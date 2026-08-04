@@ -1238,3 +1238,99 @@ than discovering it. If the answer is "REST should carry it too," the fix is
 additive - two more fields on each of `RunAgentSummary` and `RoleState`,
 sourced from the same `AgentData` the service already resolves - not a new
 mechanism.
+
+### permission-option-kind-derivation-diverges | high | a live sync path bypasses the module's own preferred resolver
+
+`src/vaultspec_a2a/streaming/types.py` declares two ways to turn an ACP
+permission option into a `PermissionOptionKind`: `map_acp_option_kind`, a bare
+substring heuristic over the option id, and `resolve_acp_option_kind`, which
+trusts the option's own declared `kind` field and reaches for the heuristic
+only when that declaration is absent or schema-invalid. The module's docstring
+is explicit that the second is the authority and the first is "the
+derivation, not the authority." `src/vaultspec_a2a/streaming/transformer.py`'s
+`_permission_option` - the function that actually builds a `PermissionRequest`
+event from a live ACP interrupt - obeys this correctly, calling
+`resolve_acp_option_kind` and logging when a declared kind is invalid enough to
+need the fallback. But `EventEmitters._sync_permission_request` in
+`src/vaultspec_a2a/streaming/emitters.py`, the handler that rebuilds the
+gateway's own pending-permission cache from a relayed worker payload inside
+`sync_worker_event`, calls `map_acp_option_kind(opt.get("option_id", ""))`
+directly - discarding whatever `kind` the relayed payload already carries (a
+value that, on the worker side, was itself already correctly resolved through
+`resolve_acp_option_kind` before the event was ever serialised) and re-deriving
+a possibly different answer from the id alone. The two paths can disagree on
+the identical option: `resolve_acp_option_kind("reject_once", "approve")`
+resolves to `REJECT_ONCE` (the declared-kind test in
+`streaming/tests/test_permission_option_projection.py` asserts exactly this),
+while `map_acp_option_kind("approve")` resolves to `ALLOW_ONCE`, because the id
+carries no rejecting keyword. Verdict DUPLICATE on the derivation, not the
+container. Not established: whether this cache currently has a live reader -
+`EventAggregator.get_pending_permissions` has production writers
+(`resolve_permission`, `expire_thread_permissions`, `prune_stale_permissions`,
+all called from `control/event_handlers.py` and `worker/executor.py`) but no
+production caller of the read method was found outside this package's own
+tests, so the blast radius today may be limited to an unread cache rather than
+a client-visible misclassification. The fix is to have
+`_sync_permission_request` call `resolve_acp_option_kind` with the relayed
+payload's own `kind` field, the same authority the worker-side emission path
+already obeys, rather than re-deriving from the id.
+
+### stale-two-path-rationale-for-the-shared-subscriber-registry | low | the second relay path the safety argument depends on no longer exists
+
+`src/vaultspec_a2a/streaming/fanout.py`'s module docstring states its bounded-
+delivery policy exists because "two relay paths implemented that rule
+independently - the server-sent-event subscriber registry and the WebSocket
+connection manager." `src/vaultspec_a2a/streaming/subscribers.py`'s
+`add_subscriber` repeats the same premise - "the SSE stream route and the
+event WebSocket both register against it" - to justify enforcing the
+connection cap at the registry rather than at either calling route.
+`src/vaultspec_a2a/streaming/tests/test_stream_connection_cap.py` opens on the
+identical claim and even names its two `_fill()` prefixes `"sse"` and `"ws"` to
+dramatise it, though the test itself only ever calls `add_subscriber` and never
+drives a real route. `src/vaultspec_a2a/control/event_handlers.py`'s
+`relay_event` docstring separately tells a caller to broadcast "to WS clients
+via ConnectionManager." No `ConnectionManager` class exists anywhere in the
+tree, and no client-facing event WebSocket route exists either - the only
+WebSocket in the codebase is the internal worker-to-gateway channel at
+`/internal/ws` in `src/vaultspec_a2a/api/internal.py`, which is not a client
+registration surface at all. The only live client entry into the shared
+registry is the SSE route in `src/vaultspec_a2a/api/thread_stream.py`. Verdict
+is neither DUPLICATE nor MISPLACED: there is no second declaration to
+consolidate, and this is the inverse of most findings here - a single, correct
+implementation whose own safety reasoning is written as though a sibling still
+exists. Recorded because the reasoning is otherwise sound engineering
+discipline (enforce a shared bound at the shared resource, not at each caller)
+and should not be weakened, but a reader following the "two paths" premise to
+find the second one, or a future engineer adding a client WebSocket back
+because the docstrings describe one as already present, would both be misled
+by documentation describing an architecture the tree does not currently have.
+
+### desktop-domain-swept-and-found-clean | low | credentials, filesystem authority, platform ACL, profile, migration, and settlement are each single-homed
+
+The desktop package (`credentials.py`, `_filesystem_authority.py`,
+`_platform_acl.py`, `profile.py`, `contract.py`, `migration.py`,
+`settlement.py`) was read in full and carries an unusually high density of
+explicit single-authority claims that were checked rather than taken on faith.
+`credential_paths` in `credentials.py` states it is the one place the credential
+filenames are declared and both the settings profile and the gateway resolve
+through it; `derive_state_paths` in `profile.py` states the same for the
+application-home layout and is in fact called from three sites
+(`DesktopProfile.ensure`, the CLI serve path, and `desktop/migration.py`) with
+the module's own comment already flagging, correctly, that the mkdir side of
+that layout is NOT equally centralised - a MISPLACED-shaped observation the
+module records about itself, so it is not repeated here as a new finding.
+`_platform_acl.py`'s DACL and POSIX-mode primitives are the sole owner
+`harden_credential_file` and `credential_file_is_owner_restricted` calls route
+through, consumed identically by the gateway discovery credential and all
+three desktop credential planes. `migration.py`'s `_apply_mutations` is
+explicitly the one mutation core shared by the dashboard-spawned migrate
+entrypoint and fresh-install initialisation, and reuses the checkpoint-pragma
+authority this same campaign already flagged a THIRD, unguarded caller of
+elsewhere (`checkpoint-pragma-drift-recurred`) - `migration.py`'s own comment
+names that exact history. `settlement.py`'s bounded-retry callback is a fifth
+retry/backoff shape in the tree, structurally similar to but distinct in
+constants from the worker IPC flush retry; consistent with this campaign's
+standing ruling that retry/backoff sites are separate failure domains each
+entitled to its own settings, it is recorded as DISTINCT rather than folded
+into the wall-clock-poll or retry findings above. No new duplicate declaration
+was found in this domain.

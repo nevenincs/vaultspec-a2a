@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:7989f714c1f3963460d15ea6a4da63dfc39d825a7f927c7263cda8f3fd4c516f'
+body_hash: 'sha256:018d6401b6b8bf9118dbbb5f8abf10001141046b77553077df68556f16afd204'
 related: []
 ---
 
@@ -5937,3 +5937,91 @@ DISTINCT - default-for-an-unbilled-lane, default-for-a-picker, and never-guess-f
 **Every lane reported what it did not reach.** Those gaps are recorded as gaps
 rather than as clean, which is the reporting discipline this campaign asked for -
 silence reads as swept, and is worse than an honest omission.
+
+### the-toctou-safe-secret-read-written-twice | high | DUPLICATE orchestration, partially DISTINCT
+
+The sixth sweep closes the partition. Its headline is a sequence written twice in
+two packages, in call shapes different enough that no grep collides them - one
+path-based, one directory-descriptor-based.
+
+Both perform, in this order: stat the name without following links, refuse a
+non-regular file, confirm owner-restriction, open refusing to follow a link, stat
+the DESCRIPTOR, and compare device and inode against the pre-open stat. That last
+comparison is the whole point - it is what closes the window between checking a
+name and opening it.
+
+The underlying platform primitive is NOT duplicated: both correctly delegate the
+owner-restriction test to its one home. **What is duplicated is the choreography**,
+which is where the security property actually lives. A caller that assembles six
+steps correctly and a caller that assembles five of them look identical until the
+sixth matters.
+
+**Partially DISTINCT, and the lane was right to say so rather than propose a
+merge.** One version is embedded in a leased-directory context and additionally
+re-verifies identity by name AFTER the read completes - a freshness check asking
+whether the published record was replaced mid-read. The other is standalone and
+does not. A single-function merge would either drag the lease machinery into the
+simple case or drop the post-read check from the other; neither is free.
+
+So the extraction is the PRE-READ half only - open-refusing-a-link plus the
+descriptor identity confirmation - beside the owner-restriction predicate both
+already import. The leased variant and the post-read freshness check stay as each
+caller's own composition.
+
+Severity is maintenance, not exposure: both sites are correct today. **The risk is
+a third reader assembling the sequence a third time and omitting the identity
+compare** - the one step whose absence changes nothing observable until it is
+attacked. This audit has already measured that the link-refusal flag in that
+sequence is INERT on the shipping platform, so the explicit checks are carrying
+the guarantee alone.
+
+### the-sweeps-distinct-verdicts-are-load-bearing | reference | what must not be merged
+
+Two clusters were examined and returned as correctly separate, both worth
+recording so a later pass does not reopen them.
+
+A workspace-file-shadows-bundled-default resolution exists in two packages. One
+picks the first existing of two candidate paths for a single file; the other
+unions a whole DIRECTORY by name with last-wins shadowing, an mtime-tiered compile
+cache, role filtering and include expansion with a containment boundary. Different
+cardinality, different machinery. The author already recognised the parallel and
+says so in prose - this is a deliberate mirror, not accidental duplication.
+
+Three bounded-retry loops share a shape and differ in every load-bearing
+particular: which exception each catches, which budget each uses, and - in one
+case - an explicit written justification for NOT reusing another's budget,
+because the root cause it rides out is a different one. **Recorded as a reminder
+that a recurring SHAPE is not a duplicate.** Forcing a shared retry helper here
+would have to reconcile budgets that were deliberately chosen apart.
+
+### a-stale-index-entry-caught-before-it-cost-anything | low | rag hygiene, third instance
+
+A semantic search surfaced a module as a near-duplicate of a live one. That module
+does not exist on disk - a stale index entry for a file deleted earlier in the
+project's history.
+
+The lane checked existence before reporting and flagged the dead lead explicitly so
+nobody chases it. Recorded as the third instance of the index-is-not-the-tree
+hazard in this campaign, and the only one caught BEFORE it produced a finding. The
+other two cost real time: one nearly retired a valid cluster by reading another
+lane's uncommitted work as established prior art, and one had a broken HEAD hidden
+behind a working tree that supplied what HEAD lacked.
+
+### what-the-comprehensive-sweep-did-not-reach | reference | recorded as gaps, not as clean
+
+Every lane reported its own uncovered surface rather than letting silence read as
+swept. Consolidated, the largest remaining gaps are:
+
+a large native filesystem-authority module read only in part - flagged by its own
+lane as the highest-remaining-risk file in its domain given its size and
+foreign-function complexity; a routes module too large and too actively edited to
+read end to end; several streaming modules unswept once the event-vocabulary axis
+surfaced as the real finding; most of one provider package's session and protocol
+internals; and the package facade files, whose re-export surfaces were never
+checked for drift against the modules' own export lists.
+
+**That last gap is directly on this campaign's subject.** A facade that re-exports
+a name the owning module no longer exports, or exports one it never did, is a
+second declaration of the public surface - the shim class this campaign refuses,
+sitting in the one place nobody thought to sweep because it is where imports are
+supposed to come from.

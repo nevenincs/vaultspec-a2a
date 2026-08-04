@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:ade2602ce1edc59c8d08e654451bfa2ca003ff05bf849cc404a8728ca6b38403'
+body_hash: 'sha256:4ceac5cdcd5226281aeb1121f937c6a7642982bd169f8e26a5ff0666abd3b96a'
 related: []
 ---
 
@@ -5761,3 +5761,54 @@ Recorded together because the group is the campaign's thesis in miniature: four
 sites, one number of "occurrences", and three different right answers. A count
 returns four. Reading returns one duplicate, one dialect boundary and one posture
 boundary.
+
+### the-wheel-boundary-has-a-second-mechanism-the-guard-is-blind-to | high | scoped, not yet swept
+
+The import guard enforces that no shipped module imports a wheel-EXCLUDED package.
+It is blind by construction to the other half of the same defect class.
+
+The wheel also excludes non-Python ASSETS - preset fixtures and mock
+configuration files. A shipped module that resolves one of those by fixed path
+**does not raise**; it silently finds nothing. Correct in a source checkout,
+degraded in an installed wheel, observable in neither place a developer looks. That
+is precisely the shape the import guard was built for, reached by a mechanism the
+guard cannot see, because it reads imports and this is a filesystem path.
+
+**Scoped as a QUESTION rather than a guard, deliberately.** The obvious candidate
+was read and is CLEAN: the preset labeller globs a DISCOVERED inventory rather
+than loading a fixed path, so in a wheel the glob returns nothing and nothing is
+labelled - it degrades correctly, and its docstring already states the exclusion.
+
+That clean case is the argument against building a guard first. A static
+path-literal matcher cannot distinguish "resolves an excluded asset by fixed path"
+from "globs whatever is present", and the second is the CORRECT pattern here. Such
+a guard would flag correct code, and a reader working through those false
+positives learns to skim the finding - the exact mechanism that got three guards
+rejected in this campaign, where the cost is never the false positive but the true
+positive the reader has been trained to skip.
+
+So the order is: **sweep for the question first** - is there any shipped module
+that resolves an excluded asset by a fixed path? - and build a guard only if the
+answer is non-empty AND the two shapes prove separable. Otherwise it is a spelling
+guard in new clothes.
+
+### a-guard-extension-measured-and-recommended-against | medium | an honest low-yield verdict
+
+The other proposed extension - following dynamic imports - was measured rather
+than estimated and then recommended AGAINST, by the lane that would have done it.
+
+The entire dynamic surface in shipped modules is six sites, and every one is a
+module-level table of literal module names: four lazy-facade tables, a warmup
+module tuple, an instrumentation name list. No computed names, no import by
+string, no plugin loading by configuration. So it is constant-table resolution in
+the syntax tree, not dataflow analysis - roughly an hour of work.
+
+It was still the wrong thing to build. Every one of those tables names a module
+INSIDE the shipped tree, so the guard would find nothing today; and the defect it
+would protect against is one an author is more likely to write as a plain import,
+where the existing guard already catches it.
+
+Recorded because a lane declining tractable work on yield - having first measured
+that it was tractable - is the judgement this campaign wants and rarely gets. The
+cheap version of that answer is "it is hard"; the honest one is "it is easy, and
+still not worth it".

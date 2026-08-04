@@ -92,24 +92,17 @@ def probe_engine_discovery_freshness() -> bool | None:
     but stale or malformed, and None when no engine discovery file is configured
     for this process (authoring is simply not wired here).
     """
-    import os
     import time
 
     from ..authoring.discovery import (
-        SERVICE_JSON_ENV,
         heartbeat_is_fresh,
         read_service_json,
+        service_json_candidates,
     )
-
-    candidates: list[Path] = []
-    env_path = os.environ.get(SERVICE_JSON_ENV)
-    if env_path:
-        candidates.append(Path(env_path))
-    candidates.append(Path.home() / ".vaultspec" / "service.json")
 
     now_ms = int(time.time() * 1000)
     any_present = False
-    for path in candidates:
+    for path in service_json_candidates():
         info = read_service_json(path)
         if info is None:
             continue

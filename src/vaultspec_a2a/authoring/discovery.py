@@ -40,6 +40,7 @@ __all__ = [
     "read_service_json",
     "resolve_engine",
     "resolve_engine_with_retry",
+    "service_json_candidates",
 ]
 
 SERVICE_JSON_ENV = "VAULTSPEC_ENGINE_SERVICE_JSON"
@@ -224,7 +225,15 @@ class EngineEndpoint:
         return f"EngineEndpoint(base_url={self.base_url!r}, bearer_token=<set>)"
 
 
-def _candidates() -> list[Path]:
+def service_json_candidates() -> list[Path]:
+    """Return the ordered service.json candidate paths this process consults.
+
+    The explicit override (:data:`SERVICE_JSON_ENV`) is tried first, then the
+    machine-global ``~/.vaultspec/service.json``. Exported so every reader of
+    the discovery file shares this ordering rather than restating it — a
+    caller that only classifies freshness (never resolves a live endpoint)
+    still needs the same candidate list.
+    """
     candidates: list[Path] = []
     env_path = os.environ.get(SERVICE_JSON_ENV)
     if env_path:
@@ -245,7 +254,7 @@ def resolve_engine(*, liveness_timeout: float = 3.0) -> EngineEndpoint | None:
     unchanged for it.
     """
     now_ms = int(time.time() * 1000)
-    for path in _candidates():
+    for path in service_json_candidates():
         info = read_service_json(path)
         if info is None or not heartbeat_is_fresh(info, now_ms):
             continue

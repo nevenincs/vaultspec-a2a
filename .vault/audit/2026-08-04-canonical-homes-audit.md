@@ -2157,3 +2157,125 @@ to `permission_repository.py` alone - no canonical export was added to
 needed nothing outside this file to be complete. 91 tests across the
 reconciliation, repair-journal, permission-audit-log, and control-action-lease
 suites pass unchanged; whole-tree `ty check` is clean.
+
+### process-tree-kill-and-poll-loop-still-live | high | two prior findings re-verified at HEAD, neither actioned
+
+Re-verified two prior findings in this newly-assigned domain
+(`src/vaultspec_a2a/lifecycle/`, `src/vaultspec_a2a/utils/`,
+`src/vaultspec_a2a/testing/`) before sweeping for anything new, per this
+campaign's method. Both are STILL LIVE, unchanged from how they were
+originally recorded.
+
+`process-tree-kill-declared-twice`: `kill_pid_tree_async` in
+`src/vaultspec_a2a/utils/process.py` (asynchronous) and `tree_kill` in
+`src/vaultspec_a2a/lifecycle/manager.py` (synchronous) both still implement
+the identical Windows-`taskkill`/POSIX-snapshot-then-escalate algorithm, each
+with its own docstring still calling itself the canonical or single such
+escalation. Not actioned. The consumer sets genuinely differ in call
+convention, not just location: `tree_kill`'s callers -
+`src/vaultspec_a2a/cli/service.py`, `reap()` in the same module, and (outside
+this domain) `service_tests/harness.py` - are synchronous call sites with no
+running event loop to await into, so collapsing onto the async version is not
+a delete-and-import; it needs either a sync-safe wrapper (a fresh decision
+about how it blocks) or converting those callers to async (a wider ripple than
+this file). Recorded rather than merged because the fix is a real design
+choice, not a mechanical dedup, and the existing precedent in this audit
+(`a-mechanism-without-deletions-makes-it-worse`) rules out leaving a
+compatibility shim as a middle path.
+
+`bounded-wall-clock-poll-loop`: every site the original finding named in this
+domain is still hand-rolled, unconverged onto any shared primitive. Confirmed
+present: `src/vaultspec_a2a/utils/process.py`'s `_POLL_INTERVAL = 0.1` (two
+call sites); `src/vaultspec_a2a/lifecycle/manager.py`'s three loops
+(`_confirm_terminated` at 0.05s, `tree_kill`'s escalation wait, and the
+0.1s-literal port-readiness wait); `src/vaultspec_a2a/lifecycle/singleton.py`'s
+`_ORPHAN_LOCK_POLL_S = 0.05` with no jitter; and
+`src/vaultspec_a2a/testing/leases.py`'s jittered acquire wait. Not actioned.
+The severity that keeps this recorded rather than merged is the consumer set,
+not the mechanics: the singleton lock guards the desktop application home's
+sole-owner guarantee, and the kill escalation is the last line before a wedged
+process is force-killed - both are exactly the kind of site where a
+single-pass mechanical extraction, done to close an audit finding rather than
+because each site's own failure semantics were individually reviewed, risks
+introducing the defect the primitive was meant to prevent. A future actioning
+step should review each site's deadline-vs-jitter-vs-diagnostic-on-expiry
+behaviour individually against the shared primitive's shape before converting
+it, not batch all five in one commit.
+
+### detached-spawn-flags-now-exported | medium | closes the prior finding for this domain's member, verified and fixed
+
+Re-verified `detached-spawn-flags-triplicated` against current HEAD:
+`src/vaultspec_a2a/lifecycle/manager.py`'s `spawn()` still hand-rolled the
+Windows-`CREATE_NEW_PROCESS_GROUP`-vs-POSIX-`start_new_session` branch inline,
+exactly as recorded (`service_tests/harness.py`'s copy is outside this
+domain and was not touched). ACTIONED for the in-domain member: exported the
+decision from `src/vaultspec_a2a/utils/process.py` as
+`detached_spawn_kwargs()`, and pointed `manager.py`'s `spawn()` at it.
+
+The first version of this fix was wrong and is recorded rather than silently
+corrected, per this audit's own precedent on method findings: it returned a
+plain `dict[str, object]` splatted into `subprocess.Popen(**kwargs)`, which
+passed `src/vaultspec_a2a/utils/tests/` and `ruff` cleanly but broke a
+whole-tree `ty check` with `invalid-return-type` and `no-matching-overload` -
+`Popen.__init__` is overloaded on its exact keyword set, and a splatted
+`**dict` erases the static information the overload resolution needs, even
+though every value in the dict was itself correctly typed. The corrected
+version returns a frozen `DetachedSpawnFlags` dataclass with both fields
+always populated (the inactive platform's neutral value, matching the
+original inline code exactly), and the caller passes `creationflags=` and
+`start_new_session=` explicitly rather than splatting. This is the concrete,
+narrow form of the general caution above: even a "just extract this small
+decision" fix needs its OWN verification, not an assumption that passing
+tests plus a clean lint is sufficient - the defect here was invisible to both
+and only a whole-tree type check caught it.
+
+Verified after the correction: `src/vaultspec_a2a/utils/tests/test_process.py`
++ `test_process_containment.py` (29 passed),
+`src/vaultspec_a2a/lifecycle/tests/test_manager.py` (39 passed, exercising
+`spawn()` through `serve_up`/`resume`/`rerun` against real spawned processes),
+the full `src/vaultspec_a2a/lifecycle/tests/` suite (151 passed), and a
+whole-tree `ty check` (0 diagnostics, both file-scoped and whole-tree).
+
+### port-reservation-misplacement-fixed-since-recorded | medium | a MISPLACED finding no longer describes the tree
+
+Re-verified `port-acquisition-split-across-modules` and its correction
+`correction-port-probe-was-a-reservation` against current HEAD. Both described
+`src/vaultspec_a2a/tests/gateway_boot.py` as holding the reservation-scoped
+port-acquisition implementation a tier away from its canonical home in
+`src/vaultspec_a2a/testing/ports.py`, importing two of that module's privates
+upward. That is no longer true. `gateway_boot.py` now imports
+`reserve_scratch_ports`, `allocate_free_ports`, and
+`hold_for_process_lifetime` directly from `testing.ports` (all three are
+public exports of that module, re-exported through `testing/__init__.py`) and
+contains no reservation logic of its own - only the call site that consumes
+them (`spawn_until_ready`'s scratch-port-pair reservation before spawning a
+gateway). The documented three-way boundary
+(`reserved_port`/`free_port`/`allocate_free_ports`) that the canonical module
+states for itself is intact and is the only implementation in the tree.
+Verdict: FIXED SINCE RECORDED, not actioned by this sweep - already correct at
+HEAD. Recorded per this domain's own standing instruction that a finding
+quietly fixed is worth knowing as much as one still open, and so the next
+sweep does not re-flag it as live.
+
+### lifecycle-utils-testing-swept-and-found-clean | low | registry classification, discovery publication, and lease/session admission are single-homed
+
+`classify_record` in `src/vaultspec_a2a/lifecycle/registry.py` is the sole
+LIVE/STALE/DEAD verdict, consumed identically by
+`src/vaultspec_a2a/lifecycle/manager.py`'s `reap()`/`resolve()`,
+`src/vaultspec_a2a/testing/progress.py`'s `registry_watch`, and
+`src/vaultspec_a2a/testing/endpoints.py`'s service resolution - no site
+re-derives liveness from a bare pid check. `write_record` and the discovery
+publication functions in `lifecycle/discovery.py` (versioned desktop record
+and the general service.json record - two genuinely different wire shapes,
+correctly not merged) both route through the one atomic-publish primitive in
+`src/vaultspec_a2a/utils/atomic_write.py` rather than each hand-rolling
+temp-then-rename. `src/vaultspec_a2a/testing/leases.py` owns the lease
+acquisition mechanism outright, and
+`src/vaultspec_a2a/testing/sessions.py` builds session admission and
+fair-share worker-count policy strictly ON TOP of it (`acquire`,
+`live_shared_holder_count` imported, not reimplemented) - mechanism and
+policy correctly separated, matching this campaign's standing rule.
+`src/vaultspec_a2a/testing/catalog_selection.py` is the already-consolidated
+selection mechanism the `correction-selection-cluster-is-eleven-sites` finding
+covers in depth; nothing new to add there. No new duplicate declaration was
+found in this pass beyond the two re-verified findings above.

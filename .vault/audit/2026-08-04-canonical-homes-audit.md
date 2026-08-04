@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:c2de2ecde6340b6bd7946ee942c47ba7088a9fcb18fe9aebc97473661b7c4043'
+body_hash: 'sha256:0795930f1b373c38e050968e6409172ef0af05986ca800e9057f3af060bf4bda'
 related: []
 ---
 
@@ -5483,3 +5483,72 @@ whatever moved into place.
 One file flipped clean-dirty-clean-dirty three times in a single session. That
 frequency is itself the argument for assigning a contended file's subjects to
 whoever already holds it, rather than sequencing a second writer in behind them.
+
+### proving-a-derivation-is-a-derivation | critical | a technique this campaign lacked
+
+The wheel-boundary guard had to DERIVE its excluded set from build configuration
+rather than hand-copy it, because a copied denylist is a second declaration of the
+wheel's exclusion policy and drifts the moment someone adds an entry. Every brief
+in this campaign has asked for derivations. **None of them, until now, could prove
+one had happened** - a derived value and a copied value are indistinguishable
+while the two agree, which is the campaign's own central complaint turned on its
+own remedy.
+
+The technique that settles it: **change the SOURCE OF TRUTH and leave the code
+untouched.** A package was added to the exclusion list in build configuration
+alone, with zero source change, and the guard immediately reported twenty-three
+violations - every shipped importer of that package. A hand-copied denylist stays
+green under that edit; only one that reads the configuration can respond to it.
+
+Recorded at critical because it generalises past this guard. Any claim of the form
+"this is derived from X rather than restating X" is testable the same way: perturb
+X, leave everything else alone, and require the consumer to move. That is a
+POSITIVE control on the derivation itself, and it is the missing counterpart to
+the break-the-link probes this campaign has otherwise relied on - those show a
+defect is detectable, this shows the dependency is real.
+
+The same pass caught what a hand-copy would have gotten wrong: the real exclusion
+list carries twenty-nine patterns, including one the orchestrator's own brief
+omitted. The brief that demanded derivation contained a short copy of the thing it
+demanded be derived.
+
+### a-liveness-floor-so-a-dead-scan-cannot-report-clean | high | answers a hazard recorded earlier
+
+This audit records that a sweep dying partway returns a PARTIAL answer, and that on
+an exhaustiveness check partial and wrong are the same result. The guard answers
+that structurally rather than by care.
+
+It asserts FLOORS: a minimum count of shipped modules scanned, and a minimum count
+of internal imports resolved to real files. A scanner that silently stops finding
+things fails the floor - and fails it BEFORE it can report an empty violation list.
+Proven by blinding the resolver: the guard failed on "only 0 internal imports
+resolved", not on the violation assertion.
+
+That is the general answer to every scan-shaped check in this campaign. **A check
+that can only fail by finding something wrong cannot distinguish a clean tree from
+a broken scanner.** A floor makes the two outcomes different, and it costs one
+assertion.
+
+Every file is also read as BYTES and handed to the syntax parser, which honours
+each file's own encoding declaration - so the undecodable blob recorded earlier
+cannot kill this scan. All seven hundred and fourteen source files parse.
+
+**Result: no production module imports a wheel-excluded package.** The build
+configuration's comment was telling the truth. It is now checked rather than
+asserted, which is the whole point - the comment could not have failed.
+
+### a-third-planter-ruled-distinct-on-the-campaigns-own-lesson | medium | DISTINCT, correctly
+
+Consolidating the two link planters surfaced a third that shares the same shell
+invocation. It was reported and deliberately left, and the reasoning is the
+campaign's own lesson applied by a lane to its own work: that one links a
+DIRECTORY, where the two link kinds are interchangeable for its purpose and there
+is no strength difference to report.
+
+Folding it in would mean either a caller consuming a returned kind it has no use
+for, or one function carrying two postures selected by an argument - which is
+exactly the shape the atomic-writer cluster was opened to punish. It shares an
+invocation and nothing else.
+
+Recorded because the surface similarity is high - the same command, the same
+argument - and a sweep by that command would have merged them.

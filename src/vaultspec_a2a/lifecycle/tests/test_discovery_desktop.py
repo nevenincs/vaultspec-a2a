@@ -20,6 +20,7 @@ from ...authoring.discovery import HEARTBEAT_STALE_MS
 from ...lifecycle.discovery import (
     DESKTOP_DISCOVERY_VERSION,
     DesktopDiscoveryState,
+    _windows_file_is_restricted,
     classify_desktop_discovery,
     desktop_record_process_is_live,
     read_desktop_discovery,
@@ -28,6 +29,36 @@ from ...lifecycle.discovery import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def test_publication_leaves_its_parent_owner_restricted(tmp_path: Path) -> None:
+    """The directory holding the record is owner-only on the host that ran this.
+
+    The desktop record names the attach credential beside it, so a readable
+    parent directory leaks which credential file to go after and, on a host with
+    a permissive default, the credential itself. The sibling service.json writer
+    has asserted this since it was written; this one published into whatever
+    permissions the directory happened to have on Windows.
+
+    Asserted against the real published directory rather than a constructed one,
+    because the guarantee belongs to the writer and not to the caller who made
+    the path.
+    """
+    path = tmp_path / "nested" / "desktop.json"
+    write_desktop_discovery(
+        path,
+        generation="gen-restricted",
+        port=8931,
+        owner="certification",
+        credential_reference=str(path.with_name("attach.token")),
+    )
+
+    assert path.is_file()
+    if os.name == "posix":
+        assert path.parent.stat().st_mode & 0o077 == 0
+        assert path.parent.stat().st_mode & 0o100, "the parent must stay traversable"
+    else:
+        assert _windows_file_is_restricted(path.parent)
 
 
 def test_round_trip_preserves_every_field(tmp_path: Path) -> None:

@@ -55,6 +55,20 @@ def recommended_entry_id(catalog: ProviderCatalog) -> str | None:
     2. otherwise the lane's FIRST entry, because provider enumerations are
        ordered by the provider and its own ordering is a better default than any
        ranking invented here.
+
+    Both steps look like the two things the operator-facing resolver refuses by
+    name - it never ranks entries and never falls back to the first one - and the
+    difference is worth stating, because a reader who finds only one of the two
+    modules will reasonably read the other as contradicting it.
+
+    That resolver RESOLVES an entry the operator already named: choosing on their
+    behalf there would silently decide what produces their artifacts and what a
+    provider charges for them, so it must refuse. This RECOMMENDS a starting
+    point nobody has chosen yet, which is the one job that requires choosing.
+    Its answer is a default a client pre-selects and a user overrides, never a
+    substitute for an absent choice at run start - run start still refuses a
+    request that names no entry. Choosing for someone who has not chosen, and
+    choosing for someone who has, are opposite acts wearing the same shape.
     """
     if not catalog.models:
         return None

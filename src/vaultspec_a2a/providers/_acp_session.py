@@ -28,7 +28,7 @@ from ._acp_types import (
     SessionSetupResult,
     require_workspace_root,
 )
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpErrorCode, AcpSessionError
 
 __all__: list[str] = []
@@ -254,7 +254,7 @@ async def _select_config_option(
         ctx.response_futures[rpc_id], timeout=settings.acp_startup_timeout_seconds
     )
     if "error" in response:
-        error = _json_object(response["error"])
+        error = lenient_json_object(response["error"])
         message = str(error.get("message", response["error"]))
         raise AcpSessionError(
             f"ACP session/set_config_option failed: {message}",
@@ -309,14 +309,9 @@ async def _select_desired_config_options(
     return selected
 
 
-def _json_object(value: JsonValue | None) -> JsonObject:
-    """Return one protocol object or an empty object for malformed data."""
-    return value if isinstance(value, dict) else {}
-
-
 def _error_code(value: JsonValue | None) -> int:
     """Read one numeric JSON-RPC error code with the standard fallback."""
-    code = _json_object(value).get("code")
+    code = lenient_json_object(value).get("code")
     return (
         code
         if isinstance(code, int) and not isinstance(code, bool)
@@ -405,7 +400,7 @@ async def initialize_session(
             code=_error_code(resp.get("error")),
         )
     res = resp.get("result")
-    result = _json_object(res)
+    result = lenient_json_object(res)
     capabilities = result.get("agentCapabilities")
     auth_methods = result.get("authMethods")
     return InitializeResult(
@@ -504,7 +499,7 @@ async def setup_session(
             break
         err = resp["error"]
         err_code = _error_code(err)
-        error = _json_object(err)
+        error = lenient_json_object(err)
         err_msg = str(error.get("message", err)) if error else str(err)
         if not attempted_auth and auth_methods and is_auth_required_error(err):
             attempted_auth = True

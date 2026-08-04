@@ -30,6 +30,36 @@ _WatchedProcess = tuple[str, "subprocess.Popen[str]", Path]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "service" / "docker-compose.integration.yml"
+
+# The lanes that execute inside the gateway process. This stack holds no
+# provider credential, so these are the only lanes its runs may select - named
+# here rather than imported so a serving-policy change upstream cannot silently
+# widen what a certification run is allowed to bill.
+_IN_PROCESS_PROVIDER_IDS = frozenset({"deterministic", "mock"})
+
+
+def _preset_in_process_provider(team_preset: str) -> str | None:
+    """Return the in-process lane a bundled preset is pinned to, if any.
+
+    Read from the preset rather than inferred from its name: the internal
+    certification presets are the one category still permitted to pin a provider,
+    and that pin is precisely the statement of which lane they need.
+    """
+    from ..team.team_config import load_team_config
+    from ..thread.errors import ConfigError, TeamConfigNotFoundError
+
+    try:
+        config = load_team_config(team_preset)
+    except (ConfigError, TeamConfigNotFoundError, ValueError):
+        return None
+    declared = [worker.model.provider for worker in config.workers]
+    declared.append(config.defaults.provider)
+    for provider in declared:
+        if provider is not None and provider.value in _IN_PROCESS_PROVIDER_IDS:
+            return provider.value
+    return None
+
+
 # Service-test runtime lives in the machine-global A2A home, not inside
 # .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 RUNTIME_ROOT = settings.a2a_home / "runtime" / "service-tests"
@@ -257,6 +287,12 @@ class ServiceStack:
     _gateway_log: Any | None = field(default=None, init=False, repr=False)
     _worker_log: Any | None = field(default=None, init=False, repr=False)
     _stopped: bool = field(default=False, init=False, repr=False)
+    # One served selection per (workspace, preset). The first catalog read on a
+    # gateway builds it cold across every registered lane, so it is paid once per
+    # session rather than once per run.
+    _selection_cache: dict[str, dict[str, Any]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         # Resolve only. Creating the directory here meant constructing a stack -
@@ -394,6 +430,14 @@ class ServiceStack:
                 "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
                 "VAULTSPEC_PROJECT_ROOT": str(REPO_ROOT),
                 "MOCK_API_BASE": self.vidaimock_url,
+                # Arm the in-process lanes. This stack has no provider
+                # credentials, and a run now has to present a selection naming a
+                # lane the gateway reports selectable - so without this the
+                # catalog offers nothing selectable at all and every run here is
+                # unstartable. The mock lane additionally needs a tape server,
+                # which MOCK_API_BASE above supplies, so both in-process lanes
+                # are served and the mock presets can select their own.
+                "VAULTSPEC_SERVE_IN_PROCESS_LANES": "true",
                 "OTEL_EXPORTER_OTLP_ENDPOINT": (
                     f"http://127.0.0.1:{self.ports['jaeger_otlp']}"
                 ),
@@ -693,6 +737,75 @@ class ServiceStack:
             self.record("jaeger-traces", payload)
             return payload
 
+    def catalog_selection(
+        self, workspace_root: str, team_preset: str
+    ) -> dict[str, Any]:
+        """Return a served selection for *team_preset*, from this stack's gateway.
+
+        A selection cannot be hand-written: run start revalidates it against the
+        catalog served FOR THIS WORKSPACE, so it has to name a lane this gateway
+        actually reports selectable, at that lane's current revision.
+
+        The lane is chosen to match what the preset is FOR. These presets run the
+        in-process lanes - the mock lane replays a tape, the deterministic lane
+        answers from fixed role-keyed content - and picking anything else would
+        change what the test exercises. So an external lane is never selected
+        here even when one is available: on a developer machine with a real
+        provider session this would otherwise quietly send certification traffic
+        to a billable lane, which is a worse failure than not running.
+        """
+        cache_key = f"{workspace_root}|{team_preset}"
+        cached = self._selection_cache.get(cache_key)
+        if cached is not None:
+            return dict(cached)
+
+        # A first read builds the catalog cold, probing every registered lane.
+        with self._client(timeout=240.0) as client:
+            resp = client.get(
+                "/v1/provider-catalog", params={"workspace_root": workspace_root}
+            )
+            resp.raise_for_status()
+            providers = cast("list[dict[str, Any]]", resp.json()["providers"])
+
+        served = [
+            record
+            for record in providers
+            if record["health"]["selectable"] and record["catalog"]["models"]
+        ]
+        in_process = [
+            record
+            for record in served
+            if record["provider_id"] in _IN_PROCESS_PROVIDER_IDS
+        ]
+        if not in_process:
+            raise GatewayBootError(
+                "this stack's gateway serves no selectable in-process lane, so a "
+                f"{team_preset!r} run cannot present a valid selection. The "
+                "gateway environment must set VAULTSPEC_SERVE_IN_PROCESS_LANES "
+                "(and MOCK_API_BASE for the mock lane). Selectable lanes served: "
+                f"{[record['provider_id'] for record in served]}"
+            )
+        # Prefer the lane the preset itself is pinned to, so a mock preset keeps
+        # replaying its tape rather than being answered by the deterministic lane.
+        preferred = _preset_in_process_provider(team_preset)
+        record = next(
+            (item for item in in_process if item["provider_id"] == preferred),
+            in_process[0],
+        )
+        catalog = record["catalog"]
+        selection = {
+            "schema_version": 1,
+            "provider_id": record["provider_id"],
+            "execution_mode": record["execution_mode"],
+            "catalog_revision": catalog["state"]["revision"],
+            "entry_id": catalog["models"][0]["entry_id"],
+            "controls": {},
+        }
+        self._selection_cache[cache_key] = selection
+        # Copied per call so a caller mutating its body cannot reach the cache
+        # and silently change what every later run in the session selects.
+        return dict(selection)
+
     def create_thread(
         self,
         *,
@@ -702,16 +815,35 @@ class ServiceStack:
         autonomous: bool | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Start a run, supplying the fields run-start now requires.
+
+        Three of them are not optional and none was being sent: a path-safe
+        ``run_id``, an explicit served ``selection``, and a metadata envelope
+        naming an existing ``workspace_root``. They are defaulted here rather
+        than pushed onto eleven call sites, because none of the three is what any
+        of those tests is about - they assert cancellation, lifecycle,
+        permissions, and streaming - while a caller that DOES care (two of them
+        supply their own workspace) still overrides by passing metadata.
+        """
+        # Path-safe by construction: run ids reach the filesystem, and the
+        # schema pattern refuses anything else.
+        run_id = f"svc-{uuid.uuid4().hex}"
+        meta: dict[str, Any] = dict(metadata) if metadata else {}
+        workspace_root = str(meta.get("workspace_root") or self.runtime_dir)
+        Path(workspace_root).mkdir(parents=True, exist_ok=True)
+        meta["workspace_root"] = workspace_root
+
         body: dict[str, Any] = {
             "message": initial_message,
             "team_preset": team_preset,
+            "run_id": run_id,
+            "selection": self.catalog_selection(workspace_root, team_preset),
+            "metadata": meta,
         }
         if title is not None:
             body["title"] = title
         if autonomous is not None:
             body["autonomous"] = autonomous
-        if metadata is not None:
-            body["metadata"] = metadata
         with self._client(timeout=30.0) as client:
             resp = client.post("/v1/runs", json=body)
             resp.raise_for_status()

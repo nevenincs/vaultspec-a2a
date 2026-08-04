@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:e709f1090499a735ca3f411d01dc627286589d763fdd1440d4a3328675871874'
+body_hash: 'sha256:a17fdfd67ba4312855f150717c5c76aa84a01df406d428b18175bf7c56455b51'
 related: []
 ---
 
@@ -7293,3 +7293,94 @@ reached the same place. **Tidying destroys provenance.**
 The tie-break the lane applied when choosing which card to delete remains correct -
 keep the one carrying more evidence, regardless of authorship. What was wrong was
 deleting rather than flagging.
+
+### the-scan-was-validated-against-a-known-positive-first | critical | the method, and it is the generalisable one
+
+The facade sweep returned an exhaustive answer, and **the reason its negative can be
+believed is a step nobody had asked for**: the lane ran its detector against the
+commit BEFORE the campaign's one confirmed instance, and required it to find that
+instance and nothing else for that name.
+
+**Without that step the sweep would have been worthless**, and the reason is exact:
+the alias was **in production use** at the time, so an unused-import scan finds
+nothing. **What made it a re-export was the CONSUMER, not the alias.** A detector
+built on the obvious signal would have returned a clean sweep over a tree that
+contained the very instance the sweep existed to generalise.
+
+This raises the campaign's proof-must-prove-itself rule from a grep to a whole scan.
+A closure grep earns trust by matching a surviving term; **a detector earns it by
+finding a known positive.** Recorded as the standing requirement for any
+exhaustiveness claim: **validate against a case you already know is there, and say
+which one.**
+
+The lane also re-ran its clean result against an extraction of the COMMITTED tree
+rather than the working tree, so the negative could not be contaminated by other
+lanes' uncommitted edits - the HEAD-is-not-the-tree lesson applied to its own
+verification rather than to the code.
+
+### the-facade-drift-was-real-and-the-wire-made-it-look-otherwise | high | DRIFT, one facade
+
+The board's actual question has an answer: **one facade had drifted.** A schema
+package declared a name as sourced from a sibling module, while that module imports
+it from the domain layer purely to annotate a field and **deliberately omits it from
+its own exports.** Two declared homes for one type.
+
+**The decisive evidence is what the siblings do.** Three other domain types are field
+types on the same models and are **not** re-exported, and the enum module states
+outright that domain enums are imported from where they live. The pattern was
+established and this name was the exception.
+
+**Being on the wire made it look like a different case.** A type that serializes into
+an event reads as belonging to the wire package - and that intuition is what kept a
+second declaration alive beside three counter-examples.
+
+Three consumers repointed at the domain home. **Sixty-two other facades were in sync
+with their owners** - a recorded negative over the mandated pattern, which is what
+makes the one finding meaningful rather than anecdotal.
+
+Three more of the same family were found only by the consumer-side scan, two of them
+in tests exactly as predicted - one of those on the line BELOW a correct home-import.
+
+### a-facade-whose-claim-rested-on-nothing-checkable | high | rule gap, not drift
+
+One module fed names into a package facade **while declaring no exports at all** -
+the only facade source in the tree that did.
+
+That is not drift, because there was nothing to drift from. It is worse in one
+specific way: **the facade's claim about that module could not be checked**, so the
+sweep's own question was unanswerable for it. A scan reporting zero drift across
+sixty-three facades would have been silently right-by-accident about one of them.
+
+**An unstated surface is not a small omission in a mandated-facade architecture; it
+is a hole in the only mechanism that makes the facade auditable.**
+
+### the-vacuity-question-asked-forward-for-the-first-time | high | the newest rule, applied before the fact
+
+The lane asked, unprompted, **what else could satisfy its assertion** - and answered
+concretely: an empty or broken facade satisfies every "this name is absent" test.
+
+So it wrote a companion assertion pinning the surface that must REMAIN, and showed
+that one fails against an emptied facade. **This is the first time in this campaign
+the indistinguishable-refusal rule was applied FORWARD rather than discovered after
+the fact** - and it was recorded only hours earlier.
+
+It also asserted type identity against the **class object rather than the name**,
+because a duplicate dataclass matches by name and serializes identically. Same
+failure one level down: an assertion that cannot distinguish the real type from a
+convincing copy.
+
+### a-second-declaration-outside-the-mandated-pattern | high | 24 hops, reported not fixed
+
+The sweep's residue is a distinct class, correctly left alone: **twenty-four cases
+where a NON-facade module re-declares an imported name in its own exports.** Not a
+mandated facade publishing its package's surface, but an ordinary module publishing
+a name it does not own.
+
+**Several involve a RENAME**, which is the sharper form - a name published under a
+spelling its owner never used means a reader searching for the owner's name cannot
+find the consumer, and one searching for the consumer's cannot find the owner.
+
+The lane declined to sweep them because **several look load-bearing** - one is a
+dependency-injection seam where the indirection may be the point. That is a decision
+per site rather than a mechanical retirement, and it is the correct call: this
+campaign's worst available outcome is fusing things that were deliberately separate.

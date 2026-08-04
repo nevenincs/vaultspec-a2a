@@ -26,9 +26,9 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
-from .provider_catalog import MAX_DISPLAY_LENGTH
+from .provider_catalog import MAX_DISPLAY_LENGTH, MAX_TEXT_LENGTH
 
 if TYPE_CHECKING:
     from ._json_contract import JsonValue
@@ -44,8 +44,6 @@ __all__ = [
     "optional_description",
     "optional_text",
 ]
-
-_MAX_FIELD_CHARS: Final = 1_024
 
 
 def optional_text(value: JsonValue | None) -> str | None:
@@ -80,7 +78,7 @@ def display_text(value: JsonValue | None, fallback: str) -> str:
 def optional_description(value: JsonValue | None) -> str | None:
     """Keep a provider description only when it is present and normalized."""
     text = optional_text(value)
-    return None if text is None else text[:_MAX_FIELD_CHARS].rstrip()
+    return None if text is None else text[:MAX_TEXT_LENGTH].rstrip()
 
 
 def local_id(namespace: str, provider_value: str) -> str:
@@ -130,8 +128,8 @@ class CatalogFieldReader:
             raise self.protocol_error(
                 f"catalog field {field!r} must be a normalized non-blank string"
             )
-        if len(text) > _MAX_FIELD_CHARS:
+        if len(text) > MAX_TEXT_LENGTH:
             raise self.protocol_error(
-                f"catalog field {field!r} exceeds 1024 characters"
+                f"catalog field {field!r} exceeds {MAX_TEXT_LENGTH} characters"
             )
         return text

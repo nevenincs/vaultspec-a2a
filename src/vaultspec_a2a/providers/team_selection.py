@@ -12,8 +12,12 @@ from typing import Any
 from pydantic import TypeAdapter, ValidationError
 
 from ..graph.enums import Provider
+from ..thread.actor_tokens import MAX_ROLES_PER_RUN
 from ._json_contract import JsonObject, JsonValue
 from .provider_catalog import (
+    MAX_CONTROLS,
+    MAX_DISPLAY_LENGTH,
+    MAX_TEXT_LENGTH,
     CatalogStatus,
     ControlSelection,
     ProviderRecord,
@@ -335,18 +339,32 @@ def normalize_replay_selection(
 
 
 def _required_record_text(record: JsonObject, field: str) -> str:
+    """Read an identity field back under the bound the catalog contract sets.
+
+    These are the opaque values the contract carries verbatim - provider and
+    entry identifiers, revisions, the provider-issued model name - so the bound
+    is the one the contract applies to them. Reading back under a stricter
+    bound would refuse a record this process itself wrote.
+    """
     value = record.get(field)
     if (
         not isinstance(value, str)
         or not value
         or value != value.strip()
-        or len(value) > 1_024
+        or len(value) > MAX_TEXT_LENGTH
     ):
         raise TeamSelectionError("persisted team selection is invalid")
     return value
 
 
 def _optional_record_text(record: JsonObject, field: str) -> str | None:
+    """Read a display field back under the display bound, which is shorter.
+
+    Display names are bounded more tightly than identifiers by the catalog
+    contract itself, and the lanes truncate to that same bound before anything
+    is persisted - so this is the contract's own display bound, not a stricter
+    rule invented at the durable boundary.
+    """
     value = record.get(field)
     if value is None:
         return None
@@ -354,7 +372,7 @@ def _optional_record_text(record: JsonObject, field: str) -> str | None:
         not isinstance(value, str)
         or not value
         or value != value.strip()
-        or len(value) > 256
+        or len(value) > MAX_DISPLAY_LENGTH
     ):
         raise TeamSelectionError("persisted team selection is invalid")
     return value
@@ -368,7 +386,7 @@ def _lane_from_record(value: object) -> FrozenSelectedLane:
     raw_defaulted = record.get("defaulted_control_ids")
     if (
         not isinstance(raw_controls, list)
-        or len(raw_controls) > 32
+        or len(raw_controls) > MAX_CONTROLS
         or not isinstance(raw_defaulted, list)
         or not all(isinstance(item, str) for item in raw_defaulted)
     ):
@@ -456,7 +474,7 @@ def frozen_team_selection_from_record(record: object) -> FrozenTeamSelection:
     if (
         not isinstance(raw_roles, list)
         or not raw_roles
-        or len(raw_roles) > 64
+        or len(raw_roles) > MAX_ROLES_PER_RUN
         or not all(isinstance(role, str) and role for role in raw_roles)
         or len(raw_roles) != len(set(raw_roles))
         or not isinstance(raw_fallbacks, list)
@@ -504,8 +522,10 @@ def freeze_team_selection(
     records: tuple[ProviderRecord, ...],
 ) -> FrozenTeamSelection:
     """Validate current catalog membership and freeze a complete selection."""
-    if not required_roles or len(required_roles) > 64:
-        raise TeamSelectionError("team selection requires between 1 and 64 roles")
+    if not required_roles or len(required_roles) > MAX_ROLES_PER_RUN:
+        raise TeamSelectionError(
+            f"team selection requires between 1 and {MAX_ROLES_PER_RUN} roles"
+        )
     if len(required_roles) != len(set(required_roles)):
         raise TeamSelectionError("team selection roles must not contain duplicates")
     role_set = set(required_roles)

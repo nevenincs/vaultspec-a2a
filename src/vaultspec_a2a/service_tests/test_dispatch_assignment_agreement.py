@@ -53,7 +53,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from ..acceptance import certified_gateway
-from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
+from ..testing.catalog_selection import (
+    NoSelectableLaneError,
+    in_process_selection,
+    preset_in_process_provider,
+)
 from ._net import tape_server_listening
 
 if TYPE_CHECKING:
@@ -113,7 +117,9 @@ def _served_in_process_selection(
         )
     assert response.status_code == 200, response.text
     try:
-        return in_process_selection(response.json())
+        return in_process_selection(
+            response.json(), prefer_provider_id=preset_in_process_provider(_PRESET)
+        )
     except NoSelectableLaneError as exc:
         pytest.skip(f"a deterministic certification run cannot be selected here: {exc}")
 

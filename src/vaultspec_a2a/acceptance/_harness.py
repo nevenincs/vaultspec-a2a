@@ -37,7 +37,11 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
-from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
+from ..testing.catalog_selection import (
+    NoSelectableLaneError,
+    in_process_selection,
+    preset_in_process_provider,
+)
 from ..tests.gateway_boot import (
     GatewayBootError,
     armed_gateway_env,
@@ -142,7 +146,14 @@ class CertifiedGateway:
                 f"catalog: {response.status_code} {response.text}"
             )
         try:
-            selection = in_process_selection(response.json())
+            # This stack's runs all execute DEFAULT_TEAM_PRESET (see run_fields'
+            # own docstring: every verb presents ONE cached selection) - so the
+            # preference this resolves must be that preset's, not the run-start
+            # verb's own default team_preset argument, which no caller overrides.
+            selection = in_process_selection(
+                response.json(),
+                prefer_provider_id=preset_in_process_provider(DEFAULT_TEAM_PRESET),
+            )
         except NoSelectableLaneError as exc:
             pytest.skip(f"this certification stack cannot present a selection: {exc}")
         self._run_fields = {

@@ -75,7 +75,11 @@ from pydantic import TypeAdapter, ValidationError
 from ..acceptance import certified_gateway
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
 from ..team.team_config import load_team_config
-from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
+from ..testing.catalog_selection import (
+    NoSelectableLaneError,
+    in_process_selection,
+    preset_in_process_provider,
+)
 from ..testing.payloads import (
     json_object,
     json_object_list,
@@ -414,7 +418,10 @@ def _served_in_process_selection(gateway: CertifiedGateway) -> JsonObject:
     its substitution has nothing honest left to assert.
     """
     try:
-        return in_process_selection(_served_catalog(gateway))
+        return in_process_selection(
+            _served_catalog(gateway),
+            prefer_provider_id=preset_in_process_provider(_CLARIFY_PRESET),
+        )
     except NoSelectableLaneError as exc:
         pytest.skip(
             f"the loop's deterministic model substitution cannot be selected "

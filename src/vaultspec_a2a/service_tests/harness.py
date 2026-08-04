@@ -20,9 +20,9 @@ from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
 from ..testing.catalog_selection import (
-    IN_PROCESS_PROVIDER_IDS,
     NoSelectableLaneError,
     in_process_selection,
+    preset_in_process_provider,
 )
 from ..testing.ports import free_port
 from ..tests.gateway_boot import GatewayBootError
@@ -37,28 +37,6 @@ _WatchedProcess = tuple[str, "subprocess.Popen[str]", Path]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "service" / "docker-compose.integration.yml"
-
-
-def _preset_in_process_provider(team_preset: str) -> str | None:
-    """Return the in-process lane a bundled preset is pinned to, if any.
-
-    Read from the preset rather than inferred from its name: the internal
-    certification presets are the one category still permitted to pin a provider,
-    and that pin is precisely the statement of which lane they need.
-    """
-    from ..team.team_config import load_team_config
-    from ..thread.errors import ConfigError, TeamConfigNotFoundError
-
-    try:
-        config = load_team_config(team_preset)
-    except (ConfigError, TeamConfigNotFoundError, ValueError):
-        return None
-    declared = [worker.model.provider for worker in config.workers]
-    declared.append(config.defaults.provider)
-    for provider in declared:
-        if provider is not None and provider.value in IN_PROCESS_PROVIDER_IDS:
-            return provider.value
-    return None
 
 
 # Service-test runtime lives in the machine-global A2A home, not inside
@@ -805,7 +783,7 @@ class ServiceStack:
         # selectable thing this stack serves.
         try:
             selection = in_process_selection(
-                payload, prefer_provider_id=_preset_in_process_provider(team_preset)
+                payload, prefer_provider_id=preset_in_process_provider(team_preset)
             )
         except NoSelectableLaneError as exc:
             raise GatewayBootError(

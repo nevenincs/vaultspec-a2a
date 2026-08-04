@@ -52,6 +52,7 @@ __all__ = [
     "NoSelectableLaneError",
     "in_process_selection",
     "named_lane_selection",
+    "preset_in_process_provider",
 ]
 
 SELECTION_SCHEMA_VERSION = 1
@@ -123,6 +124,33 @@ def _served_summary(records: list[dict[str, Any]]) -> str:
         )
         or "nothing at all"
     )
+
+
+def preset_in_process_provider(team_preset: str) -> str | None:
+    """Return the in-process lane a bundled preset is pinned to, if any.
+
+    Read from the preset rather than inferred from its name: the internal
+    certification presets are the one category still permitted to pin a provider,
+    and that pin is precisely the statement of which lane they need. Feed the
+    result to :func:`in_process_selection` as ``prefer_provider_id`` - an omitted
+    preference falls back to the first in-process lane in registry order, which
+    is the deterministic lane whenever both are served, so a caller resolving a
+    selection for a MOCK-pinned preset must pass this explicitly or the mock
+    lane's tape is silently never exercised.
+    """
+    from ..team.team_config import load_team_config
+    from ..thread.errors import ConfigError, TeamConfigNotFoundError
+
+    try:
+        config = load_team_config(team_preset)
+    except (ConfigError, TeamConfigNotFoundError, ValueError):
+        return None
+    declared = [worker.model.provider for worker in config.workers]
+    declared.append(config.defaults.provider)
+    for provider in declared:
+        if provider is not None and provider.value in IN_PROCESS_PROVIDER_IDS:
+            return provider.value
+    return None
 
 
 def in_process_selection(

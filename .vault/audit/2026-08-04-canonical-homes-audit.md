@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:23650220a5b6a214a075a252f92143b69e101f4b74b8a36372eb2a0a2724312a'
+body_hash: 'sha256:affab4b49dc9097235940a7c60f95655e2dd344442907b04b707df435d341ca2'
 related: []
 ---
 
@@ -3927,3 +3927,54 @@ Where a vocabulary was shared across layers that must not import upward, the
 resolution was to move the declaration DOWN to the layer where its subject is
 defined, not to import upward from the lower layer. Recorded so the direction is
 not relitigated per cluster.
+
+### the-credential-mint-copied-a-private-function-by-name | high | sharpens the atomic-writer finding
+
+Two corrections to the atomic-writer entry above, both established against `HEAD`
+rather than the working tree.
+
+**The duplicate is a wholesale copy, not a reimplementation.** Both modules define
+a PRIVATE function of the SAME NAME, with the same body shape and the same two
+constants. Independent authorship does not converge on another module's private
+name. This is the cleanest evidence in the cluster that the author had the
+canonical module open - stronger than the copied Windows rationale, because a
+comment can be paraphrased from shared knowledge and a private name cannot.
+
+**Only the hardening ever needed the home to grow.** The earlier entry left open
+whether the rename retry also had to move. It did not: the canonical writer
+already carried the retry budget, the retry parameter and the full retry loop,
+with the same interval. So the retry was never a capability the home lacked - it
+is duplicated with no justification at all, and deleting it removes work rather
+than relocating it.
+
+That narrows the general claim recorded in the method section. The residue is
+still the case the home could not serve, but only PART of a residual site is
+usually that case; the rest is ordinary duplication that travelled with it. A
+converter should separate the two, because they have different fixes - grow the
+home for one, delete outright for the other.
+
+**The ordering inside the residual case is the load-bearing part.** The mint
+hardens the TEMPORARY file before the rename, so the target never exists in a
+briefly-readable state. A fold that hardens after the rename produces an identical
+end state and silently loses the invariant, failing nothing and detectable only in
+a timing window nobody observes. Recorded because it is the same silent-success
+shape as applying file-shaped permissions to a directory: correct-looking, wrong
+only where no one is watching.
+
+### in-flight-edits-read-as-established-prior-art | medium | method hazard, live this session
+
+While verifying whether the canonical writer could already express the mint's
+requirement, both semantic search and the working tree showed a hardening
+parameter that looked like long-standing prior art. It was another lane's
+UNCOMMITTED work, written minutes earlier under this campaign's own brief.
+
+Reporting it as pre-existing would have inverted the finding - it would have
+recorded that the home always served the case and the caller simply failed to
+adopt it, which is the opposite of what was true and would have retired a valid
+cluster.
+
+`git show HEAD:<path>` is the check that separates a lane's in-flight edits from
+the baseline, and in a shared worktree with concurrent writers it must be run
+before any claim that a capability "already exists". Recorded as a standing rule,
+not an anecdote: this campaign runs several lanes in one tree by design, so the
+hazard is structural rather than incidental.

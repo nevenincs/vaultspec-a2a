@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:82e063eafe03ebefff9240788f66738d0f27b449a140aaa4a9da97421d6ef56a'
+body_hash: 'sha256:21a216691bf92b6e6c34e759c024c416592d997c44eedf905925d7376ed1f226'
 related: []
 ---
 
@@ -638,6 +638,67 @@ are the right proofs for the seam they target and neither proves a run completes
 The live run is blocked on an unrelated in-flight rehoming that has left the
 working tree unable to collect the suite. Nothing past that gate has executed
 since 2026-07-19, so more is expected to surface behind it once it clears.
+
+### api-suite-depends-on-a-paid-provider-session | high | green here, error everywhere else
+
+Both catalog derivations in the API test configuration select with no default, so
+on any host where nothing is selectable they raise rather than skip, and every
+test using that helper errors. It passes on this machine only because a real
+provider session happens to be present. Two consequences, and the second is worse
+than the first: the suite cannot pass in continuous integration or for a new
+contributor, and on the machines where it does pass it is spending provider money
+to assert things that have nothing to do with a provider. Fixed by migrating to
+the in-process mechanism and arming in-process lanes for that suite - which is a
+behavioural change to the suite's environment, and the right one. A suite whose
+green depends on the developer holding a paid session is not a suite anyone can
+trust.
+
+### canonical-selection-mechanism-landed | high | the dangerous combination has no callable form
+
+The consolidated mechanism is in place, mechanism only, with no consumer migrated
+so each call site moves as its own reviewable change. The constraint agreed for
+it is enforced more strongly than authorised: rather than a flag that could be
+passed wrongly, there are two entry points and the unsafe combination cannot be
+expressed - the in-process form takes no lane parameters at all, and the named
+form cannot omit its entry. The test asserts that against the signatures rather
+than by attempting a call, because the claim is that the API cannot express the
+combination and a runtime probe would only show that one attempt failed. The
+in-process form also refuses an external lane even when it is the only selectable
+thing served, naming both the missing environment declaration and what was
+actually served - which is exactly the developer-box case where the old
+derivation silently returned a paid lane. Two parts of the original brief did not
+generalise and correctly stayed with callers: the HTTP transport, which differs
+per tier, and the cache, which keys on the caller's own base address.
+
+### three-of-four-leads-were-already-closed | medium | method finding on how a lead list is built
+
+Three of the four clusters in a lead list I issued turned out to be already
+consolidated by earlier campaigns, and the investigating lane reported them as
+false leads rather than manufacturing three commits. Gateway boot had already
+been fixed, and the owning module's docstring records the earlier failure it
+fixed - two copies that had disagreed about whether a dead child may be
+tree-killed. Credential seeding has exactly one definition, already delegating
+naming and hardening to production. And the two application factories build
+different SUBJECTS - one the whole production application, one a bare application
+carrying only the internal routes - where merging would have destroyed the very
+distinction that let the second declare it has no database. The finding is about
+the list, not the code: I assembled it from two semantic queries and memory, and
+never checked whether each cluster was already closed. A lead list must be
+verified as OPEN before it is issued, or it spends a lane's time re-deriving
+history.
+
+### deadline-policies-one-duplicate-two-distinct | medium | only one of three is a rehoming
+
+Three death-aware waits exist with three different policies, and only one is
+duplication. The progress-based wait declares its policy outright - fail on death
+or stall rather than on elapsed wall clock. The gateway readiness wait is
+wall-clock, single-child and HTTP-specific, and its budget is documented at
+length as the deliberate larger of two previously forked values, sized for the
+slowest real boot path; converting it to progress-based would be a behaviour
+change wearing a rehoming's clothes, and it stays. The generic wall-clock wait in
+the service harness does genuinely re-implement what the progress module owns and
+is the one real move. Recorded as one DUPLICATE and two DISTINCT rather than as a
+single cluster, so a later sweep does not collapse all three.
 
 ## Recommendations
 

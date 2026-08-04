@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#tool-cores'
 date: '2026-07-17'
-modified: '2026-08-02'
-body_hash: 'sha256:1f1bd29c64d30fc152bfa5e831548d19bb675e70e0c9b1ff63af932b304d7e20'
+modified: '2026-08-04'
+body_hash: 'sha256:88a494b4114fcbb491faba40f0572e79a1610c7366c2ce9ae94f890c0d866708'
 related:
   - "[[2026-07-17-tool-cores-adr]]"
   - "[[2026-07-17-tool-cores-plan]]"

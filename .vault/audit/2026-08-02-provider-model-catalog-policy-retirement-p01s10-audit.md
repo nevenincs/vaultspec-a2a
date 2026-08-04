@@ -5,6 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
+body_hash: 'sha256:2cbe8b55454f419994edb55644dbd82167df7a8c09c77842c899f42e8e5cdf2c'
 related:
   - "[[2026-08-02-provider-model-catalog-adr]]"
   - "[[2026-08-02-provider-model-catalog-plan]]"

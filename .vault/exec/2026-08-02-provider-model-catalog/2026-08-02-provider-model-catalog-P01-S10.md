@@ -5,6 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
+body_hash: 'sha256:c570756e670c6f94a2805f5604a831208b93cfc03f595ad6efdd81c0452d4815'
 step_id: 'S10'
 related:
   - "[[2026-08-02-provider-model-catalog-adr]]"

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:4ceac5cdcd5226281aeb1121f937c6a7642982bd169f8e26a5ff0666abd3b96a'
+body_hash: 'sha256:7989f714c1f3963460d15ea6a4da63dfc39d825a7f927c7263cda8f3fd4c516f'
 related: []
 ---
 
@@ -5812,3 +5812,128 @@ Recorded because a lane declining tractable work on yield - having first measure
 that it was tractable - is the judgement this campaign wants and rarely gets. The
 cheap version of that answer is "it is hard"; the honest one is "it is easy, and
 still not worth it".
+
+## Comprehensive sweep: five domains reported
+
+Five of six partitioned sweeps returned. Two findings are live defects rather than
+maintenance burden, and both were verified independently before recording.
+
+### a-declared-harness-capability-that-never-reaches-the-worker | CRITICAL | live defect
+
+**A team preset declares a grounding server that the compiler silently discards.**
+
+The worker-node compile helper - the one shared by the star, pipeline and
+pipeline-loop topologies - never accepts or forwards the harness MCP server list.
+Only the research-adr compiler does. Verified by parsing the compiler and asking
+which functions mention it at all: three, all inside the research-adr path. The
+shared helper is not among them.
+
+One shipped preset is `pipeline` topology and declares a rag grounding server,
+with a comment stating the server "gives the editor semantic recall of the
+document's corpus context". It never arrives. That preset authors document
+revisions with none of the recall its own declaration promises.
+
+**This is the project's own D5 rule violated on a different surface.** That rule
+says a capability must have a producer actually injected, and that an emitter with
+zero callers is a defect rather than a feature - written after a capability
+shipped built-but-unwired. This is the same failure one layer over: declared in
+configuration, consumed by one compiler out of four.
+
+**And the prose lies about it, which is why it survived.** The lifecycle gate's
+docstring states the mcp-servers-only case "is already proven to reach every known
+provider's own delivery mechanism", and defers to that. False for three of the
+four topologies. Fifth instance in this campaign of prose asserting what the code
+does not do.
+
+**The test stays green throughout** because it asserts the CONFIG parses the
+declaration, never that the compiled worker received it. Config-level coverage
+over a wiring defect is the exact shape recorded earlier as proving a refactor
+happened rather than that it works.
+
+Fix either way, but not neither: forward it from the shared helper, or REFUSE the
+declaration at compile time on a topology that ignores it. The refusal precedent
+already exists in the same file for a different unwired declaration.
+
+### an-unredacted-credential-surface-on-the-sibling-diagnostic-path | CRITICAL | security
+
+Two subprocess-diagnostic paths retain and surface a failed child's stderr. One
+redacts credential-shaped values; the other does not, and the other is the one
+whose output reaches a client.
+
+The redacting path documents exactly why it exists: provider subprocesses report
+their configuration when they fail, and configuration is where credentials live.
+Its sibling - which bounds and returns a stderr tail for declared harness servers,
+including ones acquired at runtime - performs the structurally identical job with
+no redaction call at all. Verified: no redaction symbol appears in that module, and
+the redaction helper is private to the module that owns it.
+
+That tail is embedded verbatim into an error whose family reaches a run's failure
+reason, which is disclosed to clients. So a harness server that echoes an
+environment variable on a failed handshake can put a live credential into a
+client-visible failure.
+
+The gap is not a defensible contract difference. The unprotected module's OWN
+docstring names the same threat surface - that the environment carries per-run
+tokens - as the reason for a scoping defence it already applies elsewhere. The
+stderr path simply never received the same review.
+
+Canonical home: the redaction pattern belongs beside the shared subprocess
+helpers both callers already import from, and must be applied before any captured
+stderr is embedded in a raised error.
+
+### the-remaining-clusters-ranked | reference | five sweeps
+
+Maintenance-burden findings, verified by their reporting lanes and recorded for
+sequencing rather than re-derived here:
+
+- **A workspace-root extractor at four sites.** One is the declared canonical
+  reader whose own docstring records that this exact drift already shipped a
+  production bug - two resume paths disagreeing about the same stored bytes. Two
+  more sites still re-implement decode-get-mint independently, and a fourth inlines
+  it. The justification the docstring offers for separateness concerns what each
+  CALLER does with a refusal, which is caller-side policy, not the extraction.
+- **A run-identifier grammar written out twice** - character-for-character
+  identical, once as a SQL predicate filtering legacy rows and once as the wire
+  type admitting new ones. The author knew: one docstring names the other in prose.
+  Divergence silently desynchronises what a listing returns from what the edge
+  admits.
+- **A domain-event to wire-type classification declared twice**, as two match
+  statements independently enumerating the same eleven classes, with no
+  discriminator on the classes themselves. Divergence does not raise: the event
+  relays untyped and the closed catalog degrades it to identity keys. The module
+  docstring names this as how a past incident shipped.
+- **Four catalog count-bound shadows** already queued, now confirmed with a fifth
+  module carrying one half of the pair.
+- **A cross-platform advisory file lock** implemented twice, differing only in
+  whether the primitive raises or returns a boolean - a policy wrapper, not a
+  contract.
+- **A subprocess containment choreography** reimplemented by a caller that already
+  imports both ends of it from the shared helper, because the helper's signature
+  cannot express the caller's stdio and creation-flag needs. The home is too
+  narrow - the tell already recorded.
+- **An undeclared magic option cap** in a relay path, in a codebase that now has
+  two named, tested option-count authorities.
+
+### the-sweeps-negative-results | reference | what is already right
+
+Recorded because a campaign that only lists defects gives no sense of the whole,
+and because several of these were near-misses a later sweep would otherwise
+re-open.
+
+The persistence and thread domains are largely consolidated already: nearly every
+bound and vocabulary searched for turned out to be a single declared authority
+whose docstring cites the duplication it replaced. The progress-frame allowlist is
+one closed catalog with both producer paths calling it and the encode boundary
+re-applying it. The attach-bearer verdict is one function with two error mappings.
+The identity-grammar regex at the edge is declared once. Inbound body limits and
+outbound frame bounds implement opposite mechanics correctly on the same axis. The
+process-tree kill was already deduplicated, its wrapper documenting the seventy
+lines it used to duplicate.
+
+Three near-identical default-selection implementations were ruled correctly
+DISTINCT - default-for-an-unbilled-lane, default-for-a-picker, and never-guess-for
+-real-money - and one of them already pre-empts the confusion in its docstring.
+
+**Every lane reported what it did not reach.** Those gaps are recorded as gaps
+rather than as clean, which is the reporting discipline this campaign asked for -
+silence reads as swept, and is worse than an honest omission.

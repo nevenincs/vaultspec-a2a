@@ -4159,3 +4159,58 @@ here precisely so it is not swept into the same constant on the strength of
 sharing a value - the trap this campaign has now hit from both directions, since
 six other sites sharing this cluster's other number were also correctly ruled
 DISTINCT.
+
+### epoch-ms-now-is-re-derived-around-a-name-collision | low | The canonical now_ms is re-derived at five production sites, and at three of them the local variable or parameter is itself called now_ms, which is why importing it was never the obvious move
+
+`lifecycle/registry.py::now_ms` is exported and is the canonical epoch-millisecond
+clock. `lifecycle/registration.py` imports and calls it. Five other production
+sites compute `int(time.time() * 1000)` inline instead:
+`lifecycle/discovery.py` (four occurrences), `lifecycle/singleton.py`,
+`control/health.py`, `authoring/discovery.py`, and `testing/leases.py` (six).
+
+All agree semantically - same unit, same epoch, no timezone divergence - so this
+is duplicated, not diverged, and it is recorded as low.
+
+The detail worth keeping is WHY it persisted, which a count of the sites does
+not show. At three of those sites the re-derivation is written as
+`now_ms if now_ms is not None else int(time.time() * 1000)`, or as a local
+assignment `now_ms = int(time.time() * 1000)` - the caller-supplied override and
+the canonical function have THE SAME NAME. A plain
+`from ..lifecycle.registry import now_ms` would be shadowed by the parameter at
+exactly the sites that most need it. Converging therefore requires renaming a
+parameter or aliasing the import, which is a slightly larger change than the
+finding's severity suggests and is the likeliest reason nobody did it.
+
+Bundle it with the next change that touches these files rather than taking it
+alone. Recorded so the name collision is discovered once rather than by each
+person who tries.
+
+### sweep-of-six-hardened-packages-returned-a-negative | medium | An agent sent to desktop, telemetry, workspace, lifecycle, authoring, and database re-derived findings the audit already held, which says more about the assignment than the packages
+
+A discovery lane was dispatched to hunt the one pattern both of this campaign's
+detection methods are blind to - the same MISTAKE made independently, where the
+implementations do not look alike and so match neither a structural hash nor a
+name search. It returned essentially clean.
+
+The result is honest and the evidence is named: `telemetry/instrumentation.py`,
+`telemetry/middleware.py`, `telemetry/aggregator_hook.py`,
+`workspace/environment.py`, `workspace/concurrency.py`, `lifecycle/pairing.py`,
+and `lifecycle/registration.py` were read in full and carry no internal
+duplication; `is_pid_alive` was confirmed single-homed across the entire tree
+including tests; and `workspace/environment.py`'s credential scrub set is the
+sole declaration, correctly imported by its provider consumer rather than
+re-derived.
+
+The lane also refused a false positive worth recording: `httpx.Timeout` is
+constructed with different budgets in `api/app.py`, `worker/ipc.py`, and
+`authoring/client.py`. Three transports, three failure domains, and this
+project's standing rule already entitles each to its own budget. Do not merge.
+
+The finding is about the ASSIGNMENT, not the packages. Those six are the ones
+this campaign has hardened hardest, and sending a fresh lane into them bought a
+confirmation rather than a discovery. The packages carrying the most unexamined
+surface are the ones the sweep has never targeted directly - the large route and
+schema modules, the graph compiler, the streaming transformer, and the
+thread/team/ipc/context/mcp/tools packages. Coverage should be steered by where
+the campaign has NOT been, and that is not the same as where the code is
+newest or least familiar.

@@ -1,0 +1,217 @@
+"""No NEW substantial function may be a structural copy of another.
+
+The sibling canonical-homes suite pins concepts by NAME, which is exactly where
+it is blind: a clone written under a different name is invisible to it, and to
+grep, and to semantic search, all three of which key on what something is
+called. Two such clones were found in ``providers/`` only after a scan that
+erases every identifier and compares what is left - the SHAPE of the code.
+
+That scan is the reason this file exists. Run once it is an audit; run on every
+commit it is the only check here that can catch a copy nobody has named yet.
+
+How it works: each function body is parsed, stripped of its docstring, rewritten
+so every identifier becomes the same placeholder, and hashed. Functions whose
+bodies survive that erasure identically are structural duplicates regardless of
+their names, their arguments, or the types they mention.
+
+Two limits are deliberate and worth knowing before reading a failure:
+
+- It cannot see a clone that DIVERGED. A copy that gained one argument hashes
+  differently and passes here. Finding those needs semantic search; the two
+  methods are complements, and neither alone supports a claim that a concept
+  has exactly one home.
+- It flags THIN BINDING SHIMS, which is why the size floor exists. Consolidated
+  code often leaves a small per-caller wrapper that binds local constants to a
+  shared implementation, and those wrappers are structurally identical to each
+  other by construction. They are the SUCCESS of a consolidation, not a
+  failure of one, so the floor keeps them out rather than teaching people to
+  ignore this suite.
+
+Adding to the allowlist is a normal outcome, but an entry needs a REASON, not
+just a recording. "Same module, one differing constant" is a legitimate reason:
+naming two operations explicitly can beat one function with a parameter that
+hides which column, table, or event kind is in play. "I did not have time to
+merge these" is a reason too - written down, it stays visible instead of
+becoming silent debt.
+"""
+
+from __future__ import annotations
+
+import ast
+import hashlib
+from collections import defaultdict
+from pathlib import Path
+from typing import Final
+
+_SOURCE_ROOT = Path(__file__).resolve().parents[1]
+
+# Below this many AST nodes a shared body is more likely a coincidence of shape
+# - a two-line delegating accessor, a guard-and-return - than a copied idea, and
+# it is where consolidation shims live. Raising it hides real copies; lowering it
+# floods the report with functions that merely rhyme.
+_NODE_FLOOR: Final = 40
+
+# Groups already understood. Membership is the key rather than the body hash so
+# that editing an accepted duplicate does not spuriously fail this suite; what
+# fails is a NEW function joining one of these shapes, or a new shape entirely.
+_ACCEPTED: Final[tuple[frozenset[str], ...]] = (
+    # The PEP 562 lazy-import shim. Each package's map of attribute to module
+    # differs; only the lookup-and-import dance is shared. A factory generating
+    # these would move the cost from three short readable functions to one
+    # indirection every reader of the package has to unwind.
+    frozenset(
+        {
+            "graph/__init__.py::__getattr__",
+            "providers/__init__.py::__getattr__",
+            "thread/__init__.py::__getattr__",
+        }
+    ),
+    # Same repository, differing only in the column grouped by. Two named
+    # queries say which aggregate is being asked for at the call site; one
+    # parametrized query moves that into an argument the reader must resolve.
+    frozenset(
+        {
+            "database/artifact_repository.py::sum_cost_by_agent",
+            "database/artifact_repository.py::sum_cost_by_thread",
+        }
+    ),
+    # Same repository, different tables and different row models. The shape is
+    # shared because the access pattern is, not because the query is.
+    frozenset(
+        {
+            "database/artifact_repository.py::get_artifacts_by_thread",
+            "database/artifact_repository.py::get_permission_logs_by_thread",
+        }
+    ),
+    # Same repository, two lookup keys onto one table. Merging them would take
+    # the key as a column name, which is how a typo becomes a runtime error
+    # instead of a name error.
+    frozenset(
+        {
+            "database/permission_repository.py::get_control_action_by_dispatch_id",
+            "database/permission_repository.py::get_control_action_by_idempotency_key",
+        }
+    ),
+    # Same module, differing in which debounced event kind is broadcast.
+    frozenset(
+        {
+            "streaming/buffering.py::broadcast_debounced_plan_update",
+            "streaming/buffering.py::broadcast_debounced_tool_update",
+        }
+    ),
+    # QUEUED, not endorsed. These three cross-module pairs are genuine
+    # consolidation candidates in the provider catalog lane, recorded in the
+    # campaign audit. They are allowlisted so this suite reports NEW copies
+    # rather than re-reporting known ones, and they should shrink out of this
+    # list rather than settle into it.
+    frozenset(
+        {
+            "providers/in_process_catalog.py::_revision",
+            "providers/openai_catalog.py::_revision",
+        }
+    ),
+    frozenset(
+        {
+            "providers/in_process_catalog.py::_entry_id",
+            "providers/openai_catalog.py::_entry_id",
+        }
+    ),
+    frozenset(
+        {
+            "providers/provider_capabilities.py::_required_text",
+            "providers/provider_catalog.py::_required_text",
+        }
+    ),
+)
+
+
+class _EraseIdentifiers(ast.NodeTransformer):
+    """Rewrite every name, argument, and attribute to one placeholder.
+
+    What remains is the control flow and the literal structure, so two functions
+    compare equal exactly when they do the same thing to differently-named
+    things - which is what a copy is.
+    """
+
+    def visit_Name(self, node: ast.Name) -> ast.Name:
+        """Collapse a bare name."""
+        return ast.copy_location(ast.Name(id="_", ctx=node.ctx), node)
+
+    def visit_arg(self, node: ast.arg) -> ast.arg:
+        """Collapse a parameter, annotation included."""
+        return ast.copy_location(ast.arg(arg="_", annotation=None), node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> ast.Attribute:
+        """Collapse an attribute access, keeping the value it reaches through."""
+        self.generic_visit(node)
+        return ast.copy_location(
+            ast.Attribute(value=node.value, attr="_", ctx=node.ctx), node
+        )
+
+
+def _structure_hash(function: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
+    """Hash *function*'s body shape, or None when it is below the size floor."""
+    body = [
+        statement
+        for statement in function.body
+        if not (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        )
+    ]
+    if not body:
+        return None
+    module = ast.Module(body=body, type_ignores=[])
+    if sum(1 for _ in ast.walk(module)) < _NODE_FLOOR:
+        return None
+    erased = _EraseIdentifiers().visit(module)
+    ast.fix_missing_locations(erased)
+    return hashlib.sha256(ast.dump(erased).encode()).hexdigest()
+
+
+def _is_test_module(path: Path) -> bool:
+    """Report whether *path* is test code rather than production code."""
+    parts = path.parts
+    return "tests" in parts or "testing" in parts or path.name.startswith("test_")
+
+
+def _structural_groups() -> list[set[str]]:
+    """Return every set of production functions sharing one body shape."""
+    by_shape: dict[str, set[str]] = defaultdict(set)
+    for path in sorted(_SOURCE_ROOT.rglob("*.py")):
+        relative = path.relative_to(_SOURCE_ROOT)
+        if _is_test_module(relative):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                shape = _structure_hash(node)
+                if shape is not None:
+                    by_shape[shape].add(f"{relative.as_posix()}::{node.name}")
+    return [members for members in by_shape.values() if len(members) > 1]
+
+
+def test_no_unreviewed_structural_duplicate() -> None:
+    """Every set of identically-shaped functions must be a reviewed one."""
+    unreviewed = [
+        group
+        for group in _structural_groups()
+        if not any(group <= accepted for accepted in _ACCEPTED)
+    ]
+    assert not unreviewed, (
+        "These functions have identical bodies once every identifier is erased, "
+        "so they implement the same thing under different names:\n\n"
+        + "\n\n".join(
+            "  " + "\n  ".join(sorted(group))
+            for group in sorted(unreviewed, key=sorted)
+        )
+        + "\n\nConsume the existing one instead of keeping the copy. If they are "
+        "genuinely distinct - the same shape applied to different tables, "
+        "columns, or event kinds is a real case - add the group to _ACCEPTED "
+        "with a sentence saying why, so the judgement is visible to whoever "
+        "reads this next."
+    )

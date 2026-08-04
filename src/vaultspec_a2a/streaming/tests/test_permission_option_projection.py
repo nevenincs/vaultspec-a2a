@@ -195,3 +195,45 @@ def test_resolve_prefers_a_declared_kind_over_the_id_heuristic() -> None:
     # heuristic recognises only rejecting spellings, so flipping it would classify
     # every approving id this system mints as a denial.
     assert resolve_acp_option_kind(None, "approve") is PermissionOptionKind.ALLOW_ONCE
+
+
+
+def test_relayed_cache_keeps_a_denial_declared_under_an_approving_id() -> None:
+    """The gateway's cache must not re-derive a kind the payload already carries.
+
+    Two paths build a permission option. The transformer, reading a live ACP
+    interrupt, resolves the kind from what the agent DECLARED. The relay path,
+    rebuilding this cache from a worker payload, used to re-derive it from the
+    option id instead - discarding the one field that says whether the option
+    denies.
+
+    That is not a hypothetical divergence. An id is free-form and
+    provider-defined, and nothing obliges an agent to spell a rejecting option
+    "deny" or "reject"; the resolver exists precisely because such an option was
+    once persisted as an approval with no way for a later reader to recover the
+    denial. Driven through the aggregator's real relay seam over a payload whose
+    declared kind and id DISAGREE, which is the only shape that can tell the two
+    derivations apart.
+    """
+    aggregator = EventAggregator()
+
+    aggregator.sync_worker_event(
+        "thread-denial-under-approving-id",
+        {
+            "type": "permission_request",
+            "request_id": "req-1",
+            "description": "Write to the repository",
+            "options": [
+                # Declared a denial, spelled like an acceptance.
+                {"option_id": "approve", "name": "No", "kind": "reject_once"},
+            ],
+        },
+    )
+
+    pending = aggregator.get_pending_permissions("thread-denial-under-approving-id")
+    assert pending, "the request never reached the cache"
+    option = pending[0].options[0]
+    assert option["kind"] == str(PermissionOptionKind.REJECT_ONCE), (
+        "the cache re-derived the kind from the id and turned a declared "
+        f"denial into {option['kind']}"
+    )

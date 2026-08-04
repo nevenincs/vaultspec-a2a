@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:a2ca72ab75b72c86a7dcac46224bf5761dbec640da84ca622aed7ec18ea57be6'
+body_hash: 'sha256:e709f1090499a735ca3f411d01dc627286589d763fdd1440d4a3328675871874'
 related: []
 ---
 
@@ -7242,3 +7242,54 @@ message - and the cards landed in a scope the shared board does not read. **The
 failure it was correcting reproduced itself one level up**, silently, and was only
 caught because the orchestrator enumerated the board rather than trusting the
 report that cards existed.
+
+### correction-the-board-mechanism-did-not-fail | critical | retracts a claim in the entry above
+
+The preceding entry states that a lane's cards "landed in a scope the shared board
+does not read", and that the failure being corrected "reproduced itself one level
+up". **Both claims are false and are retracted.**
+
+**The board is shared. Those cards are absent because the lane DELETED them** on
+finding they duplicated a card the orchestrator had just written.
+
+**The disproof was in the orchestrator's own tool output and went unread.** The
+replacement card was created with id **54**. If the lane's two creates had gone to
+a separate scope, the next free id would have been 52. **The counter having already
+consumed 52 and 53 is proof they were allocated on this board** - and that fact was
+sitting in the create result at the moment the conclusion was drawn. The lane also
+reads every other lane's cards, and had quoted the replacement card's full text
+back by id.
+
+**This is the campaign's own signature failure, committed by its record-keeper, for
+the second time.** A confident conclusion drawn before the available evidence was
+read - and the more alarming of the two explanations chosen, which is the direction
+that does the most damage when wrong. Had it stood, the next lane with a finding
+would have believed it had no durable channel, and the entry would have discouraged
+exactly the behaviour the campaign spent the day asking for.
+
+**The lane set the trap and named it accurately:** it reported creating and deleting
+the cards in one message, and the sequence was not clear enough to read in order. A
+reader given both facts and no ordering will reconstruct one - and will pick the
+explanation that fits the frame they are already carrying. The frame here was a day
+of correction-loss findings.
+
+### leave-the-duplicate-and-flag-it | high | the process rule that would have prevented this
+
+The lane's own diagnosis is the durable output, and it is a rule worth adopting:
+
+> **Leave the duplicate and flag it.** A redundant card costs a moment of triage; a
+> deleted one destroys the record of how it got there.
+
+Deleting the duplicate removed the only evidence that the boarding mechanism had
+worked. The remaining state - two ids missing from a sequence - is indistinguishable
+from cards that were never created, which is precisely the wrong conclusion that
+followed.
+
+**Generalises past task cards to every shared artefact in a multi-writer setting.**
+Cleaning up your own redundant work is the instinct of a careful contributor, and it
+is exactly wrong when the redundancy is itself the evidence of how two parties
+reached the same place. **Tidying destroys provenance.**
+
+The tie-break the lane applied when choosing which card to delete remains correct -
+keep the one carrying more evidence, regardless of authorship. What was wrong was
+deleting rather than flagging.

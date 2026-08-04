@@ -737,6 +737,36 @@ class TeamConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _resolve_preset_path(
+    filename_id: str,
+    workspace_root: Path | None,
+    *,
+    subdir: str,
+    preset_dir: Path,
+) -> Path | None:
+    """Resolve the two-level discovery path shared by agent and team loading.
+
+    Checks ``{workspace_root}/.vaultspec/{subdir}/{filename_id}.toml`` first
+    (when a workspace is given), then the bundled *preset_dir* - the single
+    "workspace override, else bundled preset" mechanism both
+    :func:`load_agent_config` and :func:`load_team_config` resolve against, so
+    the ordering can only drift in one place. Returns ``None`` when neither
+    candidate exists; the caller raises its own typed not-found error, since
+    that type differs per config kind.
+    """
+    candidates: list[Path] = []
+    if workspace_root is not None:
+        candidates.append(
+            workspace_root / ".vaultspec" / subdir / f"{filename_id}.toml"
+        )
+    candidates.append(preset_dir / f"{filename_id}.toml")
+
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
 def load_agent_config(
     agent_id: str,
     workspace_root: Path | None = None,
@@ -765,16 +795,12 @@ def load_agent_config(
             r"[a-zA-Z_][a-zA-Z0-9_\-]{{0,62}} (alphanumeric, underscores, hyphens)."
         )
 
-    candidates: list[Path] = []
-    if workspace_root is not None:
-        candidates.append(workspace_root / ".vaultspec" / "agents" / f"{agent_id}.toml")
-    candidates.append(_PRESET_AGENTS_DIR / f"{agent_id}.toml")
-
-    for path in candidates:
-        if path.is_file():
-            return AgentConfig.from_toml(path)
-
-    raise AgentConfigNotFoundError(agent_id)
+    path = _resolve_preset_path(
+        agent_id, workspace_root, subdir="agents", preset_dir=_PRESET_AGENTS_DIR
+    )
+    if path is None:
+        raise AgentConfigNotFoundError(agent_id)
+    return AgentConfig.from_toml(path)
 
 
 def load_team_config(
@@ -803,13 +829,9 @@ def load_team_config(
             r"[a-zA-Z_][a-zA-Z0-9_\-]{{0,62}}."
         )
 
-    candidates: list[Path] = []
-    if workspace_root is not None:
-        candidates.append(workspace_root / ".vaultspec" / "teams" / f"{team_id}.toml")
-    candidates.append(_PRESET_TEAMS_DIR / f"{team_id}.toml")
-
-    for path in candidates:
-        if path.is_file():
-            return TeamConfig.from_toml(path)
-
-    raise TeamConfigNotFoundError(team_id)
+    path = _resolve_preset_path(
+        team_id, workspace_root, subdir="teams", preset_dir=_PRESET_TEAMS_DIR
+    )
+    if path is None:
+        raise TeamConfigNotFoundError(team_id)
+    return TeamConfig.from_toml(path)

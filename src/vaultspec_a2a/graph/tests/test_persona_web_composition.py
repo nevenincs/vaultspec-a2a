@@ -55,6 +55,7 @@ from ..compiler import (
     _web_grounding_text,
     compile_team_graph,
 )
+from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -296,6 +297,7 @@ async def test_the_compiled_run_tells_each_role_what_its_lane_may_claim(
         proposal_submitter=_RecordingSubmitter(),
         autonomous=True,
         workspace_root=workspace,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     result = await graph.ainvoke(

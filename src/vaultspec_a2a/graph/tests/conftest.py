@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeChatModel
 
+from ..enums import Model, Provider
 from ..protocols import ProviderFactoryProtocol
 
 _PACKAGE_DIR = str(__import__("pathlib").Path(__file__).resolve().parent)
@@ -60,3 +61,29 @@ def pf() -> ProviderFactoryProtocol:
     factory = _StubProviderFactory()
     assert isinstance(factory, ProviderFactoryProtocol)
     return factory
+
+
+def deterministic_model_assignment(team_config: Any) -> dict[str, dict[str, Any]]:
+    """Build the frozen assignment a compile needs now that presets name no lane.
+
+    Bundled presets no longer declare a provider or capability: a run chooses
+    both at start from the catalog its execution lane serves, and freezes the
+    result per role. A compile therefore has nothing to resolve from
+    configuration alone and refuses, which is correct behaviour and exactly what
+    the served-catalog retirement intends.
+
+    Tests that are about GRAPH SHAPE - node sets, edges, timeouts, retry policy -
+    should not each re-derive that. They state the one thing the compiler is
+    missing, keyed by ``agent_id`` as the compiler looks it up, and pin every
+    role to the in-process deterministic lane so a structural assertion never
+    depends on a credential, a network, or a served catalog.
+    """
+    return {
+        ref.agent_id: {
+            "provider": Provider.DETERMINISTIC.value,
+            "capability": Model.MID.value,
+            "model_name": "deterministic",
+            "fallback": [],
+        }
+        for ref in team_config.workers
+    }

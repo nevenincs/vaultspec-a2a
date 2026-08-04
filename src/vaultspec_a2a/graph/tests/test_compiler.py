@@ -49,6 +49,7 @@ from ..compiler import (
     _worker_retry_on,
     compile_team_graph,
 )
+from .conftest import deterministic_model_assignment
 
 
 @pytest_asyncio.fixture
@@ -127,6 +128,7 @@ async def test_compile_graph_structure(
         checkpointer=checkpointer,
         supervisor_agent_config=supervisor_cfg,
         provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     assert team.topology.type == topology
@@ -172,9 +174,10 @@ def test_bundled_preset_workers_resolve_only_on_an_in_process_lane(
             )
             continue
 
-        # Surfaced at the compiler seam as fallback exhaustion; the cause beneath
-        # it is the factory refusing to invent an implicit default.
-        with pytest.raises(ValueError, match="All providers exhausted"):
+        # The compiler now names the cause directly rather than surfacing it as
+        # fallback exhaustion: the role declares no provider, and a run picks its
+        # provider and model at start from the catalog its lane serves.
+        with pytest.raises(ValueError, match="has no provider"):
             _resolve_model_for_worker(
                 worker_ref, agent_config, team, provider_factory=factory
             )
@@ -209,6 +212,7 @@ async def test_compile_team_graph_accepts_workspace_root(
         supervisor_agent_config=supervisor_cfg,
         workspace_root=Path("Y:/code/test-workspace"),
         provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
@@ -250,6 +254,7 @@ async def test_compile_interrupt_before_always_empty(
         checkpointer=checkpointer,
         autonomous=autonomous,
         provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     assert list(graph.interrupt_before_nodes) == []
@@ -285,6 +290,7 @@ async def test_compile_unknown_topology_raises(
             agent_configs=agent_configs,
             checkpointer=checkpointer,
             provider_factory=pf,
+            model_assignment=deterministic_model_assignment(bad_team),
         )
 
 
@@ -323,6 +329,7 @@ async def test_compile_pipeline_loop_structure(
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
@@ -357,6 +364,7 @@ async def test_compile_pipeline_loop_single_agent_raises(
             agent_configs=agent_configs,
             checkpointer=checkpointer,
             provider_factory=pf,
+            model_assignment=deterministic_model_assignment(bad_team),
         )
 
 
@@ -378,6 +386,7 @@ async def test_compile_pipeline_missing_agent_config_raises(
             agent_configs=agent_configs,
             checkpointer=checkpointer,
             provider_factory=pf,
+            model_assignment=deterministic_model_assignment(team),
         )
 
 
@@ -397,6 +406,7 @@ async def test_compile_pipeline_empty_order_raises(
             agent_configs=agent_configs,
             checkpointer=checkpointer,
             provider_factory=pf,
+            model_assignment=deterministic_model_assignment(bad_team),
         )
 
 
@@ -531,6 +541,7 @@ async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) 
             checkpointer=cp,
             step_timeout=42.0,
             provider_factory=pf,
+            model_assignment=deterministic_model_assignment(team),
         )
     assert graph.step_timeout == 42.0
 
@@ -551,6 +562,7 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
             checkpointer=cp,
             step_timeout=None,
             provider_factory=pf,
+            model_assignment=deterministic_model_assignment(team),
         )
     assert graph.step_timeout == 120.0
 
@@ -618,6 +630,7 @@ async def test_compile_team_graph_passes_supervisor_agent_config_to_provider_fac
         checkpointer=checkpointer,
         supervisor_agent_config=supervisor_cfg,
         provider_factory=factory,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     assert graph is not None
@@ -643,6 +656,7 @@ async def test_compile_team_graph_does_not_set_recursion_limit(
             agent_configs=agent_configs,
             checkpointer=cp,
             provider_factory=pf,
+            model_assignment=deterministic_model_assignment(team),
         )
     # recursion_limit is passed at runtime via config, not set on graph.
     assert not hasattr(graph, "recursion_limit")
@@ -720,16 +734,25 @@ def test_resolve_worker_model_preferences_consumes_frozen_assignment() -> None:
 
 
 def test_frozen_assignment_absent_worker_falls_through_to_resolution() -> None:
-    """A frozen map that does not name this worker leaves resolution unchanged."""
+    """A frozen map that does not name this worker leaves resolution unchanged.
+
+    Unchanged now means "refuses identically". The preset declares no provider,
+    so configuration alone cannot resolve one and the resolver says so; what this
+    pins is that a frozen map naming SOMEONE ELSE neither supplies the missing
+    lane nor changes the refusal. Comparing the two outcomes is still the point -
+    only the outcome being compared moved from a resolved pair to a refusal.
+    """
     team = load_team_config("vaultspec-solo-coder")
     agent_cfg = load_agent_config("vaultspec-coder")
     worker_ref = team.workers[0]
 
-    with_frozen = _resolve_worker_model_preferences(
-        worker_ref, agent_cfg, team, frozen_assignment={"someone-else": {}}
-    )
-    without_frozen = _resolve_worker_model_preferences(worker_ref, agent_cfg, team)
-    assert with_frozen == without_frozen
+    with pytest.raises(ValueError, match="has no provider") as with_frozen:
+        _resolve_worker_model_preferences(
+            worker_ref, agent_cfg, team, frozen_assignment={"someone-else": {}}
+        )
+    with pytest.raises(ValueError, match="has no provider") as without_frozen:
+        _resolve_worker_model_preferences(worker_ref, agent_cfg, team)
+    assert str(with_frozen.value) == str(without_frozen.value)
 
 
 def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:
@@ -1074,6 +1097,7 @@ async def test_every_model_backed_node_carries_the_production_retry_policy(
             agent_configs=agent_configs,
             provider_factory=pf,
             **extra,
+            model_assignment=deterministic_model_assignment(team),
         )
 
         carrying, bare = _retry_policy_partition(graph)

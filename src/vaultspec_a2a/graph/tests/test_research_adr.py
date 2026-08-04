@@ -33,6 +33,7 @@ from ...team.team_config import (
 )
 from ...thread.errors import ConfigError
 from ..compiler import _doc_review_router, compile_team_graph
+from .conftest import deterministic_model_assignment
 
 
 def _review_state(review_text: str) -> dict[str, Any]:
@@ -137,6 +138,7 @@ async def test_research_adr_compiles_expected_node_set(
         checkpointer=checkpointer,
         provider_factory=pf,
         proposal_submitter=_FakeSubmitter(),
+        model_assignment=deterministic_model_assignment(team),
     )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
@@ -170,6 +172,7 @@ async def test_research_adr_requires_proposal_submitter(
             checkpointer=checkpointer,
             provider_factory=pf,
             proposal_submitter=None,
+            model_assignment=deterministic_model_assignment(team),
         )
 
 
@@ -189,6 +192,7 @@ async def test_research_adr_missing_role_raises(
             checkpointer=checkpointer,
             provider_factory=pf,
             proposal_submitter=_FakeSubmitter(),
+            model_assignment=deterministic_model_assignment(team),
         )
 
 
@@ -216,6 +220,7 @@ async def test_research_adr_runs_to_first_document_gate(
         checkpointer=checkpointer,
         provider_factory=pf,
         proposal_submitter=submitter,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     state: dict[str, Any] = {
@@ -281,6 +286,7 @@ async def test_research_gate_submit_sees_run_state_and_synthesis_body(
         checkpointer=checkpointer,
         provider_factory=pf,
         proposal_submitter=submitter,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     run_thread_id = "run-1784136458"
@@ -337,6 +343,7 @@ async def test_plan_phase_runs_after_gate_two_and_parks_on_gate_three(
         checkpointer=checkpointer,
         provider_factory=pf,
         proposal_submitter=submitter,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     run_thread_id = "ra-plan-run"
@@ -396,6 +403,7 @@ async def test_plan_gate_request_changes_loops_the_plan_writer(
         checkpointer=checkpointer,
         provider_factory=pf,
         proposal_submitter=submitter,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     run_thread_id = "ra-plan-revision-run"

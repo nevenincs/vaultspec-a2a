@@ -77,12 +77,23 @@ class ProviderCatalogService:
         factory: ProviderFactory | None = None,
         ttl: timedelta = PROVIDER_CATALOG_CACHE_TTL,
         max_workspace_scopes: int = _MAX_WORKSPACE_SCOPES,
+        serve_in_process_lanes: bool | None = None,
     ) -> None:
         if max_workspace_scopes <= 0:
             raise ValueError("max_workspace_scopes must be positive")
         self._factory = factory or ProviderFactory()
         self._ttl = ttl
         self._max_workspace_scopes = max_workspace_scopes
+        # Forwarded to the registration factory, which already accepts it and
+        # documents why: an explicit value is the same decision a caller that
+        # knows its own posture would make, "so the policy is exercisable
+        # without reaching into the process environment". Dropping it here left
+        # the environment as the only transport, and a process-wide variable is
+        # inherited by every gateway child this service's callers spawn - so
+        # arming a lane for one caller silently rearmed it for unrelated
+        # subprocesses. ``None`` keeps the served gateway's behaviour exactly:
+        # consult the deployment's declaration.
+        self._serve_in_process_lanes = serve_in_process_lanes
         self._scopes: OrderedDict[str, _WorkspaceScope] = OrderedDict()
         self._scope_lock = asyncio.Lock()
 
@@ -107,7 +118,10 @@ class ProviderCatalogService:
                         "provider catalog workspace capacity is busy"
                     )
                 del self._scopes[inactive]
-            registrations = self._factory.catalog_registrations(Path(workspace_root))
+            registrations = self._factory.catalog_registrations(
+                Path(workspace_root),
+                serve_in_process_lanes=self._serve_in_process_lanes,
+            )
             scope = _WorkspaceScope(
                 registrations=registrations,
                 cache=CatalogRefreshCache(

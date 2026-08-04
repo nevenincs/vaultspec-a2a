@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:67043a311a382212329a0c58c328525dff4fb028253687f566ec5b0031d1fbf1'
+body_hash: 'sha256:d42b1b6d81c06c0339587ab0c309357174104f52ba34b452f68abdc424310c09'
 related: []
 ---
 
@@ -1642,6 +1642,50 @@ So the shared reader takes the precondition and leaves output, purpose and
 failure policy to the caller. Flattening any one would have destroyed something
 load-bearing. Recorded because "several concepts sharing a shape" has until now
 meant two; here it meant four, and only comparing bodies separated them.
+
+### a-docstring-claiming-the-guarantee-the-code-lacks | critical | worse than a lying name
+
+The cleanup containment reader resolves the stored workspace value with no
+absoluteness check, so a relative stored root resolves against the SERVING
+PROCESS's working directory - and if that path happens to exist, the
+existing-directory check passes and it proceeds to judge which artifacts are
+contained. Containment decides what cleanup may touch, every other reader of that
+column now refuses a relative root, and this one silently relocates it. It is
+also precisely the split-brain this repository's own absolute-path test exists to
+prevent.
+
+What raises it above the other name-collision findings is its docstring, which
+states that the existing-directory check is there so a stale root "refuses every
+artifact rather than resolving relative paths against the process working
+directory". The documentation asserts the exact protection the code does not
+have. A lying NAME misleads a reader who is looking; a docstring claiming the
+missing guarantee stops them looking at all - a reviewer asking "does this handle
+relative roots?" reads that sentence and moves on. Recorded as the more dangerous
+form of the same class.
+
+Ruling: refuse a relative stored root, keep the path return and the existence
+requirement - those are its genuine contract and the reason it is correctly
+DISTINCT - and add only the absoluteness the docstring already promises. It does
+not route through the shared reader.
+
+### the-reader-asks-the-boundary-rather-than-restating-it | high | the principle applied to itself
+
+The consolidated workspace reader deliberately does not restate the
+absoluteness rule. Writing that predicate inline would have been a second
+declaration of a contract the boundary's own minting function already owns, and
+it would stop agreeing the moment that owner changed - in a commit whose entire
+subject is that class of mistake. It asks the owner instead.
+
+Recorded because it is the campaign's principle turned on the campaign's own
+output, and because the alternative would have looked like a fix: a hand-written
+`isabs` check reads as defensive rigour and is in fact a fresh copy of somebody
+else's rule.
+
+The non-vacuity table filed with it also corrects this audit's earlier framing.
+"One site read it with no type check" understated the defect: reproducing both
+deleted readers against the test inputs shows one returned all three
+crash-inducing values and the other two of three, so BOTH resume paths could
+strand a run holding a claim with no dispatch.
 
 ## Recommendations
 

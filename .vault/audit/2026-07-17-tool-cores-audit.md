@@ -830,3 +830,24 @@ four by reading and one by tracing. The four were wrong and each cost a
 withdrawal; the trace was right first time and cost four log lines. Where a
 refusal is silent, instrument before reasoning.
 
+**Correction to the location, from reading the two named helpers.** Neither
+raises: `evaluate_execution_eligibility` (`control/run_start_policy.py`) contains
+no raise at all, and `_admission_readiness` only projects seated facts. So the
+503 does not originate in either.
+
+The trace still bounds it exactly, and one call earlier than the previous entry
+said. `commit step: probe_worker` is logged BEFORE `probe_worker_health(...)`,
+and nothing is logged after it, so the request does not survive that call. The
+remaining candidate is `probe_worker_health` itself, or the awaiting of it -
+the one thing in the window that performs I/O against another process.
+
+That fits the shape of the failure better than any of the five earlier
+candidates: it is the only step whose behaviour depends on a live peer rather
+than on local state, which is why it fails for the commit-heavy cases and not for
+the prepare-only ones, and why every attempt to find it by reading control flow
+missed it.
+
+Left here with the boundary observed and the candidate named rather than
+asserted. The trace lines are committed, so re-running the test reproduces this
+in 40 seconds.
+

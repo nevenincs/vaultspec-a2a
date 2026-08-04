@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from ...api.tests.conftest import make_app
 from ...conftest import materialize_schema
 from ...lifecycle.discovery import service_json_path, write_service_json
+from ...testing.catalog_selection import in_process_selection
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -112,12 +113,18 @@ class _GatewayFixture:
         return engine
 
 
-def _first_selectable_entry(base: str) -> dict[str, str]:
-    """Return a served provider/mode/entry this gateway can actually run.
+def _in_process_lane_arguments(base: str) -> dict[str, str]:
+    """Return the provider/mode/entry arguments naming a served in-process lane.
 
     A TEST may choose an entry; production code may not. What is asserted by
     using it here is that the CLI carries the caller's choice through to the
-    gateway intact, not that any particular model is right.
+    gateway intact, not that any particular model is right - so the choice must
+    be a lane that bills nothing, which is the one guarantee the shared
+    mechanism makes.
+
+    Only three of the reference's fields are returned. The CLI's own resolver
+    reads the catalog and supplies the revision, and that resolution is part of
+    what this test exercises; handing it a revision would skip it.
     """
     import httpx
 
@@ -127,16 +134,11 @@ def _first_selectable_entry(base: str) -> dict[str, str]:
         timeout=180.0,
     )
     assert response.status_code == 200, response.text
-    for record in response.json()["providers"]:
-        catalog = record.get("catalog") or {}
-        entries = catalog.get("models") or []
-        if record.get("health", {}).get("selectable") and entries:
-            return {
-                "provider_id": record["provider_id"],
-                "execution_mode": record["execution_mode"],
-                "entry_id": entries[0]["entry_id"],
-            }
-    raise AssertionError("gateway served no selectable catalog entry")
+    selection = in_process_selection(response.json())
+    return {
+        key: str(selection[key])
+        for key in ("provider_id", "execution_mode", "entry_id")
+    }
 
 
 def _run_cli(
@@ -223,7 +225,7 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
         # hardcoded, so this proves the real end-to-end path.
         catalog = _run_cli("presets", "--url", srv.base)
         assert catalog.returncode == 0, catalog.stdout + catalog.stderr
-        lane = _first_selectable_entry(srv.base)
+        lane = _in_process_lane_arguments(srv.base)
         start = _run_cli(
             "run",
             "start",

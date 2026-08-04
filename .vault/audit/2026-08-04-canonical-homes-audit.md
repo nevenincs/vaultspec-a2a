@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:94eb172dd1ddc1d66277cc5541c3127f93a8d61942f2c3165506820a981349f5'
+body_hash: 'sha256:2ededc5bfb95fcfc1a2667730fe0f8143c1cdc4713df6d2d511f4c2ebc3ba726'
 related: []
 ---
 
@@ -7031,3 +7031,84 @@ Recorded because it is the same class as the inert flag and the identity compare
 **a platform behaviour that must be measured rather than reasoned about** - and
 because an assertion searching for the raw string would have failed while the code
 was correct, which is the false negative that wastes the most time.
+
+### the-cross-check-reconstructed-and-therefore-erred | critical | the task's own rule, broken by its verification
+
+The purity work's first rule is **ask the authority, do not reconstruct it** - the
+marker is applied by directory-level hooks, so no file declares it and any
+reimplementation must reproduce all of them correctly to be trusted.
+
+The lane obeyed that in the fix and **broke it in the cross-check**. Its verifier
+parsed pytest's **text report** to attribute fixtures to tests. A parametrized
+identifier containing spaces and backslashes did not match the header pattern, so
+fixtures were attributed to the **previous** test - and a real removal appeared
+unbacked. Asking pytest about that single test directly showed the impure fixture
+in its closure.
+
+**The reconstruction was the thing that erred, inside a task whose subject was the
+danger of reconstruction.** The lane caught it because the anomaly pointed at its
+own tooling rather than at the code.
+
+**The rule, stated generally: a text report is a RENDERING, not an interface.**
+Parsing one is a reimplementation of the tool's formatting decisions, and it fails
+on exactly the inputs a formatter treats specially - which are the unusual ones,
+which are the ones a sweep most needs to get right. This is the same class as the
+identifier-masking hazard already recorded here, where a search tool's OUTPUT was
+trusted as if it were the data.
+
+### ask-the-authority-per-ITEM-not-per-file | high | the mechanism, and why it does not rot
+
+The gap the previous pass could not see - a file inheriting an impure fixture
+across a configuration boundary while importing and calling nothing - is closed by
+asking pytest for each collected item's **resolved fixture closure**.
+
+By collection time that closure already contains everything the previous mechanism
+could not follow: inheritance across boundaries, automatic fixtures, local
+overrides, and fixtures requesting other fixtures. The lane names the impure
+fixtures; the tool decides which tests reach them.
+
+**Per item, not per file** - and that distinction is load-bearing. A file-level
+exclusion strips the claim from pure tests that merely share a file with impure
+ones, which is the false positive that costs COVERAGE rather than correctness and
+is therefore the kind nobody investigates.
+
+**And it does not rot.** A new test requesting one of those fixtures loses the
+claim with no list to edit. Compare that with what it replaced: a hook exempting
+live files **by name**, from a hand-maintained list.
+
+### the-name-based-exemption-missed-the-file-its-name-fits | high | the camouflage shape, recurring
+
+The residue was real and larger than assumed: thirty-seven tests across seven files
+in **two** packages, where the previous pass had reported the affected files as
+"already among the twenty-eight" **without proving it**.
+
+**One of them is the predicted shape.** A hook exempted live files by NAME from a
+literal list, and a file whose name plainly announces it is live sat OUTSIDE that
+list while using the impure fixture. Recorded earlier in this campaign as *a file
+that looks already-handled by its name is exactly where it hides* - now confirmed
+rather than anticipated.
+
+The lane also read **both** definitions of the fixture it keyed on rather than
+trusting the name, and found a second, unrelated fixture sharing that name in a
+different package - one probing over the network, one binding a real loopback
+socket and serving from a thread. Both genuinely impure, but they are different
+fixtures.
+
+**Stated limitation, volunteered:** matching is by fixture NAME, because that is how
+the tool identifies fixtures in a closure. A future PURE fixture reusing one of
+those names would be a false positive.
+
+### an-explicit-claim-that-forfeits-purity | medium | a decision, not a sweep
+
+Found on the way and correctly not acted on: an automatic fixture spanning a
+hundred and twenty-four pure-selected files takes machine-global leases - **but
+only when a test declares a resource claim**, returning immediately otherwise.
+
+So a test marked pure while carrying a resource claim performs real lease
+input/output **by its own declaration**. That is not the defect this sweep
+retires - nothing is hidden, and the test asked for it - but it means the two
+markers can be worn together while contradicting each other.
+
+**The question is whether an explicit claim forfeits the purity claim**, and that
+is a policy decision about what the marker means rather than a list of sites to
+fix. Boarded as a decision.

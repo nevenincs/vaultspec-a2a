@@ -21,6 +21,7 @@ from pydantic import TypeAdapter, ValidationError
 from ._catalog_fields import CatalogFieldReader, local_id, model_list_revision
 from ._json_contract import JsonObject
 from .provider_catalog import (
+    MAX_MODELS,
     AuthenticationState,
     CatalogState,
     CatalogStatus,
@@ -37,7 +38,6 @@ __all__ = [
 ]
 
 _MAX_RESPONSE_BYTES: Final = 1_048_576
-_MAX_MODELS: Final = 256
 _MAX_API_KEY_LENGTH: Final = 4_096
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
@@ -159,9 +159,9 @@ def catalog_from_model_list(
         raise OpenAICompatibleCatalogError(
             "OpenAI-compatible model-list data must be a list"
         )
-    if len(raw_models) > _MAX_MODELS:
+    if len(raw_models) > MAX_MODELS:
         raise OpenAICompatibleCatalogError(
-            f"OpenAI-compatible model-list exceeds {_MAX_MODELS} models"
+            f"OpenAI-compatible model-list exceeds {MAX_MODELS} models"
         )
     model_values: set[str] = set()
     for index, raw_model in enumerate(raw_models):

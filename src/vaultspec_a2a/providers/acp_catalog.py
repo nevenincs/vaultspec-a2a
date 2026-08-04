@@ -33,6 +33,8 @@ from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .acp_exceptions import AcpErrorCode, AcpSessionError
 from .provider_catalog import (
+    MAX_CONTROLS,
+    MAX_MODELS,
     MAX_OPTIONS,
     AuthenticationState,
     CatalogState,
@@ -54,8 +56,6 @@ __all__ = [
 
 _MAX_FRAME_BYTES: Final = 1_048_576
 _MAX_FRAMES: Final = 64
-_MAX_MODELS: Final = 256
-_MAX_CONTROLS: Final = 32
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _SUPPORTED_CONTROL_CATEGORIES: Final = frozenset({"thought_level", "model_config"})
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
@@ -262,7 +262,10 @@ def _normalized_payload(
     config_options = _objects(
         result.get("configOptions"),
         field="configOptions",
-        limit=_MAX_CONTROLS + 1,
+        # ACP carries the model selector in the same list as the controls, so a
+        # session advertising the full complement of controls plus its one model
+        # selector is legitimate and must survive this early bound.
+        limit=MAX_CONTROLS + 1,
     )
     for option in config_options:
         category = optional_text(option.get("category"))
@@ -274,7 +277,7 @@ def _normalized_payload(
                 )
             models = _models_from_options(
                 _flatten_options(
-                    option.get("options"), field="model.options", limit=_MAX_MODELS
+                    option.get("options"), field="model.options", limit=MAX_MODELS
                 ),
                 namespace=f"{key.provider_id}:{key.execution_mode}:model",
             )
@@ -286,9 +289,9 @@ def _normalized_payload(
             )
             if control is not None:
                 controls.append(control)
-                if len(controls) > _MAX_CONTROLS:
+                if len(controls) > MAX_CONTROLS:
                     raise AcpCatalogProtocolError(
-                        f"ACP session advertises more than {_MAX_CONTROLS} controls",
+                        f"ACP session advertises more than {MAX_CONTROLS} controls",
                         code=AcpErrorCode.INTERNAL_ERROR,
                     )
 
@@ -299,7 +302,7 @@ def _normalized_payload(
             _objects(
                 legacy_models.get("availableModels"),
                 field="models.availableModels",
-                limit=_MAX_MODELS,
+                limit=MAX_MODELS,
             ),
             namespace=f"{key.provider_id}:{key.execution_mode}:model",
         )

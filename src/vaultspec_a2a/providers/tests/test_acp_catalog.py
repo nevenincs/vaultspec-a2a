@@ -14,6 +14,7 @@ from ..acp_catalog import (
     catalog_from_session_result,
 )
 from ..provider_catalog import (
+    MAX_CONTROLS,
     MAX_OPTIONS,
     AuthenticationState,
     CatalogStatus,
@@ -204,9 +205,11 @@ def test_control_and_option_bounds_fail_as_protocol_errors() -> None:
             "type": "select",
             "options": [{"value": "one", "name": "One"}],
         }
-        for index in range(33)
+        for index in range(MAX_CONTROLS + 1)
     ]
-    with pytest.raises(AcpCatalogProtocolError, match="more than 32 controls"):
+    with pytest.raises(
+        AcpCatalogProtocolError, match=f"more than {MAX_CONTROLS} controls"
+    ):
         catalog_from_session_result(
             cast("JsonObject", {"configOptions": controls}), key=_KEY
         )

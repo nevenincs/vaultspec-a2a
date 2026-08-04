@@ -31,6 +31,8 @@ from ._json_contract import JsonObject, JsonValue
 from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
+    MAX_CONTROLS,
+    MAX_MODELS,
     MAX_OPTIONS,
     AuthenticationState,
     CatalogState,
@@ -53,8 +55,6 @@ __all__ = [
 _MAX_FRAME_BYTES: Final = 1_048_576
 _MAX_FRAMES_PER_RESPONSE: Final = 64
 _MAX_PAGES: Final = 16
-_MAX_MODELS: Final = 256
-_MAX_CONTROLS: Final = 32
 _MODEL_PAGE_SIZE: Final = 100
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
@@ -264,13 +264,15 @@ def catalog_from_app_server(
     controls: list[NativeControl] = []
     seen_models: set[str] = set()
     for page_index, page in enumerate(model_pages):
-        remaining = _MAX_MODELS - len(models)
+        # Pages accumulate into one catalog, so each page is bounded by what the
+        # bound leaves rather than by the whole bound.
+        remaining = MAX_MODELS - len(models)
         page_models = _objects(
-            page.get("data"), field=f"pages[{page_index}].data", limit=_MAX_MODELS
+            page.get("data"), field=f"pages[{page_index}].data", limit=MAX_MODELS
         )
         if len(page_models) > remaining:
             raise CodexCatalogProtocolError(
-                f"Codex catalog exceeds {_MAX_MODELS} models"
+                f"Codex catalog exceeds {MAX_MODELS} models"
             )
         for model_index, model in enumerate(page_models):
             value = _FIELDS.required_text(
@@ -329,9 +331,9 @@ def catalog_from_app_server(
                     ),
                 )
             )
-            if len(controls) > _MAX_CONTROLS:
+            if len(controls) > MAX_CONTROLS:
                 raise CodexCatalogProtocolError(
-                    f"Codex catalog exceeds {_MAX_CONTROLS} native controls"
+                    f"Codex catalog exceeds {MAX_CONTROLS} native controls"
                 )
     now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     if not models:

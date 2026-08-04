@@ -26,6 +26,8 @@ from ._json_contract import JsonObject, JsonValue
 from ._stdio_rpc import OutputBudget, cancel_task
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
+    MAX_CONTROLS,
+    MAX_MODELS,
     MAX_OPTIONS,
     AuthenticationState,
     CatalogState,
@@ -45,8 +47,6 @@ __all__ = [
     "discover_kimi_catalog",
 ]
 
-_MAX_MODELS: Final = 256
-_MAX_CONTROLS: Final = 32
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
@@ -175,9 +175,9 @@ def catalog_from_provider_list(
     """Normalize ``kimi provider list --json`` without retaining provider secrets."""
     providers = _object_table(result.get("providers"), field="providers")
     model_table = _object_table(result.get("models"), field="models")
-    if len(model_table) > _MAX_MODELS:
+    if len(model_table) > MAX_MODELS:
         raise KimiCatalogProtocolError(
-            f"Kimi catalog field 'models' exceeds {_MAX_MODELS} items"
+            f"Kimi catalog field 'models' exceeds {MAX_MODELS} items"
         )
     models: list[ModelCatalogEntry] = []
     controls: list[NativeControl] = []
@@ -217,9 +217,9 @@ def catalog_from_provider_list(
         )
         if control is not None:
             controls.append(control)
-            if len(controls) > _MAX_CONTROLS:
+            if len(controls) > MAX_CONTROLS:
                 raise KimiCatalogProtocolError(
-                    f"Kimi catalog exceeds {_MAX_CONTROLS} native controls"
+                    f"Kimi catalog exceeds {MAX_CONTROLS} native controls"
                 )
         models.append(
             ModelCatalogEntry(

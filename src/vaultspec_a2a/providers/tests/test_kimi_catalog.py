@@ -21,6 +21,7 @@ from ..kimi_catalog import (
     discover_kimi_catalog,
 )
 from ..provider_catalog import (
+    MAX_CONTROLS,
     AuthenticationState,
     CatalogStatus,
     ControlKind,
@@ -147,9 +148,12 @@ def test_native_control_bound_fails_before_normalized_contract_construction() ->
     template = models.get("configured-alias")
     assert isinstance(template, dict)
     result["models"] = {
-        f"alias-{index}": {**template, "model": f"wire-{index}"} for index in range(33)
+        f"alias-{index}": {**template, "model": f"wire-{index}"}
+        for index in range(MAX_CONTROLS + 1)
     }
-    with pytest.raises(KimiCatalogProtocolError, match="32 native controls"):
+    with pytest.raises(
+        KimiCatalogProtocolError, match=f"{MAX_CONTROLS} native controls"
+    ):
         catalog_from_provider_list(result, key=_KEY)
 
 

@@ -3133,3 +3133,40 @@ correctly separate.
 Rehoming requires deciding which acceptance is correct before choosing a home,
 because consolidating onto the wrong one silently widens or narrows what six
 call sites will accept. That decision is the work, not the move.
+
+### object-narrower-consolidated-onto-strict-with-one-explicit-widening | high | Eight declarations converged on one home and one acceptance; the single site that could not inherit it widens visibly instead of dragging everyone lenient
+
+Closes the fragmentation recorded above. The eight declarations now consume
+`coerce_object_mapping` in `utils/coercion.py`, validated `strict`.
+
+The decision rested on an EXECUTED probe rather than reasoning about pydantic
+from memory, and the probe narrowed the question usefully: `MappingProxyType`
+and hand-rolled `Mapping` implementations pass lenient validation and are
+refused strict; `dict` subclasses and `OrderedDict` pass both ways; int-keyed
+dicts, lists, and `None` are refused both ways. Lenient mode does not merely
+accept a non-`dict` `Mapping` - it COPIES it into a `dict`, which is repair,
+not narrowing. Strict was chosen because these sites sit at trust boundaries
+where a value's provenance is precisely what is in question.
+
+One site could not inherit that refusal, and it announced this itself.
+`_checkpoint_id` in the worker state projection already tested
+`isinstance(configurable, Mapping)` rather than `dict` - an existing statement
+that a LangGraph config may arrive as a non-`dict` mapping. Under strict
+validation its guard became self-contradictory: it would raise
+"must be a mapping" about a value that IS a mapping, on a path that previously
+worked. It now converts explicitly at that one call site, so the tolerance is
+visible where it applies instead of every other caller silently inheriting a
+lenient narrower to accommodate it.
+
+Two neighbours were deliberately left DISTINCT: `_string_list` in
+`control/dispatch.py` narrows to a list of STRINGS, a stricter contract than
+`coerce_object_list`; and `providers/team_selection.py` RAISES a domain refusal
+instead of returning `None`, a different failure posture serving a different
+caller.
+
+Process note worth keeping: the lane that did this work was lost to a
+connection failure before it could report, so its reasoning had to be
+reconstructed from the diff and its probe re-executed independently. The
+self-contradictory guard was found during that re-verification, not by the lane
+that wrote it. Work handed back without a report is not finished work, and
+re-deriving the evidence is the only way to accept it.

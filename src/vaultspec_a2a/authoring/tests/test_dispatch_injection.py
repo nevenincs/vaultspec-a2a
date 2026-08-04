@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing.http_handlers import JsonReplyHandler
 from .. import AuthoringClient
 from ..catalog import make_tool_dispatch, parse_catalog
 
@@ -59,19 +60,10 @@ class _EngineState:
     requests: list[dict] = field(default_factory=list)
 
 
-def _make_handler(state: _EngineState) -> type[BaseHTTPRequestHandler]:
-    class _Handler(BaseHTTPRequestHandler):
-        def log_message(self, format: str, *args: object) -> None:
-            return
-
-        def _reply(self, status: int, body: dict) -> None:
-            payload = json.dumps(body).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
+def _make_handler(state: _EngineState) -> type[JsonReplyHandler]:
+    # BaseHTTPRequestHandler is listed again, redundantly - see
+    # testing/http_handlers.py's docstring for why.
+    class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             self._reply(200, {"status": "ok"})
 

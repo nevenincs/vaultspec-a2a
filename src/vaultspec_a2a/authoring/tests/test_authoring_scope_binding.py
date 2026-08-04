@@ -27,6 +27,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from ...graph.enums import PipelinePhase
+from ...testing.http_handlers import JsonReplyHandler
 from ...thread.actor_tokens import ActorTokenBundle
 from ...worker.token_store import RunTokenStore
 from ..client import AuthoringClient
@@ -82,19 +83,10 @@ class _RecordedEngine:
         raise AssertionError(f"engine never received a {command!r} command")
 
 
-def _make_handler(state: _RecordedEngine) -> type[BaseHTTPRequestHandler]:
-    class _Handler(BaseHTTPRequestHandler):
-        def log_message(self, format: str, *args: object) -> None:
-            return  # silence the stdlib access log
-
-        def _reply(self, status: int, body: dict[str, object]) -> None:
-            payload = json.dumps(body).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
+def _make_handler(state: _RecordedEngine) -> type[JsonReplyHandler]:
+    # BaseHTTPRequestHandler is listed again, redundantly - see
+    # testing/http_handlers.py's docstring for why.
+    class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             length = int(self.headers.get("Content-Length", "0") or "0")
             raw = self.rfile.read(length) if length else b"{}"

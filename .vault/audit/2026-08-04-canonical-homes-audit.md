@@ -1688,6 +1688,62 @@ did not recognise as the same pattern - recorded as unconfirmed rather than
 silently left standing or rewritten, per this audit's rule against editing a
 settled entry.
 
+### stdio-json-rpc-client-reimplemented-for-codex | high | one generic mechanism, two independent implementations
+
+`src/vaultspec_a2a/providers/_acp_protocol.py`'s `process_stdout_loop` and
+`dispatch_packet`, together with the response-future map the ACP session
+builder populates per call in `src/vaultspec_a2a/providers/_acp_session.py`,
+implement a generic asynchronous JSON-RPC-over-stdio client: read
+newline-delimited JSON frames from a subprocess's stdout, route a frame
+carrying `result`/`error` to a pending request keyed by id in a future map,
+route an unsolicited frame to its own handling path, and on stream EOF fail
+every still-pending future and push a sentinel so a blocked consumer does not
+hang forever. `codex_chat_model.py`'s `_CodexAppServerClient` implements the
+identical mechanism from scratch, independently: `_read_loop` reads the same
+newline-delimited frames, `_dispatch` routes a response frame (has `id`, no
+`method`) to a future in `self._pending`, routes a notification (has `method`,
+no `id`) to `self.notifications`, and on EOF `_fail_pending` fails every
+pending future exactly as the ACP finally-block does, followed by pushing its
+own `_STREAM_CLOSED` sentinel onto the notification queue - the same shape,
+the same ordering, the same reasoning, arrived at twice. `request`/`notify`/
+the outbound `_send` writer duplicate the ACP session builder's
+`ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()` /
+stdin-write-plus-drain idiom the same way. Verdict DUPLICATE on the mechanism,
+not on the dialect. What must NOT be merged is already correctly separate on
+each side: ACP's `dispatch_packet` additionally handles a server-initiated
+`session/update` notification stream with capability-gated dispatch back to the
+agent (tool calls, mode changes, plan updates - genuine ACP-only semantics),
+while Codex's app-server apparently never issues a server-initiated request at
+all, so `_dispatch` only ever needs to refuse one with a bare method-not-found.
+Those dialect-specific bodies are correctly provider-owned. What is duplicated
+is everything beneath the dialect: the frame loop, the id-to-future bookkeeping,
+the fail-all-pending-on-EOF discipline, and the sentinel-on-close signal to an
+otherwise-blocked consumer. Teardown itself is NOT duplicated - both sides
+already route through the same `kill_process_tree`
+(`src/vaultspec_a2a/providers/_subprocess.py`) and the same
+`run_independent_cleanups` (`src/vaultspec_a2a/providers/_cleanup.py`) for the
+two-fold process-tree-plus-reader-task shutdown, which is the shape a
+consolidation of the read side should match: a shared low-level stdio JSON-RPC
+client (send, notify, request-with-future, a read loop keyed on id-vs-method
+presence, EOF failure and closure signalling) that each provider's own
+dialect-specific dispatcher sits on top of, the same layering `_acp_protocol.py`
+already keeps deliberately separate from `_acp_rpc_handlers.py` via its
+passed-in handler map rather than an import, specifically to avoid a circular
+import - the same discipline a shared client module would need to preserve.
+
+### config-home-roots-correctly-distinct | low | protected pair, not a new finding
+
+`src/vaultspec_a2a/providers/_config_home_roots.py` and
+`src/vaultspec_a2a/providers/_codex_config_home.py` read as a duplicate pair by
+name alone. They are not: the roots module owns WHERE a per-run config home
+lives and HOW an abandoned one is swept by age, generically, for any CLI
+lane's prefix; the Codex module is the one caller that still needs an isolated
+per-run home at all, and its own docstring records that the ACP/Claude lane
+that used to be the sibling caller was retired in favour of running in the
+operator's ambient config home under a different confinement contract. Recorded
+because the name pair invites exactly the wrong merge on sight, not because
+either declaration is fragmented.
+
 ### checkpoint-pragma-fix-holds-but-a-fourth-touchpoint-bypasses-it | medium | the "two checkpoint paths" framing is now stale
 
 Following up on `checkpoint-pragma-drift-recurred`: the fix holds. All three

@@ -103,14 +103,24 @@ logger = logging.getLogger(__name__)
 
 # The spawned CLI writes its own session transcript into the OPERATOR's real
 # config home, partitioned by the ABSOLUTE path of the directory the session
-# opened in. A RUN spawns into its active project, so a run's transcript lands
-# in the operator's own partition for that project, beside the sessions their
-# interactive CLI writes there, and mints no new partition. Catalog DISCOVERY
-# is the other spawning site and does not share that property: it roots the
-# same CLI at whatever workspace its caller passes, so a caller that passes a
-# temporary directory mints a partition that outlives it. Nothing here creates,
-# names, opens, or can reach the file either way; the spawn is merely what
-# causes it to exist, which is why the declaration sits at the spawning seam.
+# opened in. Nothing here creates, names, opens, or can reach that file; the
+# spawn is merely what causes it to exist, which is why this declaration sits
+# at a spawning seam.
+#
+# TWO seams spawn, and the declaration covers both. This one opens a session at
+# the run's active project. Catalog discovery opens one too - the prompt-free
+# probe in ``acp_catalog`` issues session/new with the caller's cwd - and it is
+# the HIGHER-frequency seam, because one catalog read probes every registered
+# lane while a run spawns only the lane it selected.
+#
+# What orphans a partition is therefore NOT which seam opened it. Neither mints
+# one per run; both mint one per WORKSPACE, and a partition is orphaned exactly
+# when the directory it keys stops existing. Served production hands both seams
+# the operator's own project, so their partitions coincide with the ones the
+# operator's interactive CLI already writes. A caller that mints a fresh
+# workspace per invocation collapses per-workspace into per-invocation, and
+# every such invocation leaves a partition behind - which is the accumulation
+# actually measured, and it is a property of the CALLER's workspace lifetime.
 #
 # Two measured facts fix the disposition. The CLI bounds the tree itself, and
 # this project never reads a transcript back: session/load is wired, but no
@@ -120,7 +130,7 @@ logger = logging.getLogger(__name__)
 # it is simply not available from here (see mechanism).
 ACP_SESSION_TRANSCRIPT_DECLARATION = ArtifactDeclaration(
     name="acp-cli-session-transcript",
-    root="<operator CLAUDE_CONFIG_DIR>/projects/<encoded run workspace_root>/",
+    root="<operator CLAUDE_CONFIG_DIR>/projects/<encoded spawn workspace path>/",
     owner="providers.acp_chat_model",
     disposition=RetentionDisposition.BOUNDED_BY_AGE,
     mechanism=(
@@ -129,8 +139,11 @@ ACP_SESSION_TRANSCRIPT_DECLARATION = ArtifactDeclaration(
         "may acquire the authority to: the transcript sits in the operator's real "
         "config home under the no-auth ambient-environment contract, keyed "
         "identically to the sessions the operator starts by hand, so NO predicate "
-        "available to this project separates a session a run spawned from one a "
-        "human started - the only discriminator is inside the file. The threshold "
+        "available to this project separates a session either seam here spawned "
+        "from one a human started - the only discriminator is inside the file. "
+        "Nor does an exists-check on the keyed directory rescue it: an operator "
+        "who deletes a scratch directory they worked in leaves an orphan of their "
+        "own, indistinguishable from ours. The threshold "
         "is therefore the operator's to set and not this project's to rely on. "
         "The lever that would belong here is suppression, not reclamation, and it "
         "is upstream: the agent SDK exposes persistSession=false, which would stop "

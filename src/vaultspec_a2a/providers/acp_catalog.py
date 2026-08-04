@@ -463,6 +463,13 @@ async def discover_acp_catalog(
             timeout=timeout,
             output_budget=output_budget,
         )
+        # Prompt-free, but still a REAL session: the CLI partitions its config
+        # home by this cwd and writes a transcript there, exactly as a run's
+        # session does. That makes discovery a creating seam for
+        # acp-cli-session-transcript (declared in ``acp_chat_model``) and the
+        # higher-frequency one, since one catalog read probes every lane. A
+        # caller passing a per-invocation directory leaves a partition per
+        # invocation behind; passing a stable one leaves a single partition.
         session = await _request(
             process,
             request_id=1,

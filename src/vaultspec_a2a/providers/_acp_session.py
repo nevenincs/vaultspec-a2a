@@ -418,6 +418,10 @@ async def setup_session(
     working_dir = str(
         require_workspace_root(config.workspace_root, surface="ACP session cwd")
     )
+    # Opening a session here makes the CLI partition its config home by this cwd
+    # and persist a transcript into the OPERATOR's home - the run-side creating
+    # seam for acp-cli-session-transcript (declared in ``acp_chat_model``). The
+    # catalog probe in ``acp_catalog`` is the other. Nothing here may reclaim it.
     method = "session/new"
     mcp_servers = session_surface_mcp_servers(config)
     params: JsonObject = {"cwd": working_dir, "mcpServers": mcp_servers}

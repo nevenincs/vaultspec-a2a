@@ -286,6 +286,36 @@ def test_the_acp_lane_takes_no_deletion_authority_over_the_operator_home() -> No
     )
 
 
+def test_every_seam_that_opens_an_acp_session_names_the_declaration() -> None:
+    """A creating seam that names nothing is how the transcript stayed undeclared.
+
+    The transcript is minted by TWO spawning seams - a run's session and the
+    prompt-free catalog probe - and a declaration can only live in one module.
+    The other must at least point at it, or a reader lands on the discovery
+    ``session/new`` with nothing telling them it writes into the operator's home.
+    """
+    name = acp_chat_model.ACP_SESSION_TRANSCRIPT_DECLARATION.name
+    opens_a_session = [
+        source
+        for source in _production_sources()
+        if '"session/new"' in source.read_text(encoding="utf-8")
+    ]
+
+    assert len(opens_a_session) >= 2, (
+        f"expected both spawning seams to open a session; found {opens_a_session}"
+    )
+    silent = [
+        source.relative_to(_PACKAGE_ROOT).as_posix()
+        for source in opens_a_session
+        if name not in source.read_text(encoding="utf-8")
+    ]
+
+    assert not silent, (
+        f"these seams open an ACP session but name no declaration for what the "
+        f"CLI persists: {silent}"
+    )
+
+
 def test_the_acp_transcript_declares_an_enforcer_it_does_not_own() -> None:
     """Its bound is real but external, and the declaration must say whose it is."""
     declaration = acp_chat_model.ACP_SESSION_TRANSCRIPT_DECLARATION

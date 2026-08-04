@@ -33,6 +33,7 @@ from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.worker_management import (
     LazyWorkerSpawner,
+    WorkerLiveness,
     WorkerState,
     WorkerWatchdog,
 )
@@ -124,13 +125,16 @@ def _crashed_owned_watchdog() -> tuple[WorkerWatchdog, WorkerState, LazyWorkerSp
     worker_state = WorkerState()
     breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
     watchdog = WorkerWatchdog(
-        spawner, breaker, worker_state, SimpleNamespace(worker_last_heartbeat_ts=None)
+        spawner,
+        breaker,
+        worker_state,
+        SimpleNamespace(worker_liveness=WorkerLiveness()),
     )
     return watchdog, worker_state, spawner
 
 
 def _unsupervised_watchdog(
-    heartbeat_ts: object,
+    heartbeat_ts: float | None,
 ) -> tuple[WorkerWatchdog, WorkerState, SimpleNamespace]:
     """A watchdog over an adopted worker on a dead port, with *heartbeat_ts* on state.
 
@@ -146,7 +150,9 @@ def _unsupervised_watchdog(
     spawner.replace_process(None)
     worker_state = WorkerState()
     breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
-    app_state = SimpleNamespace(worker_last_heartbeat_ts=heartbeat_ts)
+    app_state = SimpleNamespace(
+        worker_liveness=WorkerLiveness(last_contact_ts=heartbeat_ts)
+    )
     watchdog = WorkerWatchdog(spawner, breaker, worker_state, app_state)
     return watchdog, worker_state, app_state
 
@@ -286,7 +292,10 @@ async def test_a_restart_cycle_that_raises_still_stamps_the_cooldown() -> None:
     worker_state = WorkerState()
     breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
     watchdog = WorkerWatchdog(
-        spawner, breaker, worker_state, SimpleNamespace(worker_last_heartbeat_ts=None)
+        spawner,
+        breaker,
+        worker_state,
+        SimpleNamespace(worker_liveness=WorkerLiveness()),
     )
     assert watchdog._restart_cooldown_elapsed() is True, (
         "a watchdog that has never restarted should not be gated"

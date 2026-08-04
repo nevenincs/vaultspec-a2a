@@ -20,6 +20,7 @@ import httpx
 from fastapi.encoders import jsonable_encoder
 
 from ..control.config import settings
+from ..graph.enums import ServerEventType
 from ..telemetry import inject_trace_context
 
 __all__ = ["WorkerBridge"]
@@ -263,7 +264,7 @@ class WorkerBridge:
             resp = await self._client.post(
                 "/internal/heartbeat",
                 json={
-                    "type": "heartbeat",
+                    "type": ServerEventType.HEARTBEAT,
                     "worker_id": self._worker_id,
                     "active_threads": sorted(self._active_threads),
                     "uptime_seconds": round(time.monotonic() - self._start_time),

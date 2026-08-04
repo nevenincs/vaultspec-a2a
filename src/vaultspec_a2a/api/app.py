@@ -43,6 +43,7 @@ from ..control.health import (
 from ..control.verdict_subscriber import VerdictSubscriber
 from ..control.worker_management import (
     LazyWorkerSpawner,
+    WorkerLiveness,
     WorkerState,
     WorkerWatchdog,
 )
@@ -364,8 +365,11 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         worker_state = WorkerState()
         app.state.worker_state = worker_state
 
+        liveness = WorkerLiveness()
+        app.state.worker_liveness = liveness
+
         def record_worker_contact(timestamp: float) -> None:
-            app.state.worker_last_heartbeat_ts = timestamp
+            liveness.record_contact(when=timestamp)
 
         watchdog = WorkerWatchdog(
             worker_spawner, circuit_breaker, worker_state, app.state

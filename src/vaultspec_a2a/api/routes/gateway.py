@@ -73,6 +73,7 @@ from ...control.thread_state_service import (
     derive_run_semantic_context,
     project_semantic_phase,
 )
+from ...control.worker_management import worker_liveness
 from ...database import (
     get_db,
     get_permission_logs_by_thread,
@@ -116,7 +117,7 @@ from ...thread.enums import (
 )
 from ...thread.errors import NicknameConflictError
 from ...utils.coercion import coerce_object_mapping
-from .._utils import mark_worker_connected, trace_headers
+from .._utils import trace_headers
 from ..dependencies import (
     get_aggregator,
     get_checkpointer,
@@ -571,7 +572,7 @@ async def _create_run_core(
         # event in the relay handler.
         persisted = True
         if result.dispatched:
-            mark_worker_connected(request)
+            worker_liveness(request.app.state).record_contact()
 
         # A dispatch failure the policy resolved to FAILED is the one durable
         # outcome no terminal event ever follows: the run is already terminal and
@@ -1748,7 +1749,7 @@ async def run_cancel_endpoint(
     raise_for_cancel_failure(result, resource_noun="Run")
 
     if result.cancelled:
-        mark_worker_connected(request)
+        worker_liveness(request.app.state).record_contact()
 
     # Cancellation is the drain's tool and is never itself admission-gated. When
     # a cancel settles the run terminally here (e.g. a submitted-but-undispatched
@@ -1940,7 +1941,7 @@ async def team_status_endpoint(
     status = await build_team_status(
         db=db,
         aggregator=aggregator,
-        heartbeat_threads=getattr(request.app.state, "worker_active_threads", []),
+        heartbeat_threads=worker_liveness(request.app.state).active_threads,
     )
     return TeamStatusV1Response(
         agents=[
@@ -2085,7 +2086,7 @@ async def run_message_endpoint(
         raise HTTPException(status_code=409, detail=result.error_detail)
 
     if result.dispatched:
-        mark_worker_connected(request)
+        worker_liveness(request.app.state).record_contact()
 
     if result.failure_type is not None:
         # A follow-up the service resolved to FAILED settles the run terminally
@@ -2173,7 +2174,7 @@ async def run_permission_respond_endpoint(
     )
 
     if result.dispatched:
-        mark_worker_connected(request)
+        worker_liveness(request.app.state).record_contact()
     if result.circuit_open:
         raise HTTPException(status_code=503, detail=result.error_detail)
     if result.error_detail:
@@ -2249,7 +2250,7 @@ async def run_clarification_respond_endpoint(
         )
 
     if result.dispatched:
-        mark_worker_connected(request)
+        worker_liveness(request.app.state).record_contact()
     return RunClarificationRespondResponse(
         run_id=result.thread_id,
         request_id=result.request_id,

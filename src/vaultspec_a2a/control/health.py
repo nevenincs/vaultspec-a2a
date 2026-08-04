@@ -26,9 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import shutil
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -38,7 +36,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from ..database import inspect_sqlite_database, verify_wal_mode
 from ..utils.coercion import coerce_object_mapping
 from .config import settings
-from .worker_management import LazyWorkerSpawner, WorkerState, probe_worker_health
+from .worker_management import (
+    LazyWorkerSpawner,
+    WorkerState,
+    probe_worker_health,
+    worker_liveness,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -345,16 +348,7 @@ def assemble_health_status(
     )
 
     # --- Worker heartbeat ---
-    last_hb: object = getattr(app_state, "worker_last_heartbeat_ts", None)
-    worker_connected = False
-    if (
-        not isinstance(last_hb, bool)
-        and isinstance(last_hb, (int, float))
-        and math.isfinite(last_hb)
-    ):
-        worker_connected = (
-            time.monotonic() - last_hb
-        ) < settings.worker_heartbeat_timeout_seconds
+    worker_connected = worker_liveness(app_state).is_fresh()
 
     # --- Worker state ---
     worker_state_value: object = getattr(app_state, "worker_state", None)

@@ -21,6 +21,7 @@ from ...control.config import settings
 from ...control.health import assemble_health_status
 from ...control.worker_management import (
     LazyWorkerSpawner,
+    WorkerLiveness,
     WorkerState,
     WorkerWatchdog,
 )
@@ -31,7 +32,7 @@ from ...testing.ports import free_port
 def _stale_app_state(**singletons: object) -> SimpleNamespace:
     # A frozen heartbeat far past the timeout - the reseat-strands-worker signal.
     return SimpleNamespace(
-        worker_last_heartbeat_ts=0.0,
+        worker_liveness=WorkerLiveness(last_contact_ts=0.0),
         **singletons,
     )
 

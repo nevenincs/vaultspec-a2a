@@ -18,6 +18,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from starlette.testclient import TestClient
 
+from ...control.worker_management import WorkerLiveness
 from ...database import (
     create_thread,
     get_permission_request,
@@ -51,9 +52,9 @@ def _make_test_app(
     app = FastAPI()
     app.include_router(internal_router)
 
-    # Pre-populate app.state with the attributes the endpoints expect
-    app.state.worker_last_heartbeat_ts = 0.0
-    app.state.worker_active_threads = []
+    # Seat the liveness record the way the gateway lifespan does, so these apps
+    # exercise the same seam production writes through.
+    app.state.worker_liveness = WorkerLiveness(last_contact_ts=0.0)
     # Seated UNCONDITIONALLY, including as None. These apps genuinely have no
     # database, and leaving the attribute off says only that they did not mention
     # one - which the relay resolves by reaching for the process database. In a
@@ -163,7 +164,7 @@ class TestInternalHeartbeat:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_updates_app_state_timestamp(self) -> None:
         app = _make_test_app()
-        before_ts = app.state.worker_last_heartbeat_ts
+        before_ts = app.state.worker_liveness.last_contact_ts
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -177,7 +178,7 @@ class TestInternalHeartbeat:
                 },
             )
         # The heartbeat should have updated the timestamp
-        assert app.state.worker_last_heartbeat_ts > before_ts
+        assert app.state.worker_liveness.last_contact_ts > before_ts
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_updates_app_state_active_threads(self) -> None:
@@ -194,13 +195,13 @@ class TestInternalHeartbeat:
                     "timestamp": "2026-03-01T12:00:00Z",
                 },
             )
-        assert app.state.worker_active_threads == ["t-aaa", "t-bbb"]
+        assert app.state.worker_liveness.active_threads == ["t-aaa", "t-bbb"]
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_replaces_old_active_threads(self) -> None:
         """A new heartbeat fully replaces the previous active_threads list."""
         app = _make_test_app()
-        app.state.worker_active_threads = ["old-thread"]
+        app.state.worker_liveness.active_threads = ["old-thread"]
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -213,7 +214,7 @@ class TestInternalHeartbeat:
                     "timestamp": "2026-03-01T12:00:00Z",
                 },
             )
-        assert app.state.worker_active_threads == []
+        assert app.state.worker_liveness.active_threads == []
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_heartbeat_log_includes_runtime_fields(

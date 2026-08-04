@@ -20,6 +20,9 @@ import asyncio
 import json
 from typing import TYPE_CHECKING
 
+from ..graph.enums import ServerEventType
+from ..thread.snapshots import wire_event_type
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -42,9 +45,14 @@ async def read_frame(
                 joined = "".join(buffer)
                 buffer = []
                 payload = json.loads(joined)
-                if payload.get("type") == "heartbeat":
+                # Read through the owner of the mirrored ``type``/``event_type``
+                # pair: a producer that wrote only the other key would otherwise
+                # read as untyped here, skipping no keep-alive and matching no
+                # wanted frame.
+                frame_type = wire_event_type(payload)
+                if frame_type == ServerEventType.HEARTBEAT:
                     continue
-                if wanted is None or payload.get("type") == wanted:
+                if wanted is None or frame_type == wanted:
                     return payload, joined
         raise AssertionError(
             f"stream closed before a {wanted or 'non-heartbeat'} frame"

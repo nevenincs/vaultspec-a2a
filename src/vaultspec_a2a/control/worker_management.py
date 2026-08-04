@@ -17,9 +17,9 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -45,10 +45,12 @@ from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
 __all__ = [
     "LazyWorkerSpawner",
     "WorkerHealthProbe",
+    "WorkerLiveness",
     "WorkerState",
     "WorkerWatchdog",
     "probe_worker_health",
     "sweep_orphan_worker_logs",
+    "worker_liveness",
     "worker_ready_and_ours",
 ]
 
@@ -84,6 +86,97 @@ class WorkerState:
     worker_last_restart_succeeded: bool | None = None
     worker_last_restart_attempts: int = 0
     worker_stderr_log_path: str | None = None
+
+
+@dataclass
+class WorkerLiveness:
+    """When the gateway last heard from its worker, and what it was running.
+
+    Sited beside the timeout rule that gives the value meaning, because the rule
+    is the only thing that makes a monotonic float mean "connected" or "stale".
+    Both readings are declared here as :meth:`is_fresh` and :meth:`is_stale`, and
+    they are deliberately not complements: at exactly the timeout neither holds,
+    and a worker never heard from is not stale, it has simply not started.
+
+    Recording contact and interpreting it used to sit apart. The stamp was an
+    undeclared attribute assigned inline at five sites, so neither reader could
+    assume it existed and both read it through a defaulted ``getattr`` with their
+    own copy of the validity guard. That defensiveness was not protection: an
+    absent stamp and a stamp nobody had written yet arrive identically, and both
+    surface as "worker unreachable" — the one failure the value exists to rule
+    out. A writer that must be reached through this type cannot forget it, and a
+    reader can now ask a question instead of guessing at a field.
+    """
+
+    last_contact_ts: float | None = None
+    active_threads: list[str] = field(default_factory=list)
+
+    def record_contact(
+        self,
+        *,
+        when: float | None = None,
+        active_threads: Sequence[str] | None = None,
+    ) -> None:
+        """Record that the worker was heard from.
+
+        *when* is a :func:`time.monotonic` reading, defaulting to now; a caller
+        supplies one only when contact happened measurably before it could say
+        so. *active_threads* is omitted by a caller that observed contact without
+        learning what the worker is running (a socket accept, a dispatch
+        acknowledgement) — omission leaves the last known set standing rather
+        than blanking it, which an empty list would.
+        """
+        self.last_contact_ts = time.monotonic() if when is None else when
+        if active_threads is not None:
+            self.active_threads = list(active_threads)
+
+    def age_seconds(self, *, now: float | None = None) -> float | None:
+        """Seconds since the last recorded contact, or ``None`` if never heard from.
+
+        A stamp that is not a finite real number reads as no contact at all. The
+        guard survives the move because ``app.state`` stays an untyped attribute
+        bag that an embedding host can seat anything on, and because both
+        predicates below must agree about a degenerate value rather than one
+        reading it as fresh and the other as stale.
+        """
+        stamp: object = self.last_contact_ts
+        if (
+            isinstance(stamp, bool)
+            or not isinstance(stamp, (int, float))
+            or not math.isfinite(stamp)
+        ):
+            return None
+        return (time.monotonic() if now is None else now) - stamp
+
+    def is_fresh(self, *, now: float | None = None) -> bool:
+        """Whether contact is recent enough to report the worker as connected."""
+        age = self.age_seconds(now=now)
+        return age is not None and age < settings.worker_heartbeat_timeout_seconds
+
+    def is_stale(self, *, now: float | None = None) -> bool:
+        """Whether contact was made and has since aged past the heartbeat timeout.
+
+        A worker never heard from is NOT stale. Reporting it as such would hand
+        the watchdog a crash signal for a worker that has not finished starting.
+        """
+        age = self.age_seconds(now=now)
+        return age is not None and age > settings.worker_heartbeat_timeout_seconds
+
+
+def worker_liveness(app_state: Any) -> WorkerLiveness:
+    """Return the liveness record on *app_state*, seating one when it has none.
+
+    The single accessor every writer and reader goes through. Seating on demand
+    keeps a host that embeds the internal router without the gateway lifespan
+    working, and costs nothing in meaning: a fresh record says the worker has
+    never been heard from, which is exactly what an app carrying no record knows.
+    """
+    existing = getattr(app_state, "worker_liveness", None)
+    if isinstance(existing, WorkerLiveness):
+        return existing
+    seated = WorkerLiveness()
+    app_state.worker_liveness = seated
+    return seated
 
 
 @dataclass(frozen=True, slots=True)
@@ -1168,8 +1261,8 @@ class WorkerWatchdog:
 
     Detection signals:
     1. ``worker_spawner.process.returncode`` is not None -- process crashed.
-    2. ``worker_last_heartbeat_ts`` stale beyond heartbeat timeout
-       -- worker unresponsive.
+    2. :meth:`WorkerLiveness.is_stale` -- no contact within the heartbeat
+       timeout, so the worker is unresponsive.
 
     Recovery: exponential backoff restarts (2s, 4s, 8s), circuit breaker
     coordination, and ``WorkerState`` state machine.
@@ -1227,14 +1320,7 @@ class WorkerWatchdog:
 
     def _heartbeat_stale(self) -> bool:
         """Check if the last heartbeat is older than the timeout threshold."""
-        last_hb = getattr(self._app_state, "worker_last_heartbeat_ts", None)
-        if (
-            isinstance(last_hb, bool)
-            or not isinstance(last_hb, (int, float))
-            or not math.isfinite(last_hb)
-        ):
-            return False  # No heartbeat yet — not stale, just not started
-        return (time.monotonic() - last_hb) > settings.worker_heartbeat_timeout_seconds
+        return worker_liveness(self._app_state).is_stale()
 
     def _process_crashed(self) -> bool:
         """Check if the worker process has exited unexpectedly."""

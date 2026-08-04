@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from typing import Any
 
 from fastapi import (
@@ -33,6 +32,8 @@ from ..control.event_handlers import (
     _handle_execution_state_event,
     relay_event,
 )
+from ..control.worker_management import worker_liveness
+from ..graph.enums import ServerEventType
 from ..thread.snapshots import normalize_wire_event_type
 from ..utils import BearerVerdict, verify_internal_bearer
 
@@ -221,7 +222,9 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
 
     # Store reference so supervisor can check connectivity
     websocket.app.state.worker_ws = websocket
-    websocket.app.state.worker_last_heartbeat_ts = time.monotonic()
+    # The accept itself is contact, but it says nothing about what the worker is
+    # running, so no thread set is claimed here.
+    worker_liveness(websocket.app.state).record_contact()
 
     try:
         while True:
@@ -236,10 +239,9 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
             msg_type = msg.get("type", "")
 
             match msg_type:
-                case "heartbeat":
-                    websocket.app.state.worker_last_heartbeat_ts = time.monotonic()
-                    websocket.app.state.worker_active_threads = msg.get(
-                        "active_threads", []
+                case ServerEventType.HEARTBEAT:
+                    worker_liveness(websocket.app.state).record_contact(
+                        active_threads=msg.get("active_threads", [])
                     )
                     logger.debug(
                         "Worker heartbeat: %d active threads",
@@ -400,8 +402,9 @@ async def receive_worker_heartbeat(request: Request) -> dict[str, str]:
     liveness without a persistent WebSocket connection.
     """
     body: dict[str, Any] = await request.json()
-    request.app.state.worker_last_heartbeat_ts = time.monotonic()
-    request.app.state.worker_active_threads = body.get("active_threads", [])
+    worker_liveness(request.app.state).record_contact(
+        active_threads=body.get("active_threads", [])
+    )
     logger.debug(
         "Worker heartbeat (HTTP): %d active threads",
         len(body.get("active_threads", [])),

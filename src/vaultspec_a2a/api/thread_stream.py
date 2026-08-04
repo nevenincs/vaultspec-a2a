@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 
 from ..control.config import settings
 from ..database import get_thread
+from ..graph.enums import ServerEventType
 from ..providers.conditions import ProviderCondition
 from ..streaming.aggregator import EventAggregator, SequencedEvent
 from ..streaming.sse_frames import encode_sse_frame
@@ -158,7 +159,7 @@ async def _stream_thread_events(
                 )
                 yield encode_sse_frame(
                     heartbeat.model_dump(mode="json"),
-                    event="heartbeat",
+                    event=ServerEventType.HEARTBEAT,
                     thread_id=thread_id,
                 )
                 continue

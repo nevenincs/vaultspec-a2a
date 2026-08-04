@@ -54,6 +54,7 @@ from ..graph.enums import research_adr_semantic_phase as semantic_phase_for_node
 # The wire event-type key pair is owned by ``thread.snapshots`` - the one layer
 # every producer and consumer of a relayed payload can import. Reading the frame
 # type through it keeps this catalog and the relay predicates on one rule.
+from ..thread.clarification import MAX_REQUEST_ID_CHARS
 from ..thread.snapshots import wire_event_type
 
 __all__ = [
@@ -363,7 +364,15 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     # attached them to the frame could not carry them across this boundary - the
     # catalog rebuilds by omission. A consumer correlates on the request id and
     # reads the questionnaire itself from run-status.
-    ServerEventType.CLARIFICATION_PENDING: {"request_id": _Text(128)},
+    #
+    # The one field it does carry is bounded by the wire model's own cap rather
+    # than a matching number, because this bound TRUNCATES rather than refuses.
+    # Set below what the run mints and the nudge still arrives, carrying a
+    # silently shortened handle - and since correlation is the entire purpose of
+    # the frame, the consumer then re-reads run-status for a request id that
+    # does not exist. That failure needs no producer bug to occur: raising the
+    # minting cap alone is enough.
+    ServerEventType.CLARIFICATION_PENDING: {"request_id": _Text(MAX_REQUEST_ID_CHARS)},
     # A plan entry's ``content`` is model-authored plan text - document-body
     # adjacent, and nothing consumes it - so only its classification survives.
     ServerEventType.PLAN_UPDATE: {

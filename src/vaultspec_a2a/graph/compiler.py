@@ -1558,18 +1558,28 @@ def _compile_pipeline_loop(
 _RA_CLARIFY_REQUEST = "clarification_request"
 _RA_CLARIFY_GATE = "clarification_gate"
 # Correlation handle for a parked questionnaire, derived from the run itself so
-# it is stable across a replay and distinct between concurrent runs. Bounded to
-# the request-id cap the wire enforces; the run id already uses a subset of the
-# permitted alphabet, so truncation cannot produce an invalid handle.
+# it is stable across a replay and distinct between concurrent runs. The run id
+# already uses a subset of the permitted alphabet, so truncation cannot produce
+# an invalid handle.
 _CLARIFICATION_ID_PREFIX = "clarify-"
-_CLARIFICATION_ID_MAX = 128
 
 
 def _clarification_request_id(thread_id: str) -> str:
-    """Return the request id a run's parked questionnaire is addressed by."""
+    """Return the request id a run's parked questionnaire is addressed by.
+
+    This is the MINTING ceiling for a clarification handle, so it is the wire
+    model's own cap rather than a number that matches it. The cross-repo bounds
+    agreement asserts the engine accepts at least what this side mints, stated in
+    terms of :data:`MAX_REQUEST_ID_CHARS` - so a locally-declared bound here left
+    that guarantee resting on two numbers happening to agree. Raise this above
+    the wire cap and the engine refuses a handle a2a issued, leaving the run
+    parked on a question that cannot be answered; raise the wire cap alone and
+    the run mints shorter handles than the contract advertises. Neither drift is
+    visible from either site, and the agreement test stays green through both.
+    """
     if not thread_id:
         return "clarification"
-    return f"{_CLARIFICATION_ID_PREFIX}{thread_id}"[:_CLARIFICATION_ID_MAX]
+    return f"{_CLARIFICATION_ID_PREFIX}{thread_id}"[:MAX_REQUEST_ID_CHARS]
 
 
 def _declared_clarification_producer(

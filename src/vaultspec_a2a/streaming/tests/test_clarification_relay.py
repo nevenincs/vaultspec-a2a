@@ -24,6 +24,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
+from ...graph.compiler import _clarification_request_id
 from ...graph.enums import AgentLifecycleState
 from ...graph.events import AgentStatus, ClarificationPending
 from ...graph.nodes.clarification import (
@@ -31,6 +32,7 @@ from ...graph.nodes.clarification import (
     create_clarification_request_node,
 )
 from ...thread.clarification import (
+    MAX_REQUEST_ID_CHARS,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
@@ -51,9 +53,9 @@ _OPTIONS = ["dock-right", "dock-left"]
 _REQUEST_ID = "clarify-relay"
 
 
-def _question_set() -> ClarificationRequest:
+def _question_set(request_id: str = _REQUEST_ID) -> ClarificationRequest:
     return ClarificationRequest(
-        request_id=_REQUEST_ID,
+        request_id=request_id,
         questions=[
             ClarificationQuestion(
                 id="dock_side",
@@ -73,9 +75,10 @@ def _question_set() -> ClarificationRequest:
 
 async def _park_on_clarification(
     thread_id: str,
+    request_id: str = _REQUEST_ID,
 ) -> tuple[StreamableGraph, dict[str, Any]]:
     """Drive the PRODUCTION node pair to a real clarification interrupt."""
-    request = _question_set()
+    request = _question_set(request_id)
 
     async def _producer(state: TeamState) -> ClarificationRequest | None:
         return request
@@ -123,13 +126,15 @@ def _drain(queue: Any) -> list[SequencedEvent]:
     return drained
 
 
-async def _relay(thread_id: str) -> tuple[EventAggregator, list[SequencedEvent]]:
+async def _relay(
+    thread_id: str, request_id: str = _REQUEST_ID
+) -> tuple[EventAggregator, list[SequencedEvent]]:
     """Park a real run, project it, and return everything a subscriber got."""
     aggregator = EventAggregator()
     queue = aggregator.add_subscriber("client-1")
     aggregator.subscribe("client-1", [thread_id])
 
-    graph, config = await _park_on_clarification(thread_id)
+    graph, config = await _park_on_clarification(thread_id, request_id)
     emitted = await emit_interrupt_events(
         thread_id, "supervisor", graph, config, aggregator._emitters
     )
@@ -278,3 +283,46 @@ def test_the_catalog_strips_question_material_from_the_frame() -> None:
     assert projected["request_id"] == _REQUEST_ID
     assert "questions" not in projected
     assert "prompt" not in projected
+
+
+@pytest.mark.asyncio
+async def test_a_handle_minted_at_the_ceiling_survives_the_relay_intact() -> None:
+    """The longest handle a run can mint reaches a subscriber unshortened.
+
+    Correlation is the entire purpose of this frame: it carries the request id and
+    nothing else, and a consumer re-reads the questionnaire from run-status by that
+    id. So the outbound bound on it must never be the shorter of the two numbers.
+    It TRUNCATES rather than refuses, which is what makes the failure quiet - the
+    nudge still arrives, still looks well-formed, and points at a request id that
+    was never issued.
+
+    Both halves are the production ones: the id is minted by the real minting
+    function rather than written out at the length it happens to have, and it is
+    carried by a really-parked run through the real emitter and then through the
+    real outbound catalog. Neither number is restated here, so this follows the
+    declaration wherever it moves and fails the moment the two stop agreeing.
+    """
+    # A thread id far past the cap, so the minting function is driven to its
+    # ceiling rather than merely near it.
+    minted = _clarification_request_id("t" * (MAX_REQUEST_ID_CHARS * 2))
+    assert len(minted) == MAX_REQUEST_ID_CHARS, (
+        "the trap must be live: this test proves nothing unless the minted handle "
+        "actually reaches the ceiling the outbound bound has to cover"
+    )
+
+    _aggregator, received = await _relay("relay-ceiling", minted)
+
+    nudges = [s for s in received if isinstance(s.event, ClarificationPending)]
+    assert len(nudges) == 1
+    assert cast("ClarificationPending", nudges[0].event).request_id == minted
+
+    projected = enforce_progress_allowlist(
+        {
+            "api_version": "v1",
+            "type": "clarification_pending",
+            "thread_id": "relay-ceiling",
+            "request_id": minted,
+        }
+    )
+
+    assert projected["request_id"] == minted

@@ -37,6 +37,7 @@ from ...thread.clarification import (
     ContinuationPrompt,
     QuestionId,
 )
+from ...thread.constants import MAX_FEATURE_TAG_LENGTH
 from ...thread.enums import CleanupKind, ThreadStatus, TranscriptAvailability
 from .snapshots import ThreadStateSnapshot
 
@@ -240,7 +241,7 @@ class RunStartRequest(BaseModel):
     # Target feature tag for document-authoring runs. Bounded; the eligibility
     # policy requires it for document-authoring presets. Falls back to
     # metadata.feature_tag when the field is omitted.
-    feature_tag: str | None = Field(default=None, max_length=128)
+    feature_tag: str | None = Field(default=None, max_length=MAX_FEATURE_TAG_LENGTH)
     # Client-supplied stable run/idempotency id. Explicit provider selection is
     # replay-safe only when every start owns a durable caller identity.
     run_id: PathSafeRunId
@@ -430,7 +431,7 @@ class ActiveRunRecord(BaseModel):
 
     run_id: PathSafeRunId
     status: ThreadStatus
-    feature_tag: str | None = Field(default=None, max_length=128)
+    feature_tag: str | None = Field(default=None, max_length=MAX_FEATURE_TAG_LENGTH)
 
 
 class ActiveRunsResponse(BaseModel):
@@ -469,7 +470,7 @@ class RunSummaryRecord(BaseModel):
 
     run_id: PathSafeRunId
     status: ThreadStatus
-    feature_tag: str | None = Field(default=None, max_length=128)
+    feature_tag: str | None = Field(default=None, max_length=MAX_FEATURE_TAG_LENGTH)
     title: str | None = Field(default=None, max_length=200)
     nickname: str | None = Field(default=None, max_length=128)
     team_preset: str | None = Field(default=None, max_length=64)

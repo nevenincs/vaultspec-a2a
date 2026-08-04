@@ -39,6 +39,7 @@ import pytest_asyncio
 from alembic import command
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from pydantic import ValidationError
 from sqlalchemy import Connection, create_engine, inspect, select, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -50,6 +51,12 @@ from sqlalchemy.ext.asyncio import (
 from ...api.schemas.events import (
     MAX_TOOL_CALL_CHARS,
     PermissionRequestEvent,
+)
+from ...api.schemas.gateway import (
+    ActiveRunRecord,
+    ProviderCatalogSelection,
+    RunStartRequest,
+    RunSummaryRecord,
 )
 from ...control.run_discovery_service import discover_active_runs
 from ...graph.enums import ServerEventType
@@ -474,9 +481,12 @@ class TestFeatureTagBoundIsTheColumn:
 
     The tag differs from the workspace root in one way worth its own assertion.
     It is also carried OUTBOUND, on the discovery and history records that
-    replay it from the column, so a wire bound below the column would truncate a
-    stored tag on the way out - which a caller reads as a tag that changed
-    rather than one that was refused.
+    replay it from the column, and there the wire bound REFUSES rather than
+    truncates: a Pydantic ``max_length`` is a constraint, not a projector. So a
+    wire bound below the column does not ship a shortened tag - it fails the
+    whole response. A run whose tag the column accepted but the record rejects
+    takes down every page it appears on, not just its own row, and only once
+    some run happens to carry a tag that long.
     """
 
     @staticmethod
@@ -563,3 +573,93 @@ class TestFeatureTagBoundIsTheColumn:
 
         with pytest.raises(ValueError, match="feature_tag must be between"):
             await discover_active_runs(session, feature_tag="f" * (width + 1))
+
+    def test_the_wire_records_carry_a_tag_the_column_can_hold(self) -> None:
+        """Every tag the column accepts survives onto the wire records.
+
+        The assertion the outbound direction actually needs, and the admitted
+        side is the load-bearing half: a refusal alone is also what a wire bound
+        set to anything smaller would produce. These records REPLAY a stored tag
+        rather than accepting one, so a bound below the column cannot refuse the
+        caller who supplied it - there is no such caller. It refuses the row on
+        the way out and fails the response built around it.
+        """
+        width = self._column_width()
+        tag = "f" * width
+        stamp = datetime.now(UTC).isoformat()
+
+        active = ActiveRunRecord(
+            run_id="r-1", status=ThreadStatus.RUNNING, feature_tag=tag
+        )
+        summary = RunSummaryRecord(
+            run_id="r-1",
+            status=ThreadStatus.RUNNING,
+            created_at=stamp,
+            updated_at=stamp,
+            feature_tag=tag,
+        )
+
+        assert active.feature_tag == tag
+        assert summary.feature_tag == tag
+
+    def test_the_wire_records_refuse_a_tag_the_column_could_not_have_stored(
+        self,
+    ) -> None:
+        """One character past the column is refused, and refused ON the tag.
+
+        The error location is asserted rather than the mere fact of a refusal:
+        both records carry other constrained fields, so a refusal for an
+        unrelated reason would otherwise read as the one under test.
+        """
+        width = self._column_width()
+        over = "f" * (width + 1)
+        stamp = datetime.now(UTC).isoformat()
+
+        with pytest.raises(ValidationError) as active_refusal:
+            ActiveRunRecord(run_id="r-1", status=ThreadStatus.RUNNING, feature_tag=over)
+        with pytest.raises(ValidationError) as summary_refusal:
+            RunSummaryRecord(
+                run_id="r-1",
+                status=ThreadStatus.RUNNING,
+                created_at=stamp,
+                updated_at=stamp,
+                feature_tag=over,
+            )
+
+        assert [e["loc"] for e in active_refusal.value.errors()] == [("feature_tag",)]
+        assert [e["loc"] for e in summary_refusal.value.errors()] == [("feature_tag",)]
+
+    def test_the_start_request_admits_the_width_and_refuses_past_it(self) -> None:
+        """The inbound body field bounds the tag a caller may declare.
+
+        The one site of the three that refuses a CALLER rather than a stored
+        row, so it is the only one whose bound a client ever sees.
+        """
+        width = self._column_width()
+        selection = ProviderCatalogSelection(
+            schema_version=1,
+            provider_id="p",
+            execution_mode="m",
+            catalog_revision="r",
+            entry_id="e",
+        )
+
+        admitted = RunStartRequest(
+            team_preset="tp",
+            run_id="r-1",
+            selection=selection,
+            message="start",
+            feature_tag="f" * width,
+        )
+        assert admitted.feature_tag == "f" * width
+
+        with pytest.raises(ValidationError) as refusal:
+            RunStartRequest(
+                team_preset="tp",
+                run_id="r-1",
+                selection=selection,
+                message="start",
+                feature_tag="f" * (width + 1),
+            )
+
+        assert [e["loc"] for e in refusal.value.errors()] == [("feature_tag",)]

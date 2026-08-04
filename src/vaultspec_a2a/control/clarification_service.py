@@ -92,6 +92,19 @@ class ClarificationRecoverySummary:
 
 
 def _idempotency_key(request_id: str) -> str:
+    """Build this action's key as a READABLE prefix, never a digest.
+
+    Its siblings in ``thread.idempotency`` hash their inputs, and converging
+    this one onto them would look like an obvious cleanup. It would break
+    restart recovery silently. The recovery sweep below finds every unapplied
+    clarification action with ``idempotency_key.like(f"{_IDEMPOTENCY_PREFIX}%")``
+    - a prefix match that a sha256 digest cannot satisfy, because a digest has
+    no queryable prefix. The query would simply match nothing, parked leases
+    would never be redriven, and nothing would raise.
+
+    So the difference from its siblings is a REQUIREMENT, not drift. Any change
+    here has to move the recovery query with it.
+    """
     return f"{_IDEMPOTENCY_PREFIX}{request_id}"
 
 

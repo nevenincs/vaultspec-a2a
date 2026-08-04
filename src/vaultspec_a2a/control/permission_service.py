@@ -7,7 +7,6 @@ protocol-agnostic service function.  Does NOT commit the session, raise
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -35,6 +34,7 @@ from ..thread.enums import (
     PermissionRequestStatus,
     ThreadStatus,
 )
+from ..thread.idempotency import default_permission_response_key
 from ..thread.permission_fsm import response_is_rejection
 from ..thread.snapshots import (
     LOCALLY_RESPONDABLE_PAUSE_CAUSES,
@@ -452,9 +452,8 @@ async def _authorize_permission_response(
     # ------------------------------------------------------------------
     # 2. Idempotency deduplication
     # ------------------------------------------------------------------
-    resolved_idempotency_key = (
-        idempotency_key
-        or hashlib.sha256(f"{request_id}:{option_id}".encode()).hexdigest()
+    resolved_idempotency_key = idempotency_key or default_permission_response_key(
+        request_id, option_id
     )
     existing_action = await get_control_action_by_idempotency_key(
         db,

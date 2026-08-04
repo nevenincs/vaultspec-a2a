@@ -64,6 +64,10 @@ os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://198.51.100.1:4317")
 DECLARE_OPTION = "--require-prerequisite"
 _COLLECTION_PREREQUISITES_MARK = "requires_prerequisites"
 
+#: How many billable proofs collection withheld, read at session end to keep a
+#: fully-withheld run from exiting as "no tests collected".
+_WITHHELD_LIVE_PROOFS: pytest.StashKey[int] = pytest.StashKey()
+
 
 class ExternalPrerequisite:
     """A resource this repository cannot provide for itself.
@@ -396,6 +400,45 @@ def pytest_collection_modifyitems(
     if deselected:
         config.hook.pytest_deselected(items=deselected)
         items[:] = selected
+        _report_cost_deselection(config, deselected, declared)
+
+
+def _report_cost_deselection(
+    config: pytest.Config,
+    deselected: list[pytest.Item],
+    declared: frozenset[str],
+) -> None:
+    """Say out loud which live proofs were withheld, and what would admit them.
+
+    A plain deselection is SILENT: pytest reports a count and nothing else, so a
+    run that withheld every cross-repository proof is indistinguishable at a
+    glance from one that had nothing to withhold. That is the same confusion the
+    skip path exists to remove - an absent prerequisite and a real pass reading
+    identically - reappearing on the cost-gated axis, where it also hides the
+    fact that the skip path for those prerequisites is unreachable while the
+    proofs needing them are billable.
+
+    Written through the terminal reporter rather than raised, because withholding
+    a billable proof is correct behaviour being disclosed, not a failure.
+    """
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is None:
+        return
+    missing: set[str] = set()
+    for item in deselected:
+        missing |= _collection_prerequisites(item) - declared
+    if not missing:
+        return
+    config.stash[_WITHHELD_LIVE_PROOFS] = len(deselected)
+    reporter.write_line(
+        f"withheld {len(deselected)} live proof(s) pending prerequisite(s): "
+        f"{', '.join(sorted(missing))}",
+        yellow=True,
+    )
+    for name in sorted(missing):
+        rule = _BY_ID.get(name)
+        if rule is not None:
+            reporter.write_line(f"  {name}: supply it by {rule.supply}", yellow=True)
 
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
@@ -437,10 +480,32 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
     )
 
 
-def pytest_sessionfinish(session: pytest.Session) -> None:
-    """Fail the session when a guaranteed prerequisite produced a skip instead."""
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Settle the session's exit status against both prerequisite outcomes.
+
+    A guaranteed prerequisite that produced a skip is a failure: the caller said
+    the resource was present, so a skip means the run did not prove what it
+    claimed to.
+
+    The opposite case has to be corrected in the other direction. Withholding
+    every billable proof leaves nothing to run, and pytest reports that as
+    ``EXIT_NOTESTSCOLLECTED``, which CI reads as a failure - the red gate this
+    rule exists to prevent, arriving through the exit status rather than a raised
+    error. A host without the dashboard repository would fail the service tier
+    while saying nothing about this repository's health.
+
+    That correction is deliberately narrow: it rewrites ONLY that one exit code,
+    and only when collection actually withheld something, so an empty run for any
+    other reason - a mistyped path, a marker matching nothing - still reports 5.
+    """
     if _declared_prerequisite_skips():
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+        return
+    if (
+        exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
+        and session.config.stash.get(_WITHHELD_LIVE_PROOFS, 0) > 0
+    ):
+        session.exitstatus = pytest.ExitCode.OK
 
 
 # ---------------------------------------------------------------------------
@@ -493,3 +558,4 @@ def materialize_schema(db_path: Path) -> Path:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(schema_template(), db_path)
     return db_path
+

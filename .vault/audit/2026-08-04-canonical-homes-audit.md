@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:a17fdfd67ba4312855f150717c5c76aa84a01df406d428b18175bf7c56455b51'
+body_hash: 'sha256:41959d59d61890e91eab78b9aec66ea111278144330901453ca6d43e4cb88e24'
 related: []
 ---
 
@@ -7384,3 +7384,80 @@ The lane declined to sweep them because **several look load-bearing** - one is a
 dependency-injection seam where the indirection may be the point. That is a decision
 per site rather than a mechanical retirement, and it is the correct call: this
 campaign's worst available outcome is fusing things that were deliberately separate.
+
+### an-exhaustiveness-claim-that-rested-on-a-hole | critical | found by the lane that made it
+
+The facade sweep's exhaustive negative was **unsound when first reported**, and the
+lane that reported it found out — by treating a redundant re-dispatch as a reason to
+**re-derive rather than restate.**
+
+Its import resolver mishandled **absolute** intra-project imports, building a
+nonsensical module path that was simply absent from its index and **silently
+skipped.** Forty-four edges went unchecked. The exhaustiveness claim covered a tree
+the scanner had not fully seen.
+
+**The tell was in the scan's own counters and nobody had read it.** It recorded
+roughly nine thousand edges and resolved fewer than six thousand. After the fix:
+**5,745 recorded, all 5,745 resolved.** The gap WAS the bug.
+
+**Recorded as a standing heuristic: an unexplained gap between what a scan SEES and
+what it RESOLVES is a defect signal, not a fact about the tree.** Every scan in this
+campaign printed such counters; this is the first time one was interrogated rather
+than reported.
+
+### fix-the-scanner-then-DIFF-the-finding-sets | critical | how to prove a tool fix changed no conclusion
+
+The lane did not merely re-run after fixing. It **diffed the finding sets** and
+reported both directions explicitly:
+
+    APPEARED only after the fix: none
+    DISAPPEARED after the fix:   none
+
+That is the difference between "I re-ran it and it still looks right" and a proof
+that a tool change altered no conclusion. **A re-run alone cannot distinguish a
+scanner whose fix mattered from one whose fix was inert** — and either way the
+reader is asked to trust a second run by the same author.
+
+It also re-validated against the known positive **before** re-running, so the fixed
+scanner was shown to still find the instance that made the original detector
+trustworthy, and ran the whole thing against an extraction of the committed tree.
+
+**Three checks composed: does it find what I know is there; does the fix change any
+verdict; is the tree I measured the one that is committed.** That is the most
+complete verification of a sweep produced in this campaign.
+
+### a-scan-that-compares-DECLARED-names-cannot-see-an-UNDECLARED-surface | high | the blind spot, closed separately
+
+The lane closed a gap its own first report had left as a bare count, and the gap is
+structural rather than incidental.
+
+The facade scan compares the names a facade **declares** against their owners. **So a
+facade declaring nothing has an implicit surface the scan never examines** — it
+cannot drift by that measure because it makes no claim to drift from. A zero-drift
+result therefore says nothing about those files.
+
+Seven non-test facades lack an explicit surface. Checked individually against their
+owners: **zero drift, and six import nothing package-internal at all.**
+
+Two are deliberate and now recorded as CORRECT rather than as gaps: one declares an
+**explicitly empty** surface because the product ships no server of its own, and one
+is a documented pure namespace whose docstring instructs callers to import from
+child modules directly — **deliberately not a re-exporting facade.**
+
+**The general form: any scan keyed on a declaration is blind to the absence of that
+declaration**, and the absence is exactly where the weakest claims live.
+
+### the-fully-lazy-package-a-plain-import-would-have-hidden | medium | why parsing rather than importing mattered
+
+Per-package coverage was proven individually rather than asserted in aggregate, with
+an assertion that would have failed had any named package been missing.
+
+One package resolves **entirely** through a lazy-import table — zero eager
+package-internal imports. **That is precisely the case a scan built on importing the
+package would have shown as empty**, and reported as clean. It was covered because
+the scan parses the table rather than executing it.
+
+Recorded because "do not import, parse" was given to that lane as a rule about HEAD
+and editable installs. It turned out to matter for a second, unrelated reason: a
+lazily-declared surface is invisible to import-time inspection but plainly visible
+in source.

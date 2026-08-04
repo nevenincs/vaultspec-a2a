@@ -39,7 +39,12 @@ from ._helpers import (
     _UnsetType,
     save_model,
 )
-from .models import ThreadExecutionStateModel, ThreadModel, _utcnow
+from .models import (
+    MAX_WORKSPACE_ROOT_LENGTH,
+    ThreadExecutionStateModel,
+    ThreadModel,
+    _utcnow,
+)
 
 __all__ = [
     "ActiveThreadProjection",
@@ -70,7 +75,6 @@ class ActiveThreadProjection:
     created_at: datetime
 
 
-_MAX_DISCOVERY_WORKSPACE_ROOT_LENGTH = 4096
 _MAX_DISCOVERY_FEATURE_TAG_LENGTH = 128
 
 
@@ -110,7 +114,7 @@ def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
     if (
         not isinstance(workspace, str)
         or not os.path.isabs(workspace)
-        or not 1 <= len(workspace) <= _MAX_DISCOVERY_WORKSPACE_ROOT_LENGTH
+        or not 1 <= len(workspace) <= MAX_WORKSPACE_ROOT_LENGTH
     ):
         workspace = None
     else:
@@ -268,8 +272,14 @@ async def list_active_thread_page(
     if not 1 <= limit <= 101:
         msg = "active-thread page limit must be between 1 and 101"
         raise ValueError(msg)
-    if workspace_root is not None and not 1 <= len(workspace_root) <= 4096:
-        msg = "active-thread workspace selector must be between 1 and 4096 characters"
+    if (
+        workspace_root is not None
+        and not 1 <= len(workspace_root) <= MAX_WORKSPACE_ROOT_LENGTH
+    ):
+        msg = (
+            "active-thread workspace selector must be between 1 and "
+            f"{MAX_WORKSPACE_ROOT_LENGTH} characters"
+        )
         raise ValueError(msg)
     if feature_tag is not None and not 1 <= len(feature_tag) <= 128:
         msg = "active-thread feature selector must be between 1 and 128 characters"

@@ -41,6 +41,7 @@ from .migrate import migration_script_location as migration_script_location
 from .migrate import run_migrations as run_migrations
 from .migrations import backfill_teamstate_sdd_fields as backfill_teamstate_sdd_fields
 from .migrations import count_pending_sdd_backfill as count_pending_sdd_backfill
+from .models import MAX_WORKSPACE_ROOT_LENGTH as MAX_WORKSPACE_ROOT_LENGTH
 from .models import ArtifactModel as ArtifactModel
 from .models import AuthoringEventCursorModel as AuthoringEventCursorModel
 from .models import Base as Base
@@ -153,6 +154,7 @@ from .thread_repository import update_thread_status as update_thread_status
 
 __all__ = [
     "DEFAULT_SUBSCRIBER_ID",
+    "MAX_WORKSPACE_ROOT_LENGTH",
     "ActiveThreadProjection",
     "ArtifactModel",
     "AuthoringEventCursorModel",

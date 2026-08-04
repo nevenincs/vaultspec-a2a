@@ -18,6 +18,9 @@ each one a decision that would otherwise survive only as a comment:
   asserted through a real write rather than by reading the model source.
 * That caller-controlled text on the permission path is bounded before it
   reaches a client, and bounded WITHOUT destroying the frame.
+* That every reader of the workspace-root selector enforces the width the
+  COLUMN declares, measured off the mapped column rather than off a number
+  repeated in the test.
 
 Everything drives real SQLite databases, the real revision chain, and the real
 Pydantic models.
@@ -25,7 +28,10 @@ Pydantic models.
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -45,15 +51,16 @@ from ...api.schemas.events import (
     MAX_TOOL_CALL_CHARS,
     PermissionRequestEvent,
 )
+from ...control.run_discovery_service import discover_active_runs
 from ...graph.enums import ServerEventType
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, RepairStatus, ThreadStatus
 from ..migrate import build_migration_config
 from ..models import Base, ControlActionModel, ThreadModel
+from ..thread_repository import create_thread, list_active_thread_page
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Iterator
-    from pathlib import Path
 
 # The four partial indexes revision 0009 created descending, and the ordering it
 # gave each one. Newest-first listing is the access pattern they exist for, so
@@ -359,3 +366,99 @@ class TestPermissionTextIsBounded:
         event = _permission_event(description="fine", tool_call=None)
 
         assert event.tool_call is None
+
+
+class TestWorkspaceRootBoundIsTheColumn:
+    """Every reader of the workspace-root selector enforces the column's width.
+
+    The column is the only site that can REFUSE an over-long root, and it
+    refuses by failing the write inside a transaction rather than by telling a
+    caller no. Each upstream check exists to convert that into a refusal at the
+    edge, which means each one is enforcing this column - and the failure is
+    asymmetric in both directions. Lower the column without lowering a check and
+    an accepted request dies at the write; raise a check without raising the
+    column and it dies the same way. Only lockstep change is safe.
+
+    The width is read off the mapped column here rather than written down, so
+    these stay true wherever the declaration moves and fail the moment a reader
+    stops agreeing with it.
+    """
+
+    @staticmethod
+    def _column_width() -> int:
+        """Return the declared width of ``threads.workspace_root``."""
+        width = ThreadModel.__table__.c.workspace_root.type.length  # ty: ignore
+        assert isinstance(width, int), (
+            "threads.workspace_root no longer declares a width; the bound every "
+            "upstream check enforces has nothing left to be derived from"
+        )
+        return width
+
+    @staticmethod
+    def _root_of_length(length: int) -> str:
+        """Build an absolute workspace root of exactly ``length`` characters."""
+        prefix = f"C:{os.sep}"
+        root = prefix + "w" * (length - len(prefix))
+        assert len(root) == length
+        return root
+
+    @pytest.mark.asyncio
+    async def test_a_root_at_the_column_width_survives_a_real_write(
+        self, session: AsyncSession
+    ) -> None:
+        """The widest admissible root round-trips through the real write seam.
+
+        Driven through ``create_thread`` rather than a hand-built row, because
+        the projection that writes the selector normalizes the path first; a
+        bound proven against an unnormalized string would not be the bound the
+        column actually receives.
+        """
+        width = self._column_width()
+        root = self._root_of_length(width)
+
+        thread = await create_thread(
+            session, metadata=json.dumps({"workspace_root": root})
+        )
+        await session.commit()
+        session.expunge_all()
+        stored = await session.get(ThreadModel, thread.id)
+
+        assert stored is not None
+        assert stored.workspace_root is not None
+        assert len(stored.workspace_root) == width
+
+    @pytest.mark.asyncio
+    async def test_the_repository_edge_admits_the_width_and_refuses_past_it(
+        self, session: AsyncSession
+    ) -> None:
+        """The paged read refuses one character past the column, not at it."""
+        width = self._column_width()
+
+        await list_active_thread_page(session, limit=1, workspace_root="w" * width)
+
+        with pytest.raises(ValueError, match="workspace selector"):
+            await list_active_thread_page(
+                session, limit=1, workspace_root="w" * (width + 1)
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_discovery_edge_admits_the_width_and_refuses_past_it(
+        self, session: AsyncSession
+    ) -> None:
+        """Discovery refuses at the edge rather than deep in a transaction.
+
+        The refusal has to happen here, before the query, because the only other
+        thing standing between an over-long root and the database is the write
+        itself - and a caller cannot be handed a 422 from inside a failed
+        transaction.
+        """
+        width = self._column_width()
+
+        await discover_active_runs(
+            session, workspace_root=Path(self._root_of_length(width))
+        )
+
+        with pytest.raises(ValueError, match="workspace_root must be between"):
+            await discover_active_runs(
+                session, workspace_root=Path(self._root_of_length(width + 1))
+            )

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..database import (
+    MAX_WORKSPACE_ROOT_LENGTH,
     list_active_thread_page,
     normalize_workspace_identity,
 )
@@ -27,7 +28,6 @@ __all__ = [
 _MAX_DISCOVERY_RESULTS = 100
 _MAX_FEATURE_TAG_LENGTH = 128
 _MAX_RUN_ID_LENGTH = 128
-_MAX_WORKSPACE_ROOT_LENGTH = 4096
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,11 +71,11 @@ async def discover_active_runs(
     )
     if (
         expected_workspace_source is not None
-        and not 1 <= len(expected_workspace_source) <= _MAX_WORKSPACE_ROOT_LENGTH
+        and not 1 <= len(expected_workspace_source) <= MAX_WORKSPACE_ROOT_LENGTH
     ):
         raise ValueError(
             "workspace_root must be between 1 and "
-            f"{_MAX_WORKSPACE_ROOT_LENGTH} characters"
+            f"{MAX_WORKSPACE_ROOT_LENGTH} characters"
         )
     expected_workspace = (
         await asyncio.to_thread(normalize_workspace_identity, expected_workspace_source)

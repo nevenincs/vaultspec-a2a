@@ -1785,6 +1785,54 @@ because it was never wired to notice. The fix is small: `_clear_checkpoint_store
 resolving its engine's connect listener from `checkpoint_pragmas()` instead of
 `_apply_sqlite_pragmas`, the same way the three canonical writers already do.
 
+### non-terminal-thread-sweep-omits-the-deletion-sink | high | live gap, not merely a duplicate risk
+
+`src/vaultspec_a2a/thread/enums.py` declares `NON_ACTIVE_STATUSES` as
+`TERMINAL_STATUSES | {ARCHIVED, DELETING}` and documents exactly why `DELETING`
+belongs there: "a durable teardown marker, not a settled outcome... must never
+be dispatched, cancelled, or messaged again." `src/vaultspec_a2a/thread/transitions.py`
+enforces the same fact structurally - `ThreadStatus.DELETING` maps to an empty
+transition set, a declared lifecycle sink with zero valid outbound moves.
+
+`list_non_terminal_threads` in `src/vaultspec_a2a/database/thread_repository.py`
+does not consult either. It hand-rolls its own exclusion literal - `NOT IN
+[COMPLETED, FAILED, CANCELLED, ARCHIVED]` - which is `TERMINAL_STATUSES |
+{ARCHIVED}` short exactly one member of `NON_ACTIVE_STATUSES`: `DELETING`. Its
+one caller, `reconcile_threads_on_startup` in
+`src/vaultspec_a2a/database/reconciliation.py`, runs this query on every gateway
+boot to find threads needing repair attention. Traced forward: the snapshots it
+builds feed `compute_reconciliation_actions` in
+`src/vaultspec_a2a/lifecycle/reconciliation.py`, which has no `DELETING`
+awareness anywhere in it - confirmed by grep, the token does not appear in that
+module - so a thread mid-teardown that also happens to have a pending
+permission or clarification, or sits in `CANCELLING`, is scored exactly like
+any other in-flight run and can be assigned a `new_thread_status`
+(`INPUT_REQUIRED`, for the pending-answer branch). `execute_reconciliation`
+then calls `update_thread_status`, which calls `validate_transition(DELETING,
+target, ...)` against the empty transition set `transitions.py` declares - a
+call this codebase's own structural authority defines as always illegal from
+`DELETING`. The action would raise `InvalidTransitionError` mid-boot
+reconciliation for a run that should have been invisible to this sweep
+entirely; a branch that only sets `repair_status`/`execution_readiness` without
+a status change writes to a row the deletion saga - the one caller
+`mark_thread_deleting`'s own docstring names as sole owner - may be tearing down
+concurrently across the checkpoint, artifact, and control stores at that exact
+moment.
+
+Verdict DUPLICATE on the vocabulary (a fourth ad hoc restatement of a status set
+this project has already found drifting three times elsewhere in this audit),
+but the severity is HIGH rather than the usual future-drift risk: this is
+already wrong today relative to the codebase's own declared invariant, reachable
+on ordinary gateway restart, and requires no unusual timing beyond a thread
+being mid-deletion (or newly `DELETING`) across a boot - the ordinary case a
+deletion saga spanning a HTTP request and a background teardown is exactly
+built to survive. The fix is narrow: derive the exclusion from
+`NON_ACTIVE_STATUSES` (or `TERMINAL_STATUSES | {ThreadStatus.ARCHIVED,
+ThreadStatus.DELETING}` if the query needs the members rather than the wire
+values) instead of the hand-typed four-item list, so a future member added to
+either canonical set is inherited rather than requiring a fifth site to
+remember it independently.
+
 ### correction-stdio-json-rpc-count-is-four-not-two | medium | the same mechanism recurs a second time, narrower
 
 Extends `stdio-json-rpc-client-reimplemented-for-codex` rather than replacing

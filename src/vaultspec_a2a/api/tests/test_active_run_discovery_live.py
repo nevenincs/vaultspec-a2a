@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...database.models import ThreadModel
 from ...database.thread_repository import create_thread
-from ...tests.gateway_boot import free_port
+from ...testing.ports import free_port
 from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:

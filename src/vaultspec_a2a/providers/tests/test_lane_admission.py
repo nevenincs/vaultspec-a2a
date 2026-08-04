@@ -56,6 +56,7 @@ _THIS_MODULE = "src/vaultspec_a2a/providers/tests/test_lane_admission.py"
 # the one that actually shipped into a served profile on handshake-only evidence.
 UNPROVEN_LANES = (Provider.KIMI, Provider.GEMINI, Provider.OPENAI, Provider.ZHIPU)
 
+
 def _team_with_profile(
     profile_provider: Provider | None = None,
     *,

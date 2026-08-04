@@ -63,10 +63,10 @@ from ..lifecycle.singleton import (
     recorded_process_is_live,
     singleton_record_path,
 )
+from ..testing.ports import free_port
 from ..tests.gateway_boot import (
     READINESS_TIMEOUT,
     armed_gateway_env,
-    free_port,
     reap_gateway,
     seat_valid_database,
     seed_credentials,

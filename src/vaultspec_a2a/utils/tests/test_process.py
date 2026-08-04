@@ -19,7 +19,7 @@ import pytest
 
 from ...lifecycle.discovery import is_pid_alive
 from ...lifecycle.manager import _await_listener
-from ...tests.gateway_boot import free_port
+from ...testing.ports import free_port
 from ...utils.process import (
     ListenerOwnership,
     classify_listener_ownership,

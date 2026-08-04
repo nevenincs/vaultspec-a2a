@@ -30,10 +30,10 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from ..lifecycle.discovery import is_pid_alive
+from ..testing.ports import free_port
 from ..tests.gateway_boot import (
     armed_gateway_env,
     await_gateway_ready,
-    free_port,
     gateway_script,
     reap_gateway,
     seat_valid_database,

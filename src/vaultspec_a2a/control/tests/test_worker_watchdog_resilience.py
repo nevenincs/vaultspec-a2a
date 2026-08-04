@@ -36,7 +36,7 @@ from ...control.worker_management import (
     WorkerState,
     WorkerWatchdog,
 )
-from ...tests.gateway_boot import free_port
+from ...testing.ports import free_port
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

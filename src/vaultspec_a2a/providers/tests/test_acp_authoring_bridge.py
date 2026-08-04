@@ -36,7 +36,7 @@ from starlette.types import Receive, Scope, Send
 from ...authoring.catalog import CATALOG_SCHEMA_VERSION, parse_catalog
 from ...control.config import settings
 from ...protocols.mcp.tools.authoring_bridge import build_authoring_mcp_server
-from ...tests.gateway_boot import free_port
+from ...testing.ports import free_port
 from ...workspace.environment import resolve_env_vars
 from .._acp_authoring import AuthoringToolBinding, build_authoring_mcp_servers
 from .._json_contract import JsonObject, JsonValue

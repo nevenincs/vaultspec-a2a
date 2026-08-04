@@ -19,7 +19,8 @@ import httpx
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
-from ..tests.gateway_boot import GatewayBootError, free_port
+from ..testing.ports import free_port
+from ..tests.gateway_boot import GatewayBootError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

@@ -24,17 +24,20 @@ whole catalog.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
     from ._json_contract import JsonValue
     from ._stdio_rpc import ProtocolErrorFactory
+    from .provider_catalog import ModelCatalogEntry, ProviderCatalogKey
 
 __all__ = [
     "CatalogFieldReader",
     "display_text",
     "local_id",
+    "model_list_revision",
     "optional_description",
     "optional_text",
 ]
@@ -71,6 +74,28 @@ def local_id(namespace: str, provider_value: str) -> str:
     """
     encoded = f"{namespace}\0{provider_value}".encode()
     return hashlib.sha256(encoded).hexdigest()[:32]
+
+
+def model_list_revision(
+    key: ProviderCatalogKey, models: tuple[ModelCatalogEntry, ...]
+) -> str:
+    """Hash a catalog's provider-issued model values into a stable revision.
+
+    Two lanes revision nothing but the bare ``provider_value`` list: the
+    OpenAI-compatible HTTP surface, whose wire contract carries no native
+    controls, and the in-process lane, which is computed rather than
+    discovered and so has none either. The three RPC lanes (ACP, Codex,
+    Kimi) advertise native controls and fold them into their own revision
+    payload, which is why each keeps its own ``_revision`` instead of
+    converging here - the shared shape ends where the payload does.
+    """
+    payload = {
+        "provider_id": key.provider_id,
+        "execution_mode": key.execution_mode,
+        "models": [model.provider_value for model in models],
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

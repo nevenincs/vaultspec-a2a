@@ -99,29 +99,6 @@ _ACCEPTED: Final[tuple[frozenset[str], ...]] = (
             "streaming/buffering.py::broadcast_debounced_tool_update",
         }
     ),
-    # QUEUED, not endorsed. These three cross-module pairs are genuine
-    # consolidation candidates in the provider catalog lane, recorded in the
-    # campaign audit. They are allowlisted so this suite reports NEW copies
-    # rather than re-reporting known ones, and they should shrink out of this
-    # list rather than settle into it.
-    frozenset(
-        {
-            "providers/in_process_catalog.py::_revision",
-            "providers/openai_catalog.py::_revision",
-        }
-    ),
-    frozenset(
-        {
-            "providers/in_process_catalog.py::_entry_id",
-            "providers/openai_catalog.py::_entry_id",
-        }
-    ),
-    frozenset(
-        {
-            "providers/provider_capabilities.py::_required_text",
-            "providers/provider_catalog.py::_required_text",
-        }
-    ),
 )
 
 

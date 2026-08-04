@@ -39,6 +39,7 @@ __all__ = [
     "ProviderRecord",
     "SelectionReference",
     "StructuredProviderHealth",
+    "required_text",
 ]
 
 CATALOG_SCHEMA_VERSION: Final = 1
@@ -52,9 +53,16 @@ MAX_CAPABILITIES: Final = 64
 MAX_HEALTH_REASONS: Final = 16
 
 
-def _required_text(
+def required_text(
     value: str, field_name: str, *, max_length: int = MAX_TEXT_LENGTH
 ) -> str:
+    """Return *value* as a non-blank, already-normalized, bounded string, or raise.
+
+    Public because :mod:`provider_capabilities` shares this exact dataclass
+    invariant - a plain ``ValueError`` naming the field, not a lane's own
+    protocol-error dialect - and both modules would otherwise carry
+    identical bodies rather than a caller-side ``max_length`` override.
+    """
     if not value or value != value.strip():
         raise ValueError(f"{field_name} must be non-blank and already normalized")
     if len(value) > max_length:
@@ -64,7 +72,7 @@ def _required_text(
 
 def _optional_text(value: str | None, field_name: str) -> None:
     if value is not None:
-        _required_text(value, field_name)
+        required_text(value, field_name)
 
 
 def _utc(value: datetime, field_name: str) -> datetime:
@@ -165,9 +173,9 @@ class NativeControlOption:
     description: str | None = None
 
     def __post_init__(self) -> None:
-        _required_text(self.option_id, "option_id")
-        _required_text(self.provider_value, "provider_value")
-        _required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
+        required_text(self.option_id, "option_id")
+        required_text(self.provider_value, "provider_value")
+        required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
         _optional_text(self.description, "description")
 
 
@@ -184,8 +192,8 @@ class NativeControl:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", tuple(self.options))
-        _required_text(self.control_id, "control_id")
-        _required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
+        required_text(self.control_id, "control_id")
+        required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
         if len(self.options) > MAX_OPTIONS:
             raise ValueError(
                 f"native control options exceed the {MAX_OPTIONS}-item limit"
@@ -193,7 +201,7 @@ class NativeControl:
         option_ids = tuple(option.option_id for option in self.options)
         _unique(option_ids, "native control option ids")
         if self.default_option_id is not None:
-            _required_text(self.default_option_id, "default_option_id")
+            required_text(self.default_option_id, "default_option_id")
             if self.default_option_id not in option_ids:
                 raise ValueError("default_option_id must name an advertised option")
         _optional_text(self.description, "description")
@@ -213,20 +221,20 @@ class ModelCatalogEntry:
     def __post_init__(self) -> None:
         object.__setattr__(self, "capabilities", tuple(self.capabilities))
         object.__setattr__(self, "native_control_ids", tuple(self.native_control_ids))
-        _required_text(self.entry_id, "entry_id")
-        _required_text(self.provider_value, "provider_value")
-        _required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
+        required_text(self.entry_id, "entry_id")
+        required_text(self.provider_value, "provider_value")
+        required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
         if len(self.capabilities) > MAX_CAPABILITIES:
             raise ValueError(f"capabilities exceed the {MAX_CAPABILITIES}-item limit")
         for capability in self.capabilities:
-            _required_text(capability, "capability")
+            required_text(capability, "capability")
         _unique(self.capabilities, "capabilities")
         if len(self.native_control_ids) > MAX_CONTROLS:
             raise ValueError(
                 f"model native control ids exceed the {MAX_CONTROLS}-item limit"
             )
         for control_id in self.native_control_ids:
-            _required_text(control_id, "model native control id")
+            required_text(control_id, "model native control id")
         _unique(self.native_control_ids, "model native control ids")
         _optional_text(self.description, "description")
 
@@ -244,7 +252,7 @@ class CatalogState:
     def __post_init__(self) -> None:
         object.__setattr__(self, "checked_at", _utc(self.checked_at, "checked_at"))
         if self.revision is not None:
-            _required_text(self.revision, "revision")
+            required_text(self.revision, "revision")
         _optional_text(self.reason, "catalog reason")
         if self.expires_at is not None:
             expires_at = _utc(self.expires_at, "expires_at")
@@ -278,7 +286,7 @@ class StructuredProviderHealth:
                 f"health reasons exceed the {MAX_HEALTH_REASONS}-item limit"
             )
         for reason in self.reasons:
-            _required_text(reason, "health reason")
+            required_text(reason, "health reason")
         _unique(self.reasons, "health reasons")
         expected = (
             self.configured is HealthState.AVAILABLE
@@ -332,8 +340,8 @@ class ProviderCatalogKey:
     execution_mode: str
 
     def __post_init__(self) -> None:
-        _required_text(self.provider_id, "provider_id")
-        _required_text(self.execution_mode, "execution_mode")
+        required_text(self.provider_id, "provider_id")
+        required_text(self.execution_mode, "execution_mode")
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,9 +398,9 @@ class ProviderRecord:
     catalog: ProviderCatalog
 
     def __post_init__(self) -> None:
-        _required_text(self.provider_id, "provider_id")
-        _required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
-        _required_text(self.execution_mode, "execution_mode")
+        required_text(self.provider_id, "provider_id")
+        required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
+        required_text(self.execution_mode, "execution_mode")
         if self.catalog.key != ProviderCatalogKey(
             provider_id=self.provider_id, execution_mode=self.execution_mode
         ):
@@ -407,8 +415,8 @@ class ControlSelection:
     option_id: str
 
     def __post_init__(self) -> None:
-        _required_text(self.control_id, "control_id")
-        _required_text(self.option_id, "option_id")
+        required_text(self.control_id, "control_id")
+        required_text(self.option_id, "option_id")
 
 
 @dataclass(frozen=True, slots=True)
@@ -424,10 +432,10 @@ class SelectionReference:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "controls", tuple(self.controls))
-        _required_text(self.provider_id, "provider_id")
-        _required_text(self.execution_mode, "execution_mode")
-        _required_text(self.catalog_revision, "catalog_revision")
-        _required_text(self.entry_id, "entry_id")
+        required_text(self.provider_id, "provider_id")
+        required_text(self.execution_mode, "execution_mode")
+        required_text(self.catalog_revision, "catalog_revision")
+        required_text(self.entry_id, "entry_id")
         if self.schema_version != SELECTION_SCHEMA_VERSION:
             raise ValueError("unsupported selection schema_version")
         if len(self.controls) > MAX_CONTROLS:

@@ -9,8 +9,6 @@ provider-native controls or capabilities.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -20,7 +18,7 @@ from typing import Final
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
-from ._catalog_fields import CatalogFieldReader, local_id
+from ._catalog_fields import CatalogFieldReader, local_id, model_list_revision
 from ._json_contract import JsonObject
 from .provider_catalog import (
     AuthenticationState,
@@ -104,16 +102,6 @@ def _api_key(value: str) -> str:
 
 def _entry_id(key: ProviderCatalogKey, provider_value: str) -> str:
     return local_id(f"{key.provider_id}:{key.execution_mode}:model", provider_value)
-
-
-def _revision(key: ProviderCatalogKey, models: tuple[ModelCatalogEntry, ...]) -> str:
-    payload = {
-        "provider_id": key.provider_id,
-        "execution_mode": key.execution_mode,
-        "models": [model.provider_value for model in models],
-    }
-    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _unavailable_catalog(
@@ -222,7 +210,7 @@ def catalog_from_model_list(
         state=CatalogState(
             status=CatalogStatus.AVAILABLE,
             checked_at=now,
-            revision=_revision(key, models),
+            revision=model_list_revision(key, models),
             expires_at=now + _CATALOG_TTL,
         ),
         models=models,

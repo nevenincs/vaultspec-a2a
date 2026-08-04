@@ -29,8 +29,6 @@ cannot drift into disagreeing about what an in-process lane is called.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -38,6 +36,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
 from ..graph.enums import MODEL_MAP, Provider
+from ._catalog_fields import local_id, model_list_revision
 from .provider_catalog import (
     AuthenticationState,
     CatalogState,
@@ -156,19 +155,7 @@ def served_in_process_lanes(
 
 
 def _entry_id(key: ProviderCatalogKey, provider_value: str) -> str:
-    namespace = f"{key.provider_id}:{key.execution_mode}:model"
-    encoded = f"{namespace}\0{provider_value}".encode()
-    return hashlib.sha256(encoded).hexdigest()[:32]
-
-
-def _revision(key: ProviderCatalogKey, models: tuple[ModelCatalogEntry, ...]) -> str:
-    payload = {
-        "provider_id": key.provider_id,
-        "execution_mode": key.execution_mode,
-        "models": [model.provider_value for model in models],
-    }
-    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return local_id(f"{key.provider_id}:{key.execution_mode}:model", provider_value)
 
 
 def _provider_values(provider: Provider) -> tuple[str, ...]:
@@ -208,7 +195,7 @@ def build_in_process_catalog(
         state=CatalogState(
             status=CatalogStatus.AVAILABLE,
             checked_at=now,
-            revision=_revision(key, models),
+            revision=model_list_revision(key, models),
             expires_at=now + _CATALOG_TTL,
         ),
         models=models,

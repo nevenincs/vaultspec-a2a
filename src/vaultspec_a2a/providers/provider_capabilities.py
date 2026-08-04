@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
+
+from .provider_catalog import required_text
 
 if TYPE_CHECKING:
     from .provider_catalog import ProviderCatalogKey
@@ -24,16 +26,6 @@ __all__ = [
     "CapabilityStatus",
     "PermissionMode",
 ]
-
-MAX_TEXT_LENGTH: Final = 1_024
-
-
-def _required_text(value: str, field_name: str) -> str:
-    if not value or value != value.strip():
-        raise ValueError(f"{field_name} must be non-blank and already normalized")
-    if len(value) > MAX_TEXT_LENGTH:
-        raise ValueError(f"{field_name} exceeds the {MAX_TEXT_LENGTH}-character limit")
-    return value
 
 
 class Capability(StrEnum):
@@ -88,7 +80,7 @@ class CapabilityBlock:
     reason: str
 
     def __post_init__(self) -> None:
-        _required_text(self.reason, "capability blocker reason")
+        required_text(self.reason, "capability blocker reason")
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,8 +93,8 @@ class CapabilityProof:
     reason: str
 
     def __post_init__(self) -> None:
-        _required_text(self.test_reference, "capability proof test_reference")
-        _required_text(self.reason, "capability proof reason")
+        required_text(self.test_reference, "capability proof test_reference")
+        required_text(self.reason, "capability proof reason")
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +112,7 @@ class CapabilityEvidence:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "blockers", tuple(self.blockers))
-        _required_text(self.support_reason, "capability support_reason")
+        required_text(self.support_reason, "capability support_reason")
         if self.proof is not None:
             if not self.upstream_supported:
                 raise ValueError("an unsupported capability cannot carry a proof")
@@ -136,7 +128,7 @@ class CapabilityEvidence:
         if self.permission_mode is not None and self.permission_reason is None:
             raise ValueError("permission_mode requires a permission_reason")
         if self.permission_reason is not None:
-            _required_text(self.permission_reason, "capability permission_reason")
+            required_text(self.permission_reason, "capability permission_reason")
 
     @property
     def status(self) -> CapabilityStatus:

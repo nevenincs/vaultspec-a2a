@@ -21,6 +21,7 @@ from ...thread.errors import WorkerExecutionError
 from ...thread.models import TokenUsageEntry
 from ..acp_options import valid_option_ids
 from ..tools.task_queue import create_mark_task_complete_tool
+from ._config_contract import accepting_runnable_config
 
 if TYPE_CHECKING:
     # Annotation-only: langchain_core.language_models is seconds-expensive at
@@ -874,4 +875,4 @@ def create_worker_node(
             usage=usage,
         )
 
-    return worker_node
+    return accepting_runnable_config(worker_node)

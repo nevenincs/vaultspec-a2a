@@ -51,6 +51,7 @@ from ..thread.errors import (
 )
 from ..thread.state import TeamState
 from .enums import Model, PipelinePhase, Provider
+from .nodes._config_contract import accepting_runnable_config
 from .nodes.clarification import (
     ClarificationQuestionProducer,
     create_clarification_gate_node,
@@ -1343,7 +1344,7 @@ def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
         result["loop_count"] = state.get("loop_count", 0) + 1
         return result
 
-    return _loop_node_with_counter
+    return accepting_runnable_config(_loop_node_with_counter)
 
 
 def _compile_pipeline_loop(

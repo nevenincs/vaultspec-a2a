@@ -32,6 +32,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Send
 
 from ...thread.state import TeamState
+from ._config_contract import accepting_runnable_config
 from .worker import WorkerNode
 
 __all__ = [
@@ -124,7 +125,7 @@ def create_research_dispatch_node(researcher_names: list[str]) -> ResearchDispat
         )
 
     research_dispatch_node.__name__ = "research_dispatch_node"
-    return research_dispatch_node
+    return accepting_runnable_config(research_dispatch_node)
 
 
 #: Keys every research finding must carry (the ``research_findings`` contract).
@@ -328,4 +329,4 @@ def create_researcher_node(
         return {"research_findings": [finding]}
 
     researcher_node.__name__ = "researcher_node"
-    return researcher_node
+    return accepting_runnable_config(researcher_node)

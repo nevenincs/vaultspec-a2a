@@ -42,6 +42,7 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
@@ -91,9 +92,55 @@ from .acp_exceptions import (
 from .conditions import condition_from_acp_error
 from .gemini_auth import refresh_gemini_token
 
-__all__ = ["AcpChatModel"]
+__all__ = [
+    "ACP_SESSION_TRANSCRIPT_DECLARATION",
+    "ARTIFACT_DECLARATIONS",
+    "AcpChatModel",
+]
 
 logger = logging.getLogger(__name__)
+
+
+# The spawned CLI writes its own session transcript into the OPERATOR's real
+# config home, partitioned by the directory the session opened in. This lane
+# spawns into the run's active project, so a run's transcript lands in the
+# operator's own partition for that project, beside the sessions their own
+# interactive CLI writes there - it does not mint a partition per run. Nothing
+# here creates, names, opens, or can reach that file; the run is merely what
+# causes it to exist, which is why the declaration sits at the spawning seam.
+#
+# Two measured facts fix the disposition. The CLI bounds the tree itself, and
+# this project never reads a transcript back: session/load is wired, but no
+# production construction supplies session_id, so provider-native resume has no
+# caller on this lane - the same posture the Codex lane ratified. That second
+# fact is what makes suppression, rather than reclamation, the correct remedy;
+# it is simply not available from here (see mechanism).
+ACP_SESSION_TRANSCRIPT_DECLARATION = ArtifactDeclaration(
+    name="acp-cli-session-transcript",
+    root="<operator CLAUDE_CONFIG_DIR>/projects/<encoded run workspace_root>/",
+    owner="providers.acp_chat_model",
+    disposition=RetentionDisposition.BOUNDED_BY_AGE,
+    mechanism=(
+        "the CLI's OWN cleanupPeriodDays sweep, 30 days by default, applied "
+        "independently of this project. Nothing here bounds it and nothing here "
+        "may acquire the authority to: the transcript sits in the operator's real "
+        "config home under the no-auth ambient-environment contract, keyed "
+        "identically to the sessions the operator starts by hand, so NO predicate "
+        "available to this project separates a session a run spawned from one a "
+        "human started - the only discriminator is inside the file. The threshold "
+        "is therefore the operator's to set and not this project's to rely on. "
+        "The lever that would belong here is suppression, not reclamation, and it "
+        "is upstream: the agent SDK exposes persistSession=false, which would stop "
+        "the write outright and costs this lane nothing because no caller resumes "
+        "a persisted session, but the pinned ACP adapter does not thread the "
+        "option and its only persistence-relevant env knob is CLAUDE_CONFIG_DIR, "
+        "whose redirection the no-auth contract forbids"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    ACP_SESSION_TRANSCRIPT_DECLARATION,
+)
 
 
 def _required_session_id(result: JsonObject, *, operation: str) -> str:
@@ -495,7 +542,11 @@ class AcpChatModel(BaseChatModel):
             # the rest. MCP surfacing writes nothing to the workspace or the
             # config home, so the session tree is the only thing to release;
             # the CLI's own transcript lives in the operator's real config home
-            # (like any interactive session) and is not ours to move.
+            # (like any interactive session) and is not ours to move. That
+            # states ownership, not lifetime, and reading it as an answer to
+            # both is how the transcript went undeclared: what it accumulates
+            # and what bounds it are recorded in
+            # ACP_SESSION_TRANSCRIPT_DECLARATION.
             cleanup_steps: list[CleanupStep] = []
             if ctx is not None and stdout_task is not None and stderr_task is not None:
                 session_ctx, out_task, err_task = ctx, stdout_task, stderr_task

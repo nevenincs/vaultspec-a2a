@@ -23,7 +23,12 @@ from ...database import admin, checkpoints, reconciliation, session
 from ...desktop import credentials, profile
 from ...lifecycle import discovery, manager, registry, singleton
 from ...protocols.mcp import authoring_stdio
-from ...providers import _acp_rpc_handlers, _codex_config_home, _config_home_roots
+from ...providers import (
+    _acp_rpc_handlers,
+    _codex_config_home,
+    _config_home_roots,
+    acp_chat_model,
+)
 from ...service_tests import harness
 from ...testing import leases
 from ...utils import logging as utils_logging
@@ -47,6 +52,7 @@ _DECLARING_MODULES: tuple[ModuleType, ...] = (
     _acp_rpc_handlers,
     _codex_config_home,
     _config_home_roots,
+    acp_chat_model,
     harness,
     utils_logging,
     profile,
@@ -208,6 +214,81 @@ def test_no_declaration_constant_is_left_out_of_its_module_inventory() -> None:
     assert not omitted, (
         f"these declarations are defined but missing from {_INVENTORY_NAME}: {omitted}"
     )
+
+
+def _production_sources() -> list[Path]:
+    """Every package source that is product code rather than test code."""
+    return [
+        source
+        for source in sorted(_PACKAGE_ROOT.rglob("*.py"))
+        if "tests" not in source.relative_to(_PACKAGE_ROOT).parts
+    ]
+
+
+def test_no_production_caller_asks_the_acp_lane_to_resume_a_persisted_session() -> None:
+    """The transcript declaration rests on this lane never reading one back.
+
+    ``session/load`` is wired and fires only when a construction supplies
+    ``session_id``.  No production one does, which is what makes the CLI's own
+    transcript pure residue here - and what makes suppressing the write upstream
+    a free change rather than the loss of a capability.  Wiring a production
+    resume would falsify both claims silently, so it fails here instead.
+    """
+    resuming: list[str] = []
+    for source in _production_sources():
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Name) and func.id == "AcpChatModel"):
+                continue
+            if any(keyword.arg == "session_id" for keyword in node.keywords):
+                relative = source.relative_to(_PACKAGE_ROOT)
+                resuming.append(f"{relative.as_posix()}:{node.lineno}")
+
+    assert not resuming, (
+        "these production call sites resume a persisted provider session, which "
+        f"contradicts {acp_chat_model.ACP_SESSION_TRANSCRIPT_DECLARATION.name!r}: "
+        f"{resuming}"
+    )
+
+
+def test_the_acp_lane_takes_no_deletion_authority_over_the_operator_home() -> None:
+    """The seam that declares the transcript must never learn to reclaim it.
+
+    The declaration's whole argument is that no predicate available here can
+    separate a session a run spawned from one the operator started by hand, so
+    the correct remedy is upstream suppression and the correct local behaviour is
+    to touch nothing.  A removal call appearing in this module would be that
+    argument being quietly abandoned.
+    """
+    source = _PACKAGE_ROOT / "providers" / "acp_chat_model.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    removers = {"rmtree", "unlink", "remove", "rmdir", "removedirs"}
+
+    found = [
+        f"{node.func.attr} at line {node.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in removers
+    ]
+
+    assert not found, (
+        f"{source.name} acquired filesystem deletion authority: {found}. The ACP "
+        "lane runs in the operator's real config home; nothing here may delete "
+        "from it"
+    )
+
+
+def test_the_acp_transcript_declares_an_enforcer_it_does_not_own() -> None:
+    """Its bound is real but external, and the declaration must say whose it is."""
+    declaration = acp_chat_model.ACP_SESSION_TRANSCRIPT_DECLARATION
+
+    assert declaration.disposition is RetentionDisposition.BOUNDED_BY_AGE
+    assert "cleanupPeriodDays" in declaration.mechanism
+    assert "operator" in declaration.mechanism.lower()
 
 
 def test_the_discovery_record_declares_its_crash_exposure() -> None:

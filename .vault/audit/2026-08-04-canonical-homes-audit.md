@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:74eefbc69b82caa99386f116e167acaa2cc646191aee784d36e59b2973d58e8b'
+body_hash: 'sha256:1f6019b57dd07ebdc9e66325062a71aef4a097e91f25f4be0a7c48cf3eb2cd4b'
 related: []
 ---
 
@@ -4052,3 +4052,44 @@ The negative results are worth as much as the findings here: three of these five
 were candidate clusters that a count-based sweep would have opened as work. What
 retired them was reading the sites and asking what each writer was actually FOR -
 the same question that found the real defects.
+
+### registration-lists-are-invisible-to-type-checking | critical | method, generalised from a live incident
+
+Generalised from the disclosure-gap closure recorded above, because it is a
+hazard this campaign CREATES rather than one it merely finds, and every lane
+consolidating into a canonical home is exposed to it.
+
+A canonical home often decides not just where a value lives but WHAT MAY PASS.
+Four shapes seen in this codebase: an explicit per-event field allowlist, a
+discriminated union, a `model_validate` over a dataclass dump that ignores
+unknown keys, and a module's export list. All four are canonical homes behaving
+exactly as designed.
+
+All four are also **invisible to the type checker**. Nothing in the type system
+knows an allowlist exists, so a value threaded correctly through every layer can
+stop one layer short of the wire with every check passing. In the live case the
+change touched five files, `ty` was clean, and the value arrived as `None`
+because it had not been REGISTERED. Reading the code found one of the three
+registration sites; guards written earlier for exactly this found the other two.
+
+The failure is silent by DESIGN, which is what makes it dangerous. The event
+catalog's own docstring states that an unrecognised frame is projected onto its
+identity keys rather than refused - degrading rather than failing is the correct
+choice for a droppable channel, and it means a mismatched key produces a frame
+that is structurally valid and materially empty. Nothing raises. A test asserting
+the frame's TYPE passes; only one asserting its CONTENT does not.
+
+**The rule.** When moving a value into a canonical home, ask what REGISTERS the
+things that may pass, not only what declares the value. And set the acceptance
+bar accordingly: proving no old declaration remains proves the refactor happened,
+not that it works. The bar is a real payload, from the real producer, arriving at
+the real consumer with its fields intact.
+
+**The corollary is the campaign's strongest evidence for guards over review.** The
+two missed seams were found by tests someone had written earlier for precisely
+this class of mistake - a parity test and an allowlist's own coverage. A careful
+read found neither. This sits beside the two guards this campaign REJECTED: the
+distinction is that these guards assert an invariant that must hold, while the
+rejected rows would have asserted a name a rename defeats or a count that
+mislabels settled decisions as debt. Guards are not the problem; guards pinned to
+spellings are.

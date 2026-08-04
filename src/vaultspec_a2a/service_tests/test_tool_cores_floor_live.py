@@ -66,6 +66,7 @@ from .test_pw7_acceptance import (
     AcceptanceCase,
     AcceptanceHarness,
     _reachable_stack,
+    _resolve_selection,
 )
 
 if TYPE_CHECKING:
@@ -83,8 +84,14 @@ _MESSAGE_FRAMES = frozenset(
 # rather than hanging. The document agents read early, mid-Diverge/Synthesize.
 _OBSERVE_DEADLINE_SECONDS = 900.0
 
-# All real-provider service tests run only under the committed all-low profile.
-_PROFILE_ID = "fast"
+# Every real-provider service lane runs on the operator-configured served
+# selection. It used to name the committed all-low "fast" model profile; a
+# preset carries no model policy now, so the cost ceiling is the operator's
+# choice of a low-cost entry from the current catalog (the same thing the
+# provider-catalog live-selection prerequisite already asks for). The lane
+# claims no particular provider - it certifies the bridge/tool floor, not who
+# produced the text - but it MUST be a real one, which is what
+# requires_live_selection pins.
 
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 
@@ -214,7 +221,7 @@ def _floor_case(feature: str, adr_name: str) -> AcceptanceCase:
         ),
         roles=tuple(required_role_ids(load_team_config(_PRESET_LIVE))),
         expected_doc_kinds=(),
-        profile_id=_PROFILE_ID,
+        requires_live_selection=True,
     )
 
 
@@ -252,12 +259,17 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
             f"ADR {adr_name} carries no distinctive interior token absent from the "
             "prompt; cannot form hallucination-resistant read evidence"
         )
+    selection, overrides = await _resolve_selection(
+        case, gateway_url, str(vault_root.parent)
+    )
     harness = AcceptanceHarness(
         case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
         gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
     )
 
     before = _snapshot_vault(vault_root)
@@ -367,7 +379,7 @@ def _rag_case(feature: str) -> AcceptanceCase:
         ),
         roles=tuple(required_role_ids(load_team_config(_PRESET_LIVE))),
         expected_doc_kinds=(),
-        profile_id=_PROFILE_ID,
+        requires_live_selection=True,
     )
 
 
@@ -418,12 +430,17 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
 
     feature = f"tool-cores-semantic-{int(time.time())}"
     case = _rag_case(feature)
+    selection, overrides = await _resolve_selection(
+        case, gateway_url, str(vault_root.parent)
+    )
     harness = AcceptanceHarness(
         case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
         gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
     )
 
     before = _snapshot_vault(vault_root)

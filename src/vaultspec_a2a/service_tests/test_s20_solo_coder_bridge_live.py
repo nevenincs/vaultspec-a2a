@@ -55,6 +55,7 @@ from .test_pw7_acceptance import (
     AcceptanceCase,
     AcceptanceHarness,
     _reachable_stack,
+    _resolve_selection,
 )
 from .test_tool_cores_floor_live import (
     _snapshot_vault,
@@ -71,8 +72,14 @@ _MESSAGE_FRAMES = frozenset(
 _OBSERVE_DEADLINE_SECONDS = 900.0
 # Cadence for polling the engine authoring plane for this run's changeset.
 _ENGINE_POLL_SECONDS = 4.0
-# All real-provider service tests run only under the committed all-low profile.
-_PROFILE_ID = "fast"
+# Every real-provider service lane runs on the operator-configured served
+# selection. It used to name the committed all-low "fast" model profile; a
+# preset carries no model policy now, so the cost ceiling is the operator's
+# choice of a low-cost entry from the current catalog (the same thing the
+# provider-catalog live-selection prerequisite already asks for). The lane
+# claims no particular provider - it certifies the bridge/tool floor, not who
+# produced the text - but it MUST be a real one, which is what
+# requires_live_selection pins.
 
 # The bridged authoring tools the solo-coder should reach. Any one invoked
 # mid-turn proves the surfacing->invocation path end to end.
@@ -147,7 +154,7 @@ def _solo_coder_case(feature: str) -> AcceptanceCase:
         ),
         roles=(_CODER_ROLE,),
         expected_doc_kinds=(),
-        profile_id=_PROFILE_ID,
+        requires_live_selection=True,
         autonomous=True,
     )
 
@@ -200,12 +207,17 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
 
     feature = f"s20-solo-coder-{int(time.time())}"
     case = _solo_coder_case(feature)
+    selection, overrides = await _resolve_selection(
+        case, gateway_url, str(vault_root.parent)
+    )
     harness = AcceptanceHarness(
         case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
         gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
     )
 
     before = _snapshot_vault(vault_root)

@@ -27,9 +27,12 @@ from ..providers.provider_catalog import (
 
 __all__ = [
     "LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON",
+    "LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON",
     "LIVE_PROVIDER_PREREQUISITES",
     "LiveProviderCatalogSelector",
     "live_provider_catalog_selector_is_configured",
+    "live_provider_override_selector_is_configured",
+    "override_selection_from_served_catalog",
     "selection_from_served_catalog",
 ]
 
@@ -40,6 +43,23 @@ LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON: Final[tuple[str, ...]] = (
     "VAULTSPEC_LIVE_ENTRY_ID",
     "VAULTSPEC_LIVE_CONTROL_ID",
     "VAULTSPEC_LIVE_OPTION_ID",
+)
+
+#: A SECOND operator-supplied lane, for a proof that needs two lanes in one run.
+#:
+#: A mixed-provider certification routes most roles to one lane and one role to
+#: another, and the whole point of it is that the two differ. That cannot be
+#: expressed by the single selector above, and it must not be faked by picking a
+#: second lane here - this module ranks nothing. So the second lane is declared
+#: exactly like the first, and a mixed proof that has not been given one SKIPS.
+#: Degrading it to a single-lane run instead would keep the label "mixed" on a
+#: run that no longer proves anything mixed, which is worse than not running.
+LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON: Final[tuple[str, ...]] = (
+    "VAULTSPEC_LIVE_OVERRIDE_PROVIDER_ID",
+    "VAULTSPEC_LIVE_OVERRIDE_EXECUTION_MODE",
+    "VAULTSPEC_LIVE_OVERRIDE_ENTRY_ID",
+    "VAULTSPEC_LIVE_OVERRIDE_CONTROL_ID",
+    "VAULTSPEC_LIVE_OVERRIDE_OPTION_ID",
 )
 
 LIVE_PROVIDER_PREREQUISITES: Final[tuple[str, ...]] = (
@@ -67,23 +87,52 @@ def live_provider_catalog_selector_is_configured() -> bool:
     )
 
 
-def _configured_selector() -> LiveProviderCatalogSelector:
-    """Read the declared identifiers after the prerequisite has admitted them."""
-    values = {
-        name: (os.environ.get(name) or "").strip()
-        for name in LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON
-    }
+def live_provider_override_selector_is_configured() -> bool:
+    """Return whether a complete SECOND lane has been declared for mixed proofs."""
+    return all(
+        (os.environ.get(name) or "").strip()
+        for name in LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON
+    )
+
+
+def _selector_from(names: tuple[str, ...], *, what: str) -> LiveProviderCatalogSelector:
+    """Read one declared lane's identifiers from its own environment names."""
+    values = {name: (os.environ.get(name) or "").strip() for name in names}
     missing = [name for name, value in values.items() if not value]
     assert not missing, (
-        "provider-catalog live selection prerequisite admitted an incomplete "
-        f"configuration: missing {', '.join(missing)}"
+        f"the {what} live selection is incomplete: missing {', '.join(missing)}"
     )
+    provider, mode, entry, control, option = names
     return LiveProviderCatalogSelector(
-        provider_id=values["VAULTSPEC_LIVE_PROVIDER_ID"],
-        execution_mode=values["VAULTSPEC_LIVE_EXECUTION_MODE"],
-        entry_id=values["VAULTSPEC_LIVE_ENTRY_ID"],
-        control_id=values["VAULTSPEC_LIVE_CONTROL_ID"],
-        option_id=values["VAULTSPEC_LIVE_OPTION_ID"],
+        provider_id=values[provider],
+        execution_mode=values[mode],
+        entry_id=values[entry],
+        control_id=values[control],
+        option_id=values[option],
+    )
+
+
+def _configured_selector() -> LiveProviderCatalogSelector:
+    """Read the declared identifiers after the prerequisite has admitted them."""
+    return _selector_from(
+        LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON, what="provider-catalog"
+    )
+
+
+def override_selection_from_served_catalog(
+    payload: object,
+) -> ProviderCatalogSelection:
+    """Validate the SECOND declared lane, for a per-role override.
+
+    Held to exactly the same current-selectable-authenticated-admitted standard
+    as the primary: an override is a lane a run really executes a role on, so a
+    weaker check here would admit through the side door precisely what the front
+    door refuses.
+    """
+    return _validated_selection(
+        _selector_from(LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON, what="override"),
+        payload,
+        what="override",
     )
 
 
@@ -95,7 +144,15 @@ def selection_from_served_catalog(payload: object) -> ProviderCatalogSelection:
     configuration, so an old operator selection is rejected instead of being
     replayed against an expired catalog revision.
     """
-    selector = _configured_selector()
+    return _validated_selection(
+        _configured_selector(), payload, what="explicitly configured"
+    )
+
+
+def _validated_selection(
+    selector: LiveProviderCatalogSelector, payload: object, *, what: str
+) -> ProviderCatalogSelection:
+    """Prove one declared lane is still served, selectable, and admitted."""
     catalog = ProviderCatalogResponse.model_validate(payload)
     matching_lanes = [
         record
@@ -104,51 +161,48 @@ def selection_from_served_catalog(payload: object) -> ProviderCatalogSelection:
         and record.execution_mode == selector.execution_mode
     ]
     assert len(matching_lanes) == 1, (
-        "the explicitly configured provider/lane is not uniquely present in the "
+        f"the {what} provider/lane is not uniquely present in the "
         "current served catalog"
     )
     lane = matching_lanes[0]
     health = lane.health
     assert health.configured is HealthState.AVAILABLE, (
-        "the explicitly configured provider/lane is no longer configured"
+        f"the {what} provider/lane is no longer configured"
     )
     assert health.transport is HealthState.AVAILABLE, (
-        "the explicitly configured provider/lane has no current transport evidence"
+        f"the {what} provider/lane has no current transport evidence"
     )
     assert health.authentication is AuthenticationState.AUTHENTICATED, (
-        "the explicitly configured provider/lane is not currently authenticated"
+        f"the {what} provider/lane is not currently authenticated"
     )
     assert health.catalog is CatalogStatus.AVAILABLE, (
-        "the explicitly configured provider/lane catalog is not available"
+        f"the {what} provider/lane catalog is not available"
     )
     assert health.admission is AdmissionState.ADMITTED, (
-        "the explicitly configured provider/lane has no completed-turn "
-        "admission evidence"
+        f"the {what} provider/lane has no completed-turn admission evidence"
     )
-    assert health.selectable, (
-        "the explicitly configured provider/lane is not selectable"
-    )
+    assert health.selectable, f"the {what} provider/lane is not selectable"
 
     state = lane.catalog.state
     assert state.status is CatalogStatus.AVAILABLE, (
-        "the explicitly configured provider/lane has no available catalog state"
+        f"the {what} provider/lane has no available catalog state"
     )
     assert state.revision is not None, (
-        "the explicitly configured provider/lane did not serve a catalog revision"
+        f"the {what} provider/lane did not serve a catalog revision"
     )
     assert state.expires_at is not None and state.expires_at > datetime.now(UTC), (
-        "the explicitly configured provider/lane catalog is stale"
+        f"the {what} provider/lane catalog is stale"
     )
 
     entries = [
         entry for entry in lane.catalog.models if entry.entry_id == selector.entry_id
     ]
     assert len(entries) == 1, (
-        "the explicitly configured catalog entry is not currently served by its lane"
+        f"the {what} catalog entry is not currently served by its lane"
     )
     entry = entries[0]
     assert selector.control_id in entry.native_control_ids, (
-        "the explicitly configured native control is not attached to the served entry"
+        f"the {what} native control is not attached to the served entry"
     )
     controls = [
         control
@@ -156,11 +210,11 @@ def selection_from_served_catalog(payload: object) -> ProviderCatalogSelection:
         if control.control_id == selector.control_id
     ]
     assert len(controls) == 1, (
-        "the explicitly configured native control is not currently served by its lane"
+        f"the {what} native control is not currently served by its lane"
     )
     assert any(
         option.option_id == selector.option_id for option in controls[0].options
-    ), "the explicitly configured native-control option is not currently served"
+    ), f"the {what} native-control option is not currently served"
 
     return ProviderCatalogSelection(
         schema_version=1,

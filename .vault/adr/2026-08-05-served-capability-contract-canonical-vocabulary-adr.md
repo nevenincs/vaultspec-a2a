@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:acffc0bb9701fb2a06fc857e4b194ea76e299a8bf4c3fff9ba57e023e47cf9bb'
+body_hash: 'sha256:74b9531539e5260d68507e4f156be6ef75186423b8a2ead8eca4a67f9b917cbf'
 related:
   - "[[2026-08-05-served-capability-contract-gateway-contract-audit]]"
 ---
@@ -179,6 +179,28 @@ lane authors through the bridged tool, so the true answers differ - and that
 mechanism difference is precisely why one topology emitted a proposal and the
 other did not.
 
+**V9 - Do not mirror another authority's vocabulary. Serve it, or carry it
+opaque.** Where a field's values are fixed by a DIFFERENT service, this
+repository does not declare its own enumeration for them. Doing so creates a
+second declaration site for a fact this repository does not own - V1's
+prohibition - with the added defect that the copy has no mechanism to learn when
+the owner changes, so it drifts from an authority it cannot observe.
+
+Two admissible outcomes and no third. Where the owning service publishes its
+declaration, SERVE that. Where it does not, the field stays an opaque
+pass-through with the reason documented at the model, and the remedy is to get
+the owner to publish - never to reconstruct their vocabulary by observation.
+
+This is V1's ownership test applied ACROSS a service boundary rather than within
+this codebase, and it makes the identity question "who fixes these values?"
+rather than "what do they look like?". Worked instances: a changeset status and
+an approval decision belong to the authoring engine, so this repository carries
+them opaque; and the engine holds a complete route declaration it does not serve
+(audit F41), where the remedy is to serve it, never to copy it. The same
+reasoning settles the provider identifier of audit F50 from the other direction
+- a value RECORDED BY A PAST RUN is owned by that record, not by this build's
+notion of what it can currently run.
+
 **V6 - Migration is subset-proved and lockstepped.** Narrowing an existing field
 requires, in order: a capture of the values that surface actually serves; proof
 that the captured set is contained in the proposed enumeration; then the
@@ -219,6 +241,23 @@ it did not address - which is, precisely, the failure mode the audit is about.
 Generalizing from the enumerations already in the contract rather than inventing
 a mechanism keeps the migration risk where it belongs: in proving each live
 value set, not in the pattern.
+
+THE CONCEPT-NOT-NAME RULE HAS NOW EARNED ITS KEEP FOUR TIMES, and stating that
+as a pattern is worth more than four separate applications of it. Two distinct
+concepts sharing one NAME, kept apart (the two admission states). Two distinct
+fields sharing one name, kept apart, one of them not even finite (the
+degradation reasons, audit F49). One KEY answering two questions, resolved by
+separating the derivations rather than reconciling them (V8). And one vocabulary
+owned by ANOTHER SERVICE, declined rather than declared (V9) - the first
+application where the correct answer is to make NO declaration at all, which a
+rule phrased only as "give every vocabulary an owner" would have got backwards
+by inventing a second owner for something already owned elsewhere.
+
+The failure mode is consistent: names collide because they describe the same
+subject area, not because they carry the same meaning, and a rule that cannot
+tell those apart will merge exactly the distinctions someone was careful to
+draw. The ownership question - WHO FIXES THESE VALUES - separates them every
+time, and it is the question a name-based rule never asks.
 
 ## Consequences
 

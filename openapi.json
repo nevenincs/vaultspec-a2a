@@ -1461,6 +1461,17 @@
         "title": "AgentSnapshot",
         "description": "Wire projection of the canonical agent descriptor within a snapshot.\n\nMirrors ``thread.snapshots.AgentData``."
       },
+      "ApprovalStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "superseded"
+        ],
+        "title": "ApprovalStatus",
+        "description": "Durable lifecycle for plan approval state on a thread."
+      },
       "ArtifactSnapshot": {
         "properties": {
           "artifact_id": {
@@ -2326,6 +2337,16 @@
         "title": "PlanEntry",
         "description": "A single entry in the agent's execution plan.\n\nFields use plain ``str`` so the domain layer stays free of wire-protocol\nenum imports.  Values correspond to ``PlanEntryStatus`` / ``PlanEntryPriority``\nmembers defined in ``api.schemas.enums``."
       },
+      "PresetOrigin": {
+        "type": "string",
+        "enum": [
+          "bundled",
+          "workspace",
+          "test_mock"
+        ],
+        "title": "PresetOrigin",
+        "description": "Which source supplied a discovered preset.\n\n``WORKSPACE`` outranks ``BUNDLED`` for the same id, because a workspace\ndefinition shadows the shipped one; the origin therefore reports where the\npreset a caller would actually get was found, not merely where a file\nexists. ``TEST_MOCK`` is a shipped preset that follows the mock naming\nconvention, kept a separate member rather than folded into ``BUNDLED`` so\nthe product layer can exclude fixtures without matching on the id."
+      },
       "PresetSummary": {
         "properties": {
           "id": {
@@ -2372,13 +2393,12 @@
           "topology": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/TopologyType"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Topology"
+            ]
           },
           "worker_count": {
             "anyOf": [
@@ -2417,13 +2437,12 @@
           "origin": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/PresetOrigin"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Origin"
+            ]
           },
           "supported_capabilities": {
             "items": {
@@ -2778,6 +2797,22 @@
         ],
         "title": "ProviderCatalogStateResponse"
       },
+      "ProviderCondition": {
+        "type": "string",
+        "enum": [
+          "network_unreachable",
+          "provider_overloaded",
+          "unauthenticated",
+          "throttled",
+          "usage_exhausted",
+          "credits_exhausted",
+          "budget_exhausted",
+          "invalid_request",
+          "unknown"
+        ],
+        "title": "ProviderCondition",
+        "description": "Why a provider failed, in terms a client can act on.\n\nThe value is the wire form: lowercase, underscore-separated, and stable."
+      },
       "ProviderEligibility": {
         "type": "string",
         "enum": [
@@ -2986,6 +3021,20 @@
         ],
         "title": "ProviderNativeControlResponse"
       },
+      "RepairStatus": {
+        "type": "string",
+        "enum": [
+          "healthy",
+          "paused_resumable",
+          "cancel_pending",
+          "replay_gap",
+          "checkpoint_unavailable",
+          "needs_reconciliation",
+          "operator_intervention_required"
+        ],
+        "title": "RepairStatus",
+        "description": "Repair and readiness classification distinct from lifecycle.\n\nTypes BOTH durable columns that carry this classification:\n``threads.repair_status`` and ``threads.execution_readiness``. The two ask\ndifferent questions — what is wrong with this run, and is it fit to resume —\nbut they answer from this one closed set, so a new member becomes available\nto both at once and neither can drift into a private vocabulary."
+      },
       "RoleAssignmentSummary": {
         "properties": {
           "role_id": {
@@ -3058,7 +3107,7 @@
           "provider_id"
         ],
         "title": "RoleAssignmentSummary",
-        "description": "Effective per-role model assignment under a profile.\n\nOnly safe operational metadata: role id, agent id, provider id, capability,\nthe stable concrete model name, ordered fallbacks, current provider readiness,\nand which precedence layer the assignment came from. Never a credential, env\nvalue, token, or private path.\n\n``provider_id`` is EMPTY when no preset layer declares a provider for the\nrole, which is the ordinary state now that product presets carry no\nprovider policy: a run chooses its lane at run start from the served catalog.\nEmpty rather than absent so the field keeps one type, and never a substituted\nprovider name - naming a lane no preset asked for would be indistinguishable\nfrom a real declaration. ``resolution_error`` carries the reason and ``source``\nreads ``undeclared``; the role is reported ineligible."
+        "description": "Effective per-role model assignment under a profile.\n\nOnly safe operational metadata: role id, agent id, provider id, capability,\nthe stable concrete model name, ordered fallbacks, current provider readiness,\nand which precedence layer the assignment came from. Never a credential, env\nvalue, token, or private path.\n\n``provider_id`` is EMPTY when no preset layer declares a provider for the\nrole, which is the ordinary state now that product presets carry no\nprovider policy: a run chooses its lane at run start from the served catalog.\nEmpty rather than absent so the field keeps one type, and never a substituted\nprovider name - naming a lane no preset asked for would be indistinguishable\nfrom a real declaration. ``resolution_error`` carries the reason and ``source``\nreads ``undeclared``; the role is reported ineligible.\n\n``provider_id`` is deliberately NOT typed by the ``Provider`` enumeration\nserved beside it on the agent snapshot, even though the two carry the same\nconcept. This surface replays FROZEN historical assignments, and two of its\nvalues are provably outside that enumeration: the empty string documented\nabove, and a provider a past run froze that this build no longer knows -\na case the disclosure path already handles explicitly by reporting it not\nready rather than raising. Narrowing here would turn both into a validation\nfailure on a read path. The reconciliation is therefore that these are two\nconcepts: ``Provider`` is the closed set of lanes this build can RUN, and\nthis is an identifier a past run RECORDED."
       },
       "RoleState": {
         "properties": {
@@ -3357,8 +3406,7 @@
             "title": "Lease Id"
           },
           "semantic_status": {
-            "type": "string",
-            "title": "Semantic Status",
+            "$ref": "#/components/schemas/SemanticPhase",
             "default": "starting"
           },
           "nickname": {
@@ -4044,8 +4092,7 @@
             "title": "Nickname"
           },
           "semantic_status": {
-            "type": "string",
-            "title": "Semantic Status",
+            "$ref": "#/components/schemas/SemanticPhase",
             "default": "starting"
           },
           "eligible": {
@@ -4091,8 +4138,7 @@
             "$ref": "#/components/schemas/ThreadStatus"
           },
           "semantic_phase": {
-            "type": "string",
-            "title": "Semantic Phase"
+            "$ref": "#/components/schemas/SemanticPhase"
           },
           "feature_tag": {
             "anyOf": [
@@ -4143,13 +4189,12 @@
           "approval_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ApprovalStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Approval Status"
+            ]
           },
           "approval_request_id": {
             "anyOf": [
@@ -4181,24 +4226,22 @@
           "repair_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Repair Status"
+            ]
           },
           "execution_readiness": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Execution Readiness"
+            ]
           },
           "degraded_reasons": {
             "items": {
@@ -4221,13 +4264,12 @@
           "provider_condition": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ProviderCondition"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Provider Condition"
+            ]
           },
           "repair_reason": {
             "anyOf": [
@@ -4420,38 +4462,32 @@
           "repair_status": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 64
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Repair Status"
+            ]
           },
           "execution_readiness": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 64
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Execution Readiness"
+            ]
           },
           "approval_status": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 64
+                "$ref": "#/components/schemas/ApprovalStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Approval Status"
+            ]
           },
           "approval_request_id": {
             "anyOf": [
@@ -4510,6 +4546,29 @@
         "title": "RunSummaryRecord",
         "description": "One run as the history reading reports it: identity plus its projection.\n\nDeliberately wider than :class:`ActiveRunRecord`, and deliberately a\nSEPARATE model rather than fields added to it. Discovery answers the narrow\nquestion \"which runs are live, and where do I bind a viewer\" and its shape is\ncertified byte-for-byte; a reader of history is asking what happened, and\nneeds the facts that distinguish a healthy run from a degraded one.\n\nEvery field here is one the list service already resolves - the degradation\nprojections in particular are its reading of checkpoint authority and stale\napproval pointers, not a restatement of stored columns - so nothing is\ninvented that the projection cannot fill."
       },
+      "SemanticPhase": {
+        "type": "string",
+        "enum": [
+          "starting",
+          "running",
+          "researching",
+          "synthesizing_research",
+          "reviewing_research",
+          "awaiting_research_decision",
+          "writing_adr",
+          "reviewing_adr",
+          "awaiting_adr_decision",
+          "writing_plan",
+          "reviewing_plan",
+          "awaiting_plan_decision",
+          "recovery_required",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "SemanticPhase",
+        "description": "What a run is product-visibly doing, in terms that name no graph node.\n\nThe one vocabulary for a run's semantic position, served on run-status as\n``semantic_phase``, on the run-start and commit acknowledgements as\n``semantic_status``, and stamped onto progress frames. Those three fields\nask the same question at different moments, so they answer from this set.\n\nIt is deliberately wider than the authoring phases alone. A run outside the\nresearch_adr topology, or between nodes, is honestly ``RUNNING`` rather than\ngiven a fabricated authoring phase, and a run that has not dispatched is\n``STARTING``. The terminal members collapse the lifecycle pairs a product\nreader cannot act on separately: an archived run reads ``COMPLETED`` and a\ncancelling one reads ``CANCELLED``, because the distinction is a lifecycle\nfact and this vocabulary is a product one.\n\n``RECOVERY_REQUIRED`` is the only member that is not a position: it says the\nrun cannot advance until it is repaired, which is what a reader needs before\nany phase detail matters."
+      },
       "ServiceStateResponse": {
         "properties": {
           "api_version": {
@@ -4557,13 +4616,12 @@
           "worker_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/WorkerConnectionStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Worker Status"
+            ]
           },
           "worker_connected": {
             "anyOf": [
@@ -5343,6 +5401,17 @@
         "title": "TopologyPosition",
         "description": "Where a run sits in its team topology (recovery snapshot).\n\nProduct-facing status speaks role vocabulary only: ``active_agent`` is\nthe role currently working, never an internal LangGraph node name. The raw\nnext-node projection lives in the internal recovery snapshot\n(``thread/snapshots.py``), not this contract; ``next_nodes`` was dropped\nfrom the v1 surface."
       },
+      "TopologyType": {
+        "type": "string",
+        "enum": [
+          "star",
+          "pipeline",
+          "pipeline_loop",
+          "research_adr"
+        ],
+        "title": "TopologyType",
+        "description": "Supported graph topology types.\n\nUses enum membership instead of string comparison."
+      },
       "TranscriptAvailability": {
         "type": "string",
         "enum": [
@@ -5393,6 +5462,18 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkerConnectionStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "up",
+          "down",
+          "restarting",
+          "unknown"
+        ],
+        "title": "WorkerConnectionStatus",
+        "description": "What the watchdog last observed about the worker process it supervises.\n\n``PENDING`` is the pre-observation value the state container is created\nwith: a watchdog exists but has not yet completed a probe, which is not the\nsame claim as ``DOWN``. ``UP`` and ``DOWN`` are settled observations,\n``RESTARTING`` is the window in which the watchdog is deliberately replacing\nthe process, and ``UNKNOWN`` is what a reader gets when no worker state\ncontainer exists at all - a gateway configured without a supervised worker."
       },
       "WorkerLifecycleState": {
         "type": "string",

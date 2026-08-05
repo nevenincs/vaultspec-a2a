@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:8c449ccbeb56098508f34891d6ee6083a627d36154d688ffa5509cbfa9a7ea19'
+body_hash: 'sha256:3cfa6eafae9ff45553a4772908ac895ac5d31b359f74a11257c122ad55f7f695'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -36,10 +36,19 @@ never written.
 
 An earlier framing of this plan attributed the authoring failure to a mis-valued
 capability string. That hypothesis is REFUTED (audit F16's correction): the
-mechanism is F24, a bridged tool call auto-denied at a provider permission rung
-with no permission request ever surfaced. `W01.P01.S01` accordingly opens with
-the cheap diagnostic - dump the generated provider config for a live run - not
-with a policy change made blind.
+mechanism is F24, a default deny with no elicitation path wired. F24's own
+mechanism detail has since been corrected once more by live protocol
+reproduction, so the Step text is authoritative over any earlier description of
+it - in particular, the remedy is to wire the elicitation rung with
+frame-correlated tool identity and a fail-closed default, NOT to relax a
+provider policy.
+
+F41 is causally upstream of this whole Wave and sits in `W05` only because it is
+a cross-repository change. The approve and apply verbs existed the entire time;
+this repository never called them because they were visible only by reading
+another language in another repository. An unserved contract is what let the
+delivery path stay broken, so treating F41 as documentation tidy-up would miss
+that it CAUSED the highest-ranked phase here.
 
 The governing decision is the canonical-vocabulary record in `related:`. Note
 its deliberate scope limit: it governs a served value's DOMAIN and explicitly
@@ -90,7 +99,7 @@ The product's primary function reports success while delivering nothing (audit F
 
 One diagnostic that must precede any provider-policy change, and one watchdog fix that stands on its own evidence. The earlier framing of this Phase rested on a hypothesis the audit has since refuted.
 
-- [ ] `W01.P01.S01` - F24 root cause of F16 - dump the generated codex config home for a live run and confirm whether the authoring server block carries propose_changeset in its enabled tool set, which is the cheap first diagnostic before any policy change; `src/vaultspec_a2a/providers/_codex_config_home.py`.
+- [ ] `W01.P01.S01` - F24 diagnostic - ANSWERED by F42 and awaiting closure confirmation from its owner. The generated config writes automatic tool approval for every server including the authoring bridge, and the provider raises the elicitation regardless, so the config key is inert on these blocks and no policy change follows from it. The remaining work moved to S34; `src/vaultspec_a2a/providers/_codex_config_home.py`.
 - [x] `W01.P01.S02` - F25 DONE in commit 088bd603 - the ingest-stall bound is now derived from the compiled graph rather than a flat global, so a run's own declared step timeout is honoured and presets without one keep the previous floor; `src/vaultspec_a2a/streaming/ingest.py`.
 
 ### Phase `W01.P02` - close the false green
@@ -106,9 +115,10 @@ Restore the missing artifact and remove the silent success that concealed it; ei
 
 A produced document has no route to disk. This is the highest product impact on the plan - a document that cannot be applied is indistinguishable from one never written.
 
-- [ ] `W01.P11.S34` - F24 - unblock the bridged authoring tool on the codex lane, either by relaxing the provider policy for the authoring server or by routing the tool permission through a2a's own handler so a denial becomes a real answerable permission request rather than a silent refusal; `src/vaultspec_a2a/providers/_acp_authoring.py`.
+- [ ] `W01.P11.S34` - F24 and F42 - wire the MCP server elicitation rung, recovering tool identity by correlating with the tool-call notification that arrives immediately before on the same thread and turn, because the elicitation payload carries no tool-name field and parsing its prose message is forbidden. FAIL CLOSED to decline on any correlation miss and log it, or the remedy becomes a latent blanket approve that the exact-name allowlist rulings forbid. Do NOT rely on the generated automatic-approval config key - F42 proves it is inert on these server blocks; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
 - [ ] `W01.P11.S35` - F30 - forward an a2a approval to the engine's approval queue, or document and serve the second call a frontend must make, so an approved proposal can actually become a file; `src/vaultspec_a2a/authoring/session.py`.
-- [ ] `W01.P11.S36` - Prove the whole delivery path end to end with a live run - instruction in, proposal created, body served to a reviewer, approval forwarded, file on disk - which no run has yet achieved; `src/vaultspec_a2a/acceptance/tests`.
+- [ ] `W01.P11.S36` - Prove the whole delivery path end to end with a live run - instruction in, proposal created, body served to a reviewer, approval forwarded, file on disk - which no run has yet achieved. The retry and idempotency half must drive a REAL ENGINE, because the engine is what dedupes on the idempotency key: a same-process assertion proves only that the key is stable, never that the document was applied once. That distinction is a drift guard versus a real proof, and only the second closes this Step; `src/vaultspec_a2a/acceptance/tests`.
+- [ ] `W01.P11.S48` - F30 deferred half - report the engine's apply outcome honestly on the permission-respond response, since Option A wires the engine calls without touching the response shape and leaves the success path reporting accepted_not_applied, which is UNDERSTATED rather than wrong. Blocked on the schema module being released, and should land together with the document-body route which is blocked on the same file for a different reason rather than contending for it twice. Do NOT encode new outcomes into the action-status string - it is an undeclared vocabulary clients branch on, and growing it mid-capture would hand the containment proof a moving target; `src/vaultspec_a2a/api/schemas/gateway.py`.
 
 ## Wave `W02` - additive contract corrections
 
@@ -203,6 +213,7 @@ Each Step changes what a served field means and requires agreement with the cons
 - [ ] `W05.P10.S45` - F33 BREAKING cross-repo - reconcile the engine's run metadata shape with a2a's model and fail loudly rather than reporting it absent, since workspace provenance is currently dropped silently for proxy-started runs; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S46` - F28 cross-repo - publish an engine schema, declare the conditional requirement of feature_tag in a2a, align workspace_root across the two surfaces and return proxy errors with a non-200 status; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S11` - F10 BREAKING not additive - declare the discriminator on the run-start response union, which requires adding a stage const to RunStartResponse since the other three members already carry one and it alone does not, so it touches a payload the dashboard parses. Cheap once sequenced - one const field plus a discriminator block, with three members already establishing the pattern; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [ ] `W05.P10.S49` - F41 cross-repo and causally upstream of W01.P11 - serve the engine's existing route-fixture table as a machine-readable description at a stable path and stop returning application HTML from the schema path, preserving the per-route named-refusal list which is the valuable part. This is unserved work rather than missing work, and it is the demonstrated cause of F30; `src/vaultspec_a2a/api/schemas/gateway.py`.
 
 ## Parallelization
 

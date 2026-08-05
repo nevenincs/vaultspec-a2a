@@ -6,8 +6,11 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:1368e50929da68eae6f2697a3dfd5c39cb4fb386590c7f5bc4f78075908c517b'
+body_hash: 'sha256:9a80cda42e11d48f70649c3e486152b46512cb72ad1fb52ae21693cc28216fba'
 related:
+  - '[[2026-08-05-served-capability-contract-W01-P01-S02]]'
+  - '[[2026-08-05-served-capability-contract-W02-P04-S12]]'
+  - '[[2026-08-05-served-capability-contract-W02-P04-S16]]'
   - '[[2026-08-05-served-capability-contract-adr]]'
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
   - '[[2026-08-05-served-capability-contract-failure-observability-adr]]'
@@ -33,6 +36,12 @@ Auto-generated index of all documents tagged with `#served-capability-contract`.
 ### audit
 
 - `2026-08-05-served-capability-contract-gateway-contract-audit` - `served-capability-contract` audit: `what the served gateway contract tells a frontend versus what is true`
+
+### exec
+
+- `2026-08-05-served-capability-contract-W01-P01-S02` - F25 DONE in commit 088bd603 - the ingest-stall bound is now derived from the compiled graph rather than a flat global, so a run's own declared step timeout is honoured and presets without one keep the previous floor
+- `2026-08-05-served-capability-contract-W02-P04-S12` - F11 DONE in commit 1022ba08 - the five underscore-prefixed snapshot models were renamed and exported, the parity test updated, and zero underscore-prefixed schemas remain in the published contract, verified against the committed artifact
+- `2026-08-05-served-capability-contract-W02-P04-S16` - Document the OpenAPI artifact regeneration command, which exists only inside the test file that enforces it
 
 ### plan
 

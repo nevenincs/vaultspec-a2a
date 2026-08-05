@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:eaa68eb2f49cf7260c4f373e46ce04788c5b536029c25bcaad13796c20f2c8f2'
+body_hash: 'sha256:9ace72e5774d118baf365a0f6bb7cb7f38fd3ff39d672ab4c33442e44d43322b'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,7 +54,8 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F39**.
+place. The current highest identifier is **F43**. F40 is RESERVED - assigned to an
+agent and not yet delivered - and is held rather than reused.
 
 **Renumbering applied to the third tranche, recorded so the source remains
 traceable.** The live-run tranche from the `product-proof` session was authored
@@ -95,12 +96,32 @@ is one channel, and the counts cited against it are aggregates over a window
 that cannot rule out a gap inside it. The real defect is a threshold mismatch,
 which is worse than a false signal rather than milder.
 
+F24 has also been corrected once, on the same pattern: its mechanism was
+diagnosed from a binary string grep, the string was present, and presence read
+as confirmation. It was present for an unrelated feature. The correction came
+from driving the actual protocol in both directions.
+
 The method lesson is the durable part. A refutation assembled from a DERIVED
 AGGREGATE of the same signal is not a refutation - it changes the resolution,
 not the subject. Both wrong versions of this entry were argued from throughput
 totals; only reading the code settled it. This document's own T5-shaped rule
 applies to its findings as much as to the fields they describe: state what was
 observed, at the resolution it was observed.
+
+**A METHOD RULE THIS AUDIT EARNED THE HARD WAY, and which anyone appending
+should read first.** Two findings in this document were mis-stated because A
+SEARCH HIT WAS READ AS PROOF - a string present in a binary for an unrelated
+feature (F24), and per-minute event counts standing in for a per-event gap
+(F25). Both survived review, both were confidently argued, and both were
+corrected only by someone tracing the actual code or driving the actual
+protocol. A grep proves a string exists. It does not prove what produced it, what
+consumes it, or that it is on the path under investigation. Where a finding's
+mechanism rests on a search result alone, it is a HYPOTHESIS and must be labelled
+one; only execution or a code trace promotes it.
+
+This is the same lesson as the audit's own through-line - a surface that looks
+right over a mechanism that is not - applied to the audit's METHOD rather than
+to the product. The document is not exempt from the failure it documents.
 
 ## Findings
 
@@ -575,31 +596,56 @@ a transition or terminal-state contract with a writer that is required to
 advance the value - and must not be folded into the typing work, or F17 and F22
 will be marked closed while still occurring.
 
-### F24-bridged-propose-is-auto-denied | critical | the authoring tool is refused as though a human declined, and no permission request is ever surfaced
+### F24-bridged-propose-is-auto-denied | critical | the authoring tool is refused at a default-deny with no elicitation path wired, and no permission request is ever surfaced
 
 Source tranche number 23. THE ROOT CAUSE OF F16. An instrumented run asked the
 model to call the engine's propose tool once and report any rejection verbatim.
 It returned `[{"type":"text","text":"user rejected MCP tool call"}]` against a
-payload that conforms to the schema the engine publishes at its agent-tools
-route. The run settled `completed` with `failure_reason: null`,
-`proposal_ids: []`, `pending_permissions: []`, and no permission-request event
-on the stream. PROVEN: a2a's own permission handler never ran - the handler logs
-a line on every invocation and there are zero such lines in the worker log for
-that run. PROVEN FROM SOURCE: the codex lane hardcodes an approval policy of
-`never` and a read-only sandbox, while the authoring server spec deliberately
-names every catalog tool including the propose tool, its docstring stating that
-restricting to reads "would silently strip the agent's propose path, the exact
-gap this function exists to close". The design intends auto-approval; the live
-call is denied anyway. INFERRED and explicitly not isolated: that the denial
-originates at the codex app-server's own approval rung before a2a is consulted -
-the phrase "user rejected MCP tool call" appears nowhere in a2a source, so the
-vocabulary is not a2a's. CONSEQUENCE: single-document authoring is impossible on
-the only admitted provider lane, and the gate cannot be answered because it is
-never asked. CLASSIFICATION: genuine defect. REMEDY: either relax the codex
-policy for the bridged authoring server, or route the tool's permission through
-a2a's handler so the denial becomes a real answerable request. The cheap first
-diagnostic is to dump the generated codex config for a live run and confirm the
-authoring server block actually carries the propose tool in its enabled set.
+payload conforming to the schema the engine publishes at its agent-tools route.
+The run settled `completed` with `failure_reason: null`, `proposal_ids: []`,
+`pending_permissions: []`, and no permission-request event on the stream.
+PROVEN: a2a's own permission handler never ran - it logs a line on every
+invocation and there are zero such lines in the worker log for that run.
+
+MECHANISM, established by LIVE PROTOCOL REPRODUCTION IN BOTH DIRECTIONS and
+superseding the original inference. The provider answers every server-initiated
+request with a method-not-found error, which is a default deny with no
+elicitation path wired. Answering that way makes the tool item settle `failed`
+with the rejection text and the turn complete - AND the target server receives
+`initialize` and `tools/list` but never `tools/call`. Answering instead with an
+acceptance makes the same tool settle `completed` with a real result, and the
+server logs the actual call. That the call never reaches the server in the deny
+case is what makes this conclusive rather than suggestive.
+
+THREE SPECIFICS IN THE ORIGINAL DIAGNOSIS WERE WRONG, and the reason they were
+wrong is recorded because it generalizes. First, the method is the MCP server
+elicitation request, NOT a permissions method - no method of that name exists in
+this protocol version, and the similarly-named approval method that does exist
+is sandbox escalation carrying no tool identity, a different feature. Second,
+the response vocabulary is the MCP elicitation contract of accept, decline, or
+cancel - not the approved/denied/timed-out set, which is real but belongs to
+auto-review NOTIFICATIONS that are informational rather than a client rung.
+Third, the request carries NO TOOL-NAME FIELD: its parameters name the thread,
+turn, server, mode, message, requested schema and a metadata marker, and the
+tool name appears ONLY inside the human-readable message.
+
+The original diagnosis came from a BINARY STRING GREP - the string was present,
+so it read as confirmation. It was present for an unrelated feature.
+
+CONSEQUENCE FOR THE REMEDY, which the third specific constrains sharply. The
+ruled decisions require an exact-name allowlist and explicitly reject blanket
+approval, and the autonomous fallback is barred from approving uncovered calls.
+The elicitation payload cannot supply that name on its own, so tool identity must
+be recovered by correlating with the tool-call notification that arrives
+immediately before on the same thread and turn. Parsing the prose message is
+forbidden. Any correlation miss must therefore FAIL CLOSED to decline and log,
+or the remedy becomes a latent blanket approve - which would be worse than the
+defect it replaces.
+
+CLASSIFICATION: genuine defect. REMEDY: wire the elicitation rung with
+frame-correlated tool identity and a fail-closed default. The substance of the
+original finding is unchanged: a default deny, no permission object ever
+constructed, and a run settling completed with nothing produced.
 
 ### F25-watchdog-bound-ignores-the-runs-own-timeouts | critical | an unconditional 90-second bound killed a run whose own configuration sanctioned 1800 seconds of node silence
 
@@ -859,7 +905,95 @@ rather than a property of the three runs that first exposed it, which is a
 stronger claim than any single earlier finding could support. Anyone closing a
 contract-shaped Step on source reading alone should read this entry first.
 
-### F40-and-beyond | low | reserved marker for continuous appending
+### F40-reserved | low | reserved, assigned and not yet received
+
+Assigned to a live-run agent for an ACP-lane tool-call gap and not yet delivered
+in full. The number is held rather than reused so the assignment stays stable.
+Known shape, to be replaced by the agent's own text: agent-lane tool calls
+accumulate rich per-update status, content and locations in the session context,
+but that state is wiped at session cleanup and never re-emitted, so it is
+unrecoverable from either the streaming or the snapshot side and needs the
+provider to forward per-update data. LATENT, NOT LIVE - no such lane is
+currently an admitted provider, and the evidence from the admitted lane must not
+be read as inflating this one.
+
+### F41-engine-route-table-is-never-served | high | the engine holds a complete machine-readable route table and serves single-page-application HTML instead
+
+Same family as F1, a strong contract a client cannot reach; this is its mirror on
+the engine side. The engine's authoring module holds a route-fixture array
+covering the whole authoring surface, carrying per route the method, path
+template, family, command kind, whether it mutates, whether idempotency is
+required, and a list of in-domain refusals NAMED INDIVIDUALLY - stale review
+revision, stale approval, missing idempotency key, unknown field. Sixteen routes
+are declared this way, including the review-decision and apply-request routes.
+Meanwhile the engine's OpenAPI path returns 200 with single-page-application
+HTML.
+
+CONSEQUENCE: this repository had to be written against that surface by reading
+another repository's source. CLASSIFICATION: genuine defect, and a cheap one -
+this is not missing work but UNSERVED work. The declaration already exists in a
+form richer than most OpenAPI documents, naming per-route failure modes that
+OpenAPI usually cannot. Nothing needs authoring; something needs exposing.
+REMEDY: serve the route table as a machine-readable description at a stable
+path and stop returning application HTML from the schema path. The named-refusal
+list is the valuable part and must survive into whatever is served - a client
+that knows a stale approval is a named outcome can handle it, where one
+discovering it as an opaque success-with-denial cannot. CROSS-REPOSITORY: this
+is a dashboard-repository change, cheap but not ours to land.
+
+WHY THIS OUTRANKS ITS SEVERITY: F41 is the DEMONSTRATED CAUSE OF F30. The
+approve and apply verbs existed the whole time and this repository never called
+them, because nobody could see them without reading another language in another
+repository. An unserved contract let a capability sit implemented-but-unreached,
+and the product's entire delivery path was broken as a direct result. That makes
+this causally upstream of the highest-ranked phase on the plan rather than a
+tidy-up item.
+
+### F42-tool-approval-config-key-does-nothing | medium | the generated provider config sets automatic tool approval for every server and the elicitation is raised anyway
+
+The generated provider configuration home writes an automatic tool-approval mode
+for EVERY declared server including the authoring bridge, and the provider still
+raised the elicitation that F24 records. The key therefore does not suppress the
+prompt on those server blocks, and a client-side rung is required regardless.
+CONSEQUENCE, and the reason this is recorded separately rather than folded into
+F24: without it, a later engineer meeting a recurrence will "fix" it by trusting
+that configuration key, and it will silently do nothing. CLASSIFICATION: genuine
+defect, or at minimum a documented-behaviour gap in a dependency; either way the
+operational consequence is the same. REMEDY: do not rely on the key; keep the
+client rung as the enforcement point, and record that the key is inert here.
+
+### F43-applied-means-two-different-things | medium | a near-miss where the natural fix would have merged two distinct verdicts under one English word
+
+Caught BEFORE any code was written, by reading a field's docstring rather than
+its name. The permission-respond response carries an `applied` flag whose own
+documentation states it reports whether the WORKER durably confirmed applying
+that request's PERMISSION RESOLUTION. The engine applying a DOCUMENT CHANGESET
+to disk is a different fact on a different plane. Two distinct verdicts share one
+English word.
+
+The obvious implementation of F30's remedy - forward the decision, then set the
+flag true - would have merged them, made the flag untrue for its existing
+consumers, and violated the canonical-homes ruling that distinct verdicts are
+load-bearing and merging them destroys properties they were written to hold.
+
+CLASSIFICATION: near-miss, no defect shipped. RECORDED IN THE F39 FAMILY and for
+the same reason. F39 earned its number because this document's through-line
+reproduced during the remediation of it; F43 is the same phenomenon caught one
+step EARLIER, before the code existed. That the correct fix's most natural
+implementation was itself a canonical-homes violation says something about how
+this class of defect propagates: it is not that people are careless, it is that
+the wrong merge is the shortest path from a correct intention.
+
+A second decision from the same work belongs here as evidence rather than as a
+defect: encoding new outcomes into the action-status string was REJECTED because
+it is a bare vocabulary clients branch on, undeclared under the
+canonical-vocabulary record's enum-worthiness clause, and growing its value set
+mid-capture would hand the in-flight containment proof a moving target. A refusal
+becomes a truthful error response instead. That is a served-contract rule doing
+real work on a live decision, which is worth recording as evidence the record is
+load-bearing rather than aspirational.
+
+### F44-and-beyond | low | reserved marker for continuous appending
 
 New findings land immediately above this marker, taking the next free identifier
 after the highest already assigned. This entry carries no finding; it exists so

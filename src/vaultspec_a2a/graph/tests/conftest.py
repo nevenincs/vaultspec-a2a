@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeChatModel
 
+from ...testing import apply_layer_markers
 from ..enums import Model, Provider
 from ..protocols import ProviderFactoryProtocol
 
@@ -49,15 +50,12 @@ _IMPURE_CORE_FILES = frozenset(
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Mark graph tests: ``middleware`` for L2 imports, else ``core`` (+ ``unit``)."""
-    for item in items:
-        if not str(item.path).startswith(_PACKAGE_DIR):
-            continue
-        if item.path.name in _MIDDLEWARE_FILES:
-            item.add_marker(pytest.mark.middleware)
-        else:
-            item.add_marker(pytest.mark.core)
-            if item.path.name not in _IMPURE_CORE_FILES:
-                item.add_marker(pytest.mark.unit)
+    apply_layer_markers(
+        items,
+        package_dir=_PACKAGE_DIR,
+        middleware_files=_MIDDLEWARE_FILES,
+        impure_files=_IMPURE_CORE_FILES,
+    )
 
 
 # ---------------------------------------------------------------------------

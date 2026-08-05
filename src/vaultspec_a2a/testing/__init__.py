@@ -32,6 +32,7 @@ from .leases import (
     lease_home,
 )
 from .links import plant_link_to_file
+from .markers import apply_layer_markers
 from .ports import (
     SCRATCH_ROLE,
     PortAllocationError,
@@ -91,6 +92,7 @@ __all__ = [
     "ResourceDiedError",
     "ResourceSpec",
     "allocate_free_ports",
+    "apply_layer_markers",
     "armed_desktop_app_home",
     "armed_environment",
     "declared_claims",

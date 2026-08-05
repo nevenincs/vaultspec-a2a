@@ -25,6 +25,7 @@ from pydantic import SecretStr
 from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
 from ...graph.enums import Provider
+from ...testing import armed_desktop_app_home
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
 from .._acp_mcp import codex_mcp_server_specs
@@ -40,7 +41,7 @@ from .._config_home_roots import ORPHAN_HOME_MIN_AGE_SECONDS, temp_home_root
 from ..lane_admission import PROVEN_WEB_LANES, is_web_lane_proven
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from .._json_contract import JsonObject
     from ..codex_chat_model import CodexChatModel
@@ -58,6 +59,41 @@ def _active_codex_leak_root() -> Path:
     leak check honest under both the armed and unarmed profile.
     """
     return temp_home_root() or Path(tempfile.gettempdir())
+
+
+@pytest.fixture
+def private_home_root(tmp_path: Path) -> Iterator[Path]:
+    """Point per-run home creation at a root no other process writes to.
+
+    The leak assertions below compare a glob of that root before and after a
+    failure. By default the root is the machine-wide temporary directory, shared
+    with every other lane on the machine, so a concurrent run creating its own
+    Codex home made the comparison fail for a reason that had nothing to do with
+    cleanup. Declaring the root through the settings surface - the same field an
+    armed desktop install sets - makes the comparison private without teaching
+    the tests a second way to find homes.
+
+    The steering is ASSERTED rather than assumed. If the declared root stopped
+    being what the production resolver returns, the glob would search a
+    directory nothing ever writes to and every leak assertion below would pass
+    VACUOUSLY - which is the exact failure :func:`_active_codex_leak_root`
+    exists to prevent, arriving through the fix for a different problem.
+
+    It arms the profile because ``desktop_temp_homes_dir`` is DERIVED from the
+    application home and has no setter; arming through the sanctioned helper
+    sets the field the property reads. That does move these three onto the armed
+    placement, and that costs no coverage: placement under each profile has its
+    own dedicated test below, while what these three assert is the cleanup
+    branch, which does not vary by root.
+    """
+    with armed_desktop_app_home(tmp_path / "app-home"):
+        root = _active_codex_leak_root()
+        assert root != Path(tempfile.gettempdir()), (
+            "the armed profile did not move the home root off the shared "
+            "temporary directory, so these assertions would still be exposed "
+            "to every other process on this machine"
+        )
+        yield root
 
 
 def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[str]:
@@ -705,7 +741,9 @@ def test_cleanup_is_none_safe_and_idempotent(tmp_path: Path) -> None:
     cleanup_codex_config_home(home)
 
 
-def test_build_self_cleans_on_copy_failure(tmp_path: Path) -> None:
+def test_build_self_cleans_on_copy_failure(
+    tmp_path: Path, private_home_root: Path
+) -> None:
     # If the credential copy fails mid-build, the partially-built home (which may
     # already hold a credential) must not leak: the builder removes its own dir.
     base = tmp_path / "base"
@@ -724,7 +762,9 @@ def test_build_self_cleans_on_copy_failure(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_spawn_failure_cleans_credential_home(tmp_path: Path) -> None:
+async def test_spawn_failure_cleans_credential_home(
+    tmp_path: Path, private_home_root: Path
+) -> None:
     # The exact HIGH-1 scenario: the credential home is built, then the subprocess
     # SPAWN itself raises (here an invalid cwd) before a client exists. The home
     # must still be cleaned - exercising the `client is None` finally branch.
@@ -751,7 +791,7 @@ async def test_spawn_failure_cleans_credential_home(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_turn_failure_after_build_cleans_credential_home(
-    tmp_path: Path,
+    tmp_path: Path, private_home_root: Path
 ) -> None:
     # A failure AFTER the credential home is built (here the codex subprocess
     # exits immediately, so the handshake fails) must still clean the home - the

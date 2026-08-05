@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:76b2646dfed508525ba7d61862f88207b15fa01539e304ca6251af3b05c2bde0'
+body_hash: 'sha256:1d43e7e6e54c2d88d4622cc8c8053736b9aabcc405b5585c58f8d6c01330a1b9'
 step_id: 'S35'
 related:
   - "[[2026-08-05-served-capability-contract-plan]]"
@@ -50,13 +50,22 @@ conflict for a stale revision fence.
 
 ## Notes
 
-THE PHASE DOES NOT CLOSE ON THIS, and that distinction must not be lost. The
-capability is reachable by callers inside this repository and by nobody else:
-no served route exposes the review-decision and apply verbs, and the consuming
-frontend speaks only to this service's edge, never to the loopback engine. A
-delivery path only this repository can reach does not close a phase that exists
-because the product cannot deliver. The gap is recorded as its own finding and
-the phase stays open behind it.
+CORRECTION - THE REACHABILITY CAVEAT ORIGINALLY RECORDED HERE IS RETRACTED. This
+record first said the capability was reachable inside this repository and by
+nobody else, citing a finding that has since been withdrawn. The consuming
+frontend reaches the engine's review and apply verbs DIRECTLY, so the human
+delivery path was complete before this campaign began.
+
+What this Step actually delivered, stated correctly: a SECOND consumer of those
+same engine verbs - a programmatic path for this service with no human at a
+browser, which genuinely did not exist. That is a real capability and a real
+first. It is a narrower claim than the one originally recorded here, and the
+work is not diminished by the correction - only the reachability framing around
+it was wrong.
+
+The phase still does not close on this Step alone: the engine content gap behind
+the review-body question is unresolved and needs verifying through the
+consuming client rather than through a declaration.
 
 THE PROOF ARTIFACT, captured here because the file itself is deliberately
 untracked. Path `.vault/research/2026-08-05-mantest-probe-research.md`, 1900

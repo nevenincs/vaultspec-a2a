@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:0b4bd6c086b654552756e8aa7bd262473cc073ad0fcbebb257339edb7867c562'
+body_hash: 'sha256:4398a523103a8a501d7085e521dce1aa91342ec1a9bfe6a2f471d66b7fef2c99'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -109,17 +109,17 @@ Restore the missing artifact and remove the silent success that concealed it; ei
 - [ ] `W01.P02.S03` - F16 - make the document editor submit its authored output as an engine proposal so the review lane has something to apply; `src/vaultspec_a2a/authoring/submitter.py`.
 - [ ] `W01.P02.S04` - F16 safety half - refuse to report a document-authoring run completed with empty degradation when it produced no artifact, the silent green being a separate defect from the missing proposal; `src/vaultspec_a2a/control/run_start_policy.py`.
 - [ ] `W01.P02.S05` - F21 - gate authored document content on structural validity before submission so the review lane never receives a document with duplicated sections; `src/vaultspec_a2a/authoring/submitter.py`.
-- [ ] `W01.P02.S06` - F29 - serve the proposed document body so a human can see what they are approving, from the engine and or as a passthrough on the run; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [ ] `W01.P02.S06` - F29 PARTIALLY RETRACTED - the half claiming no route here serves the document body falls with F57, since the dashboard reads proposal detail direct from the engine. What SURVIVES is an engine content gap: the proposal fetch returned an empty review-documents array and the diff and preview routes 404. VERIFY THAT AGAINST THE DASHBOARD'S LIVE CLIENT before acting - it may be a dev-config artifact - and verify through the CONSUMER, not the declaration; `src/vaultspec_a2a/api/routes/gateway.py`.
 
 ### Phase `W01.P11` - restore the delivery path
 
 A produced document has no route to disk. This is the highest product impact on the plan - a document that cannot be applied is indistinguishable from one never written.
 
 - [ ] `W01.P11.S34` - F24 and F42 - wire the MCP server elicitation rung, recovering tool identity by correlating with the tool-call notification that arrives immediately before on the same thread and turn, because the elicitation payload carries no tool-name field and parsing its prose message is forbidden. FAIL CLOSED to decline on any correlation miss and log it, or the remedy becomes a latent blanket approve that the exact-name allowlist rulings forbid. Do NOT rely on the generated automatic-approval config key - F42 proves it is inert on these server blocks; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
-- [x] `W01.P11.S35` - F30 DONE in commit cb7f856e - approval forwarding wired through the engine decision and apply verbs, proven by a real document reaching disk. NOTE the phase does NOT close on this: delivery works for callers inside this repository and for nobody else, because no REST proxy exposes those verbs to the frontend. That gap is F57; `src/vaultspec_a2a/authoring/session.py`.
+- [x] `W01.P11.S35` - F30 DONE in commit cb7f856e - approval forwarding wired through the engine decision and apply verbs, proven by a real document reaching disk. What it added is a SECOND consumer of those verbs, a programmatic path with no human at a browser. The human path already worked directly against the engine, so the earlier claim that no frontend could reach them was F57, now retracted; `src/vaultspec_a2a/authoring/session.py`.
 - [ ] `W01.P11.S36` - Prove the whole delivery path end to end with a live run - instruction in, proposal created, body served to a reviewer, approval forwarded, file on disk - which no run has yet achieved. The retry and idempotency half must drive a REAL ENGINE, because the engine is what dedupes on the idempotency key: a same-process assertion proves only that the key is stable, never that the document was applied once. That distinction is a drift guard versus a real proof, and only the second closes this Step; `src/vaultspec_a2a/acceptance/tests`.
 - [ ] `W01.P11.S48` - F30 deferred half - report the engine's apply outcome honestly on the permission-respond response, since Option A wires the engine calls without touching the response shape and leaves the success path reporting accepted_not_applied, which is UNDERSTATED rather than wrong. Blocked on the schema module being released, and should land together with the document-body route which is blocked on the same file for a different reason rather than contending for it twice. Do NOT encode new outcomes into the action-status string - it is an undeclared vocabulary clients branch on, and growing it mid-capture would hand the containment proof a moving target; `src/vaultspec_a2a/api/schemas/gateway.py`.
-- [ ] `W01.P11.S54` - F57 - serve a REST proxy for the engine review-decision and apply verbs so the delivery path is reachable by the frontend rather than only by callers inside this repository. This is what W01.P11 actually closes on: a file reaching disk proved the mechanism, not the product capability; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [ ] `W01.P11.S54` - F57 RETRACTED - the premise was wrong and this Step has no work. The dashboard reaches the engine review and apply verbs DIRECTLY, so the human delivery path was complete before this campaign began. Retired in place rather than removed so the wrong premise stays visible. Under V9 a proxy here would have been a mirror of another authority's surface; `src/vaultspec_a2a/api/routes/gateway.py`.
 
 ## Wave `W02` - additive contract corrections
 
@@ -149,6 +149,7 @@ Mechanical contract corrections with no owner yet, each independent of the other
 - [ ] `W02.P04.S40` - F36 - demote the health poll and the unreachable-collector telemetry export, and log authoring tool calls and rejections with the run identifier, since the logs cannot currently answer what a run did; `src/vaultspec_a2a/lifecycle`.
 - [ ] `W02.P04.S51` - F51 latent - route execution_readiness assignments through the same coercion helper repair_status already uses, since both columns share a type but only one is gated on write, and serving the field as an enumeration turns a silently accepted bad value into a 500 on run-status days later. Blocked on the owning repository module being released; `src/vaultspec_a2a/database/thread_repository.py`.
 - [ ] `W02.P04.S53` - F56 - add a mechanical module-size gate, since the mandate is currently enforced by nobody and two modules already exceed it. A mandate depending on someone remembering is the same shape as a terminal state nothing is obliged to advance; `dev/toolchain.py`.
+- [ ] `W02.P04.S55` - F58 - make a stale-candidate skip in engine discovery say so, naming the candidate and why it was rejected, since a correct refusal that cannot explain itself cost two agents real time. This is the failure-observability record's swallowed-condition clause applied to discovery; `src/vaultspec_a2a/authoring/discovery.py`.
 
 ## Wave `W03` - canonical vocabulary
 
@@ -193,6 +194,7 @@ Fix the projections that serve untrue values on completed and failed runs.
 - [ ] `W04.P08.S41` - F31 - fold the authoring session reference into thread state on the submitter path as well as the bridge path, so a run discloses the session the engine recorded for it; `src/vaultspec_a2a/authoring/submitter.py`.
 - [ ] `W04.P08.S42` - F32 - preserve the recorded approval outcome across a terminal transition, so pruning a pending request stops erasing the decision a human made; `src/vaultspec_a2a/control/thread_state_service.py`.
 - [ ] `W04.P08.S50` - F47 LIVE - the harness-readiness verdict is computed for the document editor on every run start and then discarded, so byte-identical harness incompleteness refuses a research_adr run and admits a doc-editor one. Fix the root cause rather than the branch: the topology-only predicate stands in for a question about roles and declared surfaces, so a point fix in the eligibility branch leaves the misclassification everywhere else. The probe helper's docstring also describes behaviour its code does not implement; `src/vaultspec_a2a/control/run_start_policy.py`.
+- [ ] `W04.P08.S56` - F61 - consult the checkpoint before resolving an abandoned run to failed, so a graph that already reached its end is recognised rather than timed out. This is the only FALSE RED in the audit and it belongs against the same non-contradiction clause as the false greens, which does not care which way a contradiction points; `src/vaultspec_a2a/control/run_discovery_service.py`.
 
 ### Phase `W04.P09` - drive and specify the live surface
 
@@ -219,6 +221,7 @@ Each Step changes what a served field means and requires agreement with the cons
 - [ ] `W05.P10.S46` - F28 cross-repo - publish an engine schema, declare the conditional requirement of feature_tag in a2a, align workspace_root across the two surfaces and return proxy errors with a non-200 status; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S11` - F10 BREAKING not additive - declare the discriminator on the run-start response union, which requires adding a stage const to RunStartResponse since the other three members already carry one and it alone does not, so it touches a payload the dashboard parses. Cheap once sequenced - one const field plus a discriminator block, with three members already establishing the pattern; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S49` - F41 cross-repo and causally upstream of W01.P11 - serve the engine's existing route-fixture table as a machine-readable description at a stable path and stop returning application HTML from the schema path, preserving the per-route named-refusal list which is the valuable part. This is unserved work rather than missing work, and it is the demonstrated cause of F30; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [ ] `W05.P10.S57` - F62 BREAKING and it BLOCKS THE CAPABILITY RE-KEY - a deliberately-failing certification fixture declares real document-authoring roles and is served as an ordinary preset because the mock predicate is a name prefix. Re-keying capabilities off roles would make it advertise three document kinds it is built to fail. The declared classification and the re-key MUST land together or the remedy manufactures the defect it removes; `src/vaultspec_a2a/team/team_config.py`.
 
 ## Parallelization
 

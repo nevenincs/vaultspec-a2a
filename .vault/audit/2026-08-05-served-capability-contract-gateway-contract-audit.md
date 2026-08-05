@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:12f687fed498723d4ce165737986c593e68fecab63bf335afc47797752bb90a9'
+body_hash: 'sha256:e97f128d4e450765685f308d166a3aaa54ec417a1a92b3596fad8f392a48f6b5'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,8 +54,9 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F59**. F40, F57 and F58 are RESERVED -
-allocated with write-ups not yet received - and are held rather than reused. F40 is RESERVED - assigned to an
+place. The current highest identifier is **F62**. F40 alone remains RESERVED -
+allocated with its write-up not yet received - and is held rather than reused.
+F57 is RETRACTED and F29 is PARTIALLY retracted; both keep their numbers. F40 is RESERVED - assigned to an
 agent and not yet delivered - and is held rather than reused. F45 and F46 now carry their
 originating write-ups, which CORRECTED the severity this document had assigned
 them from one-line summaries - both are LOW and neither is asserted as a live
@@ -171,6 +172,18 @@ from anything the current build generates.
 
 All three rules share one shape: an instrument that cannot produce the
 disconfirming case is not evidence, however green it reads.
+
+**AND THE CONSTRUCTIVE FORM, from the F57 retraction: verify through the
+CONSUMER, not the declaration.** That refutation was made deliberately against
+the consuming repository's own client code rather than against the engine's
+route declaration, on the reasoning that A CONSUMER PROVES THE ROUTES ARE
+ACTUALLY CALLED, WHILE A DECLARATION PROVES ONLY THAT THEY EXIST. The three
+rules above say what not to trust; this one says what to reach for instead.
+
+It is also what F41 gets wrong in the opposite direction - a complete
+declaration nobody serves - and what F52 gets wrong at the other end: a field
+with no producer at all. Declaration, production and consumption are three
+separate facts, and evidence about one is not evidence about the others.
 
 ## Findings
 
@@ -863,6 +876,26 @@ cannot see what they are approving. CLASSIFICATION: genuine defect; the content
 is in the ledger and is simply not served. REMEDY: serve the proposed body, from
 the engine and/or as an a2a passthrough on the run.
 
+PARTIAL RETRACTION, following F57 - THIS ENTRY HAS TWO INDEPENDENT HALVES AND
+ONLY ONE SURVIVES INTACT. The first half - that no route on THIS side serves the
+document body - falls for exactly the reason F57 does: the dashboard reads
+proposal detail and snapshots DIRECTLY from the engine and needs no route here.
+An a2a passthrough is therefore not the remedy, and under V9 would be a mirror of
+another authority's surface.
+
+The second half STANDS AND IS UNAFFECTED: the engine's own proposal fetch
+returned an EMPTY review-documents array with an operation count carrying no
+body, and its diff and preview routes both answered 404. That is an engine
+content gap, measured directly against the engine, and no amount of client-side
+routing fixes it.
+
+SO THE GATE MAY STILL BE CEREMONIAL, for a different reason than this entry
+gave: not because nobody can call the route, but because the route returned
+nothing to show. NOT VERIFIED against the dashboard's live client - it is
+possible the empty response was a development-configuration artifact rather than
+a content gap. That verification is owed before either half is closed, and it
+should be done the way F57's was: through the CONSUMER, not the declaration.
+
 ### F30-a2a-approval-never-advances-the-engine-decision | high | approving through a2a is a graph resume signal only, so a produced document has no path to disk
 
 Source tranche number 29. The permission respond route returns 200 with
@@ -1390,21 +1423,71 @@ neither module was fixed. A MECHANICAL SIZE GATE is the durable answer; a
 mandate that depends on someone remembering is the same shape as a terminal set
 nothing is obliged to advance.
 
-### F57-reserved | unrated | RESERVED - allocated, write-up not yet received
+### F57-no-rest-proxy-for-review-verbs | RETRACTED | the dashboard already reaches the engine directly; the premise was wrong
 
-Held under the standing rule in Scope. Allocated for the absence of a served
-route exposing the engine's review-decision and apply verbs. No severity and no
-mechanism are recorded here.
+RETRACTED IN FULL. Kept with its number rather than deleted, because the wrong
+premise is part of the trail and deleting it invites the next person to
+re-derive it.
 
-The one thing recorded, because it bounds how the delivery proof in F59 must be
-read: the capability proven there is reachable by callers INSIDE this repository
-and by nobody else. The consuming frontend speaks only to this service's edge,
-never to the loopback engine.
+THE CLAIM, AND WHOSE IT WAS. This was raised as "no served proxy exists for the
+engine's review-decision and apply verbs, so the capability is unreachable from
+the dashboard". The premise originated with the CAMPAIGN'S ROUTING LEAD, not
+with the agent that investigated it - the attribution is recorded because a
+finding traced to the wrong source teaches the wrong lesson about which evidence
+to distrust.
 
-### F58-reserved | unrated | RESERVED - allocated, write-up not yet received
+THE REFUTATION, made against the CONSUMING REPOSITORY'S OWN SOURCE rather than
+inferred from this side. The dashboard ships a complete authoring client calling
+the review-decision and apply-request routes DIRECTLY against the engine origin,
+exported as hooks and consumed by its review station, wired into that view's
+action map. The read side is identical - proposal listing, proposal detail and
+snapshot are all direct-to-engine.
 
-Held under the standing rule in Scope. Allocated for a stale machine-global
-engine discovery record. No severity and no mechanism are recorded here.
+THE ARCHITECTURE, in one sentence, and it is the thing this document had wrong:
+the dashboard is served by - or shares an origin with - THE ENGINE, not this
+service. This service is the run-orchestration edge; the engine is its own
+authoring backend with its own independent frontend client.
+
+CONSEQUENCE OF THE RETRACTION. The delivery path for a HUMAN REVIEWER has been
+complete since before this campaign began. What the approval-forwarding work
+added is a SECOND AND LEGITIMATE consumer of the same two engine verbs - a
+programmatic path for this service with no human at a browser, which had no
+dashboard equivalent and was genuinely missing. That work is not invalidated by
+this retraction; only the reachability claim around it was wrong.
+
+It also vindicates a design note made before the topology was known: an
+a2a-side document-body proxy would have been "a second declaration that can
+drift". Under V9 that is now a rule rather than an instinct - the engine owns
+these verbs, so the answer was always to reach them, never to mirror them.
+
+OPEN QUESTION CARRIED FORWARD, not a defect: the engine's snapshot route
+answered with the machine bearer alone and no actor token. Actor tokens live in
+a worker-scoped store unreachable from the gateway process, so bearer-only is
+the ONLY architecturally possible shape for any future read proxy on this side.
+Whether that is a deliberate read/write policy split or this development
+engine's looser configuration is an engine-repository question, unresolved, and
+it matters only if such a proxy is ever built. It presently is not.
+
+### F58-stale-default-engine-discovery | medium | the fallback discovery record is days stale, so zero-config resolution silently returns nothing
+
+The machine-global discovery record - the fallback candidate when the explicit
+environment variable is unset - is over 87 hours stale, carrying a heartbeat
+from a dead process and a port nothing listens on. The freshness check CORRECTLY
+rejects it, so resolution returns nothing rather than handing back a lie; the
+defect is not a false answer.
+
+CONSEQUENCE: a caller relying on zero-configuration discovery gets a confusing
+skip with no indication that a live engine exists two directories away. The live
+record is workspace-local under the vault data directory and is reachable only
+by setting the environment variable explicitly. This cost real time to at least
+two agents in this session alone.
+
+CLASSIFICATION: genuine defect, and note WHERE it sits - the resolution logic is
+right and the failure is in what it can SAY. A correct refusal that cannot
+explain itself is the operator-facing twin of the served-contract problem this
+document catalogues. REMEDY: this is the failure-observability record's
+swallowed-condition clause applied to discovery - a resolution that skips a
+stale candidate should say so, naming the candidate and why it was rejected.
 
 ### F59-the-delivery-proof-artifact | informational | a real document reached disk, and the file is deliberately left untracked
 
@@ -1419,11 +1502,17 @@ the first time in this campaign that anything did. It is genuine content rather
 than a scaffold: real code locators, two options compared with one rejected and
 the reason given, an open gap, and sources.
 
-THE CAVEAT, which must be read with equal weight. Delivery works for callers
-inside this repository and for nobody else, because no served route exposes the
-verbs involved. A delivery path only this repository can reach does not make the
-product able to deliver. "A file reached disk" must NOT be read as "delivery
-works"; the gap is F57 and the owning phase stays open behind it.
+THE CAVEAT AS ORIGINALLY WRITTEN IS ITSELF RETRACTED. This entry first said
+delivery worked for callers inside this repository and for nobody else, citing
+F57. F57 is retracted: the dashboard reaches the engine's review and apply verbs
+directly, so the HUMAN delivery path was complete before this campaign began.
+
+What the proof actually demonstrates, stated correctly: a SECOND consumer of
+those same engine verbs now works - a programmatic path for this service with no
+human at a browser, which genuinely did not exist. That is a real capability and
+a real first, and it is a narrower claim than the one this entry originally
+made. The artifact reaching disk is still the campaign's only end-to-end
+evidence; what changed is that it was never the ONLY route to disk.
 
 THE ARTIFACT, reproduced so the evidence survives independently of the file.
 Path `.vault/research/2026-08-05-mantest-probe-research.md`, 1900 bytes, body
@@ -1451,6 +1540,64 @@ its content is durable here, and no phantom feature enters the tracked corpus.
 
 ANYONE ENCOUNTERING THIS FILE SHOULD LEAVE IT ALONE. Its presence is deliberate
 and its reason is this entry.
+
+### F60-reconciliation-bound-is-a-borrowed-proxy | low | no preset declares how long a transitional state may last, so a per-step bound stands in for a per-run one
+
+No preset declares how long a run may remain in the reconciling state. The
+reconciler reuses the graph's per-STEP execution bound as the nearest genuine
+per-RUN quantity, and discloses that substitution in its own docstring.
+
+The finding is NOT that the substitution is wrong - it is the best available
+quantity, and inventing a configuration surface for a single call site would
+have been worse. The finding is that THE DECLARATION DOES NOT EXIST. A bound
+borrowed from a different question will be correct only by coincidence, and
+nothing marks where it stops being so. CLASSIFICATION: genuine gap, low.
+RELATION: this is the state-truthfulness record's reconciliation clause meeting
+its own precondition - that clause requires an abandonment bound DERIVED FROM
+THE RUN, and the run does not currently declare one.
+
+### F61-reconciler-is-checkpoint-oblivious | medium | a potential false RED, which is the opposite direction from every other truthfulness defect here
+
+The reconciler resolves an abandoned transitional state to failed on elapsed
+time and status alone. It never checks whether the checkpoint shows the graph
+already reached its end, so a run that genuinely COMPLETED can be reported
+FAILED.
+
+NOTE THE DIRECTION, because it is unique in this document. Every other
+truthfulness defect catalogued here is a false GREEN - a completed run with no
+artifact, a failed run reporting healthy, tool calls pending forever. This is a
+false RED. The reasoning behind it is sound and the direction is the safer one:
+a thread abandoned that long is far more likely dead than quietly finished.
+
+It is still a field that can assert something untrue, so it belongs against the
+state-truthfulness record's non-contradiction clause exactly as the false greens
+do. That clause forbids a structured field contradicting the run's own outcome,
+and it does not care which way the contradiction points. CLASSIFICATION: genuine
+defect. REMEDY: consult the checkpoint before resolving, so a reached end is
+recognised rather than timed out.
+
+### F62-a-certification-fixture-is-served-as-product | medium | a deliberately-failing fixture declares real document-authoring roles and is served to the frontend today
+
+A certification fixture reuses the REAL researcher and synthesist agents with a
+recursion limit deliberately set below what its two-stage pipeline needs, so it
+always terminates failed BY DESIGN - while declaring two genuine
+document-authoring roles. The mock predicate returns FALSE for it, because that
+predicate is a name-prefix convention and this fixture does not carry the
+prefix. It is therefore served to the consuming frontend as an ordinary preset
+today.
+
+CONSEQUENCE, and it is F4 with teeth: this is not merely scaffolding leaking
+into a product list, it is scaffolding that ADVERTISES CAPABILITIES IT IS
+BUILT TO FAIL. CLASSIFICATION: genuine defect.
+
+TWO REASONS THIS ENTRY MATTERS MORE THAN ITS SEVERITY. First, it is direct
+evidence that the taxonomy record's declared-classification ruling is NECESSARY
+rather than tidy - the name-prefix inference it retires is exactly what admits
+this fixture. Second, IT BLOCKS THE CAPABILITY RE-KEY: deriving capabilities
+from declared roles would make this fixture advertise research, decision and
+plan documents it structurally cannot deliver - a NEW false claim introduced BY
+the fix. The re-key and the classification must land together, or the remedy
+manufactures the defect it was meant to remove.
 
 ### F47-and-beyond | low | reserved marker for continuous appending
 

@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:efc5dc4505d00a2376a9d77378bc24dd984f684bedb57ddff442f95449b30d35'
+body_hash: 'sha256:0b4bd6c086b654552756e8aa7bd262473cc073ad0fcbebb257339edb7867c562'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -116,9 +116,10 @@ Restore the missing artifact and remove the silent success that concealed it; ei
 A produced document has no route to disk. This is the highest product impact on the plan - a document that cannot be applied is indistinguishable from one never written.
 
 - [ ] `W01.P11.S34` - F24 and F42 - wire the MCP server elicitation rung, recovering tool identity by correlating with the tool-call notification that arrives immediately before on the same thread and turn, because the elicitation payload carries no tool-name field and parsing its prose message is forbidden. FAIL CLOSED to decline on any correlation miss and log it, or the remedy becomes a latent blanket approve that the exact-name allowlist rulings forbid. Do NOT rely on the generated automatic-approval config key - F42 proves it is inert on these server blocks; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
-- [ ] `W01.P11.S35` - F30 - forward an a2a approval to the engine's approval queue, or document and serve the second call a frontend must make, so an approved proposal can actually become a file; `src/vaultspec_a2a/authoring/session.py`.
+- [x] `W01.P11.S35` - F30 DONE in commit cb7f856e - approval forwarding wired through the engine decision and apply verbs, proven by a real document reaching disk. NOTE the phase does NOT close on this: delivery works for callers inside this repository and for nobody else, because no REST proxy exposes those verbs to the frontend. That gap is F57; `src/vaultspec_a2a/authoring/session.py`.
 - [ ] `W01.P11.S36` - Prove the whole delivery path end to end with a live run - instruction in, proposal created, body served to a reviewer, approval forwarded, file on disk - which no run has yet achieved. The retry and idempotency half must drive a REAL ENGINE, because the engine is what dedupes on the idempotency key: a same-process assertion proves only that the key is stable, never that the document was applied once. That distinction is a drift guard versus a real proof, and only the second closes this Step; `src/vaultspec_a2a/acceptance/tests`.
 - [ ] `W01.P11.S48` - F30 deferred half - report the engine's apply outcome honestly on the permission-respond response, since Option A wires the engine calls without touching the response shape and leaves the success path reporting accepted_not_applied, which is UNDERSTATED rather than wrong. Blocked on the schema module being released, and should land together with the document-body route which is blocked on the same file for a different reason rather than contending for it twice. Do NOT encode new outcomes into the action-status string - it is an undeclared vocabulary clients branch on, and growing it mid-capture would hand the containment proof a moving target; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [ ] `W01.P11.S54` - F57 - serve a REST proxy for the engine review-decision and apply verbs so the delivery path is reachable by the frontend rather than only by callers inside this repository. This is what W01.P11 actually closes on: a file reaching disk proved the mechanism, not the product capability; `src/vaultspec_a2a/api/routes/gateway.py`.
 
 ## Wave `W02` - additive contract corrections
 

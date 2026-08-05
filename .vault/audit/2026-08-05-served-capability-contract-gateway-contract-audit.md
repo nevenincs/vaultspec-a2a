@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:b5e940ff48793b008e7605de6d0e3d2d55ee30d2cb8a2b8954b6bbfe49a4c145'
+body_hash: 'sha256:12f687fed498723d4ce165737986c593e68fecab63bf335afc47797752bb90a9'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,8 +54,8 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F56**. F40 alone remains RESERVED -
-allocated with its write-up not yet received - and is held rather than reused. F40 is RESERVED - assigned to an
+place. The current highest identifier is **F59**. F40, F57 and F58 are RESERVED -
+allocated with write-ups not yet received - and are held rather than reused. F40 is RESERVED - assigned to an
 agent and not yet delivered - and is held rather than reused. F45 and F46 now carry their
 originating write-ups, which CORRECTED the severity this document had assigned
 them from one-line summaries - both are LOW and neither is asserted as a live
@@ -1389,6 +1389,68 @@ its own growth is annotations and documentation rather than new types - but
 neither module was fixed. A MECHANICAL SIZE GATE is the durable answer; a
 mandate that depends on someone remembering is the same shape as a terminal set
 nothing is obliged to advance.
+
+### F57-reserved | unrated | RESERVED - allocated, write-up not yet received
+
+Held under the standing rule in Scope. Allocated for the absence of a served
+route exposing the engine's review-decision and apply verbs. No severity and no
+mechanism are recorded here.
+
+The one thing recorded, because it bounds how the delivery proof in F59 must be
+read: the capability proven there is reachable by callers INSIDE this repository
+and by nobody else. The consuming frontend speaks only to this service's edge,
+never to the loopback engine.
+
+### F58-reserved | unrated | RESERVED - allocated, write-up not yet received
+
+Held under the standing rule in Scope. Allocated for a stale machine-global
+engine discovery record. No severity and no mechanism are recorded here.
+
+### F59-the-delivery-proof-artifact | informational | a real document reached disk, and the file is deliberately left untracked
+
+NOT A DEFECT. Recorded because it is the single piece of end-to-end evidence
+this campaign has produced, and because the decision about the file needs a
+durable home so nobody tidies it away.
+
+WHAT HAPPENED. The evidence proposal from the six live runs - the one that sat
+at needs-review and queued and could never become a file - was approved and
+applied through the newly wired path, and a real document reached disk. This is
+the first time in this campaign that anything did. It is genuine content rather
+than a scaffold: real code locators, two options compared with one rejected and
+the reason given, an open gap, and sources.
+
+THE CAVEAT, which must be read with equal weight. Delivery works for callers
+inside this repository and for nobody else, because no served route exposes the
+verbs involved. A delivery path only this repository can reach does not make the
+product able to deliver. "A file reached disk" must NOT be read as "delivery
+works"; the gap is F57 and the owning phase stays open behind it.
+
+THE ARTIFACT, reproduced so the evidence survives independently of the file.
+Path `.vault/research/2026-08-05-mantest-probe-research.md`, 1900 bytes, body
+hash `sha256:30026f2f01bdf22a5f30bb6b54d645c15e3fe75a16890b9a9eecb55ab5a1cfdd`,
+tagged as research under a probe feature. Its subject is whether the anonymous
+liveness route should expose a worker restart count. Its conclusion is no - keep
+that route liveness-only, because the armed route returns a liveness schema
+limited to that fact, and the restart count already appears in the broader health
+assembly alongside restart reason and detail. It compares two options and rejects
+exposing the count on the public route, on the grounds that doing so expands an
+anonymous contract beyond liveness and duplicates operator telemetry available
+elsewhere. It records an open gap: no retrieved consumer currently depends on
+that field being on the anonymous route. It cites the liveness route and schema,
+the health assembly, and the operations documentation framing that route as a
+public supervisor check.
+
+THE DECISION ON THE FILE, and the reasoning, so it is not revisited blindly. The
+file is LEFT UNTRACKED - neither committed nor deleted. Committing it would mint
+a permanent feature and index entry in the corpus for what is a PROBE, polluting
+exactly the structure this campaign exists to make trustworthy. Deleting it would
+destroy the campaign's only end-to-end evidence, against this repository's
+standing rule that tidying away provenance is itself a defect. Leaving it
+untracked destroys nothing and pollutes nothing: it stays inspectable on disk,
+its content is durable here, and no phantom feature enters the tracked corpus.
+
+ANYONE ENCOUNTERING THIS FILE SHOULD LEAVE IT ALONE. Its presence is deliberate
+and its reason is this entry.
 
 ### F47-and-beyond | low | reserved marker for continuous appending
 

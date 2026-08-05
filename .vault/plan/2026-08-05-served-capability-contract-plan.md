@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:007a6178a7ca9e232c8bc2dd4cc5424df14afcaed8b6e079d0c16ae8328b92e2'
+body_hash: 'sha256:efc5dc4505d00a2376a9d77378bc24dd984f684bedb57ddff442f95449b30d35'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -146,6 +146,8 @@ Mechanical contract corrections with no owner yet, each independent of the other
 - [ ] `W02.P04.S38` - F27 - honour the explicit data seat as the vault root, or refuse a seat that resolves into an enclosing git worktree, since the guard is currently defeated by exactly the case it exists for; `src/vaultspec_a2a/lifecycle/engine_serve.py`.
 - [ ] `W02.P04.S39` - F34 - raise or split the run-start forward budget and warm the provider catalog before forwarding, so a cold catalog stops surfacing as a transport connect error with no run and no log line; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W02.P04.S40` - F36 - demote the health poll and the unreachable-collector telemetry export, and log authoring tool calls and rejections with the run identifier, since the logs cannot currently answer what a run did; `src/vaultspec_a2a/lifecycle`.
+- [ ] `W02.P04.S51` - F51 latent - route execution_readiness assignments through the same coercion helper repair_status already uses, since both columns share a type but only one is gated on write, and serving the field as an enumeration turns a silently accepted bad value into a 500 on run-status days later. Blocked on the owning repository module being released; `src/vaultspec_a2a/database/thread_repository.py`.
+- [ ] `W02.P04.S53` - F56 - add a mechanical module-size gate, since the mandate is currently enforced by nobody and two modules already exceed it. A mandate depending on someone remembering is the same shape as a terminal state nothing is obliged to advance; `dev/toolchain.py`.
 
 ## Wave `W03` - canonical vocabulary
 
@@ -167,6 +169,7 @@ Give each served vocabulary one owning declaration and make every emit site deri
 - [ ] `W03.P06.S21` - Enforce import-from-owner for served vocabularies so no surface redeclares or re-exports one, keeping the two distinct AdmissionState concepts separate rather than merged; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W03.P06.S43` - F37 - declare and serve a summarization capability or drop the product claim, since no served preset advertises it and the nearest path is the false green of F24; `src/vaultspec_a2a/team/team_config.py`.
 - [ ] `W03.P06.S47` - Write the client-facing API guide as the OUTPUT of this Wave rather than a parallel track, using the wireframe acceptance gate as its completion test - the guide cannot be written honestly until the served semantics are canonical; `docs/index.rst`.
+- [ ] `W03.P06.S52` - F53 and F54 - derive the role capability and assignment-source fields from their existing owning enumerations and remove the restated default literal, both being shape-one items F23 did not list. Their omission is why F23's inventory is a starting point rather than a closed set; `src/vaultspec_a2a/api/schemas/gateway.py`.
 
 ## Wave `W04` - truthful run projection and the live interaction surface
 
@@ -176,7 +179,7 @@ Findings where a correctly typed field still carries an untrue value, plus the s
 
 The vocabulary decision governs a value's domain, never whether a written value is true. These findings need a decision on terminal states and the obligation to reach them.
 
-- [ ] `W04.P07.S22` - Transition-contract decision AUTHORED as the state-truthfulness record - execute its five clauses across the state vocabularies, declaring terminal partitions, naming an obliged writer per transitional state, reconciling abandoned transitions with run-derived bounds, and enforcing non-contradiction where health fields are assembled; `src/vaultspec_a2a/thread/enums.py`.
+- [ ] `W04.P07.S22` - Transition-contract decision AUTHORED as the state-truthfulness record - execute its five clauses across the state vocabularies. TWO findings have already landed on it since it was written: the terminal-partition question in F45, and F52's semantic_status which has no producer at all and is permanently its default. F52 is T2's obliged-writer problem and is NOT closed by typing it; `src/vaultspec_a2a/thread/enums.py`.
 
 ### Phase `W04.P08` - repair the run projection
 

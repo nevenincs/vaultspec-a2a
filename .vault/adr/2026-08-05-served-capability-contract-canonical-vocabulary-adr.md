@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:02919c2518752ee89b72f2b3fff64b037610cdd005e6a0ab804f6536ca0ad02b'
+body_hash: 'sha256:acffc0bb9701fb2a06fc857e4b194ea76e299a8bf4c3fff9ba57e023e47cf9bb'
 related:
   - "[[2026-08-05-served-capability-contract-gateway-contract-audit]]"
 ---
@@ -157,6 +157,27 @@ are drawn from a fixed set is a vocabulary in an array, not an exception.
 WHY, so a field whose false case a client must explain is not a boolean. Where
 the audit records an undefined boolean serving as a verdict, the remedy is a
 declared vocabulary carrying the state, not a comment explaining the flag.
+
+**V8 - One key answering two questions is resolved by SEPARATING the
+derivations, never by reconciling their answers.** Where two consumers read the
+same key to answer different questions, deriving each from what it actually asks
+will make them DISAGREE. That disagreement is the correct outcome and producing
+it is the point; prior agreement was the symptom, not the health - both were
+reading a key that answered neither question properly.
+
+The hazard this clause exists to prevent is downstream and human: a later reader
+sees two derivations disagree, assumes one is broken, and aligns them - which
+re-conflates the questions and re-introduces the defect the separation removed.
+Each site therefore documents WHICH QUESTION IT ANSWERS and that the other
+deliberately answers a different one. The documentation obligation is heaviest
+at the site a debugger lands on first, because that is where the urge to make
+them match is strongest.
+
+Worked instance: whether a preset AUTHORS DOCUMENTS and whether it uses the
+DIRECT WORKER-TO-ENGINE SUBMITTER are different questions. The solo document
+lane authors through the bridged tool, so the true answers differ - and that
+mechanism difference is precisely why one topology emitted a proposal and the
+other did not.
 
 **V6 - Migration is subset-proved and lockstepped.** Narrowing an existing field
 requires, in order: a capture of the values that surface actually serves; proof

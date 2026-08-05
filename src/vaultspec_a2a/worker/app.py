@@ -36,13 +36,14 @@ from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 
-from ..control.config import settings
+from ..control.config import GATEWAY_URL_ALT_ENV, GATEWAY_URL_ENV, settings
 from ..control.worker_management import (
     GATEWAY_LIFETIME_ENV,
     WORKER_GENERATION_ENV,
 )
 from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
+from ..lifecycle.pairing import DispatchPairingStatus, resolve_worker_gateway_target
 from ..lifecycle.registration import deregister_serve, register_serve
 from ..providers.warmup import warm_model_imports
 from ..telemetry import TelemetryMiddleware, configure_telemetry
@@ -138,6 +139,33 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # attributed separately from the gateway in Jaeger/OTLP backends.
     configure_telemetry(service_name="vaultspec-worker")
     logger.info("Telemetry configured (service=vaultspec-worker)")
+
+    # Worker -> gateway pairing (the master-bug guard's missing other half): a band
+    # worker whose gateway target was never explicitly configured auto-derives the
+    # SAME resident default (settings._derive_service_urls) the observed bug hit -
+    # it then heartbeats a dead or foreign gateway forever with nothing louder than
+    # log noise. Learn a live band gateway when it is unambiguous, and refuse to
+    # boot (mirroring the gateway's own dispatch-pairing guard) rather than run
+    # broken when the pairing cannot be resolved safely.
+    gateway_url_explicit = bool(
+        os.environ.get(GATEWAY_URL_ENV) or os.environ.get(GATEWAY_URL_ALT_ENV)
+    )
+    resolved_gateway_url, pairing_status, pairing_message = (
+        resolve_worker_gateway_target(
+            settings.gateway_url,
+            gateway_url_explicit=gateway_url_explicit,
+            worker_port=settings.worker_port,
+        )
+    )
+    if pairing_status is DispatchPairingStatus.MISPAIRED:
+        raise RuntimeError(pairing_message)
+    app.state.gateway_pairing_warning = None
+    if resolved_gateway_url != settings.gateway_url:
+        logger.info("Worker gateway pairing: %s", pairing_message)
+        settings.gateway_url = resolved_gateway_url
+    elif pairing_status is DispatchPairingStatus.UNPAIRED:
+        logger.warning("Worker gateway pairing: %s", pairing_message)
+        app.state.gateway_pairing_warning = pairing_message
 
     async with open_checkpointer() as checkpointer:
         bridge = WorkerBridge(
@@ -324,11 +352,20 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         from a stale orphan still pointing at a dead dev-band gateway. Without
         this provenance the spawn path would blindly adopt the orphan and it
         would heartbeat a dead port forever.
+
+        ``gateway_pairing_warning`` surfaces the non-fatal half of the worker's
+        own boot-time pairing guard (``resolve_worker_gateway_target``): a band
+        worker whose target could not be learned unambiguously and fell back to
+        the auto-derived default. ``None`` when the target was explicit, learned,
+        or the worker is not on a band port.
         """
         return {
             "status": "ok",
             "service": "worker",
             "gateway_url": settings.gateway_url,
+            "gateway_pairing_warning": getattr(
+                app.state, "gateway_pairing_warning", None
+            ),
             "worker_port": settings.worker_port,
             "database_backend": settings.resolved_database_backend,
             "checkpoint_backend": settings.resolved_checkpoint_backend,

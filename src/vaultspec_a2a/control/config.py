@@ -56,6 +56,10 @@ _CHECKOUT_ENV_FILE: Path = _DEFAULT_PROJECT_ROOT / ".env"
 # environment, so the name lives in exactly one place (never a mirrored literal).
 INTERNAL_TOKEN_ENV = "VAULTSPEC_INTERNAL_TOKEN"
 GATEWAY_URL_ENV = "VAULTSPEC_GATEWAY_URL"
+# The MCP-scoped alternate spelling of GATEWAY_URL_ENV (see the gateway_url Field
+# below): a single named constant so the alias lives in one place rather than as a
+# literal repeated at every explicit-configuration check.
+GATEWAY_URL_ALT_ENV = "VAULTSPEC_MCP_API_BASE_URL"
 WORKER_URL_ENV = "VAULTSPEC_WORKER_URL"
 
 # Canonical service-endpoint defaults. This module is the ONE home for every
@@ -502,7 +506,7 @@ class InfraConfig(BaseSettings):
         default="",
         validation_alias=AliasChoices(
             GATEWAY_URL_ENV,
-            "VAULTSPEC_MCP_API_BASE_URL",
+            GATEWAY_URL_ALT_ENV,
         ),
         description=(
             "Base URL for reaching the gateway HTTP API. Used by the worker "

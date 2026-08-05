@@ -1,10 +1,19 @@
-"""Gateway -> worker dispatch pairing verification (the campaign master-bug guard).
+"""Gateway <-> worker dispatch pairing verification (the campaign master-bug guard).
 
 A procs-managed dev gateway (registered on a gateway-dev band port) must dispatch to
 its paired dev worker, not silently to the owner's resident worker on the default
-port. This classifies the gateway's resolved ``worker_url`` against the worker-dev
-band and the live registry, so a mis-paired gateway fails loud at boot instead of
-running green while dispatching into a foreign stack.
+port; :func:`verify_dispatch_pairing` classifies the gateway's resolved
+``worker_url`` against the worker-dev band and the live registry, so a mis-paired
+gateway fails loud at boot instead of running green while dispatching into a foreign
+stack.
+
+The reverse direction had no guard at all: a procs-managed dev worker (registered on
+a worker-dev band port) auto-derives its heartbeat target from the SAME resident
+default (port 18000) when no explicit gateway URL was configured, and nothing ever
+told it a paired dev gateway was live elsewhere. :func:`resolve_worker_gateway_target`
+closes that gap - it lets an unconfigured band worker LEARN the live band gateway
+instead of silently heartbeating the resident default forever, and refuses to boot
+(mirroring the gateway-side guard) when the pairing cannot be resolved safely.
 """
 
 from __future__ import annotations
@@ -13,7 +22,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from ..control.config import WORKER_URL_ENV
+from ..control.config import GATEWAY_URL_ENV, WORKER_URL_ENV
 from .discovery import is_pid_alive
 from .procs_config import ProcsConfigError, load_procs_config
 from .registry import list_records
@@ -28,6 +37,7 @@ __all__ = [
     "WorkerPairingVerdict",
     "classify_worker_pairing",
     "eviction_is_authorized",
+    "resolve_worker_gateway_target",
     "verify_dispatch_pairing",
 ]
 
@@ -113,6 +123,120 @@ def verify_dispatch_pairing(
         "dispatching to a non-band worker; ensure this is intentional."
     )
     return DispatchPairingStatus.UNPAIRED, message
+
+
+def _gateway_port(gateway_url: str) -> int | None:
+    try:
+        return urlparse(gateway_url).port
+    except ValueError:
+        return None
+
+
+def resolve_worker_gateway_target(
+    gateway_url: str,
+    *,
+    gateway_url_explicit: bool,
+    worker_port: int,
+    home: Path | None = None,
+    config: ProcsConfig | None = None,
+) -> tuple[str, DispatchPairingStatus, str]:
+    """Resolve the gateway URL a band worker should heartbeat to.
+
+    Mirrors :func:`verify_dispatch_pairing` for the worker -> gateway direction,
+    plus the one behaviour the gateway side never needed: an unconfigured band
+    worker LEARNS a live band gateway instead of running forever against the
+    auto-derived resident default (the reported bug - a worker started against
+    a live dev gateway on 18100 kept heartbeating the resident 18000).
+
+    Returns ``(effective_gateway_url, status, message)``:
+
+    - Not a worker-dev band port, no ``gateway-dev`` role declared, or the target
+      already resolves inside the gateway-dev band: ``OK`` pass-through, the input
+      URL unchanged, no message.
+    - Not explicitly configured (the auto-derived resident default) and exactly one
+      live band gateway is registered: ``OK`` with the LEARNED URL and an
+      informational message - the worker adopts the band gateway instead of the
+      resident default.
+    - Not explicitly configured and zero live band gateways are registered: the
+      input URL unchanged, ``UNPAIRED`` (warn-only) - a worker legitimately started
+      before its gateway has nothing to pair to yet.
+    - Explicitly configured (operator or spawning gateway intent) but resolves
+      outside the band while a DIFFERENT live band gateway is registered, or the
+      auto-derived default cannot be resolved unambiguously (more than one live
+      band gateway): the input URL unchanged, ``MISPAIRED`` - refuse to boot rather
+      than silently heartbeat a dead or foreign gateway.
+    """
+    resolved_config = config
+    if resolved_config is None:
+        try:
+            resolved_config = load_procs_config()
+        except ProcsConfigError:
+            return gateway_url, DispatchPairingStatus.OK, ""
+    worker_role = resolved_config.roles.get(_WORKER_ROLE)
+    if worker_role is None or worker_port not in worker_role.band:
+        return gateway_url, DispatchPairingStatus.OK, ""
+    gateway_role = resolved_config.roles.get(_GATEWAY_ROLE)
+    if gateway_role is None:
+        return gateway_url, DispatchPairingStatus.OK, ""
+
+    port = _gateway_port(gateway_url)
+    band = gateway_role.band
+    if port is None or port in band:
+        return gateway_url, DispatchPairingStatus.OK, ""
+
+    band_range = f"[{band.start}, {band.end}]"
+    band_gateways = [
+        rec
+        for rec in list_records(home)
+        if rec.role == _GATEWAY_ROLE and rec.port in band and is_pid_alive(rec.pid)
+    ]
+
+    if gateway_url_explicit:
+        if band_gateways:
+            rec = band_gateways[0]
+            message = (
+                f"worker gateway target {gateway_url!r} is OUTSIDE the gateway-dev "
+                f"band {band_range}, but a live band gateway is registered "
+                f"({rec.role}-{rec.name} on port {rec.port}, pid {rec.pid}). "
+                "Refusing to boot rather than heartbeat a foreign or dead gateway. "
+                f"Fix: point the worker at the band gateway (procs up --gateway-url "
+                f"http://127.0.0.1:{rec.port}, or set {GATEWAY_URL_ENV})."
+            )
+            return gateway_url, DispatchPairingStatus.MISPAIRED, message
+        message = (
+            f"worker gateway target {gateway_url!r} is outside the gateway-dev "
+            f"band {band_range} and no live band gateway is registered - "
+            "heartbeating a non-band gateway; ensure this is intentional."
+        )
+        return gateway_url, DispatchPairingStatus.UNPAIRED, message
+
+    if len(band_gateways) == 1:
+        rec = band_gateways[0]
+        learned = f"http://127.0.0.1:{rec.port}"
+        message = (
+            f"worker gateway target auto-derived to the resident default "
+            f"{gateway_url!r}; learned the live band gateway instead "
+            f"({rec.role}-{rec.name} on port {rec.port}, pid {rec.pid})."
+        )
+        return learned, DispatchPairingStatus.OK, message
+
+    if len(band_gateways) > 1:
+        names = ", ".join(f"{rec.role}-{rec.name}:{rec.port}" for rec in band_gateways)
+        message = (
+            f"worker gateway target defaulted to {gateway_url!r} (outside the "
+            f"gateway-dev band {band_range}) and MULTIPLE live band gateways are "
+            f"registered ({names}) - cannot safely pick one. Refusing to boot; set "
+            f"{GATEWAY_URL_ENV} explicitly (procs up --gateway-url ...)."
+        )
+        return gateway_url, DispatchPairingStatus.MISPAIRED, message
+
+    message = (
+        f"worker gateway target defaulted to {gateway_url!r} (outside the "
+        f"gateway-dev band {band_range}) and no live band gateway is registered "
+        "yet - heartbeating the resident default until one appears; ensure this "
+        "is intentional."
+    )
+    return gateway_url, DispatchPairingStatus.UNPAIRED, message
 
 
 class WorkerPairingVerdict(StrEnum):

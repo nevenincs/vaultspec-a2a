@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:603d054c8e9709b55276d9a7beb266b52672025f9ad98ee4580bf4978fdd22e2'
+body_hash: 'sha256:007a6178a7ca9e232c8bc2dd4cc5424df14afcaed8b6e079d0c16ae8328b92e2'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -188,6 +188,7 @@ Fix the projections that serve untrue values on completed and failed runs.
 - [ ] `W04.P08.S26` - F22 - stop serving healthy on every structured health field of a failed run, so a frontend gating on machine-readable fields is not forced to parse prose; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W04.P08.S41` - F31 - fold the authoring session reference into thread state on the submitter path as well as the bridge path, so a run discloses the session the engine recorded for it; `src/vaultspec_a2a/authoring/submitter.py`.
 - [ ] `W04.P08.S42` - F32 - preserve the recorded approval outcome across a terminal transition, so pruning a pending request stops erasing the decision a human made; `src/vaultspec_a2a/control/thread_state_service.py`.
+- [ ] `W04.P08.S50` - F47 LIVE - the harness-readiness verdict is computed for the document editor on every run start and then discarded, so byte-identical harness incompleteness refuses a research_adr run and admits a doc-editor one. Fix the root cause rather than the branch: the topology-only predicate stands in for a question about roles and declared surfaces, so a point fix in the eligibility branch leaves the misclassification everywhere else. The probe helper's docstring also describes behaviour its code does not implement; `src/vaultspec_a2a/control/run_start_policy.py`.
 
 ### Phase `W04.P09` - drive and specify the live surface
 

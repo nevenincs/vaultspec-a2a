@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:a8d76e523fd2d99bc775fea07fb27f43b7bd1fc807ddf3f7a37a841eac2c4c1a'
+body_hash: 'sha256:ca6a302f6bfbf4e137a4a0d0a57d306ebdb74b17e4cbd8f70f374f2e33d19fdd'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,7 +54,7 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F46**. F40 is RESERVED - assigned to an
+place. The current highest identifier is **F47**. F40 is RESERVED - assigned to an
 agent and not yet delivered - and is held rather than reused. F45 and F46 now carry their
 originating write-ups, which CORRECTED the severity this document had assigned
 them from one-line summaries - both are LOW and neither is asserted as a live
@@ -1024,13 +1024,17 @@ requires per-role token coverage regardless of topology, and the function's
 docstring states that intent explicitly. The misclassification does not reach
 the token gate.
 
-WHAT THE MISCLASSIFICATION DOES SKIP, and both are deliberate and documented in
-the same docstring: the feature-tag requirement and the harness-readiness
-verdict. Neither is obviously wrong for this preset - the document editor edits
-an EXISTING document rather than scaffolding a new one under a feature, and it
-declares no required workspace authoring surfaces for a harness check to verify.
-Whether they SHOULD apply is a design question, not a defect, and it is not
-settled here.
+WHAT THE MISCLASSIFICATION DOES SKIP, and the two halves have been SPLIT because
+they have different consequences. The feature-tag skip stays here and is
+deliberate: the same docstring states the bridge path needs no feature tag, and
+the document editor edits an EXISTING document by user instruction rather than
+scaffolding a new one under a feature, so the exemption is coherent. Recorded as
+an OPEN QUESTION RESOLVED BY DOCSTRING rather than as a finding.
+
+The HARNESS-READINESS skip is a different matter and is now F47. This entry
+originally classified it as deliberate on the strength of the same docstring
+sentence. THAT CLASSIFICATION WAS WRONG, and the correction is recorded in F47
+with the evidence that overturned it.
 
 CONSEQUENCE: the served capability field is still wrong (F7), and that is worth
 fixing on its own merits. But no admission gap follows from it. CLASSIFICATION:
@@ -1045,60 +1049,143 @@ establishes is that the topology-only predicate is a real second-site defect wit
 its own smaller consequences - which is why the capability derivation remains
 worth doing, just never credited with F16.
 
-### F45-completion-check-excludes-archived | low | the authoring completion check scopes to literal completed and deliberately excludes archived, with the consequence unverified
+### F45-completion-check-excludes-archived | low | the completion check gates on the literal completed status while the semantic map treats archived as the same phase
 
-CLASSIFICATION CORRECTED: recorded here first as a medium genuine defect on a
-one-line summary. The originating agent's own write-up rates it LOW and
-explicitly declines to assert a live gap. That correction is the finding's own
-discipline applied to itself - a severity assigned before the evidence arrived
-was assigned too confidently.
+SEVERITY CORRECTED DOWN from an initial medium assigned before the originating
+write-up arrived. Author's own words below, structurally preserved.
 
-The authoring completion check scopes strictly to a literal `completed` status,
-deliberately excluding `archived`, even though the semantic terminal mapping
-sends BOTH to the same completed semantic phase. So one layer treats the two as
-equivalent and the other does not.
+EVIDENCE. The authoring completion check gates on the literal `completed` status
+string rather than a broader terminal-success set. The semantic-phase map treats
+both `COMPLETED` and `ARCHIVED` as the same product-facing phase, `completed`.
+So two distinct durable status values already collapse to one meaning everywhere
+else in that module, and only this check recognises one of the two.
 
-WHAT IS EXPLICITLY NOT KNOWN, in the agent's own terms: whether an archived
-thread's checkpoint and proposal-identifier state is even readable or meaningful
-at that point, since archival may clear or invalidate it. If it is not, the
-exclusion is correct rather than a gap. This is recorded as an OPEN QUESTION for
-whoever owns the archival lifecycle, not as an assertion that anything is broken.
+The narrowing was DISCLOSED IN THE SHIPPED DOCSTRING at commit time, not
+discovered afterwards: the check is scoped to the literal status because the
+reported gap was a freshly completed run, and archival is a distinct
+post-completion lifecycle the check has not been proven against.
 
-WHY IT IS WORTH KEEPING despite being unverified: "does archived count as
-complete?" is a TERMINAL-PARTITION question, not a scoping oversight. It falls
-directly under the state-truthfulness record's first clause, which requires each
-state vocabulary to declare which members are terminal. Under that clause this
-stops being a matter of remembering to enumerate a status in each new check and
-becomes a property the type carries. That is the clause earning its keep on a
-finding that did not exist when it was written, which is better evidence the
-record is load-bearing than any argument made for it in the abstract.
+CONSEQUENCE. A run reaching `completed` with empty proposal and changeset
+identifiers is caught. If that thread is later archived, a read of its snapshot
+at that point would silently NOT carry the no-proposal signal, though nothing
+changed about whether it produced an artifact.
+
+WHAT IS EXPLICITLY NOT CHECKED, and why the gap may not be real: whether
+archival happens soon enough after completion that most reads still land while
+the status is literally `completed`; and whether the checkpoint and channel state
+the identifier derivation reads remains intact once archived - OR WHETHER
+ARCHIVAL CLEARS OR INVALIDATES IT, in which case extending the check to archived
+would read stale or wrong data rather than fill a gap. That second possibility
+is why this is an open question and not a defect.
+
+CLASSIFICATION: LOW, explicitly an open question rather than an asserted defect.
+REMEDY: none proposed by the author. This is a TERMINAL-PARTITION question under
+the state-truthfulness record's first clause - a declared vocabulary of which
+statuses count as terminal-successful would make this checkable instead of a
+per-call-site enumeration risk. Whoever owns that record should decide whether
+this check's status set is driven from the vocabulary rather than from a single
+literal.
 
 ### F46-preset-predicate-ignores-workspace-overrides | low | the preset predicate resolves bundled definitions only, so a workspace override is invisible to it
 
-INFORMATIONAL, and recorded as a known simplification rather than as a defect.
-Classification corrected here for the same reason as F45: the originating
-agent's write-up rates it LOW and flags it as deliberately out of scope rather
-than broken.
+SEVERITY CORRECTED DOWN from an initial medium assigned before the originating
+write-up arrived. Author's own words below, structurally preserved.
 
-The predicate that decides whether a preset requires document authoring resolves
-presets and agent configurations with NO workspace root, which is a bundled
-lookup only. A project that overrides the team or agent definition in its own
-workspace to add or remove document-authoring roles on a custom preset would not
-be reflected in that predicate.
+EVIDENCE. The predicate loads the team configuration and, per worker, the agent
+configuration, both with no workspace root. Those loaders document a two-level
+discovery order - the workspace's own definitions first, then the bundled set -
+so passing nothing skips the first level entirely and only ever resolves the
+bundled directory.
 
-DELIBERATELY NOT FIXED, and the reason is recorded because it is good practice
-rather than an excuse: obtaining the real workspace root would require touching
-the thread repository's metadata parsing, which is owned by another agent and
-was dirty in the same session. The agent flagged the simplification and stayed
-out of a file it did not own, which is the correct call in this tree - a
-cross-owner edit to fix a low-severity informational gap would have risked more
-than it repaired.
+Confirmed a real exercised path rather than hypothetical: the thread model and
+its capture DO have workspace context available, and the thread repository
+already parses a workspace root out of that same metadata for other purposes.
+The author states plainly: "I chose not to thread it into my predicate."
 
-RELATION: preset discovery is documented as a SUPERSET that deliberately
-includes workspace-local definitions, so resolving without the workspace answers
-a narrower question than the one being asked. Whether that matters in practice
-depends on whether any deployment actually overrides these presets, which is not
-established.
+CONSEQUENCE. A project overriding a preset, or one of its workers, in its own
+workspace - for example changing a custom preset's roster so it does or does not
+carry a document-authoring persona role - would have that override silently
+ignored. The predicate classifies from bundled definitions even when the run
+compiled and executed against workspace-overridden ones, producing a false
+negative or a false positive depending on the direction of the override. NOT
+OBSERVED IN PRACTICE: no test or run this session exercised a
+workspace-overridden preset. The path exists and is unguarded.
+
+CLASSIFICATION: LOW, informational scope limitation, disclosed in the function's
+own shipped docstring - it fails closed toward not flagging, and an unresolvable
+preset returns false.
+
+REMEDY: not attempted, and the reason is worth preserving as good practice
+rather than reading as an excuse. Correct resolution needs the run's actual
+workspace root threaded from thread metadata via the same parsing the repository
+already does - but that helper is PRIVATE to a module owned by another agent and
+dirty in the same session, and duplicating its parsing would create two
+independent readers of the same untrusted field with no guarantee they stay in
+sync. The clean fix likely wants that helper exported as a small shared one,
+decided by whoever owns the repository module.
+
+NOTE ON BOTH F45 AND F46: each discloses its narrowing in the SHIPPED DOCSTRING
+rather than only in a report, so the limitation is discoverable from the code
+without this audit. F46 goes further and records that the author CHOSE not to
+thread the workspace context, with the reason. A limitation that says why it was
+accepted is a stronger artifact than a finding that merely notes a gap, and it
+is the pattern the rest of this document's remediation should follow.
+
+### F47-harness-verdict-computed-then-discarded | high | a harness-readiness verdict is computed for the document editor on every run start and then silently ignored
+
+LIVE. Split out of F44, where this document first classified it as a deliberate
+exemption. That classification was WRONG and is corrected here.
+
+The eligibility function reads its harness parameter only in the
+document-authoring branch. The non-authoring branch - which is where the
+document editor lands, because the predicate is topology-only - never consults
+it. But the caller computes that argument UNCONDITIONALLY for every preset, and
+the probe helper gates on whether the preset declares a harness at all, NOT on
+whether it is document-authoring. The document editor declares one, so a real
+readiness verdict is genuinely computed for it and then thrown away.
+
+PROVEN, by feeding the real eligibility function a definitively-not-ready
+harness together with complete token coverage:
+
+- `vaultspec-doc-editor` - eligible TRUE. The incomplete harness is ignored.
+- `vaultspec-adr-research` - eligible FALSE, "agent harness incomplete".
+
+Byte-identical harness incompleteness refuses one preset and admits the other.
+
+WHY THE EARLIER "DELIBERATE" READING FAILED, because the reasoning matters more
+than the verdict. The policy docstring does say the bridge path needs no harness
+surfaces, and that sentence is real. But it was written for a preset shape with
+NO required surfaces - a coder lane that arms the bridge and needs nothing from
+the workspace. The document editor is a different shape wearing the same
+classification: it declares a grounding server, and its own persona mandate
+requires the target document's corpus context to be recalled semantically BEFORE
+any revision is drafted. An exemption reasoned for a preset that needs nothing
+from its workspace now covers a preset that does.
+
+Two further signs this is an unhandled branch rather than an intended exemption.
+The caller PAYS FOR THE PROBE it then discards, and a deliberate skip does not
+buy what it throws away. And the probe helper's own docstring describes
+behaviour its code does not implement - it claims to probe for a
+document-authoring preset and otherwise return nothing, while the code branches
+on whether a harness is declared. A docstring describing an intent the code does
+not carry is how this exemption came to cover a preset nobody reasoned about.
+
+CONSEQUENCE: a document-editor run proceeds against an incomplete workspace
+harness and fails later, or - worse - partially succeeds. The remaining backstop
+is a compile-time assertion inside the worker, and it checks a narrower and
+different thing: whether each worker's resolved model exposes the bridge
+attachment points, NOT whether the workspace carries the declared rules,
+templates and skills. It is not a substitute.
+
+CLASSIFICATION: genuine defect, live. REMEDY: not proposed here, and the root
+cause is shared with F7 and F44 - a topology-only predicate standing in for a
+question about roles and declared surfaces. Whoever takes the root-cause work
+owns the policy module, the team configuration module and the authoring contract
+leaf together; a point fix in the eligibility branch would leave the
+misclassification in place everywhere else.
+
+WHAT WAS CHECKED AND DOES NOT HOLD: token coverage. See F44 - two independent
+verifications agree it is enforced.
 
 ### F47-and-beyond | low | reserved marker for continuous appending
 

@@ -30,9 +30,14 @@ from ..control.snapshot import (
     load_checkpoint_history_depth,
 )
 from ..database import get_thread
-from ..graph.enums import research_adr_semantic_phase
+from ..graph.enums import SemanticPhase, research_adr_semantic_phase
 from ..team.team_config import load_agent_config, load_team_config
-from ..thread.enums import RepairStatus, ThreadStatus, TranscriptAvailability
+from ..thread.enums import (
+    RepairStatus,
+    ReplayStatus,
+    ThreadStatus,
+    TranscriptAvailability,
+)
 from ..thread.errors import ConfigError
 from ..thread.snapshots import (
     ThreadStateData,
@@ -68,12 +73,12 @@ AUTHORING_SESSION_FIELD = "authoring_session_id"
 # --- Semantic authoring-phase projection -------
 
 # Terminal thread statuses map straight to a product-safe semantic phase.
-_SEMANTIC_TERMINAL: dict[str, str] = {
-    ThreadStatus.COMPLETED.value: "completed",
-    ThreadStatus.ARCHIVED.value: "completed",
-    ThreadStatus.FAILED.value: "failed",
-    ThreadStatus.CANCELLED.value: "cancelled",
-    ThreadStatus.CANCELLING.value: "cancelled",
+_SEMANTIC_TERMINAL: dict[str, SemanticPhase] = {
+    ThreadStatus.COMPLETED.value: SemanticPhase.COMPLETED,
+    ThreadStatus.ARCHIVED.value: SemanticPhase.COMPLETED,
+    ThreadStatus.FAILED.value: SemanticPhase.FAILED,
+    ThreadStatus.CANCELLED.value: SemanticPhase.CANCELLED,
+    ThreadStatus.CANCELLING.value: SemanticPhase.CANCELLED,
 }
 
 # Statuses / repair postures that mean the run needs recovery before it advances.
@@ -97,7 +102,7 @@ def project_semantic_phase(
     status: str,
     next_nodes: list[str],
     repair_status: str | None,
-) -> str:
+) -> SemanticPhase:
     """Project a product-safe semantic authoring phase for a run.
 
     Maps terminal and recovery states first, then the research_adr topology
@@ -114,14 +119,14 @@ def project_semantic_phase(
     if status in _RECOVERY_STATUSES or (
         repair_status is not None and repair_status in _RECOVERY_REPAIR
     ):
-        return "recovery_required"
+        return SemanticPhase.RECOVERY_REQUIRED
     for raw in next_nodes:
         phase = research_adr_semantic_phase(raw)
         if phase is not None:
             return phase
     if status == ThreadStatus.SUBMITTED.value:
-        return "starting"
-    return "running"
+        return SemanticPhase.STARTING
+    return SemanticPhase.RUNNING
 
 
 def _channel_values(checkpoint_tuple: CheckpointTuple) -> dict[str, object]:
@@ -358,7 +363,7 @@ async def capture_thread_state(
         checkpoint_error = True
         snapshot.snapshot_complete = False
         snapshot.degraded_reasons.append("checkpoint_timeout")
-        snapshot.replay_status = "unknown"
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
         snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
@@ -371,7 +376,7 @@ async def capture_thread_state(
         checkpoint_error = True
         snapshot.snapshot_complete = False
         snapshot.degraded_reasons.append("checkpoint_unavailable")
-        snapshot.replay_status = "unknown"
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
         snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)

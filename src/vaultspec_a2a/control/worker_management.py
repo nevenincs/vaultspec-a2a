@@ -41,6 +41,7 @@ from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..utils.runtime_exec import module_command
 from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
+from .worker_status import WorkerConnectionStatus
 
 __all__ = [
     "LazyWorkerSpawner",
@@ -77,7 +78,7 @@ class WorkerState:
     onto ``app.state``.
     """
 
-    worker_status: str = "pending"
+    worker_status: str = WorkerConnectionStatus.PENDING.value
     worker_restart_count: int = 0
     worker_last_restart_reason: str | None = None
     worker_last_restart_detail: str | None = None
@@ -1284,7 +1285,7 @@ class WorkerWatchdog:
         # global inter-cycle cooldown that rate-limits a persistent crash signal.
         self._last_restart_cycle_ts: float | None = None
         # Initialise worker state
-        self._worker_state.worker_status = "pending"
+        self._worker_state.worker_status = WorkerConnectionStatus.PENDING.value
         self._worker_state.worker_restart_count = 0
         self._worker_state.worker_last_restart_reason = None
         self._worker_state.worker_last_restart_detail = None
@@ -1427,25 +1428,29 @@ class WorkerWatchdog:
         # at "down"/"pending" and make plain /health readiness lie. Track the live HTTP
         # probe every tick instead, so an adopted healthy worker reaches "up".
         if self._spawner.process is None:
-            self._worker_state.worker_status = "up" if http_ready else "down"
+            self._worker_state.worker_status = (
+                WorkerConnectionStatus.UP.value
+                if http_ready
+                else WorkerConnectionStatus.DOWN.value
+            )
             return
 
         # Promote to "up" only after a positive worker health probe.
-        if self._worker_state.worker_status == "pending":
+        if self._worker_state.worker_status == WorkerConnectionStatus.PENDING:
             if http_ready and not needs_recovery:
-                self._worker_state.worker_status = "up"
+                self._worker_state.worker_status = WorkerConnectionStatus.UP.value
                 return
             if not needs_recovery:
                 return
 
         # --- Healthy / degraded-but-alive: reconcile status, never restart ---
         if not needs_recovery:
-            if self._worker_state.worker_status == "up":
+            if self._worker_state.worker_status == WorkerConnectionStatus.UP:
                 return
             # Recovered from a transient state (a "down" worker stays down until a
             # real recovery flips it).
-            if self._worker_state.worker_status != "down":
-                self._worker_state.worker_status = "up"
+            if self._worker_state.worker_status != WorkerConnectionStatus.DOWN:
+                self._worker_state.worker_status = WorkerConnectionStatus.UP.value
             return
 
         # --- Needs recovery ---
@@ -1453,7 +1458,11 @@ class WorkerWatchdog:
         # (or a no-auto-spawn deployment) it reports the truth and leaves recovery to
         # the owner - never force-opening the breaker or spawning a competitor.
         if not self._owns_worker():
-            self._worker_state.worker_status = "up" if http_ready else "down"
+            self._worker_state.worker_status = (
+                WorkerConnectionStatus.UP.value
+                if http_ready
+                else WorkerConnectionStatus.DOWN.value
+            )
             return
 
         # Global inter-cycle cooldown: a persistent crash signal cannot spin restart
@@ -1474,7 +1483,7 @@ class WorkerWatchdog:
             reason,
             f" ({detail})" if detail else "",
         )
-        self._worker_state.worker_status = "restarting"
+        self._worker_state.worker_status = WorkerConnectionStatus.RESTARTING.value
         self._mark_restart_started(reason, detail)
 
         # Force circuit breaker open so dispatches return 503.
@@ -1492,10 +1501,10 @@ class WorkerWatchdog:
         self._mark_restart_finished(restarted, attempts)
         if restarted:
             self._cb.record_success()
-            self._worker_state.worker_status = "up"
+            self._worker_state.worker_status = WorkerConnectionStatus.UP.value
             logger.info("Worker restarted successfully")
         else:
-            self._worker_state.worker_status = "down"
+            self._worker_state.worker_status = WorkerConnectionStatus.DOWN.value
             logger.critical(
                 "Worker restart failed after %d attempts — "
                 "manual intervention required. "

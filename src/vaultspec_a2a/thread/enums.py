@@ -15,9 +15,11 @@ __all__ = [
     "CleanupKind",
     "ControlActionResultStatus",
     "ControlActionType",
+    "DegradedReason",
     "InvalidTransitionError",
     "PermissionRequestStatus",
     "RepairStatus",
+    "ReplayStatus",
     "TaskQueueStatus",
     "ThreadStatus",
     "TranscriptAvailability",
@@ -71,6 +73,67 @@ class RepairStatus(StrEnum):
     CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
     NEEDS_RECONCILIATION = "needs_reconciliation"
     OPERATOR_INTERVENTION_REQUIRED = "operator_intervention_required"
+
+
+class ReplayStatus(StrEnum):
+    """How much of a run's event history the snapshot could actually replay.
+
+    Answers a different question from :class:`RepairStatus`: that one classifies
+    what is WRONG with a run, this one classifies how far the reader got. A
+    ``durable`` replay walked the stored history whole; ``best_effort`` served
+    what the live aggregator held because the durable history was not reachable;
+    ``gap_detected`` walked it and found a hole. ``unknown`` is the honest
+    starting value and the answer whenever the checkpoint could not be read at
+    all - deliberately not collapsed into ``gap_detected``, because "there is a
+    hole here" and "I could not look" are different claims and only the first
+    accuses the store.
+    """
+
+    DURABLE = "durable"
+    BEST_EFFORT = "best_effort"
+    GAP_DETECTED = "gap_detected"
+    UNKNOWN = "unknown"
+
+
+class DegradedReason(StrEnum):
+    """Why a run snapshot is less than complete, in terms a program can match.
+
+    These are the machine-readable members of a run snapshot's degradation list.
+    They are deliberately NOT the same vocabulary as the service-state
+    degradation list, which carries human-readable prose ("worker is down") for
+    an operator to read rather than tokens for a client to branch on. The two
+    share a field name and nothing else, so they stay separate declarations.
+
+    Membership follows the reader's fault lines: what could not be read
+    (``*_UNAVAILABLE``, ``*_UNREADABLE``, ``*_TIMEOUT``), what was read but is
+    not current (``*_STALE``), what should have been present and was not
+    (``*_MISSING``), and what was present but contradicts another store
+    (the permission residue and cross-store mismatch members).
+    """
+
+    AUTHORING_RUN_PRODUCED_NO_PROPOSAL = "authoring_run_produced_no_proposal"
+    CHECKPOINT_HISTORY_TIMEOUT = "checkpoint_history_timeout"
+    CHECKPOINT_HISTORY_UNAVAILABLE = "checkpoint_history_unavailable"
+    CHECKPOINT_HISTORY_UNKNOWN = "checkpoint_history_unknown"
+    CHECKPOINT_MISSING = "checkpoint_missing"
+    CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW = (
+        "checkpoint_permission_without_durable_row"
+    )
+    CHECKPOINT_TIMEOUT = "checkpoint_timeout"
+    CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
+    EXECUTION_STATE_PROJECTION_MISSING = "execution_state_projection_missing"
+    EXECUTION_STATE_PROJECTION_STALE = "execution_state_projection_stale"
+    EXECUTION_STATE_PROJECTION_UNREADABLE = "execution_state_projection_unreadable"
+    INTERRUPT_PAYLOAD_UNREADABLE = "interrupt_payload_unreadable"
+    INTERRUPT_PAYLOAD_UNTYPED = "interrupt_payload_untyped"
+    PENDING_PERMISSION_WITHOUT_CHECKPOINT_TRUTH = (
+        "pending_permission_without_checkpoint_truth"
+    )
+    PERMISSION_PROJECTION_UNREADABLE = "permission_projection_unreadable"
+    TERMINAL_THREAD_PENDING_PERMISSION_RESIDUE = (
+        "terminal_thread_pending_permission_residue"
+    )
+    UNKNOWN = "unknown"
 
 
 class TranscriptAvailability(StrEnum):

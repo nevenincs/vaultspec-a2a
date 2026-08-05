@@ -42,6 +42,7 @@ from .worker_management import (
     probe_worker_health,
     worker_liveness,
 )
+from .worker_status import WorkerConnectionStatus
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -353,7 +354,9 @@ def assemble_health_status(
     # --- Worker state ---
     worker_state_value: object = getattr(app_state, "worker_state", None)
     ws = worker_state_value if isinstance(worker_state_value, WorkerState) else None
-    worker_status = ws.worker_status if ws is not None else "unknown"
+    worker_status = (
+        ws.worker_status if ws is not None else WorkerConnectionStatus.UNKNOWN.value
+    )
     worker_restart_count = ws.worker_restart_count if ws is not None else 0
     worker_last_restart_reason = (
         ws.worker_last_restart_reason if ws is not None else None
@@ -544,7 +547,7 @@ def assemble_desktop_readiness(
         # No worker exists yet; one starts on first execution demand.
         worker_state = WorkerLifecycleState.COLD
         reasons.append("worker is cold; starts on first execution demand")
-    elif worker_status == "pending":
+    elif worker_status == WorkerConnectionStatus.PENDING:
         # A demand-side caller can complete the worker's real HTTP probe before
         # the watchdog has advanced its cached lifecycle label.  In that narrow
         # window the live probe is the stronger fact: refusing admission as
@@ -564,7 +567,10 @@ def assemble_desktop_readiness(
             worker_state = WorkerLifecycleState.READY
         else:
             worker_state = WorkerLifecycleState.STARTING
-    elif worker_status in {"down", "restarting"}:
+    elif worker_status in {
+        WorkerConnectionStatus.DOWN,
+        WorkerConnectionStatus.RESTARTING,
+    }:
         worker_state = WorkerLifecycleState.UNAVAILABLE
         reasons.append(f"worker is {worker_status}")
     else:

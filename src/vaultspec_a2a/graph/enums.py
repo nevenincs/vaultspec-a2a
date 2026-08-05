@@ -23,6 +23,7 @@ __all__ = [
     "PermissionType",
     "PipelinePhase",
     "Provider",
+    "SemanticPhase",
     "ServerEventType",
     "ToolCallStatus",
     "ToolKind",
@@ -296,26 +297,69 @@ PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
 # research_adr node -> semantic authoring phase
 # ---------------------------------------------------------------------------
 
+
+class SemanticPhase(StrEnum):
+    """What a run is product-visibly doing, in terms that name no graph node.
+
+    The one vocabulary for a run's semantic position, served on run-status as
+    ``semantic_phase``, on the run-start and commit acknowledgements as
+    ``semantic_status``, and stamped onto progress frames. Those three fields
+    ask the same question at different moments, so they answer from this set.
+
+    It is deliberately wider than the authoring phases alone. A run outside the
+    research_adr topology, or between nodes, is honestly ``RUNNING`` rather than
+    given a fabricated authoring phase, and a run that has not dispatched is
+    ``STARTING``. The terminal members collapse the lifecycle pairs a product
+    reader cannot act on separately: an archived run reads ``COMPLETED`` and a
+    cancelling one reads ``CANCELLED``, because the distinction is a lifecycle
+    fact and this vocabulary is a product one.
+
+    ``RECOVERY_REQUIRED`` is the only member that is not a position: it says the
+    run cannot advance until it is repaired, which is what a reader needs before
+    any phase detail matters.
+    """
+
+    STARTING = "starting"
+    RUNNING = "running"
+    RESEARCHING = "researching"
+    SYNTHESIZING_RESEARCH = "synthesizing_research"
+    REVIEWING_RESEARCH = "reviewing_research"
+    AWAITING_RESEARCH_DECISION = "awaiting_research_decision"
+    WRITING_ADR = "writing_adr"
+    REVIEWING_ADR = "reviewing_adr"
+    AWAITING_ADR_DECISION = "awaiting_adr_decision"
+    WRITING_PLAN = "writing_plan"
+    REVIEWING_PLAN = "reviewing_plan"
+    AWAITING_PLAN_DECISION = "awaiting_plan_decision"
+    RECOVERY_REQUIRED = "recovery_required"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 # Canonical map from a research_adr structural node name to the product-safe
 # semantic authoring phase. The node names are graph-owned (the research_adr
 # topology in the compiler), so this lives here as the single source both the
 # run-status projection (control) and the SSE frame stamping (streaming) import,
 # rather than duplicating the vocabulary in each layer. The dispatch/researcher
 # fan-out nodes map by prefix (see ``research_adr_semantic_phase``).
-RESEARCH_ADR_NODE_PHASE: dict[str, str] = {
-    "synthesis": "synthesizing_research",
-    "research_review": "reviewing_research",
-    "research_gate": "awaiting_research_decision",
-    "adr_author": "writing_adr",
-    "adr_review": "reviewing_adr",
-    "adr_gate": "awaiting_adr_decision",
-    "plan_author": "writing_plan",
-    "plan_review": "reviewing_plan",
-    "plan_gate": "awaiting_plan_decision",
+#
+# Valued by :class:`SemanticPhase` member rather than by literal, so a node
+# mapped to a phase this vocabulary does not contain cannot be written here.
+RESEARCH_ADR_NODE_PHASE: dict[str, SemanticPhase] = {
+    "synthesis": SemanticPhase.SYNTHESIZING_RESEARCH,
+    "research_review": SemanticPhase.REVIEWING_RESEARCH,
+    "research_gate": SemanticPhase.AWAITING_RESEARCH_DECISION,
+    "adr_author": SemanticPhase.WRITING_ADR,
+    "adr_review": SemanticPhase.REVIEWING_ADR,
+    "adr_gate": SemanticPhase.AWAITING_ADR_DECISION,
+    "plan_author": SemanticPhase.WRITING_PLAN,
+    "plan_review": SemanticPhase.REVIEWING_PLAN,
+    "plan_gate": SemanticPhase.AWAITING_PLAN_DECISION,
 }
 
 
-def research_adr_semantic_phase(node_name: str) -> str | None:
+def research_adr_semantic_phase(node_name: str) -> SemanticPhase | None:
     """Map a research_adr node name to its semantic authoring phase, or None.
 
     Strips the ``mount_`` prefix, resolves the dispatch and researcher
@@ -328,5 +372,5 @@ def research_adr_semantic_phase(node_name: str) -> str | None:
     if not node or node == "__end__":
         return None
     if node.startswith("research_dispatch"):
-        return "researching"
+        return SemanticPhase.RESEARCHING
     return RESEARCH_ADR_NODE_PHASE.get(node)

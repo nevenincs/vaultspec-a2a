@@ -28,6 +28,11 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ...context.metadata import ThreadMetadata
+from ...control.worker_status import WorkerConnectionStatus
+from ...graph.enums import SemanticPhase
+from ...providers.conditions import ProviderCondition
+from ...team.preset_origin import PresetOrigin
+from ...team.team_config import TopologyType
 from ...thread.actor_tokens import MAX_ROLES_PER_RUN, ActorTokenBundle
 from ...thread.clarification import (
     MAX_QUESTIONS_PER_REQUEST,
@@ -38,7 +43,13 @@ from ...thread.clarification import (
     QuestionId,
 )
 from ...thread.constants import MAX_FEATURE_TAG_LENGTH
-from ...thread.enums import CleanupKind, ThreadStatus, TranscriptAvailability
+from ...thread.enums import (
+    ApprovalStatus,
+    CleanupKind,
+    RepairStatus,
+    ThreadStatus,
+    TranscriptAvailability,
+)
 from .snapshots import ThreadStateSnapshot
 
 # ``MAX_RUN_MESSAGE_CHARS`` is imported to BOUND a field, not to be republished:
@@ -354,8 +365,9 @@ class RunStartResponse(BaseModel):
     status: str
     nickname: str | None = None
     # Initial product-safe semantic status; the full phase projection is served
-    # by run-status. "starting" for a freshly dispatched run.
-    semantic_status: str = "starting"
+    # by run-status. Typed by the SAME vocabulary that field answers from, since
+    # this is that question asked one moment earlier, not a second one.
+    semantic_status: SemanticPhase = SemanticPhase.STARTING
     # Whether the run was accepted as eligible to dispatch (always True on a 201;
     # ineligible requests are refused with a 4xx before reaching this response).
     eligible: bool = True
@@ -412,7 +424,7 @@ class RunCommitResponse(BaseModel):
     run_id: PathSafeRunId
     status: str
     lease_id: LeaseId
-    semantic_status: str = "starting"
+    semantic_status: SemanticPhase = SemanticPhase.STARTING
     nickname: str | None = None
     # As on RunStartResponse: the freeze is the one start-surface disclosure;
     # the legacy profile pair is unreachable through the commit schema.
@@ -479,9 +491,13 @@ class RunSummaryRecord(BaseModel):
     # The projection's verdict on this run's recoverability. A caller scanning
     # history for work that needs attention reads these, and they are the whole
     # reason this record exists rather than the discovery one.
-    repair_status: str | None = Field(default=None, max_length=64)
-    execution_readiness: str | None = Field(default=None, max_length=64)
-    approval_status: str | None = Field(default=None, max_length=64)
+    # All three answer from a closed set the service fixes, so they are served
+    # as the enumerations that already own them rather than as bounded strings.
+    # ``repair_status`` and ``execution_readiness`` share one vocabulary
+    # deliberately: they ask different questions from the same set of answers.
+    repair_status: RepairStatus | None = None
+    execution_readiness: RepairStatus | None = None
+    approval_status: ApprovalStatus | None = None
     approval_request_id: str | None = Field(default=None, max_length=256)
     created_at: datetime
     updated_at: datetime
@@ -545,7 +561,7 @@ class RunStatusResponse(BaseModel):
     status: ThreadStatus
     # Product-safe semantic authoring phase projected from topology position and
     # gate state, so the Rust backend never interprets LangGraph node names.
-    semantic_phase: str
+    semantic_phase: SemanticPhase
     # The run's target feature tag and the Rust-backend authoring session id it
     # produced, read from the checkpoint (None until produced / for non-authoring).
     feature_tag: str | None = None
@@ -554,12 +570,17 @@ class RunStatusResponse(BaseModel):
     roles: list[RoleState] = Field(default_factory=list)
     proposal_ids: list[str] = Field(default_factory=list)
     changeset_ids: list[str] = Field(default_factory=list)
-    approval_status: str | None = None
+    approval_status: ApprovalStatus | None = None
     approval_request_id: str | None = None
     checkpoint_id: str | None = None
     last_sequence: int = 0
-    repair_status: str | None = None
-    execution_readiness: str | None = None
+    repair_status: RepairStatus | None = None
+    execution_readiness: RepairStatus | None = None
+    # Left as bare strings pending the narrowing, NOT because this list lacks an
+    # owning vocabulary - ``thread.enums.DegradedReason`` declares it - but
+    # because the projection that appends to it is under concurrent revision and
+    # a member added there while this field is narrowed would fail the response
+    # rather than the write. Narrowed once that projection derives from the type.
     degraded_reasons: list[str] = Field(default_factory=list)
     # The capped, single-line reason this run last transitioned to FAILED,
     # sourced from the durable threads.failure_reason column (never a live SSE
@@ -572,7 +593,8 @@ class RunStatusResponse(BaseModel):
     # says what happened, this says what the reader should do about it - wait,
     # re-authenticate, top up, raise a ceiling, or change the request - and a
     # client that had to derive that from the reason text would be matching
-    # vendor prose, which breaks the moment a vendor rewords a message.
+    # vendor prose, which breaks the moment a vendor rewords a message. Served
+    # as the owning enumeration, which is what makes that promise checkable.
     #
     # Authoritative here rather than on the relay, following the same discipline
     # the pending clarification below follows: the error frame carrying this
@@ -580,7 +602,7 @@ class RunStatusResponse(BaseModel):
     # only from this response. Additive; None for a run that never failed, or
     # one whose failure predates the durable column. The value is a wire
     # contract shared with the consuming repository and is additive-only.
-    provider_condition: str | None = None
+    provider_condition: ProviderCondition | None = None
     # Why an OPERATION did not take on a run that is STILL ALIVE - a follow-up
     # or a resume the worker never received - as opposed to why a run FAILED.
     # The distinction is not cosmetic and a client must not collapse it: a run
@@ -890,6 +912,17 @@ class RoleAssignmentSummary(BaseModel):
     provider name - naming a lane no preset asked for would be indistinguishable
     from a real declaration. ``resolution_error`` carries the reason and ``source``
     reads ``undeclared``; the role is reported ineligible.
+
+    ``provider_id`` is deliberately NOT typed by the ``Provider`` enumeration
+    served beside it on the agent snapshot, even though the two carry the same
+    concept. This surface replays FROZEN historical assignments, and two of its
+    values are provably outside that enumeration: the empty string documented
+    above, and a provider a past run froze that this build no longer knows -
+    a case the disclosure path already handles explicitly by reporting it not
+    ready rather than raising. Narrowing here would turn both into a validation
+    failure on a read path. The reconciliation is therefore that these are two
+    concepts: ``Provider`` is the closed set of lanes this build can RUN, and
+    this is an identifier a past run RECORDED.
     """
 
     role_id: str
@@ -935,17 +968,21 @@ class PresetSummary(BaseModel):
     unavailable_reason: str | None = None
     display_name: str | None = None
     description: str | None = None
-    topology: str | None = None
+    # The topology enumeration the preset loader already validates against, not
+    # a restatement of it: an unloadable preset has no topology and reads None.
+    topology: TopologyType | None = None
     worker_count: int | None = None
     required_roles: list[str] = Field(default_factory=list)
     authoring_capability: str | None = None
     # True for bundled mock/test presets so the product layer can exclude them.
     is_mock: bool = False
-    # model-profiles additions (additive v1 fields, absent-safe):
-    # preset origin (bundled | workspace | test_mock), the document outputs the
-    # topology delivers, the selectable profiles with effective assignments and
-    # eligibility, and the default profile id.
-    origin: str | None = None
+    # model-profiles additions (additive v1 fields, absent-safe): the preset's
+    # origin, the document outputs the topology delivers, the selectable
+    # profiles with effective assignments and eligibility, and the default
+    # profile id. The origin's legal values were previously stated only in this
+    # comment, which is a declaration no client can read and no compiler can
+    # check; they are now the enumeration the field is typed by.
+    origin: PresetOrigin | None = None
     supported_capabilities: list[str] = Field(default_factory=list)
     profiles: list[ProfileSummary] = Field(default_factory=list)
     default_profile_id: str | None = None
@@ -983,7 +1020,10 @@ class ServiceStateResponse(BaseModel):
     # consumer comparing only host and port cannot tell the two apart - which is
     # how dispatch reached a worker still paired to a gateway that had exited.
     gateway_lifetime_id: str | None = None
-    worker_status: str | None = None
+    # The watchdog's raw observation, served as the vocabulary that watchdog
+    # writes. Distinct from ``readiness.worker_state`` below, which is the
+    # readiness ladder this is projected onto - see ``control.worker_status``.
+    worker_status: WorkerConnectionStatus | None = None
     worker_connected: bool | None = None
     # What the worker reports about the pairing, echoed rather than asserted:
     # which gateway incarnation spawned it, and which spawn attempt it was.
@@ -1003,6 +1043,12 @@ class ServiceStateResponse(BaseModel):
     authoring_backend_reachable: bool | None = None
     # Configured maximum concurrent runs this gateway admits.
     active_run_capacity: int | None = None
+    # Free-form BY DESIGN, and not the same field as the run snapshot's list of
+    # the same name. These are operator-readable sentences ("worker is down"),
+    # one of them interpolated from the worker's own status, meant to be read
+    # rather than matched. A client branching on service health reads the typed
+    # facts under ``readiness``; nothing is expected to compare these to a
+    # constant, so under this contract they are prose and not a vocabulary.
     degraded_reasons: list[str] = Field(default_factory=list)
     # Sorted "METHOD path" signature of the live route table (see
     # ``route_signature`` in ``api.routes.gateway``). The doctor CLI diffs this

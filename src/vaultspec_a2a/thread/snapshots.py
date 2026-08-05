@@ -16,7 +16,14 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ..graph.enums import AgentLifecycleState, Model, PermissionType, Provider
-from .enums import TERMINAL_STATUSES, RepairStatus, ThreadStatus, TranscriptAvailability
+from .enums import (
+    TERMINAL_STATUSES,
+    DegradedReason,
+    RepairStatus,
+    ReplayStatus,
+    ThreadStatus,
+    TranscriptAvailability,
+)
 from .models import PlanEntry
 
 if TYPE_CHECKING:
@@ -847,24 +854,24 @@ def finalize_snapshot_replay_status(
     ``snapshot_complete``, and ``degraded_reasons`` attributes.
     """
     if checkpoint_loaded:
-        snapshot.replay_status = "durable"
+        snapshot.replay_status = ReplayStatus.DURABLE.value
     elif checkpoint_error:
         snapshot.snapshot_complete = False
-        snapshot.replay_status = "unknown"
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
     elif checkpoint_present:
         snapshot.snapshot_complete = False
-        snapshot.replay_status = "best_effort"
+        snapshot.replay_status = ReplayStatus.BEST_EFFORT.value
     elif thread_status == ThreadStatus.SUBMITTED.value:
         snapshot.snapshot_complete = True
-        snapshot.replay_status = "unknown"
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
     else:
         snapshot.snapshot_complete = False
-        if "checkpoint_missing" not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append("checkpoint_missing")
+        if DegradedReason.CHECKPOINT_MISSING not in snapshot.degraded_reasons:
+            snapshot.degraded_reasons.append(DegradedReason.CHECKPOINT_MISSING.value)
         repair = CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"]
         with contextlib.suppress(AttributeError):
             snapshot.repair_status = repair.value
         with contextlib.suppress(AttributeError):
             snapshot.execution_readiness = repair.value
-        snapshot.replay_status = "gap_detected"
+        snapshot.replay_status = ReplayStatus.GAP_DETECTED.value
     return snapshot

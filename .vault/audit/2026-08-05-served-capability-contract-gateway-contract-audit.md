@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:f09b7cc28d9b3e2b03d7613007e91f29da2946acf29143abfdc1ba28350e95a4'
+body_hash: 'sha256:d22513018c9d0aaf9ef6cd676c32f85730981dc7adfb3a43a6ced811c0d40cae'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -1982,7 +1982,26 @@ cross-repository. EXPLICITLY UNRELATED to the delivery work and to the field-sha
 questions - the delivery work proves DELIVERY, not VISIBILITY, and the natural
 misreading is that this reopens it. It does not.
 
-REMEDY, two options, and the second is close to free. Persist a real empty-base
+A SECOND AND DISTINCT DEFECT SITS UNDER THIS ONE, and it must NOT be closed by
+fixing the first. The projection SILENTLY SKIPS on a preimage miss - returning
+nothing, raising nothing, logging nothing. THAT SILENCE IS WHY THIS SURVIVED: a
+projection can lose a document with no signal anywhere, so the only observable
+symptom was a checkmark that looks like success.
+
+Fixing the preimage removes today's miss. It does NOT remove the property that
+any FUTURE miss - a new operation kind, a migration, a partial write - vanishes
+the same way. This is the failure-observability record's swallowed-condition
+clause exactly: a path that declines, falls back, or returns nothing where a
+result was expected must say so where it happens. A remedy that repairs the
+lookup and leaves the silence intact fixes one instance of a defect class and
+preserves the class.
+
+It may warrant its own identifier rather than living inside this entry; the
+routing lead holds allocation and the next free numbers are reserved for a
+different sweep, so it is recorded here in full rather than given a colliding
+number.
+
+REMEDY, two options for the preimage, and the second is close to free. Persist a real empty-base
 preimage for create operations so the lookup succeeds and the diff renders
 honestly as nothing-to-full-text, WHICH IS THE SEMANTICALLY CORRECT DIFF FOR A
 CREATE ANYWAY. Or have the detail projection synthesise the review document

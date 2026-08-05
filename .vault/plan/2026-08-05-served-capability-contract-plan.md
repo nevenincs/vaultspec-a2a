@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:9a96965070124a503feef3521a7187d557b73296bb3fa4b1ef1b65d37fd889c4'
+body_hash: 'sha256:4539ba84e26a8406114a0c2d2313b0c8857f52b5bf123b4a9101a9f8f233fa61'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -166,7 +166,7 @@ Findings where a correctly typed field still carries an untrue value, plus the s
 
 The vocabulary decision governs a value's domain, never whether a written value is true. These findings need a decision on terminal states and the obligation to reach them.
 
-- [ ] `W04.P07.S22` - Author the transition-contract decision the vocabulary record ruled out of scope, defining terminal state sets, the writer obliged to reach them and reconciliation for states that never do; `.vault/adr`.
+- [ ] `W04.P07.S22` - Transition-contract decision AUTHORED as the state-truthfulness record - execute its five clauses across the state vocabularies, declaring terminal partitions, naming an obliged writer per transitional state, reconciling abandoned transitions with run-derived bounds, and enforcing non-contradiction where health fields are assembled; `src/vaultspec_a2a/thread/enums.py`.
 
 ### Phase `W04.P08` - repair the run projection
 

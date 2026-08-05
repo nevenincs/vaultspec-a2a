@@ -20,7 +20,12 @@ from ..graph.compiler import _resolve_model_for_worker, compile_team_graph
 from ..ipc.schemas import canonical_project_root
 from ..providers.warmup import warm_model_imports
 from ..streaming import StreamableGraph, node_metadata_from_graph
-from ..team.team_config import AgentConfig, load_agent_config, load_team_config
+from ..team.team_config import (
+    AgentConfig,
+    TopologyType,
+    load_agent_config,
+    load_team_config,
+)
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.errors import (
@@ -446,9 +451,28 @@ class GraphLifecycleManager:
         # at build time when the run cannot author (so it never starts vague). The
         # feedback reader is the read-path companion (best-effort, not fail-closed):
         # it grounds the document writers on a revision run's reviewer batch.
+        #
+        # KEYED ON TOPOLOGY ON PURPOSE, and it must stay that way. The question
+        # here is a MECHANISM one - "does this preset submit over the direct
+        # worker-to-engine HTTP path?" - and only ``research_adr`` does. The solo
+        # doc-editor lane also authors documents, but submits through the model's
+        # bridged tool instead, so it correctly gets no submitter here.
+        #
+        # The served ``authoring_capability`` field asks a DIFFERENT question -
+        # "does this preset author documents?" - and is keyed on declared ROLES,
+        # so it answers ``document_authoring`` for that same doc-editor lane. The
+        # two therefore DISAGREE for the doc-editor, and both are right.
+        #
+        # If you arrived here debugging a run that authored nothing, that
+        # disagreement is not the bug and making these two agree is not the fix:
+        # this gate is why the bridged lane submits by a different route, and
+        # aligning it would either strand the served field on a wrong answer again
+        # or hand a submitter to a lane that does not use one. They agreed once,
+        # when one topology key answered both questions - and answered this one's
+        # neighbour wrongly.
         proposal_submitter = None
         feedback_reader = None
-        if team_config.topology.type == "research_adr":
+        if team_config.topology.type == TopologyType.RESEARCH_ADR:
             proposal_submitter = await self._build_proposal_submitter(ws_root)
             feedback_reader = self._build_feedback_reader()
 

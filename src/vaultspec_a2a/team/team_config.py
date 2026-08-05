@@ -22,9 +22,12 @@ from enum import StrEnum
 from importlib import resources
 from pathlib import Path
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
-from ..authoring.contract import is_document_authoring_topology
+from ..authoring.contract import (
+    is_document_authoring_role,
+    is_document_authoring_topology,
+)
 from ..graph.enums import Model, Provider
 from ..thread.clarification import (
     CLARIFICATION_TOPOLOGIES,
@@ -195,21 +198,44 @@ class DocumentCapability(StrEnum):
     PLAN_DOCUMENT = "plan_document"
 
 
-def authoring_capability(topology_type: TopologyType) -> AuthoringCapability:
-    """Return the coarse authoring capability a topology delivers.
+def authoring_capability(team_config: "TeamConfig") -> AuthoringCapability:
+    """Return the coarse authoring capability a preset delivers.
 
-    ``document_authoring`` for the research_adr document phase machine; ``coding``
-    for the coder topologies. This is diagnostic truth for the Rust backend, not
-    product curation text.
+    Keyed on the DECLARED ROLES of the preset's workers, not on its topology. A
+    preset is ``document_authoring`` when any worker holds a role from the
+    authoring contract's document-role set, and ``coding`` otherwise.
 
-    Keyed on TOPOLOGY, which is known to misclassify a preset that runs a
-    document-authoring ROLE under a coder topology - the solo doc-editor lane is
-    exactly that shape. Re-keying is a live question and deliberately not settled
-    here; see the capability sweep test beside this module for what the two
-    keyings actually disagree about across the bundled presets.
+    The distinction is not academic and topology-keying got it wrong: the solo
+    doc-editor lane runs a ``pipeline`` topology while genuinely authoring
+    documents through the engine bridge, so a topology key reported ``coding``
+    for a preset that authors. Roles follow the content; topology follows the
+    graph shape, and only one of those is what this field claims.
+
+    THIS DELIBERATELY DISAGREES with the submitter gate in
+    ``worker/graph_lifecycle.py``, which keys on topology. That gate answers a
+    different question - "does this preset submit over the direct worker-to-engine
+    HTTP path?" - and ``research_adr`` genuinely does while the doc-editor lane
+    submits through the model's bridged tool instead. Two true answers to two
+    different questions. Do not "align" them; the agreement they used to show was
+    the symptom of one key answering both questions, and answering one of them
+    wrongly.
+
+    Fails closed toward ``coding``: a worker whose agent config cannot be loaded
+    is skipped rather than raised on, matching the role-based predicate the
+    run-status projection already uses. A preset that is entirely unloadable
+    never reaches this function - the listing reports it ``loadable=False`` with
+    no descriptive fields at all - so the fail-closed path here covers only the
+    narrower case of one bad agent reference inside an otherwise valid preset.
+    The consequence is an understatement (``coding`` for a preset that may
+    author), never a false authoring claim.
     """
-    if is_document_authoring_topology(topology_type):
-        return AuthoringCapability.DOCUMENT_AUTHORING
+    for worker in team_config.workers:
+        try:
+            agent_config = load_agent_config(worker.agent_id)
+        except (ConfigError, ValidationError):
+            continue
+        if is_document_authoring_role(agent_config.role):
+            return AuthoringCapability.DOCUMENT_AUTHORING
     return AuthoringCapability.CODING
 
 
@@ -229,6 +255,19 @@ def supported_capabilities(topology_type: TopologyType) -> list[DocumentCapabili
     the moment it names a second: the predicate admits it, a name comparison
     keeps answering "coding" with no capabilities, and the dashboard renders a
     document-authoring preset as a plain coding one.
+
+    Deliberately still keyed on TOPOLOGY while ``authoring_capability`` above has
+    moved to roles, and the asymmetry is the point. That field says WHETHER a
+    preset authors, which the roles answer correctly. This one claims WHICH
+    documents a preset can PRODUCE, and a role set cannot support that claim: the
+    bundled failure fixture declares two document-authoring roles while its
+    recursion budget guarantees it never finishes, so keying outputs off roles
+    would advertise three deliverables it structurally cannot deliver. The cost
+    of staying is that the solo doc-editor lane reports no capabilities - an
+    understatement, which a client can act on safely, rather than a false claim,
+    which it cannot tell apart from a real one. A per-role output map and a
+    declared product/certification classification are what make re-keying this
+    field safe; until both exist, understatement is the correct answer.
     """
     if is_document_authoring_topology(topology_type):
         return [

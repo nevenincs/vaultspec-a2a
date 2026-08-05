@@ -401,20 +401,30 @@ LIVE_DOCUMENT_CAPABILITY = {
 def test_capability_vocabularies_contain_what_the_listing_serves() -> None:
     """The two preset capability enumerations cover the whole live listing.
 
-    Both are sole-producer vocabularies, so this drives the producers over every
-    topology rather than sampling: the returned set IS the served set, and the
-    twenty-preset capture agreed with it member for member.
+    Both are sole-producer vocabularies, so this drives the producers over their
+    whole input domain rather than sampling: the returned set IS the served set,
+    and the twenty-preset capture agreed with it member for member.
+
+    The two domains differ because the two keyings now differ. The coarse field
+    is driven over every DISCOVERABLE PRESET, since it reads declared roles; the
+    document array is driven over every TOPOLOGY, since it still reads topology.
     """
     from ...team.team_config import (
         AuthoringCapability,
         DocumentCapability,
         authoring_capability,
+        discover_team_preset_ids,
+        load_team_config,
         supported_capabilities,
     )
 
-    produced_coarse = {
-        authoring_capability(topology).value for topology in TopologyType
-    }
+    produced_coarse: set[str] = set()
+    for preset_id in discover_team_preset_ids():
+        try:
+            team = load_team_config(preset_id)
+        except Exception:
+            continue
+        produced_coarse.add(authoring_capability(team).value)
     produced_documents = {
         capability.value
         for topology in TopologyType
@@ -440,10 +450,18 @@ def test_every_declared_capability_member_has_a_producing_topology() -> None:
         AuthoringCapability,
         DocumentCapability,
         authoring_capability,
+        discover_team_preset_ids,
+        load_team_config,
         supported_capabilities,
     )
 
-    reachable_coarse = {authoring_capability(topology) for topology in TopologyType}
+    reachable_coarse: set[AuthoringCapability] = set()
+    for preset_id in discover_team_preset_ids():
+        try:
+            team = load_team_config(preset_id)
+        except Exception:
+            continue
+        reachable_coarse.add(authoring_capability(team))
     reachable_documents = {
         capability
         for topology in TopologyType
@@ -453,35 +471,41 @@ def test_every_declared_capability_member_has_a_producing_topology() -> None:
     assert reachable_documents == set(DocumentCapability)
 
 
-def test_the_topology_and_role_keyings_disagree_on_exactly_two_presets() -> None:
-    """Record which bundled presets the two derivations classify differently.
+def test_the_capability_and_mechanism_keyings_disagree_on_exactly_two_presets() -> None:
+    """Pin which presets the capability and mechanism questions answer differently.
 
-    ``authoring_capability`` keys on TOPOLOGY; the run-status projection asks the
-    same question by ROLE. This test does not assert either is right - that is a
-    taxonomy question this layer does not own. It pins the disagreement SET, so a
-    re-keying lands as a reviewed change to a known list rather than as a silent
-    reclassification of presets nobody enumerated.
+    Two questions are asked of every preset and they are NOT the same question.
+    ``authoring_capability`` asks "does this preset author documents?" and keys on
+    declared ROLES. The submitter gate in ``worker/graph_lifecycle.py`` asks "does
+    this preset submit over the direct worker-to-engine path?" and keys on
+    TOPOLOGY. Both are correct, and where they disagree BOTH answers are true.
 
-    Both members are deliberate and neither is the doc-editor lane alone:
+    This test asserts neither is right - it pins the disagreement SET. The set is
+    the thing a future reader will be tempted to eliminate, because two
+    derivations of what looks like one fact disagreeing reads as a bug. Growing
+    or shrinking it should be a reviewed decision, not a side effect.
 
-    ``vaultspec-doc-editor`` runs the solo ``doc-editor`` role under a
-    ``pipeline`` topology, so topology-keying calls it coding when it does author
-    documents. This is the known case.
+    The two members, and why each is deliberate:
+
+    ``vaultspec-doc-editor`` authors documents (role ``doc-editor``) but submits
+    through the model's bridged tool rather than the direct path, so it is
+    document-authoring WITHOUT a submitter. This is the case the re-key existed
+    to fix, and the disagreement here is the fix working.
 
     ``deterministic-failure`` reuses the REAL researcher and synthesist agents to
-    script a guaranteed graph-budget failure. It therefore DECLARES two
-    document-authoring roles while structurally never finishing, and it is not a
-    mock by the id convention, so it is served to the dashboard as an ordinary
-    preset. Role-keying would reclassify it as document-authoring - which is why
-    the re-key needs a decision about whether the capability describes the roles
-    a preset RUNS or the documents it can DELIVER.
+    script a guaranteed graph-budget failure, so it DECLARES document-authoring
+    roles while structurally never finishing. It reads document-authoring by role
+    and gets no submitter by topology. It is certification scaffolding that the
+    preset listing should exclude by declared classification rather than by
+    identifier - until it does, this preset is why ``supported_capabilities``
+    deliberately still keys on topology: keying OUTPUTS off roles would advertise
+    three deliverables this preset cannot produce.
     """
-    from ...authoring.contract import is_document_authoring_role
+    from ...authoring.contract import is_document_authoring_topology
     from ...team.team_config import (
         AuthoringCapability,
         authoring_capability,
         discover_team_preset_ids,
-        load_agent_config,
         load_team_config,
     )
 
@@ -491,23 +515,14 @@ def test_the_topology_and_role_keyings_disagree_on_exactly_two_presets() -> None
             team = load_team_config(preset_id)
         except Exception:
             continue
-        by_topology = (
-            authoring_capability(team.topology.type)
-            is AuthoringCapability.DOCUMENT_AUTHORING
+        authors_documents = (
+            authoring_capability(team) is AuthoringCapability.DOCUMENT_AUTHORING
         )
-        by_role = False
-        for worker in team.workers:
-            try:
-                agent = load_agent_config(worker.agent_id)
-            except Exception:
-                continue
-            if is_document_authoring_role(agent.role):
-                by_role = True
-                break
-        if by_topology != by_role:
+        uses_direct_submitter = is_document_authoring_topology(team.topology.type)
+        if authors_documents != uses_direct_submitter:
             disagreeing.add(preset_id)
 
     assert disagreeing == {"vaultspec-doc-editor", "deterministic-failure"}, (
-        "the topology and role keyings now disagree on a different set of "
+        "the capability and mechanism keyings now disagree on a different set of "
         f"presets than recorded: {sorted(disagreeing)}"
     )

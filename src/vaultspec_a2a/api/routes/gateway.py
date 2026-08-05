@@ -2439,7 +2439,7 @@ def _summarize_preset(
         # produce lands before the graph ever runs, where nothing downstream can
         # observe it.
         required_roles=required_role_ids(tc),
-        authoring_capability=authoring_capability(tc.topology.type),
+        authoring_capability=authoring_capability(tc),
         is_mock=is_mock,
         origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
         supported_capabilities=supported_capabilities(tc.topology.type),

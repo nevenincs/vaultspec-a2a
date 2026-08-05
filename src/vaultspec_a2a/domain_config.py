@@ -88,14 +88,21 @@ class DomainConfig(BaseModel):
     ingest_event_stall_timeout_seconds: float = Field(
         default=90.0,
         description=(
-            "Ingest: maximum seconds to wait for the NEXT astream_events event "
-            "before treating the graph run as stalled (S37). Independent of a "
-            "team's own step_timeout_seconds (a per-node budget LangGraph is "
-            "supposed to enforce internally, but was observed live to not "
-            "always fire) — this is an unconditional outer bound on the ingest "
-            "loop itself, so a genuine wedge fails loud and retriable instead "
-            "of leaving a thread stuck RUNNING forever with no checkpoint, no "
-            "error, and no log line."
+            "Ingest: FLOOR on the seconds to wait for the NEXT astream_events "
+            "event before treating the graph run as stalled (S37). Independent "
+            "of a team's own step_timeout_seconds (a per-node budget LangGraph "
+            "is supposed to enforce internally, but was observed live to not "
+            "always fire) in the sense that this backstop never trusts "
+            "step_timeout to fire on its own — but it is a floor, not a fixed "
+            "value: a run whose compiled graph carries a wider step_timeout "
+            "(streaming/ingest.py's _effective_stall_timeout) is bounded by "
+            "that wider budget instead, so a node using exactly the silence "
+            "its own team preset sanctions (a long tool call, extended "
+            "reasoning on an ACP-backed lane) is never killed by this floor. "
+            "A genuine wedge on a preset with no wider step budget still fails "
+            "loud and retriable at this value instead of leaving a thread "
+            "stuck RUNNING forever with no checkpoint, no error, and no log "
+            "line."
         ),
     )
 

@@ -2016,6 +2016,41 @@ class _StallingGraph:
 assert issubclass(_StallingGraph, StreamableGraph)  # protocol drift guard
 
 
+class _LongStepBudgetGraph:
+    """Graph stub carrying a compiled ``step_timeout``, quiet within that budget.
+
+    Reproduces the live false-positive: a team preset can declare
+    ``step_timeout_seconds`` far above the global ingest-stall default (e.g.
+    1800s for an ACP-backed authoring node doing a long tool call or extended
+    reasoning between protocol frames -- ``graph/compiler.py`` sets exactly
+    this on the compiled Pregel object from the team TOML). ``astream_events``
+    here goes quiet for longer than the tiny global default this test
+    configures, but still well inside ``step_timeout`` -- the shape of a node
+    using precisely the silence its own run sanctioned, not a wedge.
+    """
+
+    step_timeout = 0.5
+
+    async def astream_events(
+        self, graph_input: object, config: object, *, version: str
+    ):
+        await asyncio.sleep(0.3)
+        yield {
+            "event": "on_chain_end",
+            "run_id": "r1",
+            "name": "worker",
+            "metadata": {},
+        }
+
+    async def aget_state(self, config: object) -> object:
+        return type(
+            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
+        )()
+
+
+assert issubclass(_LongStepBudgetGraph, StreamableGraph)  # protocol drift guard
+
+
 class TestIngestStallWatchdog:
     """Tests for the S37 ingest-stall safety net (astream_events wedge)."""
 
@@ -2114,3 +2149,39 @@ class TestIngestStallWatchdog:
         )
         assert outcome == "completed"
         assert aggregator.take_failure_reason("thread-normal") is None
+
+    @pytest.mark.asyncio
+    async def test_a_node_within_its_own_step_budget_is_not_killed_by_the_global_floor(
+        self, aggregator: EventAggregator, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A silent stretch under the run's OWN step_timeout must not trip the
+        watchdog, even when it exceeds the flat global default.
+
+        Reproduces the live incident this fix addresses: an ADR-authoring
+        node's ACP subprocess legitimately went quiet -- a long tool call, or
+        extended reasoning with no protocol frame to relay -- for longer than
+        the global default but comfortably inside the team preset's own much
+        larger step_timeout_seconds (1800s on the real preset that failed).
+        The unconditional outer bound, blind to that run's own configured
+        budget, killed a healthy run and reported "no event from the graph"
+        while the run was doing exactly the long-running work its own
+        configuration sanctioned. Fails on the unfixed code (the global
+        default alone bounds the wait, so the 0.3s quiet stretch below trips
+        it well before astream_events yields) and passes once the effective
+        bound is widened to the graph's own step_timeout.
+        """
+        monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.1)
+        graph = _LongStepBudgetGraph()
+        config = {"configurable": {"thread_id": "thread-long-step"}}
+        outcome = await asyncio.wait_for(
+            aggregator.ingest(
+                thread_id="thread-long-step",
+                agent_id="supervisor",
+                graph=graph,
+                graph_input={"messages": []},
+                config=config,
+            ),
+            timeout=5.0,
+        )
+        assert outcome == "completed"
+        assert aggregator.take_failure_reason("thread-long-step") is None

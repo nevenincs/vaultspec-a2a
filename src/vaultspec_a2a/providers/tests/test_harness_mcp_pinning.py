@@ -8,8 +8,9 @@ real search server over a real MCP stdio session.
 Two things are deliberately NOT claimed here. The live case proves the declared
 channel is the SERVER's own root authority and outranks the working directory it
 was launched in; it does not prove the strict claude lane delivers that value to
-the spawned server, because the lane placeholder-substitutes registry env values
-and hoists only the authoring bridge's real values into the spawn environment. And
+the spawned server, because the lane placeholder-substitutes advertised spec env
+values and hoists only the authoring bridge's real values into the spawn
+environment (a registry entry can declare no env of its own to substitute). And
 composition pins only when a caller states a project: no test here asserts that a
 run reaches this seam with one, because that wiring lives outside this module and
 asserting it from inside would prove nothing about the run.
@@ -154,6 +155,60 @@ def test_registry_construction_refuses_a_malformed_root_pin(
                 }
             }
         )
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param({"PROBE_LOG": "info"}, id="flat-mapping-the-codex-shape"),
+        pytest.param(
+            [{"name": "PROBE_LOG", "value": "info"}], id="pair-list-the-acp-shape"
+        ),
+    ],
+)
+def test_registry_construction_refuses_an_env_declaration(env: JsonValue) -> None:
+    """BOTH candidate shapes are refused, because neither is servable to both.
+
+    Not a style rule and not a preference between the two shapes: the ACP stdio
+    spec models env as a list of name/value pairs and the Codex block models it as
+    a flat mapping, and a registry entry is read by both. Before this refusal the
+    constructor admitted either, so whichever an author wrote, one transport got
+    it wrong - the flat mapping reaching an UNPINNED ACP session wrong and silent,
+    which is the half nobody investigates.
+
+    Parametrizing over both shapes is what keeps that the claim. A test refusing
+    only one would read as a shape preference and would still admit the other.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        _declare_registry(
+            {
+                "probe": {
+                    "name": "probe",
+                    "command": "uvx",
+                    "args": [],
+                    "env": env,
+                    "read_only": True,
+                    "network_egress": False,
+                    "root_pin": "PROBE_ROOT",
+                    "exact_surface": False,
+                }
+            }
+        )
+    message = str(excinfo.value)
+    assert "env" in message
+    assert "probe" in message
+
+
+def test_no_shipped_entry_declares_an_environment() -> None:
+    """The admitted case: the closed registry satisfies the refusal it now imposes.
+
+    The complement of the test above, and the reason the refusal costs nothing -
+    a constructor rule the shipped registry itself violated would be a rule that
+    could never ship.
+    """
+    for name, entry in _KNOWN_MCP_SERVERS.items():
+        assert isinstance(entry, MappingProxyType)
+        assert "env" not in entry, f"{name} declares an environment"
 
 
 def test_registry_construction_admits_an_explicitly_unpinnable_entry() -> None:

@@ -39,7 +39,6 @@ from ._json_contract import (
     JsonObject,
     JsonValue,
     freeze_json,
-    thaw_json,
 )
 from ._subprocess import redact_secrets
 from .lane_admission import is_web_lane_proven
@@ -153,17 +152,34 @@ class HarnessMcpResolution:
 # over immutable values, so the registry cannot be extended, re-pointed, or
 # re-declared by an importer after import. Membership is a trust claim, and a
 # trust claim that any module can add with one assignment is not a claim at all.
-# WARNING: the session surface reaches the claude CLI as a dynamic MCP config
-# parsed with env expansion, so a literal ``${...}`` placed in a future registry
-# ``env`` value would be expanded by the CLI from its process environment at
-# parse time (the same mechanism the authoring bridge relies on) — registry env
-# values must be literals, never accidental ``${...}`` strings. That constraint
-# is exactly why the per-run project pin is NOT a registry value: the registry
-# cannot know a run's project, and a placeholder standing in for one would be
-# expanded from the serving process's environment rather than the run's. The pin
-# rides :func:`pin_harness_mcp_servers` instead - a separate, explicit, per-run
-# seam applied to a rendered spec - so the literals-only rule stands unrelaxed.
-_LAUNCH_SPEC_KEYS = ("name", "command", "args", "env")
+# An entry may NOT declare ``env``: the field is refused at construction, because
+# the two transports shape it irreconcilably and neither shape is servable to
+# both. The ACP stdio spec models env as a LIST of name/value pairs; the Codex
+# ``config.toml`` block models the same data as a FLAT MAPPING. A registry entry
+# is read by both, so a flat mapping renders correctly for Codex and reaches an
+# ACP session malformed (loudly if the run pins it, SILENTLY if it does not),
+# while a list of pairs renders correctly for ACP and is refused outright by the
+# Codex reader. There is no third shape: whichever an author picked, one
+# transport would be wrong, and the dangerous half is the silent one.
+#
+# Refusing the field is smaller than teaching either side a projection, and it
+# also makes a standing hazard unbreakable rather than merely documented. The
+# session surface reaches the claude CLI as a dynamic MCP config parsed WITH env
+# expansion, so a literal ``${...}`` in a registry env value would be expanded by
+# the CLI from the SERVING process's environment at parse time - the same
+# mechanism the authoring bridge deliberately rides, and precisely what a project
+# pin must not do. A field that cannot be declared cannot carry that placeholder.
+# The one env value a run still states - its project pin - enters through
+# :func:`pin_harness_mcp_servers` (ACP) or the ``project_root`` argument (Codex),
+# per run, from an explicit value, and :func:`_pin_value` refuses an expansion
+# marker there. So the literals-only rule now holds by construction on the
+# registry side and by enforcement on the one side values can still arrive.
+#
+# ``env`` remains in the launch key partition below because the Codex spec still
+# CARRIES the field - it is built per run to hold the pin, rather than read from
+# an entry.
+_ENV_FIELD = "env"
+_LAUNCH_SPEC_KEYS = ("name", "command", "args", _ENV_FIELD)
 _TRUST_AXES = ("read_only", "network_egress")
 _ROOT_PIN_AXIS = "root_pin"
 _EXACT_SURFACE_AXIS = "exact_surface"
@@ -204,10 +220,18 @@ def _declare_registry(
     here rather than at each reader keeps construction the only way in, which is
     what lets the surfacing seams reason about what can possibly reach them.
 
+    An entry declaring ``env`` is refused outright. That is a REFUSAL rather than
+    a validation because no shape would be correct: the two transports model a
+    server's environment irreconcilably, so a declaration servable to one reaches
+    the other malformed - and on the ACP path an unpinned run carries the wrong
+    shape all the way to the session without complaint. Refusing the field at the
+    only construction seam is what makes the silent half unreachable, and it keeps
+    the registry's literals-only rule true by construction rather than by memory.
+
     Raises:
         ConfigError: If an entry omits any trust axis, declares either boolean
-            axis non-boolean, or declares the root-pin axis as anything other
-            than a non-empty string or ``None``.
+            axis non-boolean, declares the root-pin axis as anything other than a
+            non-empty string or ``None``, or declares ``env``.
     """
     for name, value in entries.items():
         if not isinstance(value, dict):
@@ -244,6 +268,17 @@ def _declare_registry(
                 "served-equals-declared so a lost restricting argument is a refused "
                 "launch rather than a silently widened surface - omission is never "
                 "read as permission"
+            )
+        if _ENV_FIELD in value:
+            raise ConfigError(
+                f"harness registry entry {name!r} declares {_ENV_FIELD!r}; the "
+                "registry cannot carry an environment because the two transports "
+                "shape it irreconcilably - the ACP stdio spec takes a list of "
+                "name/value pairs and the Codex block takes a flat mapping, so "
+                "either shape reaches the other transport wrong, and the flat one "
+                "reaches an unpinned ACP session wrong WITHOUT complaint. State a "
+                "run's project through the root-pin axis, which both transports "
+                "render for themselves"
             )
     frozen = freeze_json(entries)
     if not isinstance(frozen, MappingProxyType):
@@ -390,20 +425,6 @@ def _frozen_string(entry: FrozenJsonObject, field: str) -> str:
     return value
 
 
-def _frozen_string_object(entry: FrozenJsonObject, field: str) -> JsonObject:
-    """Read one optional object with string keys and values from a registry entry."""
-    value = entry.get(field)
-    if value is None:
-        return {}
-    object_value = _frozen_object(value, context=f"harness registry field {field!r}")
-    result: JsonObject = {}
-    for key, item in object_value.items():
-        if not isinstance(item, str):
-            raise ConfigError(f"harness registry field {field!r} must contain strings")
-        result[key] = item
-    return result
-
-
 def _declared_root_pin(name: str, entry: FrozenJsonObject) -> str | None:
     """Return the environment variable pinning *entry*, or ``None`` if unpinnable.
 
@@ -514,16 +535,14 @@ def _launch_spec(name: str, entry: FrozenJsonObject) -> JsonObject:
         "command": _frozen_string(entry, "command"),
         "args": list(_frozen_strings(entry, "args")),
     }
-    if "env" in entry:
-        spec["env"] = thaw_json(entry["env"])
     return spec
 
 
 # The launch fields a spec riding a registry-known name must carry unchanged from
 # its entry. ``name`` is absent because it is the lookup key rather than a
 # compared field, and ``env`` is absent because it legitimately VARIES PER RUN:
-# no registry entry declares one (the registry may hold only literals, and a
-# run's project is not knowable at construction time), the per-run pin appends
+# no registry entry CAN declare one (the field is refused at construction, and a
+# run's project is not knowable there anyway), the per-run pin appends
 # the run's project through :func:`pin_harness_mcp_servers`, and the strict claude
 # surface then rewrites every env value into a ``${NAME}`` placeholder. Comparing
 # it would refuse every pinned run - which is why this is a comparison of LAUNCH
@@ -1177,10 +1196,10 @@ def codex_mcp_server_specs(
     *project_root* carries the run's project pin, the Codex rendering of what
     :func:`pin_harness_mcp_servers` applies on the ACP transport: the same
     registry-declared variable, written into this transport's flat ``env``
-    mapping instead of its list of pairs. Passing ``None`` renders the registry's
-    own env unchanged, which leaves the launched server resolving its project from
-    its working directory - correct only for a caller that has no run-bound
-    project to state.
+    mapping instead of its list of pairs. Passing ``None`` renders an EMPTY env -
+    the registry declares none and cannot - which leaves the launched server
+    resolving its project from its working directory, correct only for a caller
+    that has no run-bound project to state.
     """
     reject_duplicate_names(names)
     resolution = resolve_harness_mcp_capabilities(names, profile=profile, lane=lane)
@@ -1189,16 +1208,13 @@ def codex_mcp_server_specs(
     for name in resolution.available_servers:
         entry = _registry_entry(name)
         _require_trust_root(name)
-        env = _frozen_string_object(entry, "env")
+        # Built here rather than read from the entry: the registry refuses ``env``
+        # outright, so this transport's flat mapping starts empty and carries only
+        # what the RUN states. There is consequently no declared value a pin could
+        # collide with - the collision this once guarded is now unconstructible.
+        env: JsonObject = {}
         if pin is not None:
-            variable = _require_root_pin(name, entry)
-            if variable in env:
-                raise ConfigError(
-                    f"refusing to pin harness server {name!r}: its registry entry "
-                    f"already declares {variable!r}, so pinning it would silently "
-                    "replace a declared value"
-                )
-            env[variable] = pin
+            env[_require_root_pin(name, entry)] = pin
         specs.append(
             {
                 **_launch_spec(name, entry),

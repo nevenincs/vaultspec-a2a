@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:ca6a302f6bfbf4e137a4a0d0a57d306ebdb74b17e4cbd8f70f374f2e33d19fdd'
+body_hash: 'sha256:f697f4d0a79505acae881753ee72ec82150e6f192759cf380f38900eec1abb85'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -61,6 +61,23 @@ them from one-line summaries - both are LOW and neither is asserted as a live
 gap. A severity assigned before the evidence arrives is assigned too
 confidently, and that applies to this document as much as to the fields it
 audits.
+
+**STANDING RULE for an unreceived finding: hold the number, record nothing.**
+When a finding is assigned but its originating write-up has not arrived, RESERVE
+the identifier so it cannot be reused and leave the body empty. Do NOT write a
+placeholder from a summary, and do NOT assign a severity to one.
+
+The reason is specific to what this document is for. An absent entry cannot be
+acted on at the wrong priority; a placeholder at a guessed severity can, because
+this audit is read as an INSTRUCTION by whoever executes it. Two entries here
+were recorded from one-line subjects at medium severity and both were corrected
+down to low once their authors' write-ups arrived - one of them explicitly
+declining to assert a live gap at all. Nothing was lost by that correction only
+because it happened before anyone scheduled work against them.
+
+A severity is a claim about evidence. Assigning one before the evidence arrives
+is the same error this document catalogues in the product: a confident typed
+value over a mechanism nobody checked.
 
 **Renumbering applied to the third tranche, recorded so the source remains
 traceable.** The live-run tranche from the `product-proof` session was authored
@@ -910,17 +927,18 @@ rather than a property of the three runs that first exposed it, which is a
 stronger claim than any single earlier finding could support. Anyone closing a
 contract-shaped Step on source reading alone should read this entry first.
 
-### F40-reserved | low | reserved, assigned and not yet received
+### F40-reserved | unrated | RESERVED - assigned, write-up not yet received
 
-Assigned to a live-run agent for an ACP-lane tool-call gap and not yet delivered
-in full. The number is held rather than reused so the assignment stays stable.
-Known shape, to be replaced by the agent's own text: agent-lane tool calls
-accumulate rich per-update status, content and locations in the session context,
-but that state is wiped at session cleanup and never re-emitted, so it is
-unrecoverable from either the streaming or the snapshot side and needs the
-provider to forward per-update data. LATENT, NOT LIVE - no such lane is
-currently an admitted provider, and the evidence from the admitted lane must not
-be read as inflating this one.
+Held under the standing rule in Scope: the identifier is reserved so it cannot
+be reused, and the body stays empty until the originating agent's write-up
+arrives. Assigned for an agent-lane tool-call gap. NO SEVERITY IS ASSIGNED and
+no mechanism is described here, because neither has been evidenced to this
+document yet.
+
+The one thing recorded, because it bounds how the entry should be read when it
+does arrive: the lane in question is NOT an admitted provider, so whatever the
+finding says, evidence from the admitted lane must not be read across to inflate
+it.
 
 ### F41-engine-route-table-is-never-served | high | the engine holds a complete machine-readable route table and serves single-page-application HTML instead
 

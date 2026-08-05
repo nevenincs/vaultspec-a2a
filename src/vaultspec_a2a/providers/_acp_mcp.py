@@ -1271,9 +1271,17 @@ def _resolve_harness_composition(
             if name in _KNOWN_MCP_SERVERS
         )
         if attached_names:
+            # The SAME lane the outer resolution was asked about. This inner call
+            # asks which already-attached servers the CURRENT profile prohibits,
+            # so it must be asked under the run's current lane too. Omitting it
+            # is fail-closed - an absent lane is never read as permission - but
+            # fail-closed for the WRONG REASON: an egressing server would be
+            # stripped from a proven desktop lane, and the served explanation
+            # would blame the lane rather than the argument nobody passed.
             attached_resolution = resolve_harness_mcp_capabilities(
                 sorted(attached_names),
                 profile=profile,
+                lane=lane,
             )
             unavailable_names.update(
                 unavailable.capability

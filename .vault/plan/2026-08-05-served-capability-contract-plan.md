@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:04b5f39641221fff1e62eb426460a976f1b21e9ad1d544bb4a37d68c38827661'
+body_hash: 'sha256:f596f31ece20b45f981d2cec76e267370678eb73b91df9064150b7f42f062e93'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -63,17 +63,33 @@ wire, so it can land at any time. `W05` is breaking: every Step changes what a
 served field MEANS or removes it, and the edge contract with the consuming
 repository is frozen.
 
-Per owner ruling, cross-repository coordination is the ROUTE for that set, NOT a
-reason to park it. A served field that contradicts itself is not made acceptable
-by documenting the contradiction, and no Step here may be discharged by writing
-around a defect: the product must deliver what it claims, with one canonical
-definition per concept. F2, F4, F5, F7 and F35 are therefore not optional and
-not deferrable behind documentation. `W05.P10`'s F9 Step remains the one most
-likely to be mishandled - it merely executes an already-ruled amendment and
-needs no new decision, yet it removes fields the dashboard consumes today, so
-"already ruled" must not be read as "safe to land alone". `W03`'s narrowings are
-breaking for the same reason and are gated behind the value capture in
-`W03.P05`.
+**W05 IS NO LONGER A COORDINATION WAVE. Zero of its six original Steps are
+breaking, established by reading the consuming repository's source rather than
+by assuming.** Every field they touch is dead, decoded-but-never-read, or
+structurally unreachable: the eligibility flag is not even declared in the
+consumer's interface; the mock flag is decoded once and never read again, with
+the picker gating on loadability alone; the provider-eligibility list and the
+whole readiness vocabulary have zero hits tree-wide.
+
+The structural fact settling two of them together: the consumer USED to have a
+client for the service-state verb and DELETED it because it rendered nothing,
+and the engine pass-through now actively refuses that verb. So those fields are
+not merely unread - they are unreachable through the consumer's only route here.
+That also settles which surface a frontend should believe, structurally rather
+than by preference: it already believes the provider catalog, because it has no
+other route to that answer.
+
+These Steps were parked behind a coordination requirement NOBODY HAD TESTED, and
+testing it took one agent one pass. That is recorded as a finding in its own
+right, because a blocker asserted rather than verified is indistinguishable from
+a real one until someone checks.
+
+What survives from the earlier framing: no Step may be discharged by writing
+around a defect - the product must deliver what it claims, with one canonical
+definition per concept. And the mock-flag Step keeps its gating relationship
+with the capability re-key, which is an INTERNAL ordering constraint rather than
+a cross-repository one. `W03`'s narrowings remain genuinely breaking and stay
+gated behind the value capture in `W03.P05`.
 
 **The client guide is an output, not a parallel track.** It is blocked on the
 canonicalization rather than on writing effort: written today it would either
@@ -106,8 +122,8 @@ One diagnostic that must precede any provider-policy change, and one watchdog fi
 
 Restore the missing artifact and remove the silent success that concealed it; either alone leaves the next failure looking identical.
 
-- [ ] `W01.P02.S03` - F16 - make the document editor submit its authored output as an engine proposal so the review lane has something to apply; `src/vaultspec_a2a/authoring/submitter.py`.
-- [x] `W01.P02.S04` - F16 safety half - refuse to report a document-authoring run completed with empty degradation when it produced no artifact, the silent green being a separate defect from the missing proposal; `src/vaultspec_a2a/control/run_start_policy.py`.
+- [x] `W01.P02.S03` - F16 - make the document editor submit its authored output as an engine proposal so the review lane has something to apply; `src/vaultspec_a2a/authoring/submitter.py`.
+- [ ] `W01.P02.S04` - F16 safety half - REOPENED. The check landed in ab572f6e but F67 proves it FALSE-POSITIVES on every completed MCP-bridge run: the doc-editor path never populates the proposal and changeset id fields because the tracker exposing them has zero production callers, so the check built to catch the silent-success gap on that lane now fires on that lane's success case. Its companion negative test seeds those ids directly, a state no real doc-editor execution reaches. Do NOT narrow the predicate to where the write path is wired - that silently restores the original blind spot on the lane the incident was about; `src/vaultspec_a2a/control/projection.py`.
 - [ ] `W01.P02.S05` - F21 - gate authored document content on structural validity before submission so the review lane never receives a document with duplicated sections; `src/vaultspec_a2a/authoring/submitter.py`.
 - [ ] `W01.P02.S06` - F29 PARTIALLY RETRACTED - the half claiming no route here serves the document body falls with F57, since the dashboard reads proposal detail direct from the engine. What SURVIVES is an engine content gap: the proposal fetch returned an empty review-documents array and the diff and preview routes 404. VERIFY THAT AGAINST THE DASHBOARD'S LIVE CLIENT before acting - it may be a dev-config artifact - and verify through the CONSUMER, not the declaration; `src/vaultspec_a2a/api/routes/gateway.py`.
 
@@ -204,7 +220,7 @@ The audit could not exercise this surface. It must be driven live before it can 
 
 ## Wave `W05` - breaking semantics requiring dashboard coordination
 
-Findings that change what a served field MEANS, or remove it. The edge contract is frozen, so every Step here lands in lockstep with the consuming repository and none may be taken unilaterally - including the one that merely executes an already-ruled amendment.
+Findings that change what a served field MEANS, or remove it. RECLASSIFIED: an impact map against the consuming repository's source found zero of the six original Steps breaking - the fields are dead, decoded-but-unread, or structurally unreachable - so these land UNILATERALLY. The later Steps added to this Phase are not covered by that map and must be assessed on their own.
 
 ### Phase `W05.P10` - coordinate the breaking set
 

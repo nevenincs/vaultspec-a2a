@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:5af27f89b6b6c002daf948624d95751f8f08d35d7aab761c6eac9ae7a41dc8f9'
+body_hash: 'sha256:aea5e10e45e34bac98f4d346f49e5bae06aeee9b19569ccbfe97ef75b054cc10'
 step_id: 'S04'
 related:
   - "[[2026-08-05-served-capability-contract-plan]]"
@@ -23,6 +23,32 @@ related:
   as a degraded reason on the run snapshot.
 
 ## Outcome
+
+STEP REOPENED after this record was first written. The implementation below
+landed and its verification stands as described, but the Step is NOT complete:
+a later finding proved the check false-positives on every completed run of the
+lane it was built for.
+
+The proposal and changeset id fields it keys on are populated only by the
+research chain's submitter path. The document-editor lane tracks its ids in a
+session object whose accessor has ZERO PRODUCTION CALLERS, so those fields are
+structurally empty on that lane whether the run succeeded or not. The check
+built to catch a silent success on the document editor now fires on the document
+editor's SUCCESS CASE - a false positive replacing the false negative.
+
+The companion negative test is vacuous for the same reason: it seeds the ids
+directly into the fixture, which is a state no real document-editor execution
+reaches. The seeded shape is not fabricated - it is exactly what the OTHER lane
+produces - which is why the vacuity was invisible when it was written.
+
+One remedy direction is explicitly RULED OUT: narrowing the predicate to fire
+only where the write path is currently wired would silently restore the original
+blind spot on the document-editor lane, which is the lane the incident was
+about. That is a regression dressed as a fix.
+
+The record below describes what landed and how it was verified. It is retained
+unchanged because the work and its proof were sound - what was wrong was the
+assumption that both lanes populate those fields.
 
 Closes in full. The predicate was chosen BEFORE the code was written and checked
 live against the real bundled presets: it keys on the worker persona ROLE, not

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:2f6176549a0c9368b8b253a07ae6231f5d719097a06520f93400eb6184a5b240'
+body_hash: 'sha256:5f22b7670f9e54f60003082351ced8941806193554f011f368ab86af716650b0'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,7 +54,8 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F65**. F64 is RESERVED alongside F40. F40 alone remains RESERVED -
+place. The current highest identifier is **F69**. F40, F64 and F66 are RESERVED -
+allocated with write-ups not yet received - and are held rather than reused. F40 alone remains RESERVED -
 allocated with its write-up not yet received - and is held rather than reused.
 F57 is RETRACTED and F29 is PARTIALLY retracted; both keep their numbers. F40 is RESERVED - assigned to an
 agent and not yet delivered - and is held rather than reused. F45 and F46 now carry their
@@ -1777,6 +1778,123 @@ fix, the clause generalising it, and an unfixed instance of the same shape in
 the instrument used to check it. A rule scoped to production does not bind the
 tooling that tests production, and nothing noticed until the tooling failed
 under load.
+
+### F69-lockstep-label-was-wrong-for-a-whole-wave | high | six Steps were parked behind a coordination requirement nobody had tested
+
+A FINDING ABOUT THE PLAN, NOT THE CODE, and recorded because the plan is what
+anyone picking this up reads as the state of the world.
+
+An entire wave was labelled cross-repository lockstep on the reasoning that its
+Steps change what a served field MEANS under a frozen contract. An impact map
+against the CONSUMING REPOSITORY'S OWN SOURCE found ZERO OF SIX ACTUALLY
+BREAKING. The fields are dead, decoded-but-never-read, or structurally
+unreachable - in one case because the consumer deleted its client for that route
+and the pass-through now refuses the verb.
+
+CONSEQUENCE: six Steps sat behind a blocker that did not exist, and the test
+took one agent one pass. CLASSIFICATION: genuine defect in the plan.
+
+THE GENERAL SHAPE IS THE VALUE: A BLOCKER ASSERTED RATHER THAN VERIFIED IS
+INDISTINGUISHABLE FROM A REAL ONE UNTIL SOMEONE CHECKS. It is the same shape as
+a stale gate found earlier in this feature's plan - a Step still naming a
+dependency whose question had been resolved - but at WAVE scale rather than Step
+scale, and costing six Steps of parked work rather than one reader's confusion.
+
+It also belongs to the pattern this document records elsewhere: an assertion
+that nothing mechanically checks. A coordination requirement is a claim about
+another system, and nothing in this repository can falsify it - so it persists
+until someone reads the other side. That makes it the cross-repository twin of
+the reachability problem in F67, where a producer with no consumer is invisible
+because nothing fails.
+
+REMEDY: applied to the plan. The wave is reclassified unilateral, its Description
+corrected rather than softened, and the one genuine internal ordering constraint
+- the mock-flag Step gating with the capability re-key - is preserved and
+labelled as internal rather than cross-repository.
+
+### F66-reserved | unrated | RESERVED - allocated, write-up not yet received
+
+Held under the standing rule in Scope, for the run projection failing to see a
+changeset its own run produced. Same root cause as F67. No severity and no
+mechanism recorded here.
+
+### F67-s04-false-positives-on-every-bridge-run | high | the completion check fires on the success case of the lane it was built for, and its companion test is vacuous
+
+LIVE, CONFIRMED, USER-VISIBLE. A served run record contradicts the engine's own
+durable state ON A SUCCESS CASE.
+
+TWO STRUCTURALLY DIFFERENT PRODUCERS EXIST FOR THE FIELDS THE CHECK KEYS ON, AND
+ONLY ONE IS WIRED. The research chain's phase gate commits the proposal
+identifiers as a real graph state update, and a call-site sweep confirms it is
+invoked only inside that topology's compiler path. The bridge lane - the
+document editor, and any preset arming the authoring bridge - tracks its
+identifiers in a session object and exposes them through an accessor IN EXACTLY
+THE RIGHT STATE SHAPE. That accessor has ZERO PRODUCTION CALLERS: its only two
+callers are its own tests, asserting the tracker against itself. The pipeline
+compiler never calls the submit node at all.
+
+LIVE CONFIRMATION INDEPENDENT OF THE TRACE: a run produced a real engine
+changeset, created by the model's own bridged call under an agent actor, while
+the run record served an empty changeset list.
+
+CONSEQUENCE: the emptiness check is unconditional once the role predicate
+returns true and the status is completed. Because the bridge path can NEVER
+populate those fields, the check appends its degraded reason to EVERY completed
+document-editor run - success and failure alike, structurally rather than
+conditionally. The check built to catch the silent-success gap FOR THAT LANE now
+false-positives on that same lane's success case.
+
+ADJACENT AND UNVERIFIED: a recovery signal documents itself as matching a parked
+run by the same two fields, so the same dead write blinds that path for bridge
+runs. The document editor auto-approves and may never need it - but a future
+preset arming the bridge WITHOUT auto-approve makes it live.
+
+THE COMPANION TEST IS VACUOUS, AND THIS INSTANCE DIFFERS INSTRUCTIVELY FROM THE
+FIVE ALREADY RECORDED. It seeds the identifiers directly into the fixture - a
+state no real document-editor execution can produce. But the seeded state is NOT
+FABRICATED: it is the EXACT shape the OTHER lane genuinely produces. The vacuity
+was invisible at write time because the fixture is architecturally real, just
+real on a different code path.
+
+So "check your fixture is reachable" is NOT ACTIONABLE HERE - the fixture IS
+reachable, elsewhere. The sharper rule: SEED STATE THROUGH THE PRODUCTION WRITER
+FOR THE SPECIFIC TOPOLOGY UNDER TEST, or name explicitly which writer would
+produce it. A fixture's plausibility must be checked against the PRESET IN THE
+TEST, not against the vocabulary in general.
+
+CLASSIFICATION: genuine defect, high. REMEDY: wire the accessor into the
+pipeline worker's turn-completion path. ONE DIRECTION EXPLICITLY RULED OUT:
+narrowing the predicate to fire only where the write path is currently wired
+would silently restore the original blind spot ON THE DOCUMENT-EDITOR LANE - the
+lane the incident was about - under a different name. A regression dressed as a
+fix, not a smaller one.
+
+THIS IS THE THIRD MEASURED INSTANCE OF EVERY-PART-BUILT-NO-PRODUCER-INJECTED in
+this campaign, after the clarification interrupt producer and the provider
+permission rung. This repository has a RULE about that shape, written because it
+had happened before - and it has now happened three more times within one
+campaign.
+
+The explanation is the actionable part, and it separates this class from the
+others this document records: A TRACKER THAT TRACKS CORRECTLY LOOKS FINISHED,
+AND NOTHING FAILS WHEN NOBODY READS IT. Unlike the terminal states nothing
+advances or the size mandate no gate enforces, there is no rule to remember here
+- THERE IS NO SIGNAL AT ALL. That argues for a different mitigation class: not a
+stricter rule, but a REACHABILITY CHECK, because a producer with no consumer is
+mechanically detectable in a way a forgotten obligation is not.
+
+### F68-plural-versus-singular-unavailable-reason | low | the two sides declare the same field with different arity, and neither reads it
+
+This service serves a PLURAL unavailable-reasons list where the consuming
+repository's interface declares a SINGULAR unavailable-reason. Nobody has hit
+the mismatch BECAUSE NEITHER SIDE READS THE FIELD EITHER WAY.
+
+CLASSIFICATION: genuine defect, low, latent. The finding is small; its
+implication is not. A shape mismatch surviving undetected on both sides of a
+frozen contract is a measure of HOW MUCH OF THIS CONTRACT IS LOAD-BEARING - and
+the answer here is that this part carries nothing at all. Worth recording
+alongside F67's dead producer and F52's absent producer: three different ways a
+contract element can exist without participating.
 
 ### F47-and-beyond | low | reserved marker for continuous appending
 

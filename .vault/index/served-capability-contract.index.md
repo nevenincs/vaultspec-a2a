@@ -6,10 +6,11 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:fd3bdb34e05a57993f6fc1458e93eacd814175d1a85af83969208012d0b0be98'
+body_hash: 'sha256:ca64d2977bfc877f0cd3f2a4a3ee6b808f7ab92042252aac69a68328fcade511'
 related:
   - '[[2026-08-05-served-capability-contract-W01-P01-S01]]'
   - '[[2026-08-05-served-capability-contract-W01-P01-S02]]'
+  - '[[2026-08-05-served-capability-contract-W01-P02-S03]]'
   - '[[2026-08-05-served-capability-contract-W01-P02-S04]]'
   - '[[2026-08-05-served-capability-contract-W01-P11-S35]]'
   - '[[2026-08-05-served-capability-contract-W02-P03-S07]]'
@@ -53,6 +54,7 @@ Auto-generated index of all documents tagged with `#served-capability-contract`.
 
 - `2026-08-05-served-capability-contract-W01-P01-S01` - F24 diagnostic - ANSWERED. The capability field has exactly ONE consumer, a served-response field that gates nothing at runtime, while the runtime submitter gate is an independent read of the same topology key. The two are parallel projections of one variable, which is why the correlation looked perfect and was a correlation between two symptoms. The capability derivation is therefore ORTHOGONAL to F16 and must never be credited with closing it. Remaining work moved to S34
 - `2026-08-05-served-capability-contract-W01-P01-S02` - F25 DONE in commit 088bd603 - the ingest-stall bound is now derived from the compiled graph rather than a flat global, so a run's own declared step timeout is honoured and presets without one keep the previous floor
+- `2026-08-05-served-capability-contract-W01-P02-S03` - F16 - make the document editor submit its authored output as an engine proposal so the review lane has something to apply
 - `2026-08-05-served-capability-contract-W01-P02-S04` - F16 safety half - refuse to report a document-authoring run completed with empty degradation when it produced no artifact, the silent green being a separate defect from the missing proposal
 - `2026-08-05-served-capability-contract-W01-P11-S35` - F30 DONE in commit cb7f856e - approval forwarding wired through the engine decision and apply verbs, proven by a real document reaching disk. NOTE the phase does NOT close on this: delivery works for callers inside this repository and for nobody else, because no REST proxy exposes those verbs to the frontend. That gap is F57
 - `2026-08-05-served-capability-contract-W02-P03-S07` - F1 correction half IN FLIGHT with agent contract-audit - correct the stale streaming route and the false claim that legacy api routes remain

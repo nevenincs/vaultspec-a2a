@@ -9,6 +9,7 @@ references to perform side effects but hold no state of their own.
 """
 
 import asyncio
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -81,6 +82,177 @@ def _artifact_label_from_tool_input(file_path: str) -> str:
     return PurePath(normalized).name or "artifact"
 
 
+#: Recognised terminal/near-terminal item statuses this repo's own
+#: ``ToolCallStatus`` already names. A provider action item's status
+#: vocabulary is owned by that provider's own schema (e.g. the Codex
+#: app-server's generated protocol), not enumerated here.
+_KNOWN_ACTION_ITEM_STATUSES = frozenset({status.value for status in ToolCallStatus})
+
+
+def _map_action_item_status(raw_status: object) -> ToolCallStatus:
+    """Map a provider action item's status onto the closed ``ToolCallStatus`` set.
+
+    A value this repo already recognises (``completed``, ``failed``,
+    ``in_progress``, ``pending``) is honoured directly. Anything else -- a
+    policy rejection, an abort, a spelling this lane has not been observed
+    using yet -- is treated as FAILED rather than risking a silent COMPLETED
+    on a call that did not succeed. That silent-success risk is the exact
+    shape of F17: one of the 15 stuck-pending tool calls in the reference
+    incident was a policy-rejected command the model narrated but the record
+    never showed as anything but pending.
+    """
+    if isinstance(raw_status, str) and raw_status in _KNOWN_ACTION_ITEM_STATUSES:
+        return ToolCallStatus(raw_status)
+    return ToolCallStatus.FAILED
+
+
+def _parse_action_detail(raw_args: object) -> dict[str, Any] | None:
+    """Parse a tool-call chunk's ``args`` as a JSON object, or return ``None``.
+
+    Two shapes reach here through the same field: a plain tool's raw input
+    (ACP's initial registration, or a partial ``tool_call_chunk`` arg-delta -
+    just the tool's own arguments, no ``status`` key) and Codex's one-shot
+    completed-action report (``{"command", "status", "exit_code", ...}`` -
+    see ``codex_chat_model._completed_action_chunk``). Both are returned as a
+    parsed dict when parseable; the caller distinguishes them by the presence
+    of ``status``. A non-JSON or non-object payload returns ``None`` rather
+    than raising, since malformed args must not stop live tool-call
+    registration.
+    """
+    if not isinstance(raw_args, str) or not raw_args:
+        return None
+    try:
+        parsed = json.loads(raw_args)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _action_detail_projection(
+    item_type: str, detail: dict[str, Any]
+) -> tuple[list[dict[str, str | None]], list[dict[str, str | int | None]]]:
+    """Project a Codex completed-action detail onto (content, locations).
+
+    Each action item type carries different REQUIRED fields (see
+    ``codex_chat_model._completed_action_chunk``, which reads only the
+    schema-required fields per variant); this mirrors that per-type shape
+    rather than guessing at a common one. ``fileChange`` is the only variant
+    that names a location a frontend could jump to, so it is the only one
+    that returns non-empty locations.
+    """
+    if item_type == "commandExecution":
+        command = detail.get("command")
+        exit_code = detail.get("exit_code")
+        parts = [f"$ {command}"] if command else []
+        if exit_code is not None:
+            parts.append(f"(exit {exit_code})")
+        text = "\n".join(parts)
+        return ([{"content_type": "text", "text": text}] if text else []), []
+    if item_type == "fileChange":
+        changes = detail.get("changes")
+        locations: list[dict[str, str | int | None]] = []
+        if isinstance(changes, list):
+            for change in changes:
+                if isinstance(change, dict):
+                    path = change.get("path")
+                    if isinstance(path, str) and path:
+                        locations.append({"path": path, "line": None})
+        text = f"{len(locations)} file(s) changed" if locations else ""
+        return ([{"content_type": "text", "text": text}] if text else []), locations
+    if item_type == "mcpToolCall":
+        server = detail.get("server")
+        tool = detail.get("tool")
+        text = f"{server}:{tool}" if server and tool else str(tool or server or "")
+        return ([{"content_type": "text", "text": text}] if text else []), []
+    return [], []
+
+
+async def _emit_completed_action(
+    thread_id: str,
+    agent_id: str,
+    tool_call_id: str,
+    item_type: str,
+    detail: dict[str, Any],
+    emitters: EventEmitters,
+) -> None:
+    """Register and immediately resolve a Codex one-shot completed-action item.
+
+    Codex reports these only on ``item/completed`` (see
+    ``codex_chat_model._completed_action_chunk`` - "a started command has no
+    exit code"), so there is no separate live start phase to observe: this
+    site sees the whole lifecycle at once. It still emits a start-then-update
+    pair, matching ``_translate_tool_start``/``_translate_tool_end`` (the
+    genuine-``BaseTool`` path) so both lanes reach the wire through the same
+    two-event shape a consumer already expects.
+    """
+    status = _map_action_item_status(detail.get("status"))
+    content, locations = _action_detail_projection(item_type, detail)
+    await emitters.emit_tool_call_start(
+        thread_id=thread_id,
+        agent_id=agent_id,
+        tool_call_id=tool_call_id,
+        title=item_type,
+        kind=classify_tool_kind(item_type),
+    )
+    await emitters.emit_tool_call_update(
+        thread_id=thread_id,
+        agent_id=agent_id,
+        tool_call_id=tool_call_id,
+        status=status,
+        content=content,
+        locations=locations,
+    )
+
+
+async def _translate_tool_call_chunks(
+    chunk: Any,
+    thread_id: str,
+    effective_agent_id: str,
+    emitters: EventEmitters,
+) -> None:
+    """Translate a streamed chunk's ``tool_call_chunks`` into tool-call events.
+
+    Provider-internal tool activity (an ACP CLI's own built-in tools, a
+    Codex ``commandExecution``/``fileChange``/``mcpToolCall`` action) never
+    goes through a real LangChain ``BaseTool``/``ToolNode``, so
+    ``on_tool_start``/``on_tool_end`` never fire for it - the only place this
+    activity reaches ``astream_events`` at all is as ``tool_call_chunks`` on
+    an ``AIMessageChunk`` flowing through ``on_chat_model_stream``. This was
+    previously not read here (only ``chunk.content`` was), so every one of
+    these calls stayed unregistered for the run's entire live stream and
+    could only be reconstructed - incorrectly, permanently PENDING - from
+    checkpoint state after the run ended (F17).
+    """
+    tool_call_chunks = getattr(chunk, "tool_call_chunks", None)
+    if not tool_call_chunks:
+        return
+    known = emitters.get_tool_call_states(thread_id)
+    for tc in tool_call_chunks:
+        tc_id = tc.get("id")
+        if not isinstance(tc_id, str) or not tc_id:
+            continue
+        name = tc.get("name") or "unknown_tool"
+        detail = _parse_action_detail(tc.get("args"))
+        if detail is not None and "status" in detail:
+            # Codex's completed-action shape: a single self-contained
+            # terminal report, not a plain registration.
+            await _emit_completed_action(
+                thread_id, effective_agent_id, tc_id, name, detail, emitters
+            )
+            continue
+        if tc_id in known:
+            # Already registered (the initial chunk, or an earlier
+            # partial-args delta for the same id) - do not re-register.
+            continue
+        await emitters.emit_tool_call_start(
+            thread_id=thread_id,
+            agent_id=effective_agent_id,
+            tool_call_id=tc_id,
+            title=name,
+            kind=classify_tool_kind(name),
+        )
+
+
 async def _translate_chat_model_stream(
     event_data: dict[str, Any],
     thread_id: str,
@@ -91,6 +263,9 @@ async def _translate_chat_model_stream(
 ) -> None:
     chunk = event_data.get("data", {}).get("chunk")
     if chunk is not None:
+        await _translate_tool_call_chunks(
+            chunk, thread_id, effective_agent_id, emitters
+        )
         content = getattr(chunk, "content", "")
         if isinstance(content, list):
             for block in content:

@@ -359,8 +359,17 @@ class EventEmitters:
         status: ToolCallStatus | None = None,
         title: str | None = None,
         content: list[dict[str, str | None]] | None = None,
+        locations: list[dict[str, str | int | None]] | None = None,
     ) -> None:
-        """Emit a tool call update event (debounced)."""
+        """Emit a tool call update event (debounced).
+
+        ``locations`` was previously accepted by the ``ToolCallUpdate`` domain
+        event but had no parameter here to reach it, so a call site that
+        DOES observe what a tool call touched (a Codex file-change item, an
+        ACP-declared edit location) had no way to report it -- every update
+        served empty ``locations`` regardless of what the provider disclosed
+        (part of F17).
+        """
         now = time.monotonic()
         key = (thread_id, tool_call_id)
 
@@ -390,6 +399,7 @@ class EventEmitters:
             status=status,
             title=title,
             content=content,
+            locations=locations,
         )
         sequenced = SequencedEvent(event=event, sequence=seq)
 

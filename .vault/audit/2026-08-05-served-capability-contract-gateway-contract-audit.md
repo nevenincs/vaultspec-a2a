@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:e97f128d4e450765685f308d166a3aaa54ec417a1a92b3596fad8f392a48f6b5'
+body_hash: 'sha256:2bb52f48b5ce9281dfe849f027b305af91929c9a70766b89b73f2dc7cff5c86c'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,7 +54,7 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F62**. F40 alone remains RESERVED -
+place. The current highest identifier is **F63**. F40 alone remains RESERVED -
 allocated with its write-up not yet received - and is held rather than reused.
 F57 is RETRACTED and F29 is PARTIALLY retracted; both keep their numbers. F40 is RESERVED - assigned to an
 agent and not yet delivered - and is held rather than reused. F45 and F46 now carry their
@@ -184,6 +184,30 @@ It is also what F41 gets wrong in the opposite direction - a complete
 declaration nobody serves - and what F52 gets wrong at the other end: a field
 with no producer at all. Declaration, production and consumption are three
 separate facts, and evidence about one is not evidence about the others.
+
+**A FOURTH, AND THE SHARPEST, because here the instrument was CORRECT and the
+CORPUS was wrong: a vault-scoped search proving absence is only as good as the
+vault it searched.** A governing sentence was reported as appearing nowhere
+literally in the decision corpus. It appears VERBATIM - in the CONSUMING
+REPOSITORY'S corpus, in two records. This project's governing decisions are
+deliberately split across two repositories under a mutual-reference discipline,
+so a single-repository search establishes single-repository absence and nothing
+more. That is a STANDING TRAP, not a one-off: every absence claim in this
+document about a governing decision must state WHICH corpora were searched.
+
+**A FIFTH, found while verifying the fourth and recorded because it nearly
+propagated:** a line-anchored search MISSES A PHRASE THAT WRAPS ACROSS LINES.
+Searching for the sentence above returned one of its two occurrences; the other
+was invisible because a line break fell inside the quoted phrase, and the
+near-conclusion drawn from that single hit was that the citation named the wrong
+file. It did not. A grep matches LINES, not sentences, and prose in this corpus
+is hard-wrapped - so any phrase search here is a lower bound on its own hits.
+
+Five instances now, across three people, every one an instrument reporting
+truthfully about something OTHER than the question asked. The pattern is not
+carelessness and understanding it confers no immunity: two of these were
+committed BY people writing the rule against them, one of them inside the very
+paragraph that states it.
 
 ## Findings
 
@@ -1468,6 +1492,54 @@ Whether that is a deliberate read/write policy split or this development
 engine's looser configuration is an engine-repository question, unresolved, and
 it matters only if such a proxy is ever built. It presently is not.
 
+CLOSING NOTE, folded in here rather than filed separately because the arc reads
+coherently only straight through.
+
+THE GOVERNING TEXT IS VERBATIM, AND IT LIVES IN THE CONSUMING REPOSITORY. "No
+second approval authority in A2A" was cited from memory on both sides of this
+investigation as though it were a paraphrase, then briefly asserted to appear
+nowhere literally. It appears verbatim in TWO records of the DASHBOARD
+repository: the orchestration-edge record's D3 amendment, and again in the
+approval-shape-reconciliation record's D3, which states it "confirms, rather
+than re-litigates, the amended edge contract". A search of THIS vault alone will
+never reach either. Anyone re-deriving this must search the consuming
+repository's decision corpus as well.
+
+THE WIRE SHAPE IS PULL, NOT PUSH - there is no relay step to permit or forbid.
+This service proposes; the human decides DIRECTLY against the engine; this
+service discovers the verdict asynchronously off the durable authoring-events
+outbox. That subscriber is implemented and running today - a working component,
+not a gap. Because the decision never routes through this service in either
+direction, "should it forward the decision" is not a live question: the step it
+would forward at does not exist in the design. The refusal on the respond route
+is therefore the system doing exactly what the contract specifies, not a
+defensible reading of an ambiguous rule.
+
+A PER-RUN AUTONOMY LEVER WAS BUILT, FOUND TO HAVE NO CONSUMER, AND REMOVED. A
+per-session mode override was modelled end to end - request type, served
+projection, frontend mirror - then deliberately stripped in favour of
+scope-only, because the request type carrying it was never deserializable and
+every production constructor hardcoded it absent. The obvious fix here was
+already tried and reversed on evidence before this campaign began.
+
+THE SIX ZERO-FILE RUNS ARE FULLY EXPLAINED, WITH NO CODE GAP ANYWHERE. They were
+created under an effective mode of MANUAL, recorded in the proposal's own policy
+block. Manual mode requires a human at the review station and no human went
+there. That is manual mode WORKING CORRECTLY. The preset's own served
+description says so unconditionally, twice. If unattended completion is wanted,
+the remedy is OPERATIONAL - an operator sets the workspace scope before a
+headless batch - not a code change in either repository.
+
+This supersedes the explanation this document carried earlier, that the runs
+produced nothing because this service could not forward a decision. It could
+not, and was never meant to; that was not why the files were absent.
+
+NET: nothing to build in either repository for this case. The
+approval-forwarding work stands as delivered - a live-proven capability for a
+scripted actor legitimately acting as a DISTINCT REVIEWER, which is a different
+and genuinely useful thing from "a headless pipeline with nobody to review".
+Conflating those two is what produced this finding in the first place.
+
 ### F58-stale-default-engine-discovery | medium | the fallback discovery record is days stale, so zero-config resolution silently returns nothing
 
 The machine-global discovery record - the fallback candidate when the explicit
@@ -1598,6 +1670,52 @@ from declared roles would make this fixture advertise research, decision and
 plan documents it structurally cannot deliver - a NEW false claim introduced BY
 the fix. The re-key and the classification must land together, or the remedy
 manufactures the defect it was meant to remove.
+
+### F63-operation-mode-is-workspace-global-and-racy | medium | a run's autonomy is decided by whichever concurrent actor last touched the workspace switch, not by that run
+
+OBSERVED LIVE, not inferred. While applying the evidence proposal, the policy
+block read an effective mode of MANUAL at creation. Minutes later the same live
+engine reported the workspace mode as AUTONOMOUS, set by a mode-setter actor
+belonging to A DIFFERENT CONCURRENT AGENT'S live test in the same shared
+workspace, with zero involvement from the session that observed it. The
+workspace's approval policy changed under a run that had nothing to do with the
+change.
+
+CONSISTENT WITH THE OPERATION-MODES RECORD BY DESIGN, NOT A BUG IN IT. Mode is
+scope-only by that record, and the one mechanism that would have scoped it
+narrower - a per-session override - was modelled end to end and then
+deliberately removed, because it never had a real consumer. So this is the
+documented, chosen shape. The hazard is that choice colliding with concurrent
+MULTI-AGENT use of one shared engine instance, which a single-operator mental
+model may not have had in view.
+
+CONSEQUENCE, and the contrast is the useful part: a per-decision forward is
+scoped to exactly one approval and can only act on the changeset it names. A
+mode flip is scoped to the ENTIRE WORKSPACE and can retroactively change how
+every other in-flight changeset resolves - including demoting a human
+reviewer's pending manual-mode approval mid-review, or promoting an unrelated
+run's proposals to auto-apply that nobody intended reviewed. The engine's
+requeue mechanism exists specifically because a DOWNGRADE has this blast radius
+and needs a recorded compensating action.
+
+THE OPEN QUESTION INSIDE THE FINDING, preserved as stated: whether the REVERSE
+direction - an upgrade arriving mid-review, which is what was actually observed
+- has an equivalent safeguard was NOT VERIFIED.
+
+CLASSIFICATION: NOT A CODE DEFECT. The scope-only design is ratified. This is an
+operational and concurrency hazard, recorded because a shared multi-agent engine
+instance is exactly the environment where it fires - AND IT FIRED SILENTLY, with
+no log line anyone saw pointing at it. It was caught only because the mode
+happened to be read twice for an unrelated reason. REMEDY: none proposed. Whether
+an upgrade needs the compensating treatment a downgrade gets, and whether a
+shared development engine should let concurrent agents hold the mode-setter
+role, is cross-cutting engine operational policy and belongs with whoever owns
+that - not a code fix on either side of the edge.
+
+RELATION: this is the operational twin of the failure-observability record's
+swallowed-condition clause. A policy change with workspace-wide blast radius
+that leaves no trace anyone noticed is a condition that should have announced
+itself.
 
 ### F47-and-beyond | low | reserved marker for continuous appending
 

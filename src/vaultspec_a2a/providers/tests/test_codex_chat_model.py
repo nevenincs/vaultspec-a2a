@@ -10,6 +10,7 @@ stdio pipes with real asyncio semantics — no mocks. The live turn test is
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import sys
 from pathlib import Path
@@ -228,8 +229,8 @@ for line in sys.stdin:
             out({
                 "method": "item/started",
                 "params": {
-                    "threadId": "t-1",
-                    "turnId": "u-1",
+                    "threadId": params.get("announce_thread", "t-1"),
+                    "turnId": params.get("announce_turn", "u-1"),
                     "item": {
                         "type": "mcpToolCall",
                         "id": "call_1",
@@ -355,6 +356,73 @@ async def test_an_approval_whose_tool_cannot_be_named_is_declined() -> None:
         await client.request("drive", {"announce": False})
         answered = await _answered_frame(client)
         assert answered["result"] == {"action": "decline"}
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_an_approval_from_a_different_turn_is_declined() -> None:
+    """A stale announcement from another turn does not decide this approval.
+
+    The correlation-miss path that matters most. The announcement names an
+    ALLOWLISTED tool, so a rung that keyed on thread and server alone would
+    happily approve; only including ``turnId`` in the identity makes this the
+    miss it actually is. A partially-matched announcement is evidence of a
+    DIFFERENT call, not weaker evidence of this one.
+    """
+    client = await _approval_client(
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+    )
+    try:
+        await client.request("drive", {"announce_turn": "u-stale"})
+        answered = await _answered_frame(client)
+        assert answered["result"] == {"action": "decline"}
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_an_approval_from_a_different_thread_is_declined() -> None:
+    """An announcement on another thread does not decide this approval either."""
+    client = await _approval_client(
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+    )
+    try:
+        await client.request("drive", {"announce_thread": "t-other"})
+        answered = await _answered_frame(client)
+        assert answered["result"] == {"action": "decline"}
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_correlation_miss_says_why_it_declined(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The fail-closed decline is LOUD, naming the identity it could not match.
+
+    A silent method-not-found is what let this defect survive six live runs. A
+    fail-closed path that is equally silent would leave the next occurrence just
+    as invisible, so the reason is asserted, not assumed.
+    """
+    client = await _approval_client(
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+    )
+    try:
+        with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.providers"):
+            await client.request("drive", {"announce": False})
+            answered = await _answered_frame(client)
+        assert answered["result"] == {"action": "decline"}
+        declines = [
+            record
+            for record in caplog.records
+            if record.levelno >= logging.WARNING
+            and "no announced tool call correlates" in record.getMessage()
+        ]
+        assert declines, (
+            "the correlation-miss decline logged nothing at WARNING; a "
+            f"fail-closed refusal must be visible. Saw: {caplog.messages}"
+        )
     finally:
         await client.aclose()
 

@@ -118,9 +118,14 @@ class CodexPermissionRung:
     ) -> None:
         self._allowed_tools = allowed_tools
         self._permission_callback = permission_callback
-        # Latest announced call per (threadId, server). Keyed by server rather
-        # than by call id because the elicitation carries no call id to join on.
-        self._announced: dict[tuple[str, str], CodexToolCall] = {}
+        # Latest announced call per (threadId, turnId, server). The elicitation
+        # carries no call id to join on, so the join is the narrowest identity
+        # both frames DO share. ``turnId`` is part of the key rather than
+        # ignored: keyed on thread and server alone, a stale announcement from an
+        # earlier turn would still match, and the decision would be made against
+        # a tool the model is no longer calling. A key that cannot be matched is
+        # a miss, and a miss declines.
+        self._announced: dict[tuple[str, str, str], CodexToolCall] = {}
 
     def observe(self, method: str, params: JsonObject) -> None:
         """Record the tool identity carried by an ``mcpToolCall`` item frame.
@@ -134,27 +139,40 @@ class CodexPermissionRung:
         if item.get("type") != "mcpToolCall":
             return
         thread_id = params.get("threadId")
+        turn_id = params.get("turnId")
         server = item.get("server")
         tool = item.get("tool")
         if (
             not isinstance(thread_id, str)
+            or not isinstance(turn_id, str)
             or not isinstance(server, str)
             or not isinstance(tool, str)
         ):
             return
-        self._announced[(thread_id, server)] = CodexToolCall(
+        self._announced[(thread_id, turn_id, server)] = CodexToolCall(
             server=server,
             tool=tool,
             arguments=lenient_json_object(item.get("arguments")),
         )
 
     def _announced_call(self, params: JsonObject) -> CodexToolCall | None:
-        """Return the call this approval is for, or ``None`` if it cannot be named."""
+        """Return the call this approval is for, or ``None`` if it cannot be named.
+
+        Correlation is exact on all three identity fields. Anything less is a
+        miss - a partially-matched announcement is not weaker evidence of the
+        same call, it is evidence of a DIFFERENT one, and approving on it would
+        decide against a tool the elicitation is not about.
+        """
         thread_id = params.get("threadId")
+        turn_id = params.get("turnId")
         server = params.get("serverName")
-        if not isinstance(thread_id, str) or not isinstance(server, str):
+        if (
+            not isinstance(thread_id, str)
+            or not isinstance(turn_id, str)
+            or not isinstance(server, str)
+        ):
             return None
-        return self._announced.get((thread_id, server))
+        return self._announced.get((thread_id, turn_id, server))
 
     async def decide(self, params: JsonObject) -> str:
         """Return the elicitation action for one approval request.
@@ -181,8 +199,11 @@ class CodexPermissionRung:
             # names the tool only in prose, and this project does not turn prose
             # into an approval.
             logger.warning(
-                "Declining a Codex MCP tool-call approval whose tool could not "
-                "be named from any announced call: server=%r",
+                "Declining a Codex MCP tool-call approval: no announced tool "
+                "call correlates to it (thread=%r turn=%r server=%r), so the "
+                "tool cannot be named and is refused rather than guessed at",
+                params.get("threadId"),
+                params.get("turnId"),
                 params.get("serverName"),
             )
             return DECLINE_ACTION

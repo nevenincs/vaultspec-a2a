@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:65ba381972ae68a0c22071cc478387d5043a497fab80ed7bf100d7f00570af04'
+body_hash: 'sha256:38b70875d4c3f64e0f1ae8eedeffb9d566caecc55391c24843dab15ec31e5ff8'
 related:
   - "[[2026-08-05-served-capability-contract-gateway-contract-audit]]"
 ---
@@ -21,15 +21,25 @@ unconstrained string arrays. In two cases one concept is served both ways in the
 same payload. The measured split and its three distinct shapes are recorded as
 F23 in the audit this record cites.
 
-A decision is needed because the split is not cosmetic. The audit's F16 records
-a document-authoring run that completed, produced real model output, and
-produced nothing applyable, with the perfect discriminator across every observed
-run being `authoring_capability` - a bare string carrying `coding` on a preset
-whose own description says it edits vault documents. If the authoring path is
-gated on that value, an undeclared vocabulary silently switched off the
-product's primary function with no error anywhere. That link is evidenced and
-NOT yet code-confirmed, but the exposure it illustrates is real regardless: a
-value with no declaration has nothing that can catch it being wrong.
+A decision is needed because the split has a measurable cost to the consumer
+this contract exists to serve. The audit records a frontend author who can
+generate exhaustive, checked handling for the typed half of the surface and must
+hand-maintain string literals for the rest, with nothing on the wire marking
+which half a given field is in. Two fields carry the same concept in one
+payload under different typings (audit F23); one vocabulary's legal values exist
+only in a source comment; and the audit's F35 records a boolean that is
+permanently false on one surface and true on another for the same preset - a
+value a client cannot act on in either direction.
+
+An earlier draft of this record motivated the decision with the audit's F16, on
+the hypothesis that an undeclared `authoring_capability` string was gating the
+authoring path and silently disabling the product's primary function. That
+hypothesis is REFUTED: F16's mechanism is F24, a bridged tool call auto-denied
+at a provider permission rung, and the capability string correlated only because
+it tracks which topology submits by which mechanism. The correction is recorded
+here rather than removed because it bounds this decision honestly - typing was
+never what was broken in F16, and this record should not be credited with
+fixing it.
 
 This record rules how served vocabularies are declared and derived. It does not
 rule the capability taxonomy, the remediation order, or any individual finding's
@@ -93,9 +103,10 @@ the surface, which is the frontend cost F23 records.
 - Parent stability is good: the enumerations this record generalizes from are
   accepted, shipped, and covered by an artifact-equality test. The risk is
   entirely in migration, not in the mechanism.
-- One consequence of this record cannot be verified from the served surface
-  alone: whether the authoring path is gated on `authoring_capability` (audit
-  F16) must be read in code before that field's remedy is chosen.
+- The `authoring_capability` field is mis-valued on a shipped preset and its
+  correction is an ordinary application of V1. It is NOT a blocked dependency:
+  the hypothesis that the authoring path was gated on it is refuted (audit F24),
+  so correcting the value fixes a declaration, not a behaviour.
 
 ## Implementation
 
@@ -195,11 +206,13 @@ value set, not in the pattern.
 
 ## Open questions
 
-- **Is the authoring path gated on `authoring_capability`?** The audit's F16
-  records a perfect correlation across every observed run and an explicit
-  absence of code confirmation. Settled by reading the gating logic; the remedy
-  branches on the answer, so this is the first work of that finding, before any
-  fix.
+- ~~**Is the authoring path gated on `authoring_capability`?**~~ SETTLED and
+  answered NO. The audit's F24 established the mechanism as a bridged tool call
+  auto-denied at a provider permission rung, with the capability string
+  correlating only because it tracks which topology submits by which mechanism.
+  The capability field is still mis-valued and still needs correcting, but that
+  is now an ordinary instance of this record's V1 rather than a blocked
+  dependency.
 - **Which vocabularies can be narrowed without a wire break?** Settled per field
   by V6's value capture against real served payloads; unknown until taken.
 - **Does the transition contract V7 defers belong to this repository alone?**

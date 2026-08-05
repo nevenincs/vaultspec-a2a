@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:808dbd97ebe71e204fa0fcaa497ac6c6f4b2317a99179d8453b9cf7c9f142c9c'
+body_hash: 'sha256:4804df91be5a3633e01dcaccd6b15a17559cbd2fd7f7b9aaf7ea5a849963fb8f'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,14 +54,36 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F23**.
+place. The current highest identifier is **F38**.
+
+**Renumbering applied to the third tranche, recorded so the source remains
+traceable.** The live-run tranche from the `product-proof` session was authored
+numbered F23 through F37, which collided at one position: F23 was already taken
+by this document's typed-vocabulary finding, committed and cited by the
+canonical-vocabulary decision record. Committed identifiers are never
+renumbered, so the incoming tranche was offset by one and preserved in its
+original order. The remap, from source number to number in this document: 23 to
+24, 24 to 25, 25 to 26, 26 to 27, 27 to 28, 28 to 29, 29 to 30, 30 to 31, 31 to
+32, 32 to 33, 33 to 34, 34 to 35, 35 to 36, 36 to 37, 37 to 38. No incoming
+finding was dropped or merged; each is a distinct observation rather than a
+rediscovery, and where one bears on an earlier finding that relationship is
+stated in both entries.
 
 **Tranche provenance.** F1-F15 are the contract audit of the served surface,
-2026-08-05, before the engine was reachable. F16-F22 are live-run findings from
-the same day, after the engine came up and real runs executed. Both tranches are
-2026-08-05; the engine's arrival between them is the reason several F1-F15
-observations about an unreachable authoring backend read differently than they
-now would.
+before the engine was reachable. F16-F22 are read-only observations of the first
+live runs, after the engine came up. F23 is the served-vocabulary measurement
+taken for the canonical-vocabulary decision. F24-F38 are the driven-run tranche,
+from a session that stood the engine up itself and executed six real runs. All
+are 2026-08-05; the engine's arrival partway through is why several F1-F15
+observations about an unreachable authoring backend read differently now, and
+why the later tranches can settle questions the earlier ones could only pose.
+
+**Corrections carried by later tranches.** Three earlier entries have been
+corrected in place rather than rewritten: F16's causal hypothesis is refuted by
+F24, F22's stall premise is superseded by F25, and F8 is retracted as
+non-reproducing. Each correction is marked inside the entry it affects, and the
+original claim is retained beside it. A reader citing any of those three must
+read its correction.
 
 ## Findings
 
@@ -236,6 +258,14 @@ serves null provider and model values. REMEDY: back `active_runs` with the same
 projection `/v1/runs` uses, or remove the route rather than serve a false empty.
 See F18, which finds the same surface wrong in the opposite direction.
 
+RETRACTION (third tranche). This finding DOES NOT REPRODUCE and should be
+treated as closed. The live-run session found `/v1/team/status` fully populated
+against a PAIRED worker; the all-empty arrays observed here were caused by the
+worker being unpaired at the time of the probe, not by the projection. The
+route is not serving a false empty. F18 is unaffected and stands on its own
+evidence - the two were never the same defect, and pairing them in the original
+entry was a mistake this retraction corrects.
+
 ### F9-run-status-serves-dead-fields | medium | run status serves two empty fields that look authoritative while the real assignment sits elsewhere
 
 A live run served `roles: []` and `assignments: []` while `frozen_assignment`
@@ -339,7 +369,25 @@ description states that no persona writes to the filesystem directly, that all
 authoring goes through engine proposals, and that a human applies through the
 dashboard review lane; no proposal was ever created, so there is nothing for the
 review lane to apply. Both completed document-editor runs show the same empty
-artifact set. CONSEQUENCE: the product's core claim reports SUCCESS while
+artifact set.
+
+CORRECTION (third tranche, supersedes the causal note below). The
+`authoring_capability` hypothesis recorded in this entry is REFUTED as the
+mechanism. The real cause is F24: the bridged `propose_changeset` tool is
+auto-denied at a permission rung with `[{"type":"text","text":"user rejected
+MCP tool call"}]` against a schema-conformant payload, and no permission request
+is ever surfaced. The two paths differ by SUBMISSION MECHANISM, not by
+capability string: the research_adr chain submits through the engine's HTTP
+authoring API directly from the worker, bypassing the model's tool surface
+entirely, while the document editor goes through the bridged tool that is
+blocked. `authoring_capability` correlated only because it tracks which topology
+uses which path. The original note is retained below unrewritten, because a
+hypothesis recorded and then refuted is more useful than one quietly deleted.
+The finding itself - a completed run producing no artifact - stands unchanged,
+and its remedy is unchanged: the missing proposal and the silent green remain
+two separate defects.
+
+CONSEQUENCE: the product's core claim reports SUCCESS while
 delivering nothing applyable. A frontend sees a completed run with no
 degradation and has no document to show or apply. This is a false green in the
 most literal sense - the run is green, the model did the work, and the work is
@@ -435,6 +483,16 @@ attached: these fields are not merely undefined, they are actively WRONG at the
 moment they matter most. It shares its defect class with F16's green-on-empty-
 artifact and F17's pending-on-complete.
 
+CORRECTION (third tranche). The premise that this run STALLED is false and is
+superseded by F25. The run was executing normally when it was killed: the worker
+was posting between 16 and 80 event batches per minute continuously, and the
+stream carried 332 author chunks and 14 review chunks in the window the watchdog
+called silent. The health fields being wrong is still the finding here and still
+stands - but they were wrong about a HEALTHY run, which makes this entry an
+instance of the same disease rather than a description of a genuine failure. The
+`failure_reason` prose, which this entry credited as "genuinely useful and
+specific", is itself false; that correction belongs to F25.
+
 ### F23-served-vocabulary-typing-is-split | high | the same kind of vocabulary is served as a closed enum in 32 places and as a bare string in 15, and two concepts are served both ways at once
 
 Measured against the served specification on 2026-08-05, not assumed. The
@@ -492,7 +550,217 @@ a transition or terminal-state contract with a writer that is required to
 advance the value - and must not be folded into the typing work, or F17 and F22
 will be marked closed while still occurring.
 
-### F24-and-beyond | low | reserved marker for continuous appending
+### F24-bridged-propose-is-auto-denied | critical | the authoring tool is refused as though a human declined, and no permission request is ever surfaced
+
+Source tranche number 23. THE ROOT CAUSE OF F16. An instrumented run asked the
+model to call the engine's propose tool once and report any rejection verbatim.
+It returned `[{"type":"text","text":"user rejected MCP tool call"}]` against a
+payload that conforms to the schema the engine publishes at its agent-tools
+route. The run settled `completed` with `failure_reason: null`,
+`proposal_ids: []`, `pending_permissions: []`, and no permission-request event
+on the stream. PROVEN: a2a's own permission handler never ran - the handler logs
+a line on every invocation and there are zero such lines in the worker log for
+that run. PROVEN FROM SOURCE: the codex lane hardcodes an approval policy of
+`never` and a read-only sandbox, while the authoring server spec deliberately
+names every catalog tool including the propose tool, its docstring stating that
+restricting to reads "would silently strip the agent's propose path, the exact
+gap this function exists to close". The design intends auto-approval; the live
+call is denied anyway. INFERRED and explicitly not isolated: that the denial
+originates at the codex app-server's own approval rung before a2a is consulted -
+the phrase "user rejected MCP tool call" appears nowhere in a2a source, so the
+vocabulary is not a2a's. CONSEQUENCE: single-document authoring is impossible on
+the only admitted provider lane, and the gate cannot be answered because it is
+never asked. CLASSIFICATION: genuine defect. REMEDY: either relax the codex
+policy for the bridged authoring server, or route the tool's permission through
+a2a's handler so the denial becomes a real answerable request. The cheap first
+diagnostic is to dump the generated codex config for a live run and confirm the
+authoring server block actually carries the propose tool in its enabled set.
+
+### F25-watchdog-kills-healthy-runs-with-a-false-reason | critical | a run doing eleven minutes of real work was terminated by its own watchdog, which then reported a demonstrably untrue reason
+
+Source tranche number 24. SUPERSEDES THE STALL PREMISE IN F22. The flagship
+research-to-ADR run was killed at 12:19:13 by the ingest-stall watchdog, serving
+`failure_reason: "Ingest stalled: no event from the graph for over 90s"`. The
+worker's own log refutes it: event-batch posts per minute across the window ran
+68, 80, 59, 54, 16, 66, 26, 73, 21, 64 - never a 90-second gap - and the stream
+capture carries 332 author chunks and 14 review chunks in the same window, with
+an agent subprocess spawned at 12:17:47 still alive at the kill. The model was
+mid-turn. CONSEQUENCE: a multi-phase authoring run cannot complete, so two of
+the flagship preset's three declared capabilities are unreachable, and the
+served reason actively misdirects diagnosis toward a stall that did not happen.
+INFERRED, not isolated: the watchdog counts a different channel than the one the
+worker posts to. CLASSIFICATION: genuine defect. REMEDY: count the channel the
+worker actually posts, and never terminate a run whose agent is mid-turn.
+
+### F26-engine-serve-command-breaks-on-windows-paths | medium | the documented launch override is unusable with native paths and the surfaced error names the wrong cause
+
+Source tranche number 25. The engine serve command template is split with POSIX
+tokenization, which consumes every backslash, so a native Windows path becomes
+an unfindable executable. The launch failure was logged ten times but surfaced
+to the operator as "no band port yielded a live listener" - a port-allocation
+message for a file-not-found cause. Forward slashes are the workaround.
+CONSEQUENCE: the documented override is broken on this repository's target
+platform and points the operator at the wrong subsystem. CLASSIFICATION: genuine
+defect. REMEDY: split without POSIX semantics on Windows, or accept a list-valued
+template, and propagate the launch error instead of collapsing it into a port
+message.
+
+### F27-engine-data-seat-guard-is-defeated | high | an explicitly supplied data seat is silently ignored whenever it sits inside a git repository
+
+Source tranche number 26. A seat directory was passed explicitly to the process
+launcher. After boot the seat was empty and the engine's store had appeared
+under the repository's own vault data directory, with the engine reporting an
+active scope of the repository root. The engine resolves its vault root by
+git-worktree discovery from the working directory rather than from the working
+directory itself, so any seat inside a git repository is hoisted to that
+repository's root. The guard's own docstring names avoiding exactly this outcome
+as its purpose. CONSEQUENCE: two development engines seated under one repository
+share a store. Impact is bounded here because the store is a gitignored
+rebuildable cache, but the guard is not doing its stated job. CLASSIFICATION:
+genuine defect, data-corruption class. REMEDY: honour the explicit seat as the
+vault root, or refuse a seat that resolves into an enclosing worktree.
+
+### F28-engine-surface-has-no-machine-readable-description | high | the engine surface a frontend must use publishes no schema, and every fact about it costs a source read in another repository
+
+Source tranche number 27. The engine's OpenAPI path returns 200 with the
+single-page-application HTML fallback rather than a schema; its route list
+exists only as a source constant. Undiscoverable from any live interface: the
+actor-token mint route and its payload; the proxy verb vocabulary; that an
+expected-scope generation fence is required on most proxy verbs and obtainable
+only from the engine's session route; that `workspace_root` is REJECTED by the
+proxy but REQUIRED by a2a directly, the two surfaces contradicting each other;
+that `feature_tag` is required for document-authoring presets but optional in
+a2a's schema; and that proxy application errors arrive with HTTP 200 carrying an
+error body. On a2a's side, `actor_tokens` appears as an optional caller-supplied
+field, no a2a route returns such a bundle, and nothing hints the value comes
+from a different service. CONSEQUENCE: a third-party frontend cannot be built
+against the live interface alone. CLASSIFICATION: genuine defect, product blind
+spot. REMEDY: publish an engine schema; declare the conditional requirement of
+`feature_tag` in a2a; align `workspace_root` across the two surfaces; return
+proxy errors with a non-200 status.
+
+### F29-review-gate-is-unreviewable | high | a human is asked to approve a document that no route will show them
+
+Source tranche number 28. The gate prompt asks for approval of a named research
+document. a2a serves only proposal identifiers, its artifacts array is empty,
+and no a2a route matches proposal, artifact, or document. On the engine side the
+proposal fetch returns 200 but with an empty review-documents array and an
+operation count of one carrying no operation body; the diff and preview routes
+both 404. CONSEQUENCE: the review gate is ceremonial - the approving human
+cannot see what they are approving. CLASSIFICATION: genuine defect; the content
+is in the ledger and is simply not served. REMEDY: serve the proposed body, from
+the engine and/or as an a2a passthrough on the run.
+
+### F30-a2a-approval-never-advances-the-engine-decision | high | approving through a2a is a graph resume signal only, so a produced document has no path to disk
+
+Source tranche number 29. The permission respond route returns 200 with
+`accepted: true`, `applied: false`, an action status of `accepted_not_applied`,
+and an approval status of `approved`. The engine ledger afterwards still reports
+the proposal as needing review and queued. Zero files were written to the vault
+by any of the six runs driven in that session. CONSEQUENCE: there is no path
+from a produced document to a file on disk through the documented API. Taken
+with F29, the delivery path is broken at its last mile rather than its first.
+CLASSIFICATION: genuine gap. The `applied: false` disclosure is honest, so the
+field is not lying - but the end-to-end capability is absent and no surface
+tells a frontend what else to call. REMEDY: forward the decision to the engine's
+approval queue, or document and serve the second call a frontend must make.
+
+### F31-authoring-session-id-always-null | medium | the run never discloses the authoring session the engine recorded for it
+
+Source tranche number 30. A run reported a null authoring session identifier
+throughout while the engine ledger recorded a concrete session identifier for
+that same run's proposal. Null on all six runs. CONSEQUENCE: a frontend cannot
+join a2a's run view to the engine's authoring session, and the documented
+run-end session close cannot find the session either. CLASSIFICATION: genuine
+defect. REMEDY: fold the session state reference, which the authoring session
+object already returns, into thread state on the submitter path as well as the
+bridge path.
+
+### F32-terminal-transition-erases-the-approval-record | medium | the decision a human made does not survive the run reaching a terminal state
+
+Source tranche number 31. At the gate the run reported a pending approval status
+with a concrete request identifier and a sequence of 678. After the approval and
+the subsequent failure, all three read null, null, and 0, with the worker
+logging that it pruned one stale permission request. The proposal identifier
+survives; the decision does not. CONSEQUENCE: a post-mortem through the API
+cannot distinguish an approved run from one never reviewed. CLASSIFICATION:
+genuine defect. REMEDY: preserve the recorded outcome on terminal transition -
+pruning a PENDING request must not erase the DECISION.
+
+### F33-engine-writes-metadata-a2a-rejects | medium | run metadata written by the engine fails a2a's own model and is silently reported absent
+
+Source tranche number 32. The gateway logged that stored metadata for a run does
+not satisfy the metadata model and that it is reporting it absent. The engine's
+run-start forwards a workspace root as a scope token. CONSEQUENCE: workspace
+provenance - which engine source describes as engine-owned and durable in a2a
+run metadata, and as the selector the bounded active-runs read matches after
+reload - is silently dropped, so reload recovery by workspace is unreliable for
+proxy-started runs. CLASSIFICATION: genuine defect, cross-repository contract
+drift. REMEDY: reconcile the engine's metadata shape with a2a's model, and fail
+loudly rather than reporting it absent.
+
+### F34-team-run-start-exceeds-the-forward-budget | medium | a cold provider catalog pushes team run-start past the proxy budget and it fails as a connection error
+
+Source tranche number 33. A first team start through the proxy returned 504 with
+a connection-attempt error. That run does not exist on a2a and has zero lines in
+either log. The proxy's control budget is 60 seconds against a cold
+provider-catalog refresh measured at 36.2 seconds with a five-minute cache life;
+warming the catalog first took 0.1 seconds and the identical start then
+succeeded. CONSEQUENCE: team run-start fails roughly whenever the catalog has
+aged out, and the operator sees a transport-level connect error for what is a
+budget expiry, with no run and no log line to work from. CLASSIFICATION: genuine
+defect. REMEDY: raise or split the run-start budget, warm the catalog before
+forwarding, report a budget expiry as a timeout, and log the abandoned attempt.
+
+### F35-eligible-is-false-on-one-surface-and-true-on-another | high | the same field contradicts itself across two surfaces, and one of them can never be true
+
+Source tranche number 34. SHARPENS F2. The preset listing returns `eligible:
+false` for every profile of all 20 presets with the research-to-ADR acceptance
+reason, because the route passes an acceptance-gate flag hardcoded false and is
+the ONLY production caller of the eligibility composer - every other call site
+is a test, so it can never be otherwise. Yet the direct run-start response for
+the same preset returns `eligible: true`, and run-start does not enforce the
+gate: all six live runs started. CONSEQUENCE: a frontend honouring the listing
+shows zero runnable presets permanently; one honouring the run-start field sees
+the opposite. The field is simultaneously dead and contradictory.
+CLASSIFICATION: genuine defect. REMEDY: wire the acceptance gate to a real
+signal or remove the term, and make the two surfaces mean the same thing.
+
+### F36-log-signal-to-noise-prevents-run-correlation | medium | the logs cannot answer what a run did, which is why the critical defect stayed invisible
+
+Source tranche number 35. Correlating by thread identifier yields four gateway
+and one worker line for a five-minute run with 30 tool calls, and ten plus four
+for a 24-minute team run. Both logs carry a health poll every five seconds and a
+telemetry-exporter warning-and-error pair every ten seconds continuously against
+an unreachable collector. CONSEQUENCE: the logs cannot answer "what did this run
+do", which is precisely why F24 remained invisible until a model prompt was
+instrumented to extract the error text. CLASSIFICATION: genuine defect. REMEDY:
+demote the health poll and the unreachable-collector export, and log authoring
+tool calls and rejections at informational level with the run identifier.
+
+### F37-no-preset-declares-summarization | medium | the advertised summarization capability is not reachable through any served preset
+
+Source tranche number 36. CONFIRMS F7 FROM THE LIVE SURFACE. Across all 20
+presets the only declared capabilities are the three document kinds, and only on
+the four research-to-ADR variants; 16 of 20 declare an empty capability list,
+including the document editor, which additionally declares its coarse capability
+as coding. CONSEQUENCE: the advertised ability to summarize existing vault
+documents is NOT REACHABLE through any served preset, and the nearest path is
+the false green of F24. CLASSIFICATION: genuine gap - either the capability is
+unimplemented or the presets under-declare it. REMEDY: declare and serve the
+capability, or drop the claim.
+
+### F38-only-codex-is-admitted | low | one provider is selectable and another serves 128 models while remaining unselectable
+
+Source tranche number 37. Recorded so it is not re-investigated. The live
+catalog shows codex selectable with 7 models; openai reports an available
+catalog with 128 models but is not admitted and not selectable; the remaining
+lanes report unavailable catalogs with reasons citing absent completed-turn
+proof. CLASSIFICATION: documented decision, the served-profile admission rule
+working as designed. No remedy. This is the intended behaviour of the admission
+rule and must not be "fixed".
+
+### F39-and-beyond | low | reserved marker for continuous appending
 
 New findings land immediately above this marker, taking the next free identifier
 after the highest already assigned. This entry carries no finding; it exists so
@@ -523,6 +791,29 @@ green light, because ready, accepting, and undegraded are served while the
 authoring backend is unreachable (F6), while a failed run reports healthy on
 every structured field (F22), and while a completed run reports success having
 produced nothing (F16).
+
+### What demonstrably WORKS, stated so the failures are not read as total
+
+The product CAN produce a real document. The research-to-ADR chain authored a
+genuine, validated artifact: a proposal and changeset recorded in the engine's
+authoring ledger with a validation status of valid, approval-ready true, and an
+authoring actor of the synthesist persona - confirmed three independent ways, by
+the worker's own 200 on submit, by the engine's ledger, and by a2a's run status.
+The model tier works: real turns read real vault documents, grounded themselves
+against linked records, and produced real content.
+
+What the product cannot do is get that document onto disk. Zero files were
+written to the vault across all six live runs. The distinction matters and must
+not be blurred in either direction: the authoring capability is real and the
+delivery path is broken, which is a materially different problem from a model
+that cannot write.
+
+Two further capabilities were proven that were previously believed blocked. An
+actor-token bundle IS obtainable through a real HTTP route - the engine's
+bootstrap mint route, gated by the machine bearer alone and requiring no
+pre-existing token - so the run-start refusal for missing role tokens is fully
+solvable client-side. And a run can be started either directly against a2a with
+a self-assembled bundle or through the engine proxy, both proven live.
 
 ### The through-line, and what it means for the decision to be taken
 
@@ -566,13 +857,25 @@ structured log (F15) - the latter has no owner anywhere in the corpus.
 ### Remediation grouping
 
 Additive and unilateral, safe to land on this side of the edge: F1, F3, F10,
-F11, F13, F14, F15. Breaking, changing what a served field MEANS and therefore
-requiring cross-repository coordination: F2, F4, F5, F6, F9, F12. Behavioural
-defects requiring investigation before a fix is specified: F16, F17, F18, F19,
-F20, F21, F22. F9 is a special case - it is execution of an already-ruled
-amendment, needing no new decision, but it removes fields the dashboard consumes
-and is therefore breaking. F16 requires its code-gating hypothesis confirmed
-before any fix is attempted, because the remedy branches on the answer.
+F11, F13, F14, F15, F26, F28, F36. Breaking, changing what a served field MEANS
+and therefore requiring cross-repository coordination: F2, F4, F5, F6, F9, F12,
+F35. Behavioural defects requiring investigation before a fix is specified: F16,
+F17, F19, F20, F21, F22, F24, F25, F27, F31, F32, F33, F34. The delivery-path
+cluster, which is the highest product impact in this document: F24, F25, F29,
+F30. Closed by retraction: F8. Recorded as intended behaviour, not to be
+"fixed": F38.
+
+Two special cases must not be misread. F9 is execution of an already-ruled
+amendment and needs no new decision, but it removes fields the dashboard
+consumes and is therefore breaking. And coordination with the consuming
+repository is the ROUTE for the breaking set, not a reason to defer it - a
+served field that contradicts itself is not made acceptable by documenting the
+contradiction.
+
+F16's remedy no longer branches on the capability-gating question; that
+hypothesis is refuted and the mechanism is F24's denial path. What remains
+branch-dependent is F24 itself, whose first move is to dump the generated
+provider configuration for a live run rather than to change policy blind.
 
 ### Two supporting facts worth preserving
 

@@ -6,8 +6,9 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:9a80cda42e11d48f70649c3e486152b46512cb72ad1fb52ae21693cc28216fba'
+body_hash: 'sha256:0a7c3c4ddcc71df82d5f3fb7265c5e5cffe26ba42da878ffaa538aba323e04e3'
 related:
+  - '[[2026-08-05-served-capability-contract-W01-P01-S01]]'
   - '[[2026-08-05-served-capability-contract-W01-P01-S02]]'
   - '[[2026-08-05-served-capability-contract-W02-P04-S12]]'
   - '[[2026-08-05-served-capability-contract-W02-P04-S16]]'
@@ -39,6 +40,7 @@ Auto-generated index of all documents tagged with `#served-capability-contract`.
 
 ### exec
 
+- `2026-08-05-served-capability-contract-W01-P01-S01` - F24 diagnostic - ANSWERED. The capability field has exactly ONE consumer, a served-response field that gates nothing at runtime, while the runtime submitter gate is an independent read of the same topology key. The two are parallel projections of one variable, which is why the correlation looked perfect and was a correlation between two symptoms. The capability derivation is therefore ORTHOGONAL to F16 and must never be credited with closing it. Remaining work moved to S34
 - `2026-08-05-served-capability-contract-W01-P01-S02` - F25 DONE in commit 088bd603 - the ingest-stall bound is now derived from the compiled graph rather than a flat global, so a run's own declared step timeout is honoured and presets without one keep the previous floor
 - `2026-08-05-served-capability-contract-W02-P04-S12` - F11 DONE in commit 1022ba08 - the five underscore-prefixed snapshot models were renamed and exported, the parity test updated, and zero underscore-prefixed schemas remain in the published contract, verified against the committed artifact
 - `2026-08-05-served-capability-contract-W02-P04-S16` - Document the OpenAPI artifact regeneration command, which exists only inside the test file that enforces it

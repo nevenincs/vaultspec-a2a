@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:3cfa6eafae9ff45553a4772908ac895ac5d31b359f74a11257c122ad55f7f695'
+body_hash: 'sha256:603d054c8e9709b55276d9a7beb266b52672025f9ad98ee4580bf4978fdd22e2'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -99,7 +99,7 @@ The product's primary function reports success while delivering nothing (audit F
 
 One diagnostic that must precede any provider-policy change, and one watchdog fix that stands on its own evidence. The earlier framing of this Phase rested on a hypothesis the audit has since refuted.
 
-- [ ] `W01.P01.S01` - F24 diagnostic - ANSWERED by F42 and awaiting closure confirmation from its owner. The generated config writes automatic tool approval for every server including the authoring bridge, and the provider raises the elicitation regardless, so the config key is inert on these blocks and no policy change follows from it. The remaining work moved to S34; `src/vaultspec_a2a/providers/_codex_config_home.py`.
+- [x] `W01.P01.S01` - F24 diagnostic - ANSWERED. The capability field has exactly ONE consumer, a served-response field that gates nothing at runtime, while the runtime submitter gate is an independent read of the same topology key. The two are parallel projections of one variable, which is why the correlation looked perfect and was a correlation between two symptoms. The capability derivation is therefore ORTHOGONAL to F16 and must never be credited with closing it. Remaining work moved to S34; `src/vaultspec_a2a/providers/_codex_config_home.py`.
 - [x] `W01.P01.S02` - F25 DONE in commit 088bd603 - the ingest-stall bound is now derived from the compiled graph rather than a flat global, so a run's own declared step timeout is honoured and presets without one keep the previous floor; `src/vaultspec_a2a/streaming/ingest.py`.
 
 ### Phase `W01.P02` - close the false green

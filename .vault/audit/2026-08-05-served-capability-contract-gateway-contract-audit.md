@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:d21c741c13a2bc94b7e1b3da53564bff827b258703c46c3e44d584b199aaa565'
+body_hash: 'sha256:a8d76e523fd2d99bc775fea07fb27f43b7bd1fc807ddf3f7a37a841eac2c4c1a'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -55,10 +55,12 @@ after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
 place. The current highest identifier is **F46**. F40 is RESERVED - assigned to an
-agent and not yet delivered - and is held rather than reused. F45 and F46 are
-recorded at summary fidelity from the routing agent's one-line subjects; their
-originating write-ups are owed and will replace that text without changing the
-numbers.
+agent and not yet delivered - and is held rather than reused. F45 and F46 now carry their
+originating write-ups, which CORRECTED the severity this document had assigned
+them from one-line summaries - both are LOW and neither is asserted as a live
+gap. A severity assigned before the evidence arrives is assigned too
+confidently, and that applies to this document as much as to the fields it
+audits.
 
 **Renumbering applied to the third tranche, recorded so the source remains
 traceable.** The live-run tranche from the `product-proof` session was authored
@@ -1043,30 +1045,60 @@ establishes is that the topology-only predicate is a real second-site defect wit
 its own smaller consequences - which is why the capability derivation remains
 worth doing, just never credited with F16.
 
-### F45-completion-check-excludes-archived | medium | the completion check scopes to the literal completed status and excludes archived
+### F45-completion-check-excludes-archived | low | the authoring completion check scopes to literal completed and deliberately excludes archived, with the consequence unverified
 
-Reported by the live-run agent and recorded at the fidelity supplied; the
-originating write-up is owed and will replace this text. The completion check
-matches the literal `completed` status only, so a run that has reached
-`archived` - a terminal state in the same vocabulary - is not counted as
-complete. CONSEQUENCE: any consumer or gate keyed on that check treats an
-archived run as incomplete. CLASSIFICATION: genuine defect, pending the
-originating agent's evidence. RELATION: this is a terminal-partition question and
-falls directly under the state-truthfulness record's first clause - a vocabulary
-that declares which members are terminal would make this checkable rather than a
-matter of remembering to enumerate them.
+CLASSIFICATION CORRECTED: recorded here first as a medium genuine defect on a
+one-line summary. The originating agent's own write-up rates it LOW and
+explicitly declines to assert a live gap. That correction is the finding's own
+discipline applied to itself - a severity assigned before the evidence arrived
+was assigned too confidently.
 
-### F46-preset-predicate-ignores-workspace-overrides | medium | the preset predicate resolves with no workspace root and therefore cannot see workspace-local overrides
+The authoring completion check scopes strictly to a literal `completed` status,
+deliberately excluding `archived`, even though the semantic terminal mapping
+sends BOTH to the same completed semantic phase. So one layer treats the two as
+equivalent and the other does not.
 
-Reported by the live-run agent and recorded at the fidelity supplied; the
-originating write-up is owed and will replace this text. The predicate resolves
-its preset with no workspace root, so a workspace-local preset that shadows or
-extends a bundled one is not seen. CONSEQUENCE: a decision taken on the bundled
-definition can diverge from the preset the run will actually use.
-CLASSIFICATION: genuine defect, pending the originating agent's evidence.
-RELATION: preset discovery is documented as a superset that includes
-workspace-local definitions, so resolving without the workspace is resolving a
-different question than the one being asked.
+WHAT IS EXPLICITLY NOT KNOWN, in the agent's own terms: whether an archived
+thread's checkpoint and proposal-identifier state is even readable or meaningful
+at that point, since archival may clear or invalidate it. If it is not, the
+exclusion is correct rather than a gap. This is recorded as an OPEN QUESTION for
+whoever owns the archival lifecycle, not as an assertion that anything is broken.
+
+WHY IT IS WORTH KEEPING despite being unverified: "does archived count as
+complete?" is a TERMINAL-PARTITION question, not a scoping oversight. It falls
+directly under the state-truthfulness record's first clause, which requires each
+state vocabulary to declare which members are terminal. Under that clause this
+stops being a matter of remembering to enumerate a status in each new check and
+becomes a property the type carries. That is the clause earning its keep on a
+finding that did not exist when it was written, which is better evidence the
+record is load-bearing than any argument made for it in the abstract.
+
+### F46-preset-predicate-ignores-workspace-overrides | low | the preset predicate resolves bundled definitions only, so a workspace override is invisible to it
+
+INFORMATIONAL, and recorded as a known simplification rather than as a defect.
+Classification corrected here for the same reason as F45: the originating
+agent's write-up rates it LOW and flags it as deliberately out of scope rather
+than broken.
+
+The predicate that decides whether a preset requires document authoring resolves
+presets and agent configurations with NO workspace root, which is a bundled
+lookup only. A project that overrides the team or agent definition in its own
+workspace to add or remove document-authoring roles on a custom preset would not
+be reflected in that predicate.
+
+DELIBERATELY NOT FIXED, and the reason is recorded because it is good practice
+rather than an excuse: obtaining the real workspace root would require touching
+the thread repository's metadata parsing, which is owned by another agent and
+was dirty in the same session. The agent flagged the simplification and stayed
+out of a file it did not own, which is the correct call in this tree - a
+cross-owner edit to fix a low-severity informational gap would have risked more
+than it repaired.
+
+RELATION: preset discovery is documented as a SUPERSET that deliberately
+includes workspace-local definitions, so resolving without the workspace answers
+a narrower question than the one being asked. Whether that matters in practice
+depends on whether any deployment actually overrides these presets, which is not
+established.
 
 ### F47-and-beyond | low | reserved marker for continuous appending
 

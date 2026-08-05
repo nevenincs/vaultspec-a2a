@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:4398a523103a8a501d7085e521dce1aa91342ec1a9bfe6a2f471d66b7fef2c99'
+body_hash: 'sha256:563f759585c66bfb38274e44f820c07cb226c9516db50a2e43a0e04e82881fa3'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -167,7 +167,7 @@ Give each served vocabulary one owning declaration and make every emit site deri
 
 - [ ] `W03.P06.S18` - F23 shape one - serve the TopologyType enumeration that already exists in code instead of a bare string, and reconcile provider_id with the typed Provider enumeration served beside it; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W03.P06.S19` - F23 shape two - declare owning enumerations for the vocabularies that have none, covering origin, repair_status, execution_readiness, provider_condition, worker_status, semantic_status, semantic_phase, replay_status and the degraded_reasons members; `src/vaultspec_a2a/api/schemas/gateway.py`.
-- [ ] `W03.P06.S20` - F7 - correct the document editor authoring_capability and populate supported_capabilities across presets, gated on the S01 verification because the remedy branches on it; `src/vaultspec_a2a/team/team_config.py`.
+- [ ] `W03.P06.S20` - F7 - DECLARATION HALF LANDED in 0e4c0db0 and e455cad9, which declared the two capability vocabularies and pinned what the keyings disagree about. The RE-KEY is parked behind F62: deriving capabilities from roles would make a deliberately-failing certification fixture advertise a deliverable it is built to fail, so the declared product classification must land with it. The old gate on the S01 verification is OBSOLETE - that hypothesis was refuted and the capability derivation is orthogonal to it; `src/vaultspec_a2a/team/team_config.py`.
 - [ ] `W03.P06.S21` - Enforce import-from-owner for served vocabularies so no surface redeclares or re-exports one, keeping the two distinct AdmissionState concepts separate rather than merged; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W03.P06.S43` - F37 - declare and serve a summarization capability or drop the product claim, since no served preset advertises it and the nearest path is the false green of F24; `src/vaultspec_a2a/team/team_config.py`.
 - [ ] `W03.P06.S47` - Write the client-facing API guide as the OUTPUT of this Wave rather than a parallel track, using the wireframe acceptance gate as its completion test - the guide cannot be written honestly until the served semantics are canonical; `docs/index.rst`.

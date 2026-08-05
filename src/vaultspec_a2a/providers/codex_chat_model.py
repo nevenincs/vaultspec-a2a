@@ -43,6 +43,7 @@ from langchain_core.messages.ai import (
     UsageMetadata,
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langgraph.errors import GraphBubbleUp
 from pydantic import Field, TypeAdapter, ValidationError
 
 from ..control.config import settings
@@ -51,12 +52,18 @@ from ..utils import package_version
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
 from ._acp_mcp import codex_mcp_server_specs
-from ._acp_types import require_workspace_root
+from ._acp_types import PermissionCallback, require_workspace_root
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._codex_config_home import (
     build_codex_config_home,
     cleanup_codex_config_home,
     resolve_codex_web_search_mode,
+)
+from ._codex_permission import (
+    DECLINE_ACTION,
+    ELICITATION_METHOD,
+    CodexPermissionRung,
+    elicitation_response,
 )
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
@@ -415,6 +422,7 @@ class _CodexAppServerClient:
         process: asyncio.subprocess.Process,
         *,
         metadata: Mapping[str, object] | None = None,
+        permission_rung: CodexPermissionRung | None = None,
     ) -> None:
         if process.stdin is None or process.stdout is None:
             raise RuntimeError("codex app-server failed to open stdio pipes")
@@ -422,6 +430,16 @@ class _CodexAppServerClient:
         self._stdin = process.stdin
         self._stdout = process.stdout
         self._metadata = metadata
+        self._permission_rung = permission_rung
+        # Decisions run as tasks because the reader loop is synchronous and a
+        # supervised rung is not: holding references keeps them from being
+        # garbage-collected mid-flight, which would strand codex waiting on a
+        # request nobody is answering any more.
+        self._decision_tasks: set[asyncio.Task[None]] = set()
+        # A graph suspension raised by a supervised rung, held for the turn
+        # consumer to re-raise. The RPC it interrupted is answered immediately so
+        # the provider is never left blocked on a request the graph parked.
+        self.pending_interrupt: BaseException | None = None
         self._next_id = 1
         self._pending: dict[int, asyncio.Future[JsonObject]] = {}
         self.notifications: asyncio.Queue[JsonObject] = asyncio.Queue()
@@ -529,9 +547,23 @@ class _CodexAppServerClient:
         )
         raw_method = message.get("method")
         method = raw_method if isinstance(raw_method, str) and raw_method else None
-        # Server-initiated request (has both id and method): we support none, so
-        # answer with a JSON-RPC "method not found" to keep the stream unblocked.
+        # Server-initiated request (has both id and method). The tool-approval
+        # request is answered on its own terms; anything else is still refused,
+        # but LOUDLY. A silent method-not-found here is what made every bridged
+        # write vanish: codex resolves an unanswered approval as not granted and
+        # hands the model "user rejected MCP tool call" while the turn still
+        # settles completed, so the refusal has to be visible in a log to ever be
+        # noticed again.
         if msg_id is not None and method:
+            if method == ELICITATION_METHOD and self._permission_rung is not None:
+                self._schedule_elicitation_decision(msg_id, message)
+                return
+            logger.warning(
+                "codex app-server sent an unsupported server-initiated request "
+                "%r; answering method-not-found, which the provider will treat "
+                "as a refusal",
+                method,
+            )
             self._send({"id": msg_id, "error": {"code": -32601, "message": method}})
             return
         if msg_id is not None:
@@ -554,7 +586,49 @@ class _CodexAppServerClient:
             future.set_result(result)
             return
         if method:
+            # Observed before the turn consumer sees it: the approval request for
+            # a tool call arrives immediately after the item frame that names the
+            # tool, and the elicitation payload itself carries no tool name.
+            if self._permission_rung is not None:
+                self._permission_rung.observe(
+                    method, lenient_json_object(message.get("params"))
+                )
             self.notifications.put_nowait(message)
+
+    def _schedule_elicitation_decision(self, msg_id: int, message: JsonObject) -> None:
+        """Decide one tool-approval request off the reader loop, then answer it.
+
+        The reader must not block: a supervised decision can wait on a human, and
+        codex keeps streaming other frames meanwhile. Every outcome answers the
+        request - a raised decision is a decline, never an unanswered frame that
+        would hang the turn until the idle backstop fired.
+        """
+        rung = self._permission_rung
+        if rung is None:
+            return
+        params = lenient_json_object(message.get("params"))
+
+        async def _decide() -> None:
+            action = DECLINE_ACTION
+            try:
+                action = await rung.decide(params)
+            except GraphBubbleUp as exc:
+                # A supervised rung suspended the graph to ask a human. Hold it
+                # for the turn consumer to re-raise, and free the provider now.
+                self.pending_interrupt = exc
+            except Exception:
+                logger.exception(
+                    "Codex permission decision failed; declining (fail-closed)"
+                )
+            if self._closed:
+                return
+            self._send(elicitation_response(msg_id, action))
+            with suppress(Exception):
+                await self._stdin.drain()
+
+        task = asyncio.create_task(_decide())
+        self._decision_tasks.add(task)
+        task.add_done_callback(self._decision_tasks.discard)
 
     def _fail_pending(self, exc: BaseException) -> None:
         for future in self._pending.values():
@@ -601,7 +675,11 @@ class _CodexAppServerClient:
         # await carries a deadline and a task that misses it is abandoned rather
         # than allowed to hold the session open.
         async def _cancel_reader_tasks() -> None:
-            for task in (self._reader_task, self._stderr_task):
+            for task in (
+                self._reader_task,
+                self._stderr_task,
+                *tuple(self._decision_tasks),
+            ):
                 if task is None:
                     continue
                 task.cancel()
@@ -649,6 +727,17 @@ class CodexChatModel(BaseChatModel):
     # through the closed registry) because the bridge is a per-run, non-registry
     # spec the worker builds fresh every turn from the engine catalog.
     authoring_mcp_server: JsonObject | None = Field(default=None, exclude=True)
+    # The Codex counterpart of ``AcpChatModel.permission_callback``, in the same
+    # field shape so the two lanes converge: the worker node wires a supervised
+    # run's human rung onto any model that DECLARES this attribute
+    # (``_resolve_effective_worker_model``), which is why its absence used to
+    # skip Codex silently rather than fail. Left unset, the lane is autonomous
+    # and decides against the run's composed surface.
+    permission_callback: PermissionCallback | None = Field(
+        default=None,
+        description="Optional async callback for custom permission handling.",
+        exclude=True,
+    )
     approval_policy: str = "never"
     sandbox: str = "read-only"
     # Bounds the startup and per-request RPC waits only - the single-shot calls
@@ -695,6 +784,53 @@ class CodexChatModel(BaseChatModel):
         """
         return self.model_copy(update={"authoring_mcp_server": spec})
 
+    def _compose_mcp_specs(self) -> list[JsonObject]:
+        """Return the MCP servers this turn declares, harness first then bridge.
+
+        The single composition: the ``config.toml`` the provider reads and the
+        permission rung that approves its calls are both derived from this one
+        list, so the surface a run auto-approves cannot drift from the surface it
+        actually delivered. The authoring bridge never replaces a same-named
+        harness entry - the two cannot collide in practice, but the order keeps
+        the harness registry as the trust root regardless.
+        """
+        specs = (
+            codex_mcp_server_specs(
+                self.harness_mcp_servers, project_root=self.workspace_root
+            )
+            if self.harness_mcp_servers
+            else []
+        )
+        if self.authoring_mcp_server is not None:
+            known = {
+                _required_string_field(spec, "name", context="MCP server")
+                for spec in specs
+            }
+            authoring_name = _required_string_field(
+                self.authoring_mcp_server, "name", context="authoring MCP server"
+            )
+            if authoring_name not in known:
+                specs = [*specs, self.authoring_mcp_server]
+        return specs
+
+    def _composed_tool_pairs(self) -> frozenset[tuple[str, str]]:
+        """Return every ``(server, tool)`` this turn composed.
+
+        The exact set the autonomous permission rung may approve. Read from the
+        same specs that become the ``enabled_tools`` allowlist, so a tool the run
+        never declared can never be approved by it.
+        """
+        pairs: set[tuple[str, str]] = set()
+        for spec in self._compose_mcp_specs():
+            name = _required_string_field(spec, "name", context="MCP server")
+            tools = spec.get("tools")
+            if not isinstance(tools, list):
+                continue
+            pairs.update(
+                (name, tool) for tool in tools if isinstance(tool, str) and tool
+            )
+        return frozenset(pairs)
+
     def _build_codex_config_home(self) -> Path:
         """Build the worker-owned per-run CODEX_HOME for this Codex turn.
 
@@ -725,22 +861,7 @@ class CodexChatModel(BaseChatModel):
         # specs here, so the run's project is applied at render time rather than
         # to an already-rendered spec as the ACP lane does. Same channel, same
         # refusal to invent a root when the run names none.
-        specs = (
-            codex_mcp_server_specs(
-                self.harness_mcp_servers, project_root=self.workspace_root
-            )
-            if self.harness_mcp_servers
-            else []
-        )
-        if self.authoring_mcp_server is not None:
-            known: set[str] = set()
-            for spec in specs:
-                known.add(_required_string_field(spec, "name", context="MCP server"))
-            authoring_name = _required_string_field(
-                self.authoring_mcp_server, "name", context="authoring MCP server"
-            )
-            if authoring_name not in known:
-                specs = [*specs, self.authoring_mcp_server]
+        specs = self._compose_mcp_specs()
         base = self.codex_home or settings.codex_home
         base_home = Path(base) if base else Path.home() / ".codex"
         configured = self.web_search_mode
@@ -872,7 +993,14 @@ class CodexChatModel(BaseChatModel):
                 use_exec=False,
                 metadata=metadata,
             )
-            client = _CodexAppServerClient(process, metadata=metadata)
+            client = _CodexAppServerClient(
+                process,
+                metadata=metadata,
+                permission_rung=CodexPermissionRung(
+                    allowed_tools=self._composed_tool_pairs(),
+                    permission_callback=self.permission_callback,
+                ),
+            )
             await asyncio.wait_for(
                 client.request(
                     "initialize",
@@ -993,6 +1121,14 @@ class CodexChatModel(BaseChatModel):
                 if deferred is not None:
                     raise deferred from None
                 raise
+            # A supervised rung that suspended the graph did so to ask a human,
+            # and the answer cannot arrive inside this turn. Surface it here
+            # rather than streaming on: the provider has already been freed with
+            # a decline, so continuing would report a refused tool call as the
+            # turn's own outcome and lose the pending question entirely.
+            if client.pending_interrupt is not None:
+                raise client.pending_interrupt
+
             method = message.get("method")
             raw_params = message.get("params")
             params = lenient_json_object(raw_params)

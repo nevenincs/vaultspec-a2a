@@ -451,6 +451,7 @@ async def _served_catalog(gateway_url: str, workspace_root: str) -> JsonObject:
         response = await hc.get(
             f"{gateway_url}/v1/provider-catalog",
             params={"workspace_root": workspace_root},
+            headers=_GATEWAY_AUTH_HEADERS,
             timeout=240.0,
         )
     assert response.status_code == 200, (

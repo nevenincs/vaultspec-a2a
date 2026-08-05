@@ -26,6 +26,7 @@ from langchain_core.messages import (
 )
 
 from ...graph.enums import Provider
+from .._codex_permission import CodexPermissionRung
 from .._subprocess import spawn_acp_process
 from ..codex_chat_model import (
     STDERR_TAIL_LINES,
@@ -44,6 +45,7 @@ from ..factory import (
 from ..model_profiles import probe_provider_readiness
 
 if TYPE_CHECKING:
+    from .._acp_types import PermissionCallback
     from .._json_contract import JsonObject
 
 
@@ -191,6 +193,246 @@ async def test_client_request_after_close_raises() -> None:
     await client.aclose()
     with pytest.raises(_CodexProtocolError, match="closed"):
         await client.request("echo", {})
+
+
+# ---------------------------------------------------------------------------
+# The MCP tool-approval rung (mcpServer/elicitation/request)
+#
+# The frames below are transcribed from a real codex-cli 0.146.0 turn: the
+# app-server announces the call with an `item/started` mcpToolCall item and then
+# raises the approval as a server-initiated request whose params name the SERVER
+# but never the TOOL. Answering it with a method-not-found is what made codex
+# resolve the call as not granted and hand the model "user rejected MCP tool
+# call" while the turn still settled `completed`.
+# ---------------------------------------------------------------------------
+
+# Emits the announce-then-ask pair on `drive`, then republishes whatever frame
+# the client answered with as a `decision` notification so a test can read the
+# real answer back off the wire instead of inspecting the client's internals.
+_APPROVAL_SERVER = r"""
+import json, sys
+
+def out(msg):
+    sys.stdout.write(json.dumps(msg) + "\n"); sys.stdout.flush()
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    mid = msg.get("id")
+    method = msg.get("method")
+    if method == "drive":
+        params = msg.get("params") or {}
+        if params.get("announce", True):
+            out({
+                "method": "item/started",
+                "params": {
+                    "threadId": "t-1",
+                    "turnId": "u-1",
+                    "item": {
+                        "type": "mcpToolCall",
+                        "id": "call_1",
+                        "server": params.get("server", "vaultspec-authoring"),
+                        "tool": params.get("tool", "propose_changeset"),
+                        "status": "inProgress",
+                        "arguments": {"text": "hello"},
+                    },
+                },
+            })
+        out({
+            "method": "mcpServer/elicitation/request",
+            "id": 9001,
+            "params": {
+                "threadId": "t-1",
+                "turnId": "u-1",
+                "serverName": params.get("server", "vaultspec-authoring"),
+                "mode": "form",
+                "_meta": {
+                    "codex_approval_kind": params.get("kind", "mcp_tool_call"),
+                    "persist": ["session", "always"],
+                    "tool_description": "Propose a changeset.",
+                    "tool_params": {"text": "hello"},
+                },
+                "message": "Allow the server to run tool \"propose_changeset\"?",
+                "requestedSchema": {"type": "object", "properties": {}},
+            },
+        })
+        out({"id": mid, "result": {}})
+    elif method == "unknown/server/request":
+        out({"method": "unknown/thing", "id": 9002, "params": {}})
+        out({"id": mid, "result": {}})
+    elif method is None and mid in (9001, 9002):
+        # The client's answer to our server-initiated request: republish it so
+        # the test reads the real frame off the wire.
+        out({"method": "decision", "params": msg})
+    elif mid is not None:
+        out({"id": mid, "result": {}})
+    else:
+        continue
+"""
+
+
+async def _approval_client(
+    *,
+    allowed: frozenset[tuple[str, str]] = frozenset(),
+    permission_callback: PermissionCallback | None = None,
+) -> _CodexAppServerClient:
+    """Spawn the real approval subprocess behind a client carrying a live rung."""
+    process = await spawn_acp_process(
+        [sys.executable, "-c", _APPROVAL_SERVER],
+        env={},
+        cwd=".",
+        use_exec=True,
+    )
+    return _CodexAppServerClient(
+        process,
+        permission_rung=CodexPermissionRung(
+            allowed_tools=allowed,
+            permission_callback=permission_callback,
+        ),
+    )
+
+
+async def _answered_frame(client: _CodexAppServerClient) -> JsonObject:
+    """Return the frame the client sent back, read off the subprocess's echo."""
+    import asyncio
+
+    while True:
+        note = await asyncio.wait_for(client.notifications.get(), timeout=20)
+        if note.get("method") == "decision":
+            params = note.get("params")
+            assert isinstance(params, dict)
+            return params
+
+
+@pytest.mark.asyncio
+async def test_a_declared_tool_call_is_approved() -> None:
+    """The composed surface is auto-approved, so the bridged write actually runs.
+
+    The regression that mattered: before the rung existed this arm answered
+    ``-32601``, which codex resolves as a refusal, and every authoring call was
+    lost while the run still reported success.
+    """
+    client = await _approval_client(
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+    )
+    try:
+        await client.request("drive", {})
+        answered = await _answered_frame(client)
+        assert answered["id"] == 9001
+        assert answered["result"] == {"action": "accept", "content": {}}
+        assert "error" not in answered
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_outside_the_composed_surface_is_declined() -> None:
+    """An undeclared tool is refused, never approved by the autonomous rung."""
+    client = await _approval_client(
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+    )
+    try:
+        await client.request("drive", {"tool": "delete_everything"})
+        answered = await _answered_frame(client)
+        assert answered["result"] == {"action": "decline"}
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_an_approval_whose_tool_cannot_be_named_is_declined() -> None:
+    """With no announced call to correlate, the rung fails closed.
+
+    The payload names the tool only in prose, and this project never turns prose
+    into an approval — so an approval it cannot name is refused.
+    """
+    client = await _approval_client(
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+    )
+    try:
+        await client.request("drive", {"announce": False})
+        answered = await _answered_frame(client)
+        assert answered["result"] == {"action": "decline"}
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_non_tool_call_elicitation_is_declined() -> None:
+    """An elicitation that is not a tool-call approval is refused, not accepted."""
+    client = await _approval_client(
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+    )
+    try:
+        await client.request("drive", {"kind": "something_else"})
+        answered = await _answered_frame(client)
+        assert answered["result"] == {"action": "decline"}
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_supervised_rung_decides_the_tool_call() -> None:
+    """A supervised run routes the decision to its human rung and honours it.
+
+    The callback is handed the ACP option shape, so the id it returns IS the
+    action codex expects — which is what keeps the two lanes converged.
+    """
+    seen: list[tuple[str, list[str]]] = []
+
+    async def approve(
+        tool_name: str, tool_input: JsonObject, options: list[JsonObject]
+    ) -> str:
+        seen.append((tool_name, [str(option.get("optionId")) for option in options]))
+        return "accept"
+
+    client = await _approval_client(permission_callback=approve)
+    try:
+        await client.request("drive", {})
+        answered = await _answered_frame(client)
+        # Approved despite an EMPTY autonomous allowlist: the decision came from
+        # the callback, proving the supervised path is the one that ran.
+        assert answered["result"] == {"action": "accept", "content": {}}
+        assert seen == [
+            ("mcp__vaultspec-authoring__propose_changeset", ["accept", "decline"])
+        ]
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_server_request_is_refused_loudly() -> None:
+    """A genuinely unsupported request keeps its method-not-found answer."""
+    client = await _approval_client()
+    try:
+        await client.request("unknown/server/request", {})
+        answered = await _answered_frame(client)
+        assert answered["id"] == 9002
+        error = answered["error"]
+        assert isinstance(error, dict)
+        assert error["code"] == -32601
+    finally:
+        await client.aclose()
+
+
+def test_the_codex_model_declares_a_permission_callback() -> None:
+    """The field the supervised worker wiring probes for exists on this lane.
+
+    ``_resolve_effective_worker_model`` attaches the human rung only to a model
+    that DECLARES ``permission_callback``; without the field a supervised Codex
+    run silently skipped the rung altogether rather than failing.
+    """
+    model = CodexChatModel()
+    assert hasattr(model, "permission_callback")
+    assert model.permission_callback is None
+    assert (
+        model.model_copy(
+            update={"permission_callback": lambda *a: None}
+        ).permission_callback
+        is not None
+    )
 
 
 # ---------------------------------------------------------------------------

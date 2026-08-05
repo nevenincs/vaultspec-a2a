@@ -7953,3 +7953,57 @@ lane rather than the argument nobody passed - never admission.
 would make both testable immediately; that server is held dark pending an ADR
 amendment, live retrieval proof, and an admission gate, and lighting one to
 enable a test would spend the ruling to buy the evidence.
+
+### the-guard-was-failed-by-a-strangers-directory | high | a flake whose cause was outside the repository
+
+The purity guard shipped flaky - about one run in four - and the cause was
+neither the rule it asserts nor anything in this tree. To match its command-line
+argument against collected nodes, **pytest enumerates its ROOTDIR and lstats the
+entries.** A suite generated into the system temp directory with no ini file
+above it makes that rootdir the SYSTEM TEMP DIRECTORY, which on this machine
+holds **658 directories belonging to another project**, continuously deleted by
+some other process. The child died mid-collection with a `FileNotFoundError`
+naming a stranger's directory.
+
+An ini file inside the generated suite stops the walk at the suite. Twenty
+consecutive isolated runs pass where the same loop previously failed seven of
+sixteen, **and the guard dropped from nine seconds to two** - the walk was most
+of its cost, which is corroborating evidence that it was happening.
+
+**The floor is the only reason this was findable.** The child wrote its dump file
+and exited, so the artefact existed and looked plausible; only the assertion that
+it must hold six items turned a silent empty collection into a named failure.
+Without it the guard would have passed VACUOUSLY on every flaky run - and a
+guard that is green because it saw nothing is the expensive failure this campaign
+keeps rediscovering.
+
+**The first diagnosis was wrong and the correction is left in the code.** Giving
+the child its own temp root looked obviously right and did not help, because what
+the child chokes on is the directory its ARGUMENT lives under. The isolation was
+kept for containment and the comment now says which of the two does what, so the
+next reader does not inherit a wrong explanation as an established reason.
+
+Also worth stating plainly, because the earlier rule needs qualifying: a red
+whose files are dirty and not yours is a STATE rather than a defect - but a red
+whose cause is outside the repository entirely is still YOUR defect if your test
+chose to depend on that outside. Enumerating a shared machine's temp directory
+was a dependency this guard took on without meaning to.
+
+### the-same-hazard-sits-unpinned-in-the-sibling | medium | reported, deliberately not fixed here
+
+`test_scheduling_evidence.py` in the same package generates mini-suites the same
+way and pins no rootdir. **Its module docstring says "an isolated rootdir" -
+prose describing an intent the code does not implement**, which is how the hazard
+stayed invisible in both places.
+
+Not fixed in a commit about something else: that module runs xdist under
+`--dist=loadgroup` and judges outcomes from wall-clock intervals and worker ids,
+so changing what config its child resolves needs its own verification loop, and
+the loop is slow because the mini-tests really sleep.
+
+Recorded with the mechanism and the one-line remedy so the next pass does not
+re-derive either. **And a second question boarded with it:** two modules in one
+package now hand-roll "generate a mini-suite, run the real pytest CLI, read the
+result back". The flake existed in both because the knowledge lived in neither -
+which is the exact argument this campaign makes for a canonical home, arriving
+this time as a reliability defect rather than a duplication one.

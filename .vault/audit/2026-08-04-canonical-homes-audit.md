@@ -8007,3 +8007,73 @@ package now hand-roll "generate a mini-suite, run the real pytest CLI, read the
 result back". The flake existed in both because the knowledge lived in neither -
 which is the exact argument this campaign makes for a canonical home, arriving
 this time as a reliability defect rather than a duplication one.
+
+### RETRACTION-the-sibling-was-never-vulnerable | critical | I asserted a negative a grep cannot establish
+
+**The previous entry's claim about `test_scheduling_evidence.py` is withdrawn.** It
+said the module had the same unpinned-rootdir flake and that its docstring
+described "an isolated rootdir" the code did not implement. Both are false.
+
+`_run_pytest` already passed `cwd=suite_dir`. With no ini above it, pytest
+resolves its rootdir from the working directory, so running there pins the
+rootdir INSIDE the generated suite - the same invariant an ini file buys by a
+different route. The docstring was accurate, and calling it "prose describing an
+intent the code does not implement" was unfair to code that was correct.
+
+**How the error was made, because the shape recurs:** I grepped for
+`pytest.ini|rootdir|tox.ini|--rootdir`, found nothing, and concluded the pin was
+absent. `cwd` was not in the pattern. **A search for the mechanisms I already had
+in mind cannot establish the absence of a mechanism I had not thought of** - the
+"grep cannot prove absence" trap wearing new clothes. I then wrote the negative
+into a task card AND an audit record, where it would have sent the next reader to
+"fix" working code.
+
+Measured on the real shapes rather than on my reconstruction of them:
+
+    dir arg, cwd=suite_dir  (the sibling, real)     4.5-10.5s   0/4 failures
+    dir arg, no cwd         (what my guard did)    18.0-26.0s   1/4 failures
+
+Two more checked in the same pass and safe for the same reason:
+`test_plugin.py` (`cwd=directory`) and `test_prerequisite_rule.py`
+(`cwd=tmp_path`, 1.4-2.0s, 0/3). **My own guard was the only one missing the
+pattern every sibling already had.** The module I reported as defective was the
+exemplar.
+
+### the-real-flake-the-hunt-found | high | a shared namespace as the subject of an assertion
+
+Chasing the wrong file surfaced the right one. Three Codex credential-leak tests
+globbed the machine-wide temporary directory before and after a failure and
+asserted no new home appeared. **The subject of that assertion is a shared
+namespace**, so any concurrent lane creating its own home in the window failed
+them for a reason unrelated to cleanup - a known flake that had been recorded and
+left unowned.
+
+They now run with the desktop profile armed at a per-test application home, so
+the root the production resolver returns is private. Arming is the route because
+the root is a DERIVED property with no setter.
+
+**Demonstrated against a real competing writer, not argued:** a background
+process creating codex-home-shaped directories in the shared temp - exactly what
+another lane does - fails all three pre-fix and passes all three after.
+
+**And a private root is not a free win**, which is the part worth keeping: it can
+make a leak check pass by looking somewhere nothing ever writes. That is the
+failure this file's own root resolver was written to prevent, so it was closed
+twice - the fixture asserts the armed root is genuinely not the shared one before
+yielding, and neutering the cleanup function while keeping its name and signature
+still fails all three. A private root that had silenced them would have passed
+that check.
+
+### one-invariant-expressed-four-ways | medium | the duplication behind both mistakes
+
+Four test modules now generate a mini-suite and run the real pytest CLI over it.
+**Three pin the rootdir through `cwd`, one through an ini file, and until this
+pass none of them said why.** The invariant was real, load-bearing, and written
+down nowhere - which is how one module could omit it and how I could then look
+straight at another and not see it.
+
+That is the campaign's own argument arriving as a reliability defect rather than
+a duplication one: the knowledge lived in no home, so it was absent from one site
+and invisible at three others. Boarded rather than folded, because the four
+differ in what they run and what they read back, and a shared home built on the
+assumption they are the same mechanism would be the next wrong negative.

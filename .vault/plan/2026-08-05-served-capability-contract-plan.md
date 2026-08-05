@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:f596f31ece20b45f981d2cec76e267370678eb73b91df9064150b7f42f062e93'
+body_hash: 'sha256:9fe80739bbb7d8432602bad0f1f7cd419bc20222fc52057f54c126cd7d1952a6'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -84,6 +84,17 @@ testing it took one agent one pass. That is recorded as a finding in its own
 right, because a blocker asserted rather than verified is indistinguishable from
 a real one until someone checks.
 
+**THE WAVE'S COMPOSITION HAS INVERTED, and that is the sequencing consequence.**
+Five of the six original Steps can land UNILATERALLY NOW; the sixth needs only a
+one-line null-safety check on the consumer's adapter, not a negotiation. What
+was labelled entirely blocked is mostly free.
+
+Meanwhile the one item here that is GENUINELY cross-repository and genuinely
+blocking - the blind review gate - was never in this wave at all, because nobody
+had found it. So the wave carried a coordination label for six Steps that did
+not need it while the item that did need it sat outside. That is worth stating
+plainly: the label was not merely wrong, it was pointing at the wrong work.
+
 What survives from the earlier framing: no Step may be discharged by writing
 around a defect - the product must deliver what it claims, with one canonical
 definition per concept. And the mock-flag Step keeps its gating relationship
@@ -125,7 +136,7 @@ Restore the missing artifact and remove the silent success that concealed it; ei
 - [x] `W01.P02.S03` - F16 - make the document editor submit its authored output as an engine proposal so the review lane has something to apply; `src/vaultspec_a2a/authoring/submitter.py`.
 - [ ] `W01.P02.S04` - F16 safety half - REOPENED. The check landed in ab572f6e but F67 proves it FALSE-POSITIVES on every completed MCP-bridge run: the doc-editor path never populates the proposal and changeset id fields because the tracker exposing them has zero production callers, so the check built to catch the silent-success gap on that lane now fires on that lane's success case. Its companion negative test seeds those ids directly, a state no real doc-editor execution reaches. Do NOT narrow the predicate to where the write path is wired - that silently restores the original blind spot on the lane the incident was about; `src/vaultspec_a2a/control/projection.py`.
 - [ ] `W01.P02.S05` - F21 - gate authored document content on structural validity before submission so the review lane never receives a document with duplicated sections; `src/vaultspec_a2a/authoring/submitter.py`.
-- [ ] `W01.P02.S06` - F29 PARTIALLY RETRACTED - the half claiming no route here serves the document body falls with F57, since the dashboard reads proposal detail direct from the engine. What SURVIVES is an engine content gap: the proposal fetch returned an empty review-documents array and the diff and preview routes 404. VERIFY THAT AGAINST THE DASHBOARD'S LIVE CLIENT before acting - it may be a dev-config artifact - and verify through the CONSUMER, not the declaration; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [ ] `W01.P02.S06` - F29 RESOLVED INTO F70 and closed as a finding here - its surviving half is confirmed with a root cause. The half claiming no route on this side serves the document body fell with F57. The half about an empty review-documents array is real, structural, and engine-side, so the work moved to the F70 Step. Nothing remains for this Step to do on this side of the edge; `src/vaultspec_a2a/api/routes/gateway.py`.
 
 ### Phase `W01.P11` - restore the delivery path
 
@@ -238,6 +249,7 @@ Each Step changes what a served field means and requires agreement with the cons
 - [ ] `W05.P10.S11` - F10 BREAKING not additive - declare the discriminator on the run-start response union, which requires adding a stage const to RunStartResponse since the other three members already carry one and it alone does not, so it touches a payload the dashboard parses. Cheap once sequenced - one const field plus a discriminator block, with three members already establishing the pattern; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S49` - F41 cross-repo and causally upstream of W01.P11 - serve the engine's existing route-fixture table as a machine-readable description at a stable path and stop returning application HTML from the schema path, preserving the per-route named-refusal list which is the valuable part. This is unserved work rather than missing work, and it is the demonstrated cause of F30; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S57` - F62 BREAKING and it BLOCKS THE CAPABILITY RE-KEY - a deliberately-failing certification fixture declares real document-authoring roles and is served as an ordinary preset because the mock predicate is a name prefix. Re-keying capabilities off roles would make it advertise three document kinds it is built to fail. The declared classification and the re-key MUST land together or the remedy manufactures the defect it removes; `src/vaultspec_a2a/team/team_config.py`.
+- [ ] `W05.P10.S58` - F70 CRITICAL cross-repo and engine-side - a reviewer cannot see the body of ANY document this service proposes, because every create operation supplies a phantom preimage that is never persisted, so the review projection is unconditionally empty and the interface renders a checkmark rather than a failure. 100 percent of this service's proposals are creates, so 100 percent hit it. Two remedies, the second close to free: persist a real empty-base preimage, or synthesise the review document from the materialised target snapshot which is already read at the same line for the replace-body case; `src/vaultspec_a2a/authoring/submitter.py`.
 
 ## Parallelization
 

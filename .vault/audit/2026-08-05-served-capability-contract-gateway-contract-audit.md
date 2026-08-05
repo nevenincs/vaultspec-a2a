@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:5f22b7670f9e54f60003082351ced8941806193554f011f368ab86af716650b0'
+body_hash: 'sha256:f09b7cc28d9b3e2b03d7613007e91f29da2946acf29143abfdc1ba28350e95a4'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,7 +54,17 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F69**. F40, F64 and F66 are RESERVED -
+place. The current highest identifier is **F70**.
+
+**A NUMBERING COLLISION WAS CORRECTED, recorded because two numbers moved after
+being committed.** The routing lead issued the identifier F67 twice, and this
+document had briefly recorded the lockstep-label finding as F69 and the
+arity-mismatch finding as F68 - the reverse of the central registry. Both were
+SWAPPED to match the registry: F68 is the lockstep label, F69 is the arity
+mismatch. This document's own rule is that committed identifiers do not move,
+and the exception is deliberate: a central allocator serving several agents
+outranks one document's internal consistency, because divergent numbering
+between agents breaks every citation rather than one. F40, F64 and F66 are RESERVED -
 allocated with write-ups not yet received - and are held rather than reused. F40 alone remains RESERVED -
 allocated with its write-up not yet received - and is held rather than reused.
 F57 is RETRACTED and F29 is PARTIALLY retracted; both keep their numbers. F40 is RESERVED - assigned to an
@@ -936,8 +946,12 @@ SO THE GATE MAY STILL BE CEREMONIAL, for a different reason than this entry
 gave: not because nobody can call the route, but because the route returned
 nothing to show. NOT VERIFIED against the dashboard's live client - it is
 possible the empty response was a development-configuration artifact rather than
-a content gap. That verification is owed before either half is closed, and it
-should be done the way F57's was: through the CONSUMER, not the declaration.
+a content gap. THAT VERIFICATION IS NOW DONE, through the consumer exactly as required, and
+THIS HALF IS CONFIRMED AND CLOSES INTO F70. It is not a development-configuration
+artifact: the engine builds a review entry only when a preimage lookup succeeds,
+and every create operation supplies a phantom preimage that is never persisted,
+so the lookup misses unconditionally. The gate IS ceremonial, for the reason
+this entry guessed at and could not then prove.
 
 ### F30-a2a-approval-never-advances-the-engine-decision | high | approving through a2a is a graph resume signal only, so a produced document has no path to disk
 
@@ -1491,12 +1505,21 @@ the dashboard is served by - or shares an origin with - THE ENGINE, not this
 service. This service is the run-orchestration edge; the engine is its own
 authoring backend with its own independent frontend client.
 
-CONSEQUENCE OF THE RETRACTION. The delivery path for a HUMAN REVIEWER has been
-complete since before this campaign began. What the approval-forwarding work
+CONSEQUENCE OF THE RETRACTION - AND IT WAS DRAWN TOO BROADLY, corrected here.
+The DECIDE-AND-APPLY path for a human reviewer has been complete since before
+this campaign began. What the approval-forwarding work
 added is a SECOND AND LEGITIMATE consumer of the same two engine verbs - a
 programmatic path for this service with no human at a browser, which had no
 dashboard equivalent and was genuinely missing. That work is not invalidated by
 this retraction; only the reachability claim around it was wrong.
+
+THE INSPECT PATH WAS NEVER FUNCTIONAL FOR THIS SERVICE'S DOCUMENTS, which F70
+establishes with a root cause. So the retraction stands - the routing claim was
+genuinely wrong - but the conclusion drawn from it, that a human at the consumer
+is served, was HALF RIGHT ONLY. The human can approve and cannot see. Correcting
+the conclusion where the claim lives, rather than filing it only under F70,
+because this is the entry a reader reaches when asking whether the reviewer path
+works.
 
 It also vindicates a design note made before the topology was known: an
 a2a-side document-body proxy would have been "a second declaration that can
@@ -1597,6 +1620,11 @@ THE CAVEAT AS ORIGINALLY WRITTEN IS ITSELF RETRACTED. This entry first said
 delivery worked for callers inside this repository and for nobody else, citing
 F57. F57 is retracted: the dashboard reaches the engine's review and apply verbs
 directly, so the HUMAN delivery path was complete before this campaign began.
+
+FURTHER CORRECTED BY F70: the human path is complete for DECIDING and APPLYING,
+not for INSPECTING. A reviewer approving one of this service's documents sees a
+checkmark, not the body. So "the human delivery path was complete" is true only
+of the half that acts, never of the half that judges.
 
 What the proof actually demonstrates, stated correctly: a SECOND consumer of
 those same engine verbs now works - a programmatic path for this service with no
@@ -1779,39 +1807,6 @@ the instrument used to check it. A rule scoped to production does not bind the
 tooling that tests production, and nothing noticed until the tooling failed
 under load.
 
-### F69-lockstep-label-was-wrong-for-a-whole-wave | high | six Steps were parked behind a coordination requirement nobody had tested
-
-A FINDING ABOUT THE PLAN, NOT THE CODE, and recorded because the plan is what
-anyone picking this up reads as the state of the world.
-
-An entire wave was labelled cross-repository lockstep on the reasoning that its
-Steps change what a served field MEANS under a frozen contract. An impact map
-against the CONSUMING REPOSITORY'S OWN SOURCE found ZERO OF SIX ACTUALLY
-BREAKING. The fields are dead, decoded-but-never-read, or structurally
-unreachable - in one case because the consumer deleted its client for that route
-and the pass-through now refuses the verb.
-
-CONSEQUENCE: six Steps sat behind a blocker that did not exist, and the test
-took one agent one pass. CLASSIFICATION: genuine defect in the plan.
-
-THE GENERAL SHAPE IS THE VALUE: A BLOCKER ASSERTED RATHER THAN VERIFIED IS
-INDISTINGUISHABLE FROM A REAL ONE UNTIL SOMEONE CHECKS. It is the same shape as
-a stale gate found earlier in this feature's plan - a Step still naming a
-dependency whose question had been resolved - but at WAVE scale rather than Step
-scale, and costing six Steps of parked work rather than one reader's confusion.
-
-It also belongs to the pattern this document records elsewhere: an assertion
-that nothing mechanically checks. A coordination requirement is a claim about
-another system, and nothing in this repository can falsify it - so it persists
-until someone reads the other side. That makes it the cross-repository twin of
-the reachability problem in F67, where a producer with no consumer is invisible
-because nothing fails.
-
-REMEDY: applied to the plan. The wave is reclassified unilateral, its Description
-corrected rather than softened, and the one genuine internal ordering constraint
-- the mock-flag Step gating with the capability re-key - is preserved and
-labelled as internal rather than cross-repository.
-
 ### F66-reserved | unrated | RESERVED - allocated, write-up not yet received
 
 Held under the standing rule in Scope, for the run projection failing to see a
@@ -1883,7 +1878,40 @@ advances or the size mandate no gate enforces, there is no rule to remember here
 stricter rule, but a REACHABILITY CHECK, because a producer with no consumer is
 mechanically detectable in a way a forgotten obligation is not.
 
-### F68-plural-versus-singular-unavailable-reason | low | the two sides declare the same field with different arity, and neither reads it
+### F68-lockstep-label-was-never-verified | high | six Steps were parked behind a coordination requirement nobody had tested
+
+A FINDING ABOUT THE PLAN, NOT THE CODE, and recorded because the plan is what
+anyone picking this up reads as the state of the world.
+
+An entire wave was labelled cross-repository lockstep on the reasoning that its
+Steps change what a served field MEANS under a frozen contract. An impact map
+against the CONSUMING REPOSITORY'S OWN SOURCE found ZERO OF SIX ACTUALLY
+BREAKING. The fields are dead, decoded-but-never-read, or structurally
+unreachable - in one case because the consumer deleted its client for that route
+and the pass-through now refuses the verb.
+
+CONSEQUENCE: six Steps sat behind a blocker that did not exist, and the test
+took one agent one pass. CLASSIFICATION: genuine defect in the plan.
+
+THE GENERAL SHAPE IS THE VALUE: A BLOCKER ASSERTED RATHER THAN VERIFIED IS
+INDISTINGUISHABLE FROM A REAL ONE UNTIL SOMEONE CHECKS. It is the same shape as
+a stale gate found earlier in this feature's plan - a Step still naming a
+dependency whose question had been resolved - but at WAVE scale rather than Step
+scale, and costing six Steps of parked work rather than one reader's confusion.
+
+It also belongs to the pattern this document records elsewhere: an assertion
+that nothing mechanically checks. A coordination requirement is a claim about
+another system, and nothing in this repository can falsify it - so it persists
+until someone reads the other side. That makes it the cross-repository twin of
+the reachability problem in F67, where a producer with no consumer is invisible
+because nothing fails.
+
+REMEDY: applied to the plan. The wave is reclassified unilateral, its Description
+corrected rather than softened, and the one genuine internal ordering constraint
+- the mock-flag Step gating with the capability re-key - is preserved and
+labelled as internal rather than cross-repository.
+
+### F69-plural-versus-singular-unavailable-reason | low | the two sides declare the same field with different arity, and neither reads it
 
 This service serves a PLURAL unavailable-reasons list where the consuming
 repository's interface declares a SINGULAR unavailable-reason. Nobody has hit
@@ -1895,6 +1923,79 @@ frozen contract is a measure of HOW MUCH OF THIS CONTRACT IS LOAD-BEARING - and
 the answer here is that this part carries nothing at all. Worth recording
 alongside F67's dead producer and F52's absent producer: three different ways a
 contract element can exist without participating.
+
+### F70-review-gate-is-structurally-ceremonial | critical | a reviewer cannot see the body of ANY document this service proposes, and the interface shows a checkmark
+
+NOT A DEVELOPMENT-INSTANCE ARTIFACT. A structural consequence of the engine's
+own design, confirmed from its source, reproducing on every engine, every time,
+BY CONSTRUCTION.
+
+WHAT RENDERS. The review station renders a diff panel whose own header comment
+states the stakes exactly: it renders the base-versus-proposed change so a
+reviewer sees what they are approving, because A REVIEWER WHO CANNOT SEE THE
+CHANGE IS A RUBBER STAMP. It reads the review-documents array from the proposal
+detail route. WHEN THAT ARRAY IS EMPTY THE PANEL RENDERS A CHECKMARK - the same
+benign "settled, nothing to review" visual used for a genuine no-op. Not an
+error. Not a warning.
+
+The sibling snapshot route DOES carry the full body text, and its hook has ZERO
+CONSUMERS anywhere in the application. There is no fallback path.
+
+DRIVEN LIVE, FOUR TIMES, against real pending proposals by read-only reads with
+nothing decided. Every one carries a real non-empty document, confirmed through
+the snapshot route. Every one's review-detail projection is EMPTY.
+
+ROOT CAUSE, FROM THE ENGINE SOURCE. The review-document projection builds a diff
+entry only when a preimage lookup finds a row, and a miss is SILENTLY SKIPPED -
+returning nothing, raising no error. Meanwhile the create-document
+materialisation constructs a PHANTOM preimage, with its own doc comment stating
+that the base it supplies is explicitly phantom: in-memory only, NEVER
+PERSISTED, a diff from nothing. It is used for in-memory validation and then
+discarded. SO THE LATER LOOKUP ALWAYS MISSES, UNCONDITIONALLY, FOR EVERY CREATE.
+
+WHY IT HITS THIS SERVICE AND ONLY THIS SERVICE. Our submitter and session issue
+ONLY whole-document create operations - never a replace-body, which is the ONLY
+operation kind whose preimage is real and persisted. The consuming repository's
+own human-editor path edits existing documents and hits the real-preimage path.
+So THIS SERVICE'S ENTIRE AUTHORING OUTPUT IS INVISIBLE TO REVIEW, and the
+consumer's own output is not.
+
+THE SCOPE LINE, quoted rather than paraphrased because it is what makes the
+severity non-negotiable: this service's entire document-authoring surface -
+research, decision, plan - is 100 PERCENT CREATE OPERATIONS, SO 100 PERCENT OF
+ITS PROPOSALS HIT THIS PATH.
+
+WHAT THIS DOES TO THIS CAMPAIGN'S HEADLINE. We established that the apply path
+works, that a document reached disk, and concluded a human at the consumer is
+served. THAT CONCLUSION WAS HALF RIGHT. The human can APPROVE. The human CANNOT
+SEE WHAT THEY ARE APPROVING, and the interface shows a checkmark rather than a
+failure, so NOTHING SIGNALS THAT ANYTHING IS WRONG. The decide-and-apply half was
+complete; the INSPECT half was never functional for documents this service
+authored.
+
+THIS RESOLVES THE SURVIVING HALF OF F29, which was recorded as unverified: the
+empty review-documents array with diff and preview unavailable. It is now
+verified, with a root cause, and that open half CLOSES INTO THIS FINDING.
+
+CLASSIFICATION: genuine defect, critical, engine-side and therefore
+cross-repository. EXPLICITLY UNRELATED to the delivery work and to the field-shape
+questions - the delivery work proves DELIVERY, not VISIBILITY, and the natural
+misreading is that this reopens it. It does not.
+
+REMEDY, two options, and the second is close to free. Persist a real empty-base
+preimage for create operations so the lookup succeeds and the diff renders
+honestly as nothing-to-full-text, WHICH IS THE SEMANTICALLY CORRECT DIFF FOR A
+CREATE ANYWAY. Or have the detail projection synthesise the review document
+directly from the materialised target snapshot for creates, without requiring a
+persisted preimage - SINCE THAT DATA IS ALREADY READ AT THE SAME LINE for the
+replace-body case.
+
+FOURTH INSTANCE OF EVERY-PART-BUILT-NO-PRODUCER-INJECTED, and THE FIRST ON THE
+CONSUMER'S SIDE. The snapshot hook is exported, correct, and carries exactly the
+data a reviewer needs, with zero consumers. That the pattern now has a confirmed
+instance in a SECOND REPOSITORY suggests it is architectural rather than local
+to this one, and it strengthens the case that the mitigation must be a
+mechanical reachability check rather than a rule anyone remembers.
 
 ### F47-and-beyond | low | reserved marker for continuous appending
 

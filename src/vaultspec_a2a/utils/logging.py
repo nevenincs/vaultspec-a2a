@@ -42,6 +42,7 @@ __all__ = [
     "ARTIFACT_DECLARATIONS",
     "SERVICE_LOG_FILE_DECLARATION",
     "JSONFormatter",
+    "LivenessPollFilter",
     "OTelCorrelationFilter",
     "ProcessKind",
     "configure_logging",
@@ -126,6 +127,50 @@ _STANDARD_LOG_ATTRS: frozenset[str] = frozenset(
         "taskName",
     }
 )
+
+
+#: Access-log paths whose SUCCESSFUL polls carry no information.
+#:
+#: Supervisors probe liveness on a fixed interval forever, so a 200 on one of
+#: these says only that polling is still happening. A non-2xx on the same path is
+#: kept: that is the one case where the probe is telling you something.
+_LIVENESS_POLL_PATHS: frozenset[str] = frozenset({"/health", "/internal/health"})
+
+
+class LivenessPollFilter(logging.Filter):
+    """Drop successful liveness-probe access lines from the service lanes.
+
+    Measured cost of not doing this: a five-minute run making thirty tool calls
+    left four lines in the gateway log, while the health poll alone contributed a
+    line every five seconds. Real events were a rounding error against the probe
+    traffic, which is how a genuine boot failure and a tool-permission denial both
+    went unnoticed in a file that was being written to constantly.
+
+    Deliberately narrow. It matches uvicorn's access logger only, keeps every
+    non-2xx, and never touches the application loggers - a filter that silences
+    real events to reduce volume trades one blind spot for another.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Return ``False`` only for a 2xx access line on a liveness path."""
+        if record.name != "uvicorn.access":
+            return True
+        args = record.args
+        # uvicorn.access formats as (client, method, path, http_version, status).
+        if not isinstance(args, tuple) or len(args) < 5:
+            return True
+        path, status = args[2], args[4]
+        if not isinstance(path, str):
+            return True
+        if path.split("?", 1)[0] not in _LIVENESS_POLL_PATHS:
+            return True
+        if not isinstance(status, int | str):
+            # An unrecognised status is not a proven-boring poll; keep it.
+            return True
+        try:
+            return not 200 <= int(status) < 300
+        except ValueError:
+            return True
 
 
 class OTelCorrelationFilter(logging.Filter):
@@ -308,6 +353,42 @@ def _assert_no_stdout_handler(root: logging.Logger) -> None:
             )
 
 
+#: Exporter loggers demoted from ERROR to WARNING on the service lanes.
+#:
+#: An unreachable telemetry collector is a DEPLOYMENT condition, not a service
+#: error: the gateway is serving correctly and the export simply has nowhere to
+#: go. Reported at ERROR it drowned the level entirely - every one of the 51
+#: ERROR records in a sampled gateway log was an export failure to an absent
+#: collector, retried every ten seconds forever, and a real boot failure in the
+#: same file had produced no ERROR line at all. Demoting these is what makes
+#: ERROR mean "something is wrong with this service" again.
+#:
+#: The condition is still reported, once per retry, at WARNING. Silencing it
+#: outright would hide a genuinely misconfigured collector.
+_EXPORT_FAILURE_LOGGERS: tuple[str, ...] = (
+    "opentelemetry.exporter.otlp.proto.grpc.exporter",
+    "opentelemetry.exporter.otlp.proto.http.exporter",
+    "opentelemetry.sdk.trace.export",
+    "opentelemetry.sdk.metrics.export",
+)
+
+
+class _DemoteToWarning(logging.Filter):
+    """Rewrite ERROR records from a named logger down to WARNING in place."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.ERROR:
+            record.levelno = logging.WARNING
+            record.levelname = "WARNING"
+        return True
+
+
+def _demote_export_failures() -> None:
+    """Stop an absent telemetry collector from monopolising the ERROR level."""
+    for name in _EXPORT_FAILURE_LOGGERS:
+        logging.getLogger(name).addFilter(_DemoteToWarning())
+
+
 def _configure_service(settings: _LoggingSettings, service_name: str) -> None:
     level = _numeric_level(settings.log_level)
     root = _reset_root()
@@ -337,8 +418,10 @@ def _configure_service(settings: _LoggingSettings, service_name: str) -> None:
         )
 
     for handler in handlers:
+        handler.addFilter(LivenessPollFilter())
         root.addHandler(handler)
     _reattach_uvicorn(handlers, level)
+    _demote_export_failures()
 
 
 def _configure_cli(settings: _LoggingSettings) -> None:

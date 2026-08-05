@@ -16,8 +16,10 @@ from ...control.config import Settings
 from ..enums import Environment, LogLevel
 from ..logging import (
     JSONFormatter,
+    LivenessPollFilter,
     OTelCorrelationFilter,
     _assert_no_stdout_handler,
+    _DemoteToWarning,
     configure_logging,
     reconfigure_console_utf8,
 )
@@ -308,3 +310,107 @@ def test_json_formatter_omits_exception_for_an_empty_exc_info_tuple() -> None:
         exc_info=(None, None, None),
     )
     assert "exception" not in json.loads(JSONFormatter().format(record))
+
+
+def _access_record(path: str, status: int, *, name: str = "uvicorn.access"):
+    """Build a record shaped exactly as uvicorn's access logger emits one.
+
+    uvicorn formats ``'%s - "%s %s HTTP/%s" %d'`` against
+    ``(client, method, path_with_query, http_version, status)``; the filter reads
+    positions 2 and 4, so the tuple must match that contract rather than a
+    convenient stand-in.
+    """
+    return logging.LogRecord(
+        name=name,
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("127.0.0.1:1", "GET", path, "1.1", status),
+        exc_info=None,
+    )
+
+
+def test_liveness_poll_filter_drops_only_successful_probe_lines() -> None:
+    """The probe is dropped when it is boring and kept when it is not."""
+    f = LivenessPollFilter()
+
+    # Boring: a supervisor confirming the process is still alive.
+    assert not f.filter(_access_record("/health", 200))
+    assert not f.filter(_access_record("/internal/health", 204))
+    assert not f.filter(_access_record("/health?probe=1", 200))
+
+    # Not boring: the probe is now telling you something.
+    assert f.filter(_access_record("/health", 503))
+    assert f.filter(_access_record("/internal/health", 401))
+
+    # Not a probe at all - real traffic must never be silenced to reduce volume.
+    assert f.filter(_access_record("/v1/runs", 200))
+    assert f.filter(_access_record("/v1/service", 200))
+
+
+def test_liveness_poll_filter_leaves_application_loggers_alone() -> None:
+    """Only uvicorn's access lane is filtered, whatever a record looks like."""
+    f = LivenessPollFilter()
+    assert f.filter(_access_record("/health", 200, name="vaultspec_a2a.api"))
+    assert f.filter(
+        logging.LogRecord(
+            name="uvicorn.error",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="/health",
+            args=(),
+            exc_info=None,
+        )
+    )
+
+
+def test_liveness_poll_filter_keeps_records_it_cannot_parse() -> None:
+    """An unrecognised shape is kept: silence must never be the default."""
+    f = LivenessPollFilter()
+    for args in ((), ("only", "three", "args"), ("c", "GET", "/health", "1.1", "xx")):
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="%s",
+            args=args,
+            exc_info=None,
+        )
+        assert f.filter(record)
+
+
+def test_export_failures_are_demoted_so_error_keeps_its_meaning() -> None:
+    """An absent collector is a deployment condition, reported below ERROR.
+
+    Guards the level, not the message: the record still travels, so a genuinely
+    misconfigured collector remains visible.
+    """
+    f = _DemoteToWarning()
+    record = logging.LogRecord(
+        name="opentelemetry.exporter.otlp.proto.grpc.exporter",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=1,
+        msg="Failed to export traces to localhost:4317",
+        args=(),
+        exc_info=None,
+    )
+    assert f.filter(record)
+    assert record.levelno == logging.WARNING
+    assert record.levelname == "WARNING"
+
+    # Anything already below ERROR is untouched.
+    warned = logging.LogRecord(
+        name="opentelemetry.exporter.otlp.proto.grpc.exporter",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="exporting",
+        args=(),
+        exc_info=None,
+    )
+    assert f.filter(warned)
+    assert warned.levelno == logging.INFO

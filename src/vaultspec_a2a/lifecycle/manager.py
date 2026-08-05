@@ -724,10 +724,39 @@ def serve_up(
             # The child never bound (a racer took the port, or it crashed): fell it
             # and try the next band port. Keep the reservation held so reserve_port
             # skips this port on the next pass.
+            #
+            # Logged, not just retried. A boot that fails on every band port used to
+            # produce a structured log with no error and no warning in it: the
+            # per-attempt failures were silent and the terminal one reached only the
+            # caller's stderr as a traceback, so the file an operator actually reads
+            # recorded a clean boot sequence for a gateway that never came up.
+            logger.warning(
+                "band port did not yield a live listener; trying the next",
+                extra={
+                    "role": role,
+                    "proc_name": name,
+                    "port": reservation.port,
+                    "child_pid": process.pid,
+                    "ready_timeout_s": ready_timeout,
+                },
+            )
             tree_kill(process.pid)
-        raise LifecycleError(
+        detail = (
             f"could not bring up {role}-{name}: no band port yielded a live listener"
         )
+        # Logged BEFORE the raise, because the raise is what the caller may turn into
+        # a bare traceback on stderr - and stderr is not the lane an operator greps.
+        logger.error(
+            detail,
+            extra={
+                "role": role,
+                "proc_name": name,
+                "band_start": role_cfg.band.start,
+                "band_end": role_cfg.band.end,
+                "attempts": max_attempts,
+            },
+        )
+        raise LifecycleError(detail)
     finally:
         for reservation in held:
             release_reservation(reservation)

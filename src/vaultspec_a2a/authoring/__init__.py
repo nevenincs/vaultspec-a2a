@@ -47,9 +47,14 @@ from .lifecycle import approval_decision_verdict as approval_decision_verdict
 from .lifecycle import changeset_status_verdict as changeset_status_verdict
 from .lifecycle import parse_sse_frame as parse_sse_frame
 from .lifecycle import verdict_from_event as verdict_from_event
+from .session import REVIEW_DECISION_APPROVE as REVIEW_DECISION_APPROVE
+from .session import REVIEW_DECISION_EDIT as REVIEW_DECISION_EDIT
+from .session import REVIEW_DECISION_REJECT as REVIEW_DECISION_REJECT
 from .session import AuthoringSession as AuthoringSession
 from .session import close_authoring_session as close_authoring_session
+from .session import decide_review as decide_review
 from .session import mint_actor_token as mint_actor_token
+from .session import request_apply as request_apply
 
 # The submitter pulls the graph -> langchain -> transformers stack (~6s of import
 # time). The per-run stdio authoring bridge (``protocols/mcp/authoring_stdio``)
@@ -117,6 +122,9 @@ __all__ = [
     "BEARER_HEADER",
     "CATALOG_SCHEMA_VERSION",
     "MAX_ID_BYTES",
+    "REVIEW_DECISION_APPROVE",
+    "REVIEW_DECISION_EDIT",
+    "REVIEW_DECISION_REJECT",
     "SERVICE_JSON_ENV",
     "AgentTool",
     "AuthoringClient",
@@ -145,6 +153,7 @@ __all__ = [
     "approval_decision_verdict",
     "changeset_status_verdict",
     "close_authoring_session",
+    "decide_review",
     "derive_idempotency_key",
     "execute_agent_tool",
     "fetch_catalog",
@@ -152,6 +161,7 @@ __all__ = [
     "mint_actor_token",
     "parse_sse_frame",
     "render_feedback_batch",
+    "request_apply",
     "resolve_engine",
     "resolve_engine_with_retry",
     "validate_id",

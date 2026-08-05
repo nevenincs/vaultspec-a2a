@@ -24,9 +24,34 @@ if TYPE_CHECKING:
     from ._envelope import Denial
     from .client import AuthoringClient
 
-__all__ = ["AuthoringSession", "close_authoring_session", "mint_actor_token"]
+__all__ = [
+    "AuthoringSession",
+    "close_authoring_session",
+    "decide_review",
+    "mint_actor_token",
+    "request_apply",
+]
 
 _ACTOR_TOKENS_PATH = "/v1/actor-tokens"
+
+# Review-decision wire values (engine `ApprovalDecision`, snake_case) and the
+# `CommandKind` each maps to for the `ResolvedCommand` authorization extractor
+# (`POST /v1/reviews/{approval_id}/decisions` deserializes a
+# `CommandEnvelope<ReviewDecisionRequest>` and runs `run_authorization` on the
+# envelope's own `command`, engine `http/mod.rs`). There is NO
+# `submit_review_decision` `CommandKind` on the wire — that is the handler
+# function name, not a command a caller may post. `edit` (RequestChanges) is the
+# reject-with-notes device: it returns the changeset to Draft and stales the
+# approval rather than terminating it.
+REVIEW_DECISION_APPROVE = "approve"
+REVIEW_DECISION_REJECT = "reject"
+REVIEW_DECISION_EDIT = "edit"
+
+_REVIEW_DECISION_COMMAND: dict[str, str] = {
+    REVIEW_DECISION_APPROVE: "approve",
+    REVIEW_DECISION_REJECT: "reject",
+    REVIEW_DECISION_EDIT: "edit_proposal",
+}
 
 
 async def close_authoring_session(
@@ -76,6 +101,110 @@ async def mint_actor_token(
     if lifetime_ms is not None:
         payload["lifetime_ms"] = lifetime_ms
     return await client.post_bare(_ACTOR_TOKENS_PATH, payload)
+
+
+async def decide_review(
+    client: AuthoringClient,
+    *,
+    approval_id: str,
+    proposal_id: str,
+    decision: str,
+    reviewed_revision: str,
+    idempotency_key: str,
+    comment: str | None = None,
+    actor_token: str | None = None,
+) -> AuthoringResponse | Denial:
+    """Record a reviewer's decision on a queued approval (``submit_review_decision``).
+
+    ``POST /authoring/v1/reviews/{approval_id}/decisions`` is the human-review
+    half of the delivery path this repository's own respond route explicitly
+    refuses to decide on a document proposal's behalf (the amended
+    a2a-orchestration-edge contract: no second approval authority in A2A) — the
+    engine review surface is the sole approval authority, and this is the typed
+    client call onto it.
+
+    ``decision`` is the engine ``ApprovalDecision`` wire value (``approve`` /
+    ``reject`` / ``edit``); it is mapped onto the ``CommandKind`` the envelope
+    must carry for the reviewer's own authorization check to run against the
+    right command (see :data:`REVIEW_DECISION_APPROVE` and siblings). Passing
+    an unrecognised value is refused client-side with ``ValueError`` before any
+    round trip.
+
+    ``reviewed_revision`` is the edge contract's REVISION FENCE: the caller
+    attests the exact ``changeset_revision`` the approval was opened against
+    (read from the same review-queue item ``approval_id``/``proposal_id`` came
+    from). A stale attestation is refused by the engine as a typed 409
+    (``authoring_stale_review``) rather than silently deciding a superseded
+    revision — this function does not swallow that; it propagates as
+    :class:`~vaultspec_a2a.authoring._errors.AuthoringTransportError`.
+
+    The caller supplies ``idempotency_key`` explicitly (never derived here): per
+    the submitter's own idempotency doctrine, a retry of the SAME decision must
+    reproduce the SAME key so the engine dedupes rather than double-deciding —
+    derive it from durable material (e.g. run id + approval id + command), never
+    fresh per call.
+    """
+    command = _REVIEW_DECISION_COMMAND.get(decision)
+    if command is None:
+        raise ValueError(
+            f"unknown review decision {decision!r}; expected one of "
+            f"{sorted(_REVIEW_DECISION_COMMAND)}"
+        )
+    validate_id(approval_id, field="approval_id")
+    validate_id(proposal_id, field="proposal_id")
+    validate_id(reviewed_revision, field="reviewed_revision")
+    payload: dict[str, Any] = {
+        "proposal_id": proposal_id,
+        "approval_id": approval_id,
+        "decision": decision,
+        "reviewed_revision": reviewed_revision,
+    }
+    if comment is not None:
+        payload["comment"] = comment
+    return await client.post_command(
+        f"/v1/reviews/{quote(approval_id, safe='')}/decisions",
+        command=command,
+        payload=payload,
+        idempotency_key=idempotency_key,
+        actor_token=actor_token,
+    )
+
+
+async def request_apply(
+    client: AuthoringClient,
+    *,
+    changeset_id: str,
+    approval_id: str,
+    idempotency_key: str,
+    actor_token: str | None = None,
+) -> AuthoringResponse | Denial:
+    """Request the engine materialize an approved changeset (``request_apply``).
+
+    ``POST /authoring/v1/apply-requests`` is the delivery half of the
+    approve -> apply pair: a decision alone never writes a file, and calling
+    this before ``approval_id`` carries an ``approve`` decision is refused by
+    the engine as a :class:`Denial` (an in-domain business refusal), never
+    silently ignored. A successful apply's receipt carries
+    ``data.child_outcome == "applied"`` and the materialized
+    ``data.receipt.child.{document_path,result_stem}`` — this function returns
+    the engine's raw response; the caller reads those fields to learn what
+    landed on disk.
+
+    ``idempotency_key`` is supplied by the caller for the same reason
+    :func:`decide_review` requires it explicitly: a retry that generates a
+    FRESH key applies the same changeset a second time, which is the single
+    worst outcome available at this seam. Derive it from durable material (run
+    id + approval id + command) and reuse it byte-for-byte across a replay.
+    """
+    validate_id(changeset_id, field="changeset_id")
+    validate_id(approval_id, field="approval_id")
+    return await client.post_command(
+        "/v1/apply-requests",
+        command="request_apply",
+        payload={"changeset_id": changeset_id, "approval_id": approval_id},
+        idempotency_key=idempotency_key,
+        actor_token=actor_token,
+    )
 
 
 class AuthoringSession:

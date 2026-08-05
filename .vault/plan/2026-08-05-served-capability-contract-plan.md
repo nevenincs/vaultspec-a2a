@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:b21fcde238581f95ef5bcda3009ac14c25e5c38206cd4bbf01952dd730e1f6fd'
+body_hash: 'sha256:9a96965070124a503feef3521a7187d557b73296bb3fa4b1ef1b65d37fd889c4'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -91,7 +91,7 @@ The product's primary function reports success while delivering nothing (audit F
 One diagnostic that must precede any provider-policy change, and one watchdog fix that stands on its own evidence. The earlier framing of this Phase rested on a hypothesis the audit has since refuted.
 
 - [ ] `W01.P01.S01` - F24 root cause of F16 - dump the generated codex config home for a live run and confirm whether the authoring server block carries propose_changeset in its enabled tool set, which is the cheap first diagnostic before any policy change; `src/vaultspec_a2a/providers/_codex_config_home.py`.
-- [ ] `W01.P01.S02` - F25 - fix the ingest-stall watchdog to count the channel the worker actually posts to, and never terminate a run whose agent is mid-turn, since it killed a run that was posting 16 to 80 event batches per minute; `src/vaultspec_a2a/worker/graph_lifecycle.py`.
+- [x] `W01.P01.S02` - F25 DONE in commit 088bd603 - the ingest-stall bound is now derived from the compiled graph rather than a flat global, so a run's own declared step timeout is honoured and presets without one keep the previous floor; `src/vaultspec_a2a/streaming/ingest.py`.
 
 ### Phase `W01.P02` - close the false green
 
@@ -127,12 +127,11 @@ Work already dispatched to other agents, represented here for tracking only. Do 
 
 Mechanical contract corrections with no owner yet, each independent of the others.
 
-- [ ] `W02.P04.S11` - F10 - add a discriminator to the four-way run-start response union, or split it by route, and document the reservation lifecycle; `src/vaultspec_a2a/api/schemas/gateway.py`.
-- [ ] `W02.P04.S12` - F11 - rename the five underscore-prefixed snapshot models that leak into the published contract and break code generation; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `W02.P04.S12` - F11 DONE in commit 1022ba08 - the five underscore-prefixed snapshot models were renamed and exported, the parity test updated, and zero underscore-prefixed schemas remain in the published contract, verified against the committed artifact; `src/vaultspec_a2a/api/schemas/snapshots.py`.
 - [ ] `W02.P04.S13` - F13 - serve topology structure on the preset so a frontend can render what a preset will do rather than only its name; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W02.P04.S14` - F15 - route startup failures through the structured logger before exit, populate the process registry log path consistently and reap the stale duplicate port records; `src/vaultspec_a2a/lifecycle`.
 - [ ] `W02.P04.S15` - F15 unowned gap - decide and record whether every error is guaranteed to reach the structured log, which no document in the corpus currently guarantees; `docs/operations.rst`.
-- [ ] `W02.P04.S16` - Document the OpenAPI artifact regeneration command, which exists only inside the test file that enforces it; `docs/development.rst`.
+- [x] `W02.P04.S16` - Document the OpenAPI artifact regeneration command, which exists only inside the test file that enforces it; `docs/development.rst`.
 - [ ] `W02.P04.S37` - F26 - split the engine serve command without POSIX semantics on Windows and propagate the launch error instead of collapsing it into a port-allocation message; `src/vaultspec_a2a/lifecycle/engine_serve.py`.
 - [ ] `W02.P04.S38` - F27 - honour the explicit data seat as the vault root, or refuse a seat that resolves into an enclosing git worktree, since the guard is currently defeated by exactly the case it exists for; `src/vaultspec_a2a/lifecycle/engine_serve.py`.
 - [ ] `W02.P04.S39` - F34 - raise or split the run-start forward budget and warm the provider catalog before forwarding, so a cold catalog stops surfacing as a transport connect error with no run and no log line; `src/vaultspec_a2a/api/routes/gateway.py`.
@@ -203,6 +202,7 @@ Each Step changes what a served field means and requires agreement with the cons
 - [ ] `W05.P10.S44` - F35 BREAKING - wire the acceptance gate to a real signal or remove the term, and make eligible mean the same thing on the preset listing and the run-start response instead of permanently false on one and true on the other; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W05.P10.S45` - F33 BREAKING cross-repo - reconcile the engine's run metadata shape with a2a's model and fail loudly rather than reporting it absent, since workspace provenance is currently dropped silently for proxy-started runs; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S46` - F28 cross-repo - publish an engine schema, declare the conditional requirement of feature_tag in a2a, align workspace_root across the two surfaces and return proxy errors with a non-200 status; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [ ] `W05.P10.S11` - F10 BREAKING not additive - declare the discriminator on the run-start response union, which requires adding a stage const to RunStartResponse since the other three members already carry one and it alone does not, so it touches a payload the dashboard parses. Cheap once sequenced - one const field plus a discriminator block, with three members already establishing the pattern; `src/vaultspec_a2a/api/schemas/gateway.py`.
 
 ## Parallelization
 

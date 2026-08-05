@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:4804df91be5a3633e01dcaccd6b15a17559cbd2fd7f7b9aaf7ea5a849963fb8f'
+body_hash: 'sha256:03d6b99f8d380142a129ef2d7ac5aaf957690897b2bfaa31991bf12f03ec27cc'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,7 +54,7 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F38**.
+place. The current highest identifier is **F39**.
 
 **Renumbering applied to the third tranche, recorded so the source remains
 traceable.** The live-run tranche from the `product-proof` session was authored
@@ -84,6 +84,16 @@ F24, F22's stall premise is superseded by F25, and F8 is retracted as
 non-reproducing. Each correction is marked inside the entry it affects, and the
 original claim is retained beside it. A reader citing any of those three must
 read its correction.
+
+F25 has itself been corrected once, and the sequence is worth stating because it
+is instructive. The entry first claimed the watchdog reported something FALSE
+about the system's own state, on the strength of per-minute event counts. That
+inference was wrong: those counts measure a different channel from the one the
+watchdog observes, and coarse throughput across a window cannot rule out a gap
+inside it. The real defect turned out to be a threshold mismatch rather than a
+false signal - which is worse, not milder. Two successive corrections on one
+entry is a signal about method: a refutation assembled from an adjacent
+measurement is not a refutation.
 
 ## Findings
 
@@ -483,15 +493,23 @@ attached: these fields are not merely undefined, they are actively WRONG at the
 moment they matter most. It shares its defect class with F16's green-on-empty-
 artifact and F17's pending-on-complete.
 
-CORRECTION (third tranche). The premise that this run STALLED is false and is
-superseded by F25. The run was executing normally when it was killed: the worker
-was posting between 16 and 80 event batches per minute continuously, and the
-stream carried 332 author chunks and 14 review chunks in the window the watchdog
-called silent. The health fields being wrong is still the finding here and still
-stands - but they were wrong about a HEALTHY run, which makes this entry an
-instance of the same disease rather than a description of a genuine failure. The
-`failure_reason` prose, which this entry credited as "genuinely useful and
-specific", is itself false; that correction belongs to F25.
+CORRECTION (third tranche, itself revised once). The run was NOT failing on its
+own merits when it was killed: it was executing legitimate long-running work
+that its own preset configuration sanctioned, and an unconditional 90-second
+bound terminated it. See F25 for the mechanism.
+
+The health fields being wrong is still the finding here and still stands - but
+they were wrong about a run that was working, which makes this entry an instance
+of the same disease rather than a description of a genuine failure. A run killed
+by its own infrastructure is exactly the case where a structured health field
+should have said something, and every one of them said `healthy`.
+
+A claim briefly recorded here and now WITHDRAWN: that the `failure_reason` prose
+was itself false. It was not - it accurately reported the watchdog's own signal.
+This entry's original credit to that field as "genuinely useful and specific"
+was closer to right than the retraction that briefly replaced it. What the
+message got wrong is narrower and belongs to F25: it named "the graph" where it
+meant one specific stream.
 
 ### F23-served-vocabulary-typing-is-split | high | the same kind of vocabulary is served as a closed enum in 32 places and as a bare string in 15, and two concepts are served both ways at once
 
@@ -576,21 +594,65 @@ a2a's handler so the denial becomes a real answerable request. The cheap first
 diagnostic is to dump the generated codex config for a live run and confirm the
 authoring server block actually carries the propose tool in its enabled set.
 
-### F25-watchdog-kills-healthy-runs-with-a-false-reason | critical | a run doing eleven minutes of real work was terminated by its own watchdog, which then reported a demonstrably untrue reason
+### F25-watchdog-bound-ignores-the-runs-own-timeouts | critical | an unconditional 90-second bound killed a run whose own configuration sanctioned 1800 seconds of node silence
 
-Source tranche number 24. SUPERSEDES THE STALL PREMISE IN F22. The flagship
-research-to-ADR run was killed at 12:19:13 by the ingest-stall watchdog, serving
-`failure_reason: "Ingest stalled: no event from the graph for over 90s"`. The
-worker's own log refutes it: event-batch posts per minute across the window ran
-68, 80, 59, 54, 16, 66, 26, 73, 21, 64 - never a 90-second gap - and the stream
-capture carries 332 author chunks and 14 review chunks in the same window, with
-an agent subprocess spawned at 12:17:47 still alive at the kill. The model was
-mid-turn. CONSEQUENCE: a multi-phase authoring run cannot complete, so two of
-the flagship preset's three declared capabilities are unreachable, and the
-served reason actively misdirects diagnosis toward a stall that did not happen.
-INFERRED, not isolated: the watchdog counts a different channel than the one the
-worker posts to. CLASSIFICATION: genuine defect. REMEDY: count the channel the
-worker actually posts, and never terminate a run whose agent is mid-turn.
+Source tranche number 24. SUPERSEDES THE STALL PREMISE IN F22. The slug and
+summary of this entry were rewritten once; the identifier is unchanged and the
+correction is described below.
+
+The flagship research-to-ADR run was killed at 12:19:13 by the ingest-stall
+watchdog, serving `failure_reason: "Ingest stalled: no event from the graph for
+over 90s"`, with an agent subprocess spawned at 12:17:47 still alive at the kill.
+The model was mid-turn.
+
+CORRECTION - the reason was NOT false, and this entry originally said it was.
+The event-batch counts and stream-chunk totals cited as refutation measure a
+DIFFERENT channel from the one the watchdog observes: the watchdog wraps each
+`astream_events()` iteration, and a long tool call or an extended reasoning
+stretch produces no stream event at all while per-minute totals across the
+window still look healthy. Coarse throughput across a window cannot rule out a
+sub-90-second gap inside it. The watchdog was reporting its own signal
+accurately. This entry's original "asserts something false about its own state"
+framing is withdrawn; the hedge it carried - that the watchdog counts a
+different channel than the worker posts to, recorded as inferred and not
+isolated - was the part that held.
+
+THE ACTUAL DEFECT is a threshold mismatch, and it is worse than a false message.
+The watchdog's outer bound was a flat global 90 seconds, while the agent chat
+model explicitly sanctions up to 600 seconds of silence as legitimate during a
+long tool call, and the run's own preset declares a step timeout of 1800 seconds
+which is set on the compiled graph object. An unconditional bound hardcoded at
+90 seconds consulted neither number. The system was killing work its own
+configuration declared safe.
+
+The message was still misleading in a narrower way: "no event from the graph"
+reads as "nothing happened in this run", when it means one specific stream
+produced nothing. That half stands.
+
+CONSEQUENCE: any agent-backed document-authoring node doing genuine
+long-running work - which is the flagship chain - was killable mid-turn by its
+own infrastructure. This was the direct blocker on producing decision and plan
+documents. CLASSIFICATION: genuine defect, correctness and observability.
+REMEDY: APPLIED in commit `088bd603`. The effective bound is now derived from
+the compiled graph - the greater of the global floor and the graph's own step
+timeout plus a margin - so it is run-aware from data already in scope rather
+than a raised static default that would be wrong for some other preset. Presets
+with no configured step timeout keep the 90-second floor unchanged. The reason
+text now names the exact signal rather than "the graph".
+
+TWO HONEST GAPS, recorded rather than smoothed over. Per-event timestamps for
+the run in question could not be obtained - the database holds no rows for that
+thread, which belonged to a different worker session - so the diagnosis rests on
+the architectural mismatch between the three timeout values, not on a log replay
+of that run. Confidence is high but this is inference. And the decision corpus
+was searched for a prior deliberate ruling on the 90-second value; none was
+found on point, the only related record being the incident that introduced the
+watchdog, which predates this tension. No ruling was overridden, and the absence
+was checked rather than assumed.
+
+RESIDUAL: the margin added to the step timeout is a module constant,
+deliberately not configurable because no other consumer needs it. If it should
+become a named configuration knob, that is a decision, not a defect.
 
 ### F26-engine-serve-command-breaks-on-windows-paths | medium | the documented launch override is unusable with native paths and the surfaced error names the wrong cause
 
@@ -760,7 +822,31 @@ proof. CLASSIFICATION: documented decision, the served-profile admission rule
 working as designed. No remedy. This is the intended behaviour of the admission
 rule and must not be "fixed".
 
-### F39-and-beyond | low | reserved marker for continuous appending
+### F39-router-level-auth-breaks-the-websocket | medium | mounting the bearer scheme at router level silently broke the worker socket behind a clean-looking contract change
+
+Found and fixed DURING remediation, recorded because it reproduces this
+document's own through-line rather than because it survived. While landing the
+authentication declaration, the bearer scheme was mounted as a router-level
+dependency. Router-level dependencies also apply to WebSocket routes, and the
+bearer resolver resolves only against an HTTP request, so the worker WebSocket
+broke. Four internal WebSocket logging tests failed and the fix was to attach
+the dependency per HTTP route instead.
+
+CONSEQUENCE, had it shipped: a correct-looking, fully declared authentication
+contract over a broken worker connection - the served surface improving while
+the mechanism beneath it stopped working. CLASSIFICATION: genuine defect,
+already fixed; recorded as evidence rather than as open work.
+
+WHY IT EARNS A NUMBER. It was caught by RUNNING THE TESTS rather than by
+reasoning from source, and reasoning from source is what would have shipped it.
+That is the same shape as F16, F17, and F22 - a typed surface that looks right
+over a mechanism that is not - occurring inside the remediation of those very
+findings. It is direct evidence that the pattern is structural to this codebase
+rather than a property of the three runs that first exposed it, which is a
+stronger claim than any single earlier finding could support. Anyone closing a
+contract-shaped Step on source reading alone should read this entry first.
+
+### F40-and-beyond | low | reserved marker for continuous appending
 
 New findings land immediately above this marker, taking the next free identifier
 after the highest already assigned. This entry carries no finding; it exists so

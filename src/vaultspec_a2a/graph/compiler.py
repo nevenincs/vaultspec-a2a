@@ -1,13 +1,16 @@
 """LangGraph orchestration engine for agent teams.
 
 Compiles a ``StateGraph`` from a ``TeamConfig`` and resolved ``AgentConfig``
-map.  Three topology types are supported:
+map.  Four topology types are supported:
 
 - ``star``:          supervisor routes dynamically; workers report back to
                      the supervisor.
 - ``pipeline``:      fixed sequential chain; no supervisor required.
 - ``pipeline_loop``: sequential chain where the loop_node conditionally
                      routes back into the loop or finishes.
+- ``research_adr``:  document phase machine; researchers fan out into a
+                     synthesis node, then the research, ADR, and plan phases
+                     each run author -> review -> submit -> approval gate.
 """
 
 from __future__ import annotations

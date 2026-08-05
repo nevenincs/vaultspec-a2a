@@ -22,7 +22,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import override
+from typing import Final, override
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -195,6 +195,76 @@ def _turn_error_message(error: JsonValue) -> str:
         if isinstance(message, str) and message:
             return message
     return "codex app-server reported an error"
+
+
+#: The item kinds that record an ACTION rather than speech. Taken from the
+#: app-server's own generated protocol schema (``codex app-server
+#: generate-json-schema``), whose thread-item union discriminates on this field,
+#: rather than from a guess at the wire vocabulary.
+_ACTION_ITEM_TYPES: Final = frozenset({"commandExecution", "fileChange", "mcpToolCall"})
+
+
+def _completed_action_chunk(params: JsonObject) -> ChatGenerationChunk | None:
+    """Project a completed action item onto a tool-call chunk, or None.
+
+    This lane consumed only speech - message deltas, usage, errors - so a run
+    that executed a command left no durable trace of having done so. The ACP
+    family already records its actions, and it does it by riding the model's own
+    stream: a tool-call chunk aggregates into the response message, the worker
+    node returns that message as state, and state is checkpointed. Emitting the
+    same shape here is PARITY with a mechanism already proven durable, not a new
+    store - which is why no retention declaration accompanies it. A separate
+    action log would have been a third at-rest copy of what one lane already
+    checkpoints.
+
+    ``item/completed`` is the seam rather than ``item/started`` because a
+    completed item carries the outcome. A started command has no exit code, and
+    a record of "a command began" that never says whether it succeeded answers
+    the question worse than not recording it.
+
+    Returns ``None`` for speech items and for anything unrecognised. The item
+    union carries eighteen variants and gains more over time; a lane that
+    guessed at unknown kinds would put invented structure into a checkpoint,
+    which is worse than the silence this replaces.
+    """
+    item = lenient_json_object(params.get("item"))
+    item_type = item.get("type")
+    if not isinstance(item_type, str) or item_type not in _ACTION_ITEM_TYPES:
+        return None
+    item_id = item.get("id")
+    if not isinstance(item_id, str) or not item_id:
+        return None
+    # Only the fields the schema marks REQUIRED for each variant are read, so a
+    # payload that grows optional fields cannot change what is recorded here.
+    if item_type == "commandExecution":
+        detail: JsonObject = {
+            "command": item.get("command"),
+            "cwd": item.get("cwd"),
+            "status": item.get("status"),
+            "exit_code": item.get("exitCode"),
+        }
+    elif item_type == "fileChange":
+        detail = {"changes": item.get("changes"), "status": item.get("status")}
+    else:
+        detail = {
+            "server": item.get("server"),
+            "tool": item.get("tool"),
+            "arguments": item.get("arguments"),
+            "status": item.get("status"),
+        }
+    return ChatGenerationChunk(
+        message=AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {
+                    "id": item_id,
+                    "name": item_type,
+                    "args": json.dumps(detail),
+                    "index": 0,
+                }
+            ],
+        )
+    )
 
 
 def _turn_failure(
@@ -933,6 +1003,12 @@ class CodexChatModel(BaseChatModel):
                 delta = params.get("delta")
                 if isinstance(delta, str) and delta:
                     yield ChatGenerationChunk(message=AIMessageChunk(content=delta))
+            elif method == "item/completed":
+                if params.get("threadId") not in (None, thread_id):
+                    continue
+                action = _completed_action_chunk(params)
+                if action is not None:
+                    yield action
             elif method == "error":
                 failure = _turn_failure(
                     params.get("error"), will_retry=params.get("willRetry")

@@ -13,11 +13,13 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
+    AIMessageChunk,
     HumanMessage,
     SystemMessage,
     ToolMessage,
@@ -30,6 +32,7 @@ from ..codex_chat_model import (
     CodexChatModel,
     _CodexAppServerClient,
     _CodexProtocolError,
+    _completed_action_chunk,
     _messages_to_prompt,
 )
 from ..conditions import ProviderCondition
@@ -39,6 +42,9 @@ from ..factory import (
     classify_provider_command,
 )
 from ..model_profiles import probe_provider_readiness
+
+if TYPE_CHECKING:
+    from .._json_contract import JsonObject
 
 _CODEX_PRESENT = shutil.which("codex") is not None
 
@@ -568,3 +574,93 @@ async def test_a_terminal_frame_that_classifies_itself_is_never_overridden() -> 
     finally:
         await client.aclose()
     assert caught.value.condition is ProviderCondition.THROTTLED
+
+
+class TestCompletedActionCapture:
+    """A completed action item must reach the message the run checkpoints.
+
+    This lane consumed only speech, so a run that executed a command left no
+    durable record of having done so, while the ACP family already recorded its
+    actions by riding the model's own stream. These drive the real projection
+    with payloads shaped by the app-server's own generated protocol schema.
+    """
+
+    def test_a_completed_command_becomes_a_tool_call_the_checkpoint_keeps(
+        self,
+    ) -> None:
+        """The command, its directory, and its exit code survive aggregation."""
+        chunk = _completed_action_chunk(
+            {
+                "threadId": "t-1",
+                "item": {
+                    "id": "item-7",
+                    "type": "commandExecution",
+                    "command": "pytest -q",
+                    "commandActions": [],
+                    "cwd": "/repo",
+                    "status": "completed",
+                    "exitCode": 0,
+                },
+            }
+        )
+        assert chunk is not None, (
+            "a completed command produced no chunk, so a run that executed it "
+            "would leave no durable record of having done so"
+        )
+        # Aggregated exactly as the stream consumer does, because a chunk that
+        # never becomes a message is not durable no matter what it carries.
+        aggregated = chunk.message
+        assert isinstance(aggregated, AIMessageChunk)
+        merged = AIMessageChunk(content="") + aggregated
+        assert merged.tool_calls, "the chunk did not aggregate into a tool call"
+        call = merged.tool_calls[0]
+        assert call["name"] == "commandExecution"
+        assert call["args"]["command"] == "pytest -q"
+        assert call["args"]["cwd"] == "/repo"
+        assert call["args"]["exit_code"] == 0
+
+    @pytest.mark.parametrize(
+        ("item_type", "extra"),
+        [
+            ("fileChange", {"changes": [{"path": "a.py"}], "status": "completed"}),
+            (
+                "mcpToolCall",
+                {
+                    "server": "vault",
+                    "tool": "search",
+                    "arguments": {"q": "x"},
+                    "status": "completed",
+                },
+            ),
+        ],
+    )
+    def test_every_action_kind_is_captured_not_only_commands(
+        self, item_type: str, extra: JsonObject
+    ) -> None:
+        """File edits and tool calls are actions too, and were equally invisible."""
+        chunk = _completed_action_chunk(
+            {"threadId": "t-1", "item": {"id": "i-1", "type": item_type, **extra}}
+        )
+        assert chunk is not None, f"{item_type} produced no chunk"
+        merged = AIMessageChunk(content="") + chunk.message
+        assert isinstance(merged, AIMessageChunk)
+        assert merged.tool_calls[0]["name"] == item_type
+
+    @pytest.mark.parametrize(
+        "item",
+        [
+            {"id": "i-2", "type": "agentMessage", "content": "hello"},
+            {"id": "i-3", "type": "reasoning", "text": "thinking"},
+            {"id": "i-4", "type": "somethingAddedNextRelease"},
+            {"type": "commandExecution", "command": "x"},
+        ],
+    )
+    def test_speech_and_unknown_items_are_left_alone(self, item: JsonObject) -> None:
+        """Only recognised ACTION kinds are recorded.
+
+        Speech already rides the content stream, and an unrecognised kind is a
+        protocol version this lane does not know. Inventing structure for either
+        would put fiction into a checkpoint, which is worse than the silence this
+        capture replaces. The last case has no id, which the schema requires.
+        """
+        assert _completed_action_chunk({"threadId": "t-1", "item": item}) is None

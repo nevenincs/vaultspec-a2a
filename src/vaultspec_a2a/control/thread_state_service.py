@@ -24,6 +24,7 @@ from ..control.projection import (
     enrich_snapshot_from_execution_state,
     reconcile_checkpoint_permissions_with_durable_state,
 )
+from ..control.run_discovery_service import reconcile_abandoned_reconciling_thread
 from ..control.snapshot import (
     MinimalState,
     enrich_snapshot_from_state,
@@ -287,6 +288,14 @@ async def capture_thread_state(
         # Product run lookups must not surface it; the cleanup coordinator reads
         # it directly instead. Report it as absent so the route answers 404.
         return None
+    if thread.status == ThreadStatus.RECONCILING.value:
+        # T3's reconciler backstop (see run_discovery_service), reused here so
+        # a direct single-run status read resolves an abandoned reconciling
+        # thread too, not only the active-run list. `thread` is the same
+        # SQLAlchemy identity-mapped row `update_thread_status` would mutate
+        # (same session, same primary key), so a reconciliation performed here
+        # is already reflected on `thread` below with no re-fetch needed.
+        await reconcile_abandoned_reconciling_thread(db, thread_id)
     last_seq = aggregator.get_sequence(thread_id)
 
     snapshot = ThreadStateData(

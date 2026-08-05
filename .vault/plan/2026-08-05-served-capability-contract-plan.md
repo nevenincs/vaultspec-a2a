@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:4539ba84e26a8406114a0c2d2313b0c8857f52b5bf123b4a9101a9f8f233fa61'
+body_hash: 'sha256:8c449ccbeb56098508f34891d6ee6083a627d36154d688ffa5509cbfa9a7ea19'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -129,8 +129,8 @@ Mechanical contract corrections with no owner yet, each independent of the other
 
 - [x] `W02.P04.S12` - F11 DONE in commit 1022ba08 - the five underscore-prefixed snapshot models were renamed and exported, the parity test updated, and zero underscore-prefixed schemas remain in the published contract, verified against the committed artifact; `src/vaultspec_a2a/api/schemas/snapshots.py`.
 - [ ] `W02.P04.S13` - F13 - serve topology structure on the preset so a frontend can render what a preset will do rather than only its name; `src/vaultspec_a2a/api/routes/gateway.py`.
-- [ ] `W02.P04.S14` - F15 - route startup failures through the structured logger before exit, populate the process registry log path consistently and reap the stale duplicate port records; `src/vaultspec_a2a/lifecycle`.
-- [ ] `W02.P04.S15` - F15 unowned gap - decide and record whether every error is guaranteed to reach the structured log, which no document in the corpus currently guarantees; `docs/operations.rst`.
+- [ ] `W02.P04.S14` - F15 registry half ONLY - the logging halves landed in 2b978a35. Populate log_path from the boot CALLER, which is where the null originates rather than in the registry, and reap the duplicate port-18110 records. Deliberately deferred as a separate pass because reaping is destructive against a registry two agents are live against, so it needs lifecycle quiet; `src/vaultspec_a2a/lifecycle`.
+- [ ] `W02.P04.S15` - F15 unowned gap RULED as the failure-observability record - execute its five clauses. The operations documentation half returns to its owner only AFTER this lands, and may state the guarantee only for paths that satisfy it, since 2b978a35 made the guarantee truer without establishing it; `src/vaultspec_a2a/lifecycle`.
 - [x] `W02.P04.S16` - Document the OpenAPI artifact regeneration command, which exists only inside the test file that enforces it; `docs/development.rst`.
 - [ ] `W02.P04.S37` - F26 - split the engine serve command without POSIX semantics on Windows and propagate the launch error instead of collapsing it into a port-allocation message; `src/vaultspec_a2a/lifecycle/engine_serve.py`.
 - [ ] `W02.P04.S38` - F27 - honour the explicit data seat as the vault root, or refuse a seat that resolves into an enclosing git worktree, since the guard is currently defeated by exactly the case it exists for; `src/vaultspec_a2a/lifecycle/engine_serve.py`.
@@ -172,7 +172,7 @@ The vocabulary decision governs a value's domain, never whether a written value 
 
 Fix the projections that serve untrue values on completed and failed runs.
 
-- [ ] `W04.P08.S23` - F17 - advance tool-call status to a terminal value and populate locations and content, so a completed run stops showing perpetually pending operations; `src/vaultspec_a2a/api/event_adapter.py`.
+- [ ] `W04.P08.S23` - F17 two breaks not one, and the file attribution was wrong - the live half drops terminal status because the stream transformer reads only chunk content and never inspects tool_call_chunks, while the snapshot half infers COMPLETED only when a matching ToolMessage exists, which provider-internal actions never produce, so every call falls to PENDING permanently. COMPLETION CRITERION - a REST read of a SETTLED run must show terminal status with locations and content populated where the provider supplied them, because the aggregator state is pruned at settle and fixing the live half alone would leave the audited symptom unchanged. Also give the emitters a way to carry status and locations, which the event type already declares; `src/vaultspec_a2a/streaming/transformer.py, src/vaultspec_a2a/streaming/emitters.py, src/vaultspec_a2a/control/snapshot.py`.
 - [ ] `W04.P08.S24` - F18 - scope the agents projection to the run topology so a one-worker pipeline stops reporting the eight-agent roster of a different topology, noting that the F8 team-status half is retracted as non-reproducing and is not part of this Step; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W04.P08.S25` - F20 - define what reconciling means, how long it may persist and how a run leaves it, then provide the recovery path a stranded run currently lacks; `src/vaultspec_a2a/control/run_discovery_service.py`.
 - [ ] `W04.P08.S26` - F22 - stop serving healthy on every structured health field of a failed run, so a frontend gating on machine-readable fields is not forced to parse prose; `src/vaultspec_a2a/api/routes/gateway.py`.

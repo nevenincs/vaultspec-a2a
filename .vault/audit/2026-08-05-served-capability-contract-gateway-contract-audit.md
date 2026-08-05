@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:03d6b99f8d380142a129ef2d7ac5aaf957690897b2bfaa31991bf12f03ec27cc'
+body_hash: 'sha256:eaa68eb2f49cf7260c4f373e46ce04788c5b536029c25bcaad13796c20f2c8f2'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -85,15 +85,22 @@ non-reproducing. Each correction is marked inside the entry it affects, and the
 original claim is retained beside it. A reader citing any of those three must
 read its correction.
 
-F25 has itself been corrected once, and the sequence is worth stating because it
-is instructive. The entry first claimed the watchdog reported something FALSE
-about the system's own state, on the strength of per-minute event counts. That
-inference was wrong: those counts measure a different channel from the one the
-watchdog observes, and coarse throughput across a window cannot rule out a gap
-inside it. The real defect turned out to be a threshold mismatch rather than a
-false signal - which is worse, not milder. Two successive corrections on one
-entry is a signal about method: a refutation assembled from an adjacent
-measurement is not a refutation.
+F25 has itself been corrected twice, and the sequence is worth stating because
+it is instructive. The entry first claimed the watchdog reported something FALSE
+about the system's own state, on the strength of per-minute event counts. It
+then credited, as the surviving part, an inferred hedge that the watchdog
+"counts a different channel". A code trace refutes both: the watchdog wraps the
+same `astream_events()` iterator the worker's own transformer consumes, so there
+is one channel, and the counts cited against it are aggregates over a window
+that cannot rule out a gap inside it. The real defect is a threshold mismatch,
+which is worse than a false signal rather than milder.
+
+The method lesson is the durable part. A refutation assembled from a DERIVED
+AGGREGATE of the same signal is not a refutation - it changes the resolution,
+not the subject. Both wrong versions of this entry were argued from throughput
+totals; only reading the code settled it. This document's own T5-shaped rule
+applies to its findings as much as to the fields they describe: state what was
+observed, at the resolution it was observed.
 
 ## Findings
 
@@ -606,16 +613,22 @@ over 90s"`, with an agent subprocess spawned at 12:17:47 still alive at the kill
 The model was mid-turn.
 
 CORRECTION - the reason was NOT false, and this entry originally said it was.
-The event-batch counts and stream-chunk totals cited as refutation measure a
-DIFFERENT channel from the one the watchdog observes: the watchdog wraps each
-`astream_events()` iteration, and a long tool call or an extended reasoning
-stretch produces no stream event at all while per-minute totals across the
-window still look healthy. Coarse throughput across a window cannot rule out a
-sub-90-second gap inside it. The watchdog was reporting its own signal
-accurately. This entry's original "asserts something false about its own state"
-framing is withdrawn; the hedge it carried - that the watchdog counts a
-different channel than the worker posts to, recorded as inferred and not
-isolated - was the part that held.
+The watchdog wraps each `astream_events()` iteration in `streaming/ingest.py`,
+which is the SAME iterator the worker's transformer consumes to produce every
+relayed chunk, in the same process against the same compiled graph. The
+event-batch counts and chunk totals cited as refutation are aggregates DERIVED
+from that stream over a window, not a separate signal, and an aggregate cannot
+rule out a gap inside the window it aggregates. Legitimate work makes such gaps
+routine: a long tool call or an extended reasoning stretch produces no
+`on_chat_model_stream` event at all while per-minute totals still look healthy.
+The watchdog was reporting its own signal accurately.
+
+Both of this entry's earlier framings are therefore withdrawn: the "asserts
+something false about its own state" claim, AND the inferred hedge that the
+watchdog "counts a different channel than the worker posts to". The hedge was
+closer to the truth than the confident claim built on it, but it is still wrong
+as stated - the source is one channel, and what differs is the resolution at
+which it was measured.
 
 THE ACTUAL DEFECT is a threshold mismatch, and it is worse than a false message.
 The watchdog's outer bound was a flat global 90 seconds, while the agent chat

@@ -9,6 +9,7 @@ catalog fetch against a live engine.
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 
@@ -161,6 +162,54 @@ class TestAuthoringBindingProvider:
             catalog_store=catalog_store,
         )
         assert await provider.binding_for("t1", "some-other-role") is None
+
+    @pytest.mark.asyncio
+    async def test_missing_bearer_logs_warning(self, caplog) -> None:
+        # Verify missing engine bearer logs a warning with thread_id and agent_id.
+        token_store = RunTokenStore()
+        token_store.register(
+            "t1",
+            ActorTokenBundle(
+                tokens={"vaultspec-coder": "actor-xyz"}, engine_bearer=None
+            ),
+        )
+        catalog_store = RunCatalogStore()
+        catalog_store.register("t1", _snapshot("read_context"))
+        provider = AuthoringBindingProvider(
+            engine_base_url=_ENGINE_URL,
+            token_store=token_store,
+            catalog_store=catalog_store,
+        )
+        with caplog.at_level(logging.WARNING):
+            binding = await provider.binding_for("t1", "vaultspec-coder")
+        assert binding is None
+        assert (
+            "authoring bridge unarmed for thread_id=t1 agent_id=vaultspec-coder: "
+            "missing engine_bearer"
+        ) in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_missing_actor_token_logs_warning(self, caplog) -> None:
+        # Verify missing actor token logs a warning with thread_id and agent_id.
+        token_store = RunTokenStore()
+        token_store.register(
+            "t1",
+            ActorTokenBundle(tokens={}, engine_bearer="bearer-xyz"),
+        )
+        catalog_store = RunCatalogStore()
+        catalog_store.register("t1", _snapshot("read_context"))
+        provider = AuthoringBindingProvider(
+            engine_base_url=_ENGINE_URL,
+            token_store=token_store,
+            catalog_store=catalog_store,
+        )
+        with caplog.at_level(logging.WARNING):
+            binding = await provider.binding_for("t1", "vaultspec-coder")
+        assert binding is None
+        assert (
+            "authoring bridge unarmed for thread_id=t1 agent_id=vaultspec-coder: "
+            "missing actor_token"
+        ) in caplog.text
 
     def test_repr_reports_only_engine_origin(self) -> None:
         provider = AuthoringBindingProvider(

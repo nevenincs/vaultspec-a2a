@@ -24,6 +24,7 @@ of its own.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -32,6 +33,8 @@ if TYPE_CHECKING:
     from .token_store import RunTokenStore
 
 __all__ = ["AuthoringBindingProvider"]
+
+logger = logging.getLogger(__name__)
 
 
 class AuthoringBindingProvider:
@@ -74,6 +77,13 @@ class AuthoringBindingProvider:
         bearer = self._token_store.engine_bearer(thread_id)
         actor_token = self._token_store.actor_token(thread_id, agent_id)
         if not bearer or not actor_token:
+            missing = "engine_bearer" if not bearer else "actor_token"
+            logger.warning(
+                "authoring bridge unarmed for thread_id=%s agent_id=%s: missing %s",
+                thread_id,
+                agent_id,
+                missing,
+            )
             return None
 
         snapshot = self._catalog_store.get(thread_id)

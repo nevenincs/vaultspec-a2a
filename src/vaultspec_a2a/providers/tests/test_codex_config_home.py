@@ -741,6 +741,42 @@ def test_cleanup_is_none_safe_and_idempotent(tmp_path: Path) -> None:
     cleanup_codex_config_home(home)
 
 
+def test_cleanup_removes_home_by_default(tmp_path: Path) -> None:
+    """Verify that cleanup_codex_config_home removes the home by default."""
+    # Ensure the env var is unset (preservation: cleanup still happens)
+    environment = dict(os.environ)
+    environment.pop("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN", None)
+
+    home = build_codex_config_home([], tmp_path, web_search=CodexWebSearchMode.DISABLED)
+    assert home.exists()
+    # Run cleanup in a context where the env var is not set
+    saved_env = os.environ.pop("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN", None)
+    try:
+        cleanup_codex_config_home(home)
+        assert not home.exists()
+    finally:
+        if saved_env is not None:
+            os.environ["VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"] = saved_env
+
+
+def test_cleanup_retains_home_when_env_var_set(tmp_path: Path) -> None:
+    """Verify that cleanup_codex_config_home retains the home when env var is set."""
+    home = build_codex_config_home([], tmp_path, web_search=CodexWebSearchMode.DISABLED)
+    assert home.exists()
+    # Save the original env var and set the retention flag
+    saved_env = os.environ.get("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN")
+    try:
+        os.environ["VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"] = "1"
+        cleanup_codex_config_home(home)
+        # Home should still exist (fix: home retention when flag is set)
+        assert home.exists()
+    finally:
+        if saved_env is not None:
+            os.environ["VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"] = saved_env
+        else:
+            os.environ.pop("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN", None)
+
+
 def test_build_self_cleans_on_copy_failure(
     tmp_path: Path, private_home_root: Path
 ) -> None:

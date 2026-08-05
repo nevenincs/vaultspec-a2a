@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
@@ -443,8 +444,18 @@ def build_codex_config_home(
 
 
 def cleanup_codex_config_home(home: Path | None) -> None:
-    """Best-effort removal of a per-run Codex config home; never raises."""
+    """Best-effort removal of a per-run Codex config home; never raises.
+
+    If VAULTSPEC_CODEX_CONFIG_HOME_RETAIN is set, the home is retained for
+    inspection and troubleshooting. Default behavior (unset) removes the home.
+    """
     if home is None:
+        return
+    if os.environ.get("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"):
+        logger.debug(
+            "Codex config home retained at %s per VAULTSPEC_CODEX_CONFIG_HOME_RETAIN",
+            home,
+        )
         return
     shutil.rmtree(home, ignore_errors=True)
 

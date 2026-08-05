@@ -46,7 +46,19 @@ from ..model_profiles import probe_provider_readiness
 if TYPE_CHECKING:
     from .._json_contract import JsonObject
 
-_CODEX_PRESENT = shutil.which("codex") is not None
+
+def _codex_present() -> bool:
+    """Whether the codex CLI resolves on PATH, asked WHEN ASKED.
+
+    A function rather than a module constant so the PATH scan does not run while
+    the module is merely imported. Import-time I/O is invisible to both purity
+    mechanisms - it is neither a call in a test body nor a fixture in a closure -
+    so as a constant this made every test in the file touch the filesystem on
+    import while the file's own tests claimed to do no I/O at all. Deferring it
+    confines the scan to the three tests that actually depend on it.
+    """
+    return shutil.which("codex") is not None
+
 
 # A minimal JSON-RPC-over-stdio echo server matching the app-server framing:
 # {id, method, params} -> {id, result} or {id, error}; bare {method} notifies.
@@ -193,17 +205,19 @@ def test_classify_codex_command_shape() -> None:
     assert meta["command_kind"] == "codex_cli"
 
 
-@pytest.mark.skipif(not _CODEX_PRESENT, reason="codex CLI not on PATH")
 def test_classify_provider_command_resolves_codex() -> None:
     """When codex is installed, the provider command classifier resolves it."""
+    if not _codex_present():
+        pytest.skip("codex CLI not on PATH")
     meta = classify_provider_command(Provider.CODEX)
     assert meta["command_kind"] == "codex_cli"
     assert meta["command_origin"] == "system_path_executable"
 
 
-@pytest.mark.skipif(not _CODEX_PRESENT, reason="codex CLI not on PATH")
 def test_codex_readiness_ready_when_installed() -> None:
     """Readiness is command-resolvability only; no secret is emitted."""
+    if not _codex_present():
+        pytest.skip("codex CLI not on PATH")
     readiness = probe_provider_readiness(Provider.CODEX)
     assert readiness.ready is True
     assert readiness.reason is None
@@ -259,7 +273,7 @@ async def test_codex_live_turn_returns_output() -> None:
     Requires a logged-in Codex session (``codex login status``). Uses a trivial
     prompt to keep spend negligible.
     """
-    if not _CODEX_PRESENT:
+    if not _codex_present():
         pytest.fail("codex CLI unavailable; install Codex before service tests")
     model = ProviderFactory().create(Provider.CODEX, model="catalog-selected-model")
     assert isinstance(model, CodexChatModel)

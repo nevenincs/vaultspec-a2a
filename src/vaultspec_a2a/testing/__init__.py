@@ -50,7 +50,12 @@ from .progress import (
     registry_watch,
     wait_for,
 )
-from .purity import IMPURE_FIXTURES, uses_impure_fixture
+from .purity import (
+    IMPURE_FIXTURES,
+    SERVICE_MARKER,
+    forfeits_purity,
+    uses_impure_fixture,
+)
 from .resources import (
     MARKER_NAME,
     RESOURCES,
@@ -79,6 +84,7 @@ __all__ = [
     "RESOURCES",
     "SCRATCH_PREFIX",
     "SCRATCH_ROLE",
+    "SERVICE_MARKER",
     "SESSION_LEASE_KEY",
     "Lease",
     "LeaseAcquisitionTimeoutError",
@@ -98,6 +104,7 @@ __all__ = [
     "declared_claims",
     "effective_worker_count",
     "exclusive_keys",
+    "forfeits_purity",
     "free_port",
     "hold_for_process_lifetime",
     "hold_lease",

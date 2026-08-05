@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from .purity import uses_impure_fixture
+from .purity import forfeits_purity
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
@@ -66,5 +66,5 @@ def apply_layer_markers(
             item.add_marker(pytest.mark.middleware)
             continue
         item.add_marker(pytest.mark.core)
-        if item.path.name not in impure_files and not uses_impure_fixture(item):
+        if item.path.name not in impure_files and not forfeits_purity(item):
             item.add_marker(pytest.mark.unit)

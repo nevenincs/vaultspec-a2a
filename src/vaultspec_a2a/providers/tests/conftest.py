@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
-from ...testing import uses_impure_fixture
+from ...testing import forfeits_purity
 from .._acp_types import AcpSessionContext
 
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
@@ -73,7 +73,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         if item.path.name in _LIVE_FILES:
             continue
         item.add_marker(pytest.mark.middleware)
-        if item.path.name not in _IMPURE_FILES and not uses_impure_fixture(item):
+        if item.path.name not in _IMPURE_FILES and not forfeits_purity(item):
             item.add_marker(pytest.mark.unit)
 
 

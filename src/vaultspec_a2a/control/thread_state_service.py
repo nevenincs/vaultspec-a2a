@@ -296,7 +296,21 @@ async def capture_thread_state(
         # (same session, same primary key), so a reconciliation performed here
         # is already reflected on `thread` below with no re-fetch needed.
         await reconcile_abandoned_reconciling_thread(db, thread_id)
-    last_seq = aggregator.get_sequence(thread_id)
+    # The durable column wins once it exists (captured at terminal settle,
+    # control/event_handlers.py::_handle_terminal_event, before the aggregator
+    # prunes its in-memory copy - F19). The live aggregator read is the
+    # fallback for a run that has not settled yet, where nothing has been
+    # captured because there is nothing terminal to capture: the run is still
+    # active and the aggregator's own counter is the current truth. A settled
+    # run whose row predates this column (last_sequence IS NULL forever, no
+    # captured value ever existed for it) falls back to the same pruned
+    # default 0 it always answered - a known limitation for rows written
+    # before the fix, not a regression this introduces.
+    last_seq = (
+        thread.last_sequence
+        if thread.last_sequence is not None
+        else aggregator.get_sequence(thread_id)
+    )
 
     snapshot = ThreadStateData(
         thread_id=thread_id,

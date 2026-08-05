@@ -668,12 +668,24 @@ async def test_service_state_degrades_when_circuit_breaker_opens(
 async def test_run_status_carries_reconnect_cursor(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """run-status carries the monotonic last_sequence reconnect cursor.
+    """run-status carries the TRUE monotonic last_sequence reconnect cursor.
 
     Evidence battery, SSE reconnect with non-authoritative semantics: durable
     reconnect reconciliation comes from run-status (last_sequence), not from the
-    droppable SSE progress stream. This asserts the cursor is served.
+    droppable SSE progress stream.
+
+    F66: this test previously asserted only the field's TYPE
+    (``isinstance(..., int)``), which a permanently-zero cursor also satisfies
+    -- so it passed against the F19 defect (last_sequence always 0 after a run
+    settles) for as long as that defect existed, naming a contract it did not
+    actually check. Widened to advance the aggregator's real counter, settle
+    the run through the SAME terminal handler production dispatch uses, and
+    assert the value the LIVE HTTP read recovers is the one advanced before
+    settle -- the read that actually exercises the reconnect-cursor contract,
+    since a reconnecting client only ever reads run-status after a run has
+    already ended.
     """
+    from ...control.event_handlers import _handle_terminal_event
     from ...database.thread_repository import create_thread
     from ...thread.enums import ThreadStatus
 
@@ -684,7 +696,20 @@ async def test_run_status_carries_reconnect_cursor(
         await session.commit()
         run_id = thread.id
 
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    app, agg, _worker, _cp = make_app(session_factory, checkpointer)
+    for _ in range(5):
+        agg.advance_sequence(run_id)
+
+    await _handle_terminal_event(
+        run_id,
+        {"event_type": "thread_terminal", "status": "completed"},
+        aggregator=agg,
+        session_factory=session_factory,
+    )
+    # The prune genuinely ran: the live in-memory counter is gone, matching
+    # what a reconnecting client's HTTP read below has to contend with.
+    assert agg.get_sequence(run_id) == 0
+
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
@@ -694,6 +719,8 @@ async def test_run_status_carries_reconnect_cursor(
         body = resp.json()
         assert "last_sequence" in body
         assert isinstance(body["last_sequence"], int)
+        assert body["last_sequence"] == 5
+        assert body["last_sequence"] != 0
 
 
 @pytest.mark.asyncio(loop_scope="function")

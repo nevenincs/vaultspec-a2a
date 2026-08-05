@@ -246,6 +246,19 @@ async def _handle_terminal_event(
     """
     if not is_terminal_event(payload):
         return
+    # Captured HERE, before anything else runs, and never re-read later: the
+    # ordering is the whole fix (F19). aggregator.clear_thread_state below (in
+    # the finally block, after the durable write commits) prunes this exact
+    # thread's counter from the aggregator's in-memory _sequences dict, so a
+    # value read after that point is always the pruned default (0) -- which is
+    # what a REST client reading run-status after a run settles always saw,
+    # since that read is the only moment its reconnect-cursor comparison
+    # matters. Capturing before the durable write below, rather than near it,
+    # means a future reordering of the write can never accidentally re-open
+    # this race by moving the read closer to the prune.
+    last_sequence = (
+        aggregator.get_sequence(thread_id) if aggregator is not None else None
+    )
     payload_status = payload.get("status")
     status_str = (
         _TERMINAL_STATUS_MAP.get(payload_status)
@@ -297,6 +310,17 @@ async def _handle_terminal_event(
             )
             await expire_pending_permission_requests(db, thread_id=thread_id)
             if thread is not None:
+                # Set directly on the row `update_thread_status` already
+                # returned, rather than adding a parameter to that function:
+                # database/thread_repository.py is under concurrent edit by
+                # another session right now, and this is the same session/
+                # transaction/commit boundary as the write above, not a second
+                # persistence path. `last_sequence is not None` on purpose --
+                # not truthiness -- since 0 is a legitimate captured value
+                # (see database/models.py's field comment) and a truthy guard
+                # would silently drop it, the same bug class this closes.
+                if last_sequence is not None:
+                    thread.last_sequence = last_sequence
                 await set_thread_approval_state(
                     db,
                     thread_id,

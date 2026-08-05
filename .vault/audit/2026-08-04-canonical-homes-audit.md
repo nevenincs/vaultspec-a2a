@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:1b049f4ab4cc6db02f505bd415ebc83361f547fa60bb9ac53e7f336f5e7e62a4'
+body_hash: 'sha256:8205899baed890cc9fb149924ec72aaadf839439b8a75e112aaf1c7293e52ee4'
 related: []
 ---
 
@@ -7799,3 +7799,157 @@ and then resolved on its own** - after an artifact drift and a cross-lane flake.
 enough established now to state as a rule: in a multi-writer tree, a red whose files
 are dirty and not yours is a STATE, not a defect, and the correct action is to name
 it and continue.
+
+### the-proof-is-the-collection-not-the-run | high | closing a card whose expected effect was zero
+
+The dead marker override is gone, and the difficulty was that removing it should
+change **nothing** - so a green run proves nothing, because the package was green
+before. The proof is a diff of pytest's own collected state, read through a plugin
+rather than parsed from its printed report: 361 items before and after, identical
+node ids, **zero resolved marker sets changed**.
+
+**The one observable difference is what makes it evidence rather than absence of
+evidence.** Both named files carried `middleware` TWICE in `own_markers` and now
+carry it once. That is precisely the hook's own redundant contribution
+disappearing - it confirms the hook WAS reached, and that a duplicate entry was
+all it ever produced. Selection reads the resolved set, so nothing collects or
+deselects differently.
+
+The structural-duplicate guard could never have found this: the body performs
+REMOVAL where its two siblings perform addition, so it is not a structural
+duplicate at all. Reading found it, and no guard tuning would have.
+
+### neither-shape-was-ever-correct | critical | the disagreement was worse than reported
+
+The registry `env` finding was carried as "two transports disagree about the
+shape". Building an entry through the real construction seam and rendering it
+through the real reader of each side showed something sharper: **the registry
+ADMITTED BOTH SHAPES AND NEITHER IS SERVABLE TO BOTH.**
+
+    flat mapping   codex renders it; the ACP pin loudly REFUSES it; an UNPINNED
+                   ACP run ships the wrong shape to the session in SILENCE
+    pair list      ACP renders and pins it; the codex reader refuses it outright
+
+So there was never a working capability that two readers disagreed about. There
+was no way to declare one correctly, whatever an author wrote - and the dangerous
+half was the quiet one, because the loud failure gets investigated.
+
+**That reframing is what made refusal the answer rather than a projection.**
+Teaching either side the other's shape would have added machinery to preserve a
+capability that never worked. Refusing the field at the single construction seam
+also makes a standing hazard unbreakable instead of merely written down: the CLI
+parses the session surface WITH env expansion, and a field that cannot be
+declared cannot carry a `${...}` placeholder. The one env value a run still
+states - its project pin - enters per run through its own seam, where the
+expansion marker is already refused.
+
+Two things fell out and were retired rather than left: the typed reader for the
+field had exactly one caller, and the codex path's guard against a pin colliding
+with a declared value now guards a collision that cannot be constructed. The
+reason is recorded where that guard stood, so a future re-admission restores it
+deliberately rather than rediscovering the need.
+
+**Evidence separated by what it proves.** Both shapes FAIL against HEAD and pass
+after - a defect proof. Every entry the registry ships today renders
+byte-identically on both transports, pinned and unpinned, INCLUDING KEY ORDER -
+a drift guard, and the reason the refusal costs nothing.
+
+### a-file-level-list-cannot-reach-one-item | critical | live: the hermetic run collected live turns
+
+`pytest -m unit` - the selection whose entire purpose is hermeticity - collected
+`test_claude_live_turn`, `test_codex_live_turn_returns_output` and the
+real-process catalog tests. **Eighteen items wore `service` and `unit` at once.**
+
+Every package had a list meant to prevent exactly this, and every list looked
+complete. The lists are **per file**, and these live tests sit in files that also
+hold pure ones, so no entry could reach them without costing the pure tests their
+claim. One package had already met this hazard and worked around it by hand in
+its own data; the next package had no way to inherit that lesson.
+
+**The rule therefore moved from each package's data into the one shared home all
+three call sites route through.** A `service` mark says the test drives real
+services; a `resource` claim says it contends for something machine-global and
+will take a lease - a test with nothing shared to touch would have nothing to
+claim. Both are the test's OWN testimony, so honouring them is reading a
+statement rather than making an inference.
+
+**Separate what is proven from what is guarded.** The `service` half is a defect
+fix - eighteen items lose a false claim. The `resource` half is a guard: nothing
+in the tree wears both today, so it forecloses a contradiction rather than
+repairing one.
+
+Non-vacuity in both directions, because a fix showing only removal cannot be told
+from a silent loss of coverage: across 4607 collected items **exactly 18 changed,
+each losing `unit` and nothing else, and zero markers were GAINED anywhere.**
+
+### import-time-io-exists-and-two-mechanisms-are-blind-to-it | high | the empty answer was not empty
+
+The import-time question was recorded as one where an empty answer would be a
+complete result. **It is not empty.**
+
+A module called `tempfile.mkdtemp` while merely being IMPORTED, in a file whose
+twenty-one tests claimed to do no I/O, leaving a directory nobody removed. It
+needed only an ABSOLUTE path, never an existing one - so the fix deleted the I/O
+rather than relocating it. Another resolved a binary on PATH at import to feed
+two `skipif` decorators, making a whole module's import machine-dependent; the
+check moved into the test bodies, confining the scan to the tests that depend on
+it.
+
+**Both were invisible to both purity mechanisms by construction** - import-time
+work is neither a call in a test body nor a fixture in a resolved closure - which
+is how it survived two prior sweeps that were each thorough about their own half.
+
+Tree-wide, four ways of claiming purity while contradicting it now count zero: a
+service mark, a resource claim, an impure fixture, and import-time I/O.
+
+### the-mirror-direction-is-real-but-errs-safely | medium | reported, deliberately not changed
+
+The inverse sweep - a PURE test excluded by an impure-sounding claim - was asked
+and answered without acting. The shared marker home withholds `unit` from
+middleware files by FILENAME and never asks per item, covering 106 items, while
+it asks per item for the core layer. Reading the excluded files confirms they
+genuinely write files and drive processes, so the data is right even though the
+mechanism is coarser on one side than the other.
+
+**Left alone on the campaign's own standard: a wrong claim is worse than none.**
+This asymmetry errs by WITHHOLDING a claim, which costs speed; correcting it by
+granting claims per item would risk granting a false one, which costs trust.
+Recorded so the asymmetry is known rather than rediscovered and "fixed" in the
+corrupting direction.
+
+Also recorded: the shared home's stated REASON is too general. It says the
+middleware layer already implies real services, but 940 items across five
+packages wear `middleware` and `unit` together quite legitimately - those
+packages read the mark as a LAYER coordinate, not a behaviour claim. The rule is
+right for its two callers; the sentence explaining it is not right tree-wide.
+
+### a-sweep-that-dies-partway-still-writes-a-file | high | the floor caught it, the output did not
+
+The whole-tree purity sweep crashed on my own bug - reading a claim attribute off
+the wrong object - **after writing 3451 of 4607 rows**. The file looked like a
+complete result. Only the process exit code said otherwise.
+
+Recorded because this campaign already knows to put floors on scans, and this is
+the sharpest instance yet of why: **the artefact of a failed sweep is
+indistinguishable from the artefact of a successful one** unless the sweep is
+made to prove its own coverage. The rerun added exactly that - a floor asserting
+the claim reader and the fixture reader each return a non-zero count, so a sweep
+that silently stopped seeing things fails instead of reporting a clean tree.
+
+### two-fixes-that-could-not-be-tested-and-why-that-was-right | medium | both lane residues closed
+
+Both harness lane-gate residues are now fixed, and **both landed with no test on
+purpose.** Every registered server declares no network egress, so resolution is
+byte-identical for a null lane, a real lane and a garbage one. A test written
+today could only assert that nothing changed - equally true of the unfixed code -
+so it would document nothing while reading as proof to a skimmer.
+
+The direction is the part worth restating, because it was gotten backwards once
+in this campaign and had to be retracted: omitting the lane is **fail CLOSED**.
+The failure is denial with a FALSE REASON - the served explanation blames the
+lane rather than the argument nobody passed - never admission.
+
+**The shortcut was declined for the third time.** Registering an egressing server
+would make both testable immediately; that server is held dark pending an ADR
+amendment, live retrieval proof, and an admission gate, and lighting one to
+enable a test would spend the ruling to buy the evidence.

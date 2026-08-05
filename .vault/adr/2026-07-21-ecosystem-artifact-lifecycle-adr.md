@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#ecosystem-artifact-lifecycle'
 date: '2026-07-21'
-modified: '2026-07-21'
-body_hash: 'sha256:d89559423b567a906173404e44d1b7ea28e03c27b9cd790f937fc64fff130717'
+modified: '2026-08-04'
+body_hash: 'sha256:8a21934b837953333ec227aca1cf7d0ac276176631dab976f7ada2e9ae32529e'
 related:
   - "[[2026-07-21-ecosystem-artifact-lifecycle-research]]"
 ---

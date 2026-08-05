@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#production-boundary'
 date: '2026-08-03'
-modified: '2026-08-03'
+modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:8c3df65f0f6492b7046323a69a7d989aebfde30bfe284558991e3d8e26133896'
+body_hash: 'sha256:177b6aefa2ce38960101af9a977bc5111081805313e6d3816bd7f539ca7095ad'
 related:
   - '[[2026-08-03-production-boundary-adr]]'
 ---

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-04'
 body_schema: 'body-v1'
-body_hash: 'sha256:48738d481bf55b5a94cb152d69dd4c6c0b078b3b321626c3f42fe0ab30a7819c'
+body_hash: 'sha256:b1c456453ea3364642d3e63f063100cb6ef1f3fa94b5d43e77fbee28c4185433'
 step_id: 'S27'
 related:
   - "[[2026-07-21-ecosystem-artifact-lifecycle-plan]]"

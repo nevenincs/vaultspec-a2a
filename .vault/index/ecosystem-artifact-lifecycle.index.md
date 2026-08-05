@@ -3,10 +3,10 @@ generated: true
 tags:
   - '#index'
   - '#ecosystem-artifact-lifecycle'
-date: '2026-08-04'
-modified: '2026-08-04'
+date: '2026-08-05'
+modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:d25e2f42c134cedcd65c4922cb6f871d76ad07e9df3122eaa65d6aad5b7657b3'
+body_hash: 'sha256:ed6f0817955006da84d1b339c1a313cc7a0ecf5fad4da1c72d54456d24aab9ef'
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S01]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S02]]'
@@ -36,6 +36,7 @@ related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S26]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S27]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P09-S28]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P09-S29]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S30]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S31]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
@@ -90,6 +91,7 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 - `2026-07-21-ecosystem-artifact-lifecycle-W04-P09-S28` - Inventory which provider action events reach a durable store versus only the live stream, per lane
 - `2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S30` - Amend Layer 3 in place to name the a2a-owned trace and redirect the obligation at the said-versus-did gap
 - `2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S31` - Ratify the ephemeral thread posture as a decision and record its reversal condition
+- `2026-07-21-ecosystem-artifact-lifecycle-W04-P09-S29` - Choose the action-event capture seam and bound it, or record why capture is refused
 
 ### plan
 

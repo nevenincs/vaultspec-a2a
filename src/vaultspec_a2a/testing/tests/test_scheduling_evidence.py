@@ -90,6 +90,15 @@ def _run_pytest(
         capture_output=True,
         text=True,
         timeout=300,
+        # LOAD-BEARING, not cosmetic. With no ini file anywhere above a suite
+        # generated into the system temp directory, the child resolves its
+        # rootdir from the working directory - so running here makes it the
+        # suite. Drop this and the rootdir becomes the checkout, the argument
+        # then sits outside it, and pytest descends from the drive root
+        # enumerating the system temp directory on the way: measured at 18-26s
+        # per collection instead of under a second, and failing outright when
+        # another process deletes one of the tens of thousands of entries
+        # mid-walk (1 run in 4). A sibling module hit exactly that.
         cwd=suite_dir,
         env=env,
     )

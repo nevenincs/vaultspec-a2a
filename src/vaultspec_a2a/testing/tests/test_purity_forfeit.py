@@ -84,6 +84,19 @@ def test_named_by_the_caller() -> None:
     assert True
 """
 
+# Pins the child's rootdir to the generated suite, and it is load-bearing rather
+# than tidiness. To match its command-line argument against collected nodes,
+# pytest enumerates its ROOTDIR and lstats the entries. Without an ini file
+# anywhere above it, a suite generated under the system temp directory makes that
+# rootdir the system temp directory - hundreds of directories belonging to other
+# projects on a shared machine, which other processes delete while the walk is
+# in progress. The child then died mid-collection with a FileNotFoundError naming
+# a stranger's directory, roughly one run in four, for a reason having nothing to
+# do with markers. An ini file in the suite stops the walk at the suite.
+_INI = """
+[pytest]
+"""
+
 # Dumps the resolved marker set of every collected item. Reads pytest's state
 # after every modifyitems hook rather than parsing the printed report, which is
 # a rendering and has misattributed parametrized ids before.
@@ -128,13 +141,24 @@ def _collect(tmp_path: Path) -> dict[str, list[str]]:
     (suite / "test_mixed.py").write_text(_MIXED, encoding="utf-8")
     (suite / "test_infra.py").write_text(_INFRA, encoding="utf-8")
     (suite / "test_named_impure.py").write_text(_NAMED_IMPURE, encoding="utf-8")
+    (suite / "pytest.ini").write_text(_INI, encoding="utf-8")
     (tmp_path / "dumper.py").write_text(_DUMPER, encoding="utf-8")
 
     dump = tmp_path / "markers.json"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
     env = dict(os.environ)
     env.pop("PYTEST_ADDOPTS", None)
     env["PURITY_DUMP"] = str(dump)
     env["PYTHONPATH"] = str(tmp_path) + os.pathsep + env.get("PYTHONPATH", "")
+    # The child writes its own temporary files here rather than into the shared
+    # machine temp directory, so a mini-run leaves nothing behind for the next
+    # session to walk. This is containment, NOT the flake fix - isolating the
+    # child's temp root was the first theory and it did not help, because what
+    # the child chokes on is the directory its ARGUMENT lives under, which the
+    # ini file above pins.
+    for variable in ("TMPDIR", "TEMP", "TMP"):
+        env[variable] = str(scratch)
 
     result = subprocess.run(
         [
@@ -144,6 +168,8 @@ def _collect(tmp_path: Path) -> dict[str, list[str]]:
             str(suite),
             "--collect-only",
             "-q",
+            "--basetemp",
+            str(scratch / "pytest"),
             # Loaded explicitly because this suite lives OUTSIDE the checkout and
             # never sees the repository root conftest that normally installs the
             # resource layer. Without it the resource mark would be inert and the
@@ -161,7 +187,8 @@ def _collect(tmp_path: Path) -> dict[str, list[str]]:
         check=False,
     )
     assert dump.is_file(), (
-        f"the mini-suite did not collect; stdout={result.stdout}\n{result.stderr}"
+        f"the mini-suite did not collect (exit {result.returncode}); "
+        f"stdout=\n{result.stdout}\nstderr=\n{result.stderr}"
     )
     rows: dict[str, list[str]] = json.loads(dump.read_text(encoding="utf-8"))
     # Floor: a dump that saw nothing would satisfy every assertion below by

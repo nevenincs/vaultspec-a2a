@@ -32,7 +32,7 @@ from ...control.worker_status import WorkerConnectionStatus
 from ...graph.enums import SemanticPhase
 from ...providers.conditions import ProviderCondition
 from ...team.preset_origin import PresetOrigin
-from ...team.team_config import TopologyType
+from ...team.team_config import AuthoringCapability, DocumentCapability, TopologyType
 from ...thread.actor_tokens import MAX_ROLES_PER_RUN, ActorTokenBundle
 from ...thread.clarification import (
     MAX_QUESTIONS_PER_REQUEST,
@@ -973,7 +973,11 @@ class PresetSummary(BaseModel):
     topology: TopologyType | None = None
     worker_count: int | None = None
     required_roles: list[str] = Field(default_factory=list)
-    authoring_capability: str | None = None
+    # Says WHETHER this preset authors documents; ``supported_capabilities``
+    # below says WHICH. Both are descriptive: nothing in run admission reads
+    # either, so a wrong value here misinforms a reader rather than refusing a
+    # run. See the owning module on the topology-versus-role keying question.
+    authoring_capability: AuthoringCapability | None = None
     # True for bundled mock/test presets so the product layer can exclude them.
     is_mock: bool = False
     # model-profiles additions (additive v1 fields, absent-safe): the preset's
@@ -983,7 +987,7 @@ class PresetSummary(BaseModel):
     # comment, which is a declaration no client can read and no compiler can
     # check; they are now the enumeration the field is typed by.
     origin: PresetOrigin | None = None
-    supported_capabilities: list[str] = Field(default_factory=list)
+    supported_capabilities: list[DocumentCapability] = Field(default_factory=list)
     profiles: list[ProfileSummary] = Field(default_factory=list)
     default_profile_id: str | None = None
 

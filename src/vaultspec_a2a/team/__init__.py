@@ -28,6 +28,12 @@ from .team_config import (
     AgentPersonaConfig as AgentPersonaConfig,
 )
 from .team_config import (
+    AuthoringCapability as AuthoringCapability,
+)
+from .team_config import (
+    DocumentCapability as DocumentCapability,
+)
+from .team_config import (
     SupervisorConfig as SupervisorConfig,
 )
 from .team_config import (
@@ -73,6 +79,8 @@ __all__ = [
     "AgentModelConfig",
     "AgentPermissionsConfig",
     "AgentPersonaConfig",
+    "AuthoringCapability",
+    "DocumentCapability",
     "PresetOrigin",
     "SupervisorConfig",
     "TeamConfig",

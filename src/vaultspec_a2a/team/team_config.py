@@ -57,6 +57,8 @@ __all__ = [
     "AgentModelConfig",
     "AgentPermissionsConfig",
     "AgentPersonaConfig",
+    "AuthoringCapability",
+    "DocumentCapability",
     "ResearchThreadSpec",
     "SupervisorConfig",
     "TeamConfig",
@@ -155,19 +157,63 @@ def is_mock_preset(preset_id: str) -> bool:
     return preset_id.startswith("mock-")
 
 
-def authoring_capability(topology_type: TopologyType) -> str:
+class AuthoringCapability(StrEnum):
+    """The coarse kind of work a preset delivers.
+
+    A two-member split rather than a spectrum: a consumer branches on whether a
+    preset produces vault documents or source changes, and nothing served today
+    distinguishes finer than that.
+
+    Naming what this does NOT decide, because the field's name invites the
+    assumption: this is a DESCRIPTION of a preset, not a gate on one. Nothing in
+    the run-admission path reads it - the submitter gate reaches the same
+    underlying question through its own derivation - so a wrong value here
+    misinforms a reader and refuses nobody.
+    """
+
+    CODING = "coding"
+    DOCUMENT_AUTHORING = "document_authoring"
+
+
+class DocumentCapability(StrEnum):
+    """One concrete vault document a preset's topology can produce.
+
+    Distinct from :class:`AuthoringCapability`, which says only WHETHER a preset
+    authors documents; this says WHICH. The two are served side by side and a
+    reader needs both, so they are not collapsible: a preset can be
+    document-authoring while producing a set this vocabulary does not yet name.
+
+    Members follow the research_adr phase machine's three gated outputs. The
+    vocabulary is deliberately narrower than the set of documents the wider
+    system knows about - an audit or a reference record has no producing
+    topology here, and a member with no producer would advertise a deliverable
+    no preset can deliver.
+    """
+
+    RESEARCH_DOCUMENT = "research_document"
+    ARCHITECTURE_DECISION = "architecture_decision"
+    PLAN_DOCUMENT = "plan_document"
+
+
+def authoring_capability(topology_type: TopologyType) -> AuthoringCapability:
     """Return the coarse authoring capability a topology delivers.
 
     ``document_authoring`` for the research_adr document phase machine; ``coding``
     for the coder topologies. This is diagnostic truth for the Rust backend, not
     product curation text.
+
+    Keyed on TOPOLOGY, which is known to misclassify a preset that runs a
+    document-authoring ROLE under a coder topology - the solo doc-editor lane is
+    exactly that shape. Re-keying is a live question and deliberately not settled
+    here; see the capability sweep test beside this module for what the two
+    keyings actually disagree about across the bundled presets.
     """
     if is_document_authoring_topology(topology_type):
-        return "document_authoring"
-    return "coding"
+        return AuthoringCapability.DOCUMENT_AUTHORING
+    return AuthoringCapability.CODING
 
 
-def supported_capabilities(topology_type: TopologyType) -> list[str]:
+def supported_capabilities(topology_type: TopologyType) -> list[DocumentCapability]:
     """Return the concrete document outputs a topology can produce.
 
     The research_adr phase machine authors a research document, an architecture
@@ -185,7 +231,11 @@ def supported_capabilities(topology_type: TopologyType) -> list[str]:
     document-authoring preset as a plain coding one.
     """
     if is_document_authoring_topology(topology_type):
-        return ["research_document", "architecture_decision", "plan_document"]
+        return [
+            DocumentCapability.RESEARCH_DOCUMENT,
+            DocumentCapability.ARCHITECTURE_DECISION,
+            DocumentCapability.PLAN_DOCUMENT,
+        ]
     return []
 
 

@@ -5,19 +5,23 @@ decomposition.  Contains no mutable state — pure data definitions
 and lookup tables only.
 """
 
+import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from langgraph.types import Command
 
-from ..graph.enums import PermissionOptionKind, ToolKind
+from ..graph.enums import PermissionOptionKind, ToolCallStatus, ToolKind
 from ..graph.events import DomainEvent
 
 __all__ = [
     "SequencedEvent",
     "StreamableGraph",
+    "action_detail_projection",
     "classify_tool_kind",
+    "map_action_item_status",
+    "parse_action_detail",
 ]
 
 
@@ -147,6 +151,109 @@ def classify_tool_kind(tool_name: str) -> ToolKind:
         if keyword in lower:
             return kind
     return ToolKind.OTHER
+
+
+# ---------------------------------------------------------------------------
+# Provider action items (F17) — a provider-internal action (an ACP CLI's own
+# built-in tools; Codex's commandExecution/fileChange/mcpToolCall) never goes
+# through a real LangChain BaseTool/ToolNode, so it never produces the
+# on_tool_start/on_tool_end pair or a ToolMessage a genuine tool call would.
+# Codex's own model (``codex_chat_model._completed_action_chunk``) instead
+# rides the model's own stream: it encodes the item's terminal outcome
+# directly into a synthetic tool_call_chunk's ``args``, deliberately so it
+# lands in checkpointed state the same way a real tool call's arguments do.
+# These helpers are the ONE place that shape is read, so the live stream
+# (streaming.transformer, watching astream_events as it happens) and a
+# settled run's REST snapshot (control.snapshot, reading the same shape back
+# out of checkpointed AIMessage.tool_calls after the aggregator's in-memory
+# state has been pruned) classify the identical detail identically — a
+# provider action can never be reported COMPLETED on one surface and PENDING
+# on the other because it was reached through two independent guesses.
+# ---------------------------------------------------------------------------
+
+#: Recognised terminal/near-terminal item statuses this repo's own
+#: ``ToolCallStatus`` already names. A provider action item's status
+#: vocabulary is owned by that provider's own schema (e.g. the Codex
+#: app-server's generated protocol), not enumerated here.
+_KNOWN_ACTION_ITEM_STATUSES = frozenset({status.value for status in ToolCallStatus})
+
+
+def map_action_item_status(raw_status: object) -> ToolCallStatus:
+    """Map a provider action item's status onto the closed ``ToolCallStatus`` set.
+
+    A value this repo already recognises (``completed``, ``failed``,
+    ``in_progress``, ``pending``) is honoured directly. Anything else -- a
+    policy rejection, an abort, a spelling this lane has not been observed
+    using yet -- is treated as FAILED rather than risking a silent COMPLETED
+    on a call that did not succeed. That silent-success risk is the exact
+    shape of F17: one of the 15 stuck-pending tool calls in the reference
+    incident was a policy-rejected command the model narrated but the record
+    never showed as anything but pending.
+    """
+    if isinstance(raw_status, str) and raw_status in _KNOWN_ACTION_ITEM_STATUSES:
+        return ToolCallStatus(raw_status)
+    return ToolCallStatus.FAILED
+
+
+def parse_action_detail(raw_args: object) -> dict[str, Any] | None:
+    """Parse a tool-call chunk's ``args`` as a JSON object, or return ``None``.
+
+    Two shapes reach here through the same field: a plain tool's raw input
+    (ACP's initial registration, or a partial ``tool_call_chunk`` arg-delta -
+    just the tool's own arguments, no ``status`` key) and Codex's one-shot
+    completed-action report (``{"command", "status", "exit_code", ...}`` -
+    see ``codex_chat_model._completed_action_chunk``). Both are returned as a
+    parsed dict when parseable; the caller distinguishes them by the presence
+    of ``status``. A non-JSON or non-object payload returns ``None`` rather
+    than raising, since malformed args must not stop live tool-call
+    registration.
+    """
+    if not isinstance(raw_args, str) or not raw_args:
+        return None
+    try:
+        parsed = json.loads(raw_args)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def action_detail_projection(
+    item_type: str, detail: dict[str, Any]
+) -> tuple[list[dict[str, str | None]], list[dict[str, str | int | None]]]:
+    """Project a Codex completed-action detail onto (content, locations).
+
+    Each action item type carries different REQUIRED fields (see
+    ``codex_chat_model._completed_action_chunk``, which reads only the
+    schema-required fields per variant); this mirrors that per-type shape
+    rather than guessing at a common one. ``fileChange`` is the only variant
+    that names a location a frontend could jump to, so it is the only one
+    that returns non-empty locations.
+    """
+    if item_type == "commandExecution":
+        command = detail.get("command")
+        exit_code = detail.get("exit_code")
+        parts = [f"$ {command}"] if command else []
+        if exit_code is not None:
+            parts.append(f"(exit {exit_code})")
+        text = "\n".join(parts)
+        return ([{"content_type": "text", "text": text}] if text else []), []
+    if item_type == "fileChange":
+        changes = detail.get("changes")
+        locations: list[dict[str, str | int | None]] = []
+        if isinstance(changes, list):
+            for change in changes:
+                if isinstance(change, dict):
+                    path = change.get("path")
+                    if isinstance(path, str) and path:
+                        locations.append({"path": path, "line": None})
+        text = f"{len(locations)} file(s) changed" if locations else ""
+        return ([{"content_type": "text", "text": text}] if text else []), locations
+    if item_type == "mcpToolCall":
+        server = detail.get("server")
+        tool = detail.get("tool")
+        text = f"{server}:{tool}" if server and tool else str(tool or server or "")
+        return ([{"content_type": "text", "text": text}] if text else []), []
+    return [], []
 
 
 def _map_acp_option_kind(option_id: str) -> PermissionOptionKind:

@@ -1,0 +1,542 @@
+---
+tags:
+  - '#audit'
+  - '#served-capability-contract'
+date: '2026-08-05'
+modified: '2026-08-05'
+body_schema: 'body-v1'
+body_hash: 'sha256:de63b9f8106eabd23b84c3b63a984d03cd0202aaa14eb07ce6755c176d79de4c'
+related:
+  - "[[2026-08-05-served-capability-contract-research]]"
+---
+
+# `served-capability-contract` audit: `what the served gateway contract tells a frontend versus what is true`
+
+## Scope
+
+This is a LIVING audit of the gateway's served contract, judged from the position
+of a frontend author who holds only the served API and the published
+documentation. It is appended to continuously; settled entries are never
+rewritten.
+
+**Method.** Live read-only interrogation of the gateway on `127.0.0.1:18100`
+(pid 63700, registry name `gateway-dev-mantest`, dev band), the committed
+`openapi.json`, the published docs, and the `.vault/adr/` corpus. GETs and
+validation-rejected POSTs only; no processes started or stopped, no runs started
+by the auditor, no repository files modified. Findings F16 onward are read-only
+observations of runs executed by a separate agent after the engine came up
+(`engine-dev-mantest` on 18760, at which point `authoring_backend_reachable`
+became `true`).
+
+**Coverage.** All 19 served paths enumerated from the live spec; live probes of
+`/health`, `/v1/service`, `/v1/presets` (with and without `workspace_root`),
+`/v1/provider-catalog`, `/v1/runs`, `/v1/runs/{id}`, `/v1/runs/{id}/history`,
+`/v1/team/status`, six `/.well-known/` and agent-card candidates, four auth
+failure modes, six validation-rejected `POST /v1/runs` shapes, the structured
+log, and the process registry.
+
+**Deliberate non-coverage - read this before quoting anything about streaming.**
+The SSE stream, `/v1/runs/{id}/messages`, and both `respond` routes were NOT
+exercised live, because a run belonging to another agent was in flight and
+driving it risked disturbing work in progress. F1's streaming finding therefore
+rests on the served spec and the docs, NOT on a live subscription. The defect F1
+records is that the surface is undocumented, not that it misbehaves - but the
+live half is unverified and must be labelled as such wherever it is cited. This
+matters more than a normal coverage gap: live progress is the primary
+interaction of an orchestration product, and it is the surface this audit has
+the least direct evidence about. `/v1/runs/{id}/history` was subsequently read
+live for the F16-F22 tranche, so that route alone has since been exercised.
+
+**Finding numbering and how to append.** Findings carry stable identifiers `F1`,
+`F2`, ... assigned in order of discovery, never renumbered and never reused. The
+ADR, the plan, and every downstream Step reference these identifiers, so
+renumbering would orphan the trail. A new finding takes the next free number
+after the highest already present and is appended to the Findings section in
+numeric order. Severity is recorded per finding and is not adjusted by later
+tranches; a superseded or retracted finding keeps its number and says so in
+place. The current highest identifier is **F22**.
+
+**Tranche provenance.** F1-F15 are the contract audit of the served surface,
+2026-08-05, before the engine was reachable. F16-F22 are live-run findings from
+the same day, after the engine came up and real runs executed. Both tranches are
+2026-08-05; the engine's arrival between them is the reason several F1-F15
+observations about an unreachable authoring backend read differently than they
+now would.
+
+## Findings
+
+### F1-no-client-facing-api-documentation | critical | 13 of 19 served paths appear in no document, and the one streaming doc points at a route that 404s
+
+Undocumented paths: `/v1/provider-catalog`, `/v1/runs/{id}/stream`,
+`/v1/runs/{id}/history`, `/v1/runs/{id}/messages`, `/v1/runs/{id}/archive`,
+`DELETE /v1/runs/{id}`, both `respond` routes, `/v1/team/status`, `/health`,
+`/admin/shutdown`, and the `/internal/*` set.
+`docs/a2a-edge-conformance-verb-mapping.md:20-23` tells a client author the
+progress stream is `GET /api/threads/{id}/stream`; no `/api/*` path is served,
+and the real route is `GET /v1/runs/{run_id}/stream`. The same file at L41-43
+claims the internal `/api/threads*`, `/api/health`, and internal preset routes
+"remain temporarily for internal callers and backward compatibility" - they do
+not. `docs/` contains zero occurrences of "openapi"; `README.md` contains zero
+occurrences of `Bearer`, `/v1/`, `service.token`, or `workspace_root`.
+CONSEQUENCE: a frontend author wires a stream URL that 404s, and on finding the
+real one gets no event names, no frame envelope, no `Last-Event-ID` or replay
+parameter, and no heartbeat or terminal-event semantics - none of which OpenAPI
+can carry. The WebSocket edge advertised at `README.md:17-18` has no documented
+URL or message schema at all. CLASSIFICATION: genuine defect. The authorizing
+records `2026-04-05-contract-validation-adr` and
+`2026-02-26-frontend-backend-contract-adr` are both superseded and their
+continuous-integration gate deleted; `2026-07-14-a2a-edge-conformance-adr`
+L385-388 explicitly predicted this outcome and the replacement coverage it
+demanded was never filled. REMEDY: publish a client guide; point `README.md` and
+`docs/index.rst` at `/docs` plus `/openapi.json` as THE contract; document the
+event taxonomy, frame schema, and `last_sequence` reconnect protocol; correct or
+delete the stale `/api/*` claims. The correction is independent of the guide and
+must not wait for it.
+
+### F2-eligible-is-structurally-always-false | critical | every preset is ineligible, and the reasons are misattributed to unrelated presets
+
+All 20 presets return `profiles[0].eligible: false`, and every one - including
+all 8 `mock-*` and all 5 `deterministic-*` - carries the identical
+`unavailable_reasons` pair "authoring engine is not reachable" and "production
+acceptance gate for the research-to-ADR capability has not passed".
+`mock-success-single` is a coding fixture with no relation to research-to-ADR.
+Meanwhile `POST /v1/runs` accepts runs and a live run reports `status: running`.
+CONSEQUENCE: a user interface gating on `eligible` offers nothing; one gating on
+`loadable` offers everything, including 16 unrunnable fixtures. A "why can't I
+run this?" tooltip tells the user a mock coding preset is blocked by a
+research-to-ADR acceptance gate - actively misleading, not merely unhelpful.
+CLASSIFICATION: genuine defect, a stranded field.
+`2026-08-02-provider-model-catalog-adr` L95-100 retired provider policy from
+presets and its 2026-08-03 amendment L153-158 removed the profile pair from
+START responses but left it on READ surfaces. `eligible` is defined only in the
+superseded `2026-07-15-model-profiles-adr` L48 and survives in code on
+`ProfileSummary` (`src/vaultspec_a2a/api/schemas/gateway.py:919`), attached to
+the exact concept the 2026-08-02 record retired. No accepted record states what
+it means under the frozen-assignment contract. REMEDY: either retire
+`eligible`/`profiles` from `/v1/presets` consistently with the amendment, or
+redefine it as "runnable given a valid selection" and scope each reason to the
+preset it applies to. Breaking wire change.
+
+### F3-openapi-declares-no-auth | high | the published contract models authentication as an optional string header and documents 401 nowhere
+
+`components.securitySchemes` is null, top-level `security` is null, and
+per-operation `security` is null on all 21 operations. `authorization` is
+modeled as an OPTIONAL plain-string header parameter on every route. No route
+documents `401`, though `DELETE /v1/runs/{run_id}` documents `404/409/503`,
+proving the others could. Live behaviour verified across four auth failure
+modes: absent, malformed, and wrong-scheme all return 401 with
+`WWW-Authenticate: Bearer` and `{"detail":"Invalid gateway service token"}`; a
+valid token returns 200. CONSEQUENCE: a generated client has no auth affordance
+- no `setBearerToken`, just an optional string the caller must know to populate.
+Swagger UI at the public `/docs` has no Authorize button, so every "Try it out"
+returns 401 with no hint why. Auth is documented in prose at
+`docs/operations.rst:64-77`, but in an operator chapter the README never links,
+and the concrete path `~/.vaultspec-a2a/service.token` appears nowhere - only
+the bare filename. CLASSIFICATION: genuine defect. No record governs the OpenAPI
+document, security schemes, or generated-client support; the two that once did
+are superseded and their generator `scripts/export_openapi.py` was deleted.
+REMEDY: add an `HTTPBearer` security scheme, apply it to `/v1` and `/admin`,
+drop the hand-rolled `authorization` parameter, declare `401` responses.
+Additive - it describes auth that already exists on the wire.
+
+### F4-fixtures-served-without-a-filter | high | 16 of 20 presets are test scaffolding, `is_mock` does not identify them, and no filter parameter exists
+
+Product presets number 4: `vaultspec-adr-research`,
+`vaultspec-adr-research-clarify`, `vaultspec-doc-editor`,
+`vaultspec-solo-coder`. Non-product number 16: five `deterministic-*`, eight
+`mock-*`, `provider-condition-probe`, `vaultspec-adr-research-deterministic`,
+and `vaultspec-adr-research-mock`. `is_mock` is true for only the eight
+`mock-*`, so `vaultspec-adr-research-mock` reports `is_mock: false, origin:
+bundled` - a preset named `-mock` that the mock flag denies. `/v1/presets`
+accepts no filter parameter; its only declared parameter is the optional
+`workspace_root`. CONSEQUENCE: filtering on `is_mock` still leaves eight
+fixtures in the product picker, one of them named `-mock`. No served field
+separates product from scaffolding - `origin` reports `bundled` for both.
+CLASSIFICATION: undocumented accident. No record rules that mock presets belong
+in the served list or that filtering is the client's job; `is_mock` rests on a
+code comment alone (`src/vaultspec_a2a/api/schemas/gateway.py:942`).
+`2026-03-31-decoupled-mockllm-adr` is status PROPOSED, never accepted, and
+scoped to the mock transport rather than served presets;
+`2026-07-18-desktop-product-profile-adr` excludes mocks from the WHEEL, meaning
+packaging, not the API. REMEDY: add a fixture-exclusion parameter defaulting to
+product-only, or replace the boolean with an accurate `origin` enum of product,
+fixture, and probe.
+
+### F5-provider-surfaces-disagree | high | `/v1/service` and `/v1/provider-catalog` disagree on which providers are usable
+
+`/v1/service` reports `provider_eligibility: eligible` and `eligible_providers:
+[claude, codex, kimi]`. `/v1/provider-catalog` at the same instant reports
+claude with `admission: not_admitted`, `selectable: false`, a reason stating the
+lane "has no exact completed-turn proof; evidence from another execution mode is
+not inherited", and `catalog.state.status: unavailable` with `models: []`. Only
+codex reports `selectable: true`. CONSEQUENCE: a provider picker built from
+`/v1/service` offers three providers, two of which cannot be selected. `POST
+/v1/runs` requires a selection naming a real catalog revision and entry
+identifier, which the unadmitted lanes cannot supply. Two plausible readings of
+the same fact, one of which fails silently at run start. CLASSIFICATION:
+documented decision with an undocumented consequence. Completed-turn admission
+is ruled (`2026-08-02-provider-model-catalog-adr` L70, L103-106, with L136-137
+conceding that some configured providers remain visible but unselectable), but
+nothing rules that `eligible_providers` may mean something different from
+`selectable`. REMEDY: rename to `configured_providers`, or derive it from the
+same admission predicate so the two surfaces cannot diverge. Believe
+`/v1/provider-catalog`.
+
+### F6-readiness-vocabulary-undefined | high | the health vocabulary is undefined and self-contradictory in three separate places
+
+`/health` serves `checks.worker.status: ok` alongside `worker_connected: false`
+and `worker_status: pending`. `/v1/service` serves `status: ready`,
+`can_accept_run: true`, `worker_ready: true`, and `degraded_reasons: []` while
+`authoring_backend_reachable` was false. A live run served `degraded_reasons:
+[execution_state_projection_missing]` beside `repair_status: healthy` and
+`execution_readiness: healthy`. CONSEQUENCE: no client can compute "is this
+usable?". `checks.worker.status: ok` next to `worker_connected: false` is a
+plain contradiction inside one payload, and a green badge derived from
+`degraded_reasons: []` hid that the document-authoring backend - the capability
+the product exists for - was unreachable. CLASSIFICATION: split. RULED and
+therefore not a defect: `worker_ready: true` on a cold worker, per
+`2026-07-18-desktop-product-profile-adr` L173-176 ("Worker absence before demand
+is informational, not degradation") and L319. NOT RULED anywhere:
+`degraded_reasons`, `can_accept_run`, and `authoring_backend_reachable` have
+zero hits in the decision corpus and originate in execution records; whether an
+unreachable authoring backend SHOULD degrade the service was never decided. A
+premise correction belongs here: `2026-07-16-authoring-contract-adr` does not
+govern health at all - it rules where the document-authoring role and topology
+constants live. REMEDY: rule the authoring-backend question; define the
+vocabulary in `docs/glossary.rst`; rename `checks.worker.status` to express
+"startable" rather than "ok".
+
+### F7-capability-disclosure-empty-and-wrong | medium | capability fields are empty on 16 presets and miscategorize the document editor as coding
+
+`supported_capabilities` is populated only on the four `research_adr` presets,
+with `research_document`, `architecture_decision`, and `plan_document`; it is
+empty on the other 16. A second field, `authoring_capability`, reports `coding`
+for `vaultspec-doc-editor` despite that preset's own served description
+beginning "Single vaultspec-doc-editor worker, no supervisor: one agent applies
+one natural-language instruction to one existing vault document".
+`vaultspec-solo-coder` likewise reports `coding` with an empty capability list.
+CONSEQUENCE: a capability-driven launcher can only offer research, decision, and
+plan authoring. Document editing and solo coding are declared nowhere
+machine-readably, and the one taxonomy field that IS populated files the
+document editor under coding. CLASSIFICATION: genuine defect.
+`2026-08-02-provider-capability-evidence-adr` explains an EMPTY list, since
+capability claims are proof-gated; it does not explain a WRONG one. REMEDY:
+populate capabilities across presets and correct the document editor's
+`authoring_capability`. See F16, which supplies strong evidence that this field
+is not cosmetic.
+
+### F8-team-status-contradicts-runs | medium | `/v1/team/status` reports an idle system during an active run
+
+`/v1/team/status` returned `{"api_version":"v1","agents":[],"active_runs":[],
+"pending_permissions":[]}` while `/v1/runs` at the same instant returned a run
+with `status: running`. CONSEQUENCE: a "current activity" panel built on
+`/v1/team/status` shows an idle system during an active run. CLASSIFICATION:
+genuine defect, consistent with the known prior finding that the same route
+serves null provider and model values. REMEDY: back `active_runs` with the same
+projection `/v1/runs` uses, or remove the route rather than serve a false empty.
+See F18, which finds the same surface wrong in the opposite direction.
+
+### F9-run-status-serves-dead-fields | medium | run status serves two empty fields that look authoritative while the real assignment sits elsewhere
+
+A live run served `roles: []` and `assignments: []` while `frozen_assignment`
+carried the real assignment including provider identity, execution mode, and
+catalog revision. CONSEQUENCE: a panel rendering "which agents and models are
+running?" from `assignments` shows nothing on a fully-resolved run, and nothing
+in the served payload indicates `frozen_assignment` is the authority.
+CLASSIFICATION: documented decision, incompletely applied. The 2026-08-03
+amendment to `2026-08-02-provider-model-catalog-adr` L153-158 rules that
+run-start and run-commit responses disclose exactly one execution authority and
+that the retired profile pair is "removed from those responses rather than
+served empty" - but scoped removal to start and commit, so run-status still
+serves them empty, precisely what the amendment refused to do. REMEDY AND
+CLASSIFICATION NOTE, recorded so it is not misread later: this is EXECUTION OF
+AN EXISTING RULING and needs no new decision record, but it REMOVES FIELDS THE
+DASHBOARD CONSUMES TODAY, so it is a breaking wire change requiring a plan Step
+plus cross-repository coordination. "Already ruled" does not mean "safe to land
+unilaterally".
+
+### F10-undiscriminated-response-union | medium | `POST /v1/runs` returns a four-way union with no discriminator
+
+The 201 response is an `anyOf` of the start, prepare, commit, and release
+response models with no `discriminator`. The selector is `stage` on the REQUEST,
+whose four values are described only inside the enum's own description.
+CONSEQUENCE: generated clients produce an untagged union the caller must narrow
+by hand, and the four-stage reservation lifecycle - genuinely useful - is
+invisible to anyone reading the route. CLASSIFICATION: genuine defect,
+mechanical. REMEDY: add a discriminator, or split by response code or route, and
+document the lifecycle.
+
+### F11-private-schema-names-leak | medium | underscore-prefixed private schema names are published in the contract
+
+`components.schemas` contains `_AgentSnapshot`,
+`_ClarificationRequestSnapshot`, `_ClarificationQuestionSnapshot`,
+`_PermissionSnapshot`, and `_PermissionOptionSnapshot`. CONSEQUENCE:
+underscore-leading names are invalid or mangled identifiers in most code
+generation targets, and these sit on the clarification and permission surfaces -
+the human-in-the-loop path. CLASSIFICATION: genuine defect. REMEDY: rename the
+models; they are public regardless of the Python convention.
+
+### F12-presets-workspace-root-optional | medium | `/v1/presets` silently returns a different answer without `workspace_root` while its sibling requires it
+
+`workspace_root` is declared optional on `/v1/presets` and required on
+`/v1/provider-catalog`, which 422s cleanly when it is omitted. The bare
+`/v1/presets` call adds "agent harness incomplete: no workspace resolved for a
+document-authoring preset" to the `research_adr` presets' unavailable reasons;
+the parameterized call does not. No error either way. CONSEQUENCE: omitting an
+optional parameter yields a quietly more-broken picture with no signal that the
+wrong question was asked, and two sibling discovery routes carry opposite
+conventions. CLASSIFICATION: genuine defect, an inconsistency between siblings.
+REMEDY: make it required to match its sibling, or return a top-level
+workspace-resolution flag.
+
+### F13-no-topology-discovery | low | no route enumerates topologies or their structure, and the topology enum is defined in no document
+
+Chains are inferable only from each preset's `topology` string - `pipeline`,
+`pipeline_loop`, `star`, `research_adr`. CONSEQUENCE: a frontend cannot render
+what a preset will actually DO, only its name and an undefined enum.
+CLASSIFICATION: undocumented accident. REMEDY: serve topology metadata - node
+sequence, roles, pause points - on the preset, or add a topologies route.
+
+### F14-stale-compiler-module-docstring | low | the graph compiler's module docstring claims three topology types where four are dispatched
+
+`src/vaultspec_a2a/graph/compiler.py:4` states "Three topology types are
+supported", listing star, pipeline, and pipeline_loop, while the function
+docstring at `:931` says "Supports four topology types" and `:1051` dispatches
+the research-to-ADR topology - the flagship chain. The module docstring is the
+sole stale copy. CONSEQUENCE: none directly, being internal source a frontend
+author never sees; recorded because it is F13's omission one layer down.
+CLASSIFICATION: genuine defect, documentation. REMEDY: update the module
+docstring.
+
+### F15-fatal-errors-bypass-structured-log | low | boot failures reach stderr only, and the live instance's registry record carries a null log path
+
+`~/.vaultspec-a2a/runtime/gateway.log` (1843 JSON lines) contains zero lines
+matching band-port, live-listener, or traceback patterns; the level tally is
+1239 informational, 554 warning, 51 error, and all 51 errors are telemetry
+exporter noise about an unavailable local collector. The reported boot failure
+reached stderr only. The live instance's process-registry record carries a null
+log path while siblings carry real paths, and two records both claim port 18110.
+CONSEQUENCE: none for a frontend author; operator-facing. CLASSIFICATION: mixed.
+Structured-logging LANES are ruled (`2026-07-19-observability-lanes-adr`
+L80-86), but a guarantee that EVERY ERROR REACHES THE STRUCTURED LOG is NOT
+FOUND anywhere in the corpus, so that completeness gap is genuinely unowned. The
+log path belongs to the process registry by design
+(`2026-07-15-dev-process-registry-adr` L38) rather than to the discovery record,
+but within the registry it is inconsistently populated and the duplicate
+port-18110 records are stale. REMEDY: route startup failures through the
+structured logger before exit; populate the log path consistently; reap stale
+registry records.
+
+### F16-completed-run-produces-no-artifact | critical | a document-authoring run completed with real model output and produced nothing applyable
+
+Run `866679f3` (`vaultspec-doc-editor`) reports `status: completed` with
+`proposal_ids: []`, `changeset_ids: []`, `artifacts: []`, an empty
+`authoring_session_id`, `approval_status: null`, `degraded_reasons: []`,
+`repair_status: healthy`, and `execution_readiness: healthy`. The model's output
+- a complete document with an appended Summary section - exists only as prose
+inside an assistant chat message in the transcript. The preset's own served
+description states that no persona writes to the filesystem directly, that all
+authoring goes through engine proposals, and that a human applies through the
+dashboard review lane; no proposal was ever created, so there is nothing for the
+review lane to apply. Both completed document-editor runs show the same empty
+artifact set. CONSEQUENCE: the product's core claim reports SUCCESS while
+delivering nothing applyable. A frontend sees a completed run with no
+degradation and has no document to show or apply. This is a false green in the
+most literal sense - the run is green, the model did the work, and the work is
+unreachable. CAUSAL LINK TO F7, strongly evidenced but not yet code-confirmed:
+`authoring_capability` takes exactly two values across all 20 served presets,
+and the split against artifact production is perfect. The four presets valued
+`document_authoring` produced proposals - even the FAILED run `1226efda` emitted
+one - while the 16 valued `coding`, including `vaultspec-doc-editor`, produced
+none. The outcome is inverted: the run that failed produced an artifact, the two
+that completed produced none, and the only distinguishing variable is that bare
+string. STILL TO CONFIRM IN CODE: that the authoring-bridge and proposal path is
+genuinely gated on this value. The remedy branches on it - if gated, reclassify
+the preset AND make the value a typed enum; if not gated, the missing proposal
+has a separate cause and F7 is merely cosmetic. REMEDY: either the document
+editor must submit its output as an engine proposal, or a run producing no
+artifact must not report completed with empty degradation. Both, ideally: the
+missing artifact is the bug, the silent green is the safety failure.
+
+### F17-tool-call-status-never-reconciled | high | every tool call stays `pending` on a completed run, including one the model narrates as rejected
+
+Run `866679f3`, status completed, carries 15 tool calls and every one is
+`status: pending` with empty `locations` and empty `content`. The transcript
+proves these are not genuinely pending - the model narrates their results, and
+one was actively rejected, the model reporting that a hash check "hit a policy
+rejection because I wrapped PowerShell inside PowerShell". That rejection is
+nowhere in the tool-call record. CONSEQUENCE: a frontend rendering tool activity
+shows 15 perpetually-spinning operations on a finished run and can never show
+which succeeded, which failed, or what any of them touched. Tool-call state is
+write-once at dispatch and never advanced to a terminal value.
+CLASSIFICATION: genuine defect, and an instance of the bare-string status
+problem - this `status` has no terminal-state contract.
+
+### F18-agents-projection-not-run-scoped | high | a one-worker pipeline run reports the full eight-agent roster of a different topology
+
+Run `866679f3` is `vaultspec-doc-editor` with `topology: pipeline` and
+`worker_count: 1`. Its history reports eight agents, none of which is the
+document editor: the complete research-to-ADR roster including research
+dispatch, synthesis, research review, decision author, decision review, plan
+author, and plan review, each with full persona descriptions referencing the
+research_adr topology. CONSEQUENCE: a frontend agent panel renders seven roles
+that are not participating, from a topology the run does not use. Combined with
+F8, the agent-identity surface is unreliable in BOTH directions - empty when it
+should be populated, populated with the wrong roster when it should be scoped.
+Inside the same projection, every agent reports a populated provider alongside a
+null `model` and a populated `model_name` - a null-versus-populated
+inconsistency in one object, matching the known team-status defect.
+CLASSIFICATION: genuine defect.
+
+### F19-last-sequence-zero | high | `last_sequence` is 0 on a completed run, so the reconnect protocol cannot work
+
+Run `866679f3` reports `last_sequence: 0` while the same payload carries three
+messages, 15 tool calls, `history_depth: 2`, `checkpoint_step: 2`, and
+`replay_status: durable`. CONSEQUENCE: `last_sequence` is the value a client
+would use to resume an interrupted subscription; if it is always 0, a
+reconnecting frontend either replays everything or replays nothing. F1 already
+established that the replay protocol is undocumented, so no client can even
+discover the intended semantics. CLASSIFICATION: genuine defect. This compounds
+the deliberate non-coverage recorded in Scope and must be verified as part of
+driving the streaming surface live.
+
+### F20-run-stranded-in-reconciling | medium | a run stranded in `reconciling` survives a restart with no recovery path and no defined meaning
+
+Run `6943bd0d` (`mock-success-single`), started before the engine existed,
+remained `reconciling` after both the gateway and the worker were restarted. It
+is the only run returned by the default runs listing, which filters to active
+state, so it permanently occupies the active-run view. CONSEQUENCE: a frontend's
+active-run list is headed indefinitely by a dead run. No served field explains
+what `reconciling` means, how long it may persist, or what a client should do.
+CLASSIFICATION: genuine defect, and another undefined vocabulary value.
+
+### F21-emitted-document-duplicates-a-heading | medium | the document content the model emitted contains two identical section headings
+
+The document body emitted in run `866679f3` contains two `## Summary` sections -
+the restated existing content and the newly appended two sentences.
+CONSEQUENCE: lower severity than F16 only because the proposal never reached
+disk. If F16 is fixed without addressing this, the first thing the review lane
+receives is a malformed document. CLASSIFICATION: genuine defect, content
+quality. REMEDY: a content-quality gate on authored output. This is direct
+evidence that authoring obligations - validation against the persisted document
+conventions - are a real requirement rather than a nicety.
+
+### F22-failed-run-reports-healthy | high | a failed run reports `healthy` on every structured health field it serves
+
+Run `1226efda` (`vaultspec-adr-research`), status failed, serves `failure_reason:
+"Ingest stalled: no event from the graph for over 90s"` alongside
+`repair_status: healthy`, `execution_readiness: healthy`, `degraded_reasons:
+[]`, an empty repair reason, and `provider_condition: unknown`. CONSEQUENCE: the
+prose failure reason is genuinely useful and specific, but every MACHINE-READABLE
+health field says nothing is wrong on a run that failed. A frontend gating on
+the structured fields sees a healthy run and must fall back to parsing status
+and prose. CLASSIFICATION: genuine defect. This is F6 with a concrete failure
+attached: these fields are not merely undefined, they are actively WRONG at the
+moment they matter most. It shares its defect class with F16's green-on-empty-
+artifact and F17's pending-on-complete.
+
+### F23-and-beyond | low | reserved marker for continuous appending
+
+New findings land immediately above this marker, taking the next free identifier
+after the highest already assigned. This entry carries no finding; it exists so
+the append point is unambiguous and so a later tranche does not have to guess
+where the log ends. Delete nothing above it.
+
+## Recommendations
+
+### What a frontend literally cannot do today
+
+Holding only the served API and the published documentation, a competent
+developer cannot: authenticate without reverse-engineering, because auth is an
+optional string header with no security scheme and the token's path appears in
+no document (F3); receive live progress, because the only document naming a
+stream names a route that 404s and the real route's event names, frame schema,
+replay protocol, and terminal semantics are undocumented (F1, F19); decide what
+to show the user, because `eligible` is false for everything and `loadable` true
+for everything, with neither defined anywhere (F2); show only real products,
+because 16 of 20 presets are fixtures and the flag catches eight while
+mislabelling one literally named `-mock` (F4); build a working provider picker,
+because two endpoints disagree and trusting one yields two dead options (F5);
+start a run from the schema alone, because a body without a metadata envelope is
+schema-valid and 422s at runtime - a RULED cost, accepted on the premise that
+the only caller is the engine; advertise two of the product's three
+capabilities, because they appear in no machine-readable field and the one
+populated taxonomy field files the document editor under coding (F7); trust a
+green light, because ready, accepting, and undegraded are served while the
+authoring backend is unreachable (F6), while a failed run reports healthy on
+every structured field (F22), and while a completed run reports success having
+produced nothing (F16).
+
+### The through-line, and what it means for the decision to be taken
+
+The TYPED surface is genuinely strong - 80-plus closed schemas, constrained
+strings, and an artifact-drift test most projects lack. What is missing is the
+SEMANTIC layer: which of two disagreeing fields is authoritative, what a boolean
+means, which presets are real, and what arrives on the stream.
+
+The live-run tranche sharpens this into something more specific than "the
+documentation is thin". In F16, F17, and F22 the PROSE is honest and the TYPED
+surface lies: the model narrates a rejected tool call whose record says pending;
+a failure reason names a 90-second graph stall while every health field says
+healthy; a transcript carries a finished document while the artifact list is
+empty and degradation is empty. The typed surface is precisely what a frontend
+must gate on. Where a served vocabulary is a bare string with no owning
+declaration and no terminal-state contract, it drifts from the truth it is meant
+to encode, and F16 shows the cost is not cosmetic: a mistyped capability string
+appears to switch the product's primary function off with no error anywhere.
+
+The originating cause is recorded plainly in the corpus: this contract was
+designed for exactly one consumer, the dashboard engine, which already knows the
+answers out of band. `2026-08-03-production-boundary-adr` L111-113 makes the
+assumption explicit. The claim that the service can feed any frontend that
+connects to it is NOT SUPPORTED; it can feed the one frontend that already knows
+what its fields mean.
+
+### The decision a follow-on record must make
+
+A follow-on decision record must rule the canonical typing of served
+vocabularies: where the enumerated types live, that emitting layers derive from
+them rather than restating literals, that consumers import from the owning
+module only, what makes a value enum-worthy as against legitimately free-form,
+and the migration stance for values the dashboard consumes under the frozen edge
+contract. That decision is not recorded here.
+
+Two questions this audit found unowned should be settled by that record or
+explicitly assigned elsewhere: whether an unreachable authoring backend should
+degrade the service (F6), and whether every error is guaranteed to reach the
+structured log (F15) - the latter has no owner anywhere in the corpus.
+
+### Remediation grouping
+
+Additive and unilateral, safe to land on this side of the edge: F1, F3, F10,
+F11, F13, F14, F15. Breaking, changing what a served field MEANS and therefore
+requiring cross-repository coordination: F2, F4, F5, F6, F9, F12. Behavioural
+defects requiring investigation before a fix is specified: F16, F17, F18, F19,
+F20, F21, F22. F9 is a special case - it is execution of an already-ruled
+amendment, needing no new decision, but it removes fields the dashboard consumes
+and is therefore breaking. F16 requires its code-gating hypothesis confirmed
+before any fix is attempted, because the remedy branches on the answer.
+
+### Two supporting facts worth preserving
+
+The repository-root `openapi.json` and the live `/openapi.json` are IDENTICAL,
+verified field-for-field: 19 paths each, same version, same specification
+version. The artifact is guarded by
+`src/vaultspec_a2a/api/tests/test_openapi_artifact.py`, which asserts valid
+encoding, path completeness in both directions, version match, full
+field-for-field equality against the freshly-built application, and the absence
+of development-record references. It carries no marker, so it runs in the
+default gate. Its regeneration path is the same file run as a script - and that
+command is documented NOWHERE outside the test file, not in the contributing
+guide, the development documentation, or the task runner. The strongest part of
+this contract surface rests on a test nobody is told about.
+
+Protocol conformance to the public agent-to-agent specification is NOT claimed
+anywhere and was affirmatively rejected: `2026-02-27-agent-definition-schema-adr`
+L298-303 rejected the well-known agent card on the grounds that the agents are
+compiled graph nodes inside a single process, and both protocol records were
+amended on 2026-07-15 to drop the ambition, stating that "a2a" survives as a
+project label only. Six well-known and agent-card candidates were live-probed
+and all 404 - correct behaviour, not an oversight. "Edge conformance" means
+conformance to the private, frozen dashboard contract. The only residual issue
+is that no published document tells an arriving reader the name is vestigial.

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:de63b9f8106eabd23b84c3b63a984d03cd0202aaa14eb07ce6755c176d79de4c'
+body_hash: 'sha256:808dbd97ebe71e204fa0fcaa497ac6c6f4b2317a99179d8453b9cf7c9f142c9c'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,7 +54,7 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F22**.
+place. The current highest identifier is **F23**.
 
 **Tranche provenance.** F1-F15 are the contract audit of the served surface,
 2026-08-05, before the engine was reachable. F16-F22 are live-run findings from
@@ -435,7 +435,64 @@ attached: these fields are not merely undefined, they are actively WRONG at the
 moment they matter most. It shares its defect class with F16's green-on-empty-
 artifact and F17's pending-on-complete.
 
-### F23-and-beyond | low | reserved marker for continuous appending
+### F23-served-vocabulary-typing-is-split | high | the same kind of vocabulary is served as a closed enum in 32 places and as a bare string in 15, and two concepts are served both ways at once
+
+Measured against the served specification on 2026-08-05, not assumed. The
+contract ALREADY carries roughly 32 properly typed, closed enumerations,
+including `ThreadStatus` (11 members), `ToolCallStatus`, `AdmissionState`,
+`HealthState`, `AuthenticationState`, `CatalogStatus`, `WorkerLifecycleState`,
+`LivenessState`, `GatewayReadiness`, `ProviderEligibility`, `RunAdmission`,
+`ToolKind`, `PermissionOptionKind`, `AgentLifecycleState`, `Provider`, `Model`,
+and `RunStage`. This corrects a premise worth recording: `RunStage` is NOT a
+lone precedent, and the surface is not uniformly stringly-typed.
+
+The defect is the SPLIT, and it has three distinct shapes.
+
+SHAPE ONE - an enumeration exists in code and is DISCARDED at the wire.
+`TopologyType` is a four-member string enumeration in
+`src/vaultspec_a2a/team/team_config.py:106`, yet `PresetSummary.topology` is
+served as a bare nullable string. `Provider` is a nine-member enumeration served
+correctly as an enum on the agent snapshot's `provider`, while the SAME concept
+is served as a bare string in `provider_id` on five other models. One concept,
+two typings, one payload.
+
+SHAPE TWO - a vocabulary has no declaration anywhere. `authoring_capability`,
+`origin`, `repair_status`, `execution_readiness`, `provider_condition`,
+`approval_status`, `worker_status`, `semantic_status`, `semantic_phase`,
+`replay_status`, and `degraded_reasons` are bare strings or string arrays with
+no owning type in code or on the wire. `origin`'s legal values exist only in a
+source comment - "bundled | workspace | test_mock" at
+`src/vaultspec_a2a/api/schemas/gateway.py:945` - which is a declaration a client
+cannot read and a compiler cannot check. `supported_capabilities` is an
+unconstrained string array. This is the direct cause of F4, F6, F7, and F13.
+
+SHAPE THREE, and the one that bounds what typing can fix - a vocabulary is
+PROPERLY TYPED and still wrong. `ToolCallStatus` is a closed enum with a genuine
+terminal set (`pending`, `in_progress`, `completed`, `failed`), and F17 happened
+anyway: 15 calls stranded at `pending` on a completed run. `ThreadStatus`
+properly contains `reconciling`, and F20 happened anyway. Typing constrains a
+value's DOMAIN; it never obliges a writer to ADVANCE the value, and it cannot
+make a written value true. F17, F20, and F22 are therefore NOT typing defects
+and will not be closed by typing work.
+
+A further hazard for anyone executing the remedy: `AdmissionState` is declared
+twice, at `src/vaultspec_a2a/control/drain.py:36` (open, draining - the drain
+gate) and `src/vaultspec_a2a/providers/provider_catalog.py:106` (admitted,
+not_admitted, unknown - completed-turn evidence). These are genuinely DISTINCT
+concepts that happen to share a name. A remedy phrased as one declaration per
+NAME would wrongly merge them; the rule must be one declaration per CONCEPT.
+
+CONSEQUENCE: a frontend can generate exhaustive, checked handling for the typed
+half of the surface and must hand-maintain string literals for the rest, with
+nothing marking which half a given field is in. CLASSIFICATION: genuine defect
+for shapes one and two; shape three is recorded here as a SCOPE LIMIT on the
+remedy rather than as a typing defect. REMEDY: shapes one and two are the
+follow-on decision record's subject. Shape three needs a separate obligation -
+a transition or terminal-state contract with a writer that is required to
+advance the value - and must not be folded into the typing work, or F17 and F22
+will be marked closed while still occurring.
+
+### F24-and-beyond | low | reserved marker for continuous appending
 
 New findings land immediately above this marker, taking the next free identifier
 after the highest already assigned. This entry carries no finding; it exists so

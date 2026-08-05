@@ -6,9 +6,10 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:418cf4294944f7201f9e09611d367e9fb941dd8db848991d8dd44ed9fa2486be'
+body_hash: 'sha256:5c708082926b0bd09d555e0d3180834af7b0758e406bce0a5ed8d226ef98a6d2'
 related:
   - '[[2026-08-05-served-capability-contract-adr]]'
+  - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
   - '[[2026-08-05-served-capability-contract-gateway-contract-audit]]'
   - '[[2026-08-05-served-capability-contract-research]]'
 ---
@@ -22,6 +23,7 @@ Auto-generated index of all documents tagged with `#served-capability-contract`.
 ### adr
 
 - `2026-08-05-served-capability-contract-adr` - `served-capability-contract` adr: `the capability a preset serves, and who routes to it` | (**status:** `proposed`)
+- `2026-08-05-served-capability-contract-canonical-vocabulary-adr` - `served-capability-contract` adr: `one declaration per served vocabulary` | (**status:** `proposed`)
 
 ### audit
 

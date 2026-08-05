@@ -8077,3 +8077,83 @@ a duplication one: the knowledge lived in no home, so it was absent from one sit
 and invisible at three others. Boarded rather than folded, because the four
 differ in what they run and what they read back, and a shared home built on the
 assumption they are the same mechanism would be the next wrong negative.
+
+### the-admission-decision-conditional-yes-nothing-admitted | critical | deferred five times, now ruled
+
+The egress admission decision is made: **an egressing harness MCP server MAY be
+admitted in principle, no candidate qualifies today, and web-search/fetch
+delivery is permanently foreclosed** to this mechanism.
+
+The "in principle" half matters as much as the conditions. A categorical never
+would have recreated the dead-capability class the governing ADR itself
+condemns, and the registry's own tripwire docstring names the admission act as
+an expected future event - the mechanism was built expressive, not prohibitive.
+
+Five conditions, of which two are the load-bearing ones: **OWNERSHIP** is the
+discriminating property that survived the ADR's own reason-corrections - not
+credentials, not billing, not pinnability - so a third-party-operated,
+contract-less endpoint fails permanently; and the **entry's own completed-work
+proof per served lane**, which lane web-proof does NOT discharge.
+
+### the-predicate-has-members-the-subject-set-is-empty | high | a correction to my framing
+
+I had been saying "nothing egresses, so the lane argument is unobservable". True,
+but I let it stand for more than it says. **`PROVEN_WEB_LANES` is NOT empty** -
+verified as `{claude, codex}`, with recorded completed-retrieval proofs. The
+gate's PREDICATE has live members; only its SUBJECT set - egressing registry
+entries - is empty.
+
+Read one as the other and you conclude the whole gate is inert, which would make
+the lanes look unproven rather than the entries absent. Two different emptinesses
+with two different remedies.
+
+**And the lane predicate is a FLOOR, not the admission.** It answers "may
+outward reach compose on this lane at all"; it does not answer "has THIS server
+completed real work on this lane". Claude's recorded proof is native
+`WebFetch`-only; codex's is a config-posture retrieval. **Neither run ever
+exercised MCP-server-mediated egress**, and the lane catalog's own principle
+forbids evidence inheritance across mechanisms - so every (server, lane) pair
+needs its own proof on the transport actually served.
+
+### an-egressing-registry-entry-has-no-bounds-axis | high | new, and the gap ships unbounded reach
+
+Verified: `_require_bounds_match_the_egress_axis(NATIVE_TOOL_EGRESS,
+NATIVE_WEB_TOOL_BOUNDS)` binds bounds to **NATIVE** egressing tools only. A
+registry entry declares four trust axes and **no bounds axis at all**.
+
+So an admitted egressing MCP tool would have per-branch caps enforced by
+nothing, while its native siblings are capped. Silence here would ship unbounded
+egress past a gate whose whole purpose is to constrain it - and it would look
+guarded, because the gate it passed is real.
+
+Not a live defect: nothing egresses, so nothing is unbounded today. It is a
+PRECONDITION the admitting change must close, either by extending a bounds
+declaration to egressing entries or by recording explicitly why the server's own
+throttling suffices.
+
+### what-does-not-count-written-down-before-it-is-needed | medium | each item has fooled someone
+
+The evidence standard was stated as a chain - shipped registry, resolution with
+the lane stated, production composition, a real spawned session, a real
+retrieval, **asserted on a value only the live source could supply** - together
+with an explicit list of what does NOT count: contract verification passing, the
+process spawning, rendering into a config file, resolution returning the name,
+the model SAYING it used the tool, any mocked or replayed transport, and
+credential or readiness checks of any kind.
+
+**Recorded now, before a candidate exists, precisely because every item on that
+list has been mistaken for proof before in this project** - once by a served
+profile admitted on handshake-only coverage. A standard written while nobody is
+waiting on it is cheaper to hold than one negotiated against a candidate.
+
+### the-ruling-declined-the-shortcut-a-fourth-time | medium | and used no tool of its own as evidence
+
+The deciding agent registered, enabled and configured nothing, and explicitly
+noted that its own web-search capability is not evidence the product may egress -
+a conflation available to anything reasoning about egress from inside a harness
+that has it.
+
+It also bounded its own coverage unprompted: which files it read whole, which it
+skimmed, which it did not open, and which of its claims were PROVED by reading
+versus REASONED. Every load-bearing claim it made was independently re-verified
+here before being persisted, and all held.

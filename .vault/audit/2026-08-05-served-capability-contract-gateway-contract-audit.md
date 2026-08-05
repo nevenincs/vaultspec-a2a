@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:2bb52f48b5ce9281dfe849f027b305af91929c9a70766b89b73f2dc7cff5c86c'
+body_hash: 'sha256:167946db4b3ee1dae78a376be019a1c0c0c45726bd03f62b00f9742489046c8e'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -208,6 +208,24 @@ truthfully about something OTHER than the question asked. The pattern is not
 carelessness and understanding it confers no immunity: two of these were
 committed BY people writing the rule against them, one of them inside the very
 paragraph that states it.
+
+HOW EACH WAS CAUGHT is the more actionable axis, and it separates cleanly. Most
+were caught by ANOTHER PERSON re-deriving the claim, or by ACCIDENT - a value
+read twice for an unrelated reason, a phrase checked for a different purpose.
+Those are not detection mechanisms; they are luck with a good sample size.
+
+Exactly one was caught by a MECHANICAL GUARD the author had just installed: a
+conditional edit that silently matched nothing was surfaced the moment its
+anchor became an unconditional assertion. The same shift is what caught a
+malformed row later, at the write-verification step rather than in review.
+
+That is the difference worth building toward. A rule that says "distrust this
+instrument" depends on someone remembering to distrust it, and five instances
+show how reliably that fails. A guard that FAILS LOUDLY when its precondition
+does not hold needs nobody to remember anything - which is the same argument
+this document makes about terminal states nothing is obliged to advance, and
+about a size mandate no gate enforces. Every one of those is a rule with no
+mechanism, and every one drifted.
 
 ## Findings
 

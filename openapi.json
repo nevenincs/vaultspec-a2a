@@ -1512,6 +1512,15 @@
         "title": "AuthenticationState",
         "description": "Authentication evidence, separate from configuration presence."
       },
+      "AuthoringCapability": {
+        "type": "string",
+        "enum": [
+          "coding",
+          "document_authoring"
+        ],
+        "title": "AuthoringCapability",
+        "description": "The coarse kind of work a preset delivers.\n\nA two-member split rather than a spectrum: a consumer branches on whether a\npreset produces vault documents or source changes, and nothing served today\ndistinguishes finer than that.\n\nNaming what this does NOT decide, because the field's name invites the\nassumption: this is a DESCRIPTION of a preset, not a gate on one. Nothing in\nthe run-admission path reads it - the submitter gate reaches the same\nunderlying question through its own derivation - so a wrong value here\nmisinforms a reader and refuses nobody."
+      },
       "CatalogStatus": {
         "type": "string",
         "enum": [
@@ -1783,6 +1792,16 @@
         ],
         "title": "DesktopReadiness",
         "description": "The authenticated desktop readiness projection.\n\nCarries process and product identity alongside the five separate bounded\nreadiness facts. The facts are never collapsed into a single boolean: a cold,\nstartable worker leaves ``gateway_readiness`` ``ready`` while ``run_admission``\nstays ``deferred``, so gateway-readiness and execution-readiness remain\ndistinct. Served only to an attach-authenticated caller."
+      },
+      "DocumentCapability": {
+        "type": "string",
+        "enum": [
+          "research_document",
+          "architecture_decision",
+          "plan_document"
+        ],
+        "title": "DocumentCapability",
+        "description": "One concrete vault document a preset's topology can produce.\n\nDistinct from :class:`AuthoringCapability`, which says only WHETHER a preset\nauthors documents; this says WHICH. The two are served side by side and a\nreader needs both, so they are not collapsible: a preset can be\ndocument-authoring while producing a set this vocabulary does not yet name.\n\nMembers follow the research_adr phase machine's three gated outputs. The\nvocabulary is deliberately narrower than the set of documents the wider\nsystem knows about - an audit or a reference record has no producing\ntopology here, and a member with no producer would advertise a deliverable\nno preset can deliver."
       },
       "ExecutionTaskSnapshot": {
         "properties": {
@@ -2421,13 +2440,12 @@
           "authoring_capability": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/AuthoringCapability"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Authoring Capability"
+            ]
           },
           "is_mock": {
             "type": "boolean",
@@ -2446,7 +2464,7 @@
           },
           "supported_capabilities": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/DocumentCapability"
             },
             "type": "array",
             "title": "Supported Capabilities"

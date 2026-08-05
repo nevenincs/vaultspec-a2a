@@ -3,12 +3,38 @@
 from __future__ import annotations
 
 import hmac
+from typing import Annotated
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..utils.ipc_auth import BearerVerdict
 
-__all__ = ["authenticate_request", "verify_attach_bearer"]
+__all__ = ["authenticate_request", "gateway_bearer_scheme", "verify_attach_bearer"]
+
+#: Declares the bearer requirement in the generated OpenAPI document.
+#:
+#: This exists for the CONTRACT, not for verification: the comparison below reads
+#: the raw header, because :func:`verify_attach_bearer` is shared with the desktop
+#: health endpoint and must keep seeing the header exactly as sent. Without this
+#: scheme the published document carried no ``securitySchemes`` entry and modeled
+#: the credential as an optional free-text header, so a generated client came out
+#: with no way to send it and the interactive docs offered no authorize control.
+#:
+#: ``auto_error=False`` is what keeps the declaration inert at runtime: FastAPI
+#: emits the scheme and the per-operation ``security`` requirement from the
+#: dependency graph, but raises nothing itself, leaving the 401/503 mapping in
+#: :func:`authenticate_request` as the single place the verdict becomes a status.
+gateway_bearer_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="GatewayServiceToken",
+    description=(
+        "Gateway service token. The service publishes it in an owner-restricted "
+        "`service.token` handoff file adjacent to the `service.json` discovery "
+        "record, whose `handoff_reference` names that file without embedding the "
+        "secret. Send it as `Authorization: Bearer <token>`."
+    ),
+)
 
 
 def verify_attach_bearer(
@@ -53,7 +79,10 @@ def verify_attach_bearer(
 
 async def authenticate_request(
     request: Request,
-    authorization: str | None = Header(default=None),
+    authorization: str | None = Header(default=None, include_in_schema=False),
+    _declared_scheme: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(gateway_bearer_scheme)
+    ] = None,
 ) -> None:
     """Require the service-discovery bearer on an engine-facing request.
 
@@ -65,6 +94,14 @@ async def authenticate_request(
     the verdict — corrupted runtime state fails closed as a 503, a bad credential
     is a 401 carrying the ``WWW-Authenticate`` challenge, and only an app created
     with the explicit test-only bypass may run without a token.
+
+    The two credential parameters are one credential read twice, for two different
+    consumers. ``authorization`` is the raw header the verifier actually compares,
+    kept out of the schema so the published contract does not also advertise it as
+    a free-text parameter. ``_declared_scheme`` is never read: depending on
+    :data:`gateway_bearer_scheme` is what puts the security requirement on every
+    operation in the generated document. Deleting it would silently strip the
+    contract's only auth affordance while leaving every request still authorized.
     """
     verdict = verify_attach_bearer(
         authorization,

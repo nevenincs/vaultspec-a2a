@@ -182,6 +182,14 @@ from ..thread_stream import build_thread_stream_response
 router = APIRouter(
     prefix="/v1",
     dependencies=[Depends(authenticate_request)],
+    # Every route here is behind the attach gate, so both refusals are properties
+    # of the router rather than of any one verb. They were absent from the
+    # published contract, which documented only success and validation failure -
+    # a client generated from it modeled 401 as an unexpected transport error.
+    responses={
+        401: {"description": "Missing or invalid gateway service token."},
+        503: {"description": "Gateway service token is not configured."},
+    },
 )
 logger = logging.getLogger(__name__)
 
@@ -1050,8 +1058,16 @@ async def _catalog_records_within_budget(
     the catalog first. The cold case is real anyway - a gateway restart, or the
     workspace scope evicted under capacity, between that read and this start -
     and building cold probes every registered lane over subprocesses and the
-    network. A run start absorbing that is indistinguishable to the caller from
-    a hung gateway.
+    network. A request absorbing that is indistinguishable to the caller from a
+    hung gateway.
+
+    Shared by BOTH readers of the catalog - the run start that revalidates a
+    selection and the ``provider-catalog`` verb that serves one. The verb is the
+    colder of the two by construction: it is the read a client makes precisely
+    when it has no selection yet, so it is the caller that most often meets an
+    unbuilt workspace. Leaving it on the unbounded service call made a lane that
+    wedged hang the verb for as long as the lane took, with no refusal a client
+    could act on.
 
     The build is SHIELDED rather than cancelled on expiry. Cancelling it would
     make every retry pay the same cold cost and never converge; letting it finish
@@ -1069,7 +1085,7 @@ async def _catalog_records_within_budget(
         # later failure is neither an unretrieved-exception warning nor silent.
         build.add_done_callback(_log_detached_catalog_build)
         logger.warning(
-            "run refused: provider catalog for workspace=%s did not build within "
+            "refused: provider catalog for workspace=%s did not build within "
             "%.1fs; the build continues and a retry will be served warm",
             canonical,
             domain_config.run_start_catalog_budget_seconds,
@@ -2301,7 +2317,7 @@ async def provider_catalog_endpoint(
             detail="workspace_root must identify an existing directory",
         )
     try:
-        records = await provider_catalog_service(request.app).records(canonical)
+        records = await _catalog_records_within_budget(request.app, canonical)
     except ProviderCatalogScopeCapacityError:
         raise HTTPException(
             status_code=503,

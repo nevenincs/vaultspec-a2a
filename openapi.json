@@ -10,23 +10,12 @@
         "summary": "Shutdown Endpoint",
         "description": "Initiate graceful server shutdown.\n\nAdministrative shutdown is a receipt-bound lifecycle operation: it requires\nboth authenticated runtime control (the attach credential) and receipt\nownership (the lifecycle capability that discovery never references), so a\nforeign attachment that can reach the product surface still cannot stop the\ngateway.\n\nRun admission is closed first, so the gateway admits no new run while it\ndrains; the in-process stop is then deferred briefly so this 202 flushes\nbefore the SIGINT-driven graceful shutdown - which drains and reaps the owned\nworker and run descendants in the lifespan - begins.",
         "operationId": "shutdown_endpoint_admin_shutdown_post",
-        "parameters": [
+        "security": [
           {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
+            "GatewayServiceToken": []
+          }
+        ],
+        "parameters": [
           {
             "name": "X-Vaultspec-Lifecycle-Capability",
             "in": "header",
@@ -59,6 +48,15 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "403": {
+            "description": "Missing or invalid lifecycle capability receipt."
+          },
+          "503": {
+            "description": "Gateway service token or lifecycle capability is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -77,22 +75,9 @@
         "summary": "Run Start Endpoint",
         "description": "Start, prepare, commit, or release through the single run-start verb.\n\nThe ``stage`` selector splits one verb into four shapes without growing the\nverb set: ``prepare`` reserves bounded capacity without tokens or a durable\nrun; ``commit`` binds the exact actor-token role set to that reservation;\n``release`` frees only an uncommitted reservation; and ``start`` (the\ndefault) preserves the one-shot engine/Compose path.",
         "operationId": "run_start_endpoint_v1_runs_post",
-        "parameters": [
+        "security": [
           {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
+            "GatewayServiceToken": []
           }
         ],
         "requestBody": {
@@ -130,6 +115,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -146,6 +137,11 @@
         "summary": "Active Runs Endpoint",
         "description": "List runs: non-terminal by default, or every run including terminal ones.\n\nThe default is unchanged and remains the capped identity projection of\ndurable non-terminal runs that the engine contract certified - a caller that\npasses nothing sees exactly what it saw before, byte for byte.\n\n``state=all`` is the history read, and it differs from discovery in more than\nwhich rows it returns. It answers through the paginated list service rather\nthan the discovery one, because discovery exists to find live work and is\ncapped for that purpose while history has to walk a store that only grows;\nthat is why this mode carries a total and an offset. And it answers with a\nWIDER record, because the two readings are asked different questions: a\nviewer binding to live work needs an identity, while a reader of history is\nasking what happened and needs the projection that separates a healthy run\nfrom a degraded one.\n\nThe two shapes are returned as two models rather than one union, so widening\nhistory cannot perturb a single byte of the certified discovery response.",
         "operationId": "active_runs_endpoint_v1_runs_get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "state",
@@ -235,22 +231,6 @@
               "default": 0,
               "title": "Offset"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
@@ -272,6 +252,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -290,6 +276,11 @@
         "summary": "Run Status Endpoint",
         "description": "Return the authoritative recovery snapshot for a run.",
         "operationId": "run_status_endpoint_v1_runs__run_id__get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -301,22 +292,6 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -330,6 +305,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -347,6 +328,11 @@
         "summary": "Run Delete Endpoint",
         "description": "Delete a run through the durable cross-store deletion saga.\n\nA replayed request resumes the same saga rather than starting a second\nteardown, so repeated calls converge on one deletion.\n\nFive outcomes, because the service distinguishes more states than two codes\ncan carry: a lifecycle refusal before the saga begins, a clean deletion, a\ndeletion that finalized over unremovable state, resumable incomplete\ncleanup, and an already-absent run. The retryable code is reserved for the\ngenuinely resumable case - the abandoned case is terminal, and inviting a\nretry there would send the caller to a not-found.",
         "operationId": "run_delete_endpoint_v1_runs__run_id__delete",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -359,27 +345,17 @@
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
           "204": {
             "description": "Deleted; every store was cleaned."
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Cleanup is unfinished but resumable; retry."
           },
           "200": {
             "description": "Deleted, but cleanup was abandoned over permanently unremovable state; the body names the kinds left behind.",
@@ -396,9 +372,6 @@
           },
           "409": {
             "description": "The run's lifecycle state refuses deletion."
-          },
-          "503": {
-            "description": "Cleanup is unfinished but resumable; retry."
           },
           "422": {
             "description": "Validation Error",
@@ -418,6 +391,11 @@
         "summary": "Run Stream Endpoint",
         "description": "Re-serve the run's bounded, versioned v1 SSE progress frames.\n\nThe public streaming companion to run-status: run-status is the authoritative\nrecovery snapshot, this is the droppable live progress relay. A run id is the\nthread id, so this delegates to the same stream builder the internal\nprogress stream has always used - one code path, the same versioned\n256 KiB-bounded frames, the same terminal-replay-then-close semantics. Frames\nare non-authoritative by contract: a consumer reconciles run state from\nrun-status, never from a relay frame.",
         "operationId": "run_stream_endpoint_v1_runs__run_id__stream_get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -430,22 +408,6 @@
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
@@ -456,6 +418,12 @@
                 "schema": {}
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -475,6 +443,11 @@
         "summary": "Run Cancel Endpoint",
         "description": "Cancel a run idempotently.",
         "operationId": "run_cancel_endpoint_v1_runs__run_id__cancel_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -503,22 +476,6 @@
               ],
               "title": "Idempotency-Key"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
@@ -531,6 +488,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -550,6 +513,11 @@
         "summary": "Run History Endpoint",
         "description": "Read one run whole, including a terminal or archived one.\n\nDistinct from run-status by design. Run-status is the BOUNDED recovery\nsnapshot an engine reconciles authority from, and widening it would have\nmade every reconciliation pay for a transcript it does not read. This is the\nwide read for a consumer that wants the record: transcript, agents, plan,\npending answers, and the run's metadata.\n\n\"Whole\" is a promise about honesty, not about always having everything. The\ntranscript lives only in the checkpoint, and a checkpoint can be gone or\nunreachable; when it is, this answers 200 with the durable half of the\nrecord it CAN read - status, agents, plan, permissions, metadata - and says\nplainly that the transcript is not part of it. Refusing the whole read over\nan absent transcript would cost the caller the half that survived, and\nanswering an unqualified empty message list would be worse still: silent\nloss dressed as a run that never spoke.\n\nThe state snapshot is embedded rather than restated, so this response cannot\ndrift from the snapshot it reports.",
         "operationId": "run_history_endpoint_v1_runs__run_id__history_get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -561,22 +529,6 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -590,6 +542,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -609,6 +567,11 @@
         "summary": "Run Archive Endpoint",
         "description": "Move a terminal run to the archived state.\n\nArchiving is not deletion: the run and its records survive, marked\nhistorical. A run whose state does not permit archiving is refused rather\nthan silently ignored, and repeating the call on an already-archived run is\nthat same refusal - the conflict IS the replay signal here.",
         "operationId": "run_archive_endpoint_v1_runs__run_id__archive_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -620,22 +583,6 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -649,6 +596,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -668,24 +621,6 @@
         "summary": "Team Status Endpoint",
         "description": "Report the team's live operational projection.\n\nA read, and deliberately a narrow one: which agents exist and what state\nthey are in, which runs are active, and what is awaiting an answer. It\ncarries no prompt, no document body, and no credential - the same\ndisclosure discipline the progress channel holds.",
         "operationId": "team_status_endpoint_v1_team_status_get",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -697,6 +632,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -707,7 +648,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ]
       }
     },
     "/v1/runs/{run_id}/messages": {
@@ -715,6 +661,11 @@
         "summary": "Run Message Endpoint",
         "description": "Send a follow-up turn into an existing run.\n\nRun-start cannot carry this. A repeat run identifier there is a REPLAY - it\nanswers with the original run and never adopts the new body - so without\nthis verb the versioned surface can start a run and watch it, but never say\nanything further to it.\n\nAccepted is not applied: the turn is handed to the worker and execution\ncontinues asynchronously, so a caller reconciles from the stream or\nrun-status rather than from this response.",
         "operationId": "run_message_endpoint_v1_runs__run_id__messages_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -742,22 +693,6 @@
                 }
               ],
               "title": "Idempotency-Key"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -782,6 +717,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -800,6 +741,11 @@
         "summary": "Run Permission Respond Endpoint",
         "description": "Answer a permission request the run raised on its progress stream.\n\nThe versioned surface already POSES this question - ``permission_request``\nis an enumerated frame on run-stream - and this is where the answer returns.\nWithout it the only answering channel is the transition surface, so retiring\nthat surface would strand every paused run.\n\nThe verb adds no state machine of its own: it is a versioned projection of\nthe same answer path, so at-most-once behaviour comes from there. Answering\ntwice replays the stored outcome rather than acting again, an answer arriving\nafter the request was applied reports the duplicate without re-dispatching,\nand a superseded or expired request is refused with a journaled rejection\nthat replays identically.\n\nScoping matters as much as the answer. The request is resolved and checked\nagainst the run in the path BEFORE anything acts on it, so a guessed request\nid cannot be used to answer another run's question - and because that check\nprecedes the service call, a mismatch has no effect at all rather than being\ndetected after the fact.",
         "operationId": "run_permission_respond_endpoint_v1_runs__run_id__permissions__request_id__respond_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -837,22 +783,6 @@
               ],
               "title": "Idempotency-Key"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "requestBody": {
@@ -876,6 +806,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -894,6 +830,11 @@
         "summary": "Run Clarification Respond Endpoint",
         "description": "Resolve through the durable clarification lease service.",
         "operationId": "run_clarification_respond_endpoint_v1_runs__run_id__clarifications__request_id__respond_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -914,22 +855,6 @@
             "schema": {
               "type": "string",
               "title": "Request Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -954,6 +879,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -972,6 +903,11 @@
         "summary": "Provider Catalog Endpoint",
         "description": "Serve prompt-free, execution-lane-specific catalogs for one workspace.",
         "operationId": "provider_catalog_endpoint_v1_provider_catalog_get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "workspace_root",
@@ -982,22 +918,6 @@
               "minLength": 1,
               "maxLength": 4096,
               "title": "Workspace Root"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -1011,6 +931,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1030,6 +956,11 @@
         "summary": "Presets List Endpoint",
         "description": "List team presets truthfully, marking each loadable or unloadable.\n\nResolution uses the requested workspace context so workspace-local presets\nare listed alongside the bundled set. A single preset that fails to load or\nvalidate is reported with ``loadable=False`` and a reason rather than\nomitted or allowed to crash the whole listing. Each loadable preset carries\nits model profiles with per-role effective assignments (resolved by the same\nshared resolver launch uses) and backend-computed eligibility. The whole\nbuild - file I/O, provider readiness, and the engine reachability probe -\nruns off the event loop.",
         "operationId": "presets_list_endpoint_v1_presets_get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "workspace_root",
@@ -1047,22 +978,6 @@
               ],
               "title": "Workspace Root"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
@@ -1075,6 +990,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1094,24 +1015,6 @@
         "summary": "Service State Endpoint",
         "description": "Return truthful, probe-backed readiness for the resident gateway.\n\nRuns the real dependency probes (database, checkpoint, worker) rather than\nreporting a hardcoded status, and separates process-alive from\ncan-accept-run. Engine authoring-backend reachability is reported from\nnon-blocking discovery-file freshness.",
         "operationId": "service_state_endpoint_v1_service_get",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1123,6 +1026,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1133,7 +1042,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ]
       }
     },
     "/internal/health": {
@@ -5518,6 +5432,13 @@
         ],
         "title": "_PermissionSnapshot",
         "description": "Outstanding permission request in a state snapshot."
+      }
+    },
+    "securitySchemes": {
+      "GatewayServiceToken": {
+        "type": "http",
+        "description": "Gateway service token. The service publishes it in an owner-restricted `service.token` handoff file adjacent to the `service.json` discovery record, whose `handoff_reference` names that file without embedding the secret. Send it as `Authorization: Bearer <token>`.",
+        "scheme": "bearer"
       }
     }
   }

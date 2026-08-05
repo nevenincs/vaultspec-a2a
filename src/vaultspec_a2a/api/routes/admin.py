@@ -29,6 +29,18 @@ def _stop_this_process() -> None:
         Depends(authenticate_request),
         Depends(require_lifecycle_capability),
     ],
+    # This route sits behind the same attach gate as the /v1 router, which
+    # documents these two refusals collectively; stated here because this router
+    # holds a single route and has no collective place to put them.
+    responses={
+        401: {"description": "Missing or invalid gateway service token."},
+        403: {"description": "Missing or invalid lifecycle capability receipt."},
+        503: {
+            "description": (
+                "Gateway service token or lifecycle capability is not configured."
+            )
+        },
+    },
 )
 async def shutdown_endpoint(request: Request) -> dict[str, str]:
     """Initiate graceful server shutdown.

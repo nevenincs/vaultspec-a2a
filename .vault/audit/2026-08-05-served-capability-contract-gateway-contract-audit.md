@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:167946db4b3ee1dae78a376be019a1c0c0c45726bd03f62b00f9742489046c8e'
+body_hash: 'sha256:2f6176549a0c9368b8b253a07ae6231f5d719097a06520f93400eb6184a5b240'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,7 +54,7 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F63**. F40 alone remains RESERVED -
+place. The current highest identifier is **F65**. F64 is RESERVED alongside F40. F40 alone remains RESERVED -
 allocated with its write-up not yet received - and is held rather than reused.
 F57 is RETRACTED and F29 is PARTIALLY retracted; both keep their numbers. F40 is RESERVED - assigned to an
 agent and not yet delivered - and is held rather than reused. F45 and F46 now carry their
@@ -1734,6 +1734,49 @@ RELATION: this is the operational twin of the failure-observability record's
 swallowed-condition clause. A policy change with workspace-wide blast radius
 that leaves no trace anyone noticed is a condition that should have announced
 itself.
+
+### F64-reserved | unrated | RESERVED - allocated, write-up not yet received
+
+Held under the standing rule in Scope, for the undocumented reconnect protocol.
+It arrives with the streaming specification, which is complete and verified live
+but DELIBERATELY HELD FROM PUBLICATION until the sequence-cursor defect lands -
+publishing a reconnect cursor that reads zero on every settled run would
+document a defect as a contract.
+
+### F65-fixed-teardown-bound-fails-under-parallel-contention | medium | a flat test-harness timeout produces false failures that read exactly like real regressions
+
+TEST-HARNESS DEFECT, not production. Running one module suite among eleven in
+parallel produced three failures with an identical signature: a fixture TEARDOWN
+timing out at a flat five-second bound while a real server shutdown was still in
+progress - not an assertion failure. Re-run alone after the other suites
+finished: all four passed, one case taking over forty seconds in isolation.
+
+CONSEQUENCE, and it is worse than a flaky test. The bound has NO RELATIONSHIP to
+the load the process is competing against. It is generous under single-suite
+execution and fires under parallel execution on a server shutting down correctly
+but slowly - producing a false failure that reads exactly like a real
+regression: failed lines, a full traceback, and no hint the cause is scheduling.
+Anyone trusting raw sweep output without an isolated re-run misattributes it to
+whatever changed most recently, WHICH IN A SHARED MULTI-AGENT TREE IS VERY OFTEN
+THE WRONG TARGET.
+
+PROVEN MECHANISM, NOT HYPOTHESIS - reproduced under contention and passed under
+isolation. No served-contract impact. Neither file is among those this fleet
+committed.
+
+CLASSIFICATION: genuine defect, test harness. REMEDY: derive the teardown bound
+as the production stall watchdog now does, or at minimum widen the constant. NOT
+IMPLEMENTED - found during a read-only sweep, outside its mandate.
+
+THE RELATION IS THE POINT. This is the IDENTICAL defect shape that the
+state-truthfulness record's reconciliation clause closes in production code -
+any bound used to decide abandonment is derived from the run, never a flat
+global - occurring one layer out, in the harness that VERIFIES that production
+code, where no equivalent rule applies. So this feature now holds the production
+fix, the clause generalising it, and an unfixed instance of the same shape in
+the instrument used to check it. A rule scoped to production does not bind the
+tooling that tests production, and nothing noticed until the tooling failed
+under load.
 
 ### F47-and-beyond | low | reserved marker for continuous appending
 

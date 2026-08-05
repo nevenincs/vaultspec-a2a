@@ -4,7 +4,7 @@ tags:
   - '#served-capability-contract'
 date: '2026-08-05'
 modified: '2026-08-05'
-body_hash: 'sha256:563f759585c66bfb38274e44f820c07cb226c9516db50a2e43a0e04e82881fa3'
+body_hash: 'sha256:04b5f39641221fff1e62eb426460a976f1b21e9ad1d544bb4a37d68c38827661'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -107,7 +107,7 @@ One diagnostic that must precede any provider-policy change, and one watchdog fi
 Restore the missing artifact and remove the silent success that concealed it; either alone leaves the next failure looking identical.
 
 - [ ] `W01.P02.S03` - F16 - make the document editor submit its authored output as an engine proposal so the review lane has something to apply; `src/vaultspec_a2a/authoring/submitter.py`.
-- [ ] `W01.P02.S04` - F16 safety half - refuse to report a document-authoring run completed with empty degradation when it produced no artifact, the silent green being a separate defect from the missing proposal; `src/vaultspec_a2a/control/run_start_policy.py`.
+- [x] `W01.P02.S04` - F16 safety half - refuse to report a document-authoring run completed with empty degradation when it produced no artifact, the silent green being a separate defect from the missing proposal; `src/vaultspec_a2a/control/run_start_policy.py`.
 - [ ] `W01.P02.S05` - F21 - gate authored document content on structural validity before submission so the review lane never receives a document with duplicated sections; `src/vaultspec_a2a/authoring/submitter.py`.
 - [ ] `W01.P02.S06` - F29 PARTIALLY RETRACTED - the half claiming no route here serves the document body falls with F57, since the dashboard reads proposal detail direct from the engine. What SURVIVES is an engine content gap: the proposal fetch returned an empty review-documents array and the diff and preview routes 404. VERIFY THAT AGAINST THE DASHBOARD'S LIVE CLIENT before acting - it may be a dev-config artifact - and verify through the CONSUMER, not the declaration; `src/vaultspec_a2a/api/routes/gateway.py`.
 
@@ -129,9 +129,9 @@ Findings whose remedy only ADDS description of behaviour that already exists on 
 
 Work already dispatched to other agents, represented here for tracking only. Do not re-specify or re-execute; close each Step when its owner reports.
 
-- [ ] `W02.P03.S07` - F1 correction half IN FLIGHT with agent contract-audit - correct the stale streaming route and the false claim that legacy api routes remain; `docs/a2a-edge-conformance-verb-mapping.md`.
-- [ ] `W02.P03.S08` - F14 IN FLIGHT with agent contract-audit - correct the module docstring that claims three topology types where four are dispatched; `src/vaultspec_a2a/graph/compiler.py`.
-- [ ] `W02.P03.S09` - F3 IN FLIGHT with agent contract-audit - declare an HTTPBearer security scheme, apply it to the versioned and admin surfaces, drop the hand-rolled authorization parameter and declare 401 responses; `src/vaultspec_a2a/api/app.py`.
+- [x] `W02.P03.S07` - F1 correction half IN FLIGHT with agent contract-audit - correct the stale streaming route and the false claim that legacy api routes remain; `docs/a2a-edge-conformance-verb-mapping.md`.
+- [x] `W02.P03.S08` - F14 IN FLIGHT with agent contract-audit - correct the module docstring that claims three topology types where four are dispatched; `src/vaultspec_a2a/graph/compiler.py`.
+- [x] `W02.P03.S09` - F3 IN FLIGHT with agent contract-audit - declare an HTTPBearer security scheme, apply it to the versioned and admin surfaces, drop the hand-rolled authorization parameter and declare 401 responses; `src/vaultspec_a2a/api/app.py`.
 - [ ] `W02.P03.S10` - F1 guide half IN FLIGHT with agent contract-audit - publish a client-facing API guide covering auth, discovery and the run lifecycle; `docs/index.rst`.
 
 ### Phase `W02.P04` - residual additive findings
@@ -159,16 +159,16 @@ Executes the canonical-vocabulary decision across the served surface: one declar
 
 Every narrowing is a breaking change unless the live value set is provably contained in the proposed enumeration; the capture comes first and gates the rest of the Wave.
 
-- [ ] `W03.P05.S17` - Capture the value set each candidate vocabulary actually serves from live payloads and prove containment in its proposed enumeration, which gates every narrowing in this Wave; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `W03.P05.S17` - Capture the value set each candidate vocabulary actually serves from live payloads and prove containment in its proposed enumeration, which gates every narrowing in this Wave; `src/vaultspec_a2a/api/schemas/gateway.py`.
 
 ### Phase `W03.P06` - declare and derive
 
 Give each served vocabulary one owning declaration and make every emit site derive from it.
 
-- [ ] `W03.P06.S18` - F23 shape one - serve the TopologyType enumeration that already exists in code instead of a bare string, and reconcile provider_id with the typed Provider enumeration served beside it; `src/vaultspec_a2a/api/schemas/gateway.py`.
-- [ ] `W03.P06.S19` - F23 shape two - declare owning enumerations for the vocabularies that have none, covering origin, repair_status, execution_readiness, provider_condition, worker_status, semantic_status, semantic_phase, replay_status and the degraded_reasons members; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `W03.P06.S18` - F23 shape one - serve the TopologyType enumeration that already exists in code instead of a bare string, and reconcile provider_id with the typed Provider enumeration served beside it; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `W03.P06.S19` - F23 shape two - declare owning enumerations for the vocabularies that have none, covering origin, repair_status, execution_readiness, provider_condition, worker_status, semantic_status, semantic_phase, replay_status and the degraded_reasons members; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W03.P06.S20` - F7 - DECLARATION HALF LANDED in 0e4c0db0 and e455cad9, which declared the two capability vocabularies and pinned what the keyings disagree about. The RE-KEY is parked behind F62: deriving capabilities from roles would make a deliberately-failing certification fixture advertise a deliverable it is built to fail, so the declared product classification must land with it. The old gate on the S01 verification is OBSOLETE - that hypothesis was refuted and the capability derivation is orthogonal to it; `src/vaultspec_a2a/team/team_config.py`.
-- [ ] `W03.P06.S21` - Enforce import-from-owner for served vocabularies so no surface redeclares or re-exports one, keeping the two distinct AdmissionState concepts separate rather than merged; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `W03.P06.S21` - Enforce import-from-owner for served vocabularies so no surface redeclares or re-exports one, keeping the two distinct AdmissionState concepts separate rather than merged; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W03.P06.S43` - F37 - declare and serve a summarization capability or drop the product claim, since no served preset advertises it and the nearest path is the false green of F24; `src/vaultspec_a2a/team/team_config.py`.
 - [ ] `W03.P06.S47` - Write the client-facing API guide as the OUTPUT of this Wave rather than a parallel track, using the wireframe acceptance gate as its completion test - the guide cannot be written honestly until the served semantics are canonical; `docs/index.rst`.
 - [ ] `W03.P06.S52` - F53 and F54 - derive the role capability and assignment-source fields from their existing owning enumerations and remove the restated default literal, both being shape-one items F23 did not list. Their omission is why F23's inventory is a starting point rather than a closed set; `src/vaultspec_a2a/api/schemas/gateway.py`.
@@ -187,9 +187,9 @@ The vocabulary decision governs a value's domain, never whether a written value 
 
 Fix the projections that serve untrue values on completed and failed runs.
 
-- [ ] `W04.P08.S23` - F17 two breaks not one, and the file attribution was wrong - the live half drops terminal status because the stream transformer reads only chunk content and never inspects tool_call_chunks, while the snapshot half infers COMPLETED only when a matching ToolMessage exists, which provider-internal actions never produce, so every call falls to PENDING permanently. COMPLETION CRITERION - a REST read of a SETTLED run must show terminal status with locations and content populated where the provider supplied them, because the aggregator state is pruned at settle and fixing the live half alone would leave the audited symptom unchanged. Also give the emitters a way to carry status and locations, which the event type already declares; `src/vaultspec_a2a/streaming/transformer.py, src/vaultspec_a2a/streaming/emitters.py, src/vaultspec_a2a/control/snapshot.py`.
+- [x] `W04.P08.S23` - F17 two breaks not one, and the file attribution was wrong - the live half drops terminal status because the stream transformer reads only chunk content and never inspects tool_call_chunks, while the snapshot half infers COMPLETED only when a matching ToolMessage exists, which provider-internal actions never produce, so every call falls to PENDING permanently. COMPLETION CRITERION - a REST read of a SETTLED run must show terminal status with locations and content populated where the provider supplied them, because the aggregator state is pruned at settle and fixing the live half alone would leave the audited symptom unchanged. Also give the emitters a way to carry status and locations, which the event type already declares; `src/vaultspec_a2a/streaming/transformer.py, src/vaultspec_a2a/streaming/emitters.py, src/vaultspec_a2a/control/snapshot.py`.
 - [ ] `W04.P08.S24` - F18 - scope the agents projection to the run topology so a one-worker pipeline stops reporting the eight-agent roster of a different topology, noting that the F8 team-status half is retracted as non-reproducing and is not part of this Step; `src/vaultspec_a2a/api/routes/gateway.py`.
-- [ ] `W04.P08.S25` - F20 - define what reconciling means, how long it may persist and how a run leaves it, then provide the recovery path a stranded run currently lacks; `src/vaultspec_a2a/control/run_discovery_service.py`.
+- [x] `W04.P08.S25` - F20 - define what reconciling means, how long it may persist and how a run leaves it, then provide the recovery path a stranded run currently lacks; `src/vaultspec_a2a/control/run_discovery_service.py`.
 - [ ] `W04.P08.S26` - F22 - stop serving healthy on every structured health field of a failed run, so a frontend gating on machine-readable fields is not forced to parse prose; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W04.P08.S41` - F31 - fold the authoring session reference into thread state on the submitter path as well as the bridge path, so a run discloses the session the engine recorded for it; `src/vaultspec_a2a/authoring/submitter.py`.
 - [ ] `W04.P08.S42` - F32 - preserve the recorded approval outcome across a terminal transition, so pruning a pending request stops erasing the decision a human made; `src/vaultspec_a2a/control/thread_state_service.py`.

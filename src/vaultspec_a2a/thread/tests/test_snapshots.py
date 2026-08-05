@@ -466,7 +466,7 @@ def test_artifact_data_round_trip() -> None:
 
 
 def test_permission_data_round_trip() -> None:
-    from ...api.schemas.snapshots import _PermissionSnapshot
+    from ...api.schemas.snapshots import PermissionSnapshot
 
     data = PermissionData(
         request_id="r1",
@@ -481,14 +481,14 @@ def test_permission_data_round_trip() -> None:
         tool_call="bash",
         tool_kind="execute",
     )
-    pydantic_obj = _PermissionSnapshot.model_validate(asdict(data))
+    pydantic_obj = PermissionSnapshot.model_validate(asdict(data))
     assert pydantic_obj.request_id == "r1"
     assert len(pydantic_obj.options) == 1
     assert pydantic_obj.tool_kind == "execute"
 
 
 def test_clarification_request_data_round_trip() -> None:
-    from ...api.schemas.snapshots import _ClarificationRequestSnapshot
+    from ...api.schemas.snapshots import ClarificationRequestSnapshot
 
     data = ClarificationRequestData(
         request_id="clarify-1",
@@ -502,14 +502,14 @@ def test_clarification_request_data_round_trip() -> None:
             )
         ],
     )
-    pydantic_obj = _ClarificationRequestSnapshot.model_validate(asdict(data))
+    pydantic_obj = ClarificationRequestSnapshot.model_validate(asdict(data))
     assert pydantic_obj.request_id == "clarify-1"
     assert len(pydantic_obj.questions) == 1
     assert pydantic_obj.questions[0].options == ["codex", "zai"]
 
 
 def test_agent_data_round_trip() -> None:
-    from ...api.schemas.snapshots import _AgentSnapshot
+    from ...api.schemas.snapshots import AgentSnapshot
 
     data = AgentData(
         agent_id="agent-1",
@@ -519,7 +519,7 @@ def test_agent_data_round_trip() -> None:
         model=Model.HIGH,
         role="manager",
     )
-    pydantic_obj = _AgentSnapshot.model_validate(asdict(data))
+    pydantic_obj = AgentSnapshot.model_validate(asdict(data))
     assert pydantic_obj.agent_id == "agent-1"
     # The descriptor is the wire model's only source, so an added field must
     # survive the asdict projection rather than falling back to its default.

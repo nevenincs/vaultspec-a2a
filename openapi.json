@@ -1058,38 +1058,26 @@
         "summary": "Internal Health",
         "description": "Readiness probe -- confirms the internal API is accepting connections.",
         "operationId": "internal_health_internal_health_get",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
+                  "type": "object",
                   "title": "Response Internal Health Internal Health Get"
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid internal IPC token."
+          },
+          "500": {
+            "description": "Internal IPC token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1101,7 +1089,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "InternalIpcToken": []
+          }
+        ]
       }
     },
     "/internal/events": {
@@ -1112,38 +1105,26 @@
         "summary": "Receive Worker Event",
         "description": "Receive a single event from the worker and relay to browser clients.\n\nThe ``WorkerBridge`` in the worker process POSTs here instead of\nsending a WebSocket frame.  The payload format matches\n``WorkerEventEnvelope``.",
         "operationId": "receive_worker_event_internal_events_post",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
+                  "type": "object",
                   "title": "Response Receive Worker Event Internal Events Post"
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid internal IPC token."
+          },
+          "500": {
+            "description": "Internal IPC token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1155,7 +1136,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "InternalIpcToken": []
+          }
+        ]
       }
     },
     "/internal/events/batch": {
@@ -1166,38 +1152,26 @@
         "summary": "Receive Worker Event Batch",
         "description": "Receive a batch of events from the worker.\n\nThe ``WorkerBridge`` accumulates events for a short interval then\nPOSTs them as a single ``{\"events\": [...]}`` payload.  Each entry\nhas the same shape as a single-event envelope (``thread_id`` +\n``payload``).",
         "operationId": "receive_worker_event_batch_internal_events_batch_post",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
+                  "type": "object",
                   "title": "Response Receive Worker Event Batch Internal Events Batch Post"
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid internal IPC token."
+          },
+          "500": {
+            "description": "Internal IPC token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1209,7 +1183,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "InternalIpcToken": []
+          }
+        ]
       }
     },
     "/internal/heartbeat": {
@@ -1220,38 +1199,26 @@
         "summary": "Receive Worker Heartbeat",
         "description": "Receive a heartbeat from the worker.\n\nUpdates ``app.state`` so the gateway can monitor worker\nliveness without a persistent WebSocket connection.",
         "operationId": "receive_worker_heartbeat_internal_heartbeat_post",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
+                  "type": "object",
                   "title": "Response Receive Worker Heartbeat Internal Heartbeat Post"
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid internal IPC token."
+          },
+          "500": {
+            "description": "Internal IPC token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1263,7 +1230,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "InternalIpcToken": []
+          }
+        ]
       }
     },
     "/health": {
@@ -1420,6 +1392,75 @@
         "title": "AgentLifecycleState",
         "description": "Observable agent states exposed to the frontend.\n\nMaps to the MCP states. Tracks\ninternal process lifecycle (init/ready/running/error/done)."
       },
+      "AgentSnapshot": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "node_name": {
+            "type": "string",
+            "title": "Node Name"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AgentLifecycleState"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Provider"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Model"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": ""
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "node_name",
+          "state"
+        ],
+        "title": "AgentSnapshot",
+        "description": "Wire projection of the canonical agent descriptor within a snapshot.\n\nMirrors ``thread.snapshots.AgentData``."
+      },
       "ArtifactSnapshot": {
         "properties": {
           "artifact_id": {
@@ -1531,6 +1572,42 @@
         "title": "ClarificationQuestion",
         "description": "One bounded question inside a clarification request.\n\n``options`` belongs to ``choice`` and only to ``choice``: a text question\ncarrying options would advertise a constraint the answer path does not\nenforce, and a choice without options would offer nothing to choose. Both are\nrefused at construction rather than tolerated and interpreted downstream."
       },
+      "ClarificationQuestionSnapshot": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": false
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Options"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "prompt",
+          "kind"
+        ],
+        "title": "ClarificationQuestionSnapshot",
+        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationQuestionData``."
+      },
       "ClarificationRequest": {
         "properties": {
           "type": {
@@ -1564,6 +1641,27 @@
         ],
         "title": "ClarificationRequest",
         "description": "The bounded question set a parked run is waiting on.\n\nThis is the interrupt payload verbatim: what the node raises, what the\ncheckpoint holds while the run is parked, and what the recovery snapshot\ndiscloses. ``type`` is carried rather than implied because the checkpoint\nholds interrupts of several kinds side by side and the discriminator is how a\nreader tells a clarification from an approval."
+      },
+      "ClarificationRequestSnapshot": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/ClarificationQuestionSnapshot"
+            },
+            "type": "array",
+            "title": "Questions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id"
+        ],
+        "title": "ClarificationRequestSnapshot",
+        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.\n\nA pending mid-run clarification, disclosed on ``run-status`` so a reload\nre-renders the questionnaire from authoritative state alone, never from a\nrelay frame."
       },
       "CleanupKind": {
         "type": "string",
@@ -2132,6 +2230,77 @@
         ],
         "title": "PermissionOptionKind",
         "description": "User permission response options (mirrors ACP PermissionOption.kind).\n\nValues:\n    ALLOW_ONCE: Allow the tool call this time only.\n    ALLOW_ALWAYS: Allow all future invocations of this tool without prompting.\n    REJECT_ONCE: Deny the tool call this time only.\n    REJECT_ALWAYS: Deny all future invocations of this tool without prompting."
+      },
+      "PermissionOptionSnapshot": {
+        "properties": {
+          "option_id": {
+            "type": "string",
+            "title": "Option Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PermissionOptionKind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "option_id",
+          "name",
+          "kind"
+        ],
+        "title": "PermissionOptionSnapshot",
+        "description": "Permission option within a snapshot."
+      },
+      "PermissionSnapshot": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/PermissionOptionSnapshot"
+            },
+            "type": "array",
+            "title": "Options"
+          },
+          "tool_call": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call"
+          },
+          "tool_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "description",
+          "options"
+        ],
+        "title": "PermissionSnapshot",
+        "description": "Outstanding permission request in a state snapshot."
       },
       "PlanEntry": {
         "properties": {
@@ -4663,7 +4832,7 @@
           },
           "pending_permissions": {
             "items": {
-              "$ref": "#/components/schemas/_PermissionSnapshot"
+              "$ref": "#/components/schemas/PermissionSnapshot"
             },
             "type": "array",
             "title": "Pending Permissions"
@@ -4671,7 +4840,7 @@
           "pending_clarification": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/_ClarificationRequestSnapshot"
+                "$ref": "#/components/schemas/ClarificationRequestSnapshot"
               },
               {
                 "type": "null"
@@ -4694,7 +4863,7 @@
           },
           "agents": {
             "items": {
-              "$ref": "#/components/schemas/_AgentSnapshot"
+              "$ref": "#/components/schemas/AgentSnapshot"
             },
             "type": "array",
             "title": "Agents"
@@ -5235,209 +5404,17 @@
         ],
         "title": "WorkerLifecycleState",
         "description": "The gateway-owned worker's rung on the cold-to-execution ladder.\n\n``cold`` is the pre-demand resting state: no worker exists yet and one is\nstartable on first execution demand. It is informational, never degradation.\n``starting`` is the single-flight startup window, ``ready`` is an up and\nreachable worker, and ``unavailable`` is a worker that started but is down or\nrestarting after demand."
-      },
-      "_AgentSnapshot": {
-        "properties": {
-          "agent_id": {
-            "type": "string",
-            "title": "Agent Id"
-          },
-          "node_name": {
-            "type": "string",
-            "title": "Node Name"
-          },
-          "state": {
-            "$ref": "#/components/schemas/AgentLifecycleState"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Provider"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "model": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Model"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "model_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Name"
-          },
-          "role": {
-            "type": "string",
-            "title": "Role",
-            "default": ""
-          },
-          "display_name": {
-            "type": "string",
-            "title": "Display Name",
-            "default": ""
-          },
-          "description": {
-            "type": "string",
-            "title": "Description",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "node_name",
-          "state"
-        ],
-        "title": "_AgentSnapshot",
-        "description": "Wire projection of the canonical agent descriptor within a snapshot.\n\nMirrors ``thread.snapshots.AgentData``."
-      },
-      "_ClarificationQuestionSnapshot": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "prompt": {
-            "type": "string",
-            "title": "Prompt"
-          },
-          "kind": {
-            "type": "string",
-            "title": "Kind"
-          },
-          "required": {
-            "type": "boolean",
-            "title": "Required",
-            "default": false
-          },
-          "options": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Options"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "prompt",
-          "kind"
-        ],
-        "title": "_ClarificationQuestionSnapshot",
-        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationQuestionData``."
-      },
-      "_ClarificationRequestSnapshot": {
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "title": "Request Id"
-          },
-          "questions": {
-            "items": {
-              "$ref": "#/components/schemas/_ClarificationQuestionSnapshot"
-            },
-            "type": "array",
-            "title": "Questions"
-          }
-        },
-        "type": "object",
-        "required": [
-          "request_id"
-        ],
-        "title": "_ClarificationRequestSnapshot",
-        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.\n\nA pending mid-run clarification, disclosed on ``run-status`` so a reload\nre-renders the questionnaire from authoritative state alone, never from a\nrelay frame."
-      },
-      "_PermissionOptionSnapshot": {
-        "properties": {
-          "option_id": {
-            "type": "string",
-            "title": "Option Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/PermissionOptionKind"
-          }
-        },
-        "type": "object",
-        "required": [
-          "option_id",
-          "name",
-          "kind"
-        ],
-        "title": "_PermissionOptionSnapshot",
-        "description": "Permission option within a snapshot."
-      },
-      "_PermissionSnapshot": {
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "title": "Request Id"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description"
-          },
-          "options": {
-            "items": {
-              "$ref": "#/components/schemas/_PermissionOptionSnapshot"
-            },
-            "type": "array",
-            "title": "Options"
-          },
-          "tool_call": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tool Call"
-          },
-          "tool_kind": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ToolKind"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "request_id",
-          "description",
-          "options"
-        ],
-        "title": "_PermissionSnapshot",
-        "description": "Outstanding permission request in a state snapshot."
       }
     },
     "securitySchemes": {
       "GatewayServiceToken": {
         "type": "http",
         "description": "Gateway service token. The service publishes it in an owner-restricted `service.token` handoff file adjacent to the `service.json` discovery record, whose `handoff_reference` names that file without embedding the secret. Send it as `Authorization: Bearer <token>`.",
+        "scheme": "bearer"
+      },
+      "InternalIpcToken": {
+        "type": "http",
+        "description": "Internal gateway-to-worker IPC token. Not the gateway service token: these routes are the worker's callback surface, not a client surface.",
         "scheme": "bearer"
       }
     }

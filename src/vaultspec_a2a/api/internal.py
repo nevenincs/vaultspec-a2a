@@ -26,6 +26,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.security import HTTPBearer
 
 from ..control.config import settings
 from ..control.event_handlers import (
@@ -83,14 +84,54 @@ def _validate_event_envelope(
         )
 
 
+#: Declares the internal-IPC bearer in the generated OpenAPI document.
+#:
+#: A SEPARATE scheme from the gateway's ``GatewayServiceToken``, because it is a
+#: separate credential: this plane verifies ``settings.internal_token``, the
+#: gateway<->worker IPC secret, not the attach credential that lifecycle discovery
+#: publishes for external callers. Declaring both under one scheme would tell a
+#: reader the two surfaces accept the same token, which they do not.
+#:
+#: Declared here rather than beside :func:`verify_internal_bearer`: that module is
+#: framework-free by design and leaves transport mapping to each caller, so a
+#: FastAPI security object belongs on this side of the boundary.
+#:
+#: ``auto_error=False`` keeps it inert - the raw header below is still what the
+#: verifier compares, and the 401/500 mapping stays in one place.
+#:
+#: Attached per HTTP ROUTE rather than to the router, and that placement is
+#: load-bearing: this router also carries the worker WebSocket, router-level
+#: dependencies apply to WebSocket routes too, and ``HTTPBearer`` resolves only
+#: against an HTTP request - mounting it on the router raises
+#: ``TypeError: HTTPBearer.__call__() missing 1 required positional argument:
+#: 'request'`` and drops the worker connection. The router keeps the raw-header
+#: verifier, which both scopes can satisfy.
+internal_bearer_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="InternalIpcToken",
+    description=(
+        "Internal gateway-to-worker IPC token. Not the gateway service token: "
+        "these routes are the worker's callback surface, not a client surface."
+    ),
+)
+
+#: Declaration-only dependency for the HTTP routes below. Never read; depending
+#: on it is what puts the security requirement on these operations in the
+#: published contract.
+_declare_internal_bearer = Depends(internal_bearer_scheme)
+
+
 async def _verify_internal_token(
-    authorization: str | None = Header(None),
+    authorization: str | None = Header(None, include_in_schema=False),
 ) -> None:
     """Verify bearer token for internal IPC endpoints.
 
     Skipped when settings.internal_token is None **and** the environment
     is DEVELOPMENT.  In production/staging/testing, a missing token is a
     configuration error. Delegates the rule to the shared IPC bearer verifier.
+
+    Runs for the WebSocket route as well as the HTTP ones, so it reads the raw
+    header rather than a security object; see :data:`internal_bearer_scheme`.
     """
     verdict, detail = verify_internal_bearer(
         authorization,
@@ -107,6 +148,15 @@ internal_router = APIRouter(
     prefix="/internal",
     tags=["internal"],
     dependencies=[Depends(_verify_internal_token)],
+    # Both refusals belong to the gate every route here sits behind, not to any
+    # one verb. Note the misconfiguration case is a 500 on this plane, where the
+    # gateway's attach gate answers 503: an unset internal token outside
+    # DEVELOPMENT is this service's own configuration error, not a dependency
+    # that might yet become available.
+    responses={
+        401: {"description": "Missing or invalid internal IPC token."},
+        500: {"description": "Internal IPC token is not configured."},
+    },
 )
 
 
@@ -272,7 +322,7 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
         websocket.app.state.worker_ws = None
 
 
-@internal_router.get("/health")
+@internal_router.get("/health", dependencies=[_declare_internal_bearer])
 async def internal_health() -> dict[str, str]:
     """Readiness probe -- confirms the internal API is accepting connections."""
     return {"status": "ok", "service": "gateway"}
@@ -283,7 +333,7 @@ async def internal_health() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-@internal_router.post("/events")
+@internal_router.post("/events", dependencies=[_declare_internal_bearer])
 async def receive_worker_event(request: Request) -> dict[str, str]:
     """Receive a single event from the worker and relay to browser clients.
 
@@ -327,7 +377,7 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@internal_router.post("/events/batch")
+@internal_router.post("/events/batch", dependencies=[_declare_internal_bearer])
 async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     """Receive a batch of events from the worker.
 
@@ -394,7 +444,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@internal_router.post("/heartbeat")
+@internal_router.post("/heartbeat", dependencies=[_declare_internal_bearer])
 async def receive_worker_heartbeat(request: Request) -> dict[str, str]:
     """Receive a heartbeat from the worker.
 

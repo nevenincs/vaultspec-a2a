@@ -361,7 +361,7 @@ class ArtifactData:
 
 @dataclass(slots=True)
 class PermissionOptionData:
-    """Layer 1 equivalent of ``_PermissionOptionSnapshot``."""
+    """Layer 1 equivalent of ``PermissionOptionSnapshot``."""
 
     option_id: str
     name: str
@@ -370,7 +370,7 @@ class PermissionOptionData:
 
 @dataclass(slots=True)
 class PermissionData:
-    """Layer 1 equivalent of ``_PermissionSnapshot``."""
+    """Layer 1 equivalent of ``PermissionSnapshot``."""
 
     request_id: str
     description: str
@@ -381,7 +381,7 @@ class PermissionData:
 
 @dataclass(slots=True)
 class ClarificationQuestionData:
-    """Layer 1 equivalent of ``_ClarificationQuestionSnapshot``.
+    """Layer 1 equivalent of ``ClarificationQuestionSnapshot``.
 
     One bounded question within a pending clarification request.
     """
@@ -395,7 +395,7 @@ class ClarificationQuestionData:
 
 @dataclass(slots=True)
 class ClarificationRequestData:
-    """Layer 1 equivalent of ``_ClarificationRequestSnapshot``.
+    """Layer 1 equivalent of ``ClarificationRequestSnapshot``.
 
     A pending mid-run clarification request. ``request_id`` is the same
     checkpoint-derived interrupt id every other interrupt

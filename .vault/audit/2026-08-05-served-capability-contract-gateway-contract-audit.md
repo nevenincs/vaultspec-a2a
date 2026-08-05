@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:9ace72e5774d118baf365a0f6bb7cb7f38fd3ff39d672ab4c33442e44d43322b'
+body_hash: 'sha256:d21c741c13a2bc94b7e1b3da53564bff827b258703c46c3e44d584b199aaa565'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,8 +54,11 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F43**. F40 is RESERVED - assigned to an
-agent and not yet delivered - and is held rather than reused.
+place. The current highest identifier is **F46**. F40 is RESERVED - assigned to an
+agent and not yet delivered - and is held rather than reused. F45 and F46 are
+recorded at summary fidelity from the routing agent's one-line subjects; their
+originating write-ups are owed and will replace that text without changing the
+numbers.
 
 **Renumbering applied to the third tranche, recorded so the source remains
 traceable.** The live-run tranche from the `product-proof` session was authored
@@ -993,7 +996,79 @@ becomes a truthful error response instead. That is a served-contract rule doing
 real work on a live decision, which is worth recording as evidence the record is
 load-bearing rather than aspirational.
 
-### F44-and-beyond | low | reserved marker for continuous appending
+### F44-topology-only-predicate-second-site | medium | the topology-only authoring predicate misclassifies the document editor at run-start too, but the token-coverage gap it was feared to open DOES NOT EXIST
+
+The predicate that decides whether a preset is document-authoring is topology-only
+- true only for the research-to-ADR topology - so `vaultspec-doc-editor`, whose
+topology is `pipeline`, is classified as non-authoring in a SECOND location
+beyond the served capability field: the run-start eligibility policy, which gates
+token-coverage requirements. The concern raised was that this under-scopes the
+run-start check for document-editor runs, making it a live admission gap rather
+than a display defect.
+
+VERIFIED, AND THE CONCERN IS REFUTED. Tested by loading the real bundled presets
+and calling the real eligibility function rather than by reading alone:
+
+- `vaultspec-doc-editor` - topology `pipeline`, predicate False, authoring
+  bridge True, run-start REFUSES with "missing an actor token for role(s):
+  ['vaultspec-doc-editor']".
+- `vaultspec-solo-coder` - same shape, refuses on its own role.
+- `vaultspec-adr-research` - topology `research_adr`, predicate True, refuses on
+  the missing feature tag.
+
+Token coverage IS enforced for the document editor. It is enforced by a
+deliberate compensating branch: a preset that arms the engine authoring bridge
+requires per-role token coverage regardless of topology, and the function's
+docstring states that intent explicitly. The misclassification does not reach
+the token gate.
+
+WHAT THE MISCLASSIFICATION DOES SKIP, and both are deliberate and documented in
+the same docstring: the feature-tag requirement and the harness-readiness
+verdict. Neither is obviously wrong for this preset - the document editor edits
+an EXISTING document rather than scaffolding a new one under a feature, and it
+declares no required workspace authoring surfaces for a harness check to verify.
+Whether they SHOULD apply is a design question, not a defect, and it is not
+settled here.
+
+CONSEQUENCE: the served capability field is still wrong (F7), and that is worth
+fixing on its own merits. But no admission gap follows from it. CLASSIFICATION:
+genuine defect in the served declaration, correctly compensated at the gate.
+REMEDY: the capability derivation, already covered by F7 and the vocabulary
+record. No run-start change is required, and making one on the assumption of a
+gap would be a fix to a defect that does not exist.
+
+NOTE ON A RELATED CORRECTION: this entry does NOT revive the refuted claim that
+the capability string gated authoring. F16's mechanism remains F24. What F44
+establishes is that the topology-only predicate is a real second-site defect with
+its own smaller consequences - which is why the capability derivation remains
+worth doing, just never credited with F16.
+
+### F45-completion-check-excludes-archived | medium | the completion check scopes to the literal completed status and excludes archived
+
+Reported by the live-run agent and recorded at the fidelity supplied; the
+originating write-up is owed and will replace this text. The completion check
+matches the literal `completed` status only, so a run that has reached
+`archived` - a terminal state in the same vocabulary - is not counted as
+complete. CONSEQUENCE: any consumer or gate keyed on that check treats an
+archived run as incomplete. CLASSIFICATION: genuine defect, pending the
+originating agent's evidence. RELATION: this is a terminal-partition question and
+falls directly under the state-truthfulness record's first clause - a vocabulary
+that declares which members are terminal would make this checkable rather than a
+matter of remembering to enumerate them.
+
+### F46-preset-predicate-ignores-workspace-overrides | medium | the preset predicate resolves with no workspace root and therefore cannot see workspace-local overrides
+
+Reported by the live-run agent and recorded at the fidelity supplied; the
+originating write-up is owed and will replace this text. The predicate resolves
+its preset with no workspace root, so a workspace-local preset that shadows or
+extends a bundled one is not seen. CONSEQUENCE: a decision taken on the bundled
+definition can diverge from the preset the run will actually use.
+CLASSIFICATION: genuine defect, pending the originating agent's evidence.
+RELATION: preset discovery is documented as a superset that includes
+workspace-local definitions, so resolving without the workspace is resolving a
+different question than the one being asked.
+
+### F47-and-beyond | low | reserved marker for continuous appending
 
 New findings land immediately above this marker, taking the next free identifier
 after the highest already assigned. This entry carries no finding; it exists so

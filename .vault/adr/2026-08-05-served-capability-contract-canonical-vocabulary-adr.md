@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:38b70875d4c3f64e0f1ae8eedeffb9d566caecc55391c24843dab15ec31e5ff8'
+body_hash: 'sha256:02919c2518752ee89b72f2b3fff64b037610cdd005e6a0ab804f6536ca0ad02b'
 related:
   - "[[2026-08-05-served-capability-contract-gateway-contract-audit]]"
 ---
@@ -25,11 +25,19 @@ A decision is needed because the split has a measurable cost to the consumer
 this contract exists to serve. The audit records a frontend author who can
 generate exhaustive, checked handling for the typed half of the surface and must
 hand-maintain string literals for the rest, with nothing on the wire marking
-which half a given field is in. Two fields carry the same concept in one
-payload under different typings (audit F23); one vocabulary's legal values exist
-only in a source comment; and the audit's F35 records a boolean that is
-permanently false on one surface and true on another for the same preset - a
-value a client cannot act on in either direction.
+which half a given field is in. A four-member enumeration exists in code and is
+served as a bare string (audit F23); one vocabulary's legal values exist only in
+a source comment; and the audit's F35 records a boolean that is permanently
+false on one surface and true on another for the same preset - a value a client
+cannot act on in either direction.
+
+An earlier draft of this paragraph also claimed two fields carry the same
+concept under different typings. That example - a provider identifier served
+beside a typed provider enumeration - was MEASURED AND DOES NOT HOLD: one is the
+closed set of lanes this build can run, the other is an identifier a past run
+recorded, and they diverge over time by design. The correction is recorded in
+audit F23. It removes an example, not the decision: the split this record
+governs is measured across the surface, not inferred from that one pair.
 
 An earlier draft of this record motivated the decision with the audit's F16, on
 the hypothesis that an undeclared `authoring_capability` string was gating the
@@ -124,9 +132,17 @@ string when an owning type exists is a defect, not a style preference. The
 served schema carries the enumeration, so the wire and the code agree by
 construction rather than by review.
 
-**V3 - Consumers import from the owning module only.** No re-export, no local
-alias, no per-surface copy. A rehoming that leaves a re-export behind has not
-removed the second declaration site.
+**V3 - Consumers import from the owning module only.** No local alias, no
+per-surface copy. A rehoming that leaves a re-export behind has not removed the
+second declaration site.
+
+REFINEMENT, from executing this clause. The rule bites on a second DECLARATION
+SITE, never on a name mention. A package facade that re-exports its own owning
+module's type is the import surface this repository's facade mandate REQUIRES,
+and a name-based check flags it and invites exactly the wrong fix - deleting the
+facade export to satisfy a rule that was never about it. Enforcement is written
+against redeclaration. The distinction is the same one V1 draws between a
+concept and a name, applied to the check rather than to the type.
 
 **V4 - What is enum-worthy.** A field is a vocabulary, and must be declared,
 when its values are drawn from a set the SERVICE fixes and a client is expected

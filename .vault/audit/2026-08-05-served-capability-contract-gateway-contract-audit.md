@@ -5,7 +5,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:f697f4d0a79505acae881753ee72ec82150e6f192759cf380f38900eec1abb85'
+body_hash: 'sha256:e65bc3ea017ea977127c978d3c5ba8fed83a3c604464d8ddf6e208168e37f2b2'
 related:
   - "[[2026-08-05-served-capability-contract-research]]"
 ---
@@ -54,7 +54,8 @@ renumbering would orphan the trail. A new finding takes the next free number
 after the highest already present and is appended to the Findings section in
 numeric order. Severity is recorded per finding and is not adjusted by later
 tranches; a superseded or retracted finding keeps its number and says so in
-place. The current highest identifier is **F47**. F40 is RESERVED - assigned to an
+place. The current highest identifier is **F56**. F40 and F48-F56 are RESERVED -
+allocated with write-ups not yet received - and are held rather than reused. F40 is RESERVED - assigned to an
 agent and not yet delivered - and is held rather than reused. F45 and F46 now carry their
 originating write-ups, which CORRECTED the severity this document had assigned
 them from one-line summaries - both are LOW and neither is asserted as a live
@@ -144,6 +145,20 @@ one; only execution or a code trace promotes it.
 This is the same lesson as the audit's own through-line - a surface that looks
 right over a mechanism that is not - applied to the audit's METHOD rather than
 to the product. The document is not exempt from the failure it documents.
+
+**A SECOND METHOD RULE, from the vocabulary sweep: a test suite that has never
+been shown to fail is not evidence.** A containment suite written against the
+current values passes whether or not it checks anything. Rather than accept
+that, its author MUTATED three enumeration members and proved the suite failed -
+across the capture check, the model-replay check and the producer sweep - then
+reverted and re-verified. That is the vacuity check the grep rule above implies,
+done explicitly.
+
+The two rules are the same rule at different stages. A grep proves a string
+exists, not that it is on the path; a green suite proves it ran, not that it
+discriminates. Both are evidence of EXECUTION mistaken for evidence of FACT, and
+both are closed the same way - change something and confirm the instrument
+notices.
 
 ## Findings
 
@@ -591,6 +606,41 @@ source comment - "bundled | workspace | test_mock" at
 `src/vaultspec_a2a/api/schemas/gateway.py:945` - which is a declaration a client
 cannot read and a compiler cannot check. `supported_capabilities` is an
 unconstrained string array. This is the direct cause of F4, F6, F7, and F13.
+
+CORRECTION, MEASURED AGAINST THE CODE AND VERIFIED HERE. This entry originally
+listed `repair_status`, `execution_readiness`, `provider_condition` and
+`approval_status` under shape two. All four HAVE owning declarations -
+`RepairStatus` and `ApprovalStatus` in the thread enums module,
+`ProviderCondition` in the provider conditions module - so they belong to SHAPE
+ONE, an enum that exists and is discarded at the wire. The error is directional
+and matters for planning: this record OVERSTATED how much declaration work
+remains and UNDERSTATED how much was merely thrown away at the boundary. Four
+items move, and their remedy moves with them - deriving an existing type at an
+emit site is a smaller change than authoring a vocabulary from nothing.
+
+SECOND CORRECTION - `degraded_reasons` is TWO fields, not one. This entry
+treated it as a single vocabulary. There are two under one name carrying two
+concepts: the run snapshot's machine tokens, and service-state's operator PROSE,
+one member of which is built by string interpolation from another field. A
+remedy that types both would be wrong on the second; a remedy that merges them
+destroys the distinction. This is the same-name-different-concept hazard this
+entry already records for `AdmissionState`, recurring inside a field this
+document itself had conflated - and it was invisible until someone swept for it.
+The one-declaration-per-CONCEPT rule catches it; the one-per-NAME rule this
+entry warns against would have merged them.
+
+THIRD CORRECTION - `provider_id` is NOT the `Provider` concept, so this entry's
+"one concept, two typings, one payload" claim DOES NOT HOLD for it. Verified in
+code: the role-assignment summary replays FROZEN HISTORICAL assignments, its
+provider value defaults to the empty string, and an unknown provider is handled
+explicitly, the source comment stating that the truthful verdict is "not ready",
+not a crash on a read path. Narrowing that field would convert a deliberately
+handled case into a 500 on a read path. The reconciliation: `Provider` is the
+closed set of lanes THIS BUILD CAN RUN; `provider_id` is an identifier A PAST
+RUN RECORDED. Two concepts that coincide at one instant and diverge over time.
+
+The surviving shape-one example is `TopologyType`, genuinely declared and
+genuinely discarded. That one stands.
 
 SHAPE THREE, and the one that bounds what typing can fix - a vocabulary is
 PROPERLY TYPED and still wrong. `ToolCallStatus` is a closed enum with a genuine
@@ -1204,6 +1254,20 @@ misclassification in place everywhere else.
 
 WHAT WAS CHECKED AND DOES NOT HOLD: token coverage. See F44 - two independent
 verifications agree it is enforced.
+
+### F48-to-F56-reserved | unrated | RESERVED - allocated, write-ups not yet received
+
+Nine identifiers reserved for the vocabulary sweep's findings under the standing
+rule in Scope: held so they cannot be reused, bodies empty until the originating
+write-ups arrive. NO severities and NO mechanisms are recorded here.
+
+Three of that sweep's results were not new findings but CORRECTIONS to F23, and
+those have been applied in place rather than held - a correction to an existing
+entry is not a new finding and waiting on it would leave a known-wrong
+classification standing. One further result is noted as belonging to the
+state-truthfulness record's obliged-writer clause rather than to the vocabulary
+record; it is reserved with the rest and will be filed against that clause when
+its write-up lands.
 
 ### F47-and-beyond | low | reserved marker for continuous appending
 

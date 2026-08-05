@@ -5,8 +5,11 @@ tags:
 date: '2026-08-04'
 modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:8205899baed890cc9fb149924ec72aaadf839439b8a75e112aaf1c7293e52ee4'
-related: []
+body_hash: 'sha256:b4e1439543a1fb7d8bdb42ddd73f85340efb240c86e918ca2098ca31fb2260f8'
+related:
+  - '[[2026-08-04-canonical-homes-adr]]'
+  - '[[2026-08-01-tool-cores-web-grounding-adr]]'
+  - '[[2026-08-02-resource-aware-test-execution-adr]]'
 ---
 
 <!-- FRONTMATTER RULES:

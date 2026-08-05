@@ -11,6 +11,7 @@ related:
   - '[[2026-07-17-tool-cores-adr]]'
   - '[[2026-07-17-tool-cores-research]]'
   - '[[2026-07-15-agent-harness-provisioning-adr]]'
+  - '[[2026-08-04-canonical-homes-audit]]'
 ---
 # `tool-cores` adr: `web grounding` | (**status:** `accepted`)
 

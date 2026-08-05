@@ -29,6 +29,7 @@ from ..thread.enums import (
     TERMINAL_STATUS_VALUES,
     ApprovalStatus,
     RepairStatus,
+    ThreadStatus,
 )
 from ..thread.snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
@@ -96,6 +97,59 @@ def _mark_terminal_permission_residue(snapshot: ThreadStateData) -> None:
         RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
     }:
         snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+
+
+def _mark_no_artifact_produced(snapshot: ThreadStateData) -> None:
+    """Fail closed when a document-authoring run completed without output.
+
+    Unlike the two markers above, this does NOT touch ``repair_status`` /
+    ``execution_readiness``: those columns classify checkpoint-lineage
+    integrity, and the checkpoint here is genuinely healthy - readable and
+    internally consistent. The defect is that the run produced nothing, a
+    question repair_status was never asked. Overloading it would make "needs
+    reconciliation" ambiguous between checkpoint corruption and an empty
+    result, corrupting a signal that is currently correct.
+    """
+    snapshot.snapshot_complete = False
+    if "authoring_run_produced_no_proposal" not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append("authoring_run_produced_no_proposal")
+
+
+def apply_authoring_completion_check(
+    snapshot: ThreadStateData,
+    *,
+    thread_status: str,
+    requires_document_authoring: bool,
+    proposal_ids: list[str],
+    changeset_ids: list[str],
+) -> ThreadStateData:
+    """Flag a completed document-authoring run that produced no artifact.
+
+    A document-authoring preset (the research_adr phase machine or the solo
+    doc-editor lane) reaching ``completed`` with both
+    ``authoring_proposal_ids`` and ``authoring_changeset_ids`` empty means the
+    run's authoring tool call never landed - a silent-success gap where
+    ``status: completed`` reported clean while nothing was produced. Scoped to
+    the literal ``completed`` status (not the broader "completed" semantic
+    phase, which also covers ``archived``): the reported gap was a freshly
+    completed run, and archival is a distinct post-completion lifecycle this
+    check has not been proven against.
+
+    Non-authoring presets, and threads that have not reached this exact
+    status, pass through untouched. Callers must gate this on a checkpoint
+    that was actually read (``proposal_ids``/``changeset_ids`` derived from a
+    successfully loaded snapshot) - an unreadable checkpoint already carries
+    its own "unavailable" degraded reason, and asserting emptiness on top of
+    that would misreport "unread" as "produced nothing".
+    """
+    if (
+        requires_document_authoring
+        and thread_status == ThreadStatus.COMPLETED.value
+        and not proposal_ids
+        and not changeset_ids
+    ):
+        _mark_no_artifact_produced(snapshot)
+    return snapshot
 
 
 def _clear_non_actionable_pause_state(snapshot: ThreadStateData) -> None:

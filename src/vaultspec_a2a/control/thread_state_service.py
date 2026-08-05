@@ -13,8 +13,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from langgraph.checkpoint.base import CheckpointTuple
+from pydantic import ValidationError
 
+from ..authoring.contract import is_document_authoring_role
 from ..control.projection import (
+    apply_authoring_completion_check,
     apply_checkpoint_projection,
     clear_permissions_without_checkpoint_truth,
     enrich_snapshot_from_durable_state,
@@ -28,7 +31,9 @@ from ..control.snapshot import (
 )
 from ..database import get_thread
 from ..graph.enums import research_adr_semantic_phase
+from ..team.team_config import load_agent_config, load_team_config
 from ..thread.enums import RepairStatus, ThreadStatus, TranscriptAvailability
+from ..thread.errors import ConfigError
 from ..thread.snapshots import (
     ThreadStateData,
     classify_transcript_availability,
@@ -169,6 +174,43 @@ def derive_run_authoring_ids(
         coerce_string_list(values.get(PROPOSAL_ID_FIELD), drop_empty=True) or [],
         coerce_string_list(values.get(CHANGESET_ID_FIELD), drop_empty=True) or [],
     )
+
+
+def _preset_requires_document_authoring(team_preset: str | None) -> bool:
+    """Return whether *team_preset* runs at least one document-authoring role.
+
+    Deliberately role-based, not topology-based. The served
+    ``authoring_capability`` projection (``team_config.authoring_capability``)
+    keys on topology alone (``is_document_authoring_topology``, true only for
+    ``research_adr``), which misclassifies the solo doc-editor lane: its
+    topology is ``pipeline``, not ``research_adr``, so that predicate answers
+    "coding" for a preset that authors documents through the engine bridge.
+    Checking each worker's persona ``role`` against the authoring contract's
+    role set catches both the research_adr phase machine and the solo
+    doc-editor lane through one predicate, because ``DOCUMENT_AUTHORING_ROLES``
+    already unions both by construction.
+
+    Fails closed toward *not flagging*: a preset that cannot be resolved or
+    whose worker configs cannot be loaded returns ``False`` rather than
+    raising, so a run-status read never breaks over a config problem. An
+    unloadable preset already fails run-start elsewhere (fail-closed there),
+    so this module declining to guess at an unproven predicate does not mask
+    that defect.
+    """
+    if not team_preset:
+        return False
+    try:
+        team_config = load_team_config(team_preset)
+    except (ConfigError, ValidationError):
+        return False
+    for worker in team_config.workers:
+        try:
+            agent_config = load_agent_config(worker.agent_id)
+        except (ConfigError, ValidationError):
+            continue
+        if is_document_authoring_role(agent_config.role):
+            return True
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,6 +396,22 @@ async def capture_thread_state(
         checkpoint_present=checkpoint_present,
         checkpoint_id=snapshot.checkpoint_id,
     )
+
+    # Gated on checkpoint_loaded, not merely captured_tuple: an unread
+    # checkpoint already carries its own "unavailable" degraded reason above,
+    # and asserting emptiness on top of an unread snapshot would misreport
+    # "unread" as "produced nothing" - see apply_authoring_completion_check.
+    if checkpoint_loaded:
+        proposal_ids, changeset_ids = derive_run_authoring_ids(captured_tuple)
+        snapshot = apply_authoring_completion_check(
+            snapshot,
+            thread_status=thread.status,
+            requires_document_authoring=_preset_requires_document_authoring(
+                thread.team_preset
+            ),
+            proposal_ids=proposal_ids,
+            changeset_ids=changeset_ids,
+        )
 
     finalized_snapshot = finalize_snapshot_replay_status(
         snapshot,

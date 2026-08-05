@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#canonical-homes'
 date: '2026-08-04'
-modified: '2026-08-04'
+modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:a0142917b1fa05ade251dabd3db1d35c82656514f21c189ee26d85881836cb67'
+body_hash: 'sha256:1b049f4ab4cc6db02f505bd415ebc83361f547fa60bb9ac53e7f336f5e7e62a4'
 related: []
 ---
 
@@ -7706,3 +7706,96 @@ Recorded because the lane raised it and did not act on it - which was correct - 
 because an unrecorded declined question returns as a finding. If the vocabulary is
 ever revisited it starts from a clean position: one home, one name, all consumers
 direct.
+
+### the-guard-prescribed-its-own-remedy | high | ask the authority, applied to a choice between options
+
+The red guard is green, and the resolution was chosen by **reading the guard's own
+docstring**, which already names the remedy for its tier: a shared test mechanism
+belongs in the shared home rather than in whichever module happened to need it
+first.
+
+**The lane took that as the answer to the card's question rather than as one input
+to its own preference.** The card offered fold or accept and asked for reasons; the
+authority on which is right had already written them down, in the artifact that was
+failing.
+
+The reading confirmed it: **the two hooks differ in nothing but their data** - each
+names its own file set, while the walk, the directory guard, the layer split and the
+withheld claim are identical. **Data varying under one mechanism is the case for a
+shared home, not for an allowlist entry.** And an accepted-duplicate entry here would
+have had to state *these two are the same and we chose not to merge them* - the
+silent-debt line the guard's own docstring warns against.
+
+### complements-not-alternatives | high | why the fold added rather than replaced
+
+Both hooks worked from **file lists**. The fold kept the per-item fixture-closure
+check beside them rather than replacing either, because each is blind where the other
+sees:
+
+- a file performing input/output **in its own body** is invisible to a fixture
+  closure and must be named;
+- a test acquiring input/output by **naming a fixture defined above it** is invisible
+  to any file list.
+
+**Recorded because consolidation pressure runs toward replacement.** Two mechanisms
+answering one question look like duplication, and this campaign's own vocabulary
+invites folding them - which would have silently dropped whichever class the survivor
+could not see.
+
+The addition was **proven inert rather than argued inert**: a collection dump before
+and after is identical across all five hundred and ten items, with zero marker sets
+changed.
+
+### six-rows-including-a-shape-the-guard-had-never-seen | critical | the fullest non-vacuity here
+
+The certification answers every question this campaign learned to ask, in one table:
+
+    post-fold                                    GREEN
+    original pair restored                       RED, naming both hooks
+    reverted                                     GREEN
+    FRESH duplicate, new names, two packages     RED, naming both new functions
+    one copy of that duplicate alone             GREEN
+    both removed                                 GREEN
+
+**The restored-pair row answers the demand directly**: the fold removed the CAUSE of
+the redness rather than the detection of it. **The fresh-duplicate row - new names, a
+shape the guard had never seen - shows this is not the silencing of one instance**,
+which was the failure the card fenced against. The single-copy row confirms the guard
+stayed a duplicate check rather than degenerating into a blocklist of known shapes.
+
+That third row is the one no prior certification in this campaign contained: proving
+a guard still catches the CLASS, not merely that it stopped catching the fixed case.
+
+**And the consolidated hooks are now structurally identical to each other by
+construction**, sitting under the tier's node floor - precisely the "successful
+consolidation" case that floor's own comment anticipates. The guard does not fire on
+its own remedy.
+
+### a-third-copy-the-guard-cannot-see | medium | reported, not fixed
+
+A nested configuration holds a third expression of the same idea, and **the guard is
+structurally blind to it**: its body genuinely differs because it performs REMOVAL
+rather than addition.
+
+It is also dead. It strips and re-adds markers for two files the **parent** already
+classifies, so its premise stopped holding when the parent's list grew. It changes
+nothing today and is override logic whose condition is never met.
+
+Left alone deliberately, because touching it moves markers and that is a separate
+decision from resolving a red guard. Recorded so the deadness is known rather than
+rediscovered later as a defect.
+
+### the-third-transient-red-correctly-attributed | low | in-flight work, resolved by its owner
+
+The lane reported whole-tree type checking as **not** clean, named three diagnostics
+in two files, established both were uncommitted and belonged to a lane editing them,
+and flagged it explicitly so it would not read as campaign fallout.
+
+Checked at close: **clean, and those files are now committed.** The owning lane
+finished.
+
+**Third time today a red was correctly attributed to another lane's in-flight work
+and then resolved on its own** - after an artifact drift and a cross-lane flake. Well
+enough established now to state as a rule: in a multi-writer tree, a red whose files
+are dirty and not yours is a STATE, not a defect, and the correct action is to name
+it and continue.

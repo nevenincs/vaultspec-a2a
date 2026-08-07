@@ -105,6 +105,7 @@ async def _verify_dispatch_token(
         authorization,
         token=settings.internal_token,
         environment=settings.environment,
+        environment_declared=settings.environment_declared,
     )
     if verdict is BearerVerdict.MISCONFIGURED:
         raise HTTPException(status_code=500, detail=detail)

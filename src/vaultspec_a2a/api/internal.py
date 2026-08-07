@@ -137,6 +137,7 @@ async def _verify_internal_token(
         authorization,
         token=settings.internal_token,
         environment=settings.environment,
+        environment_declared=settings.environment_declared,
     )
     if verdict is BearerVerdict.MISCONFIGURED:
         raise HTTPException(status_code=500, detail=detail)
@@ -262,6 +263,7 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
         websocket.headers.get("authorization"),
         token=settings.internal_token,
         environment=settings.environment,
+        environment_declared=settings.environment_declared,
     )
     if verdict is not BearerVerdict.OK:
         await websocket.close(code=1008, reason="Unauthorized")

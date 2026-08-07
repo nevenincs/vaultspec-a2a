@@ -1155,6 +1155,17 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return self
 
     @property
+    def environment_declared(self) -> bool:
+        """Whether the operator DECLARED an environment rather than inheriting one.
+
+        The environment setting has a default, so its value alone cannot say
+        whether anyone chose it. Security decisions that key on the development
+        environment need that difference: reading a defaulted value as consent
+        turns "nobody configured this" into "authentication is off".
+        """
+        return "environment" in self.model_fields_set
+
+    @property
     def is_dev(self) -> bool:
         """Check if running in development environment."""
         return self.environment == Environment.DEVELOPMENT

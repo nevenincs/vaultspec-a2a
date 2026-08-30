@@ -27,11 +27,29 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _SPEC = _PROJECT_ROOT / "packaging" / "pyinstaller" / "vaultspec-a2a.spec"
 _BINARY_NAME = "vaultspec-a2a.exe" if sys.platform == "win32" else "vaultspec-a2a"
 
-#: Characters that disqualify a path segment as a portable install-path
-#: component. The space is the one that actually bit us; the rest are the
-#: Windows-reserved set, included because a tree that installs on Linux and not
-#: on Windows is the same class of defect found later.
-_UNPORTABLE_CHARS = frozenset(' \t\n\r<>:"|?*\\')
+#: The consumer's grammar, transcribed rather than approximated.
+#
+# vaultspec-dashboard's `validate_portable_segment` (manifest/verification.rs)
+# is an ALLOWLIST, and the first version of this check was a denylist of space
+# plus the Windows-reserved characters. That was looser than the rule it
+# claimed to mirror: a parenthesis, comma, equals sign, tilde or any non-ASCII
+# byte passed here and would still have failed the compose two repos away -
+# which is the entire failure this check exists to move upstream.
+#
+# Called with `ascii_release_path = true` from `product_build.rs`, so the
+# permitted set is exactly: ASCII alphanumeric, and @ _ + . -
+_PORTABLE_EXTRA = frozenset("@_+.-")
+
+#: Windows device names, reserved on the stem before the first dot.
+_WINDOWS_RESERVED = frozenset(
+    ["con", "conin$", "conout$", "prn", "aux", "nul"]
+    + [f"com{d}" for d in "123456789"]
+    + [f"lpt{d}" for d in "123456789"]
+)
+
+#: The consumer's own bounds.
+_MAX_SEGMENT = 128
+_MAX_SEGMENTS = 32
 
 
 def _run(
@@ -137,6 +155,7 @@ def assert_portable_paths(root: Path) -> None:
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
         if any(_is_unportable(part) for part in path.relative_to(root).parts)
+        or len(path.relative_to(root).parts) > _MAX_SEGMENTS
     )
     if offenders:
         listed = "\n  ".join(offenders[:20])
@@ -153,13 +172,25 @@ def assert_portable_paths(root: Path) -> None:
 def _is_unportable(segment: str) -> bool:
     """Whether one path segment would be refused as an install-path component.
 
-    Deliberately narrow. This mirrors the consumer's rule rather than inventing
-    a stricter one: a check that refuses trees the dashboard would happily
-    install is a check someone eventually disables.
+    Transcribed from vaultspec-dashboard's `validate_portable_segment`, not
+    approximated. Matching the consumer exactly is the point: a looser rule
+    lets a tree through that the compose then rejects, and a stricter one
+    refuses trees the dashboard would happily install - which is a check
+    someone eventually disables.
     """
+    if not segment or len(segment) > _MAX_SEGMENT:
+        return True
     if segment in (".", ".."):
-        return False
-    return bool(set(segment) & _UNPORTABLE_CHARS) or segment != segment.strip()
+        return True
+    if segment.endswith(".") or segment.endswith(" "):
+        return True
+    if any(
+        not (character.isascii() and (character.isalnum() or character in _PORTABLE_EXTRA))
+        for character in segment
+    ):
+        return True
+    stem = segment.split(".", 1)[0].lower()
+    return stem in _WINDOWS_RESERVED
 
 
 def smoke(binary: Path) -> None:

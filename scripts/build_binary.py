@@ -185,7 +185,10 @@ def _is_unportable(segment: str) -> bool:
     if segment.endswith(".") or segment.endswith(" "):
         return True
     if any(
-        not (character.isascii() and (character.isalnum() or character in _PORTABLE_EXTRA))
+        not (
+            character.isascii()
+            and (character.isalnum() or character in _PORTABLE_EXTRA)
+        )
         for character in segment
     ):
         return True

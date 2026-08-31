@@ -27,6 +27,30 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _SPEC = _PROJECT_ROOT / "packaging" / "pyinstaller" / "vaultspec-a2a.spec"
 _BINARY_NAME = "vaultspec-a2a.exe" if sys.platform == "win32" else "vaultspec-a2a"
 
+#: The consumer's grammar, transcribed rather than approximated.
+#
+# vaultspec-dashboard's `validate_portable_segment` (manifest/verification.rs)
+# is an ALLOWLIST, and the first version of this check was a denylist of space
+# plus the Windows-reserved characters. That was looser than the rule it
+# claimed to mirror: a parenthesis, comma, equals sign, tilde or any non-ASCII
+# byte passed here and would still have failed the compose two repos away -
+# which is the entire failure this check exists to move upstream.
+#
+# Called with `ascii_release_path = true` from `product_build.rs`, so the
+# permitted set is exactly: ASCII alphanumeric, and @ _ + . -
+_PORTABLE_EXTRA = frozenset("@_+.-")
+
+#: Windows device names, reserved on the stem before the first dot.
+_WINDOWS_RESERVED = frozenset(
+    ["con", "conin$", "conout$", "prn", "aux", "nul"]
+    + [f"com{d}" for d in "123456789"]
+    + [f"lpt{d}" for d in "123456789"]
+)
+
+#: The consumer's own bounds.
+_MAX_SEGMENT = 128
+_MAX_SEGMENTS = 32
+
 
 def _run(
     command: list[str],
@@ -105,6 +129,73 @@ def flatten_links(root: Path) -> int:
     return len(links)
 
 
+def assert_portable_paths(root: Path) -> None:
+    """Refuse a frozen tree carrying a name the consumer cannot install.
+
+    Same contract as :func:`flatten_links`, and here for the same reason: the
+    dashboard composes this tree into a product generation and validates every
+    path against a PORTABLE install-path rule. A name that breaks it is not a
+    cosmetic problem - the composed tree is refused outright:
+
+        vaultspec-product-build: composed file name is not a portable install
+        path: invalid composed tree: unsafe portable path segment
+        "Lorem ipsum.txt"
+
+    That is a real failure, not a hypothetical one. It took out all four Compose
+    legs of vaultspec-dashboard v0.1.7, and the diagnosis surfaced two repos
+    away from its cause - `setuptools` vendors `jaraco.text`, whose sample data
+    file carries a space, and PyInstaller was bundling setuptools.
+
+    So the check belongs HERE, where the tree is produced, rather than in the
+    consumer that happens to notice. A dependency bump can vendor another such
+    file at any time, and the next one should fail this build with its own name
+    in the message instead of a downstream compose step.
+    """
+    offenders = sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if any(_is_unportable(part) for part in path.relative_to(root).parts)
+        or len(path.relative_to(root).parts) > _MAX_SEGMENTS
+    )
+    if offenders:
+        listed = "\n  ".join(offenders[:20])
+        more = f"\n  ... and {len(offenders) - 20} more" if len(offenders) > 20 else ""
+        raise SystemExit(
+            f"{len(offenders)} path(s) in the frozen tree are not portable "
+            f"install paths:\n  {listed}{more}\n"
+            "Exclude the package that ships them in "
+            "packaging/pyinstaller/vaultspec-a2a.spec rather than renaming "
+            "vendored files, which the next resolve would undo."
+        )
+
+
+def _is_unportable(segment: str) -> bool:
+    """Whether one path segment would be refused as an install-path component.
+
+    Transcribed from vaultspec-dashboard's `validate_portable_segment`, not
+    approximated. Matching the consumer exactly is the point: a looser rule
+    lets a tree through that the compose then rejects, and a stricter one
+    refuses trees the dashboard would happily install - which is a check
+    someone eventually disables.
+    """
+    if not segment or len(segment) > _MAX_SEGMENT:
+        return True
+    if segment in (".", ".."):
+        return True
+    if segment.endswith(".") or segment.endswith(" "):
+        return True
+    if any(
+        not (
+            character.isascii()
+            and (character.isalnum() or character in _PORTABLE_EXTRA)
+        )
+        for character in segment
+    ):
+        return True
+    stem = segment.split(".", 1)[0].lower()
+    return stem in _WINDOWS_RESERVED
+
+
 def smoke(binary: Path) -> None:
     """Prove the frozen dispatch surface without booting a service.
 
@@ -149,6 +240,7 @@ def main() -> None:
     # Before the smoke gate: a tree the consumer would refuse is not worth
     # proving the dispatch surface of.
     flatten_links(binary.parent)
+    assert_portable_paths(binary.parent)
     smoke(binary)
 
 

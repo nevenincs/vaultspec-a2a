@@ -14,6 +14,7 @@ from logging.config import fileConfig
 from typing import Literal
 
 from alembic import context
+from alembic.util import CommandError
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -68,12 +69,54 @@ def include_name(
     return True
 
 
+# -- Database URL resolution --------------------------------------------------
+
+#: ``-x`` key through which the bare Alembic CLI names its target database.
+_URL_ARGUMENT = "sqlalchemy_url"
+
+_MISSING_URL_MESSAGE = (
+    "No database URL was supplied. alembic.ini leaves sqlalchemy.url empty on "
+    "purpose, so that a bare `alembic` run cannot migrate whatever database a "
+    "stale default happens to name. Name the target explicitly:\n"
+    "    alembic -x sqlalchemy_url=sqlite+aiosqlite:///path/to/vaultspec.db "
+    "upgrade head\n"
+    "or use the administrative entry point, which resolves the configured "
+    "store for you:\n"
+    "    python -m vaultspec_a2a.database.admin migrate"
+)
+
+
+def resolve_database_url() -> str:
+    """Return the database URL this run must migrate.
+
+    Two kinds of caller reach this file. ``database.migrate`` builds its config
+    programmatically and sets ``sqlalchemy.url`` directly; a human on the bare
+    CLI has only ``alembic.ini``, which ships that option empty and documents
+    ``-x sqlalchemy_url=...`` as the way to fill it. Reading that argument here
+    is what makes the documented invocation work; without it the empty string
+    travels all the way to SQLAlchemy, whose "Could not parse SQLAlchemy URL"
+    names neither the cause nor the remedy.
+
+    The ``-x`` value wins over the config file so a CLI run can retarget a
+    populated ``alembic.ini``, and an absent URL raises here rather than
+    downstream.
+
+    Raises:
+        CommandError: When neither source names a database.
+    """
+    override = context.get_x_argument(as_dictionary=True).get(_URL_ARGUMENT)
+    url = override or config.get_main_option("sqlalchemy.url")
+    if not url:
+        raise CommandError(_MISSING_URL_MESSAGE)
+    return url
+
+
 # -- Offline mode -------------------------------------------------------------
 
 
 def run_migrations_offline() -> None:
     """Emit SQL to stdout without connecting to the database."""
-    url = config.get_main_option("sqlalchemy.url")
+    url = resolve_database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -103,8 +146,10 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Create an async engine and bridge to sync Alembic context."""
+    settings = dict(config.get_section(config.config_ini_section, {}))
+    settings["sqlalchemy.url"] = resolve_database_url()
     connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        settings,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )

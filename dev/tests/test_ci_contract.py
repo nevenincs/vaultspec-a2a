@@ -21,9 +21,13 @@ LINT = toolchain.LINT
 PYTHON_PATHS = toolchain.PYTHON_PATHS
 find_verb = toolchain.find_verb
 
+# The dimensions still carried as advisory sentinels. A dimension leaves this
+# tuple when it graduates into `lint all` and its sentinel step goes with it -
+# `imports` and `type-platforms` have both done so. The structural assertions on
+# `type-platforms` below still hold it to its shape; it is only no longer
+# advisory.
 STRICT_SENTINELS = (
     "type-strict",
-    "type-platforms",
     "complexity",
     "cyclomatic",
     "shape",

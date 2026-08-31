@@ -1,3 +1,15 @@
+# Runner labels this repository is permitted to schedule onto.
+#
+# actionlint rejects any `runs-on:` label absent from this list, which is the
+# whole purpose: a mistyped or retired label does not fail at dispatch, it
+# queues forever with no logs and no failure. Enumerating the set here turns
+# that silent, unbounded stall into a lint error on the pull request.
+#
+# `dev-runner` is DECLARED but not currently registered to this repository -
+# `bootstrap-branch.yml` targets it, and every historical run of that workflow
+# was cancelled by hand rather than completing. It is listed here because the
+# workflow legitimately expects an on-demand runner to be provisioned under that
+# label; it is not evidence that one exists today.
 self-hosted-runner:
   labels:
     - dev-runner

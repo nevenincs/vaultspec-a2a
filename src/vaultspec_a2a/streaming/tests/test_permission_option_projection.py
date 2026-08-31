@@ -197,7 +197,6 @@ def test_resolve_prefers_a_declared_kind_over_the_id_heuristic() -> None:
     assert resolve_acp_option_kind(None, "approve") is PermissionOptionKind.ALLOW_ONCE
 
 
-
 def test_relayed_cache_keeps_a_denial_declared_under_an_approving_id() -> None:
     """The gateway's cache must not re-derive a kind the payload already carries.
 

@@ -19,14 +19,23 @@ schema actually reached head.
 from __future__ import annotations
 
 import sqlite3
+from argparse import Namespace
 from pathlib import Path
 
+import pytest
+from alembic import command
+from alembic.config import Config
 from alembic.script import ScriptDirectory
+from alembic.util import CommandError
 
-import vaultspec_a2a
+# These tests assert where an INSTALLED distribution resolves its package data
+# from, so they need the package anchor itself rather than any module within it.
+# A relative import binds a submodule and would reintroduce the path arithmetic
+# this module exists to pin down.
+import vaultspec_a2a  # absolute-import-ok
 
 from .. import admin as database_admin
-from ..migrate import migration_script_location
+from ..migrate import _alembic_option, migration_script_location
 from ..models import Base
 
 _PACKAGE_ROOT = Path(vaultspec_a2a.__file__).resolve().parent
@@ -129,3 +138,65 @@ def test_a_real_upgrade_survives_a_percent_in_the_database_directory(
     database_admin._migrate_to_head(f"sqlite+aiosqlite:///{database}")
 
     assert _tables(database) >= set(Base.metadata.tables)
+
+
+def _cli_config(*x_arguments: str) -> Config:
+    """Build the configuration a bare ``alembic`` CLI run arrives with.
+
+    ``sqlalchemy.url`` is left unset, exactly as the shipped ``alembic.ini``
+    leaves it, so these tests exercise the resolution the CLI actually depends
+    on rather than a URL some other seam already supplied.
+    """
+    cfg = Config()
+    cfg.set_main_option(
+        "script_location", _alembic_option(str(migration_script_location()))
+    )
+    cfg.cmd_opts = Namespace(x=list(x_arguments))
+    return cfg
+
+
+def test_the_cli_x_argument_names_the_database_that_gets_migrated(
+    tmp_path: Path,
+) -> None:
+    """``alembic.ini`` documents ``-x sqlalchemy_url=...``; it must be honoured.
+
+    The file ships ``sqlalchemy.url`` empty on purpose, so this argument is the
+    only way a bare CLI run can name a target. When nothing reads it the empty
+    string reaches SQLAlchemy and the documented invocation fails.
+    """
+    database = tmp_path / "cli.db"
+
+    command.upgrade(
+        _cli_config(f"sqlalchemy_url=sqlite+aiosqlite:///{database}"), "head"
+    )
+
+    assert _tables(database) >= set(Base.metadata.tables)
+
+
+def test_the_round_trip_leaves_a_downgraded_database_migratable_again(
+    tmp_path: Path,
+) -> None:
+    """Upgrade, downgrade to base, upgrade again — the CI round trip, for real."""
+    database = tmp_path / "round-trip.db"
+    cfg = _cli_config(f"sqlalchemy_url=sqlite+aiosqlite:///{database}")
+
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "base")
+    assert _tables(database) & set(Base.metadata.tables) == set()
+
+    command.upgrade(cfg, "head")
+    assert _tables(database) >= set(Base.metadata.tables)
+
+
+def test_a_run_that_names_no_database_refuses_instead_of_guessing() -> None:
+    """Migrating a database nobody named is worse than refusing to migrate.
+
+    The failure must also say what to do about it: SQLAlchemy's own complaint
+    about an unparseable URL names neither the empty option nor the remedy.
+    """
+    with pytest.raises(CommandError) as excinfo:
+        command.upgrade(_cli_config(), "head")
+
+    message = str(excinfo.value)
+    assert "sqlalchemy_url" in message
+    assert "database.admin migrate" in message

@@ -24,9 +24,34 @@ if TYPE_CHECKING:
     from ._envelope import Denial
     from .client import AuthoringClient
 
-__all__ = ["AuthoringSession", "close_authoring_session", "mint_actor_token"]
+__all__ = [
+    "AuthoringSession",
+    "close_authoring_session",
+    "decide_review",
+    "mint_actor_token",
+    "request_apply",
+]
 
 _ACTOR_TOKENS_PATH = "/v1/actor-tokens"
+
+# Review-decision wire values (engine `ApprovalDecision`, snake_case) and the
+# `CommandKind` each maps to for the `ResolvedCommand` authorization extractor
+# (`POST /v1/reviews/{approval_id}/decisions` deserializes a
+# `CommandEnvelope<ReviewDecisionRequest>` and runs `run_authorization` on the
+# envelope's own `command`, engine `http/mod.rs`). There is NO
+# `submit_review_decision` `CommandKind` on the wire — that is the handler
+# function name, not a command a caller may post. `edit` (RequestChanges) is the
+# reject-with-notes device: it returns the changeset to Draft and stales the
+# approval rather than terminating it.
+REVIEW_DECISION_APPROVE = "approve"
+REVIEW_DECISION_REJECT = "reject"
+REVIEW_DECISION_EDIT = "edit"
+
+_REVIEW_DECISION_COMMAND: dict[str, str] = {
+    REVIEW_DECISION_APPROVE: "approve",
+    REVIEW_DECISION_REJECT: "reject",
+    REVIEW_DECISION_EDIT: "edit_proposal",
+}
 
 
 async def close_authoring_session(
@@ -78,6 +103,110 @@ async def mint_actor_token(
     return await client.post_bare(_ACTOR_TOKENS_PATH, payload)
 
 
+async def decide_review(
+    client: AuthoringClient,
+    *,
+    approval_id: str,
+    proposal_id: str,
+    decision: str,
+    reviewed_revision: str,
+    idempotency_key: str,
+    comment: str | None = None,
+    actor_token: str | None = None,
+) -> AuthoringResponse | Denial:
+    """Record a reviewer's decision on a queued approval (``submit_review_decision``).
+
+    ``POST /authoring/v1/reviews/{approval_id}/decisions`` is the human-review
+    half of the delivery path this repository's own respond route explicitly
+    refuses to decide on a document proposal's behalf (the amended
+    a2a-orchestration-edge contract: no second approval authority in A2A) — the
+    engine review surface is the sole approval authority, and this is the typed
+    client call onto it.
+
+    ``decision`` is the engine ``ApprovalDecision`` wire value (``approve`` /
+    ``reject`` / ``edit``); it is mapped onto the ``CommandKind`` the envelope
+    must carry for the reviewer's own authorization check to run against the
+    right command (see :data:`REVIEW_DECISION_APPROVE` and siblings). Passing
+    an unrecognised value is refused client-side with ``ValueError`` before any
+    round trip.
+
+    ``reviewed_revision`` is the edge contract's REVISION FENCE: the caller
+    attests the exact ``changeset_revision`` the approval was opened against
+    (read from the same review-queue item ``approval_id``/``proposal_id`` came
+    from). A stale attestation is refused by the engine as a typed 409
+    (``authoring_stale_review``) rather than silently deciding a superseded
+    revision — this function does not swallow that; it propagates as
+    :class:`~vaultspec_a2a.authoring._errors.AuthoringTransportError`.
+
+    The caller supplies ``idempotency_key`` explicitly (never derived here): per
+    the submitter's own idempotency doctrine, a retry of the SAME decision must
+    reproduce the SAME key so the engine dedupes rather than double-deciding —
+    derive it from durable material (e.g. run id + approval id + command), never
+    fresh per call.
+    """
+    command = _REVIEW_DECISION_COMMAND.get(decision)
+    if command is None:
+        raise ValueError(
+            f"unknown review decision {decision!r}; expected one of "
+            f"{sorted(_REVIEW_DECISION_COMMAND)}"
+        )
+    validate_id(approval_id, field="approval_id")
+    validate_id(proposal_id, field="proposal_id")
+    validate_id(reviewed_revision, field="reviewed_revision")
+    payload: dict[str, Any] = {
+        "proposal_id": proposal_id,
+        "approval_id": approval_id,
+        "decision": decision,
+        "reviewed_revision": reviewed_revision,
+    }
+    if comment is not None:
+        payload["comment"] = comment
+    return await client.post_command(
+        f"/v1/reviews/{quote(approval_id, safe='')}/decisions",
+        command=command,
+        payload=payload,
+        idempotency_key=idempotency_key,
+        actor_token=actor_token,
+    )
+
+
+async def request_apply(
+    client: AuthoringClient,
+    *,
+    changeset_id: str,
+    approval_id: str,
+    idempotency_key: str,
+    actor_token: str | None = None,
+) -> AuthoringResponse | Denial:
+    """Request the engine materialize an approved changeset (``request_apply``).
+
+    ``POST /authoring/v1/apply-requests`` is the delivery half of the
+    approve -> apply pair: a decision alone never writes a file, and calling
+    this before ``approval_id`` carries an ``approve`` decision is refused by
+    the engine as a :class:`Denial` (an in-domain business refusal), never
+    silently ignored. A successful apply's receipt carries
+    ``data.child_outcome == "applied"`` and the materialized
+    ``data.receipt.child.{document_path,result_stem}`` — this function returns
+    the engine's raw response; the caller reads those fields to learn what
+    landed on disk.
+
+    ``idempotency_key`` is supplied by the caller for the same reason
+    :func:`decide_review` requires it explicitly: a retry that generates a
+    FRESH key applies the same changeset a second time, which is the single
+    worst outcome available at this seam. Derive it from durable material (run
+    id + approval id + command) and reuse it byte-for-byte across a replay.
+    """
+    validate_id(changeset_id, field="changeset_id")
+    validate_id(approval_id, field="approval_id")
+    return await client.post_command(
+        "/v1/apply-requests",
+        command="request_apply",
+        payload={"changeset_id": changeset_id, "approval_id": approval_id},
+        idempotency_key=idempotency_key,
+        actor_token=actor_token,
+    )
+
+
 class AuthoringSession:
     """One authoring session bound to a single run.
 
@@ -89,14 +218,34 @@ class AuthoringSession:
     run_id:
         Stable run-local identifier used as idempotency-key material and as the
         seed for generated session/changeset ids. Must satisfy the id grammar.
+    project_scope:
+        The project this session's work belongs to, in the engine's scope
+        spelling. It becomes the session's ``scope`` at creation, which is the
+        one field the engine stores verbatim on the session record and therefore
+        the only place a run's project can ride the closed authoring wire. Every
+        mutating proposal verb below refuses while it is unset, so a proposal can
+        never be issued from a session that named no project - the closed wire
+        gives a proposal payload no field of its own, so its binding is the
+        session it carries, and an unpinned session is a proposal fenced against
+        whatever the engine's active workspace happens to be at command time.
+
+        Optional here only so a caller may supply it to :meth:`create_session`
+        instead; one of the two must provide it before any proposal.
     """
 
-    def __init__(self, client: AuthoringClient, run_id: str) -> None:
+    def __init__(
+        self,
+        client: AuthoringClient,
+        run_id: str,
+        *,
+        project_scope: str | None = None,
+    ) -> None:
         self._client = client
         self._run_id = validate_id(run_id, field="run_id")
         self._seq = 0
         self._session_id: str | None = None
         self._engine_run_id: str | None = None
+        self._project_scope = project_scope or None
         # Produced Vaultspec ids, accumulated for thread-state cross-reference.
         self._changeset_ids: list[str] = []
         self._proposal_ids: list[str] = []
@@ -109,6 +258,11 @@ class AuthoringSession:
     def session_id(self) -> str | None:
         """The engine session id once ``create_session`` has run."""
         return self._session_id
+
+    @property
+    def project_scope(self) -> str | None:
+        """The project every command on this session is fenced to."""
+        return self._project_scope
 
     @property
     def engine_run_id(self) -> str | None:
@@ -165,24 +319,73 @@ class AuthoringSession:
         if changeset_id not in self._changeset_ids:
             self._changeset_ids.append(changeset_id)
 
+    def _bind_project(self, scope: str | None) -> str:
+        """Settle the session's project from the binding and the call, or refuse.
+
+        A session bound at construction ignores no caller: an explicit *scope*
+        that agrees is redundant and accepted, one that disagrees is a command
+        trying to fence this run's work to a different project and is refused
+        rather than silently resolved either way.
+        """
+        if self._project_scope is not None:
+            if scope is not None and scope != self._project_scope:
+                raise ValueError(
+                    f"session for run {self._run_id!r} is bound to project "
+                    f"{self._project_scope!r}; refusing to open it under {scope!r}"
+                )
+            return self._project_scope
+        if not scope:
+            raise ValueError(
+                f"session for run {self._run_id!r} names no project: supply "
+                f"project_scope at construction or scope at create_session"
+            )
+        self._project_scope = scope
+        return scope
+
+    def _require_project(self, command: str) -> str:
+        """Return the session's project, refusing an unpinned mutating command.
+
+        A proposal command carries no project of its own - the engine's payloads
+        are closed - so the session's binding is the whole of it. Refusing here
+        keeps an unpinned session from producing work the engine would authorise
+        against whatever workspace is active when the command lands.
+        """
+        if self._project_scope is None:
+            raise RuntimeError(
+                f"{command} requires a project-bound session; run "
+                f"{self._run_id!r} opened none"
+            )
+        return self._project_scope
+
     # ------------------------------------------------------------------
     # Session lifecycle
     # ------------------------------------------------------------------
 
     async def create_session(
-        self, *, scope: str, title: str, idempotency_key: str | None = None
+        self,
+        *,
+        title: str,
+        scope: str | None = None,
+        idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         """Open the authoring session for this run (``create_session``).
 
         The engine generates the ``session_id`` and returns it in the receipt
         (``data.session_id``); the payload carries only ``scope`` and ``title``.
         A stable ``idempotency_key`` makes this a create-or-resume: a repeat call
-        for the same run returns the same session (the engine dedupes).
+        for the same run returns the same session (the engine dedupes) - which
+        also means the project the session was FIRST opened under is the one it
+        keeps, so a mid-run switch cannot re-scope work already in flight.
+
+        ``scope`` is the session's project. A session constructed with a
+        ``project_scope`` already carries it and needs none here; a caller may
+        supply it instead, but not one that contradicts the binding.
         """
+        effective_scope = self._bind_project(scope)
         result = await self._client.post_command(
             "/v1/sessions",
             command="create_session",
-            payload={"scope": scope, "title": title},
+            payload={"scope": effective_scope, "title": title},
             idempotency_key=self._resolve_key("create_session", idempotency_key),
         )
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
@@ -231,6 +434,7 @@ class AuthoringSession:
         """Create a proposal changeset (``create_proposal``)."""
         if self._session_id is None:
             raise RuntimeError("create_session must run before create_proposal")
+        self._require_project("create_proposal")
         validate_id(changeset_id, field="changeset_id")
         result = await self._client.post_command(
             "/v1/proposals",
@@ -293,9 +497,10 @@ class AuthoringSession:
         operations: list[dict[str, Any]],
         idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
+        command = "append_draft" if verb == "append" else "replace_draft"
+        self._require_project(command)
         validate_id(changeset_id, field="changeset_id")
         validate_id(expected_revision, field="expected_revision")
-        command = "append_draft" if verb == "append" else "replace_draft"
         return await self._client.post_command(
             f"/v1/proposals/{changeset_id}/{verb}",
             command=command,
@@ -323,6 +528,7 @@ class AuthoringSession:
         opened approval). It is captured from the receipt into the run's
         produced-id references so thread state can match the engine's records.
         """
+        self._require_project("submit_for_review")
         validate_id(changeset_id, field="changeset_id")
         validate_id(expected_revision, field="expected_revision")
         result = await self._client.post_command(
@@ -346,6 +552,7 @@ class AuthoringSession:
         idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         """Rebase a proposal onto the latest base revision (``rebase``)."""
+        self._require_project("rebase")
         validate_id(changeset_id, field="changeset_id")
         validate_id(expected_revision, field="expected_revision")
         return await self._client.post_command(

@@ -10,23 +10,12 @@
         "summary": "Shutdown Endpoint",
         "description": "Initiate graceful server shutdown.\n\nAdministrative shutdown is a receipt-bound lifecycle operation: it requires\nboth authenticated runtime control (the attach credential) and receipt\nownership (the lifecycle capability that discovery never references), so a\nforeign attachment that can reach the product surface still cannot stop the\ngateway.\n\nRun admission is closed first, so the gateway admits no new run while it\ndrains; the in-process stop is then deferred briefly so this 202 flushes\nbefore the SIGINT-driven graceful shutdown - which drains and reaps the owned\nworker and run descendants in the lifespan - begins.",
         "operationId": "shutdown_endpoint_admin_shutdown_post",
-        "parameters": [
+        "security": [
           {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
+            "GatewayServiceToken": []
+          }
+        ],
+        "parameters": [
           {
             "name": "X-Vaultspec-Lifecycle-Capability",
             "in": "header",
@@ -59,6 +48,15 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "403": {
+            "description": "Missing or invalid lifecycle capability receipt."
+          },
+          "503": {
+            "description": "Gateway service token or lifecycle capability is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -77,22 +75,9 @@
         "summary": "Run Start Endpoint",
         "description": "Start, prepare, commit, or release through the single run-start verb.\n\nThe ``stage`` selector splits one verb into four shapes without growing the\nverb set: ``prepare`` reserves bounded capacity without tokens or a durable\nrun; ``commit`` binds the exact actor-token role set to that reservation;\n``release`` frees only an uncommitted reservation; and ``start`` (the\ndefault) preserves the one-shot engine/Compose path.",
         "operationId": "run_start_endpoint_v1_runs_post",
-        "parameters": [
+        "security": [
           {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
+            "GatewayServiceToken": []
           }
         ],
         "requestBody": {
@@ -130,6 +115,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -146,6 +137,11 @@
         "summary": "Active Runs Endpoint",
         "description": "List runs: non-terminal by default, or every run including terminal ones.\n\nThe default is unchanged and remains the capped identity projection of\ndurable non-terminal runs that the engine contract certified - a caller that\npasses nothing sees exactly what it saw before, byte for byte.\n\n``state=all`` is the history read, and it differs from discovery in more than\nwhich rows it returns. It answers through the paginated list service rather\nthan the discovery one, because discovery exists to find live work and is\ncapped for that purpose while history has to walk a store that only grows;\nthat is why this mode carries a total and an offset. And it answers with a\nWIDER record, because the two readings are asked different questions: a\nviewer binding to live work needs an identity, while a reader of history is\nasking what happened and needs the projection that separates a healthy run\nfrom a degraded one.\n\nThe two shapes are returned as two models rather than one union, so widening\nhistory cannot perturb a single byte of the certified discovery response.",
         "operationId": "active_runs_endpoint_v1_runs_get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "state",
@@ -235,22 +231,6 @@
               "default": 0,
               "title": "Offset"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
@@ -272,6 +252,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -290,6 +276,11 @@
         "summary": "Run Status Endpoint",
         "description": "Return the authoritative recovery snapshot for a run.",
         "operationId": "run_status_endpoint_v1_runs__run_id__get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -301,22 +292,6 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -330,6 +305,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -347,6 +328,11 @@
         "summary": "Run Delete Endpoint",
         "description": "Delete a run through the durable cross-store deletion saga.\n\nA replayed request resumes the same saga rather than starting a second\nteardown, so repeated calls converge on one deletion.\n\nFive outcomes, because the service distinguishes more states than two codes\ncan carry: a lifecycle refusal before the saga begins, a clean deletion, a\ndeletion that finalized over unremovable state, resumable incomplete\ncleanup, and an already-absent run. The retryable code is reserved for the\ngenuinely resumable case - the abandoned case is terminal, and inviting a\nretry there would send the caller to a not-found.",
         "operationId": "run_delete_endpoint_v1_runs__run_id__delete",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -359,27 +345,17 @@
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
           "204": {
             "description": "Deleted; every store was cleaned."
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Cleanup is unfinished but resumable; retry."
           },
           "200": {
             "description": "Deleted, but cleanup was abandoned over permanently unremovable state; the body names the kinds left behind.",
@@ -396,9 +372,6 @@
           },
           "409": {
             "description": "The run's lifecycle state refuses deletion."
-          },
-          "503": {
-            "description": "Cleanup is unfinished but resumable; retry."
           },
           "422": {
             "description": "Validation Error",
@@ -418,6 +391,11 @@
         "summary": "Run Stream Endpoint",
         "description": "Re-serve the run's bounded, versioned v1 SSE progress frames.\n\nThe public streaming companion to run-status: run-status is the authoritative\nrecovery snapshot, this is the droppable live progress relay. A run id is the\nthread id, so this delegates to the same stream builder the internal\nprogress stream has always used - one code path, the same versioned\n256 KiB-bounded frames, the same terminal-replay-then-close semantics. Frames\nare non-authoritative by contract: a consumer reconciles run state from\nrun-status, never from a relay frame.",
         "operationId": "run_stream_endpoint_v1_runs__run_id__stream_get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -430,22 +408,6 @@
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
@@ -456,6 +418,12 @@
                 "schema": {}
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -475,6 +443,11 @@
         "summary": "Run Cancel Endpoint",
         "description": "Cancel a run idempotently.",
         "operationId": "run_cancel_endpoint_v1_runs__run_id__cancel_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -503,22 +476,6 @@
               ],
               "title": "Idempotency-Key"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
@@ -531,6 +488,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -548,8 +511,13 @@
     "/v1/runs/{run_id}/history": {
       "get": {
         "summary": "Run History Endpoint",
-        "description": "Read one run whole, including a terminal or archived one.\n\nDistinct from run-status by design. Run-status is the BOUNDED recovery\nsnapshot an engine reconciles authority from, and widening it would have\nmade every reconciliation pay for a transcript it does not read. This is the\nwide read for a consumer that wants the record: transcript, agents, plan,\npending answers, and the run's metadata.\n\nThe state snapshot is embedded rather than restated, so this response cannot\ndrift from the snapshot it reports.",
+        "description": "Read one run whole, including a terminal or archived one.\n\nDistinct from run-status by design. Run-status is the BOUNDED recovery\nsnapshot an engine reconciles authority from, and widening it would have\nmade every reconciliation pay for a transcript it does not read. This is the\nwide read for a consumer that wants the record: transcript, agents, plan,\npending answers, and the run's metadata.\n\n\"Whole\" is a promise about honesty, not about always having everything. The\ntranscript lives only in the checkpoint, and a checkpoint can be gone or\nunreachable; when it is, this answers 200 with the durable half of the\nrecord it CAN read - status, agents, plan, permissions, metadata - and says\nplainly that the transcript is not part of it. Refusing the whole read over\nan absent transcript would cost the caller the half that survived, and\nanswering an unqualified empty message list would be worse still: silent\nloss dressed as a run that never spoke.\n\nThe state snapshot is embedded rather than restated, so this response cannot\ndrift from the snapshot it reports.",
         "operationId": "run_history_endpoint_v1_runs__run_id__history_get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -561,22 +529,6 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -590,6 +542,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -609,6 +567,11 @@
         "summary": "Run Archive Endpoint",
         "description": "Move a terminal run to the archived state.\n\nArchiving is not deletion: the run and its records survive, marked\nhistorical. A run whose state does not permit archiving is refused rather\nthan silently ignored, and repeating the call on an already-archived run is\nthat same refusal - the conflict IS the replay signal here.",
         "operationId": "run_archive_endpoint_v1_runs__run_id__archive_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -620,22 +583,6 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -649,6 +596,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -668,24 +621,6 @@
         "summary": "Team Status Endpoint",
         "description": "Report the team's live operational projection.\n\nA read, and deliberately a narrow one: which agents exist and what state\nthey are in, which runs are active, and what is awaiting an answer. It\ncarries no prompt, no document body, and no credential - the same\ndisclosure discipline the progress channel holds.",
         "operationId": "team_status_endpoint_v1_team_status_get",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -697,6 +632,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -707,7 +648,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ]
       }
     },
     "/v1/runs/{run_id}/messages": {
@@ -715,6 +661,11 @@
         "summary": "Run Message Endpoint",
         "description": "Send a follow-up turn into an existing run.\n\nRun-start cannot carry this. A repeat run identifier there is a REPLAY - it\nanswers with the original run and never adopts the new body - so without\nthis verb the versioned surface can start a run and watch it, but never say\nanything further to it.\n\nAccepted is not applied: the turn is handed to the worker and execution\ncontinues asynchronously, so a caller reconciles from the stream or\nrun-status rather than from this response.",
         "operationId": "run_message_endpoint_v1_runs__run_id__messages_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -742,22 +693,6 @@
                 }
               ],
               "title": "Idempotency-Key"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -782,6 +717,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -800,6 +741,11 @@
         "summary": "Run Permission Respond Endpoint",
         "description": "Answer a permission request the run raised on its progress stream.\n\nThe versioned surface already POSES this question - ``permission_request``\nis an enumerated frame on run-stream - and this is where the answer returns.\nWithout it the only answering channel is the transition surface, so retiring\nthat surface would strand every paused run.\n\nThe verb adds no state machine of its own: it is a versioned projection of\nthe same answer path, so at-most-once behaviour comes from there. Answering\ntwice replays the stored outcome rather than acting again, an answer arriving\nafter the request was applied reports the duplicate without re-dispatching,\nand a superseded or expired request is refused with a journaled rejection\nthat replays identically.\n\nScoping matters as much as the answer. The request is resolved and checked\nagainst the run in the path BEFORE anything acts on it, so a guessed request\nid cannot be used to answer another run's question - and because that check\nprecedes the service call, a mismatch has no effect at all rather than being\ndetected after the fact.",
         "operationId": "run_permission_respond_endpoint_v1_runs__run_id__permissions__request_id__respond_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -837,22 +783,6 @@
               ],
               "title": "Idempotency-Key"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "requestBody": {
@@ -876,6 +806,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -894,6 +830,11 @@
         "summary": "Run Clarification Respond Endpoint",
         "description": "Resolve through the durable clarification lease service.",
         "operationId": "run_clarification_respond_endpoint_v1_runs__run_id__clarifications__request_id__respond_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "run_id",
@@ -914,22 +855,6 @@
             "schema": {
               "type": "string",
               "title": "Request Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -954,6 +879,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -972,6 +903,11 @@
         "summary": "Provider Catalog Endpoint",
         "description": "Serve prompt-free, execution-lane-specific catalogs for one workspace.",
         "operationId": "provider_catalog_endpoint_v1_provider_catalog_get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "workspace_root",
@@ -982,22 +918,6 @@
               "minLength": 1,
               "maxLength": 4096,
               "title": "Workspace Root"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
             }
           }
         ],
@@ -1011,6 +931,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1030,6 +956,11 @@
         "summary": "Presets List Endpoint",
         "description": "List team presets truthfully, marking each loadable or unloadable.\n\nResolution uses the requested workspace context so workspace-local presets\nare listed alongside the bundled set. A single preset that fails to load or\nvalidate is reported with ``loadable=False`` and a reason rather than\nomitted or allowed to crash the whole listing. Each loadable preset carries\nits model profiles with per-role effective assignments (resolved by the same\nshared resolver launch uses) and backend-computed eligibility. The whole\nbuild - file I/O, provider readiness, and the engine reachability probe -\nruns off the event loop.",
         "operationId": "presets_list_endpoint_v1_presets_get",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
         "parameters": [
           {
             "name": "workspace_root",
@@ -1047,22 +978,6 @@
               ],
               "title": "Workspace Root"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
@@ -1075,6 +990,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1094,24 +1015,6 @@
         "summary": "Service State Endpoint",
         "description": "Return truthful, probe-backed readiness for the resident gateway.\n\nRuns the real dependency probes (database, checkpoint, worker) rather than\nreporting a hardcoded status, and separates process-alive from\ncan-accept-run. Engine authoring-backend reachability is reported from\nnon-blocking discovery-file freshness.",
         "operationId": "service_state_endpoint_v1_service_get",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1123,6 +1026,12 @@
               }
             }
           },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1133,7 +1042,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ]
       }
     },
     "/internal/health": {
@@ -1144,38 +1058,26 @@
         "summary": "Internal Health",
         "description": "Readiness probe -- confirms the internal API is accepting connections.",
         "operationId": "internal_health_internal_health_get",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
+                  "type": "object",
                   "title": "Response Internal Health Internal Health Get"
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid internal IPC token."
+          },
+          "500": {
+            "description": "Internal IPC token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1187,7 +1089,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "InternalIpcToken": []
+          }
+        ]
       }
     },
     "/internal/events": {
@@ -1198,38 +1105,26 @@
         "summary": "Receive Worker Event",
         "description": "Receive a single event from the worker and relay to browser clients.\n\nThe ``WorkerBridge`` in the worker process POSTs here instead of\nsending a WebSocket frame.  The payload format matches\n``WorkerEventEnvelope``.",
         "operationId": "receive_worker_event_internal_events_post",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
+                  "type": "object",
                   "title": "Response Receive Worker Event Internal Events Post"
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid internal IPC token."
+          },
+          "500": {
+            "description": "Internal IPC token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1241,7 +1136,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "InternalIpcToken": []
+          }
+        ]
       }
     },
     "/internal/events/batch": {
@@ -1252,38 +1152,26 @@
         "summary": "Receive Worker Event Batch",
         "description": "Receive a batch of events from the worker.\n\nThe ``WorkerBridge`` accumulates events for a short interval then\nPOSTs them as a single ``{\"events\": [...]}`` payload.  Each entry\nhas the same shape as a single-event envelope (``thread_id`` +\n``payload``).",
         "operationId": "receive_worker_event_batch_internal_events_batch_post",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
+                  "type": "object",
                   "title": "Response Receive Worker Event Batch Internal Events Batch Post"
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid internal IPC token."
+          },
+          "500": {
+            "description": "Internal IPC token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1295,7 +1183,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "InternalIpcToken": []
+          }
+        ]
       }
     },
     "/internal/heartbeat": {
@@ -1306,38 +1199,26 @@
         "summary": "Receive Worker Heartbeat",
         "description": "Receive a heartbeat from the worker.\n\nUpdates ``app.state`` so the gateway can monitor worker\nliveness without a persistent WebSocket connection.",
         "operationId": "receive_worker_heartbeat_internal_heartbeat_post",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
+                  "type": "object",
                   "title": "Response Receive Worker Heartbeat Internal Heartbeat Post"
                 }
               }
             }
+          },
+          "401": {
+            "description": "Missing or invalid internal IPC token."
+          },
+          "500": {
+            "description": "Internal IPC token is not configured."
           },
           "422": {
             "description": "Validation Error",
@@ -1349,13 +1230,18 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "InternalIpcToken": []
+          }
+        ]
       }
     },
     "/health": {
       "get": {
         "summary": "Health Endpoint",
-        "description": "Top-level health check: the one probe surface for external callers.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority.\n\nThe Compose and development profiles get the full readiness aggregate:\nthe DB, checkpointer and worker are actively PROBED, not merely read off\napp state, because a healthcheck that only reports what the process\nbelieves about itself cannot notice a dependency that has gone away.",
+        "description": "Top-level health check: the one probe surface for external callers.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority, computed\nover a live database probe. Only the authenticated branch probes: the\nunauthenticated answer stays a constant so it cannot be used to measure\nthe gateway's dependencies.\n\nBoth profiles PROBE rather than read off app state - the DB here and, on\nCompose and development, the checkpointer and worker as well - because a\nhealthcheck that only reports what the process believes about itself\ncannot notice a dependency that has gone away.",
         "operationId": "health_endpoint_health_get",
         "responses": {
           "200": {
@@ -1382,6 +1268,7 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "status": {
@@ -1505,6 +1392,86 @@
         "title": "AgentLifecycleState",
         "description": "Observable agent states exposed to the frontend.\n\nMaps to the MCP states. Tracks\ninternal process lifecycle (init/ready/running/error/done)."
       },
+      "AgentSnapshot": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "node_name": {
+            "type": "string",
+            "title": "Node Name"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AgentLifecycleState"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Provider"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Model"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": ""
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "node_name",
+          "state"
+        ],
+        "title": "AgentSnapshot",
+        "description": "Wire projection of the canonical agent descriptor within a snapshot.\n\nMirrors ``thread.snapshots.AgentData``."
+      },
+      "ApprovalStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "superseded"
+        ],
+        "title": "ApprovalStatus",
+        "description": "Durable lifecycle for plan approval state on a thread."
+      },
       "ArtifactSnapshot": {
         "properties": {
           "artifact_id": {
@@ -1544,6 +1511,15 @@
         ],
         "title": "AuthenticationState",
         "description": "Authentication evidence, separate from configuration presence."
+      },
+      "AuthoringCapability": {
+        "type": "string",
+        "enum": [
+          "coding",
+          "document_authoring"
+        ],
+        "title": "AuthoringCapability",
+        "description": "The coarse kind of work a preset delivers.\n\nA two-member split rather than a spectrum: a consumer branches on whether a\npreset produces vault documents or source changes, and nothing served today\ndistinguishes finer than that.\n\nNaming what this does NOT decide, because the field's name invites the\nassumption: this is a DESCRIPTION of a preset, not a gate on one. Nothing in\nthe run-admission path reads it - the submitter gate reaches the same\nunderlying question through its own derivation - so a wrong value here\nmisinforms a reader and refuses nobody."
       },
       "CatalogStatus": {
         "type": "string",
@@ -1616,6 +1592,42 @@
         "title": "ClarificationQuestion",
         "description": "One bounded question inside a clarification request.\n\n``options`` belongs to ``choice`` and only to ``choice``: a text question\ncarrying options would advertise a constraint the answer path does not\nenforce, and a choice without options would offer nothing to choose. Both are\nrefused at construction rather than tolerated and interpreted downstream."
       },
+      "ClarificationQuestionSnapshot": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": false
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Options"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "prompt",
+          "kind"
+        ],
+        "title": "ClarificationQuestionSnapshot",
+        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationQuestionData``."
+      },
       "ClarificationRequest": {
         "properties": {
           "type": {
@@ -1649,6 +1661,27 @@
         ],
         "title": "ClarificationRequest",
         "description": "The bounded question set a parked run is waiting on.\n\nThis is the interrupt payload verbatim: what the node raises, what the\ncheckpoint holds while the run is parked, and what the recovery snapshot\ndiscloses. ``type`` is carried rather than implied because the checkpoint\nholds interrupts of several kinds side by side and the discriminator is how a\nreader tells a clarification from an approval."
+      },
+      "ClarificationRequestSnapshot": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/ClarificationQuestionSnapshot"
+            },
+            "type": "array",
+            "title": "Questions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id"
+        ],
+        "title": "ClarificationRequestSnapshot",
+        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.\n\nA pending mid-run clarification, disclosed on ``run-status`` so a reload\nre-renders the questionnaire from authoritative state alone, never from a\nrelay frame."
       },
       "CleanupKind": {
         "type": "string",
@@ -1759,6 +1792,16 @@
         ],
         "title": "DesktopReadiness",
         "description": "The authenticated desktop readiness projection.\n\nCarries process and product identity alongside the five separate bounded\nreadiness facts. The facts are never collapsed into a single boolean: a cold,\nstartable worker leaves ``gateway_readiness`` ``ready`` while ``run_admission``\nstays ``deferred``, so gateway-readiness and execution-readiness remain\ndistinct. Served only to an attach-authenticated caller."
+      },
+      "DocumentCapability": {
+        "type": "string",
+        "enum": [
+          "research_document",
+          "architecture_decision",
+          "plan_document"
+        ],
+        "title": "DocumentCapability",
+        "description": "One concrete vault document a preset's topology can produce.\n\nDistinct from :class:`AuthoringCapability`, which says only WHETHER a preset\nauthors documents; this says WHICH. The two are served side by side and a\nreader needs both, so they are not collapsible: a preset can be\ndocument-authoring while producing a set this vocabulary does not yet name.\n\nMembers follow the research_adr phase machine's three gated outputs. The\nvocabulary is deliberately narrower than the set of documents the wider\nsystem knows about - an audit or a reference record has no producing\ntopology here, and a member with no producer would advertise a deliverable\nno preset can deliver."
       },
       "ExecutionTaskSnapshot": {
         "properties": {
@@ -2218,6 +2261,77 @@
         "title": "PermissionOptionKind",
         "description": "User permission response options (mirrors ACP PermissionOption.kind).\n\nValues:\n    ALLOW_ONCE: Allow the tool call this time only.\n    ALLOW_ALWAYS: Allow all future invocations of this tool without prompting.\n    REJECT_ONCE: Deny the tool call this time only.\n    REJECT_ALWAYS: Deny all future invocations of this tool without prompting."
       },
+      "PermissionOptionSnapshot": {
+        "properties": {
+          "option_id": {
+            "type": "string",
+            "title": "Option Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PermissionOptionKind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "option_id",
+          "name",
+          "kind"
+        ],
+        "title": "PermissionOptionSnapshot",
+        "description": "Permission option within a snapshot."
+      },
+      "PermissionSnapshot": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/PermissionOptionSnapshot"
+            },
+            "type": "array",
+            "title": "Options"
+          },
+          "tool_call": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call"
+          },
+          "tool_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "description",
+          "options"
+        ],
+        "title": "PermissionSnapshot",
+        "description": "Outstanding permission request in a state snapshot."
+      },
       "PlanEntry": {
         "properties": {
           "content": {
@@ -2241,6 +2355,16 @@
         ],
         "title": "PlanEntry",
         "description": "A single entry in the agent's execution plan.\n\nFields use plain ``str`` so the domain layer stays free of wire-protocol\nenum imports.  Values correspond to ``PlanEntryStatus`` / ``PlanEntryPriority``\nmembers defined in ``api.schemas.enums``."
+      },
+      "PresetOrigin": {
+        "type": "string",
+        "enum": [
+          "bundled",
+          "workspace",
+          "test_mock"
+        ],
+        "title": "PresetOrigin",
+        "description": "Which source supplied a discovered preset.\n\n``WORKSPACE`` outranks ``BUNDLED`` for the same id, because a workspace\ndefinition shadows the shipped one; the origin therefore reports where the\npreset a caller would actually get was found, not merely where a file\nexists. ``TEST_MOCK`` is a shipped preset that follows the mock naming\nconvention, kept a separate member rather than folded into ``BUNDLED`` so\nthe product layer can exclude fixtures without matching on the id."
       },
       "PresetSummary": {
         "properties": {
@@ -2288,13 +2412,12 @@
           "topology": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/TopologyType"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Topology"
+            ]
           },
           "worker_count": {
             "anyOf": [
@@ -2317,13 +2440,12 @@
           "authoring_capability": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/AuthoringCapability"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Authoring Capability"
+            ]
           },
           "is_mock": {
             "type": "boolean",
@@ -2333,17 +2455,16 @@
           "origin": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/PresetOrigin"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Origin"
+            ]
           },
           "supported_capabilities": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/DocumentCapability"
             },
             "type": "array",
             "title": "Supported Capabilities"
@@ -2694,6 +2815,22 @@
         ],
         "title": "ProviderCatalogStateResponse"
       },
+      "ProviderCondition": {
+        "type": "string",
+        "enum": [
+          "network_unreachable",
+          "provider_overloaded",
+          "unauthenticated",
+          "throttled",
+          "usage_exhausted",
+          "credits_exhausted",
+          "budget_exhausted",
+          "invalid_request",
+          "unknown"
+        ],
+        "title": "ProviderCondition",
+        "description": "Why a provider failed, in terms a client can act on.\n\nThe value is the wire form: lowercase, underscore-separated, and stable."
+      },
       "ProviderEligibility": {
         "type": "string",
         "enum": [
@@ -2763,6 +2900,20 @@
           },
           "state": {
             "$ref": "#/components/schemas/ProviderCatalogStateResponse"
+          },
+          "recommended_entry_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommended Entry Id"
           },
           "models": {
             "items": {
@@ -2888,6 +3039,20 @@
         ],
         "title": "ProviderNativeControlResponse"
       },
+      "RepairStatus": {
+        "type": "string",
+        "enum": [
+          "healthy",
+          "paused_resumable",
+          "cancel_pending",
+          "replay_gap",
+          "checkpoint_unavailable",
+          "needs_reconciliation",
+          "operator_intervention_required"
+        ],
+        "title": "RepairStatus",
+        "description": "Repair and readiness classification distinct from lifecycle.\n\nTypes BOTH durable columns that carry this classification:\n``threads.repair_status`` and ``threads.execution_readiness``. The two ask\ndifferent questions — what is wrong with this run, and is it fit to resume —\nbut they answer from this one closed set, so a new member becomes available\nto both at once and neither can drift into a private vocabulary."
+      },
       "RoleAssignmentSummary": {
         "properties": {
           "role_id": {
@@ -2960,7 +3125,7 @@
           "provider_id"
         ],
         "title": "RoleAssignmentSummary",
-        "description": "Effective per-role model assignment under a profile.\n\nOnly safe operational metadata: role id, agent id, provider id, capability,\nthe stable concrete model name, ordered fallbacks, current provider readiness,\nand which precedence layer the assignment came from. Never a credential, env\nvalue, token, or private path."
+        "description": "Effective per-role model assignment under a profile.\n\nOnly safe operational metadata: role id, agent id, provider id, capability,\nthe stable concrete model name, ordered fallbacks, current provider readiness,\nand which precedence layer the assignment came from. Never a credential, env\nvalue, token, or private path.\n\n``provider_id`` is EMPTY when no preset layer declares a provider for the\nrole, which is the ordinary state now that product presets carry no\nprovider policy: a run chooses its lane at run start from the served catalog.\nEmpty rather than absent so the field keeps one type, and never a substituted\nprovider name - naming a lane no preset asked for would be indistinguishable\nfrom a real declaration. ``resolution_error`` carries the reason and ``source``\nreads ``undeclared``; the role is reported ineligible.\n\n``provider_id`` is deliberately NOT typed by the ``Provider`` enumeration\nserved beside it on the agent snapshot, even though the two carry the same\nconcept. This surface replays FROZEN historical assignments, and two of its\nvalues are provably outside that enumeration: the empty string documented\nabove, and a provider a past run froze that this build no longer knows -\na case the disclosure path already handles explicitly by reporting it not\nready rather than raising. Narrowing here would turn both into a validation\nfailure on a read path. The reconciliation is therefore that these are two\nconcepts: ``Provider`` is the closed set of lanes this build can RUN, and\nthis is an identifier a past run RECORDED."
       },
       "RoleState": {
         "properties": {
@@ -3041,6 +3206,9 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "status": {
@@ -3065,6 +3233,9 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "status": {
@@ -3176,6 +3347,9 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "request_id": {
@@ -3233,6 +3407,9 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "status": {
@@ -3241,11 +3418,13 @@
           },
           "lease_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Lease Id"
           },
           "semantic_status": {
-            "type": "string",
-            "title": "Semantic Status",
+            "$ref": "#/components/schemas/SemanticPhase",
             "default": "starting"
           },
           "nickname": {
@@ -3258,24 +3437,6 @@
               }
             ],
             "title": "Nickname"
-          },
-          "profile_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Id"
-          },
-          "assignments": {
-            "items": {
-              "$ref": "#/components/schemas/RoleAssignmentSummary"
-            },
-            "type": "array",
-            "title": "Assignments"
           },
           "frozen_assignment": {
             "anyOf": [
@@ -3307,6 +3468,9 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "deleted": {
@@ -3348,6 +3512,9 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "state": {
@@ -3362,15 +3529,31 @@
                 "type": "null"
               }
             ]
+          },
+          "transcript_available": {
+            "type": "boolean",
+            "title": "Transcript Available"
+          },
+          "transcript_status": {
+            "$ref": "#/components/schemas/TranscriptAvailability"
+          },
+          "permission_decisions": {
+            "items": {
+              "$ref": "#/components/schemas/RunPermissionDecision"
+            },
+            "type": "array",
+            "title": "Permission Decisions"
           }
         },
         "type": "object",
         "required": [
           "run_id",
-          "state"
+          "state",
+          "transcript_available",
+          "transcript_status"
         ],
         "title": "RunHistoryResponse",
-        "description": "The full read of one run, including terminal and archived ones.\n\nDeliberately distinct from run-status, which is the BOUNDED recovery\nsnapshot an engine reconciles from. This is the wide read - transcript,\nagents, plan, pending answers, and the run's metadata - for a consumer that\nwants the whole record rather than the authority fields.\n\nThe state snapshot is embedded by reference rather than restated field by\nfield, so the two cannot drift apart as the snapshot evolves."
+        "description": "The full read of one run, including terminal and archived ones.\n\nDeliberately distinct from run-status, which is the BOUNDED recovery\nsnapshot an engine reconciles from. This is the wide read - transcript,\nagents, plan, pending answers, and the run's metadata - for a consumer that\nwants the whole record rather than the authority fields.\n\nThe state snapshot is embedded by reference rather than restated field by\nfield, so the two cannot drift apart as the snapshot evolves.\n\nThe transcript is the one part of the record this verb cannot always\ndeliver, because it lives only in the checkpoint. ``transcript_available``\nand ``transcript_status`` say so outright, so ``state.messages`` is never\nread as \"this run had no conversation\" when the truth is that its\nconversation could not be read. They are the transcript's counterpart to the\nsnapshot's own ``snapshot_complete`` / ``degraded_reasons`` pairing.\n\n``permission_decisions`` is the settled counterpart to the snapshot's PENDING\npermissions. A gate leaves the pending list the moment it is answered or the\nrun ends, so without this the record of a decision a human actually made was\ndurable in the audit log and readable nowhere - a run could be reviewed whole\nwith no trace that anyone had approved anything."
       },
       "RunMessageRequest": {
         "properties": {
@@ -3411,6 +3594,9 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "accepted": {
@@ -3466,6 +3652,9 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "description": {
@@ -3492,6 +3681,53 @@
         ],
         "title": "RunPendingPermission",
         "description": "A permission awaiting an answer, addressed by the run that raised it."
+      },
+      "RunPermissionDecision": {
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "option_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Option Id"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "responded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Responded At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_name",
+          "action",
+          "responded_at"
+        ],
+        "title": "RunPermissionDecision",
+        "description": "One permission decision this run settled, as the audit log recorded it.\n\nAnswers which tool call was approved or refused, with which option, and when.\nCarries no tool INPUT and no prompt text, so a caller reviewing what a run was\npermitted to do never has to read what it was asked to do.\n\n``agent_id`` is nullable because it is genuinely not knowable at the decision\nseam rather than merely unset: the interrupt payload carries the tool, its\ninput, and the options, but no agent. An unattributed decision is still a real\nrecord, and the alternative is fabricating attribution."
       },
       "RunPermissionRespondRequest": {
         "properties": {
@@ -3532,6 +3768,9 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "request_id": {
@@ -3600,6 +3839,9 @@
           },
           "reservation_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Reservation Id"
           },
           "lease_id": {
@@ -3847,6 +4089,9 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "status": {
@@ -3865,32 +4110,13 @@
             "title": "Nickname"
           },
           "semantic_status": {
-            "type": "string",
-            "title": "Semantic Status",
+            "$ref": "#/components/schemas/SemanticPhase",
             "default": "starting"
           },
           "eligible": {
             "type": "boolean",
             "title": "Eligible",
             "default": true
-          },
-          "profile_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Id"
-          },
-          "assignments": {
-            "items": {
-              "$ref": "#/components/schemas/RoleAssignmentSummary"
-            },
-            "type": "array",
-            "title": "Assignments"
           },
           "frozen_assignment": {
             "anyOf": [
@@ -3921,14 +4147,16 @@
           },
           "run_id": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "status": {
             "$ref": "#/components/schemas/ThreadStatus"
           },
           "semantic_phase": {
-            "type": "string",
-            "title": "Semantic Phase"
+            "$ref": "#/components/schemas/SemanticPhase"
           },
           "feature_tag": {
             "anyOf": [
@@ -3979,13 +4207,12 @@
           "approval_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ApprovalStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Approval Status"
+            ]
           },
           "approval_request_id": {
             "anyOf": [
@@ -4017,24 +4244,22 @@
           "repair_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Repair Status"
+            ]
           },
           "execution_readiness": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Execution Readiness"
+            ]
           },
           "degraded_reasons": {
             "items": {
@@ -4057,13 +4282,12 @@
           "provider_condition": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ProviderCondition"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Provider Condition"
+            ]
           },
           "repair_reason": {
             "anyOf": [
@@ -4199,6 +4423,7 @@
             "type": "string",
             "maxLength": 128,
             "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
           "status": {
@@ -4255,38 +4480,32 @@
           "repair_status": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 64
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Repair Status"
+            ]
           },
           "execution_readiness": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 64
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Execution Readiness"
+            ]
           },
           "approval_status": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 64
+                "$ref": "#/components/schemas/ApprovalStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Approval Status"
+            ]
           },
           "approval_request_id": {
             "anyOf": [
@@ -4345,6 +4564,29 @@
         "title": "RunSummaryRecord",
         "description": "One run as the history reading reports it: identity plus its projection.\n\nDeliberately wider than :class:`ActiveRunRecord`, and deliberately a\nSEPARATE model rather than fields added to it. Discovery answers the narrow\nquestion \"which runs are live, and where do I bind a viewer\" and its shape is\ncertified byte-for-byte; a reader of history is asking what happened, and\nneeds the facts that distinguish a healthy run from a degraded one.\n\nEvery field here is one the list service already resolves - the degradation\nprojections in particular are its reading of checkpoint authority and stale\napproval pointers, not a restatement of stored columns - so nothing is\ninvented that the projection cannot fill."
       },
+      "SemanticPhase": {
+        "type": "string",
+        "enum": [
+          "starting",
+          "running",
+          "researching",
+          "synthesizing_research",
+          "reviewing_research",
+          "awaiting_research_decision",
+          "writing_adr",
+          "reviewing_adr",
+          "awaiting_adr_decision",
+          "writing_plan",
+          "reviewing_plan",
+          "awaiting_plan_decision",
+          "recovery_required",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "SemanticPhase",
+        "description": "What a run is product-visibly doing, in terms that name no graph node.\n\nThe one vocabulary for a run's semantic position, served on run-status as\n``semantic_phase``, on the run-start and commit acknowledgements as\n``semantic_status``, and stamped onto progress frames. Those three fields\nask the same question at different moments, so they answer from this set.\n\nIt is deliberately wider than the authoring phases alone. A run outside the\nresearch_adr topology, or between nodes, is honestly ``RUNNING`` rather than\ngiven a fabricated authoring phase, and a run that has not dispatched is\n``STARTING``. The terminal members collapse the lifecycle pairs a product\nreader cannot act on separately: an archived run reads ``COMPLETED`` and a\ncancelling one reads ``CANCELLED``, because the distinction is a lifecycle\nfact and this vocabulary is a product one.\n\n``RECOVERY_REQUIRED`` is the only member that is not a position: it says the\nrun cannot advance until it is repaired, which is what a reader needs before\nany phase detail matters."
+      },
       "ServiceStateResponse": {
         "properties": {
           "api_version": {
@@ -4392,13 +4634,12 @@
           "worker_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/WorkerConnectionStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Worker Status"
+            ]
           },
           "worker_connected": {
             "anyOf": [
@@ -4667,7 +4908,7 @@
           },
           "pending_permissions": {
             "items": {
-              "$ref": "#/components/schemas/_PermissionSnapshot"
+              "$ref": "#/components/schemas/PermissionSnapshot"
             },
             "type": "array",
             "title": "Pending Permissions"
@@ -4675,7 +4916,7 @@
           "pending_clarification": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/_ClarificationRequestSnapshot"
+                "$ref": "#/components/schemas/ClarificationRequestSnapshot"
               },
               {
                 "type": "null"
@@ -4698,7 +4939,7 @@
           },
           "agents": {
             "items": {
-              "$ref": "#/components/schemas/_AgentSnapshot"
+              "$ref": "#/components/schemas/AgentSnapshot"
             },
             "type": "array",
             "title": "Agents"
@@ -5178,6 +5419,28 @@
         "title": "TopologyPosition",
         "description": "Where a run sits in its team topology (recovery snapshot).\n\nProduct-facing status speaks role vocabulary only: ``active_agent`` is\nthe role currently working, never an internal LangGraph node name. The raw\nnext-node projection lives in the internal recovery snapshot\n(``thread/snapshots.py``), not this contract; ``next_nodes`` was dropped\nfrom the v1 surface."
       },
+      "TopologyType": {
+        "type": "string",
+        "enum": [
+          "star",
+          "pipeline",
+          "pipeline_loop",
+          "research_adr"
+        ],
+        "title": "TopologyType",
+        "description": "Supported graph topology types.\n\nUses enum membership instead of string comparison."
+      },
+      "TranscriptAvailability": {
+        "type": "string",
+        "enum": [
+          "available",
+          "not_yet_recorded",
+          "missing",
+          "unreadable"
+        ],
+        "title": "TranscriptAvailability",
+        "description": "Why a run's conversation is, or is not, readable from its checkpoint.\n\nA run's transcript lives only in the checkpoint, so an unread checkpoint\nyields an empty message list that is indistinguishable from a run that\ngenuinely said nothing. This classification is what tells the two apart, and\nit exists so no reader has to infer loss from an empty list.\n\n``NOT_YET_RECORDED`` is the only non-fault absence: the run has not been\ndispatched, so there is nothing to have lost. ``MISSING`` and ``UNREADABLE``\nare both faults and differ in whether the checkpoint is gone or merely\nunreachable right now.\n\nA run whose transcript was deliberately released under a retention policy\nwould be a fourth, non-fault member. It is deliberately absent: no\nproduction seam prunes a checkpoint today, so every absence really is a\nfault, and a member with no producer would let a genuine loss be dismissed\nas intended."
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -5218,6 +5481,18 @@
         ],
         "title": "ValidationError"
       },
+      "WorkerConnectionStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "up",
+          "down",
+          "restarting",
+          "unknown"
+        ],
+        "title": "WorkerConnectionStatus",
+        "description": "What the watchdog last observed about the worker process it supervises.\n\n``PENDING`` is the pre-observation value the state container is created\nwith: a watchdog exists but has not yet completed a probe, which is not the\nsame claim as ``DOWN``. ``UP`` and ``DOWN`` are settled observations,\n``RESTARTING`` is the window in which the watchdog is deliberately replacing\nthe process, and ``UNKNOWN`` is what a reader gets when no worker state\ncontainer exists at all - a gateway configured without a supervised worker."
+      },
       "WorkerLifecycleState": {
         "type": "string",
         "enum": [
@@ -5228,192 +5503,18 @@
         ],
         "title": "WorkerLifecycleState",
         "description": "The gateway-owned worker's rung on the cold-to-execution ladder.\n\n``cold`` is the pre-demand resting state: no worker exists yet and one is\nstartable on first execution demand. It is informational, never degradation.\n``starting`` is the single-flight startup window, ``ready`` is an up and\nreachable worker, and ``unavailable`` is a worker that started but is down or\nrestarting after demand."
+      }
+    },
+    "securitySchemes": {
+      "GatewayServiceToken": {
+        "type": "http",
+        "description": "Gateway service token. The service publishes it in an owner-restricted `service.token` handoff file adjacent to the `service.json` discovery record, whose `handoff_reference` names that file without embedding the secret. Send it as `Authorization: Bearer <token>`.",
+        "scheme": "bearer"
       },
-      "_AgentSnapshot": {
-        "properties": {
-          "agent_id": {
-            "type": "string",
-            "title": "Agent Id"
-          },
-          "node_name": {
-            "type": "string",
-            "title": "Node Name"
-          },
-          "state": {
-            "$ref": "#/components/schemas/AgentLifecycleState"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Provider"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "model": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Model"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "role": {
-            "type": "string",
-            "title": "Role",
-            "default": ""
-          },
-          "display_name": {
-            "type": "string",
-            "title": "Display Name",
-            "default": ""
-          },
-          "description": {
-            "type": "string",
-            "title": "Description",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "node_name",
-          "state"
-        ],
-        "title": "_AgentSnapshot",
-        "description": "Wire projection of the canonical agent descriptor within a snapshot.\n\nMirrors ``thread.snapshots.AgentData``."
-      },
-      "_ClarificationQuestionSnapshot": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "prompt": {
-            "type": "string",
-            "title": "Prompt"
-          },
-          "kind": {
-            "type": "string",
-            "title": "Kind"
-          },
-          "required": {
-            "type": "boolean",
-            "title": "Required",
-            "default": false
-          },
-          "options": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Options"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "prompt",
-          "kind"
-        ],
-        "title": "_ClarificationQuestionSnapshot",
-        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationQuestionData``."
-      },
-      "_ClarificationRequestSnapshot": {
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "title": "Request Id"
-          },
-          "questions": {
-            "items": {
-              "$ref": "#/components/schemas/_ClarificationQuestionSnapshot"
-            },
-            "type": "array",
-            "title": "Questions"
-          }
-        },
-        "type": "object",
-        "required": [
-          "request_id"
-        ],
-        "title": "_ClarificationRequestSnapshot",
-        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.\n\nA pending mid-run clarification, disclosed on ``run-status`` so a reload\nre-renders the questionnaire from authoritative state alone, never from a\nrelay frame."
-      },
-      "_PermissionOptionSnapshot": {
-        "properties": {
-          "option_id": {
-            "type": "string",
-            "title": "Option Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/PermissionOptionKind"
-          }
-        },
-        "type": "object",
-        "required": [
-          "option_id",
-          "name",
-          "kind"
-        ],
-        "title": "_PermissionOptionSnapshot",
-        "description": "Permission option within a snapshot."
-      },
-      "_PermissionSnapshot": {
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "title": "Request Id"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description"
-          },
-          "options": {
-            "items": {
-              "$ref": "#/components/schemas/_PermissionOptionSnapshot"
-            },
-            "type": "array",
-            "title": "Options"
-          },
-          "tool_call": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tool Call"
-          },
-          "tool_kind": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ToolKind"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "request_id",
-          "description",
-          "options"
-        ],
-        "title": "_PermissionSnapshot",
-        "description": "Outstanding permission request in a state snapshot."
+      "InternalIpcToken": {
+        "type": "http",
+        "description": "Internal gateway-to-worker IPC token. Not the gateway service token: these routes are the worker's callback surface, not a client surface.",
+        "scheme": "bearer"
       }
     }
   }

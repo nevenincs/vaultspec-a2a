@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:7cb6f50818783bd1519955c1d8e0c28e4dacb6534bd29839da1266d1f0526a07'
+body_hash: 'sha256:5b90a400c1eed8c8e3433b8ee734513af64ed5051dee5742e546b4bba61bc6a9'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -32,7 +32,6 @@ The reviewed provider-test partitions have no open static, formatting, forbidden
 ### acp-v1-terminal-wire | medium | open contract drift
 
 `test_terminal_containment.py` still asserts the legacy terminal payload and lifetime: a top-level `exitCode`, scalar `exitStatus`, and a kill operation that removes the terminal identity. That contradicts the accepted ACP v1 wire decision, whose exit statuses are objects and whose killed terminal remains addressable until release. This is an S26 test-contract defect: it can reward obsolete behaviour and block the required production migration. `src/vaultspec_a2a/providers/tests/test_terminal_containment.py:225-245`; `2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr`.
-
 
 ### dashboard-engine-lost-ack | low | open validation boundary
 
@@ -85,7 +84,6 @@ The mandatory `just lint complexity` sentinel is now demonstrably blocking: `Sta
 ### duplication-cognitive-gate | high | open baseline
 
 The mandatory duplication sentinel is wired as `just audit duplication` (not a `just lint` target) and completed successfully as an advisory check, but reports 22 clones: 547 duplicated lines (0.41%) and 4,457 duplicated tokens (0.51%) across 574 analysed files. The reported candidates include the ADR-research team presets; active-run migrations; repeated executor-token and authoring-binding tests; ACP security/config/authoring tests; task-queue and vault-reader tests; verdict/redispatch and clarification relay tests; service stream/permission/cancellation/tool-core tests; and the terminal containment/desktop process-tree tests. Triage each clone as intentional generated/migration structure, a justified scenario fixture, or an extractable shared production/test helper; eliminate or explicitly suppress none by policy. Until that classification and the chosen refactors are complete, JSCPD must remain advisory and cannot be promoted to a strict CI gate. `dev/toolchain.py`; `.github/workflows/test.yml`.
-
 
 ### typed-state-import-lint | low | resolved
 

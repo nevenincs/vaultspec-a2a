@@ -49,12 +49,15 @@ import httpx
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from ..api.schemas.enums import ServerEventType
+from ..graph.enums import ServerEventType
+from ..providers._json_contract import JsonObject
+from ..testing.payloads import json_object
 from .test_pw7_acceptance import (
     _MODE_AUTONOMOUS,
     AcceptanceCase,
     AcceptanceHarness,
     _reachable_stack,
+    _resolve_selection,
 )
 from .test_tool_cores_floor_live import (
     _snapshot_vault,
@@ -71,8 +74,14 @@ _MESSAGE_FRAMES = frozenset(
 _OBSERVE_DEADLINE_SECONDS = 900.0
 # Cadence for polling the engine authoring plane for this run's changeset.
 _ENGINE_POLL_SECONDS = 4.0
-# All real-provider service tests run only under the committed all-low profile.
-_PROFILE_ID = "fast"
+# Every real-provider service lane runs on the operator-configured served
+# selection. It used to name the committed all-low "fast" model profile; a
+# preset carries no model policy now, so the cost ceiling is the operator's
+# choice of a low-cost entry from the current catalog (the same thing the
+# provider-catalog live-selection prerequisite already asks for). The lane
+# claims no particular provider - it certifies the bridge/tool floor, not who
+# produced the text - but it MUST be a real one, which is what
+# requires_live_selection pins.
 
 # The bridged authoring tools the solo-coder should reach. Any one invoked
 # mid-turn proves the surfacing->invocation path end to end.
@@ -81,20 +90,12 @@ _PROPOSE_TOOL = "mcp__vaultspec-authoring__propose_changeset"
 
 _CODER_ROLE = "vaultspec-coder"
 _SOLO_CODER_PRESET = "vaultspec-solo-coder"
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+_JSON_OBJECT = TypeAdapter(JsonObject)
+_JSON_OBJECT_LIST = TypeAdapter(list[JsonObject])
 
 
-def _json_object(value: object, *, at: str) -> dict[str, object]:
-    """Require an object wherever the live bridge contract promises one."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError as exc:
-        raise AssertionError(f"expected a JSON object at {at}: {exc}") from exc
-
-
-def _items(value: object, *, at: str) -> list[dict[str, object]]:
-    body = _json_object(value, at=at)
+def _items(value: object, *, at: str) -> list[JsonObject]:
+    body = json_object(value, at=at)
     items = body.get("items")
     if items is None:
         return []
@@ -104,7 +105,7 @@ def _items(value: object, *, at: str) -> list[dict[str, object]]:
         raise AssertionError(f"expected proposal objects at {at}.items: {exc}") from exc
 
 
-def _dig(item: dict[str, object], field_name: str) -> str | None:
+def _dig(item: JsonObject, field_name: str) -> str | None:
     value = item.get(field_name)
     if isinstance(value, str):
         return value
@@ -120,7 +121,7 @@ def _dig(item: dict[str, object], field_name: str) -> str | None:
     return None
 
 
-def _message_content(payload: dict[str, object]) -> str | None:
+def _message_content(payload: JsonObject) -> str | None:
     if payload.get("type") not in _MESSAGE_FRAMES:
         return None
     content = payload.get("content")
@@ -147,7 +148,7 @@ def _solo_coder_case(feature: str) -> AcceptanceCase:
         ),
         roles=(_CODER_ROLE,),
         expected_doc_kinds=(),
-        profile_id=_PROFILE_ID,
+        requires_live_selection=True,
         autonomous=True,
     )
 
@@ -162,12 +163,12 @@ async def _run_changeset_ids(ec: AuthoringClient, run_id: str) -> set[str]:
     whatever verdict state it has reached.
     """
     resp = await ec.get("/v1/proposals", with_actor=False)
-    data = _json_object(resp.data, at="authoring proposals response")
+    data = json_object(resp.data, at="authoring proposals response")
     found: set[str] = set()
     lanes: list[object] = [data]
     applied = data.get("applied_under_policy")
     if applied is not None:
-        applied_object = _json_object(applied, at="authoring applied-under-policy lane")
+        applied_object = json_object(applied, at="authoring applied-under-policy lane")
         lanes.append(applied_object)
     for lane in lanes:
         for item in _items(lane, at="authoring proposal lane"):
@@ -200,12 +201,17 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
 
     feature = f"s20-solo-coder-{int(time.time())}"
     case = _solo_coder_case(feature)
+    selection, overrides = await _resolve_selection(
+        case, gateway_url, str(vault_root.parent)
+    )
     harness = AcceptanceHarness(
         case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
         gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
     )
 
     before = _snapshot_vault(vault_root)
@@ -306,7 +312,7 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
     )
 
 
-def _parse_event(body: str) -> dict[str, object]:
+def _parse_event(body: str) -> JsonObject:
     """Parse one SSE data payload as the object the live stream promises."""
     if not body:
         raise AssertionError(
@@ -318,7 +324,7 @@ def _parse_event(body: str) -> dict[str, object]:
         raise AssertionError(
             f"received malformed SSE JSON from the live bridge run: {body!r}"
         ) from exc
-    return _json_object(payload, at="live bridge SSE data payload")
+    return json_object(payload, at="live bridge SSE data payload")
 
 
 def _extract_bridge_tools(output: str) -> set[str]:

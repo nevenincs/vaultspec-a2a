@@ -56,22 +56,24 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-from pydantic import TypeAdapter, ValidationError
 
-from ..api.schemas.enums import ServerEventType
 from ..control.run_start_policy import required_role_ids
+from ..graph.enums import ServerEventType
 from ..team.team_config import load_team_config
+from ..testing.payloads import json_object
 from .test_pw7_acceptance import (
     _PRESET_LIVE,
     AcceptanceCase,
     AcceptanceHarness,
     _reachable_stack,
+    _resolve_selection,
 )
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from ..conftest import ExternalPrerequisiteRule
+    from ..providers._json_contract import JsonObject
 
 # The message frame types that carry an agent's mid-turn narration and output. The
 # read/citation surface here (validated live), not in tool-call frames.
@@ -83,10 +85,14 @@ _MESSAGE_FRAMES = frozenset(
 # rather than hanging. The document agents read early, mid-Diverge/Synthesize.
 _OBSERVE_DEADLINE_SECONDS = 900.0
 
-# All real-provider service tests run only under the committed all-low profile.
-_PROFILE_ID = "fast"
-
-_JSON_OBJECT = TypeAdapter(dict[str, object])
+# Every real-provider service lane runs on the operator-configured served
+# selection. It used to name the committed all-low "fast" model profile; a
+# preset carries no model policy now, so the cost ceiling is the operator's
+# choice of a low-cost entry from the current catalog (the same thing the
+# provider-catalog live-selection prerequisite already asks for). The lane
+# claims no particular provider - it certifies the bridge/tool floor, not who
+# produced the text - but it MUST be a real one, which is what
+# requires_live_selection pins.
 
 
 def _pick_named_adr(vault_root: Path) -> Path | None:
@@ -177,15 +183,7 @@ def _vault_write_delta(
     return {"created": created, "modified": modified, "deleted": deleted}
 
 
-def _json_object(value: object, *, at: str) -> dict[str, object]:
-    """Return an SSE JSON object or fail with its observation boundary."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError as exc:
-        raise AssertionError(f"expected JSON object at {at}: {exc}") from exc
-
-
-def _message_content(payload: dict[str, object]) -> str | None:
+def _message_content(payload: JsonObject) -> str | None:
     """Return the content of a message/thought chunk frame, else None."""
     if payload.get("type") not in _MESSAGE_FRAMES:
         return None
@@ -214,7 +212,7 @@ def _floor_case(feature: str, adr_name: str) -> AcceptanceCase:
         ),
         roles=tuple(required_role_ids(load_team_config(_PRESET_LIVE))),
         expected_doc_kinds=(),
-        profile_id=_PROFILE_ID,
+        requires_live_selection=True,
     )
 
 
@@ -252,12 +250,17 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
             f"ADR {adr_name} carries no distinctive interior token absent from the "
             "prompt; cannot form hallucination-resistant read evidence"
         )
+    selection, overrides = await _resolve_selection(
+        case, gateway_url, str(vault_root.parent)
+    )
     harness = AcceptanceHarness(
         case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
         gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
     )
 
     before = _snapshot_vault(vault_root)
@@ -302,7 +305,7 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
                                 "malformed SSE JSON at grounding floor stream: "
                                 f"{body!r}"
                             ) from exc
-                        payload = _json_object(decoded, at="grounding floor SSE stream")
+                        payload = json_object(decoded, at="grounding floor SSE stream")
                         content = _message_content(payload)
                         if content:
                             output_parts.append(content)
@@ -367,7 +370,7 @@ def _rag_case(feature: str) -> AcceptanceCase:
         ),
         roles=tuple(required_role_ids(load_team_config(_PRESET_LIVE))),
         expected_doc_kinds=(),
-        profile_id=_PROFILE_ID,
+        requires_live_selection=True,
     )
 
 
@@ -418,12 +421,17 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
 
     feature = f"tool-cores-semantic-{int(time.time())}"
     case = _rag_case(feature)
+    selection, overrides = await _resolve_selection(
+        case, gateway_url, str(vault_root.parent)
+    )
     harness = AcceptanceHarness(
         case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
         gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
     )
 
     before = _snapshot_vault(vault_root)
@@ -468,7 +476,7 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
                             raise AssertionError(
                                 f"malformed SSE JSON at semantic tool stream: {body!r}"
                             ) from exc
-                        payload = _json_object(decoded, at="semantic tool SSE stream")
+                        payload = json_object(decoded, at="semantic tool SSE stream")
                         content = _message_content(payload)
                         if content:
                             output_parts.append(content)

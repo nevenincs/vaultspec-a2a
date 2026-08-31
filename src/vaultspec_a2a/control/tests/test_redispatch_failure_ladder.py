@@ -52,6 +52,7 @@ async def test_invalid_frozen_selection_fails_only_its_thread_and_sweep_continue
                 thread_id="valid-after-corrupt",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
+                metadata=json.dumps({"workspace_root": str(tmp_path)}),
             )
             await create_thread(
                 session,
@@ -60,10 +61,11 @@ async def test_invalid_frozen_selection_fails_only_its_thread_and_sweep_continue
                 team_preset="mock-success-single",
                 metadata=json.dumps(
                     {
+                        "workspace_root": str(tmp_path),
                         "provider_catalog_selection": {
                             "schema_version": 1,
                             "digest": "not-a-valid-digest",
-                        }
+                        },
                     }
                 ),
             )
@@ -95,8 +97,7 @@ async def test_invalid_frozen_selection_fails_only_its_thread_and_sweep_continue
         assert corrupt is not None
         assert corrupt.status == ThreadStatus.FAILED.value
         assert (
-            corrupt.failure_reason
-            == "persisted provider catalog selection is invalid"
+            corrupt.failure_reason == "persisted provider catalog selection is invalid"
         )
         assert valid is not None
         assert valid.status == ThreadStatus.RECONCILING.value
@@ -109,6 +110,153 @@ async def test_invalid_frozen_selection_fails_only_its_thread_and_sweep_continue
             and "valid-after-corrupt" in record.getMessage()
             for record in caplog.records
         )
+    finally:
+        await close_db()
+
+
+@pytest.mark.asyncio
+async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continues(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unrecoverable thread must not strand every healthy one behind it.
+
+    A reconciling thread inherits the active project it was created with. One
+    whose stored metadata names none cannot be re-sited, and the ingest contract
+    refuses to construct a dispatch without it - so the refusal has to happen in
+    the sweep, per thread. Left to the constructor, the raised error would abort
+    the whole pass and the healthy threads after it would never be re-dispatched.
+    """
+    db_file = tmp_path / "redispatch-no-project.db"
+    await close_db()
+    await init_db(str(db_file))
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            # Newest first, so the healthy thread is created first and the
+            # projectless one is reached before it.
+            await create_thread(
+                session,
+                thread_id="healthy-after-projectless",
+                status=ThreadStatus.RECONCILING,
+                team_preset="mock-success-single",
+                metadata=json.dumps({"workspace_root": str(tmp_path)}),
+            )
+            await create_thread(
+                session,
+                thread_id="projectless",
+                status=ThreadStatus.RECONCILING,
+                team_preset="mock-success-single",
+                metadata=json.dumps({"feature_tag": "no-project-here"}),
+            )
+            await session.commit()
+
+        spawner = LazyWorkerSpawner(
+            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+        )
+        spawner.replace_process(None)
+        circuit_breaker = WorkerCircuitBreaker(
+            failure_threshold=1, recovery_timeout=999.0
+        )
+        circuit_breaker.force_open()
+
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:9", timeout=0.2
+        ) as client:
+            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+                await redispatch_reconciling_threads(
+                    client,
+                    circuit_breaker,
+                    spawner,
+                    record_worker_contact=lambda _when: None,
+                )
+
+        async with session_factory() as session:
+            projectless = await get_thread(session, "projectless")
+            healthy = await get_thread(session, "healthy-after-projectless")
+        assert projectless is not None
+        assert projectless.status == ThreadStatus.FAILED.value
+        assert "no active project" in (projectless.failure_reason or "")
+        # The sweep reached the thread AFTER the refusal, which is the property
+        # under test: a raised validator would have aborted before this one.
+        assert healthy is not None
+        assert healthy.status == ThreadStatus.RECONCILING.value
+        assert any(
+            "no active project" in record.getMessage()
+            and "projectless" in record.getMessage()
+            for record in caplog.records
+        )
+        assert any(
+            "Circuit breaker open" in record.getMessage()
+            and "healthy-after-projectless" in record.getMessage()
+            for record in caplog.records
+        )
+    finally:
+        await close_db()
+
+
+@pytest.mark.asyncio
+async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A root that is PRESENT but unusable must refuse here too, not at the request.
+
+    The sibling test above stores no ``workspace_root`` at all, which a bare type
+    check already refuses. This one stores a relative path: a string, present,
+    and still not a project a dispatch can be sited on, because resolving it
+    would anchor the run to whatever directory this process was started in. It
+    is the case that reaches the minting rather than the type check, and the one
+    that used to raise inside the request constructor and abort the whole pass.
+    """
+    db_file = tmp_path / "redispatch-relative-project.db"
+    await close_db()
+    await init_db(str(db_file))
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id="healthy-after-relative",
+                status=ThreadStatus.RECONCILING,
+                team_preset="mock-success-single",
+                metadata=json.dumps({"workspace_root": str(tmp_path)}),
+            )
+            await create_thread(
+                session,
+                thread_id="relative-project",
+                status=ThreadStatus.RECONCILING,
+                team_preset="mock-success-single",
+                metadata=json.dumps({"workspace_root": "workspaces/project"}),
+            )
+            await session.commit()
+
+        spawner = LazyWorkerSpawner(
+            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+        )
+        spawner.replace_process(None)
+        circuit_breaker = WorkerCircuitBreaker(
+            failure_threshold=1, recovery_timeout=999.0
+        )
+        circuit_breaker.force_open()
+
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:9", timeout=0.2
+        ) as client:
+            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+                await redispatch_reconciling_threads(
+                    client,
+                    circuit_breaker,
+                    spawner,
+                    record_worker_contact=lambda _when: None,
+                )
+
+        async with session_factory() as session:
+            relative = await get_thread(session, "relative-project")
+            healthy = await get_thread(session, "healthy-after-relative")
+        assert relative is not None
+        assert relative.status == ThreadStatus.FAILED.value
+        assert "no active project" in (relative.failure_reason or "")
+        assert healthy is not None
+        assert healthy.status == ThreadStatus.RECONCILING.value
     finally:
         await close_db()
 
@@ -131,6 +279,7 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
                     thread_id=thread_id,
                     status=ThreadStatus.RECONCILING,
                     team_preset="mock-success-single",
+                    metadata=json.dumps({"workspace_root": str(tmp_path)}),
                 )
             await session.commit()
 
@@ -201,6 +350,7 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
                 session,
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
+                metadata=json.dumps({"workspace_root": str(tmp_path)}),
             )
             await session.commit()
 

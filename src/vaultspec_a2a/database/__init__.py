@@ -44,10 +44,13 @@ from .migrations import count_pending_sdd_backfill as count_pending_sdd_backfill
 from .models import ArtifactModel as ArtifactModel
 from .models import AuthoringEventCursorModel as AuthoringEventCursorModel
 from .models import Base as Base
+from .models import ControlActionModel as ControlActionModel
 from .models import CostTrackingModel as CostTrackingModel
 from .models import PermissionLogModel as PermissionLogModel
+from .models import PermissionRequestModel as PermissionRequestModel
 from .models import TaskQueueEntryModel as TaskQueueEntryModel
 from .models import ThreadDeletionSagaModel as ThreadDeletionSagaModel
+from .models import ThreadExecutionStateModel as ThreadExecutionStateModel
 from .models import ThreadModel as ThreadModel
 from .permission_repository import (
     ControlActionReservation as ControlActionReservation,
@@ -108,31 +111,37 @@ from .permission_repository import (
 from .permission_repository import (
     supersede_permission_requests as supersede_permission_requests,
 )
+from .session import application_session_factory as application_session_factory
 from .session import close_db as close_db
 from .session import get_db as get_db
 from .session import get_engine as get_engine
 from .session import get_session_factory as get_session_factory
 from .session import init_db as init_db
+from .session import inspect_sqlite_database as inspect_sqlite_database
 from .session import verify_wal_mode as verify_wal_mode
 from .task_queue_repository import MarkCompleteResult as MarkCompleteResult
 from .task_queue_repository import get_queue_view as get_queue_view
 from .task_queue_repository import mark_task_complete as mark_task_complete
 from .task_queue_repository import seed_task_queue as seed_task_queue
+from .thread_repository import ActiveThreadProjection as ActiveThreadProjection
 from .thread_repository import create_thread as create_thread
 from .thread_repository import delete_thread as delete_thread
-from .thread_repository import (
-    delete_thread_execution_state as delete_thread_execution_state,
-)
 from .thread_repository import get_thread as get_thread
 from .thread_repository import (
     get_thread_execution_state as get_thread_execution_state,
 )
 from .thread_repository import get_thread_metadata as get_thread_metadata
 from .thread_repository import (
+    list_active_thread_page as list_active_thread_page,
+)
+from .thread_repository import (
     list_non_terminal_threads as list_non_terminal_threads,
 )
 from .thread_repository import list_threads as list_threads
 from .thread_repository import mark_thread_deleting as mark_thread_deleting
+from .thread_repository import (
+    normalize_workspace_identity as normalize_workspace_identity,
+)
 from .thread_repository import (
     record_thread_execution_state as record_thread_execution_state,
 )
@@ -140,25 +149,29 @@ from .thread_repository import (
     set_thread_approval_state as set_thread_approval_state,
 )
 from .thread_repository import set_thread_repair_state as set_thread_repair_state
-from .thread_repository import update_thread_metadata as update_thread_metadata
 from .thread_repository import update_thread_status as update_thread_status
 
 __all__ = [
     "DEFAULT_SUBSCRIBER_ID",
+    "ActiveThreadProjection",
     "ArtifactModel",
     "AuthoringEventCursorModel",
     "Base",
+    "ControlActionModel",
     "ControlActionReservation",
     "CostTrackingModel",
     "MarkCompleteResult",
     "PermissionLogModel",
+    "PermissionRequestModel",
     "SchemaCompatibilityError",
     "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",
+    "ThreadExecutionStateModel",
     "ThreadModel",
     "acquire_control_action_lease",
     "append_cost_record",
     "append_permission_log",
+    "application_session_factory",
     "backfill_teamstate_sdd_fields",
     "build_migration_config",
     "close_db",
@@ -168,7 +181,6 @@ __all__ = [
     "create_control_action",
     "create_thread",
     "delete_thread",
-    "delete_thread_execution_state",
     "expire_pending_permission_requests",
     "get_artifact",
     "get_artifacts_by_thread",
@@ -187,6 +199,8 @@ __all__ = [
     "get_thread_execution_state",
     "get_thread_metadata",
     "init_db",
+    "inspect_sqlite_database",
+    "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",
     "mark_control_action_applied",
@@ -196,6 +210,7 @@ __all__ = [
     "mark_task_complete",
     "mark_thread_deleting",
     "migration_script_location",
+    "normalize_workspace_identity",
     "record_permission_request",
     "record_permission_response_submission",
     "record_thread_execution_state",
@@ -213,7 +228,6 @@ __all__ = [
     "sum_cost_by_thread",
     "supersede_permission_requests",
     "supported_migration_head",
-    "update_thread_metadata",
     "update_thread_status",
     "validate_desktop_schema",
     "verify_wal_mode",

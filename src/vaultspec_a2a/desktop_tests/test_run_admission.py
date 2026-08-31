@@ -30,6 +30,7 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -43,11 +44,11 @@ from ..tests.gateway_boot import (
     spawn_gateway,
     spawn_until_ready,
 )
+from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Iterator
-    from pathlib import Path
 
 _ATTACH = "attach-credential-admission-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-admission-fedcba0987654321"
@@ -80,7 +81,9 @@ def _running_gateway(
                 app_home,
                 gateway_port=gateway_port,
                 worker_port=worker_port,
-                extra=extra_env,
+                # Every run this module admits selects an in-process lane
+                # (see ``_catalog.py``); the gateway must serve one to select.
+                extra={"VAULTSPEC_SERVE_IN_PROCESS_LANES": "true", **extra_env},
             ),
             log_handle=log_handle,
             new_session=True,
@@ -104,6 +107,14 @@ def _armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]
     seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
     seat_valid_database(app_home)
     with _running_gateway(tmp_path, app_home, **extra_env) as gateway:
+        # Warm the catalog HERE, not inside the first prepare. The first read
+        # probes every provider lane and takes seconds; paying that inside a
+        # prepare shifted the timing the concurrency and replay cases depend on,
+        # and their reservations aged out into an execution-readiness refusal.
+        # Warming at arm time is also what the product should do - a run start
+        # is not the place to discover the catalog for the first time.
+        base, auth = gateway
+        catalog_selection(base, auth, str(Path.cwd()))
         yield gateway
 
 
@@ -119,6 +130,7 @@ def _prepare(
     Blocks inside the gateway until the single-flight worker start reaches
     readiness, so parallel calls model concurrent first demand.
     """
+    workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
             "/v1/runs",
@@ -128,7 +140,10 @@ def _prepare(
                 "stage": "prepare",
                 "autonomous": True,
                 **({"run_id": run_id} if run_id is not None else {}),
-                **({"metadata": metadata} if metadata is not None else {}),
+                # The workspace anchors the selection, so it rides even when the
+                # caller declared no metadata of its own.
+                "metadata": {"workspace_root": workspace, **(metadata or {})},
+                "selection": catalog_selection(base, auth, workspace),
             },
         )
     try:
@@ -148,6 +163,7 @@ def _commit(
     metadata: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Fire one authenticated commit binding tokens under *reservation_id*."""
+    workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
             "/v1/runs",
@@ -164,8 +180,14 @@ def _commit(
                     ),
                     "engine_bearer": "bearer",
                 },
+                # Commit carries the selection too: it is the stage that creates
+                # the durable run, so it is where the freeze happens. The value
+                # matches prepare's because both read the same cached served
+                # catalog - a replayed commit must be byte-identical to be
+                # recognised as a replay rather than a changed body.
+                "metadata": {"workspace_root": workspace, **(metadata or {})},
+                "selection": catalog_selection(base, auth, workspace),
                 **({"run_id": run_id} if run_id is not None else {}),
-                **({"metadata": metadata} if metadata is not None else {}),
             },
         )
     try:
@@ -183,7 +205,15 @@ def _release(
     run_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Explicitly release one uncommitted prepared reservation."""
+    """Explicitly release one uncommitted prepared reservation.
+
+    The release binding is the digest of the PREPARED request, so this body must
+    mirror the prepare that opened the reservation field for field - including
+    the selection and the workspace metadata. A release that omits either is not
+    a weaker request, it is a DIFFERENT one, and the broker refuses to release a
+    reservation it cannot recognise.
+    """
+    workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
             "/v1/runs",
@@ -194,7 +224,8 @@ def _release(
                 "reservation_id": reservation_id,
                 "autonomous": True,
                 **({"run_id": run_id} if run_id is not None else {}),
-                **({"metadata": metadata} if metadata is not None else {}),
+                "metadata": {"workspace_root": workspace, **(metadata or {})},
+                "selection": catalog_selection(base, auth, workspace),
             },
         )
     return resp.status_code, resp.json()

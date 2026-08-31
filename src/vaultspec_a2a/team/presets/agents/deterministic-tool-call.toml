@@ -1,0 +1,13 @@
+[agent]
+id           = "deterministic-tool-call"
+display_name = "Deterministic Tool Call"
+role         = "coder"
+description  = "In-process ProviderFactory scenario that marks one real queued task complete."
+
+[agent.persona]
+system_prompt = "Emit the programmed deterministic task-queue tool call."
+
+[agent.model]
+provider   = "deterministic"
+capability = "mid"
+

@@ -22,8 +22,13 @@ import importlib
 # ``__init__``; eagerly loading ``.compiler`` here would therefore close the cycle
 # through a partially-initialized ``context.token_budget``. Deferring the compiler
 # exports keeps ``graph.enums`` importable without dragging the compiler tree in.
+#
+# Each name is resolved from the module that DEFINES it. The index builder was
+# reached through ``.compiler`` while living in ``.nodes.vault_reader``, which
+# made the compiler a second declared home for it and left this package's own
+# docstring pointing somewhere the lookup did not go.
 _LAZY_IMPORTS = {
-    "build_initial_vault_index": ".compiler",
+    "build_initial_vault_index": ".nodes.vault_reader",
     "compile_team_graph": ".compiler",
 }
 

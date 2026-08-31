@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from ...thread.enums import TERMINAL_STATUSES
+from ...thread.enums import TERMINAL_STATUS_VALUES
 from .. import CertifiedGateway, certified_gateway
 
 if TYPE_CHECKING:
@@ -29,9 +29,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # The product-safe terminal status strings a public run-status response can carry.
-TERMINAL_STATUS_VALUES: frozenset[str] = frozenset(
-    status.value for status in TERMINAL_STATUSES
-)
 
 
 @pytest.fixture(scope="module")

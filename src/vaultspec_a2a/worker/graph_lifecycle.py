@@ -17,8 +17,15 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..domain_config import domain_config
 from ..graph.compiler import _resolve_model_for_worker, compile_team_graph
+from ..ipc.schemas import canonical_project_root
+from ..providers.warmup import warm_model_imports
 from ..streaming import StreamableGraph, node_metadata_from_graph
-from ..team.team_config import AgentConfig, load_agent_config, load_team_config
+from ..team.team_config import (
+    AgentConfig,
+    TopologyType,
+    load_agent_config,
+    load_team_config,
+)
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.errors import (
@@ -48,6 +55,7 @@ __all__ = [
     "GraphLifecycleManager",
     "GraphStateSnapshot",
     "RegisteredCompiledGraph",
+    "graph_cache_key",
 ]
 
 
@@ -61,6 +69,30 @@ logger = logging.getLogger(__name__)
 # real-behavior tests install a pre-compiled graph without reaching mutable
 # cache dictionaries.
 type GraphCacheKey = tuple[str, str | None, bool]
+
+
+def graph_cache_key(
+    team_preset: str,
+    workspace_root: str | None,
+    autonomous: bool,
+) -> GraphCacheKey:
+    """Form the cache key for a compiled team graph.
+
+    The single site that builds a key, so the workspace element is always the
+    run's canonical project spelling. Keys are compared as plain tuples, so two
+    spellings of one directory used to occupy two entries: a run's first
+    dispatch keyed on a locally re-resolved path while every later dispatch
+    keyed on the spelling stored at admission, and the first follow-up on a
+    thread whose entry had been evicted recompiled the identical graph under a
+    second key. Minting here collapses them to one entry - and holds even for a
+    key handed in through the registration seam, which does not cross the
+    dispatch wire and so is not minted by it.
+    """
+    return (
+        team_preset,
+        canonical_project_root(workspace_root) if workspace_root else None,
+        autonomous,
+    )
 
 
 class GraphStateSnapshot(Protocol):
@@ -110,12 +142,18 @@ def assert_armed_authoring_attachable(
     so a provider with no attachment surface at all is refused with a served
     compile-time reason before the run ever starts — never a live-run timeout.
 
-    A no-op when *harness* does not arm the authoring bridge (a per-worker
-    resolution scoped to authoring_bridge specifically: the
-    harness-mcp_servers-only case is
-    already proven to reach every known provider's own delivery mechanism -
-    ``with_mcp_servers`` or ``with_harness_mcp_servers`` - via
-    ``compose_harness_mcp_servers``, so it is out of scope here).
+    A no-op when *harness* does not arm the authoring bridge. The scope is
+    authoring_bridge specifically because the mcp_servers-only case fails
+    SOFTLY: ``compose_harness_mcp_servers`` returns a model with no delivery
+    mechanism unchanged rather than raising, so there is no per-turn error for a
+    compile-time gate to pull forward. That is a weaker guarantee than a gate,
+    and it is deliberately not restated as one here - this docstring previously
+    claimed the mcp_servers path was "already proven to reach every known
+    provider", which was untrue on three of the four topologies at the time it
+    was written, because only the research_adr compiler read the declaration at
+    all. The forwarding now happens in every worker-compiling topology; what
+    remains unguarded here is a lane whose model exposes neither delivery
+    surface, and that stays a silent no-op by design rather than by omission.
     """
     if harness is None or not harness.authoring_bridge:
         return
@@ -125,13 +163,15 @@ def assert_armed_authoring_attachable(
         if agent_config is None:
             continue
         try:
-            model, _resolved_provider, _capability = _resolve_model_for_worker(
-                worker_ref,
-                agent_config,
-                team_config,
-                ws_root,
-                provider_factory=provider_factory,
-                frozen_assignment=frozen_assignment,
+            model, _resolved_provider, _capability, _frozen_model = (
+                _resolve_model_for_worker(
+                    worker_ref,
+                    agent_config,
+                    team_config,
+                    ws_root,
+                    provider_factory=provider_factory,
+                    frozen_assignment=frozen_assignment,
+                )
             )
         except ValueError:
             # Provider exhaustion is a distinct failure surfaced by compile.
@@ -174,8 +214,9 @@ class GraphLifecycleManager:
         token_store: RunTokenStore,
         catalog_store: RunCatalogStore,
     ) -> None:
-        from ..database.session import get_session_factory
+        from ..database import get_session_factory
         from ..providers.factory import ProviderFactory
+        from .cost_port import SqlCostPort
         from .task_queue_port import SqlTaskQueuePort
 
         self._checkpointer = checkpointer
@@ -191,6 +232,9 @@ class GraphLifecycleManager:
         # The worker reaches the app database (task_queue_entries) via
         # the shared session factory; migrations are owned by the gateway.
         self._task_queue_port = SqlTaskQueuePort(get_session_factory())
+        # Token accounting reaches the same app database (cost_tracking) over
+        # the same shared session factory.
+        self._cost_port = SqlCostPort(get_session_factory())
         self._graph_cache: OrderedDict[GraphCacheKey, RegisteredCompiledGraph] = (
             OrderedDict()
         )
@@ -231,7 +275,11 @@ class GraphLifecycleManager:
         This is the only public graph-injection seam.  It maintains the same
         cache and thread mapping invariant as normal compilation, then makes
         the graph available to event aggregation before dispatch can resume it.
+        That invariant includes the project spelling: an injected key is minted
+        here so a graph installed through this seam shares the entry a dispatch
+        for the same workspace would find, rather than shadowing it.
         """
+        cache_key = graph_cache_key(*cache_key)
         while (
             cache_key not in self._graph_cache
             and len(self._graph_cache) >= domain_config.max_cached_graphs
@@ -274,7 +322,7 @@ class GraphLifecycleManager:
         if not team_preset:
             return None
 
-        new_key: GraphCacheKey = (team_preset, workspace_root, autonomous)
+        new_key = graph_cache_key(team_preset, workspace_root, autonomous)
 
         # Check if another thread already compiled for this key.
         if new_key in self._graph_cache:
@@ -334,12 +382,19 @@ class GraphLifecycleManager:
         """Load team/agent configs and compile a LangGraph ``StateGraph``.
 
         Uses the same two-level config discovery order as the monolith:
-        workspace override then bundled preset. ``async`` only because it may
-        await ``_build_proposal_submitter``/``_build_authoring_binding_provider``
-        below, which offload the engine-discovery retry loop off this event
-        loop; everything else here is synchronous config/compile work.
+        workspace override then bundled preset. The awaits below are all
+        offloads, not I/O of this coroutine's own:
+        ``_build_proposal_submitter``/``_build_authoring_binding_provider`` move
+        the engine-discovery retry loop off this event loop, and
+        ``warm_model_imports`` moves the model stack's multi-second first import
+        off it. Everything else here is synchronous config/compile work, and it
+        runs on the loop by design - it is fast, but only once the imports it
+        triggers have already been paid for elsewhere.
         """
-        ws_root = Path(req.workspace_root).resolve() if req.workspace_root else None
+        # No re-resolution here: the project was minted when the dispatch was
+        # validated, and re-deriving it is what let compilation disagree with
+        # the cache key it was compiled under.
+        ws_root = Path(req.workspace_root) if req.workspace_root else None
 
         try:
             team_config = load_team_config(
@@ -383,15 +438,42 @@ class GraphLifecycleManager:
                     },
                 )
 
+        # Everything below reaches ``ProviderFactory.create``, which loads the
+        # LangChain and ACP model stack on first use - seconds of pure import
+        # work with no await in it, on this event loop. Paying it on a thread
+        # first is what keeps the worker answering /health and a second dispatch
+        # while a run boots; once warm the call is a dict lookup, so a later
+        # compile pays nothing for it.
+        await asyncio.to_thread(warm_model_imports)
+
         # Document-phase topologies author through the engine; build the
         # production submitter here, the single construction site, and fail closed
         # at build time when the run cannot author (so it never starts vague). The
         # feedback reader is the read-path companion (best-effort, not fail-closed):
         # it grounds the document writers on a revision run's reviewer batch.
+        #
+        # KEYED ON TOPOLOGY ON PURPOSE, and it must stay that way. The question
+        # here is a MECHANISM one - "does this preset submit over the direct
+        # worker-to-engine HTTP path?" - and only ``research_adr`` does. The solo
+        # doc-editor lane also authors documents, but submits through the model's
+        # bridged tool instead, so it correctly gets no submitter here.
+        #
+        # The served ``authoring_capability`` field asks a DIFFERENT question -
+        # "does this preset author documents?" - and is keyed on declared ROLES,
+        # so it answers ``document_authoring`` for that same doc-editor lane. The
+        # two therefore DISAGREE for the doc-editor, and both are right.
+        #
+        # If you arrived here debugging a run that authored nothing, that
+        # disagreement is not the bug and making these two agree is not the fix:
+        # this gate is why the bridged lane submits by a different route, and
+        # aligning it would either strand the served field on a wrong answer again
+        # or hand a submitter to a lane that does not use one. They agreed once,
+        # when one topology key answered both questions - and answered this one's
+        # neighbour wrongly.
         proposal_submitter = None
         feedback_reader = None
-        if team_config.topology.type == "research_adr":
-            proposal_submitter = await self._build_proposal_submitter()
+        if team_config.topology.type == TopologyType.RESEARCH_ADR:
+            proposal_submitter = await self._build_proposal_submitter(ws_root)
             feedback_reader = self._build_feedback_reader()
 
         # CLI-coder presets that arm the engine authoring bridge get a per-run
@@ -439,6 +521,7 @@ class GraphLifecycleManager:
                 # Thread feature_tag so vault indexing works in worker
                 feature_tag=req.active_feature,
                 task_queue_port=self._task_queue_port,
+                cost_port=self._cost_port,
                 provider_factory=self._provider_factory,
                 proposal_submitter=proposal_submitter,
                 feedback_reader=feedback_reader,
@@ -449,12 +532,21 @@ class GraphLifecycleManager:
             ),
         )
 
-    async def _build_proposal_submitter(self) -> DocumentProposalSubmitter:
+    async def _build_proposal_submitter(
+        self, workspace_root: Path | None
+    ) -> DocumentProposalSubmitter:
         """Construct the production authoring submitter for a research_adr run.
 
+        The submitter is bound to *workspace_root* - the run's minted active
+        project - so the authoring session it opens is authorised against the
+        project that authored the proposals rather than whichever workspace the
+        engine happens to hold active when a command lands. A graph is cached
+        per project, so a submitter built alongside one stays bound to it.
+
         Fails closed at build time: a research_adr run whose engine origin cannot
-        be resolved never starts vaguely — the typed error propagates as a
-        ``GraphCompilationError`` and a truthful run failure. The per-role tokens
+        be resolved, or which names no project to author into, never starts
+        vaguely — the typed error propagates as a ``GraphCompilationError`` and a
+        truthful run failure. The per-role tokens
         the submitter reads at call time come from this worker's
         :class:`RunTokenStore`; the engine bearer and the writer document body are
         resolved per run from the store and graph state, so the cached graph is
@@ -473,6 +565,14 @@ class GraphLifecycleManager:
             PhaseAuthoringSpec,
             resolve_engine_with_retry,
         )
+
+        if workspace_root is None:
+            raise ConfigError(
+                "a document-authoring run must name the project it authors into; "
+                "this dispatch carried no active project, so the authoring "
+                "session would open against whatever workspace the engine holds "
+                "active at command time"
+            )
 
         # Bounded poll, not a one-shot probe: the engine has measured multi-
         # second stall windows (scope-watcher rebuilds) during which a single
@@ -495,6 +595,7 @@ class GraphLifecycleManager:
         return DocumentProposalSubmitter(
             engine_base_url=engine.base_url,
             token_store=self._token_store,
+            workspace_root=workspace_root,
             phases={
                 "research": PhaseAuthoringSpec(
                     document_role="vaultspec-synthesist",
@@ -590,6 +691,22 @@ class GraphLifecycleManager:
         is the fresh-checkpoint half of the desktop compatibility contract: an
         ordinary restart validates those keys and never runs a migration.
 
+        The run's active project is written on EVERY turn, not only the first.
+        ``TeamState`` has always declared the key as threaded in from here, and
+        nothing wrote it, so the two nodes that read it fell through to their
+        compile-time closure every time and the declaration was a dead one. It
+        carries no reducer, so an unconditional write is last-write-wins over an
+        identity that cannot change within a thread - the graph is cached per
+        project - which also repairs a checkpoint written before this key was
+        ever populated. The value is the project the dispatch was minted with:
+        an ingest that names none is refused at the wire, and this is only ever
+        called for an ingest.
+
+        This is a truthful state contract, NOT an authority. Compilation's
+        explicit workspace argument remains the binding for every scoped
+        behaviour; consumers must keep preferring it and reading state only as
+        the fallback it already is.
+
         Args:
             req: The incoming ``DispatchRequest``.
             is_first_ingest: ``True`` when the thread has no prior
@@ -609,6 +726,7 @@ class GraphLifecycleManager:
         graph_input: dict[str, Any] = {
             "messages": messages,
             "thread_id": req.thread_id,
+            "workspace_root": req.workspace_root,
         }
         if is_first_ingest:
             graph_input.update(

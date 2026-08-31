@@ -87,12 +87,14 @@ from typing import TYPE_CHECKING
 
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
+from .in_process_catalog import IN_PROCESS_EXECUTION_MODES
 from .provider_catalog import ProviderCatalogKey
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 __all__ = [
+    "IN_PROCESS_CATALOG_LANES",
     "IN_PROCESS_LANES",
     "PROVEN_CATALOG_TURN_LANES",
     "PROVEN_TURN_LANES",
@@ -218,6 +220,26 @@ IN_PROCESS_LANES: frozenset[Provider] = frozenset(
     {Provider.MOCK, Provider.DETERMINISTIC}
 )
 
+# The same in-process admission at CATALOG identity, and it is a SEPARATE
+# declaration for the reason the catalog map above is separate from the
+# provider-level one: catalog admission is execution-mode specific, so admitting
+# a provider does not admit every mode it might one day be served under. An
+# in-process provider offered under some other execution mode is not this
+# declaration and still lands on deny.
+#
+# It is derived from :data:`IN_PROCESS_LANES` and the serving module's mode
+# declaration rather than hand-listed, and that is deliberate in a module whose
+# rule is otherwise "edit by hand, never derive". The hand-editing rule protects
+# claims about work that finished on a lane; these lanes make no such claim, and
+# their identity is exactly "the in-process lanes, under the modes they are
+# served as". Restating the pair here would create a second place for a renamed
+# execution mode to be forgotten, which is the failure mode this module exists to
+# prevent, not an instance of the vigilance it asks for.
+IN_PROCESS_CATALOG_LANES: frozenset[ProviderCatalogKey] = frozenset(
+    ProviderCatalogKey(provider.value, IN_PROCESS_EXECUTION_MODES[provider])
+    for provider in IN_PROCESS_LANES
+)
+
 # ---------------------------------------------------------------------------
 # THE WEB DECLARATION - edit by hand, never derive. It landed EMPTY, because the
 # wiring lands before the PROOF and every seam is asserted dark until a live run
@@ -331,8 +353,14 @@ def is_lane_admissible(provider: Provider) -> bool:
 
 
 def is_catalog_lane_admissible(key: ProviderCatalogKey) -> bool:
-    """Return whether this exact external execution lane has completed-turn proof."""
-    return key in PROVEN_CATALOG_TURN_LANES
+    """Return whether this exact execution lane may be served as selectable.
+
+    True for an external lane with recorded completed-turn proof and for the
+    in-process lanes under the exact modes they are served as. False for
+    everything else, including an in-process provider named under a foreign
+    execution mode - deny is the default here as it is one layer up.
+    """
+    return key in PROVEN_CATALOG_TURN_LANES or key in IN_PROCESS_CATALOG_LANES
 
 
 def catalog_lane_admission_reason(key: ProviderCatalogKey) -> str | None:

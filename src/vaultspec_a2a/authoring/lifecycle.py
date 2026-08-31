@@ -26,12 +26,17 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from ..thread.enums import (
+    VERDICT_APPROVED,
+    VERDICT_REJECTED,
+    VERDICT_REQUEST_CHANGES,
+)
 from ..utils.coercion import coerce_int
 
+# The verdict vocabulary is imported to MAP ONTO, not to offer a second way in:
+# thread.enums holds it precisely because this module and the graph's phase gate
+# cannot import each other, and a consumer taking it from either would undo that.
 __all__ = [
-    "VERDICT_APPROVED",
-    "VERDICT_REJECTED",
-    "VERDICT_REQUEST_CHANGES",
     "GapSignal",
     "LifecycleEvent",
     "SseFrame",
@@ -42,9 +47,6 @@ __all__ = [
     "verdict_from_event",
 ]
 
-VERDICT_APPROVED = "approved"
-VERDICT_REJECTED = "rejected"
-VERDICT_REQUEST_CHANGES = "request_changes"
 
 # Engine review-decision strings (`ApprovalDecision`, snake_case) mapped onto the
 # pinned a2a verdict vocabulary shared across executors.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
@@ -10,6 +10,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...conftest import materialize_schema
 from ...control.thread_state_service import build_thread_state
 from ...database import (
     create_thread,
@@ -17,16 +18,12 @@ from ...database import (
     record_permission_response_submission,
 )
 from ...database.models import (
-    Base,
     PermissionRequestModel,
     ThreadExecutionStateModel,
     ThreadModel,
 )
 from ...graph.events import PermissionRequest
 from ...streaming.aggregator import EventAggregator
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @pytest.mark.asyncio
@@ -37,10 +34,8 @@ async def test_checkpoint_failure_updates_execution_readiness_with_repair_status
     case_dir = tmp_path / "thread-state-service-db-closed"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -84,10 +79,8 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(tmp_path: Path) ->
     case_dir = tmp_path / "thread-state-service-db-missing"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -136,10 +129,8 @@ async def test_missing_checkpoint_hides_durable_pending_permission_state(
     case_dir = tmp_path / "thread-state-service-db-missing-pending-permission"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -203,10 +194,8 @@ async def test_submitted_thread_missing_checkpoint_clears_stale_pending_approval
     case_dir = tmp_path / "thread-state-service-db-submitted-stale-approval"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -265,10 +254,8 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
     case_dir = tmp_path / "thread-state-service-db-corrupt-state"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -342,10 +329,8 @@ async def test_stale_execution_state_degrades_snapshot_readiness(
     case_dir = tmp_path / "thread-state-service-db-stale-state"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -426,10 +411,8 @@ async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
     case_dir = tmp_path / "thread-state-service-db-corrupt-permission"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -501,10 +484,8 @@ async def test_unreadable_plan_approval_row_does_not_seed_pending_approval(
     case_dir = tmp_path / "thread-state-service-db-corrupt-plan"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -575,10 +556,8 @@ async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state(
     case_dir = tmp_path / "thread-state-service-db-stale-plan"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -650,10 +629,8 @@ async def test_missing_plan_approval_request_clears_stale_thread_pending_approva
     case_dir = tmp_path / "thread-state-service-db-missing-plan"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -712,10 +689,8 @@ async def test_plan_approval_without_tool_call_preserves_pending_approval(
     case_dir = tmp_path / "thread-state-service-db-plan-no-tool-call"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -784,10 +759,8 @@ async def test_rejected_thread_approval_is_replaced_by_live_pending_plan_approva
     case_dir = tmp_path / "thread-state-service-db-rejected-stale-live-plan"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -856,10 +829,8 @@ async def test_rejected_thread_approval_residue_does_not_surface_without_live_pl
     case_dir = tmp_path / "thread-state-service-db-rejected-residue"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -918,10 +889,8 @@ async def test_terminal_thread_excludes_durable_pending_permission_from_thread_s
     case_dir = tmp_path / "thread-state-service-db-terminal-permission-residue"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -994,10 +963,8 @@ async def test_answered_pending_apply_permission_does_not_surface_in_thread_stat
     case_dir = tmp_path / "thread-state-service-db-answered-pending-apply"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -1074,10 +1041,8 @@ async def test_aggregator_only_pending_permission_does_not_surface_in_thread_sta
     case_dir = tmp_path / "thread-state-service-db-aggregator-only-permission"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -1149,10 +1114,8 @@ async def test_checkpoint_only_pending_permission_does_not_surface_in_thread_sta
     case_dir = tmp_path / "thread-state-service-db-checkpoint-only-permission"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,

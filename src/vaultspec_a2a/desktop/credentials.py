@@ -22,23 +22,27 @@ exception argument.
 
 from __future__ import annotations
 
-import contextlib
 import os
 import secrets
 import stat
-import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
+from ..utils.atomic_write import atomic_write_text
 from ._platform_acl import (
+    confirm_opened_secret,
     credential_file_is_owner_restricted,
-    harden_credential_file,
+    harden_credential_path,
+    unfollowed_read_flags,
 )
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
     "ATTACH_CREDENTIAL_NAME",
     "OWNERSHIP_CAPABILITY_NAME",
+    "WORKER_IPC_CREDENTIAL_DECLARATION",
     "WORKER_IPC_CREDENTIAL_NAME",
     "CredentialError",
     "CredentialPlane",
@@ -53,6 +57,30 @@ ATTACH_CREDENTIAL_NAME = "attach.cred"
 OWNERSHIP_CAPABILITY_NAME = "ownership.cap"
 WORKER_IPC_CREDENTIAL_NAME = "worker-ipc.cred"
 
+# Only the worker IPC file is declared here: the other two planes are created by
+# the dashboard and this module merely validates them, so their lifetime is not
+# this project's to state. The disk cost is nil - one fixed-name file, replaced
+# rather than accumulated - which is exactly why the interesting part of this
+# declaration is the part that is NOT enforced: a live secret stays readable on
+# disk after the gateway that minted it exits.
+WORKER_IPC_CREDENTIAL_DECLARATION = ArtifactDeclaration(
+    name="worker-ipc-credential",
+    root=f"<desktop_credentials_dir>/{WORKER_IPC_CREDENTIAL_NAME}",
+    owner="desktop.credentials",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "replaced wholesale on every mint, so a boot always owns its own secret "
+        "and the file never multiplies; a failed mint removes its own temporary "
+        "rather than stranding a second secret. NOTHING removes the file on "
+        "shutdown, so the last boot's secret remains at rest, owner-restricted, "
+        "until the next boot overwrites it"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    WORKER_IPC_CREDENTIAL_DECLARATION,
+)
+
 # A credential is an opaque high-entropy token. These bounds reject an empty or
 # truncated file and a pathologically large one before the bytes are trusted; the
 # charset admits the URL-safe and hex token alphabets this product mints without
@@ -64,24 +92,6 @@ _ALLOWED_CHARS = frozenset(
 )
 # The gateway mints a 256-bit worker IPC secret; 32 bytes rendered as hex.
 _WORKER_IPC_ENTROPY_BYTES = 32
-
-# How long to ride out a transient Windows sharing violation on the rename that
-# publishes the minted secret. ``os.replace`` is atomic, but on Windows a reader
-# holding the target open can briefly deny it, and this file is read by the
-# gateway-worker pair while a later boot may be publishing over it.
-#
-# This mirrors, rather than calls, the lifecycle package's audited writer. That
-# writer takes text and optional permission bits and renames immediately after
-# the fsync; this mint has to apply the owner-restricting access-control list to
-# the temporary file *between* the fsync and the rename, so the secret is never
-# reachable by another local principal - not even for the width of the rename -
-# and on Windows those bits are a discretionary access-control list rather than
-# mode bits the shared writer could pass through. It also opens the temporary
-# with ``O_NOFOLLOW``, which that writer does not. Adding a pre-rename callback
-# to the shared writer for this single caller would trade one duplicated loop
-# for a general-purpose seam nothing else wants.
-_REPLACE_RETRY_SECONDS = 2.0
-_REPLACE_RETRY_INTERVAL = 0.01
 
 
 class CredentialError(ValueError):
@@ -172,19 +182,14 @@ def _read_owner_restricted_secret(path: Path, *, plane: CredentialPlane) -> str:
     if named.st_size > _MAX_CREDENTIAL_BYTES:
         raise CredentialError(f"{plane.value} credential file exceeds its size bound")
 
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     try:
-        descriptor = os.open(path, flags)
+        descriptor = os.open(path, unfollowed_read_flags())
     except OSError as exc:
         raise CredentialError(
             f"{plane.value} credential file cannot be opened"
         ) from exc
     try:
-        opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
-            named.st_dev,
-            named.st_ino,
-        ):
+        if not confirm_opened_secret(descriptor, named=named, path=path):
             raise CredentialError(
                 f"{plane.value} credential file changed identity while opening"
             )
@@ -230,10 +235,7 @@ def create_worker_ipc_credential(credentials_dir: Path) -> str:
     """
     directory = Path(credentials_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    if os.name == "posix":
-        os.chmod(directory, 0o700)
-    else:
-        harden_credential_file(directory)
+    harden_credential_path(directory)
 
     paths = credential_paths(directory)
     secret = secrets.token_hex(_WORKER_IPC_ENTROPY_BYTES)
@@ -241,43 +243,13 @@ def create_worker_ipc_credential(credentials_dir: Path) -> str:
     if target.is_symlink() or target.is_junction():
         raise CredentialError("worker_ipc credential path is a link")
 
-    # Write to a private per-process temp then atomically replace, so a concurrent
-    # reader never observes a partially written or world-readable secret.
-    tmp = target.with_name(f".{WORKER_IPC_CREDENTIAL_NAME}.{os.getpid()}.tmp")
-    flags = (
-        os.O_WRONLY
-        | os.O_CREAT
-        | os.O_TRUNC
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_BINARY", 0)
-    )
-    try:
-        descriptor = os.open(tmp, flags, 0o600)
-        try:
-            os.write(descriptor, secret.encode("utf-8"))
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        harden_credential_file(tmp)
-        _replace_with_retry(tmp, target)
-    except BaseException:
-        # Every failure path, ``KeyboardInterrupt`` and ``SystemExit`` included:
-        # an interrupted mint must never be the one case that leaves a live
-        # secret sitting in a temporary file nothing collects.
-        with contextlib.suppress(OSError):
-            tmp.unlink(missing_ok=True)
-        raise
+    # Published through the project's audited write-and-rename, which is the only
+    # copy of that discipline: a concurrent reader never observes a partial file,
+    # and an interrupted mint removes its own temporary rather than stranding a
+    # live secret beside the credential. The owner-restriction travels as a
+    # callable because it is not expressible as permission bits alone - on Windows
+    # it is a discretionary access-control list - and it is applied to the
+    # temporary before the rename, so the secret is never reachable by another
+    # local principal under its real name, not even for the width of the rename.
+    atomic_write_text(target, secret, mode=0o600, harden=harden_credential_path)
     return secret
-
-
-def _replace_with_retry(tmp: Path, target: Path) -> None:
-    """Rename *tmp* over *target*, riding out a transient sharing violation."""
-    deadline = time.monotonic() + _REPLACE_RETRY_SECONDS
-    while True:
-        try:
-            os.replace(tmp, target)
-            return
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(_REPLACE_RETRY_INTERVAL)

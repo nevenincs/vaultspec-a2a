@@ -1,14 +1,14 @@
 """Worker node for LangGraph agent task execution."""
 
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
-from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command, interrupt
 
@@ -18,17 +18,24 @@ from ...context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...thread.errors import WorkerExecutionError
-from ...thread.state import TeamState
+from ...thread.models import TokenUsageEntry
 from ..acp_options import valid_option_ids
-from ..protocols import TaskQueuePort
 from ..tools.task_queue import create_mark_task_complete_tool
+from ._config_contract import accepting_runnable_config
 
 if TYPE_CHECKING:
+    # Annotation-only: langchain_core.language_models is seconds-expensive at
+    # import (it eagerly probes for transformers); the node receives already
+    # constructed models and never instantiates one.
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import BaseTool
 
     from ...authoring import FeedbackContextReader
     from ...providers._acp_authoring import AuthoringToolBinding
+    from ...thread.state import TeamState
     from ...worker.authoring_binding import AuthoringBindingProvider
+    from ..protocols import CostPort, TaskQueuePort
 
 _logger = logging.getLogger(__name__)
 
@@ -173,19 +180,19 @@ def _resolve_effective_worker_model(
     )
 
 
-def _describe_worker_model(model: BaseChatModel) -> str:
-    """Name the provider lane and concrete model a worker turn actually ran on.
+def _worker_model_identity(model: BaseChatModel) -> tuple[str | None, str | None]:
+    """Return the ``(lane, model_id)`` a worker turn actually ran on.
 
-    The class name a worker used to report - ``AcpChatModel`` - names neither:
-    the same class serves every ACP lane with a redirected base URL, so a failure
-    report built from it could not distinguish which vendor was called, let alone
-    which model. Both facts are already on the resolved model instance; this reads
-    them off the SAME instance the turn invoked rather than the provider that was
-    requested, because a fallback chain means those can differ and only the
-    former is a fact about the run.
+    Both facts are read off the SAME instance the turn invoked rather than the
+    provider that was requested, because a fallback chain means those can differ
+    and only the former is a fact about the run.
 
-    Degrades rather than guesses: a model declaring neither (the in-process mock,
-    a hosted API model) falls back to its class name, which is at least true.
+    This is the single source for the pair. :func:`_describe_worker_model`
+    renders it for humans and the accounting writer stores it as data; neither
+    recovers the components by splitting the rendered string, which would break
+    on the vendor-prefixed model ids that legitimately contain a slash. Either
+    element is ``None`` when the instance does not declare it — an unknown lane
+    is reported as unknown rather than guessed.
     """
     lane = _bounded_model_identity(getattr(model, "provider", None))
     model_id: str | None = None
@@ -193,6 +200,24 @@ def _describe_worker_model(model: BaseChatModel) -> str:
         model_id = _bounded_model_identity(getattr(model, attribute, None))
         if model_id is not None:
             break
+    return lane, model_id
+
+
+def _describe_worker_model(model: BaseChatModel) -> str:
+    """Name the provider lane and concrete model a worker turn actually ran on.
+
+    The class name a worker used to report - ``AcpChatModel`` - names neither:
+    the same class serves every ACP lane with a redirected base URL, so a failure
+    report built from it could not distinguish which vendor was called, let alone
+    which model.
+
+    Degrades rather than guesses: a model declaring neither (the in-process mock,
+    a hosted API model) falls back to its class name, which is at least true.
+    That fallback is a DISPLAY affordance for a human-readable failure reason and
+    is deliberately not reused by the accounting writer, where a class name in a
+    provider column would read as a lane that never existed.
+    """
+    lane, model_id = _worker_model_identity(model)
     if lane is not None and model_id is not None:
         return f"{lane}/{model_id}"
     return lane or model_id or type(model).__name__
@@ -287,7 +312,7 @@ def _wrap_worker_exception(
 async def _collect_queue_tool_results(
     *,
     response: BaseMessage,
-    queue_tool: "BaseTool | None",
+    queue_tool: BaseTool | None,
 ) -> tuple[list[ToolMessage], dict[str, Any]]:
     """Dispatch mark_task_complete tool calls, collecting their Command update.
 
@@ -391,7 +416,7 @@ async def _resolve_worker_tool_calls(
     *,
     messages: list[BaseMessage],
     response: BaseMessage,
-    queue_tool: "BaseTool | None",
+    queue_tool: BaseTool | None,
     model: BaseChatModel,
     autonomous: bool,
     config: RunnableConfig | None,
@@ -445,20 +470,91 @@ async def _resolve_worker_tool_calls(
     return final_response, state_patch
 
 
+def _turn_token_usage(response: BaseMessage) -> TokenUsageEntry | None:
+    """Read the turn's token accounting off the message the provider returned.
+
+    Reads LangChain's standard ``usage_metadata``, so any lane that reports
+    usage is picked up by this one path rather than by a per-provider branch.
+    Lanes that report nothing return ``None`` and contribute no counters — an
+    absent report is not the same fact as a measured zero, and recording it as
+    one would make unreported usage indistinguishable from a free turn.
+    """
+    usage = getattr(response, "usage_metadata", None)
+    if not usage:
+        return None
+    input_tokens = int(usage.get("input_tokens", 0))
+    output_tokens = int(usage.get("output_tokens", 0))
+    return TokenUsageEntry(
+        agent_id="",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total=int(usage.get("total_tokens", input_tokens + output_tokens)),
+    )
+
+
+async def _record_turn_usage(
+    *,
+    cost_port: CostPort | None,
+    thread_id: object,
+    worker_name: str,
+    model: BaseChatModel,
+    usage: TokenUsageEntry,
+) -> None:
+    """Persist one turn's token accounting, never failing the turn over it.
+
+    Accounting is strictly observational: a database hiccup here must not
+    destroy a completed unit of real work, so the write is best-effort and
+    logged rather than raised.
+
+    The lane and model come from :func:`_worker_model_identity` as a PAIR, not
+    by splitting the rendered display string, which would misparse the
+    vendor-prefixed model ids that legitimately contain a slash. An undeclared
+    lane or model is stored as SQL ``NULL``: the measured token counts are real
+    and worth keeping, so the row is written rather than dropped, but the
+    identity is recorded as genuinely unknown. ``type(model).__name__`` is
+    deliberately NOT substituted here — a class name in a provider column would
+    be indistinguishable from a real lane, which is the same fabricated-fact
+    problem that keeps ``estimated_cost`` unwritten.
+    """
+    if cost_port is None or not isinstance(thread_id, str) or not thread_id:
+        return
+    lane, model_id = _worker_model_identity(model)
+    try:
+        await cost_port.record_usage(
+            thread_id=thread_id,
+            agent_id=worker_name,
+            provider=lane,
+            model=model_id,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+        )
+    except Exception:
+        _logger.warning(
+            "worker[%s] token accounting write failed; the turn is unaffected",
+            worker_name,
+            exc_info=True,
+        )
+
+
 def _finalize_worker_response(
     *,
     response: BaseMessage,
     worker_name: str,
     state_updates: dict[str, Any],
+    usage: TokenUsageEntry | None = None,
 ) -> dict[str, Any]:
     """Attach worker attribution and merge the queue tool's Command update.
 
     ``state_updates`` carries the non-message keys (e.g. ``current_task_id``)
     from any ``mark_task_complete`` Command dispatched this turn; they flow
     through the reducer pipeline via this node return.
+
+    When the lane reported usage, this node also emits the per-agent delta on
+    the ``token_usage`` channel, whose existing additive reducer accumulates it
+    across the run.
     """
     response.name = worker_name
-    return {
+    update: dict[str, Any] = {
         "messages": [response],
         "mounted_context": None,
         # Approval outcomes are consumed by the worker turn they routed.
@@ -466,6 +562,9 @@ def _finalize_worker_response(
         "approval_request_id": None,
         **state_updates,
     }
+    if usage is not None:
+        update["token_usage"] = {worker_name: usage.to_dict()}
+    return update
 
 
 def _require_valid_option_id(candidate: object, options: list[dict[str, Any]]) -> str:
@@ -546,7 +645,7 @@ async def _interrupt_permission_callback(
 
 def _attach_authoring_tools(
     model: BaseChatModel,
-    binding: "AuthoringToolBinding | None",
+    binding: AuthoringToolBinding | None,
     *,
     autonomous: bool,
 ) -> BaseChatModel:
@@ -576,10 +675,11 @@ def create_worker_node(
     workspace_root: Path | None = None,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
-    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
     role: str | None = None,
     harness_mcp_servers: list[str] | None = None,
-    feedback_reader: "FeedbackContextReader | None" = None,
+    feedback_reader: FeedbackContextReader | None = None,
+    cost_port: CostPort | None = None,
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
@@ -593,6 +693,9 @@ def create_worker_node(
         task_queue_port:   Optional database-backed queue port; when present the
                            mark-task-complete tool is bound per invocation to the
                            running thread.
+        cost_port:         Optional database-backed token-accounting port; when
+                           present, each turn that reports usage persists one
+                           ``cost_tracking`` row for the running thread.
         authoring_binding_provider: Optional per-run builder of the engine's
                            bridged authoring binding; when present, each invocation
                            resolves this role's binding for the running thread and,
@@ -674,11 +777,29 @@ def create_worker_node(
             # (in compose) with the authoring names the attach step already set;
             # supervised runs keep their prompts. Parallel to the authoring-attach
             # allowlist above.
+            # The lane is passed on BOTH calls, not just the composition: the
+            # allowlist is what auto-permits the composed servers' tools in an
+            # autonomous run, so naming a tool here that composition then refuses
+            # would leave the two halves disagreeing about what this role may
+            # reach.
+            harness_lane = getattr(effective_model, "provider", None)
             harness_allowed = (
-                harness_allowed_tool_names(harness_mcp_servers) if autonomous else None
+                harness_allowed_tool_names(harness_mcp_servers, lane=harness_lane)
+                if autonomous
+                else None
             )
+            # The run's project pins every harness server it surfaces. Without
+            # it a composed grounding server resolves its own project from the
+            # directory it inherits, which is the undeclared inheritance the pin
+            # replaces. Absent, composition stays unpinned rather than inventing
+            # a root - a default here would be that same inheritance, spelled
+            # invisibly.
             effective_model = compose_harness_mcp_servers(
-                effective_model, harness_mcp_servers, allowed_tools=harness_allowed
+                effective_model,
+                harness_mcp_servers,
+                allowed_tools=harness_allowed,
+                project_root=str(workspace_root) if workspace_root else None,
+                lane=harness_lane,
             )
         from ...providers._acp_mcp import compose_native_read_tools
         from ...providers.lane_admission import web_tool_names_for
@@ -734,10 +855,24 @@ def create_worker_node(
             ) from exc
 
         _logger.debug("worker[%s] response len=%d", name, len(str(response.content)))
+        # One extraction, two existing sinks: the state channel's additive
+        # reducer and the cost_tracking table. Reading usage twice, or letting
+        # either sink grow its own extraction, is how this capability came to be
+        # half-built in three places.
+        usage = _turn_token_usage(response)
+        if usage is not None:
+            await _record_turn_usage(
+                cost_port=cost_port,
+                thread_id=state.get("thread_id"),
+                worker_name=name,
+                model=effective_model,
+                usage=usage,
+            )
         return _finalize_worker_response(
             response=response,
             worker_name=name,
             state_updates=state_updates,
+            usage=usage,
         )
 
-    return worker_node
+    return accepting_runnable_config(worker_node)

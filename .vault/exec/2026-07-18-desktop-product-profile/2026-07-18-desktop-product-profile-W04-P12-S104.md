@@ -3,8 +3,8 @@ tags:
   - '#exec'
   - '#desktop-product-profile'
 date: '2026-07-20'
-modified: '2026-07-30'
-body_hash: 'sha256:0380cb8a1bc5db994235a07696159ed22a1a2c9d64f2acd44fdc23a859f5cbe9'
+modified: '2026-08-02'
+body_hash: 'sha256:02bc243a5dbcae1ec7dff18cb654a831dcd0d77b9cf735684f9d00c44bfc4ed4'
 step_id: 'S104'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -92,7 +92,6 @@ repository-wide green is claimed here.
 No data was removed. The live RAG process was not killed; CI uses an isolated virtual
 environment to avoid its legitimate executable lock. S101 remains independently open
 for the unproved 512-descriptor and 8 GiB supported-target retention envelope.
-
 
 Re-certification residue, recorded so it stays visible: the absent-engine case is now
 quiet by default. The missing-prerequisite handling moved from a hard assertion inside

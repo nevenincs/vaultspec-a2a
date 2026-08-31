@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing.listeners import health_listener
 from ..discovery import (
     DESKTOP_RECORD_VERSION,
     SERVICE_JSON_ENV,
@@ -116,27 +115,11 @@ def test_round_trip_read_of_versioned_and_legacy(tmp_path: Path) -> None:
     assert legacy_view is not None and legacy_view.bearer_token == "tok"
 
 
-def _serve_health() -> tuple[ThreadingHTTPServer, threading.Thread, int]:
-    class _Health(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            self.send_response(200)
-            self.end_headers()
-
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Health)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return server, thread, server.server_address[1]
-
-
 def test_legacy_record_still_resolves_the_engine(
     tmp_path: Path, set_service_json: Callable[[Path], None]
 ) -> None:
     """The engine path is unchanged: a legacy record with a live health resolves."""
-    server, thread, port = _serve_health()
-    try:
+    with health_listener() as port:
         path = tmp_path / "service.json"
         path.write_text(
             json.dumps(
@@ -154,10 +137,6 @@ def test_legacy_record_still_resolves_the_engine(
         assert isinstance(endpoint, EngineEndpoint)
         assert endpoint.bearer_token == "tok-legacy"
         assert endpoint.base_url == f"http://127.0.0.1:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)
 
 
 def test_versioned_record_is_not_resolved_as_an_engine(
@@ -169,8 +148,7 @@ def test_versioned_record_is_not_resolved_as_an_engine(
     inline bearer); any endpoint returned would be the machine-global fallback,
     never this port.
     """
-    server, thread, port = _serve_health()
-    try:
+    with health_listener() as port:
         path = tmp_path / "service.json"
         credential_file = tmp_path / "attach.cred"
         credential_file.write_text("secret-bearer", encoding="utf-8")
@@ -179,7 +157,3 @@ def test_versioned_record_is_not_resolved_as_an_engine(
         set_service_json(path)
         result = resolve_engine(liveness_timeout=0.5)
         assert result is None or result.base_url != f"http://127.0.0.1:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)

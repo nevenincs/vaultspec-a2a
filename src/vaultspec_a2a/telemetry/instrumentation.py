@@ -25,7 +25,23 @@ OTel environment variables consumed (all read at import time):
     OTEL_EXPORTER_OTLP_ENDPOINT: gRPC endpoint (default: http://localhost:4317).
     OTEL_EXPORTER_OTLP_INSECURE: Set to "true" to disable TLS (default: true).
     OTEL_SDK_DISABLED: Set to "true" to force no-op mode.
+    OTEL_TRACES_EXPORTER: Set to "none" to build no span exporter at all.
+    OTEL_METRICS_EXPORTER: Set to "none" to build no metric reader at all.
     OTEL_EXPORTER_CONSOLE: Set to "true" to log spans to stdout (dev only).
+
+``OTEL_TRACES_EXPORTER``/``OTEL_METRICS_EXPORTER`` are the specification's own
+names for this switch, but the specification assigns them to the SDK's
+auto-configuration entrypoint, and this module deliberately builds its providers
+by hand instead. They are therefore read HERE, or they would not be read at all:
+setting ``OTEL_METRICS_EXPORTER=none`` used to change nothing, leaving a
+``PeriodicExportingMetricReader`` running against whatever endpoint was
+configured in a process whose operator believed metrics export was off.
+
+A caller with no collector should switch the exporter off rather than aim it at
+an address that refuses connections. An unroutable endpoint does not silence
+export - the gRPC exporter cannot tell a black hole from a slow collector, so it
+keeps retrying on its own deadlines and reports each failure - and it makes a
+real transport fault indistinguishable from the arrangement.
 """
 
 from __future__ import annotations
@@ -78,6 +94,21 @@ _CONSOLE_EXPORT = os.environ.get("OTEL_EXPORTER_CONSOLE", "").lower() in (
     "yes",
 )
 
+
+def _signal_export_disabled(env_name: str) -> bool:
+    """Return whether *env_name* selects the specification's ``none`` exporter.
+
+    Unset is NOT ``none``: the specification's default is the OTLP exporter, and
+    an absent variable must keep meaning "export normally" so a deployment that
+    never heard of this switch is unaffected.
+    """
+    selected = os.environ.get(env_name, "").strip().lower()
+    return selected == "none"
+
+
+_TRACES_EXPORT_DISABLED = _signal_export_disabled("OTEL_TRACES_EXPORTER")
+_METRICS_EXPORT_DISABLED = _signal_export_disabled("OTEL_METRICS_EXPORTER")
+
 _OTLP_EXPORTER_MODULES = (
     "opentelemetry.exporter",
     "opentelemetry.exporter.otlp",
@@ -102,6 +133,11 @@ class TelemetryConfig:
             tracing state at the moment ``configure_telemetry`` ran. This is a
             report, not a switch — nothing in this package can turn LangSmith
             tracing on or off.
+        traces_exporting: True when a span processor was actually installed.
+            Distinct from ``otlp_available``, which only says the package is
+            importable: an installed exporter switched off by
+            ``OTEL_TRACES_EXPORTER=none`` reports available but not exporting.
+        metrics_exporting: The same distinction for the metric reader.
     """
 
     sdk_available: bool
@@ -110,6 +146,8 @@ class TelemetryConfig:
     service_name: str
     otlp_endpoint: str
     langsmith_enabled: bool
+    traces_exporting: bool = False
+    metrics_exporting: bool = False
 
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
@@ -117,6 +155,8 @@ class TelemetryConfig:
             f"TelemetryConfig("
             f"sdk_enabled={self.sdk_enabled}, "
             f"otlp_available={self.otlp_available}, "
+            f"traces_exporting={self.traces_exporting}, "
+            f"metrics_exporting={self.metrics_exporting}, "
             f"service={self.service_name!r}, "
             f"langsmith={self.langsmith_enabled})"
         )
@@ -226,7 +266,12 @@ def _build_sdk_provider(
     )
     provider = SdkTracerProvider(resource=resource)
 
-    if otlp_available:
+    if _TRACES_EXPORT_DISABLED:
+        # No processor at all: spans are still created, so instrumentation and
+        # the correlation filter keep working, but nothing leaves the process
+        # and no export thread is started.
+        logger.info("OTel span export disabled via OTEL_TRACES_EXPORTER=none")
+    elif otlp_available:
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
             OTLPSpanExporter,
         )
@@ -274,7 +319,9 @@ def _build_sdk_meter_provider(
     )
     readers = []
 
-    if otlp_available:
+    if _METRICS_EXPORT_DISABLED:
+        logger.info("OTel metric export disabled via OTEL_METRICS_EXPORTER=none")
+    elif otlp_available:
         from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
             OTLPMetricExporter,
         )
@@ -332,9 +379,12 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
             otlp_available=otlp_available, service_name=effective_service
         )
         logger.info(
-            "OTel SDK TracerProvider configured service=%s otlp=%s langsmith=%s",
+            "OTel SDK TracerProvider configured service=%s otlp=%s traces=%s "
+            "metrics=%s langsmith=%s",
             effective_service,
             otlp_available,
+            not _TRACES_EXPORT_DISABLED,
+            not _METRICS_EXPORT_DISABLED,
             langsmith_enabled,
         )
     elif _SDK_DISABLED:
@@ -365,6 +415,14 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
         service_name=effective_service,
         otlp_endpoint=_OTLP_ENDPOINT,
         langsmith_enabled=langsmith_enabled,
+        traces_exporting=(
+            sdk_enabled
+            and not _TRACES_EXPORT_DISABLED
+            and (otlp_available or _CONSOLE_EXPORT)
+        ),
+        metrics_exporting=(
+            sdk_enabled and not _METRICS_EXPORT_DISABLED and otlp_available
+        ),
     )
 
 

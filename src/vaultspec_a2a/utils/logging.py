@@ -23,16 +23,26 @@ import json
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from opentelemetry import trace
 from opentelemetry.trace.span import format_span_id, format_trace_id
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
+
 if TYPE_CHECKING:
     from pathlib import Path
 
+#: The populated shape of ``LogRecord.exc_info``; see ``JSONFormatter``, which
+#: exists partly because the attribute is not always this.
+type _ExcInfo = tuple[type[BaseException], BaseException, TracebackType | None]
+
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "SERVICE_LOG_FILE_DECLARATION",
     "JSONFormatter",
+    "LivenessPollFilter",
     "OTelCorrelationFilter",
     "ProcessKind",
     "configure_logging",
@@ -45,6 +55,25 @@ ProcessKind = Literal["service", "cli", "protocol", "library"]
 # long-lived service process never grows an unbounded log.
 _FILE_MAX_BYTES = 10 * 1024 * 1024
 _FILE_BACKUP_COUNT = 5
+
+# The one durable artifact this module creates. The cap is real and enforced by
+# the handler itself rather than by a sweeper, which is why this seam is bounded
+# where the sibling redirect logs are not: rotation happens inside the writer.
+SERVICE_LOG_FILE_DECLARATION = ArtifactDeclaration(
+    name="service-log-file",
+    root="<a2a_home>/runtime/<service_name>.log (plus .1-.5 rotation siblings)",
+    owner="utils.logging",
+    disposition=RetentionDisposition.BOUNDED_BY_SIZE,
+    mechanism=(
+        f"RotatingFileHandler caps each file at {_FILE_MAX_BYTES} bytes and keeps "
+        f"{_FILE_BACKUP_COUNT} backups, so one service name holds at most "
+        f"{_FILE_MAX_BYTES * (_FILE_BACKUP_COUNT + 1)} bytes; nothing deletes the "
+        "files when the service stops, so a service name that is never run again "
+        "leaves its last generation on disk indefinitely"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (SERVICE_LOG_FILE_DECLARATION,)
 
 
 class _LoggingSettings(Protocol):
@@ -100,6 +129,50 @@ _STANDARD_LOG_ATTRS: frozenset[str] = frozenset(
 )
 
 
+#: Access-log paths whose SUCCESSFUL polls carry no information.
+#:
+#: Supervisors probe liveness on a fixed interval forever, so a 200 on one of
+#: these says only that polling is still happening. A non-2xx on the same path is
+#: kept: that is the one case where the probe is telling you something.
+_LIVENESS_POLL_PATHS: frozenset[str] = frozenset({"/health", "/internal/health"})
+
+
+class LivenessPollFilter(logging.Filter):
+    """Drop successful liveness-probe access lines from the service lanes.
+
+    Measured cost of not doing this: a five-minute run making thirty tool calls
+    left four lines in the gateway log, while the health poll alone contributed a
+    line every five seconds. Real events were a rounding error against the probe
+    traffic, which is how a genuine boot failure and a tool-permission denial both
+    went unnoticed in a file that was being written to constantly.
+
+    Deliberately narrow. It matches uvicorn's access logger only, keeps every
+    non-2xx, and never touches the application loggers - a filter that silences
+    real events to reduce volume trades one blind spot for another.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Return ``False`` only for a 2xx access line on a liveness path."""
+        if record.name != "uvicorn.access":
+            return True
+        args = record.args
+        # uvicorn.access formats as (client, method, path, http_version, status).
+        if not isinstance(args, tuple) or len(args) < 5:
+            return True
+        path, status = args[2], args[4]
+        if not isinstance(path, str):
+            return True
+        if path.split("?", 1)[0] not in _LIVENESS_POLL_PATHS:
+            return True
+        if not isinstance(status, int | str):
+            # An unrecognised status is not a proven-boring poll; keep it.
+            return True
+        try:
+            return not 200 <= int(status) < 300
+        except ValueError:
+            return True
+
+
 class OTelCorrelationFilter(logging.Filter):
     """Inject OTel correlation fields into log records when a span is active."""
 
@@ -151,10 +224,42 @@ class JSONFormatter(logging.Formatter):
             if key not in _STANDARD_LOG_ATTRS and not key.startswith("_"):
                 log_data[key] = value
 
-        if record.exc_info is not None:
-            log_data["exception"] = self.formatException(record.exc_info)
+        exception = self._exception_text(record.exc_info)
+        if exception is not None:
+            log_data["exception"] = exception
 
         return json.dumps(log_data)
+
+    def _exception_text(self, exc_info: object) -> str | None:
+        """Render whatever ``record.exc_info`` holds, or ``None`` if it holds nothing.
+
+        ``exc_info`` is not the three-tuple its name promises. ``Logger._log``
+        normalises only TRUTHY values, so a caller passing ``exc_info=False`` -
+        which is what a computed flag evaluates to, and what the OTLP gRPC
+        exporter passes on every transport error it does not classify as unknown
+        - reaches the record as the bare ``False``. Handing that to
+        ``formatException`` raised ``TypeError: 'bool' object is not
+        subscriptable``, and because a formatter that raises loses the record
+        entirely, every such export failure went unreported by the lane meant to
+        report it.
+
+        Each shape the attribute can legally carry is answered here: absent or
+        switched off, an exception instance, a populated three-tuple, an empty
+        one, and the raw flag on a record built outside ``Logger._log``.
+        """
+        if not exc_info:
+            return None
+        if isinstance(exc_info, BaseException):
+            return self.formatException(
+                (type(exc_info), exc_info, exc_info.__traceback__)
+            )
+        if not isinstance(exc_info, tuple):
+            # A record assembled directly rather than through ``Logger._log``
+            # never had its flag resolved; resolve it the way that would have.
+            exc_info = sys.exc_info()
+        if len(exc_info) != 3 or exc_info[0] is None:
+            return None
+        return self.formatException(cast("_ExcInfo", exc_info))
 
 
 def reconfigure_console_utf8() -> None:
@@ -248,6 +353,42 @@ def _assert_no_stdout_handler(root: logging.Logger) -> None:
             )
 
 
+#: Exporter loggers demoted from ERROR to WARNING on the service lanes.
+#:
+#: An unreachable telemetry collector is a DEPLOYMENT condition, not a service
+#: error: the gateway is serving correctly and the export simply has nowhere to
+#: go. Reported at ERROR it drowned the level entirely - every one of the 51
+#: ERROR records in a sampled gateway log was an export failure to an absent
+#: collector, retried every ten seconds forever, and a real boot failure in the
+#: same file had produced no ERROR line at all. Demoting these is what makes
+#: ERROR mean "something is wrong with this service" again.
+#:
+#: The condition is still reported, once per retry, at WARNING. Silencing it
+#: outright would hide a genuinely misconfigured collector.
+_EXPORT_FAILURE_LOGGERS: tuple[str, ...] = (
+    "opentelemetry.exporter.otlp.proto.grpc.exporter",
+    "opentelemetry.exporter.otlp.proto.http.exporter",
+    "opentelemetry.sdk.trace.export",
+    "opentelemetry.sdk.metrics.export",
+)
+
+
+class _DemoteToWarning(logging.Filter):
+    """Rewrite ERROR records from a named logger down to WARNING in place."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.ERROR:
+            record.levelno = logging.WARNING
+            record.levelname = "WARNING"
+        return True
+
+
+def _demote_export_failures() -> None:
+    """Stop an absent telemetry collector from monopolising the ERROR level."""
+    for name in _EXPORT_FAILURE_LOGGERS:
+        logging.getLogger(name).addFilter(_DemoteToWarning())
+
+
 def _configure_service(settings: _LoggingSettings, service_name: str) -> None:
     level = _numeric_level(settings.log_level)
     root = _reset_root()
@@ -277,8 +418,10 @@ def _configure_service(settings: _LoggingSettings, service_name: str) -> None:
         )
 
     for handler in handlers:
+        handler.addFilter(LivenessPollFilter())
         root.addHandler(handler)
     _reattach_uvicorn(handlers, level)
+    _demote_export_failures()
 
 
 def _configure_cli(settings: _LoggingSettings) -> None:

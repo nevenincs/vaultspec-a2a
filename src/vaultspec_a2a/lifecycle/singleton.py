@@ -39,10 +39,15 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from .atomic_write import atomic_write_text
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
+from ..utils.atomic_write import atomic_write_text
 from .discovery import is_pid_alive
+from .registry import now_ms
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "SINGLETON_LOCK_DECLARATION",
+    "SINGLETON_RECORD_DECLARATION",
     "SINGLETON_RECORD_VERSION",
     "RuntimeSingleton",
     "SingletonConflictError",
@@ -70,6 +75,48 @@ SINGLETON_RECORD_VERSION = 1
 _LOCK_NAME = "gateway.singleton.lock"
 _RECORD_NAME = "gateway.singleton.json"
 _RUNTIME_DIR = "runtime"
+
+# The two files this module leaves under the application home, and why their
+# retention differs. The anchor's permanence is the point rather than an
+# omission: mutual exclusion is held on THAT inode, so a release that unlinked it
+# would let the next acquirer create a fresh file and take a lock a live
+# contender is not contending for. The record has no such property and is
+# released.
+SINGLETON_LOCK_DECLARATION = ArtifactDeclaration(
+    name="gateway-singleton-lock-anchor",
+    root=f"<app_home>/{_RUNTIME_DIR}/{_LOCK_NAME}",
+    owner="lifecycle.singleton",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "the operating-system lock is held on this file's inode, so removing it "
+        "on release would let a later acquirer lock a different file and grant "
+        "two live gateways one application home; the anchor must outlive every "
+        "holder for the exclusion to mean anything"
+    ),
+    mechanism=(
+        "nothing removes it, and nothing needs to: it is one fixed-name file per "
+        "application home whose contents are never written, so it neither grows "
+        "nor multiplies"
+    ),
+)
+
+SINGLETON_RECORD_DECLARATION = ArtifactDeclaration(
+    name="gateway-singleton-owner-record",
+    root=f"<app_home>/{_RUNTIME_DIR}/{_RECORD_NAME}",
+    owner="lifecycle.singleton",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "unlinked by RuntimeSingleton.release when the recorded pid is still this "
+        "holder's, and overwritten by an owner-matching stale takeover at the next "
+        "acquire; a crash leaves the record behind until that next acquire, where "
+        "it reads as STALE rather than as a live resident"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    SINGLETON_LOCK_DECLARATION,
+    SINGLETON_RECORD_DECLARATION,
+)
 
 # The runtime singleton the current process holds for its desktop application
 # home, if any. The desktop serve entrypoint acquires the singleton before the
@@ -550,7 +597,7 @@ def acquire_singleton(app_home: Path, *, owner: str | None = None) -> RuntimeSin
         pid=os.getpid(),
         owner=principal,
         start_fingerprint=current_process_fingerprint(),
-        acquired_at_ms=int(time.time() * 1000),
+        acquired_at_ms=now_ms(),
     )
     try:
         _write_record(record_path, record)

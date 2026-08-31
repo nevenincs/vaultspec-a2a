@@ -677,3 +677,108 @@ def test_trace_headers_produces_traceparent_under_real_span() -> None:
             assert parts[0] == "00"  # version
             assert len(parts[1]) == 32  # trace_id hex
             assert len(parts[2]) == 16  # span_id hex
+
+
+# The "none" exporter selection is read at import time like every other OTel
+# toggle in this module, so it can only be exercised across a process boundary.
+# The probe reports what the SDK actually BUILT - the tracer provider's span
+# processors and the meter provider's metric readers - rather than what the
+# config snapshot claims, because the defect this guards against was precisely a
+# claim of "off" over a pipeline that was still running.
+_EXPORTER_SELECTION_PROBE_SCRIPT = textwrap.dedent(
+    """
+    import json
+
+    from opentelemetry import metrics, trace
+
+    from vaultspec_a2a.telemetry import configure_telemetry
+
+    cfg = configure_telemetry()
+
+    provider = trace.get_tracer_provider()
+    processor = getattr(
+        getattr(provider, "_active_span_processor", None), "_span_processors", ()
+    )
+    meter_provider = metrics.get_meter_provider()
+    readers = getattr(meter_provider, "_all_metric_readers", None)
+    if readers is None:
+        readers = getattr(
+            getattr(meter_provider, "_measurement_consumer", None),
+            "_reader_storages",
+            (),
+        )
+
+    print(json.dumps({
+        "otlp_available": cfg.otlp_available,
+        "traces_exporting": cfg.traces_exporting,
+        "metrics_exporting": cfg.metrics_exporting,
+        "span_processors": len(processor),
+        "metric_readers": len(readers),
+    }))
+    """
+)
+
+
+def _run_exporter_selection_probe(
+    tmp_path: Path, env_overrides: dict[str, str]
+) -> dict:
+    """Configure telemetry in a child with a controlled exporter selection."""
+    script = tmp_path / "exporter_selection_probe.py"
+    script.write_text(_EXPORTER_SELECTION_PROBE_SCRIPT, encoding="utf-8")
+    env = dict(os.environ)
+    for key in ("OTEL_TRACES_EXPORTER", "OTEL_METRICS_EXPORTER", "OTEL_SDK_DISABLED"):
+        env.pop(key, None)
+    env.update(env_overrides)
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def test_default_selection_builds_both_export_pipelines(tmp_path: Path) -> None:
+    """Unset means export, so the "none" cases below are not vacuously true."""
+    default = _run_exporter_selection_probe(tmp_path, {})
+    if not default["otlp_available"]:
+        pytest.skip("the OTLP gRPC exporter is not installed in this environment")
+
+    assert default["span_processors"] >= 1, default
+    assert default["metric_readers"] >= 1, default
+    assert default["traces_exporting"] is True
+    assert default["metrics_exporting"] is True
+
+
+def test_none_selection_builds_no_exporter_at_all(tmp_path: Path) -> None:
+    """``none`` must remove the pipelines, not aim them somewhere unreachable.
+
+    ``OTEL_METRICS_EXPORTER`` is an SDK auto-configuration variable and this
+    module builds its providers by hand, so setting it used to change nothing at
+    all: a process whose operator had switched metrics off still ran a
+    ``PeriodicExportingMetricReader`` against the configured endpoint.
+    """
+    off = _run_exporter_selection_probe(
+        tmp_path,
+        {"OTEL_TRACES_EXPORTER": "none", "OTEL_METRICS_EXPORTER": "none"},
+    )
+
+    assert off["span_processors"] == 0, off
+    assert off["metric_readers"] == 0, off
+    assert off["traces_exporting"] is False
+    assert off["metrics_exporting"] is False
+
+
+def test_the_two_signals_switch_off_independently(tmp_path: Path) -> None:
+    """Silencing metrics must not silence traces, or the switch is too blunt."""
+    metrics_off = _run_exporter_selection_probe(
+        tmp_path, {"OTEL_METRICS_EXPORTER": "none"}
+    )
+    if not metrics_off["otlp_available"]:
+        pytest.skip("the OTLP gRPC exporter is not installed in this environment")
+
+    assert metrics_off["metric_readers"] == 0, metrics_off
+    assert metrics_off["span_processors"] >= 1, metrics_off

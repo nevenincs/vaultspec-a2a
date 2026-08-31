@@ -282,13 +282,17 @@ LINT = Verb(
     summary="Run gating static analysis; a finding fails the build.",
     note=(
         "'all' chains only the dimensions that hold the line today. complexity, "
-        "cyclomatic, shape, limits, nesting, size, type-strict, and type-platforms are "
-        "REAL GATES at "
+        "cyclomatic, shape, limits, nesting, size, and type-strict are REAL GATES at "
         "industry thresholds whose burndown is unfinished - run each by name, or "
         "'just health' for the ranked backlog. Chaining a permanently-red gate "
         "would hide every dimension behind it and teach people to ignore red. A "
         "dimension graduates into 'all' when it reaches zero and can hold it; "
-        "'imports' is the first to have done so."
+        "'imports' was the first, and 'type-platforms' has since followed. That "
+        "one earns its place: `ty` resolves `sys.platform` against the machine it "
+        "runs on, so a Windows-only call in unguarded code passes for everyone on "
+        "Windows and fails only on the Linux runner. Advisory, it reported a real "
+        "defect that shipped anyway; gating, the sweep answers the same on every "
+        "machine."
     ),
     targets=(
         Target(
@@ -367,6 +371,11 @@ LINT = Verb(
             (dev_module("guards.relative_imports"),),
         ),
         Target(
+            "anchors",
+            "Production code must not anchor storage to the repository layout.",
+            (dev_module("guards.storage_anchors"),),
+        ),
+        Target(
             "dependencies",
             "Deptry dependency-declaration drift.",
             (uv_run("deptry", "."),),
@@ -400,6 +409,7 @@ LINT = Verb(
                 for name in (
                     "python",
                     "type",
+                    "type-platforms",
                     "imports",
                     "dependencies",
                     "toml",

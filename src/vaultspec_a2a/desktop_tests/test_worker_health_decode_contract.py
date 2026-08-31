@@ -26,6 +26,7 @@ ask different questions of the same occupant:
 from __future__ import annotations
 
 import contextlib
+import socket
 import subprocess
 import sys
 import time
@@ -39,7 +40,7 @@ from ..control.worker_management import (
     WorkerHealthProbe,
     probe_worker_health,
 )
-from ..tests.gateway_boot import free_port
+from ..testing.ports import free_port
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -71,6 +72,56 @@ class Handler(BaseHTTPRequestHandler):
 
 HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 """
+
+
+# A real server that ACCEPTS the connection and then never answers - the shape a
+# worker takes while it is busy compiling a graph for an already-admitted run.
+_STALLED_WORKER = """
+import socket, sys, time
+
+port = int(sys.argv[1])
+listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+listener.bind(("127.0.0.1", port))
+listener.listen(8)
+held = []
+deadline = time.monotonic() + 120
+while time.monotonic() < deadline:
+    conn, _ = listener.accept()
+    # Read the request and deliberately send nothing back, holding the socket
+    # open so the client sees a read timeout rather than a connect failure.
+    conn.recv(65536)
+    held.append(conn)
+"""
+
+
+@contextlib.contextmanager
+def _stalled_worker() -> Generator[str]:
+    """Run a real server that accepts /health and never sends a response."""
+    port = free_port()
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _STALLED_WORKER, str(port)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    url = f"http://127.0.0.1:{port}"
+    try:
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            with (
+                contextlib.suppress(OSError),
+                socket.create_connection(("127.0.0.1", port), timeout=1.0),
+            ):
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("the stalled worker never bound its port")
+        yield url
+    finally:
+        with contextlib.suppress(Exception):
+            proc.kill()
+            proc.wait(timeout=10)
 
 
 @contextlib.contextmanager
@@ -148,3 +199,28 @@ async def test_nothing_listening_is_reported_absent(tmp_path: Path) -> None:
     dead = "http://127.0.0.1:9"
     probe = await probe_worker_health(dead)
     assert probe == WorkerHealthProbe(healthy=False, body=None)
+    # A refused connection is an OBSERVATION of absence, not a failure to observe.
+    assert probe.indeterminate is False
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_stalled_worker_is_unhealthy_but_not_observed_absent() -> None:
+    """A worker that accepts and never answers yields an INDETERMINATE verdict.
+
+    This is the third reading the pair above does not cover, and the one run
+    admission turns on. A worker compiling a graph for an already-admitted run
+    stops answering for seconds; the probe budget expires; and the old verdict was
+    byte-identical to a dead worker's. Admission then refused an unrelated commit
+    with 503 because the first run was still booting.
+
+    The occupant is a real socket server that accepts the connection and sends
+    nothing, so the client genuinely reads past its budget rather than being told
+    the port is closed - which is precisely the distinction under proof.
+    """
+    with _stalled_worker() as url:
+        probe = await probe_worker_health(url, timeout=1.0)
+
+    assert probe.healthy is False, "a worker that never answered is not healthy"
+    assert probe.indeterminate is True, (
+        "a read that outran its budget proves nothing about the worker's existence"
+    )

@@ -11,6 +11,13 @@ from typing import Literal
 
 from ..thread.enums import ControlActionType, RepairStatus, ThreadStatus
 
+__all__ = [
+    "STARTUP_REPAIR_REASON",
+    "ReconciliationAction",
+    "ThreadSnapshot",
+    "compute_reconciliation_actions",
+]
+
 STARTUP_REPAIR_REASON: str = "Gateway restarted with an active thread"
 
 

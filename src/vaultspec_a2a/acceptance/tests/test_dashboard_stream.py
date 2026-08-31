@@ -28,14 +28,13 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...thread.enums import TERMINAL_STATUSES
-from ._sse import read_frame
+from ...testing.sse import read_frame
+from ...thread.enums import TERMINAL_STATUS_VALUES
 from .conftest import wait_for_terminal
 
 if TYPE_CHECKING:
     from .. import CertifiedGateway
 
-_TERMINAL_STATUS_VALUES = frozenset(status.value for status in TERMINAL_STATUSES)
 _FORBIDDEN_BODY_KEYS = ("prompt", "document", "diff", "old_text", "new_text")
 
 
@@ -72,10 +71,10 @@ async def test_terminal_replay_is_idempotent_across_reconnects_and_reconciles(
         ):
             assert response.status_code == 200, response
             frame, raw = await read_frame(
-                response.aiter_lines(), wanted="thread_terminal"
+                response.aiter_lines(), wanted="thread_terminal", timeout=30.0
             )
         _assert_positive_frame(frame, raw)
-        assert frame["status"] in _TERMINAL_STATUS_VALUES
+        assert frame["status"] in TERMINAL_STATUS_VALUES
         statuses.append(frame["status"])
 
     assert statuses[0] == statuses[1]

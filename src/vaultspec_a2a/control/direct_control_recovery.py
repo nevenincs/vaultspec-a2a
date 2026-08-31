@@ -9,12 +9,17 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 
-from ..database import get_permission_request, get_thread, update_thread_status
-from ..database.models import ControlActionModel
+from ..database import (
+    ControlActionModel,
+    get_permission_request,
+    get_thread,
+    update_thread_status,
+)
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
+from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
 from .permission_dispatch import permission_resume_value
@@ -50,6 +55,27 @@ class DirectControlRecoverySummary:
     dispatched: int
     deferred: int
     conflicted: int
+    #: Actions this pass declined to reconstruct at all, each for a typed
+    #: reason. Separate from ``conflicted`` (a competing payload under the same
+    #: idempotency key) because nothing about a refusal is a race: the stored
+    #: action simply cannot become a dispatch, and counting the two together hid
+    #: which one a restart had actually met.
+    refused: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _Refusal:
+    """A stored action that must not be dispatched, and the typed reason why.
+
+    Recovery reconstructs a dispatch from durable rows, so every way that can
+    fail is a property of what was stored - never a transport outcome. Returning
+    this instead of a bare ``None`` keeps the reason typed at the point it is
+    known, which is what lets an absent active project be reported as itself
+    rather than folded into a generic rejection at the provider seam.
+    """
+
+    failure_type: FailureType
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,33 +97,53 @@ def _decode_payload(encoded: str | None) -> dict[str, object] | None:
         return None
 
 
-def _workspace_root(metadata_json: str | None) -> str | None:
-    if metadata_json is None:
-        return None
-    try:
-        metadata = _JSON_OBJECT.validate_json(metadata_json)
-    except ValidationError:
-        return None
-    value = metadata.get("workspace_root")
-    return value if isinstance(value, str) and value else None
-
-
 async def _reconstruct_dispatch(
     db: AsyncSession,
     action: _StoredAction,
     *,
     dispatch_id: str,
     recursion_limit: int,
-) -> DispatchRequest | None:
+) -> DispatchRequest | _Refusal:
     thread = await get_thread(db, action.thread_id)
     if thread is None:
-        return None
-    workspace_root = _workspace_root(thread.thread_metadata)
+        return _Refusal(
+            FailureType.NOT_FOUND,
+            "the thread this action belongs to no longer exists",
+        )
+
+    if action.action_type == ControlActionType.CANCEL.value:
+        # A cancel names no active project by design: it tears a run down rather
+        # than siting one, so it is reconstructed before the project gate below.
+        return DispatchRequest(
+            dispatch_id=dispatch_id,
+            action=to_dispatch_action(ControlActionType.CANCEL),
+            thread_id=action.thread_id,
+            recursion_limit=recursion_limit,
+        )
+
+    # Both remaining actions re-enter graph execution, and a recovery pass runs
+    # after the worker that held the run is gone: there is no live graph still
+    # carrying the project, so a resume needs it named as much as a follow-up
+    # does. Refuse here, typed, the way the follow-up path refuses - rather than
+    # dispatching with nothing and letting the provider seam site the agent and
+    # its sandbox roots in whatever directory the worker was started in.
+    workspace_root = dispatchable_workspace_root(thread.thread_metadata)
+    if workspace_root is None:
+        return _Refusal(
+            FailureType.NO_ACTIVE_PROJECT,
+            "run carries no active project: its stored metadata names no usable "
+            "workspace_root, so a recovered dispatch cannot be sited. "
+            "Start a new run.",
+        )
+
     if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
         content = action.payload.get("content")
         agent_value = action.payload.get("agent_id")
         if not isinstance(content, str):
-            return None
+            return _Refusal(
+                FailureType.REJECTED,
+                "the stored follow-up carries no message content",
+            )
         agent_id = (
             agent_value
             if isinstance(agent_value, str) and agent_value
@@ -113,13 +159,6 @@ async def _reconstruct_dispatch(
             workspace_root=workspace_root,
             recursion_limit=recursion_limit,
         )
-    if action.action_type == ControlActionType.CANCEL.value:
-        return DispatchRequest(
-            dispatch_id=dispatch_id,
-            action=to_dispatch_action(ControlActionType.CANCEL),
-            thread_id=action.thread_id,
-            recursion_limit=recursion_limit,
-        )
     if (
         action.action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
         and action.request_id is not None
@@ -128,7 +167,10 @@ async def _reconstruct_dispatch(
         option_value = action.payload.get("option_id")
         notes_value = action.payload.get("notes")
         if permission is None or not isinstance(option_value, str):
-            return None
+            return _Refusal(
+                FailureType.REJECTED,
+                "the permission request this response answers is unreadable",
+            )
         notes = notes_value if isinstance(notes_value, str) else None
         return DispatchRequest(
             dispatch_id=dispatch_id,
@@ -143,7 +185,10 @@ async def _reconstruct_dispatch(
             workspace_root=workspace_root,
             recursion_limit=recursion_limit,
         )
-    return None
+    return _Refusal(
+        FailureType.REJECTED,
+        f"stored action type {action.action_type!r} has no recoverable dispatch",
+    )
 
 
 async def _restore_requested_state(
@@ -196,7 +241,7 @@ async def redrive_direct_control_actions(
             if (payload := _decode_payload(row.payload_json)) is not None
         ]
 
-    dispatched = deferred = 0
+    dispatched = deferred = refused = 0
     conflicted = len(rows) - len(stored)
     for action in stored:
         async with session_factory() as db:
@@ -224,13 +269,31 @@ async def redrive_direct_control_actions(
                 dispatch_id=claim.dispatch_id,
                 recursion_limit=recursion_limit,
             )
-            if dispatch is None:
+            if isinstance(dispatch, _Refusal):
+                # No worker was contacted, so the lease release is offered with
+                # the refusal's own type: a definite non-delivery hands the
+                # action straight back for redrive, while a refusal that can
+                # never succeed on its own - an absent active project - is not in
+                # that set and keeps its lease until the TTL, so a permanently
+                # unsatisfiable action backs off instead of spinning.
+                logger.warning(
+                    "Direct control recovery refused %s on thread %s (%s): %s",
+                    action.action_type,
+                    action.thread_id,
+                    dispatch.failure_type.value,
+                    dispatch.reason,
+                    extra={
+                        "thread_id": action.thread_id,
+                        "action": action.action_type,
+                        "failure_type": dispatch.failure_type.value,
+                    },
+                )
                 await release_definite_non_delivery(
                     db,
                     claim,
-                    FailureType.REJECTED,
+                    dispatch.failure_type,
                 )
-                conflicted += 1
+                refused += 1
                 continue
             outcome = await safe_dispatch(
                 worker_client,
@@ -263,6 +326,7 @@ async def redrive_direct_control_actions(
         dispatched=dispatched,
         deferred=deferred,
         conflicted=conflicted,
+        refused=refused,
     )
     logger.info("Direct control recovery pass complete: %s", summary)
     return summary

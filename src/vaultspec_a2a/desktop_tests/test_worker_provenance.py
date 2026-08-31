@@ -30,10 +30,10 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from ..lifecycle.discovery import is_pid_alive
+from ..testing.ports import free_port
 from ..tests.gateway_boot import (
     armed_gateway_env,
     await_gateway_ready,
-    free_port,
     gateway_script,
     reap_gateway,
     seat_valid_database,
@@ -41,6 +41,7 @@ from ..tests.gateway_boot import (
     spawn_gateway,
     spawn_until_ready,
 )
+from ._catalog import catalog_selection
 from .test_run_admission import _ATTACH, _OWNERSHIP
 
 if TYPE_CHECKING:
@@ -133,7 +134,12 @@ def _armed_gateway_on_worker_port(
             script=_GATEWAY,
             gateway_port=gateway_port,
             env=armed_gateway_env(
-                app_home, gateway_port=gateway_port, worker_port=worker_port
+                app_home,
+                gateway_port=gateway_port,
+                worker_port=worker_port,
+                # This module admits runs against the in-process mock lane
+                # (see ``_catalog.py``); the gateway must serve one to select.
+                extra={"VAULTSPEC_SERVE_IN_PROCESS_LANES": "true"},
             ),
             log_handle=log_handle,
         )
@@ -147,6 +153,7 @@ def _armed_gateway_on_worker_port(
 
 
 def _prepare(base: str, auth: str, run_id: str) -> tuple[int, dict[str, Any]]:
+    workspace = str(Path.cwd())
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
             "/v1/runs",
@@ -156,6 +163,10 @@ def _prepare(base: str, auth: str, run_id: str) -> tuple[int, dict[str, Any]]:
                 "stage": "prepare",
                 "autonomous": True,
                 "run_id": run_id,
+                # The workspace anchors the selection, which run start
+                # revalidates against the catalog served for it.
+                "metadata": {"workspace_root": workspace},
+                "selection": catalog_selection(base, auth, workspace),
             },
         )
     try:
@@ -244,7 +255,12 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
             script=_GATEWAY,
             gateway_port=gateway_port,
             env=armed_gateway_env(
-                app_home, gateway_port=gateway_port, worker_port=worker_port
+                app_home,
+                gateway_port=gateway_port,
+                worker_port=worker_port,
+                # This module admits runs against the in-process mock lane
+                # (see ``_catalog.py``); the gateway must serve one to select.
+                extra={"VAULTSPEC_SERVE_IN_PROCESS_LANES": "true"},
             ),
             log_handle=log_handle,
         )

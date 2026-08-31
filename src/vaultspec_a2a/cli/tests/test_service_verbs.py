@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...tests.gateway_boot import free_port
+from ...testing.ports import free_port
 
 if TYPE_CHECKING:
     from pathlib import Path

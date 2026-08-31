@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from .conftest import catalog_run_fields
 from .conftest import make_app as _make_app_4
 
 
@@ -74,6 +75,10 @@ class TestCreateThreadWithMetadata:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Implement auth flow",
                         "metadata": metadata,
+                        "run_id": "thread-meta-01",
+                        "selection": catalog_run_fields(client, workspace_root=ws)[
+                            "selection"
+                        ],
                     },
                 )
 
@@ -98,9 +103,18 @@ class TestCreateThreadWithMetadata:
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "Hello",
                     "metadata": metadata,
+                    "run_id": "thread-meta-02",
+                    # Resolved against a REAL workspace on purpose: this test's
+                    # workspace_root is deliberately bogus, and the refusal
+                    # under test is the run's. The catalog verb refuses a
+                    # nonexistent workspace with its own 422, so deriving the
+                    # selection from the bad path would fail earlier, inside
+                    # the fixture, for a different reason.
+                    "selection": catalog_run_fields(client)["selection"],
                 },
             )
         assert resp.status_code == 422
+        assert "existing directory" in resp.text
 
     def test_create_thread_auto_generates_nickname(
         self, session_factory, checkpointer
@@ -120,6 +134,10 @@ class TestCreateThreadWithMetadata:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
+                        "run_id": "thread-meta-03",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
 
@@ -144,6 +162,10 @@ class TestCreateThreadWithMetadata:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "First",
                         "metadata": metadata,
+                        "run_id": "thread-meta-04",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
                 assert resp1.status_code == 201
@@ -154,12 +176,25 @@ class TestCreateThreadWithMetadata:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Second",
                         "metadata": metadata,
+                        "run_id": "thread-meta-05",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
                 assert resp2.status_code == 409
 
     def test_legacy_thread_backward_compat(self, session_factory, checkpointer) -> None:
-        """Threads without metadata work exactly as before."""
+        """A run that declares no nickname is auto-named rather than left null.
+
+        This asserted a null nickname, which described a run carrying no
+        metadata at all. That state is no longer reachable: run-start requires
+        an explicit catalog selection, a selection is revalidated against the
+        catalog served for its workspace, and the workspace is carried in
+        metadata - so every run now has metadata whether or not the caller
+        cared about it. The gateway names such a run itself, which is the
+        behaviour worth pinning here.
+        """
         app, _agg = _make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -169,12 +204,16 @@ class TestCreateThreadWithMetadata:
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "Hello",
                     "title": "Legacy",
+                    "run_id": "thread-meta-06",
+                    **catalog_run_fields(client),
                 },
             )
 
         assert resp.status_code == 201
         data = resp.json()
-        assert data["nickname"] is None
+        assert isinstance(data["nickname"], str) and data["nickname"], (
+            "a run with no caller-supplied nickname must still be named"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +244,10 @@ class TestListThreadsWithMetadata:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
+                        "run_id": "thread-meta-07",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
             summaries, _total = _list_summaries(session_factory, checkpointer)
@@ -228,15 +271,21 @@ class TestListThreadsWithMetadata:
                     "team_preset": _BUNDLE_FREE_PRESET,
                     "message": "Hello",
                     "title": "Legacy",
+                    "run_id": "thread-meta-08",
+                    **catalog_run_fields(client),
                 },
             )
         summaries, _total = _list_summaries(session_factory, checkpointer)
         assert len(summaries) == 1
         t = next(iter(summaries.values()))
-        assert t["nickname"] is None
-        assert t["feature_tag"] is None
-        assert t["source_branch"] is None
-        assert t["callee"] is None
+        # The gateway names every run, so the listing's nickname is populated
+        # even when the caller supplied none. The fields the caller genuinely
+        # did not declare are the ones that stay empty, and they are what this
+        # row is asserting.
+        assert t["nickname"]
+        assert not t["feature_tag"]
+        assert not t["source_branch"]
+        assert not t["callee"]
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +313,10 @@ class TestGetMetadataEndpoint:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
+                        "run_id": "thread-meta-09",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
                 thread_id = create_resp.json()["run_id"]
@@ -275,30 +328,49 @@ class TestGetMetadataEndpoint:
             assert data["feature_tag"] == "auth-flow"
             assert data["source_repo"] == "github.com/org/repo"
 
-    def test_metadata_is_absent_for_a_run_started_without_any(
+    def test_metadata_reads_back_minted_for_a_run_that_declared_none(
         self, session_factory, checkpointer
     ) -> None:
-        """A run with no metadata reads back as null metadata, not as an error.
+        """A run that declared nothing of its own reads back what was minted.
 
-        The retired metadata route answered 404 here, because absent metadata
-        left it with no resource to serve. The history verb has one: the run
-        itself. Reporting the absence in the body rather than as a not-found is
-        the better contract - a caller reading a real run's record must not have
-        to distinguish "no such run" from "that run declared no metadata".
+        This once asserted null metadata for a metadata-less run. That state is
+        unreachable now: the selection is revalidated against the catalog
+        served for its workspace, the workspace rides in metadata, and a run
+        without it is refused before anything durable exists - so every run has
+        metadata whether or not the caller cared. What the history verb must
+        therefore serve for a minimal run is the MINTED envelope: the admitted
+        workspace and the gateway-assigned nickname present, and the source
+        fields the caller genuinely never declared empty rather than invented.
         """
         app, _agg = _make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
+            fields = catalog_run_fields(client)
             create_resp = client.post(
                 "/v1/runs",
-                json={"team_preset": _BUNDLE_FREE_PRESET, "message": "Hello"},
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "Hello",
+                    "run_id": "thread-meta-10",
+                    **fields,
+                },
             )
             assert create_resp.status_code == 201, create_resp.text
             thread_id = create_resp.json()["run_id"]
             resp = client.get(f"/v1/runs/{thread_id}/history")
 
         assert resp.status_code == 200
-        assert resp.json()["metadata"] is None
+        data = resp.json()["metadata"]
+        assert data is not None, "every admitted run carries minted metadata"
+        assert (
+            Path(data["workspace_root"]).resolve()
+            == Path(fields["metadata"]["workspace_root"]).resolve()
+        )
+        assert data["nickname"]
+        assert not data["feature_tag"]
+        assert not data["source_repo"]
+        assert not data["source_branch"]
+        assert not data["callee"]
 
     def test_history_404_nonexistent_thread(
         self, session_factory, checkpointer
@@ -347,6 +419,10 @@ class TestAutoDiscovery:
                         "team_preset": _BUNDLE_FREE_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
+                        "run_id": "thread-meta-11",
+                        "selection": catalog_run_fields(
+                            client, workspace_root=metadata["workspace_root"]
+                        )["selection"],
                     },
                 )
                 thread_id = create_resp.json()["run_id"]

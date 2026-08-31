@@ -1,0 +1,25 @@
+[team]
+id           = "deterministic-relay-burst"
+display_name = "Deterministic Relay Burst"
+description  = "ProviderFactory scenario for overflowing a bounded relay replay window."
+
+[team.defaults]
+provider   = "deterministic"
+capability = "mid"
+
+[team.topology]
+type  = "pipeline"
+order = ["deterministic-relay-burst"]
+
+[team.permissions]
+auto_approve = false
+
+[team.persona]
+directive = "Run the in-process deterministic relay-burst scenario."
+
+[team.graph]
+step_timeout_seconds = 300
+recursion_limit      = 10
+
+[[team.workers]]
+agent_id = "deterministic-relay-burst"

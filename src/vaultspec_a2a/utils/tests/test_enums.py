@@ -1,7 +1,6 @@
 """Tests for enums and constants.
 
-Exercises membership, value types, MODEL_MAP completeness, and
-PROVIDER_DEFAULT_MODELS consistency.
+Exercises membership, value types, and the internal-only model maps.
 """
 
 from ...graph.enums import (
@@ -83,16 +82,15 @@ class TestModel:
 
 
 class TestModelMap:
-    """Tests for the MODEL_MAP dict."""
+    """Tests for the internal deterministic and mock MODEL_MAP entries."""
 
-    def test_every_provider_has_entry(self) -> None:
-        """MODEL_MAP has a key for every Provider member."""
-        for provider in Provider:
-            assert provider in MODEL_MAP, f"Missing MODEL_MAP entry for {provider}"
+    def test_only_internal_providers_have_entries(self) -> None:
+        """External model identifiers are never repository-authored."""
+        assert set(MODEL_MAP) == {Provider.DETERMINISTIC, Provider.MOCK}
 
     def test_every_capability_mapped_per_provider(self) -> None:
-        """Each provider maps all four capability levels to a non-empty string."""
-        for provider in Provider:
+        """Each internal provider maps all capability levels to a non-empty string."""
+        for provider in MODEL_MAP:
             for cap in Model:
                 model_name = MODEL_MAP[provider][cap]
                 assert isinstance(model_name, str), (
@@ -112,14 +110,14 @@ class TestModelMap:
 
 
 class TestProviderDefaultModels:
-    """Tests for the PROVIDER_DEFAULT_MODELS dict."""
+    """Tests for internal-only PROVIDER_DEFAULT_MODELS entries."""
 
-    def test_every_provider_has_default(self) -> None:
-        """Every Provider has a default model capability."""
-        for provider in Provider:
-            assert provider in PROVIDER_DEFAULT_MODELS, (
-                f"Missing default model for {provider}"
-            )
+    def test_only_internal_providers_have_defaults(self) -> None:
+        """External providers require an exact frozen catalog selection."""
+        assert set(PROVIDER_DEFAULT_MODELS) == {
+            Provider.DETERMINISTIC,
+            Provider.MOCK,
+        }
 
     def test_defaults_are_valid_capabilities(self) -> None:
         """Each default is a valid Model enum member."""

@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#ecosystem-artifact-lifecycle'
 date: '2026-07-21'
-modified: '2026-07-21'
-body_hash: 'sha256:d89559423b567a906173404e44d1b7ea28e03c27b9cd790f937fc64fff130717'
+modified: '2026-08-04'
+body_hash: 'sha256:8a21934b837953333ec227aca1cf7d0ac276176631dab976f7ada2e9ae32529e'
 related:
   - "[[2026-07-21-ecosystem-artifact-lifecycle-research]]"
 ---
@@ -115,9 +115,52 @@ Where an invariant can be checked when the artifact is created, it is checked th
 fails loudly, following the stdout-handler assertion already proven in this codebase.
 
 The third layer is the safety and observability work the first two unblock: disarming the
-workspace-delete path before artifact persistence exists, preserving the agent transcript
-that is currently destroyed unread, and completing the truncation path that today misses
-several tables and the checkpoint store entirely.
+workspace-delete path before artifact persistence exists, closing the gap between what a
+run's durable record says an agent said and what it does not say the agent did, and
+completing the truncation path that today misses several tables and the checkpoint store
+entirely.
+
+**Amended 2026-08-05, on evidence.** This layer originally read "preserving the agent
+transcript that is currently destroyed unread". That artifact does not exist on any lane
+this project owns, and the clause is replaced rather than struck because its protected
+quantity - visibility - survives the disappearance of the instrument named for it.
+
+Three findings force the change. The Codex lane opens an EPHEMERAL thread on every turn,
+so no session record is written for it to destroy; three real turns established this, the
+decisive one driven through this project's own production functions with the isolated home
+inspected before teardown. The ACP family writes its session into the OPERATOR's real
+config home, where the defect is the inverse of the one assumed: the record is not
+destroyed but retained indefinitely, outside this project's ownership, keyed to run
+workspaces that no longer exist and reachable by no reaper this project has. And the real
+absence is elsewhere entirely - the durable trace records an agent's MESSAGES, while its
+ACTIONS reach only an in-memory fan-out and the live stream, so an autonomous allowlisted
+command leaves no durable mark at all.
+
+The obligation therefore attaches to this project's OWN stores rather than to a provider's
+files. The trace of record is the checkpoint transcript served with a truthful
+availability, the durable permission decisions, and the control-actions journal; provider
+session files are not that record on any lane, and on the lanes where they exist this
+project could not own their retention anyway. The closing work is action-event capture at
+the provider seam into stores this project owns, under one retention vocabulary and one
+owner, bounded - not per-provider file salvage, which would be lane-specific, in a
+provider's format, and a second copy of message text this project already holds.
+
+The ephemeral posture is ratified rather than left inherited. It has been present since
+the Codex lane's first commit and was not a considered choice, but it is the correct one:
+the lane opens one server, one thread, and one turn per generation, so provider-native
+resume has no caller; enabling session records would write them into the per-run
+configuration directory that also holds a copied credential and is removed by the same
+teardown, recreating precisely the destroyed-unread defect this layer was written to fix;
+and the message text such a record would carry is already at rest in this project's own
+checkpoint store, so the addition would be a second at-rest location under a second
+retention regime - the disease this record exists to treat. The reversal condition is
+narrow: the posture changes only if this project adopts provider-native session continuity
+or a compliance obligation demands provider-native records, and then only together with an
+export into the accounted state root and a retention declaration, never bare.
+
+A residual exposure is recorded rather than resolved here, because it belongs to the
+confinement trail: on the ACP lanes the full session, including the text of the workspace
+context file, persists in the operator's own home under no declaration this project makes.
 
 Cross-repo seams are handled by contract rather than by coordinated edits. Bounds and
 identifiers duplicated by hand across repositories get a single source or a contract test

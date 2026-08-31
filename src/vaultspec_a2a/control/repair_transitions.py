@@ -12,7 +12,7 @@ from ..thread.repair_policy import DISPATCH_FAILED_TRANSITION, repair_state_for_
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.models import ThreadModel
+    from ..database import ThreadModel
 
 
 async def apply_dispatch_failure(

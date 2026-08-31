@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 from langchain_core.messages import AIMessage
 
+from ...streaming.node_metadata import node_metadata_from_graph
 from ...team.team_config import (
     ResearchThreadSpec,
     load_agent_config,
@@ -33,6 +34,7 @@ from ...team.team_config import (
 )
 from ...thread.errors import ConfigError
 from ..compiler import _doc_review_router, compile_team_graph
+from .conftest import deterministic_model_assignment
 
 
 def _review_state(review_text: str) -> dict[str, Any]:
@@ -137,6 +139,7 @@ async def test_research_adr_compiles_expected_node_set(
         checkpointer=checkpointer,
         provider_factory=pf,
         proposal_submitter=_FakeSubmitter(),
+        model_assignment=deterministic_model_assignment(team),
     )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
@@ -158,6 +161,60 @@ async def test_research_adr_compiles_expected_node_set(
 
 
 @pytest.mark.asyncio
+async def test_research_adr_discloses_one_metadata_entry_per_worker(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """A compiled research_adr graph must disclose its whole roster, not none.
+
+    ``node_metadata_from_graph`` - the real function every disclosure surface
+    (``/team/status``, the ``team_status`` broadcast, the run snapshot) walks -
+    SKIPS a node whose metadata is empty. Every research_adr worker node used
+    to be added with no ``metadata=`` at all, so this topology reported an
+    empty roster while executing a full one; nothing else catches that, since
+    it type-checks clean and every node still runs. Pinned here against the
+    real frozen-catalog compile path, not inferred from types.
+    """
+    team = _research_adr_team(
+        [
+            ResearchThreadSpec(thread_id="codebase"),
+            ResearchThreadSpec(thread_id="prior-art"),
+        ]
+    )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        proposal_submitter=_FakeSubmitter(),
+        model_assignment=deterministic_model_assignment(team),
+    )
+
+    disclosed = node_metadata_from_graph(graph)
+    expected_worker_nodes = {
+        "research_dispatch_researcher_00",
+        "research_dispatch_researcher_01",
+        "synthesis",
+        "research_review",
+        "adr_author",
+        "adr_review",
+        "plan_author",
+        "plan_review",
+    }
+    # This is the assertion that fails without the fix: node_metadata_from_graph
+    # SKIPS a node whose metadata dict is empty, and every one of these used to
+    # be added with no metadata= at all - the whole roster was absent, not just
+    # short a field.
+    assert expected_worker_nodes <= set(disclosed), disclosed
+
+    for node_name in expected_worker_nodes:
+        entry = disclosed[node_name]
+        assert entry["provider"] == "deterministic", (node_name, entry)
+        assert entry["display_name"], (node_name, entry)
+        assert entry["role"], (node_name, entry)
+
+
+@pytest.mark.asyncio
 async def test_research_adr_requires_proposal_submitter(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
@@ -170,6 +227,7 @@ async def test_research_adr_requires_proposal_submitter(
             checkpointer=checkpointer,
             provider_factory=pf,
             proposal_submitter=None,
+            model_assignment=deterministic_model_assignment(team),
         )
 
 
@@ -189,6 +247,7 @@ async def test_research_adr_missing_role_raises(
             checkpointer=checkpointer,
             provider_factory=pf,
             proposal_submitter=_FakeSubmitter(),
+            model_assignment=deterministic_model_assignment(team),
         )
 
 
@@ -216,6 +275,7 @@ async def test_research_adr_runs_to_first_document_gate(
         checkpointer=checkpointer,
         provider_factory=pf,
         proposal_submitter=submitter,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     state: dict[str, Any] = {
@@ -281,6 +341,7 @@ async def test_research_gate_submit_sees_run_state_and_synthesis_body(
         checkpointer=checkpointer,
         provider_factory=pf,
         proposal_submitter=submitter,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     run_thread_id = "run-1784136458"
@@ -337,6 +398,7 @@ async def test_plan_phase_runs_after_gate_two_and_parks_on_gate_three(
         checkpointer=checkpointer,
         provider_factory=pf,
         proposal_submitter=submitter,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     run_thread_id = "ra-plan-run"
@@ -396,6 +458,7 @@ async def test_plan_gate_request_changes_loops_the_plan_writer(
         checkpointer=checkpointer,
         provider_factory=pf,
         proposal_submitter=submitter,
+        model_assignment=deterministic_model_assignment(team),
     )
 
     run_thread_id = "ra-plan-revision-run"

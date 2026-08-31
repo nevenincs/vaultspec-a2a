@@ -12,6 +12,7 @@ from ...team.team_config import (
     authoring_capability,
     discover_team_preset_ids,
     is_mock_preset,
+    load_team_config,
     supported_capabilities,
 )
 
@@ -48,10 +49,25 @@ def test_is_mock_preset_marks_mock_ids() -> None:
     assert is_mock_preset("vaultspec-adr-research") is False
 
 
-def test_authoring_capability_maps_topology() -> None:
-    assert authoring_capability(TopologyType.RESEARCH_ADR) == "document_authoring"
-    assert authoring_capability(TopologyType.STAR) == "coding"
-    assert authoring_capability(TopologyType.PIPELINE) == "coding"
+def test_authoring_capability_keys_on_declared_roles_not_topology() -> None:
+    """The coarse capability follows the roles a preset declares.
+
+    Both presets asserted here run a ``pipeline`` topology, so a topology key
+    could not tell them apart - it called both ``coding``. The doc-editor lane
+    authors documents through the engine bridge and must not read as a coder
+    preset merely because its graph is shaped like one.
+    """
+    doc_editor = load_team_config("vaultspec-doc-editor")
+    solo_coder = load_team_config("vaultspec-solo-coder")
+    assert doc_editor.topology.type is TopologyType.PIPELINE
+    assert solo_coder.topology.type is TopologyType.PIPELINE
+
+    assert authoring_capability(doc_editor) == "document_authoring"
+    assert authoring_capability(solo_coder) == "coding"
+    assert (
+        authoring_capability(load_team_config("vaultspec-adr-research"))
+        == "document_authoring"
+    )
 
 
 def test_research_adr_declares_all_three_document_outputs() -> None:

@@ -20,6 +20,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..ipc.schemas import ExecutionStateProjectionPayload
 from ..providers import ProviderCondition
+from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ..thread.enums import InvalidTransitionError, ThreadStatus
 from ..thread.permission_fsm import (
     compute_permission_request_effects,
@@ -32,6 +33,7 @@ from ..thread.snapshots import (
     is_terminal_event,
 )
 from ..thread.terminal_effects import compute_terminal_effects
+from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -73,13 +75,38 @@ _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 
 def _session_factory(
     configured: async_sessionmaker[AsyncSession] | None,
-) -> async_sessionmaker[AsyncSession]:
-    """Select the injected session factory or the application factory."""
-    if configured is not None:
-        return configured
-    from ..database.session import get_session_factory
+) -> async_sessionmaker[AsyncSession] | None:
+    """Return the caller's session factory; ``None`` means skip the durable write.
 
-    return get_session_factory()
+    Deliberately NOT a resolver. Which database an event belongs in is a property
+    of the application relaying it, and the app boundary is the only place that
+    knows - so it resolves once, in ``api.internal``, and these handlers use what
+    they are given.
+
+    Resolving again here defeated that. An app that had DECLARED it owns no
+    database arrived as ``None``, this reached for the process database anyway,
+    and the write landed in whichever store some unrelated component had opened
+    in the same process. The earlier form was worse still: it called
+    ``get_session_factory``, which CREATES an engine from ambient settings when
+    none was initialized, so a process owning no database acquired a connection
+    to a settings-derived path and failed at its first query.
+    """
+    return configured
+
+
+def _skip_without_database(what: str, thread_id: str) -> None:
+    """Record a durable write skipped because this process has no database.
+
+    Silence here would be the same defect as the ambient engine it replaces: a
+    projection that never happened must be readable as an absence, not inferred
+    from a missing row much later.
+    """
+    logger.warning(
+        "Skipping %s for %s: this process has no database",
+        what,
+        thread_id,
+        extra={"thread_id": thread_id, "action": "durable_write_skipped_no_database"},
+    )
 
 
 def _json_object(encoded: str) -> dict[str, object] | None:
@@ -96,14 +123,6 @@ def _option_mappings(value: object) -> list[dict[str, object]]:
         return _OPTION_MAPPINGS.validate_python(value)[:50]
     except ValidationError:
         return []
-
-
-def _object_mapping(value: object) -> dict[str, object] | None:
-    """Validate a nested JSON-object value at the boundary."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError:
-        return None
 
 
 def _durable_provider_condition(value: object, *, status: ThreadStatus) -> str | None:
@@ -198,7 +217,7 @@ async def _read_run_lease(
     data = _json_object(thread.thread_metadata)
     if data is None:
         return None
-    lease = _object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
+    lease = coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
     if lease is None:
         return None
     lease_id: object = lease.get("lease_id")
@@ -227,6 +246,19 @@ async def _handle_terminal_event(
     """
     if not is_terminal_event(payload):
         return
+    # Captured HERE, before anything else runs, and never re-read later: the
+    # ordering is the whole fix (F19). aggregator.clear_thread_state below (in
+    # the finally block, after the durable write commits) prunes this exact
+    # thread's counter from the aggregator's in-memory _sequences dict, so a
+    # value read after that point is always the pruned default (0) -- which is
+    # what a REST client reading run-status after a run settles always saw,
+    # since that read is the only moment its reconnect-cursor comparison
+    # matters. Capturing before the durable write below, rather than near it,
+    # means a future reordering of the write can never accidentally re-open
+    # this race by moving the read closer to the prune.
+    last_sequence = (
+        aggregator.get_sequence(thread_id) if aggregator is not None else None
+    )
     payload_status = payload.get("status")
     status_str = (
         _TERMINAL_STATUS_MAP.get(payload_status)
@@ -240,12 +272,16 @@ async def _handle_terminal_event(
             expire_pending_permission_requests,
             get_latest_control_action,
             mark_control_action_applied,
+            set_thread_approval_state,
             set_thread_repair_state,
             update_thread_status,
         )
         from ..thread.enums import ControlActionType
 
         factory = _session_factory(session_factory)
+        if factory is None:
+            _skip_without_database("the terminal status write", thread_id)
+            return
         # error_detail rides the same thread_terminal payload the SSE relay
         # already surfaces it through (012840a4); threading it into the
         # durable status write here is the only additional step needed for a
@@ -265,7 +301,7 @@ async def _handle_terminal_event(
         )
 
         async with factory() as db:
-            await update_thread_status(
+            thread = await update_thread_status(
                 db,
                 thread_id,
                 ThreadStatus(status_str),
@@ -273,6 +309,26 @@ async def _handle_terminal_event(
                 provider_condition=provider_condition,
             )
             await expire_pending_permission_requests(db, thread_id=thread_id)
+            if thread is not None:
+                # Set directly on the row `update_thread_status` already
+                # returned, rather than adding a parameter to that function:
+                # database/thread_repository.py is under concurrent edit by
+                # another session right now, and this is the same session/
+                # transaction/commit boundary as the write above, not a second
+                # persistence path. `last_sequence is not None` on purpose --
+                # not truthiness -- since 0 is a legitimate captured value
+                # (see database/models.py's field comment) and a truthy guard
+                # would silently drop it, the same bug class this closes.
+                if last_sequence is not None:
+                    thread.last_sequence = last_sequence
+                await set_thread_approval_state(
+                    db,
+                    thread_id,
+                    approval_status=None,
+                    approval_request_id=None,
+                    approval_reason=None,
+                    approval_response_action_id=None,
+                )
             latest_cancel = await get_latest_control_action(
                 db, thread_id=thread_id, action_type=ControlActionType.CANCEL
             )
@@ -394,7 +450,13 @@ async def _persist_permission_request(
         except_request_id=request_id,
     )
     description_value = payload.get("description")
-    description = description_value[:4096] if isinstance(description_value, str) else ""
+    # The same declaration the streamed permission frame truncates at, so the
+    # row a reload replays from cannot hold less than the operator was shown.
+    description = (
+        description_value[:MAX_PERMISSION_DESCRIPTION_CHARS]
+        if isinstance(description_value, str)
+        else ""
+    )
     allowed_options = _option_mappings(payload.get("options"))
     await record_permission_request(
         db,
@@ -521,6 +583,9 @@ async def _handle_permission_event(
     event_value = payload.get("type")
     event_type = event_value if isinstance(event_value, str) else ""
     factory = _session_factory(session_factory)
+    if factory is None:
+        _skip_without_database("the durable permission journal", thread_id)
+        return
     async with factory() as db:
         if event_type in _PERMISSION_REQUEST_EVENT_TYPES:
             await _persist_permission_request(
@@ -549,6 +614,9 @@ async def _handle_progress_event(
     from .repair_transitions import mark_message_followup_applied
 
     factory = _session_factory(session_factory)
+    if factory is None:
+        _skip_without_database("the control-action settlement", thread_id)
+        return
     async with factory() as db:
         dispatch_value = payload.get("dispatch_id")
         dispatch_id = dispatch_value if isinstance(dispatch_value, str) else ""
@@ -605,6 +673,9 @@ async def _handle_execution_state_event(
             snapshot_created_at = None
 
     factory = _session_factory(session_factory)
+    if factory is None:
+        _skip_without_database("the execution-state projection", thread_id)
+        return
     async with factory() as db:
         await record_thread_execution_state(
             db,

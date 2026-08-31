@@ -25,7 +25,6 @@ def _config() -> AcpModelConfig:
         agent_config=None,
         permission_callback=None,
         workspace_root=None,
-        cwd=None,
         command=["node", "acp.js"],
         env_vars={"ANTHROPIC_AUTH_TOKEN": _TOKEN},
         session_id=None,

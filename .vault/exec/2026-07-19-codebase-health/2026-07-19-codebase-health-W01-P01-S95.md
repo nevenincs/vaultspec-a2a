@@ -3,45 +3,12 @@ tags:
   - '#exec'
   - '#codebase-health'
 date: '2026-07-24'
-modified: '2026-07-24'
-body_hash: 'sha256:eae13b81170d7787be24aaf7c595198c3e044e5a5c05dda0a7c8193e90bcb3d6'
+modified: '2026-08-02'
+body_hash: 'sha256:1c53fc255774c20fe22b87a68dcad1f7f1441c1c5507537cd669a76988908be6'
 step_id: 'S95'
 related:
   - "[[2026-07-19-codebase-health-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace codebase-health with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S95 and 2026-07-19-codebase-health-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Prove authenticated two-gateway one-worker pairing with real processes and ## Scope
-
-- `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
 
 # Prove authenticated two-gateway one-worker pairing with real processes
 

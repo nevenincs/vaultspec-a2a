@@ -3,46 +3,13 @@ tags:
   - '#exec'
   - '#provider-error-taxonomy'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:15c2e5d7870f73fb9eac7ea8c44e115a1c1fe7d4206adc039e2fe93c859c4ca8'
+body_hash: 'sha256:cd014e271fba0fe9b8d428c32eaec278260be6040d2adc7ee0691216e75efaf4'
 step_id: 'S43'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace provider-error-taxonomy with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S43 and 2026-08-02-provider-error-taxonomy-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Replace the usage-limit substring sniff with the typed condition and ## Scope
-
-- `src/vaultspec_a2a/service_tests/test_claude_web_grounding_live.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
 
 # Replace the usage-limit substring sniff with the typed condition
 

@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#desktop-product-profile'
 date: '2026-07-19'
-modified: '2026-07-30'
-body_hash: 'sha256:831f982382ca0a583cebea8262e235c48a9dd68dd47648753adc9e7d1594e8a4'
+modified: '2026-08-02'
+body_hash: 'sha256:5669f22d06222577159436732a4e58c1183defc6aa298856527a4f0df5f989cd'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
@@ -36,7 +36,6 @@ The `extra = "rag"` selector correctly scopes uv lock resolution, but
 wheel consumers receive the Torch extra without the custom index. The capsule
 must therefore consume the uv-managed lock, and the Step Record must not claim
 that wheel metadata alone carries the override.
-
 
 ### lost-ack-clause-rests-on-superseded-bytes | medium | the cross-repository lost-acknowledgement proof cannot be re-certified on HEAD, so that contract clause still rests on the 2026-07-20 run | `src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py:51`
 

@@ -27,10 +27,11 @@ from ..graph.events import (
     ToolCallUpdate,
 )
 from ..streaming.sse_frames import enforce_progress_allowlist
+from ..thread.models import PlanEntry
 from ..thread.snapshots import coerce_model, coerce_provider
 
 if TYPE_CHECKING:
-    from ..streaming.aggregator import SequencedEvent
+    from ..streaming.types import SequencedEvent
 from .schemas.enums import (
     PlanEntryPriority,
     PlanEntryStatus,
@@ -44,7 +45,6 @@ from .schemas.events import (
     MessageChunkEvent,
     PermissionOption,
     PermissionRequestEvent,
-    PlanEntry,
     PlanUpdateEvent,
     ServerEvent,
     TeamStatusEvent,
@@ -248,6 +248,7 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
                     state=AgentLifecycleState(a.get("state", "idle")),
                     provider=coerce_provider(a.get("provider")),
                     model=coerce_model(a.get("model")),
+                    model_name=a.get("model_name") or None,
                     role=a.get("role", ""),
                     display_name=a.get("display_name", ""),
                     description=a.get("description", ""),

@@ -9,6 +9,9 @@ definitions into that canonical configuration.
 :mod:`vaultspec_a2a.worker` executes the compiled team.
 """
 
+from .preset_origin import (
+    PresetOrigin as PresetOrigin,
+)
 from .team_config import (
     AgentCapabilitiesConfig as AgentCapabilitiesConfig,
 )
@@ -23,6 +26,12 @@ from .team_config import (
 )
 from .team_config import (
     AgentPersonaConfig as AgentPersonaConfig,
+)
+from .team_config import (
+    AuthoringCapability as AuthoringCapability,
+)
+from .team_config import (
+    DocumentCapability as DocumentCapability,
 )
 from .team_config import (
     SupervisorConfig as SupervisorConfig,
@@ -70,6 +79,9 @@ __all__ = [
     "AgentModelConfig",
     "AgentPermissionsConfig",
     "AgentPersonaConfig",
+    "AuthoringCapability",
+    "DocumentCapability",
+    "PresetOrigin",
     "SupervisorConfig",
     "TeamConfig",
     "TeamDefaultsConfig",

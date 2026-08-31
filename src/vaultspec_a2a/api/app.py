@@ -11,7 +11,6 @@ worker process via HTTP POST to ``/dispatch`` (service separation).
 """
 
 import asyncio  # Gateway uses asyncio directly — no structured concurrency needed.
-import hmac
 import logging
 import os
 import secrets
@@ -35,26 +34,27 @@ from ..control.config import settings
 from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
 from ..control.health import (
-    assemble_desktop_readiness,
     assemble_health_status,
     build_full_health,
     build_sqlite_fallback_diagnostics,
+    probe_desktop_readiness,
 )
 from ..control.verdict_subscriber import VerdictSubscriber
 from ..control.worker_management import (
     LazyWorkerSpawner,
+    WorkerLiveness,
     WorkerState,
     WorkerWatchdog,
 )
-from ..database.checkpoints import open_checkpointer
-from ..database.migrations import backfill_teamstate_sdd_fields
-from ..database.reconciliation import reconcile_threads_on_startup
-from ..database.session import (
+from ..database import (
     close_db,
     get_db,
     get_session_factory,
     init_db,
 )
+from ..database.checkpoints import open_checkpointer
+from ..database.migrations import backfill_teamstate_sdd_fields
+from ..database.reconciliation import reconcile_threads_on_startup
 from ..domain_config import domain_config
 from ..lifecycle.discovery import (
     HEARTBEAT_REFRESH_SECONDS,
@@ -74,7 +74,9 @@ from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..telemetry.aggregator_hook import OTelAggregatorHook
 from ..utils import configure_logging, package_version, reconfigure_console_utf8
 from ..utils.asyncio_compat import configure_asyncio_runtime
+from ..utils.ipc_auth import BearerVerdict
 from ._utils import trace_headers
+from .auth import verify_attach_bearer
 from .body_limit import BoundedV1WriteBodyMiddleware
 from .internal import internal_router
 from .routes import register_routes
@@ -243,18 +245,22 @@ def _http_attach_authorized(request: Request, app: FastAPI) -> bool:
     """Return whether an HTTP request presents a valid attach credential.
 
     The liveness surface answers every caller, but only a caller that proves the
-    attach credential in constant time is disclosed the readiness projection, so
-    the liveness boundary cannot weaken the attach gate: the explicit test-only
-    bypass short-circuits for route-behaviour tests, and corrupted runtime state
-    with no token discloses nothing.
+    attach credential is disclosed the readiness projection, so the liveness
+    boundary cannot weaken the attach gate. It cannot drift from it either: the
+    rule is the one the refusing gate applies, asked here and mapped onto this
+    surface's own answer, which is a silent ``False`` rather than a status code
+    because this endpoint discloses less instead of refusing. Corrupted runtime
+    state and a bad credential therefore collapse to the same non-disclosure,
+    which is the whole difference between the two callers.
     """
-    if bool(getattr(app.state, "allow_unauthenticated_v1_for_testing", False)):
-        return True
-    expected = getattr(app.state, "v1_service_token", None)
-    if not isinstance(expected, str) or not expected:
-        return False
-    supplied = request.headers.get("authorization", "").encode("utf-8")
-    return hmac.compare_digest(supplied, f"Bearer {expected}".encode())
+    verdict = verify_attach_bearer(
+        request.headers.get("authorization"),
+        expected=getattr(app.state, "v1_service_token", None),
+        test_bypass=bool(
+            getattr(app.state, "allow_unauthenticated_v1_for_testing", False)
+        ),
+    )
+    return verdict is BearerVerdict.OK
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +321,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             session_factory = get_session_factory()
             async with session_factory() as db:
                 app.state.repair_summary = await reconcile_threads_on_startup(
-                    db, checkpointer, strategy=settings.repair_strategy
+                    db,
+                    checkpointer,
+                    strategy=settings.repair_strategy,
+                    retain_repair_boots=settings.repair_journal_retention_boots,
                 )
                 await db.commit()
         else:
@@ -361,8 +370,11 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         worker_state = WorkerState()
         app.state.worker_state = worker_state
 
+        liveness = WorkerLiveness()
+        app.state.worker_liveness = liveness
+
         def record_worker_contact(timestamp: float) -> None:
-            app.state.worker_last_heartbeat_ts = timestamp
+            liveness.record_contact(when=timestamp)
 
         watchdog = WorkerWatchdog(
             worker_spawner, circuit_breaker, worker_state, app.state
@@ -504,7 +516,13 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         serve_record = register_serve(
             "gateway-dev",
             settings.port,
-            workspace=str(settings.workspace_root),
+            # Absent is the empty string the registry documents, never the
+            # rendering of None: workspace_root carries no default, so
+            # stringifying it unconditionally registers the literal "None" as a
+            # directory for every process that never had one.
+            workspace=""
+            if settings.workspace_root is None
+            else str(settings.workspace_root),
             command=["vaultspec-a2a", "serve", "--port", str(settings.port)],
         )
         if armed:
@@ -697,16 +715,19 @@ def create_app(
         Under the armed desktop profile the unauthenticated boundary discloses
         only the minimal liveness fact - no process identity, product identity, or
         product state - while an attach-authenticated caller additionally receives
-        the readiness projection from the single readiness authority.
+        the readiness projection from the single readiness authority, computed
+        over a live database probe. Only the authenticated branch probes: the
+        unauthenticated answer stays a constant so it cannot be used to measure
+        the gateway's dependencies.
 
-        The Compose and development profiles get the full readiness aggregate:
-        the DB, checkpointer and worker are actively PROBED, not merely read off
-        app state, because a healthcheck that only reports what the process
-        believes about itself cannot notice a dependency that has gone away.
+        Both profiles PROBE rather than read off app state - the DB here and, on
+        Compose and development, the checkpointer and worker as well - because a
+        healthcheck that only reports what the process believes about itself
+        cannot notice a dependency that has gone away.
         """
         if settings.desktop_profile_armed:
             if _http_attach_authorized(request, app):
-                readiness = assemble_desktop_readiness(app_state=app.state)
+                readiness = await probe_desktop_readiness(app_state=app.state, db=db)
                 return readiness.model_dump(mode="json")
             return LivenessResponse().model_dump(mode="json")
         aggregate = await _unarmed_health_aggregate(app, db)

@@ -1,25 +1,43 @@
-"""LLM Provider factory."""
+"""LLM Provider factory.
+
+The LangChain model classes are imported lazily, not at module scope. Importing
+``langchain_openai`` costs roughly twenty-five seconds in this environment, and
+this module's classification and readiness helpers - which several callers reach
+for WITHOUT ever constructing a model - had to pay that before answering. The
+chat-model classes are now imported where a model is actually built, so probing
+which provider a command resolves to no longer loads a model stack to answer.
+"""
+
+from __future__ import annotations
 
 import logging
 import os
 import shutil
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from langchain_core.language_models import BaseChatModel
-from langchain_openai import ChatOpenAI
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
+    from langchain_core.language_models import BaseChatModel
+
+    from ..team.team_config import AgentConfig
+
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
-from ..team.team_config import AgentConfig
 from ..thread.errors import ConfigError
 from ..workspace.environment import resolve_env_vars
 from .acp_catalog import discover_acp_catalog
-from .acp_chat_model import AcpChatModel
 from .codex_catalog import discover_codex_catalog
+from .in_process_catalog import (
+    IN_PROCESS_EXECUTION_MODES,
+    discover_in_process_catalog,
+    in_process_lane_serving_armed,
+    served_in_process_lanes,
+)
 from .kimi_catalog import discover_kimi_catalog
 from .openai_catalog import discover_openai_compatible_catalog
 from .provider_catalog import (
@@ -32,6 +50,9 @@ from .provider_catalog import (
 )
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "GEMINI_SESSION_STORE_DECLARATION",
+    "KIMI_SESSION_STORE_DECLARATION",
     "ProviderCatalogDiscovery",
     "ProviderCatalogRegistration",
     "ProviderFactory",
@@ -41,10 +62,77 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+
+# Gemini and Kimi keep their own project-partitioned session stores, in homes
+# THIS module decides (``_build_gemini_env`` seats GEMINI_CLI_HOME,
+# ``_build_kimi_env`` seats KIMI_CODE_HOME) and reached by CLIs THIS module
+# spawns. Neither store sits under the sweep root in ``_config_home_roots`` nor
+# matches its prefixes, so no reaper here has ever seen them.
+#
+# The dominant producer is not a run - it is ``catalog_registrations`` below.
+# Every external lane gets a registration whose discovery spawns the real CLI
+# rooted at the caller's workspace, so ONE catalog read spawns Gemini and Kimi
+# against that directory even when the caller wants neither. Each family's store
+# then keys the directory its own way, which is why one declaration cannot cover
+# them and why reclamation is unavailable on both (see each mechanism).
+GEMINI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
+    name="gemini-cli-session-store",
+    root="<GEMINI_CLI_HOME, else operator ~/.gemini>/<project-partitioned tree>/",
+    owner="providers.factory",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "permanence is what this project can honestly promise rather than what "
+        "it would choose: the store belongs to the operator's Gemini CLI and "
+        "holds their own interactive sessions alongside anything a spawn here "
+        "produced. The key is the workspace directory's BASENAME with "
+        "underscores sanitized, which is far more collision-prone than a full "
+        "path - an operator's own directory sharing a basename with a discarded "
+        "temporary one is not merely hard to tell apart, it is the SAME entry. "
+        "No reclaim predicate can be built on a key that ambiguous"
+    ),
+    mechanism=(
+        "NOTHING bounds it. No sweep here reaches the home, no age gate applies, "
+        "and no equivalent of the Claude CLI's cleanupPeriodDays has been "
+        "verified for this lane, so growth is one entry per distinct workspace "
+        "basename ever discovered against, retained until an operator deletes it "
+        "by hand. Suppression, not reclamation, is the lever: spawning fewer "
+        "lanes at discovery would stop most entries being minted at all"
+    ),
+)
+
+KIMI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
+    name="kimi-code-session-store",
+    root="<KIMI_CODE_HOME, else operator ~/.kimi-code>/<per-workspace partition>/",
+    owner="providers.factory",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "the store is the operator's, and on this lane orphanhood cannot even be "
+        "ESTABLISHED: the partition key is a one-way truncated digest of the "
+        "full working-directory path, so a key cannot be decoded back into the "
+        "directory it names and no reader here can ask whether that directory "
+        "still exists. A reclaim predicate needs a question this key cannot "
+        "answer, which is the strongest form of the argument that declaring, "
+        "not reaping, is the only mechanism that covers every lane"
+    ),
+    mechanism=(
+        "NOTHING bounds it, and nothing here can: see the reason above. Measured "
+        "volume is currently negligible - a single certification window - but "
+        "that is a fact about how rarely the lane is exercised, not a bound"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    GEMINI_SESSION_STORE_DECLARATION,
+    KIMI_SESSION_STORE_DECLARATION,
+)
+
 # Resolve the claude-agent-acp entry point from the project-level node_modules.
 # VAULTSPEC_PROJECT_ROOT controls the base; see Settings.project_root.
+# project_root resolves THIS SERVICE's own installed assets here, never a place
+# to put data and never a directory an agent runs in - the two roles the
+# storage-anchor gate exists to separate.
 _CLAUDE_ACP_JS = (
-    settings.project_root
+    settings.project_root  # storage-anchor-ok
     / "node_modules"
     / "@agentclientprotocol"
     / "claude-agent-acp"
@@ -226,7 +314,7 @@ def _classify_gemini_command(
         }
 
     local_entry = (
-        settings.project_root
+        settings.project_root  # storage-anchor-ok
         / "node_modules"
         / "@google"
         / "gemini-cli"
@@ -260,7 +348,7 @@ def _classify_gemini_command(
             "command_target": system_gemini,
         }
 
-    local_bin = settings.project_root / "node_modules" / ".bin"
+    local_bin = settings.project_root / "node_modules" / ".bin"  # storage-anchor-ok
     candidate_name = "gemini.cmd" if os.name == "nt" else "gemini"
     local_gemini = local_bin / candidate_name
     if local_gemini.exists():
@@ -829,6 +917,25 @@ async def _discover_openai_catalog(key: ProviderCatalogKey) -> ProviderCatalogDi
     )
 
 
+async def _discover_in_process_catalog(
+    key: ProviderCatalogKey,
+) -> ProviderCatalogDiscovery:
+    """Adapt the computed in-process catalog to the registration contract.
+
+    The health evidence is asserted rather than observed, and every value is a
+    fact about this build: the provider is compiled into this process, so it is
+    configured and its transport is a function call; it holds no credential, so
+    authentication is not applicable rather than unknown.
+    """
+    discovered = discover_in_process_catalog(key)
+    return ProviderCatalogDiscovery(
+        discovered.catalog,
+        discovered.authentication,
+        configured=HealthState.AVAILABLE,
+        transport=HealthState.AVAILABLE,
+    )
+
+
 async def _discover_unverified_catalog(
     key: ProviderCatalogKey,
 ) -> ProviderCatalogDiscovery:
@@ -851,26 +958,37 @@ async def _discover_unverified_catalog(
     )
 
 
-def _admit_and_resolve_model_name(
-    provider: Provider, model: "Model | str | None"
-) -> str:
+def _admit_and_resolve_model_name(provider: Provider, model: Model | str | None) -> str:
     """Admit the provider and resolve its model name, or raise.
 
     The admission path, separated from construction: it refuses an unsupported
     provider and turns the optional model selector into a concrete model name.
-    A default or a ``Model`` enum is validated against the model map; a raw
-    string is passed through with a warning, because it bypasses that
-    validation and an operator should see when a non-canonical name is in use.
+
+    Only the internal in-process lanes carry a repository-authored default and
+    capability map. An external lane is selected from its own served catalog and
+    frozen into the run's role assignment, so it admits the exact frozen value
+    alone: asked for a default or a capability tier, this refuses rather than
+    inventing a model identifier the provider never advertised. Being supported
+    and having a repo-authored default are separate facts, so the refusal names
+    the missing selection rather than reporting an unsupported provider.
 
     Raises:
-        ValueError: If the provider is unsupported or the model level is not
-            mapped for it.
+        ValueError: If the provider is unsupported, if an external lane is asked
+            for an implicit default or a capability tier, or if the model level
+            is not mapped for an internal lane.
     """
     if provider not in _SUPPORTED_PROVIDERS:
         logger.error("Failed to instantiate: Unsupported provider %s", provider)
         raise ValueError(f"Unsupported provider: {provider}")
 
     if model is None:
+        if provider not in PROVIDER_DEFAULT_MODELS:
+            raise ValueError(
+                f"Provider {provider.value!r} has no implicit default model. An "
+                "external lane is chosen from the catalog that lane serves, so "
+                "the exact model value frozen into the run's role assignment is "
+                "the only admissible selection."
+            )
         model_level = PROVIDER_DEFAULT_MODELS[provider]
         try:
             return MODEL_MAP[provider][model_level]
@@ -879,21 +997,29 @@ def _admit_and_resolve_model_name(
                 f"Unsupported model level {model_level!r} for provider {provider!r}"
             ) from None
     if isinstance(model, Model):
+        if provider not in MODEL_MAP:
+            raise ValueError(
+                f"Provider {provider.value!r} does not map capability level "
+                f"{model.value!r}. Capability tiers carry no equivalent meaning "
+                "across providers, so an external lane admits only the exact "
+                "model value frozen from its served catalog."
+            )
         try:
             return MODEL_MAP[provider][model]
         except KeyError:
             raise ValueError(
                 f"Unsupported model level {model!r} for provider {provider!r}"
             ) from None
-    # M21: raw string model_name bypasses the MODEL_MAP validation that would
-    # catch typos or unsupported models. Log a warning so operators can see
-    # when a non-canonical model string is in use.
-    logger.warning(
-        "ProviderFactory received a raw model string %r for provider=%s. "
-        "Prefer passing a Model enum value to ensure the name is valid.",
-        model,
-        provider,
-    )
+    # For an external lane the raw string IS the frozen catalog value, which is
+    # the admissible selection. Only an internal lane, which has a map to
+    # validate against, is worth warning about here.
+    if provider in MODEL_MAP:
+        logger.warning(
+            "ProviderFactory received a raw model string %r for provider=%s. "
+            "Prefer passing a Model enum value to ensure the name is valid.",
+            model,
+            provider,
+        )
     return model
 
 
@@ -901,15 +1027,32 @@ class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
     def catalog_registrations(
-        self, workspace_root: Path | None = None
+        self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None
     ) -> tuple[ProviderCatalogRegistration, ...]:
-        """Return each external catalog lane with its exact discovery adapter.
+        """Return each catalog lane with its exact discovery adapter.
 
         Registrations deliberately contain no model values. A lane without a
         verified enumeration surface remains present but unavailable, rather than
         inheriting an API or ACP catalog from a different execution mode.
+
+        The workspace root is required: discovery spawns real provider
+        subprocesses, and a lane discovered against this service's own tree
+        describes a different machine state than the one the run will execute in.
+
+        ``serve_in_process_lanes`` arms the in-process lanes, which are hidden by
+        default. ``None`` consults the deployment's environment declaration, which
+        is what the served gateway path does; an explicit value is the same
+        decision made by a caller that already knows its own posture, so the
+        policy is exercisable without reaching into the process environment.
+        The in-process registrations come last, so arming them cannot reorder the
+        external lanes a client already enumerates.
         """
-        discovery_root = workspace_root or settings.project_root
+        discovery_root = workspace_root
+        armed = (
+            in_process_lane_serving_armed()
+            if serve_in_process_lanes is None
+            else serve_in_process_lanes
+        )
         claude = ProviderCatalogKey(
             Provider.CLAUDE.value, f"claude-agent-acp:{settings.acp_backend}"
         )
@@ -921,6 +1064,17 @@ class ProviderFactory:
             Provider.ZAI.value, f"zai-claude-agent-acp:{settings.acp_backend}"
         )
         zhipu = ProviderCatalogKey(Provider.ZHIPU.value, "zhipu-openai-compatible-api")
+        in_process = tuple(
+            # ``key=key`` binds this iteration's lane into the callback; a bare
+            # closure over the loop variable would give every registration the
+            # last lane's identity, and the loader fences a mismatched key.
+            ProviderCatalogRegistration(
+                key, lambda key=key: _discover_in_process_catalog(key)
+            )
+            for key in served_in_process_lanes(
+                armed=armed, mock_api_base=settings.mock_api_base
+            )
+        )
         return (
             ProviderCatalogRegistration(
                 claude, lambda: _discover_claude_catalog(claude, discovery_root)
@@ -941,13 +1095,20 @@ class ProviderFactory:
             ProviderCatalogRegistration(
                 zhipu, lambda: _discover_unverified_catalog(zhipu)
             ),
+            *in_process,
         )
 
     def catalog_registration(
-        self, key: ProviderCatalogKey
+        self,
+        key: ProviderCatalogKey,
+        workspace_root: Path,
+        *,
+        serve_in_process_lanes: bool | None = None,
     ) -> ProviderCatalogRegistration:
         """Resolve a served lane exactly; unknown modes cannot borrow an adapter."""
-        for registration in self.catalog_registrations():
+        for registration in self.catalog_registrations(
+            workspace_root, serve_in_process_lanes=serve_in_process_lanes
+        ):
             if registration.key == key:
                 return registration
         raise ValueError(
@@ -957,10 +1118,10 @@ class ProviderFactory:
     def create(
         self,
         provider: Provider,
-        model: "Model | str | None" = None,
+        model: Model | str | None = None,
         agent_config: AgentConfig | None = None,
         workspace_root: Path | None = None,
-        backend: "str | None" = None,
+        backend: str | None = None,
         **kwargs: Any,
     ) -> BaseChatModel:
         """Create a configured BaseChatModel for the given provider.
@@ -980,6 +1141,14 @@ class ProviderFactory:
         Returns:
             A LangChain BaseChatModel implementation.
         """
+        # Imported here rather than at module scope: this is the only place that
+        # builds one, and the LangChain model stack costs tens of seconds to load,
+        # which every caller of this module's classification helpers used to pay to
+        # answer a question that needs no model at all.
+        from langchain_openai import ChatOpenAI
+
+        from .acp_chat_model import AcpChatModel
+
         timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
         execution_mode = kwargs.pop("execution_mode", None)
         native_controls = kwargs.pop("native_controls", None)
@@ -1002,6 +1171,13 @@ class ProviderFactory:
                     raise ValueError("backend conflicts with frozen execution_mode")
                 backend = frozen_backend
             expected_modes = {
+                # The in-process lanes read their modes from the serving
+                # declaration, so a frozen selection and the catalog that issued
+                # it cannot disagree about what the lane is called.
+                Provider.DETERMINISTIC: IN_PROCESS_EXECUTION_MODES[
+                    Provider.DETERMINISTIC
+                ],
+                Provider.MOCK: IN_PROCESS_EXECUTION_MODES[Provider.MOCK],
                 Provider.CODEX: "codex-app-server",
                 Provider.CLAUDE: f"claude-agent-acp:{backend or settings.acp_backend}",
                 Provider.ZAI: f"zai-claude-agent-acp:{backend or settings.acp_backend}",
@@ -1069,9 +1245,7 @@ class ProviderFactory:
             for control_id, value in selected_controls.items():
                 field = control_id.partition(":")[0]
                 if field not in {"reasoning_effort", "service_tier"}:
-                    raise ValueError(
-                        f"Unsupported Codex native control {control_id!r}"
-                    )
+                    raise ValueError(f"Unsupported Codex native control {control_id!r}")
                 if field in codex_controls:
                     raise ValueError(f"Duplicate Codex native control {field!r}")
                 codex_controls[field] = value
@@ -1203,9 +1377,7 @@ class ProviderFactory:
             kimi_effort: str | None = None
             for control_id, value in selected_controls.items():
                 if control_id.partition(":")[0] != "thinking_effort":
-                    raise ValueError(
-                        f"Unsupported Kimi native control {control_id!r}"
-                    )
+                    raise ValueError(f"Unsupported Kimi native control {control_id!r}")
                 if kimi_effort is not None:
                     raise ValueError("Duplicate Kimi thinking-effort control")
                 kimi_effort = value

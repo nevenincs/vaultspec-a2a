@@ -11,9 +11,9 @@ related:
   - "[[2026-07-15-multi-provider-execution-adr]]"
 supersedes:
   - '2026-07-15-model-profiles-adr'
-modified: '2026-08-02'
+modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:c05f1e8e483414e76ab49ea654240b03d43bab5b0fb3f5518a1e69a75825aa79'
+body_hash: 'sha256:482ca2aa625a5e87873cfa2df1b57c7456e25bbc4d6de68678a93149405f4835'
 ---
 # `provider-model-catalog` adr: `provider-owned model catalogs, bounded run selection, and truthful provider health` | (**status:** `accepted`)
 
@@ -142,3 +142,28 @@ removing its invalid static ownership assumption.
 - On acceptance this record supersedes the profile-only ownership decision in
   `2026-07-15-model-profiles-adr` while preserving its freeze and admission
   invariants.
+
+## Amendment (2026-08-03): run-start response disclosure and mandatory metadata
+
+Decided while migrating the run-start callers to the explicit-selection
+contract; codifies the response-side consequences of the Selection contract
+above.
+
+- **One start-surface authority.** The run-start and run-commit responses
+  disclose exactly one execution authority: the frozen team assignment. The
+  retired profile pair - `profile_id` and the top-level `assignments` list -
+  is removed from those responses rather than served empty. The request
+  schema refuses every profile-driven body, so on a success those fields
+  could only report a confident emptiness a client cannot distinguish from
+  "no assignments exist".
+- **Legacy disclosure narrows to the read surfaces.** Run-status retains
+  `profile_id` and per-role `assignments`, because runs frozen before this
+  record remain readable and restartable there. Per-role provider readiness
+  stays a live host fact: probed at read time by the preset listing and by
+  the legacy run-status disclosure, never persisted inside a freeze.
+- **Every run has metadata; every run is named.** A selection revalidates
+  against the catalog served for its workspace and the workspace rides in
+  run metadata, so a run without a metadata envelope is refused before
+  anything durable exists. The gateway therefore names every run - the
+  caller's nickname when supplied, a minted one otherwise. Null metadata and
+  null nicknames are legacy-row states, not producible ones.

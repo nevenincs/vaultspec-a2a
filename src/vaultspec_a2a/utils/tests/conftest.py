@@ -8,6 +8,18 @@ import pytest
 
 _PACKAGE_DIR = str(__import__("pathlib").Path(__file__).resolve().parent)
 
+# Core-layer tests that really do spawn a child process. They keep ``core`` but
+# are not pure, so the orthogonal ``unit`` claim is withheld - a wrong marker is
+# worse than none, because a selection excluding impure tests silently includes
+# anything missing from this set.
+_IMPURE_FILES = frozenset(
+    {
+        "test_logging_entrypoints.py",
+        "test_process_containment.py",
+        "test_runtime_exec.py",
+    }
+)
+
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Mark tests collected from THIS directory with appropriate layer marker."""
@@ -24,4 +36,5 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.middleware)
         else:
             item.add_marker(pytest.mark.core)
-            item.add_marker(pytest.mark.unit)
+            if item.path.name not in _IMPURE_FILES:
+                item.add_marker(pytest.mark.unit)

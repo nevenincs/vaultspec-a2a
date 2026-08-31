@@ -2,7 +2,7 @@
 
 The four readers - the worker's ``graph_registered`` payload builder, the
 subscriber cache, the relayed-payload sync that rebuilds that cache, and the
-team-status emitter - used to spell the same five fields out independently.
+team-status emitter - used to spell the same six fields out independently.
 They agreed only by repetition, so the direct path and the relayed path could
 drift apart on a field added to one. These tests drive the real seams (no
 mocks) and pin that agreement.
@@ -10,18 +10,21 @@ mocks) and pin that agreement.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
 
 from ...graph.enums import AgentLifecycleState
 from ...graph.events import TeamStatus
-from ..aggregator import EventAggregator, StreamableGraph
+from ..aggregator import EventAggregator
 from ..node_metadata import (
     NODE_METADATA_FIELDS,
     node_metadata_fields,
     node_metadata_from_graph,
 )
+
+if TYPE_CHECKING:
+    from ..types import StreamableGraph
 
 
 class _Node:
@@ -135,6 +138,10 @@ def test_direct_and_relayed_registration_agree_field_for_field() -> None:
             "description": "Reviews code for correctness",
             "provider": "claude",
             "model": "opus",
+            # Empty, not absent: this fixture's node carries no frozen catalog
+            # entry, and every summary keeps the same shape so no consumer has
+            # to guard a key.
+            "model_name": "",
         }
     ]
     assert set(direct_summaries[0]) == {
@@ -146,7 +153,7 @@ def test_direct_and_relayed_registration_agree_field_for_field() -> None:
 
 @pytest.mark.asyncio
 async def test_team_status_defaults_every_field_but_keeps_caller_values() -> None:
-    """emit_team_status fills all five fields, without clobbering supplied ones."""
+    """emit_team_status fills all six fields, without clobbering supplied ones."""
     aggregator = EventAggregator()
     queue = aggregator.add_subscriber("client-1")
     aggregator.subscribe("client-1", ["thread-1"])

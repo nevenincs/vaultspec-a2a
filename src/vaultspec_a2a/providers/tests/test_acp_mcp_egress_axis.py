@@ -36,6 +36,7 @@ from .._acp_mcp import (
     NATIVE_READ_TOOL_NAMES,
     NATIVE_TOOL_EGRESS,
     NATIVE_WEB_TOOL_BOUNDS,
+    HarnessMcpRuntimeProfile,
     NativeToolBoundHolder,
     NativeToolDomainPosture,
     NativeWebToolBounds,
@@ -45,7 +46,9 @@ from .._acp_mcp import (
     compose_harness_mcp_servers,
     compose_native_read_tools,
     harness_allowed_tool_names,
+    harness_server_egresses,
     require_declared_surface,
+    resolve_harness_mcp_capabilities,
     resolve_harness_mcp_servers,
 )
 from .._codex_config_home import build_codex_config_home, cleanup_codex_config_home
@@ -83,7 +86,15 @@ def _frozen_object(value: FrozenJsonValue) -> FrozenJsonObject:
 
 
 def _entry(**overrides: JsonValue) -> JsonObject:
-    """A registry-shaped candidate entry, minus whatever the caller drops."""
+    """A registry-shaped candidate entry, minus whatever the caller drops.
+
+    An override of ``None`` DROPS its key, which is how a case here asks for an
+    undeclared axis. That spelling is unavailable for the root-pin axis, whose
+    declared-unpinnable value IS ``None``: dropping the key and declaring it null
+    are different facts to the constructor, and only the first is an omission.
+    A case wanting the unpinnable shape declares it against the constructor
+    directly rather than through this helper.
+    """
     entry: JsonObject = {
         "name": "candidate",
         "command": "uvx",
@@ -91,6 +102,10 @@ def _entry(**overrides: JsonValue) -> JsonObject:
         "tools": ["search"],
         "read_only": True,
         "network_egress": False,
+        # Fully declared on every axis, so a case about one axis is never
+        # answered by a refusal from another.
+        "root_pin": "CANDIDATE_ROOT",
+        "exact_surface": False,
     }
     entry.update(overrides)
     for key, value in list(entry.items()):
@@ -528,3 +543,60 @@ class TestConstructionSeamIsTheOnlyWayIn:
         # the egress assertion, which re-applies the constructor's own predicate.
         declared = _declare_registry(_entry(read_only=False))
         assert _frozen_object(declared["candidate"])["read_only"] is False
+
+
+class TestTheLaneGatesTheEgressAxis:
+    """The harness axis admits outward reach only on a lane that proved it.
+
+    Reachability had been gated on the NATIVE read-floor axis and not at all on
+    the harness ``mcp_servers`` axis, so a declared server was composed on every
+    lane - including one with no completed-turn proof, and a model declaring no
+    lane at all. The gate lives in the resolution stage every composition passes
+    through, so it cannot be skipped by a caller that forgot to ask.
+
+    The exhaustiveness claim below is load-bearing rather than decorative. No
+    shipped registry entry declares egress today, so the REFUSAL branch has
+    nothing live to fire against and cannot be driven end to end through the
+    frozen registry - deliberately frozen, since an axis any importer could add
+    at runtime would not be a declaration. Pinning the empty set in BOTH
+    directions is what keeps that honest: the first entry to declare egress
+    breaks this test, which is precisely the moment someone must prove the lane
+    gate against it rather than discover it in production.
+    """
+
+    def test_no_shipped_server_declares_egress_in_either_direction(self) -> None:
+        egressing = {
+            name for name in _KNOWN_MCP_SERVERS if harness_server_egresses(name)
+        }
+        assert egressing == set(), (
+            "a shipped harness server now declares network_egress; the lane gate "
+            "in resolve_harness_mcp_capabilities must be proven against it "
+            "end-to-end before this entry ships"
+        )
+
+    def test_a_local_read_only_server_survives_every_lane(self) -> None:
+        # The constraint that shaped the gate: vaultspec-rag is read-only and
+        # local, so it must keep resolving on an unproven lane, on a proven one,
+        # and on a model that declared no lane at all. Keying the gate on server
+        # identity instead of the declared axis would have broken exactly this.
+        for lane in (None, "kimi", "codex", "not-a-lane"):
+            resolution = resolve_harness_mcp_capabilities(
+                ["vaultspec-rag"],
+                profile=HarnessMcpRuntimeProfile.NON_DESKTOP,
+                lane=lane,
+            )
+            assert resolution.available_servers == ("vaultspec-rag",), lane
+            assert resolution.unavailable == (), lane
+
+    def test_the_allowlist_and_the_composition_read_the_same_lane(self) -> None:
+        # Two halves that must agree: the allowlist auto-permits the composed
+        # servers' tools in an autonomous run, so a name admitted by one and
+        # refused by the other would leave the role's reach ambiguous.
+        for lane in (None, "kimi"):
+            allowed = harness_allowed_tool_names(["vaultspec-rag"], lane=lane)
+            resolution = resolve_harness_mcp_capabilities(
+                ["vaultspec-rag"],
+                profile=HarnessMcpRuntimeProfile.NON_DESKTOP,
+                lane=lane,
+            )
+            assert bool(allowed) is bool(resolution.available_servers), lane

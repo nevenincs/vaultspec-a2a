@@ -15,7 +15,6 @@ Architecture:
 """
 
 import asyncio
-import json
 import logging
 import shutil
 import sys
@@ -43,13 +42,19 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
 from ._acp_auth import authenticate_rpc, runtime_log_extra
-from ._acp_authoring import config_home_authoring_entry
+from ._acp_authoring import (
+    AUTHORING_MCP_SERVER_NAME,
+    config_home_authoring_entry,
+)
+from ._acp_mcp import harness_spawn_env
 from ._acp_protocol import process_stdout_loop
+from ._acp_request import await_response, issue_request
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
     on_fs_write_text_file,
@@ -68,9 +73,14 @@ from ._acp_types import (
     AcpSessionContext,
     PermissionCallback,
     RpcHandlerMap,
+    require_workspace_root,
 )
 from ._cleanup import CleanupStep, run_independent_cleanups
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import (
+    JsonObject,
+    lenient_json_object,
+    lenient_json_object_list,
+)
 from ._mcp_contract import verify_harness_mcp_contract
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
@@ -82,23 +92,71 @@ from .acp_exceptions import (
 from .conditions import condition_from_acp_error
 from .gemini_auth import refresh_gemini_token
 
-__all__ = ["AcpChatModel"]
+__all__ = [
+    "ACP_SESSION_TRANSCRIPT_DECLARATION",
+    "ARTIFACT_DECLARATIONS",
+    "AcpChatModel",
+]
 
 logger = logging.getLogger(__name__)
 
 
-def _json_object(value: JsonValue | None) -> JsonObject:
-    """Return an object payload or the empty object for malformed fields."""
-    return value if isinstance(value, dict) else {}
+# The spawned CLI writes its own session transcript into the OPERATOR's real
+# config home, partitioned by the ABSOLUTE path of the directory the session
+# opened in. Nothing here creates, names, opens, or can reach that file; the
+# spawn is merely what causes it to exist, which is why this declaration sits
+# at a spawning seam.
+#
+# TWO seams spawn, and the declaration covers both. This one opens a session at
+# the run's active project. Catalog discovery opens one too - the prompt-free
+# probe in ``acp_catalog`` issues session/new with the caller's cwd - and it is
+# the HIGHER-frequency seam, because one catalog read probes every registered
+# lane while a run spawns only the lane it selected.
+#
+# What orphans a partition is therefore NOT which seam opened it. Neither mints
+# one per run; both mint one per WORKSPACE, and a partition is orphaned exactly
+# when the directory it keys stops existing. Served production hands both seams
+# the operator's own project, so their partitions coincide with the ones the
+# operator's interactive CLI already writes. A caller that mints a fresh
+# workspace per invocation collapses per-workspace into per-invocation, and
+# every such invocation leaves a partition behind - which is the accumulation
+# actually measured, and it is a property of the CALLER's workspace lifetime.
+#
+# Two measured facts fix the disposition. The CLI bounds the tree itself, and
+# this project never reads a transcript back: session/load is wired, but no
+# production construction supplies session_id, so provider-native resume has no
+# caller on this lane - the same posture the Codex lane ratified. That second
+# fact is what makes suppression, rather than reclamation, the correct remedy;
+# it is simply not available from here (see mechanism).
+ACP_SESSION_TRANSCRIPT_DECLARATION = ArtifactDeclaration(
+    name="acp-cli-session-transcript",
+    root="<operator CLAUDE_CONFIG_DIR>/projects/<encoded spawn workspace path>/",
+    owner="providers.acp_chat_model",
+    disposition=RetentionDisposition.BOUNDED_BY_AGE,
+    mechanism=(
+        "the CLI's OWN cleanupPeriodDays sweep, 30 days by default, applied "
+        "independently of this project. Nothing here bounds it and nothing here "
+        "may acquire the authority to: the transcript sits in the operator's real "
+        "config home under the no-auth ambient-environment contract, keyed "
+        "identically to the sessions the operator starts by hand, so NO predicate "
+        "available to this project separates a session either seam here spawned "
+        "from one a human started - the only discriminator is inside the file. "
+        "Nor does an exists-check on the keyed directory rescue it: an operator "
+        "who deletes a scratch directory they worked in leaves an orphan of their "
+        "own, indistinguishable from ours. The threshold "
+        "is therefore the operator's to set and not this project's to rely on. "
+        "The lever that would belong here is suppression, not reclamation, and it "
+        "is upstream: the agent SDK exposes persistSession=false, which would stop "
+        "the write outright and costs this lane nothing because no caller resumes "
+        "a persisted session, but the pinned ACP adapter does not thread the "
+        "option and its only persistence-relevant env knob is CLAUDE_CONFIG_DIR, "
+        "whose redirection the no-auth contract forbids"
+    ),
+)
 
-
-def _json_object_list(value: JsonValue | None) -> list[JsonObject]:
-    """Return object entries from one protocol array."""
-    return (
-        [entry for entry in value if isinstance(entry, dict)]
-        if isinstance(value, list)
-        else []
-    )
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    ACP_SESSION_TRANSCRIPT_DECLARATION,
+)
 
 
 def _required_session_id(result: JsonObject, *, operation: str) -> str:
@@ -122,7 +180,7 @@ def _raise_prompt_error(response: JsonObject) -> Never:
     each of them re-deriving it from prose that has already been flattened.
     """
     raw_error = response.get("error")
-    error = _json_object(raw_error)
+    error = lenient_json_object(raw_error)
     code_value = error.get("code")
     code = (
         code_value
@@ -168,10 +226,6 @@ class AcpChatModel(BaseChatModel):
             "<tool>); passed to the CLI via session/new _meta. Empty keeps the "
             "default prompt for human-in-loop runs."
         ),
-    )
-    cwd: str | None = Field(
-        default=None,
-        description="Working directory for the agent session.",
     )
     permission_callback: PermissionCallback | None = Field(
         default=None,
@@ -268,7 +322,6 @@ class AcpChatModel(BaseChatModel):
             agent_config=self.agent_config,
             permission_callback=self.permission_callback,
             workspace_root=self.workspace_root,
-            cwd=self.cwd,
             command=self.command,
             env_vars=dict(self.env_vars),
             session_id=self.session_id,
@@ -342,7 +395,9 @@ class AcpChatModel(BaseChatModel):
         # and strips none. Provider-specific config (e.g. Z.ai's
         # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN retarget) rides self.env_vars
         # as an additive overlay from ProviderFactory.
-        _ws_path = Path(self.workspace_root or self.cwd or str(Path.cwd()))
+        _ws_path = require_workspace_root(
+            self.workspace_root, surface="ACP environment resolution"
+        )
         env = resolve_env_vars(_ws_path)
         env.update(self.env_vars)
         # Bypass the adapter's bundled cli.js — drive the same installed claude
@@ -406,6 +461,15 @@ class AcpChatModel(BaseChatModel):
                 self._config.mcp_servers
             )
             env.update(bridge_env)
+            # Every OTHER advertised spec's env is projected the same way and
+            # was never hoisted, so a pinned harness server reached the CLI as a
+            # dangling reference and started with its pin unset - looking pinned
+            # while resolving its project from the inherited directory.
+            env.update(
+                harness_spawn_env(
+                    self._config.mcp_servers, exclude=AUTHORING_MCP_SERVER_NAME
+                )
+            )
 
         if self.command and Path(self.command[0]).stem.lower() == "gemini":
             await refresh_gemini_token(env=env)
@@ -422,7 +486,11 @@ class AcpChatModel(BaseChatModel):
             process = await _spawn_acp_process(
                 self.command,
                 env,
-                self.workspace_root or self.cwd or str(Path.cwd()),
+                str(
+                    require_workspace_root(
+                        self.workspace_root, surface="ACP subprocess spawn"
+                    )
+                ),
                 use_exec=self.use_exec,
                 metadata=runtime_log_extra(
                     self._config,
@@ -490,7 +558,11 @@ class AcpChatModel(BaseChatModel):
             # the rest. MCP surfacing writes nothing to the workspace or the
             # config home, so the session tree is the only thing to release;
             # the CLI's own transcript lives in the operator's real config home
-            # (like any interactive session) and is not ours to move.
+            # (like any interactive session) and is not ours to move. That
+            # states ownership, not lifetime, and reading it as an answer to
+            # both is how the transcript went undeclared: what it accumulates
+            # and what bounds it are recorded in
+            # ACP_SESSION_TRANSCRIPT_DECLARATION.
             cleanup_steps: list[CleanupStep] = []
             if ctx is not None and stdout_task is not None and stderr_task is not None:
                 session_ctx, out_task, err_task = ctx, stdout_task, stderr_task
@@ -621,18 +693,15 @@ class AcpChatModel(BaseChatModel):
             # session/cancel must be a proper JSON-RPC (with id) and awaited with a
             # 3-second timeout so the subprocess flushes its state before the kill.
             rpc_id = AcpRequestId.SESSION_CANCEL
-            loop = asyncio.get_running_loop()
-            ctx.response_futures[rpc_id] = loop.create_future()
-            req = {
-                "jsonrpc": "2.0",
-                "id": rpc_id,
-                "method": "session/cancel",
-                "params": {"sessionId": self._active_session_id},
-            }
-            async with ctx.stdin_lock:
-                ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-                await ctx.stdin.drain()
-            await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=3.0)
+            future = await issue_request(
+                ctx.response_futures,
+                stdin=ctx.stdin,
+                stdin_lock=ctx.stdin_lock,
+                rpc_id=rpc_id,
+                method="session/cancel",
+                params={"sessionId": self._active_session_id},
+            )
+            await await_response(future, timeout=3.0)
 
         async def _cancel_background_tasks() -> None:
             for task in list(ctx.background_tasks):
@@ -778,64 +847,52 @@ class AcpChatModel(BaseChatModel):
         """Fork the current session."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_FORK
-        futures = self._require_response_futures()
-        futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "session/fork",
-            "params": {"sessionId": sid},
-        }
-        stdin = self._require_stdin()
-        async with self._stdin_lock:
-            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await stdin.drain()
-        resp = await asyncio.wait_for(
-            futures[rpc_id], timeout=settings.acp_startup_timeout_seconds
+        future = await issue_request(
+            self._require_response_futures(),
+            stdin=self._require_stdin(),
+            stdin_lock=self._stdin_lock,
+            rpc_id=rpc_id,
+            method="session/fork",
+            params={"sessionId": sid},
         )
-        return _required_session_id(_json_object(resp.get("result")), operation="fork")
+        resp = await await_response(
+            future, timeout=settings.acp_startup_timeout_seconds
+        )
+        return _required_session_id(
+            lenient_json_object(resp.get("result")), operation="fork"
+        )
 
     async def list_sessions(self) -> list[JsonObject]:
         """List all sessions."""
         self._require_session()
         rpc_id = AcpRequestId.SESSION_LIST
-        futures = self._require_response_futures()
-        futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "session/list",
-            "params": {},
-        }
-        stdin = self._require_stdin()
-        async with self._stdin_lock:
-            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await stdin.drain()
-        resp = await asyncio.wait_for(
-            futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
+        future = await issue_request(
+            self._require_response_futures(),
+            stdin=self._require_stdin(),
+            stdin_lock=self._stdin_lock,
+            rpc_id=rpc_id,
+            method="session/list",
+            params={},
         )
-        return _json_object_list(_json_object(resp.get("result")).get("sessions"))
+        resp = await await_response(future, timeout=settings.acp_rpc_timeout_seconds)
+        return lenient_json_object_list(
+            lenient_json_object(resp.get("result")).get("sessions")
+        )
 
     async def set_mode(self, mode_id: str) -> JsonObject:
         """Set agent mode."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_SET_MODE
-        futures = self._require_response_futures()
-        futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "session/set_mode",
-            "params": {"sessionId": sid, "modeId": mode_id},
-        }
-        stdin = self._require_stdin()
-        async with self._stdin_lock:
-            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await stdin.drain()
-        resp = await asyncio.wait_for(
-            futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
+        future = await issue_request(
+            self._require_response_futures(),
+            stdin=self._require_stdin(),
+            stdin_lock=self._stdin_lock,
+            rpc_id=rpc_id,
+            method="session/set_mode",
+            params={"sessionId": sid, "modeId": mode_id},
         )
-        return _json_object(resp.get("result"))
+        resp = await await_response(future, timeout=settings.acp_rpc_timeout_seconds)
+        return lenient_json_object(resp.get("result"))
 
     async def authenticate(self, token: str) -> JsonObject:
         """Authenticate session.
@@ -850,7 +907,11 @@ class AcpChatModel(BaseChatModel):
             "Sending authenticate RPC (token redacted, length=%d)",
             len(token),
         )
-        env = resolve_env_vars(Path(self.workspace_root or self.cwd or str(Path.cwd())))
+        env = resolve_env_vars(
+            require_workspace_root(
+                self.workspace_root, surface="ACP authentication environment"
+            )
+        )
         env.update(self.env_vars)
         return await authenticate_rpc(
             ctx=None,

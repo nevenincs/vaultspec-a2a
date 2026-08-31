@@ -24,11 +24,16 @@ this module reuses them rather than restating asset paths.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
+
 __all__ = [
+    "APP_HOME_STATE_TREE_DECLARATION",
+    "ARTIFACT_DECLARATIONS",
     "DesktopProfile",
     "DesktopProfileError",
     "DesktopStatePaths",
@@ -43,6 +48,8 @@ __all__ = [
 # import back through ``control.config``. ``test_profile_paths`` guards the two names
 # against drift.
 _DISCOVERY_RECORD_FILENAME = "service.json"
+
+logger = logging.getLogger(__name__)
 
 
 class DesktopProfileError(ValueError):
@@ -103,6 +110,54 @@ class DesktopStatePaths:
             self.logs_dir,
             self.workspaces_root,
         )
+
+
+# Declared on the layout AUTHORITY rather than on any one creator, because three
+# call sites materialise this tree and a declaration beside any single one would
+# describe a third of the artifact: ``DesktopProfile.ensure`` (the armed path),
+# ``cli.service`` (the non-armed serve path, which seats the same layout through
+# this same function), and ``desktop.migration``, which creates the database
+# parent during a staged migration. Naming the authority keeps one declaration
+# true for all three.
+#
+# That three-creator split is worth stating plainly as a finding rather than
+# hiding behind the declaration: the artifact-lifecycle contract wants root
+# selection owned by a resolver so a caller cannot invent a location. The
+# derivation IS centralised here, but the mkdir is not, so a fourth creator could
+# appear without anything noticing. Consolidating the creation is a boot-path
+# change and deliberately NOT done as part of declaring.
+#
+# The import above is leaf-only by necessity: this module is reached from the
+# settings model validator while ``control.config`` is still constructing, so a
+# declaration that dragged in the lifecycle or HTTP stack would close the import
+# cycle the discovery-filename constant already exists to avoid. The retention
+# vocabulary imports nothing but ``dataclasses`` and ``enum``, which is what makes
+# it safe to declare here at all.
+APP_HOME_STATE_TREE_DECLARATION = ArtifactDeclaration(
+    name="desktop-application-state-tree",
+    root="<app_home>/{,state/,runtime/,workspaces/}",
+    owner="desktop.profile",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "the application home is the mutable-state root that deliberately "
+        "SURVIVES immutable runtime replacement - it holds the databases, the "
+        "checkpoint store, and the credential and discovery planes, so an "
+        "upgrade that replaced the capsule and reclaimed this tree would discard "
+        "every run the install has ever recorded"
+    ),
+    mechanism=(
+        "nothing removes the tree, and no uninstall verb exists in this repository "
+        "to remove it. The directories are created owner-restricted and idempotently "
+        "(an existing one is left untouched), so the tree itself neither grows nor "
+        "multiplies - what grows is the individually declared artifacts inside it. "
+        "Note that workspaces_root is materialised on the armed path but has no "
+        "production writer, so it is currently created empty and stays empty"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    APP_HOME_STATE_TREE_DECLARATION,
+)
 
 
 def _discovery_path(app_home: Path) -> Path:
@@ -270,6 +325,29 @@ class DesktopProfile:
         a live consumer are created; the reserved directories are left for their
         consuming phases so ``ensure`` never seeds dead empty state. Called once
         the profile is armed and about to seat live state.
+
+        Each directory is restricted to its owner. The credential files one level
+        over already get this treatment, and the state directory holds the
+        databases: thread content, the permission-decision log, and the whole of
+        every agent conversation in the checkpoint store. Restricting the
+        DIRECTORY rather than the database files is deliberate — SQLite writes
+        ``-wal`` and ``-shm`` beside each database, and the write-ahead log holds
+        recently committed rows, so hardening the files alone would leave the most
+        recent data readable.
         """
+        from ._platform_acl import harden_credential_path
+
         for directory in self.state.provisioned_directories:
             directory.mkdir(parents=True, exist_ok=True)
+            # Best effort: a filesystem that cannot express owner-only access
+            # (a network share, a mount without ACL support) must not stop the
+            # profile from arming — the store still has to work there.
+            try:
+                harden_credential_path(directory)
+            except OSError:
+                logger.warning(
+                    "Could not restrict %s to its owner; the databases beneath it "
+                    "may be readable by other local users.",
+                    directory,
+                    exc_info=True,
+                )

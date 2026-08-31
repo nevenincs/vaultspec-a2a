@@ -3,45 +3,12 @@ tags:
   - '#exec'
   - '#codebase-health'
 date: '2026-07-24'
-modified: '2026-07-24'
-body_hash: 'sha256:85e69dbd3158f008fcc706a59ae88a908068155fd5d1ec05cc94ed55207a72bf'
+modified: '2026-08-02'
+body_hash: 'sha256:004c57b16eb7b98cbc0c42ed83767233cef4603ca89a024da32c7f120b19702c'
 step_id: 'S155'
 related:
   - "[[2026-07-19-codebase-health-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace codebase-health with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S155 and 2026-07-19-codebase-health-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Prove unauthenticated legacy readiness never authorizes adoption with real processes and ## Scope
-
-- `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
 
 # Prove unauthenticated legacy readiness never authorizes adoption with real processes
 

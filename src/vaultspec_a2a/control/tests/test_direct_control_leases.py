@@ -9,6 +9,8 @@ the worker's synchronous dispatch-ID admission boundary.
 from __future__ import annotations
 
 import asyncio
+import json
+import tempfile
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
@@ -135,6 +137,18 @@ def _install_receipt_graph(
     )
 
 
+# A follow-up inherits the active project its run was created with, so a thread
+# seeded for a dispatch-behaviour test needs a real one: without it the message
+# service refuses before reaching the behaviour under test. The directory is
+# real because the refusal is about presence, not shape.
+_ACTIVE_PROJECT = tempfile.mkdtemp(prefix="vaultspec-active-project-")
+
+
+def _active_project_metadata() -> str:
+    """Return thread metadata naming a real active project."""
+    return json.dumps({"workspace_root": _ACTIVE_PROJECT})
+
+
 async def _running_thread(
     sessions: async_sessionmaker[AsyncSession],
     thread_id: str,
@@ -147,6 +161,7 @@ async def _running_thread(
             thread_id=thread_id,
             status=ThreadStatus.RUNNING,
             team_preset=team_preset,
+            metadata=_active_project_metadata(),
         )
         await db.commit()
 
@@ -507,7 +522,14 @@ async def test_restart_redrives_expired_permission_message_and_cancel_actions(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """A new gateway reconstructs all three direct control dispatches."""
+    """A new gateway reconstructs all three direct control dispatches.
+
+    Each thread names a real active project, as a run created through the API
+    always does: a redriven follow-up or permission resume re-enters graph
+    execution and is refused without one. The subject here is lease expiry and
+    reconstruction; the project gate itself is proved in
+    ``test_direct_control_recovery.py``.
+    """
     expired_now = datetime.now(UTC) - timedelta(minutes=5)
     async with session_factory() as db:
         for thread_id, status in (
@@ -515,7 +537,12 @@ async def test_restart_redrives_expired_permission_message_and_cancel_actions(
             ("recover-cancel", ThreadStatus.CANCELLING),
             ("recover-permission", ThreadStatus.INPUT_REQUIRED),
         ):
-            await create_thread(db, thread_id=thread_id, status=status)
+            await create_thread(
+                db,
+                thread_id=thread_id,
+                status=status,
+                metadata=_active_project_metadata(),
+            )
         request_id = "recover-permission:permission-1"
         await record_permission_request(
             db,

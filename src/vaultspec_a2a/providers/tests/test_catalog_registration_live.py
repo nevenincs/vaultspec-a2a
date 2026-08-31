@@ -7,21 +7,18 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from ..factory import ProviderCatalogRegistration, ProviderFactory
 from ..provider_catalog import AuthenticationState, CatalogStatus
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 def _registration(provider_id: str) -> ProviderCatalogRegistration:
     return next(
         registration
-        for registration in ProviderFactory().catalog_registrations()
+        for registration in ProviderFactory().catalog_registrations(Path.cwd())
         if registration.key.provider_id == provider_id
     )
 

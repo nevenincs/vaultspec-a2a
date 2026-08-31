@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from importlib import metadata
 from typing import TYPE_CHECKING
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..context.harness import verify_harness
 from ..utils.runtime_exec import module_command
 
@@ -34,7 +35,41 @@ if TYPE_CHECKING:
 
     from ..context.harness import HarnessReadiness
 
-__all__ = ["ProvisionError", "ProvisionResult", "provision_workspace"]
+__all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "WORKSPACE_HARNESS_DECLARATION",
+    "ProvisionError",
+    "ProvisionResult",
+    "provision_workspace",
+]
+
+# Provisioning writes a corpus into a directory the operator named, so this seam
+# creates durable state outside any run's lifetime. It is bounded in the one way
+# that matters - re-provisioning overwrites in place rather than accumulating
+# generations - and unbounded in the honest sense that de-provisioning is not a
+# verb this project has.
+WORKSPACE_HARNESS_DECLARATION = ArtifactDeclaration(
+    name="provisioned-workspace-harness",
+    root="<workspace_root>/.vaultspec/",
+    owner="cli.provision",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "the harness corpus is the workspace's own configuration, read by every "
+        "later run and by the operator's own tooling; it belongs to the workspace "
+        "rather than to the run that happened to install it, and a run removing "
+        "it would silently de-provision a project the operator still uses"
+    ),
+    mechanism=(
+        "no verb here removes it. Growth is bounded only because "
+        "``vaultspec-core install`` rewrites the corpus in place, so repeated "
+        "provisioning replaces rather than accumulates; there is no teardown "
+        "counterpart to this verb"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    WORKSPACE_HARNESS_DECLARATION,
+)
 
 # The vaultspec-core distribution/console-script name.
 _CORE_DIST = "vaultspec-core"

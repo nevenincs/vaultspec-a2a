@@ -25,9 +25,11 @@ tree.
 
 from __future__ import annotations
 
+import itertools
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
@@ -41,10 +43,10 @@ from ..tests.gateway_boot import (
     spawn_gateway,
     spawn_until_ready,
 )
+from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
-    from pathlib import Path
 
 _ATTACH = "attach-credential-lazyworker-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-lazyworker-fedcba0987654321"
@@ -75,12 +77,16 @@ def _worker_state(base: str, headers: dict[str, str]) -> str:
     return body["worker_state"]
 
 
+_RUN_SEQ = itertools.count(1)
+
+
 def _start_run(base: str, headers: dict[str, str]) -> int:
     """Fire one authenticated mock run-start and return its status code.
 
     Each call blocks inside the gateway until the single-flight worker start
     reaches readiness, so parallel calls model concurrent first demand.
     """
+    workspace = str(Path.cwd())
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
             "/v1/runs",
@@ -89,10 +95,21 @@ def _start_run(base: str, headers: dict[str, str]) -> int:
                 "team_preset": _PRESET,
                 "message": "build it",
                 "autonomous": True,
+                # Distinct per call: these fire concurrently and the subject is
+                # that ONE worker serves several runs. A shared id would make
+                # the later calls replays of the first and prove nothing about
+                # concurrent demand.
+                "run_id": f"lazy-worker-{next(_RUN_SEQ):02d}",
                 "actor_tokens": {
                     "tokens": {"coder": "tok-coder"},
                     "engine_bearer": "bearer",
                 },
+                # The workspace anchors the selection, which run start
+                # revalidates against the catalog served for it.
+                "metadata": {"workspace_root": workspace},
+                "selection": catalog_selection(
+                    base, headers["Authorization"], workspace
+                ),
             },
         )
     return resp.status_code
@@ -117,7 +134,12 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
             script=_GATEWAY,
             gateway_port=gateway_port,
             env=armed_gateway_env(
-                app_home, gateway_port=gateway_port, worker_port=worker_port
+                app_home,
+                gateway_port=gateway_port,
+                worker_port=worker_port,
+                # This module admits runs against the in-process mock lane
+                # (see ``_catalog.py``); the gateway must serve one to select.
+                extra={"VAULTSPEC_SERVE_IN_PROCESS_LANES": "true"},
             ),
             log_handle=log_handle,
         )

@@ -18,7 +18,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ._acp_auth import runtime_log_extra
 from ._acp_types import AcpModelConfig, AcpRpcId, AcpSessionContext, RpcHandlerMap
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import JsonObject, JsonValue, lenient_json_object
 
 __all__: list[str] = []
 
@@ -40,11 +40,6 @@ _CAPABILITY_REQUIREMENTS: dict[str, str] = {
     # server->client RPC initiated by the agent, not a capability-gated
     # client->server request.  No clientCapability flag governs it.
 }
-
-
-def _json_object(value: JsonValue | None) -> JsonObject:
-    """Return an object payload or the empty object for malformed fields."""
-    return value if isinstance(value, dict) else {}
 
 
 def _json_string(value: JsonValue | None, *, default: str = "") -> str:
@@ -127,7 +122,7 @@ async def dispatch_packet(
 
     method = _json_string(data.get("method"))
     rpc_id = _rpc_id(data.get("id"))
-    params = _json_object(data.get("params"))
+    params = lenient_json_object(data.get("params"))
 
     if rpc_id is not None and method:
         t = asyncio.create_task(
@@ -161,7 +156,7 @@ async def handle_client_response(
                     "Response for rpc_id=%r arrived after timeout; discarding", rid
                 )
 
-    result = _json_object(data.get("result"))
+    result = lenient_json_object(data.get("result"))
     if result.get("stopReason") == "end_turn":
         ctx.prompt_done.set()
     elif "error" in data and ctx.prompt_id_ref and rid == ctx.prompt_id_ref[0]:
@@ -252,11 +247,11 @@ async def handle_session_update(
     ctx: AcpSessionContext,
 ) -> None:
     """Dispatch all session update notification types."""
-    update = _json_object(params.get("update"))
+    update = lenient_json_object(params.get("update"))
     u_type = _json_string(update.get("sessionUpdate"))
 
     if u_type in ("agent_message_chunk", "agent_thought_chunk"):
-        text = _json_string(_json_object(update.get("content")).get("text"))
+        text = _json_string(lenient_json_object(update.get("content")).get("text"))
         if text:
             try:
                 ctx.chunk_queue.put_nowait(

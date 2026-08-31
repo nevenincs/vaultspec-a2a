@@ -20,13 +20,13 @@ Two properties matter here and are enforced by construction:
 
 from __future__ import annotations
 
-import json
 import logging
 import pathlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeIs
+from typing import TYPE_CHECKING, Any
 
 from ...thread.enums import CleanupKind
+from .._thread_metadata import dispatchable_workspace_root
 from ..repositories import (
     CleanupItem,
     CleanupItemResult,
@@ -47,13 +47,6 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 _MAX_DETAIL_LENGTH = 200
-
-
-def _is_json_object(value: object) -> TypeIs[dict[str, object]]:
-    """Return whether a decoded JSON value is a string-keyed object."""
-    # ``json.loads`` only constructs string-keyed object values; this helper is
-    # called only on its decoded result after it has been erased to ``object``.
-    return isinstance(value, dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,25 +74,28 @@ def _workspace_root_from_thread(thread: Any) -> pathlib.Path | None:
 
     The root is read from the thread's own metadata so containment is judged
     against the checkout the thread declared, and only an existing directory is
-    returned so a stale or missing root refuses every artifact rather than
-    resolving relative paths against the process working directory.
+    returned so a stale or missing root refuses every artifact.
+
+    A RELATIVE stored root is refused rather than resolved: resolving one anchors
+    containment to whatever directory this process happens to be serving from, so
+    a stale root that happens to name an existing path there would go on to
+    decide which artifacts count as contained. That rule is not restated here,
+    nor is the reading of the column - the shared reader owns both, and asking it
+    is what keeps this pass agreeing with every other reader of the same bytes.
+
+    What this adds is its own, and stays: containment is judged against a
+    directory, and a root that no longer exists must refuse every artifact rather
+    than admit paths under a vanished tree.
     """
-    metadata_json = getattr(thread, "thread_metadata", None)
-    if not metadata_json:
+    workspace_root = dispatchable_workspace_root(
+        getattr(thread, "thread_metadata", None)
+    )
+    if workspace_root is None:
         return None
-    try:
-        meta: object = json.loads(metadata_json)
-    except (json.JSONDecodeError, TypeError):
+    resolved = pathlib.Path(workspace_root)
+    if not resolved.is_dir():
         return None
-    if not _is_json_object(meta):
-        return None
-    workspace_root_str = meta.get("workspace_root")
-    if not workspace_root_str or not isinstance(workspace_root_str, str):
-        return None
-    workspace_root = pathlib.Path(workspace_root_str).resolve()
-    if not workspace_root.is_dir():
-        return None
-    return workspace_root
+    return resolved
 
 
 def resolve_contained_artifact_path(

@@ -12,10 +12,9 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from ..database import get_pending_permission_requests
-from ..database.models import ThreadModel
+from ..database import ThreadModel, get_pending_permission_requests
 from ..graph.enums import AgentLifecycleState
-from ..thread.enums import TERMINAL_STATUSES, RepairStatus
+from ..thread.enums import TERMINAL_STATUS_VALUES, RepairStatus
 from ..thread.snapshots import AgentData, build_agent_descriptor
 from .permission_options import extract_allowed_option_ids
 
@@ -67,7 +66,6 @@ async def build_team_status(
     terminal_thread_ids: set[str] = set()
     checkpoint_unavailable_thread_ids: set[str] = set()
     if thread_ids:
-        terminal_statuses = [status.value for status in TERMINAL_STATUSES]
         rows = await db.execute(
             select(
                 ThreadModel.id,
@@ -81,7 +79,7 @@ async def build_team_status(
         terminal_thread_ids = {
             thread_id
             for thread_id, status, _repair_status, _execution_readiness in known_rows
-            if status in terminal_statuses
+            if status in TERMINAL_STATUS_VALUES
         }
         checkpoint_unavailable_thread_ids = {
             thread_id

@@ -6,7 +6,8 @@ import signal
 
 from fastapi import APIRouter, Depends, Request
 
-from ..dependencies import require_attach, require_lifecycle_capability
+from ..auth import authenticate_request
+from ..dependencies import require_lifecycle_capability
 from .gateway import admission_gate
 
 router = APIRouter()
@@ -25,9 +26,21 @@ def _stop_this_process() -> None:
     "/admin/shutdown",
     status_code=202,
     dependencies=[
-        Depends(require_attach),
+        Depends(authenticate_request),
         Depends(require_lifecycle_capability),
     ],
+    # This route sits behind the same attach gate as the /v1 router, which
+    # documents these two refusals collectively; stated here because this router
+    # holds a single route and has no collective place to put them.
+    responses={
+        401: {"description": "Missing or invalid gateway service token."},
+        403: {"description": "Missing or invalid lifecycle capability receipt."},
+        503: {
+            "description": (
+                "Gateway service token or lifecycle capability is not configured."
+            )
+        },
+    },
 )
 async def shutdown_endpoint(request: Request) -> dict[str, str]:
     """Initiate graceful server shutdown.

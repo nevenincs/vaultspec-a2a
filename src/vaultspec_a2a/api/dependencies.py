@@ -3,13 +3,14 @@
 Injected at lifespan startup via ``app.state``; these functions read from it.
 Used by all route modules in ``api/routes/``.
 
-Authentication dependencies live here too. ``require_attach`` is the pre-existing
-attach-control gate (re-exported from :mod:`vaultspec_a2a.api.auth` so route modules
-have one import surface); it authenticates dashboard control and product traffic.
-``require_lifecycle_capability`` is the additional receipt-bound ownership gate that
-discovery never references, required on top of attach for lifecycle operations such
-as administrative shutdown. Both compare in constant time and never disclose the
-expected credential in a failure.
+``require_lifecycle_capability`` lives here too: the receipt-bound ownership gate
+that discovery never references, required ON TOP OF the attach gate for lifecycle
+operations such as administrative shutdown. The attach gate itself is
+:func:`vaultspec_a2a.api.auth.authenticate_request` and routes mount it from there
+directly. This module does not re-offer it under a second spelling - nothing here
+overrides or adapts it, so an alias would only hide which module answers for the
+credential. Both gates compare in constant time and never disclose the expected
+credential in a failure.
 """
 
 import hmac
@@ -19,10 +20,9 @@ import httpx
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..database import get_db
 from ..database.checkpoints import Checkpointer
-from ..database.session import get_db
 from ..streaming.aggregator import EventAggregator
-from .auth import authenticate_request as require_attach
 
 # The header carrying the receipt-bound lifecycle ownership capability. Distinct
 # from the attach Authorization bearer so the two planes never alias; loopback-only
@@ -37,7 +37,6 @@ __all__ = [
     "get_services",
     "get_worker_client",
     "get_worker_spawner",
-    "require_attach",
     "require_lifecycle_capability",
 ]
 

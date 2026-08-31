@@ -1,31 +1,41 @@
 """LangGraph orchestration engine for agent teams.
 
 Compiles a ``StateGraph`` from a ``TeamConfig`` and resolved ``AgentConfig``
-map.  Three topology types are supported:
+map.  Four topology types are supported:
 
 - ``star``:          supervisor routes dynamically; workers report back to
                      the supervisor.
 - ``pipeline``:      fixed sequential chain; no supervisor required.
 - ``pipeline_loop``: sequential chain where the loop_node conditionally
                      routes back into the loop or finishes.
+- ``research_adr``:  document phase machine; researchers fan out into a
+                     synthesis node, then the research, ADR, and plan phases
+                     each run author -> review -> submit -> approval gate.
 """
+
+from __future__ import annotations
 
 import functools
 import logging
-from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable
+    from collections.abc import Callable, Hashable, Mapping, Sequence
+
+    # Annotation-only: importing langchain_core.language_models at module scope
+    # costs seconds (it eagerly probes for transformers), and the compiler only
+    # names BaseChatModel in signatures — the instances it wires come from the
+    # provider factory, which imports the model stack at construction time.
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.base import BaseCheckpointSaver
 
     from ..authoring import FeedbackContextReader
     from ..worker.authoring_binding import AuthoringBindingProvider
+    from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, RetryPolicy
@@ -34,6 +44,7 @@ from ..authoring.contract import RESEARCH_ADR_ROLES, is_document_authoring_role
 from ..providers.conditions import ProviderCondition, condition_is_retryable
 from ..thread.clarification import (
     CLARIFICATION_TOPOLOGIES,
+    MAX_REQUEST_ID_CHARS,
     ClarificationRequest,
     topology_honours_clarification,
 )
@@ -44,6 +55,7 @@ from ..thread.errors import (
 )
 from ..thread.state import TeamState
 from .enums import Model, PipelinePhase, Provider
+from .nodes._config_contract import accepting_runnable_config
 from .nodes.clarification import (
     ClarificationQuestionProducer,
     create_clarification_gate_node,
@@ -61,18 +73,14 @@ from .nodes.phase_gate import (
     create_phase_submit_node,
 )
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
-from .nodes.vault_reader import build_initial_vault_index, create_mount_node
+from .nodes.vault_reader import create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
-from .protocols import ProviderFactoryProtocol, TaskQueuePort
 from .web_locators import extract_web_locators
 
 logger = logging.getLogger(__name__)
 
 
-# ``build_initial_vault_index`` is defined in ``nodes.vault_reader`` (the mount
-# node reuses it to refresh the index each pass) and re-exported here to preserve
-# the historical ``graph.compiler.build_initial_vault_index`` import surface.
-__all__ = ["CompiledTeamGraph", "build_initial_vault_index", "compile_team_graph"]
+__all__ = ["CompiledTeamGraph", "compile_team_graph"]
 
 
 class CompiledTeamGraph(Protocol):
@@ -276,8 +284,17 @@ def _resolve_model_for_worker(
     *,
     provider_factory: ProviderFactoryProtocol,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> tuple[BaseChatModel, Provider, Model | None]:
-    """Resolve provider + capability following the standard precedence.
+) -> tuple[BaseChatModel, Provider, Model | None, str | None]:
+    """Resolve provider + capability + concrete model following the precedence.
+
+    The fourth value is the CONCRETE catalog model identifier when a frozen
+    assignment supplied one, and ``None`` on the unfrozen path where no catalog
+    entry was named. It is returned separately from the capability rather than
+    folded into it because the two speak different vocabularies: capability is a
+    four-value tier, while a catalog identifier is a provider-issued string such
+    as ``mock-high``. Both are needed downstream - the tier is what an unfrozen
+    run requests, the identifier is what a frozen run actually ran - and the
+    only way to disclose the second was to stop discarding it here.
 
     When a ``frozen_assignment`` names this worker, its provider/capability/
     fallback are used verbatim (model-profiles: restart reproduces the exact
@@ -312,7 +329,7 @@ def _resolve_model_for_worker(
                         provider.value,
                         execution_mode,
                     )
-                    return model, provider, None
+                    return model, provider, None, model_name
                 except (ConfigError, ValueError) as exc:
                     logger.warning(
                         "Frozen provider lane %s/%s unavailable for worker %s: %s",
@@ -356,7 +373,19 @@ def _resolve_model_for_worker(
             # provider the run is actually using.  Reporting the configured
             # primary would be worse than reporting nothing — a null reads as
             # unknown, a confidently wrong provider reads as fact.
-            return model, p, capability
+            #
+            # The model name obeys the same rule, which is why it mirrors the
+            # ``model=`` expression above rather than being returned outright:
+            # only the PRIMARY provider was built from the frozen catalog name,
+            # so only it may disclose one.  A fallback was built from the
+            # capability tier and has no catalog identity to report, and naming
+            # the frozen one there would assert a model that never ran.
+            return (
+                model,
+                p,
+                capability,
+                frozen_model_name if p == primary_provider else None,
+            )
         except ValueError as exc:
             logger.warning(
                 "Provider %s unavailable for worker %s: %s",
@@ -449,6 +478,17 @@ def _resolve_worker_model_preferences(
     assignment = resolve_role_assignment(
         worker_ref, agent_config, team_config, profile_overlay=None
     )
+    if assignment.provider is None:
+        # Nothing declared a provider and nothing froze one. Refusing is the whole
+        # point: omission may not silently choose what produces the artifact, so
+        # this fails the compile loudly instead of falling back to a
+        # repository-authored lane the caller never selected. A product preset
+        # reaches this only when its run started without freezing a selection,
+        # which is itself the defect to surface.
+        raise ValueError(
+            f"Worker {worker_ref.agent_id!r} has no provider: "
+            f"{assignment.resolution_error}"
+        )
     return (
         assignment.provider,
         assignment.capability,
@@ -526,6 +566,7 @@ def _resolve_supervisor_model(
 def _model_assignment_metadata(
     provider: Provider,
     capability: Model | None,
+    model_name: str | None = None,
 ) -> dict[str, str]:
     """Render a resolved model assignment as node metadata.
 
@@ -534,25 +575,113 @@ def _model_assignment_metadata(
     becomes observable.  An unset capability is rendered as the empty string —
     the metadata map is flat strings, and consumers read empty as "unknown"
     rather than inventing a default.
+
+    ``model_name`` is the CONCRETE catalog identifier a frozen run executed, and
+    it is carried beside the capability rather than in place of it because the
+    two are different vocabularies: ``model`` holds a four-value tier, so a
+    provider-issued string like ``mock-high`` cannot be expressed there at all.
+    Without this key the frozen path disclosed nothing about which model ran —
+    it resolves the capability to ``None`` by design, so ``model`` is empty on
+    every frozen run, and a run could promise a catalog entry, execute it, and
+    leave no observable evidence that it had.
     """
-    return {
+    assignment = {
         "provider": provider.value,
         "model": capability.value if capability is not None else "",
     }
+    # Absent rather than empty: an empty string here would be indistinguishable
+    # from a frozen run that named no model, and the unfrozen path genuinely has
+    # no catalog identifier to report.
+    if model_name is not None:
+        assignment["model_name"] = model_name
+    return assignment
 
 
 def _agent_node_metadata(
     agent_config: Any,
     provider: Provider,
     capability: Model | None,
+    model_name: str | None = None,
 ) -> dict[str, str]:
     """Build the full node metadata for a compiled worker node."""
     return {
         "display_name": agent_config.display_name,
         "role": agent_config.role,
         "description": agent_config.description.strip(),
-        **_model_assignment_metadata(provider, capability),
+        **_model_assignment_metadata(provider, capability, model_name),
     }
+
+
+def _compile_worker_node(
+    worker_ref: Any,
+    agent_cfg: Any,
+    team_config: Any,
+    workspace_root: Path | None,
+    *,
+    provider_factory: ProviderFactoryProtocol,
+    frozen_assignment: dict[str, dict[str, Any]] | None,
+    autonomous: bool,
+    feature_tag: str | None,
+    task_queue_port: TaskQueuePort | None,
+    cost_port: CostPort | None,
+    authoring_binding_provider: AuthoringBindingProvider | None,
+) -> tuple[WorkerNode, dict[str, str]]:
+    """Resolve one worker's model and build its compiled node plus node metadata.
+
+    Shared by the star, pipeline, and pipeline_loop topologies, which otherwise
+    each wrote this exact resolve-compose-build-metadata step out in full - not
+    hypothetical duplication: the model-name disclosure fix had to touch all
+    three call sites identically, and a miss at any one of them would have meant
+    that topology silently failing to disclose which model it ran, in exactly
+    the way that fix existed to close.
+
+    The team harness is resolved HERE rather than passed in, for that same
+    reason: it is read off the ``team_config`` all three topologies already hand
+    over, so there is one resolution site instead of three that must agree. It
+    was previously read only by ``_compile_research_adr``, which left a preset
+    declaring ``[team.harness] mcp_servers`` on any other topology compiling to
+    a worker that never advertised it - a declaration the config layer parsed,
+    validated, and then dropped on the floor.
+
+    Deliberately stops short of ``builder.add_node``. pipeline_loop wraps
+    exactly one returned node - its own loop node - in ``_wrap_loop_node``
+    before adding it, which needs a seam between "node built" and "node added"
+    that a helper owning ``add_node`` could only offer back as a callback
+    parameter every caller would have to remember to pass correctly. The mount
+    node each topology inserts around its worker, and the edge each draws out
+    of it, differ enough between topologies (star edges the worker back to the
+    supervisor; pipeline and pipeline_loop insert the mount before add_node
+    rather than after) that they stay topology-owned rather than folded in here
+    - that wiring is each topology's actual subject, not shared duplication.
+    """
+    model, used_provider, capability, model_name = _resolve_model_for_worker(
+        worker_ref,
+        agent_cfg,
+        team_config,
+        workspace_root,
+        provider_factory=provider_factory,
+        frozen_assignment=frozen_assignment,
+    )
+    # Flat and team-level, exactly as the research_adr path reads it: the harness
+    # schema carries no per-role MCP field, so every worker of the team gets the
+    # team's declaration. Empty when no harness is declared, which composes to a
+    # no-op rather than to some inherited default.
+    harness = team_config.effective_harness()
+    worker_node = create_worker_node(
+        model,
+        _composed_worker_prompt(agent_cfg, model),
+        name=agent_cfg.id,
+        autonomous=autonomous,
+        workspace_root=workspace_root,
+        feature_tag=feature_tag,
+        task_queue_port=task_queue_port,
+        cost_port=cost_port,
+        authoring_binding_provider=authoring_binding_provider,
+        role=agent_cfg.role,
+        harness_mcp_servers=list(harness.mcp_servers) if harness is not None else [],
+    )
+    metadata = _agent_node_metadata(agent_cfg, used_provider, capability, model_name)
+    return worker_node, metadata
 
 
 def _wire_diverge_stage(
@@ -562,6 +691,7 @@ def _wire_diverge_stage(
     synthesis_name: str,
     specs: list[dict[str, Any]],
     make_researcher: Callable[[dict[str, Any]], WorkerNode],
+    researcher_metadata: dict[str, str],
 ) -> str:
     """Wire a Send-based diverge stage into ``builder``.
 
@@ -575,7 +705,11 @@ def _wire_diverge_stage(
 
     ``make_researcher`` maps a thread spec to the branch node, so the topology
     supplies model-backed researchers while the fan-out/join structure stays
-    model-agnostic and independently testable.
+    model-agnostic and independently testable. ``researcher_metadata`` is the
+    one caller-built exception to that: every branch shares the same researcher
+    role, provider, and model, so one precomputed metadata dict is applied to
+    each - a per-spec callback would only ever be asked to return the same
+    value, which is a flag in disguise, not a real degree of freedom.
 
     Each researcher carries the same retry policy as every other model-backed
     node. A branch was the lone exception, so a transient provider failure in one
@@ -595,7 +729,12 @@ def _wire_diverge_stage(
     researcher_names: list[str] = []
     for index, spec in enumerate(specs):
         name = researcher_node_name(dispatch_name, index)
-        builder.add_node(name, make_researcher(spec), retry_policy=_NODE_RETRY_POLICY)
+        builder.add_node(
+            name,
+            make_researcher(spec),
+            metadata=researcher_metadata,
+            retry_policy=_NODE_RETRY_POLICY,
+        )
         builder.add_edge(name, synthesis_name)
         researcher_names.append(name)
 
@@ -784,9 +923,10 @@ def compile_team_graph(
     step_timeout: float | None = None,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    cost_port: CostPort | None = None,
     proposal_submitter: DocumentProposalSubmitter | None = None,
-    feedback_reader: "FeedbackContextReader | None" = None,
-    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
+    feedback_reader: FeedbackContextReader | None = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
     model_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> CompiledTeamGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
@@ -878,6 +1018,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
@@ -891,6 +1032,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
@@ -905,6 +1047,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
@@ -919,6 +1062,7 @@ def compile_team_graph(
             proposal_submitter=proposal_submitter,
             feedback_reader=feedback_reader,
             frozen_assignment=model_assignment,
+            cost_port=cost_port,
         )
     else:
         raise ValueError(
@@ -966,7 +1110,8 @@ def _compile_star(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
-    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
+    cost_port: CostPort | None = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END."""
@@ -1053,29 +1198,23 @@ def _compile_star(
                 f"Ensure the agent TOML exists and is loaded."
             )
         agent_cfg = agent_configs[worker_ref.agent_id]
-        model, used_provider, capability = _resolve_model_for_worker(
+        worker_node, node_metadata = _compile_worker_node(
             worker_ref,
             agent_cfg,
             team_config,
             workspace_root,
             provider_factory=provider_factory,
             frozen_assignment=frozen_assignment,
-        )
-        worker_node = create_worker_node(
-            model,
-            _composed_worker_prompt(agent_cfg, model),
-            name=agent_cfg.id,
             autonomous=autonomous,
-            workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
-            role=agent_cfg.role,
         )
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata=_agent_node_metadata(agent_cfg, used_provider, capability),
+            metadata=node_metadata,
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(agent_cfg.id, "supervisor")
@@ -1137,7 +1276,8 @@ def _compile_pipeline(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
-    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
+    cost_port: CostPort | None = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
@@ -1187,24 +1327,18 @@ def _compile_pipeline(
                 f"Pipeline node {agent_id!r} has no matching WorkerRef in "
                 f"team {team_config.id!r}."
             )
-        model, used_provider, capability = _resolve_model_for_worker(
+        worker_node, node_metadata = _compile_worker_node(
             worker_ref,
             agent_cfg,
             team_config,
             workspace_root,
             provider_factory=provider_factory,
             frozen_assignment=frozen_assignment,
-        )
-        worker_node = create_worker_node(
-            model,
-            _composed_worker_prompt(agent_cfg, model),
-            name=agent_cfg.id,
             autonomous=autonomous,
-            workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
-            role=agent_cfg.role,
         )
         # Insert mount node between pipeline stages.
         mount_fn = create_mount_node(workspace_root, task_queue_port)
@@ -1213,7 +1347,7 @@ def _compile_pipeline(
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata=_agent_node_metadata(agent_cfg, used_provider, capability),
+            metadata=node_metadata,
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(mount_id, agent_cfg.id)
@@ -1328,7 +1462,7 @@ def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
         result["loop_count"] = state.get("loop_count", 0) + 1
         return result
 
-    return _loop_node_with_counter
+    return accepting_runnable_config(_loop_node_with_counter)
 
 
 def _compile_pipeline_loop(
@@ -1342,7 +1476,8 @@ def _compile_pipeline_loop(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
-    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
+    cost_port: CostPort | None = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a pipeline_loop topology.
@@ -1371,24 +1506,18 @@ def _compile_pipeline_loop(
                 f"Pipeline-loop node {agent_id!r} has no matching WorkerRef in "
                 f"team {team_config.id!r}."
             )
-        model, used_provider, capability = _resolve_model_for_worker(
+        worker_node, node_metadata = _compile_worker_node(
             worker_ref,
             agent_cfg,
             team_config,
             workspace_root,
             provider_factory=provider_factory,
             frozen_assignment=frozen_assignment,
-        )
-        worker_node = create_worker_node(
-            model,
-            _composed_worker_prompt(agent_cfg, model),
-            name=agent_cfg.id,
             autonomous=autonomous,
-            workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
-            role=agent_cfg.role,
         )
         if agent_id == loop_node_id:
             worker_node = _wrap_loop_node(worker_node)
@@ -1400,7 +1529,7 @@ def _compile_pipeline_loop(
         builder.add_node(
             agent_cfg.id,
             worker_node,
-            metadata=_agent_node_metadata(agent_cfg, used_provider, capability),
+            metadata=node_metadata,
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(mount_id, agent_cfg.id)
@@ -1443,18 +1572,28 @@ def _compile_pipeline_loop(
 _RA_CLARIFY_REQUEST = "clarification_request"
 _RA_CLARIFY_GATE = "clarification_gate"
 # Correlation handle for a parked questionnaire, derived from the run itself so
-# it is stable across a replay and distinct between concurrent runs. Bounded to
-# the request-id cap the wire enforces; the run id already uses a subset of the
-# permitted alphabet, so truncation cannot produce an invalid handle.
+# it is stable across a replay and distinct between concurrent runs. The run id
+# already uses a subset of the permitted alphabet, so truncation cannot produce
+# an invalid handle.
 _CLARIFICATION_ID_PREFIX = "clarify-"
-_CLARIFICATION_ID_MAX = 128
 
 
 def _clarification_request_id(thread_id: str) -> str:
-    """Return the request id a run's parked questionnaire is addressed by."""
+    """Return the request id a run's parked questionnaire is addressed by.
+
+    This is the MINTING ceiling for a clarification handle, so it is the wire
+    model's own cap rather than a number that matches it. The cross-repo bounds
+    agreement asserts the engine accepts at least what this side mints, stated in
+    terms of :data:`MAX_REQUEST_ID_CHARS` - so a locally-declared bound here left
+    that guarantee resting on two numbers happening to agree. Raise this above
+    the wire cap and the engine refuses a handle a2a issued, leaving the run
+    parked on a question that cannot be answered; raise the wire cap alone and
+    the run mints shorter handles than the contract advertises. Neither drift is
+    visible from either site, and the agreement test stays green through both.
+    """
     if not thread_id:
         return "clarification"
-    return f"{_CLARIFICATION_ID_PREFIX}{thread_id}"[:_CLARIFICATION_ID_MAX]
+    return f"{_CLARIFICATION_ID_PREFIX}{thread_id}"[:MAX_REQUEST_ID_CHARS]
 
 
 def _declared_clarification_producer(
@@ -1505,11 +1644,18 @@ def _resolve_research_adr_models(
     *,
     provider_factory: ProviderFactoryProtocol,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, BaseChatModel]:
-    """Resolve one model per required research_adr role.
+) -> dict[str, tuple[BaseChatModel, dict[str, str]]]:
+    """Resolve one model, and its node metadata, per required research_adr role.
 
     Raises ConfigError when a required role has no resolved AgentConfig among the
     team's workers.
+
+    The metadata is built here, through the same :func:`_agent_node_metadata`
+    every other topology uses, rather than left for the caller to reconstruct:
+    this is the one place that holds the resolved provider, capability, and
+    frozen catalog model name for each role, and discarding them here - as this
+    function used to - is exactly how research_adr's compiled graph ended up
+    disclosing no agents at all.
     """
     cfg_by_role: dict[str, Any] = {}
     ref_by_role: dict[str, Any] = {}
@@ -1528,9 +1674,9 @@ def _resolve_research_adr_models(
             f"{list(RESEARCH_ADR_ROLES)}."
         )
 
-    models: dict[str, BaseChatModel] = {}
+    resolved: dict[str, tuple[BaseChatModel, dict[str, str]]] = {}
     for role in RESEARCH_ADR_ROLES:
-        models[role], _provider, _capability = _resolve_model_for_worker(
+        model, provider, capability, model_name = _resolve_model_for_worker(
             ref_by_role[role],
             cfg_by_role[role],
             team_config,
@@ -1538,7 +1684,11 @@ def _resolve_research_adr_models(
             provider_factory=provider_factory,
             frozen_assignment=frozen_assignment,
         )
-    return models
+        metadata = _agent_node_metadata(
+            cfg_by_role[role], provider, capability, model_name
+        )
+        resolved[role] = (model, metadata)
+    return resolved
 
 
 def _make_research_producer(
@@ -1613,11 +1763,33 @@ def _make_research_producer(
             # tool is not blocked by a prompt, parallel to the worker composition
             # site. The researcher producer is the primary target of the grounding
             # feature, so its wiring must match the worker's.
+            #
+            # The lane is stated on BOTH calls, as the worker states it. Resolution
+            # gates the network-egress axis on the lane, and an unstated lane is
+            # refused rather than defaulted - correct as a fail-closed default, but
+            # wrong as a silent one HERE: it would deny this role an egressing
+            # server even on a lane carrying live-retrieval proof, and report the
+            # lane as unproven when the actual fault was the missing argument.
+            harness_lane = getattr(model, "provider", None)
             harness_allowed = (
-                harness_allowed_tool_names(harness_mcp_servers) if autonomous else None
+                harness_allowed_tool_names(harness_mcp_servers, lane=harness_lane)
+                if autonomous
+                else None
             )
+            # The run's project pins every harness server it surfaces. Without
+            # it a composed grounding server resolves its own project from the
+            # directory it inherits, which is the undeclared inheritance the pin
+            # replaces. Absent, composition stays unpinned rather than inventing
+            # a root - a default here would be that same inheritance, spelled
+            # invisibly.
             effective_model = compose_harness_mcp_servers(
-                model, harness_mcp_servers, allowed_tools=harness_allowed
+                model,
+                harness_mcp_servers,
+                allowed_tools=harness_allowed,
+                project_root=(
+                    str(effective_workspace_root) if effective_workspace_root else None
+                ),
+                lane=harness_lane,
             )
         response = await effective_model.ainvoke(messages, config=config)
         claim = str(response.content)
@@ -1671,8 +1843,9 @@ def _compile_research_adr(
     workspace_root: Path | None = None,
     autonomous: bool = False,
     proposal_submitter: DocumentProposalSubmitter | None,
-    feedback_reader: "FeedbackContextReader | None" = None,
+    feedback_reader: FeedbackContextReader | None = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
+    cost_port: CostPort | None = None,
 ) -> None:
     """Wire the research_adr document phase machine.
 
@@ -1730,6 +1903,11 @@ def _compile_research_adr(
         provider_factory=provider_factory,
         frozen_assignment=frozen_assignment,
     )
+    researcher_model, researcher_metadata = models["researcher"]
+    synthesist_model, synthesist_metadata = models["synthesist"]
+    doc_reviewer_model, doc_reviewer_metadata = models["doc-reviewer"]
+    adr_author_model, adr_author_metadata = models["adr-author"]
+    plan_author_model, plan_author_metadata = models["plan-author"]
 
     # The team-harness MCP servers are a flat, team-level declaration composed
     # into every document-role model's ACP session (there is no per-role field
@@ -1742,9 +1920,9 @@ def _compile_research_adr(
     ] or [{"thread_id": "primary", "topic": "", "instructions": ""}]
 
     researcher_producer = _make_research_producer(
-        models["researcher"],
+        researcher_model,
         _composed_role_prompt(
-            team_config, agent_configs, "researcher", models["researcher"]
+            team_config, agent_configs, "researcher", researcher_model
         ),
         workspace_root=workspace_root,
         harness_mcp_servers=harness_mcp_servers,
@@ -1757,47 +1935,52 @@ def _compile_research_adr(
         synthesis_name=_RA_SYNTHESIS,
         specs=specs,
         make_researcher=lambda spec: create_researcher_node(spec, researcher_producer),
+        researcher_metadata=researcher_metadata,
     )
 
     builder.add_node(
         _RA_SYNTHESIS,
         create_worker_node(
-            models["synthesist"],
+            synthesist_model,
             _composed_role_prompt(
-                team_config, agent_configs, "synthesist", models["synthesist"]
+                team_config, agent_configs, "synthesist", synthesist_model
             ),
             name=_RA_SYNTHESIS,
             autonomous=autonomous,
             workspace_root=workspace_root,
             role="synthesist",
             harness_mcp_servers=harness_mcp_servers,
+            cost_port=cost_port,
             # Feedback-loop grounding: the research-doc writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=feedback_reader,
         ),
+        metadata=synthesist_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_node(
         _RA_RESEARCH_REVIEW,
         create_worker_node(
-            models["doc-reviewer"],
+            doc_reviewer_model,
             _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", models["doc-reviewer"]
+                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
             ),
             name=_RA_RESEARCH_REVIEW,
             autonomous=autonomous,
             workspace_root=workspace_root,
             role="doc-reviewer",
             harness_mcp_servers=harness_mcp_servers,
+            cost_port=cost_port,
         ),
+        metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_node(
         _RA_ADR_AUTHOR,
         create_worker_node(
-            models["adr-author"],
+            adr_author_model,
             _composed_role_prompt(
-                team_config, agent_configs, "adr-author", models["adr-author"]
+                team_config, agent_configs, "adr-author", adr_author_model
             ),
             name=_RA_ADR_AUTHOR,
             autonomous=autonomous,
@@ -1807,30 +1990,34 @@ def _compile_research_adr(
             # Feedback-loop grounding: the ADR writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=feedback_reader,
+            cost_port=cost_port,
         ),
+        metadata=adr_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_node(
         _RA_ADR_REVIEW,
         create_worker_node(
-            models["doc-reviewer"],
+            doc_reviewer_model,
             _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", models["doc-reviewer"]
+                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
             ),
             name=_RA_ADR_REVIEW,
             autonomous=autonomous,
             workspace_root=workspace_root,
             role="doc-reviewer",
             harness_mcp_servers=harness_mcp_servers,
+            cost_port=cost_port,
         ),
+        metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_node(
         _RA_PLAN_AUTHOR,
         create_worker_node(
-            models["plan-author"],
+            plan_author_model,
             _composed_role_prompt(
-                team_config, agent_configs, "plan-author", models["plan-author"]
+                team_config, agent_configs, "plan-author", plan_author_model
             ),
             name=_RA_PLAN_AUTHOR,
             autonomous=autonomous,
@@ -1840,22 +2027,26 @@ def _compile_research_adr(
             # Feedback-loop grounding: the plan writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=feedback_reader,
+            cost_port=cost_port,
         ),
+        metadata=plan_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_node(
         _RA_PLAN_REVIEW,
         create_worker_node(
-            models["doc-reviewer"],
+            doc_reviewer_model,
             _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", models["doc-reviewer"]
+                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
             ),
             name=_RA_PLAN_REVIEW,
             autonomous=autonomous,
             workspace_root=workspace_root,
             role="doc-reviewer",
             harness_mcp_servers=harness_mcp_servers,
+            cost_port=cost_port,
         ),
+        metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     # Each gate is split into a submit node (commits the proposal id to the

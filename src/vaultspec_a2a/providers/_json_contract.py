@@ -20,6 +20,8 @@ __all__ = [
     "json_list",
     "json_object",
     "json_text",
+    "lenient_json_object",
+    "lenient_json_object_list",
     "thaw_json",
 ]
 
@@ -69,6 +71,37 @@ def thaw_json(value: FrozenJsonValue) -> JsonValue:
 # wrong, saying which key held what beats an empty dict flowing onward to fail
 # somewhere less informative.
 # ---------------------------------------------------------------------------
+
+
+def lenient_json_object(value: JsonValue | None) -> JsonObject:
+    """Return an object payload, or the empty object for anything malformed.
+
+    The LENIENT counterpart to :func:`json_object`, and the difference is the
+    whole point of it existing separately. The raising trio below signals a
+    broken internal invariant - something this process built wrongly. These two
+    read UNTRUSTED provider output, where a malformed field is an ordinary event
+    that must degrade to an empty value rather than abort a live turn.
+
+    Kept beside the raising trio rather than merged with it: three failure
+    postures already share overlapping names in this package, and a caller
+    reaching for the wrong one gets either a crash on ordinary provider noise or
+    silence where an invariant should have shouted.
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def lenient_json_object_list(value: JsonValue | None) -> list[JsonObject]:
+    """Return only the object entries of an untrusted JSON array.
+
+    Non-object entries are dropped rather than refused, for the same reason
+    :func:`lenient_json_object` degrades: a provider may interleave shapes this
+    caller does not model, and one unexpected entry must not cost the rest.
+    """
+    return (
+        [entry for entry in value if isinstance(entry, dict)]
+        if isinstance(value, list)
+        else []
+    )
 
 
 def json_object(value: JsonValue, *, at: str = "value") -> JsonObject:

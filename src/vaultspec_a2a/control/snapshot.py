@@ -11,7 +11,11 @@ from ..graph.enums import (
     ToolCallStatus,
     ToolKind,
 )
-from ..streaming.types import classify_tool_kind
+from ..streaming.types import (
+    action_detail_projection,
+    classify_tool_kind,
+    map_action_item_status,
+)
 from ..thread.snapshots import (
     AgentData,
     ArtifactData,
@@ -84,8 +88,28 @@ def enrich_snapshot_from_state(
                 )
             )
 
-    # Extract tool calls from AIMessage.tool_calls, cross-reference with
-    # ToolMessage to determine completion status.
+    # Extract tool calls from AIMessage.tool_calls. Two shapes reach this
+    # loop through the identical field:
+    #
+    # A genuine LangChain BaseTool/ToolNode call cross-references against a
+    # ToolMessage the dispatch produced, since that message is the only
+    # place its outcome lives.
+    #
+    # A provider-internal action (an ACP CLI's own built-in tools; Codex's
+    # commandExecution/fileChange/mcpToolCall) never produces a ToolMessage
+    # - no ToolNode ever dispatched it - so it fell to the else-PENDING
+    # branch below unconditionally, FOREVER, regardless of what it actually
+    # did (F17: 15/15 tool calls on a completed run served pending, one of
+    # them a policy-rejected command the model narrated as failed). Codex's
+    # own model (codex_chat_model._completed_action_chunk) already encodes
+    # that item's terminal status/content/locations into its tool_call's
+    # args as a deliberate durability move - "parity with a mechanism
+    # already proven durable" per that function's own docstring - so args
+    # carrying a "status" key is read as that report instead of guessed at
+    # via ToolMessage correlation. action_detail_projection/
+    # map_action_item_status are the SAME functions streaming.transformer
+    # uses for the live stream, so a provider action classifies identically
+    # whether read live or reconstructed from a settled run's checkpoint.
     answered_tool_ids: set[str] = {
         m.tool_call_id
         for m in state.values.get("messages", [])
@@ -101,6 +125,25 @@ def enrich_snapshot_from_state(
                     continue
                 tc_name = tc.get("name", "unknown_tool")
                 checkpoint_tc_ids.add(tc_id)
+                tc_args = tc.get("args")
+                detail = (
+                    tc_args
+                    if isinstance(tc_args, dict) and "status" in tc_args
+                    else None
+                )
+                if detail is not None:
+                    content, locations = action_detail_projection(tc_name, detail)
+                    tool_call_data.append(
+                        ToolCallData(
+                            tool_call_id=tc_id,
+                            title=tc_name,
+                            kind=str(classify_tool_kind(tc_name)),
+                            status=str(map_action_item_status(detail.get("status"))),
+                            content=content,
+                            locations=locations,
+                        )
+                    )
+                    continue
                 tool_call_data.append(
                     ToolCallData(
                         tool_call_id=tc_id,

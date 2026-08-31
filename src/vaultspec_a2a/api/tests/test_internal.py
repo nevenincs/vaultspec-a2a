@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import pathlib
 
 import pytest
 from fastapi import FastAPI
@@ -17,6 +18,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from starlette.testclient import TestClient
 
+from ...control.worker_management import WorkerLiveness
 from ...database import (
     create_thread,
     get_permission_request,
@@ -27,6 +29,10 @@ from ...database.models import ThreadExecutionStateModel
 from ...streaming.aggregator import EventAggregator
 from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
+
+# Every dispatch names an active project, as a real one does. This package's own
+# directory is real, absolute, and present on either platform.
+_WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -46,11 +52,16 @@ def _make_test_app(
     app = FastAPI()
     app.include_router(internal_router)
 
-    # Pre-populate app.state with the attributes the endpoints expect
-    app.state.worker_last_heartbeat_ts = 0.0
-    app.state.worker_active_threads = []
-    if session_factory is not None:
-        app.state.db_session_factory = session_factory
+    # Seat the liveness record the way the gateway lifespan does, so these apps
+    # exercise the same seam production writes through.
+    app.state.worker_liveness = WorkerLiveness(last_contact_ts=0.0)
+    # Seated UNCONDITIONALLY, including as None. These apps genuinely have no
+    # database, and leaving the attribute off says only that they did not mention
+    # one - which the relay resolves by reaching for the process database. In a
+    # single-test run there is none and the write failed; in a full session some
+    # unrelated test has already opened one, and these apps wrote into it. The
+    # durable write must be skipped, so the absence has to be DECLARED.
+    app.state.db_session_factory = session_factory
 
     app.state.aggregator = None
 
@@ -153,7 +164,7 @@ class TestInternalHeartbeat:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_updates_app_state_timestamp(self) -> None:
         app = _make_test_app()
-        before_ts = app.state.worker_last_heartbeat_ts
+        before_ts = app.state.worker_liveness.last_contact_ts
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -167,7 +178,7 @@ class TestInternalHeartbeat:
                 },
             )
         # The heartbeat should have updated the timestamp
-        assert app.state.worker_last_heartbeat_ts > before_ts
+        assert app.state.worker_liveness.last_contact_ts > before_ts
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_updates_app_state_active_threads(self) -> None:
@@ -184,13 +195,13 @@ class TestInternalHeartbeat:
                     "timestamp": "2026-03-01T12:00:00Z",
                 },
             )
-        assert app.state.worker_active_threads == ["t-aaa", "t-bbb"]
+        assert app.state.worker_liveness.active_threads == ["t-aaa", "t-bbb"]
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_replaces_old_active_threads(self) -> None:
         """A new heartbeat fully replaces the previous active_threads list."""
         app = _make_test_app()
-        app.state.worker_active_threads = ["old-thread"]
+        app.state.worker_liveness.active_threads = ["old-thread"]
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -203,7 +214,7 @@ class TestInternalHeartbeat:
                     "timestamp": "2026-03-01T12:00:00Z",
                 },
             )
-        assert app.state.worker_active_threads == []
+        assert app.state.worker_liveness.active_threads == []
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_heartbeat_log_includes_runtime_fields(
@@ -1401,6 +1412,7 @@ class TestNoFailedRunPersistsWithoutACondition:
         await executor.handle_dispatch(
             DispatchRequest(
                 action="ingest",
+                workspace_root=_WORKSPACE,
                 thread_id="t-worker-rejection",
                 content="do the thing",
                 recursion_limit=25,

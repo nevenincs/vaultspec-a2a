@@ -23,6 +23,7 @@ from .._acp_mcp import (
     codex_mcp_server_specs,
     reject_duplicate_identities,
     require_declared_surface,
+    resolve_harness_mcp_servers,
 )
 
 if TYPE_CHECKING:
@@ -36,8 +37,16 @@ def _spec(command: str) -> JsonObject:
 
 
 def test_a_single_identity_passes_the_declared_surface_guard() -> None:
-    """The ordinary case is unaffected by the guard."""
-    require_declared_surface([_spec("only")], bridge_name=AUTHORING_MCP_SERVER_NAME)
+    """The ordinary case is unaffected by the guard.
+
+    Resolved from the registry rather than invented, because the same guard now
+    also requires a registry-known name to carry its entry's launch: a spec that
+    is singular but divergent would be refused for the other reason and prove
+    nothing about duplicates.
+    """
+    require_declared_surface(
+        resolve_harness_mcp_servers([_KNOWN]), bridge_name=AUTHORING_MCP_SERVER_NAME
+    )
 
 
 def test_a_repeated_identity_is_refused_rather_than_overwritten() -> None:

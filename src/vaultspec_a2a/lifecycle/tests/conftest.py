@@ -7,6 +7,8 @@ services) instead — keeping the marker selections a clean partition.
 
 import pytest
 
+from ...testing import apply_layer_markers
+
 _PACKAGE_DIR = str(__import__("pathlib").Path(__file__).resolve().parent)
 
 # Files whose tests drive real infrastructure (fs/process/HTTP) rather than pure
@@ -24,13 +26,19 @@ _INFRA_FILES = frozenset(
 )
 
 
+# Core-layer lifecycle tests that really do launch a child process. They stay
+# ``core`` - they are domain tests, not infrastructure ones - but they are not
+# pure, so the orthogonal ``unit`` claim is withheld. A wrong marker is worse
+# than none: a selection excluding impure tests silently includes anything
+# missing here, and the run is then believed hermetic when it is not.
+_IMPURE_CORE_FILES = frozenset({"test_pairing.py", "test_singleton.py"})
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Mark tests from THIS directory by layer according to what they exercise."""
-    for item in items:
-        if not str(item.path).startswith(_PACKAGE_DIR):
-            continue
-        if item.path.name in _INFRA_FILES:
-            item.add_marker(pytest.mark.middleware)
-        else:
-            item.add_marker(pytest.mark.core)
-            item.add_marker(pytest.mark.unit)
+    apply_layer_markers(
+        items,
+        package_dir=_PACKAGE_DIR,
+        middleware_files=_INFRA_FILES,
+        impure_files=_IMPURE_CORE_FILES,
+    )

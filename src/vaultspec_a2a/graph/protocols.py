@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
+    "CostPort",
     "MarkCompleteOutcome",
     "NullTelemetryHook",
     "ProviderFactoryProtocol",
@@ -77,6 +78,38 @@ class TaskQueuePort(Protocol):
         task_key: str,
     ) -> MarkCompleteOutcome:
         """Idempotently complete ``task_key`` and report the next pending row."""
+        ...
+
+
+@runtime_checkable
+class CostPort(Protocol):
+    """Protocol for durable per-invocation token accounting.
+
+    The sibling of :class:`TaskQueuePort`, and injected the same way: graph
+    nodes depend only on this abstract interface and receive a concrete adapter
+    at compile time, so the persistence layer never leaks into the domain graph.
+
+    Deliberately token-only. No cost argument is accepted because no provider
+    lane in this project reports one and no rate table exists to derive one; a
+    price parameter here would invite a fabricated number to be passed as a
+    measured fact.
+
+    ``provider`` and ``model`` are optional for the same reason: a lane the
+    invoked instance never declared is passed as ``None`` and stored as unknown,
+    rather than back-filled with a stand-in that would read as a real lane.
+    """
+
+    async def record_usage(
+        self,
+        *,
+        thread_id: str,
+        agent_id: str,
+        provider: str | None,
+        model: str | None,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        """Persist one invocation's reported token usage."""
         ...
 
 

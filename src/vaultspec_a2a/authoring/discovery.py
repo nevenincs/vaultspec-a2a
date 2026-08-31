@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import httpx
-from pydantic import TypeAdapter, ValidationError
+
+from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -40,6 +41,7 @@ __all__ = [
     "read_service_json",
     "resolve_engine",
     "resolve_engine_with_retry",
+    "service_json_candidates",
 ]
 
 SERVICE_JSON_ENV = "VAULTSPEC_ENGINE_SERVICE_JSON"
@@ -56,7 +58,6 @@ _DESKTOP_PROFILE = "desktop"
 # not as an available service (mirrors the engine's HEARTBEAT_STALE_MS).
 HEARTBEAT_STALE_MS = 120_000
 _STALE_MS = HEARTBEAT_STALE_MS
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
 def read_service_json(path: Path) -> dict[str, object] | None:
@@ -70,10 +71,7 @@ def read_service_json(path: Path) -> dict[str, object] | None:
         decoded: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    try:
-        return _JSON_OBJECT.validate_python(decoded)
-    except ValidationError:
-        return None
+    return coerce_object_mapping(decoded)
 
 
 def _parse_heartbeat_ms(value: object) -> int | None:
@@ -169,9 +167,8 @@ def parse_discovery_record(info: Mapping[str, object]) -> DiscoveryRecordView | 
         and info.get("profile") == _DESKTOP_PROFILE
     ):
         endpoint_value = info.get("endpoint")
-        try:
-            endpoint = _JSON_OBJECT.validate_python(endpoint_value)
-        except ValidationError:
+        endpoint = coerce_object_mapping(endpoint_value)
+        if endpoint is None:
             return None
         port = _coerce_port(endpoint.get("port"))
         if port is None:
@@ -224,7 +221,15 @@ class EngineEndpoint:
         return f"EngineEndpoint(base_url={self.base_url!r}, bearer_token=<set>)"
 
 
-def _candidates() -> list[Path]:
+def service_json_candidates() -> list[Path]:
+    """Return the ordered service.json candidate paths this process consults.
+
+    The explicit override (:data:`SERVICE_JSON_ENV`) is tried first, then the
+    machine-global ``~/.vaultspec/service.json``. Exported so every reader of
+    the discovery file shares this ordering rather than restating it — a
+    caller that only classifies freshness (never resolves a live endpoint)
+    still needs the same candidate list.
+    """
     candidates: list[Path] = []
     env_path = os.environ.get(SERVICE_JSON_ENV)
     if env_path:
@@ -245,7 +250,7 @@ def resolve_engine(*, liveness_timeout: float = 3.0) -> EngineEndpoint | None:
     unchanged for it.
     """
     now_ms = int(time.time() * 1000)
-    for path in _candidates():
+    for path in service_json_candidates():
         info = read_service_json(path)
         if info is None or not heartbeat_is_fresh(info, now_ms):
             continue

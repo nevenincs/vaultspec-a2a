@@ -25,6 +25,7 @@ __all__ = [
     "CHECKPOINT_SCHEMA_DIGEST",
     "CHECKPOINT_SCHEMA_VERSION",
     "CheckpointSchemaError",
+    "checkpoint_pragmas",
     "install_checkpoint_schema_identity",
     "open_checkpoint_read_only",
     "validate_checkpoint_schema_connection",
@@ -161,19 +162,67 @@ class CheckpointSchemaError(RuntimeError):
     """The checkpoint database lacks or contradicts its schema identity."""
 
 
-def open_checkpoint_read_only(checkpoint_path: Path) -> sqlite3.Connection:
+def checkpoint_pragmas(busy_timeout_ms: int) -> tuple[str, ...]:
+    """Return the connection posture every writable checkpoint path applies.
+
+    The canonical setter for the application store is the SQLAlchemy ``connect``
+    listener in :mod:`vaultspec_a2a.database.session`. It cannot be reused here:
+    it is a pool event bound to an ``AsyncEngine``, while both checkpoint writers
+    hold a raw connection no engine owns - ``aiosqlite`` for the LangGraph saver,
+    stdlib ``sqlite3`` for the identity installer. The statements are therefore
+    restated deliberately, and kept in one place so the two checkpoint paths
+    cannot drift from each other the way they had.
+
+    ``journal_mode`` is persisted in the database header, so the first writer to
+    set WAL fixes it for every later connection. ``busy_timeout`` and
+    ``foreign_keys`` are per-connection and must be re-applied every time.
+    """
+    return (
+        "PRAGMA journal_mode=WAL",
+        f"PRAGMA busy_timeout={busy_timeout_ms}",
+        "PRAGMA foreign_keys=ON",
+    )
+
+
+def _resolve_busy_timeout_ms(busy_timeout_ms: int | None) -> int:
+    """Resolve the configured busy timeout, allowing an explicit override."""
+    if busy_timeout_ms is not None:
+        return busy_timeout_ms
+    # Imported lazily: this module is the stdlib-only structural authority the
+    # desktop updater loads, and settings drags in pydantic-settings.
+    from ..control.config import settings
+
+    return settings.sqlite_busy_timeout_ms
+
+
+def open_checkpoint_read_only(
+    checkpoint_path: Path, *, busy_timeout_ms: int | None = None
+) -> sqlite3.Connection:
     """Open an existing checkpoint database with SQLite-enforced read-only mode."""
     if not checkpoint_path.is_file():
         raise CheckpointSchemaError(
             f"checkpoint database does not exist at {checkpoint_path}"
         )
     uri = f"{checkpoint_path.resolve().as_uri()}?mode=ro"
+    timeout_ms = _resolve_busy_timeout_ms(busy_timeout_ms)
     try:
-        return sqlite3.connect(uri, uri=True)
+        connection = sqlite3.connect(uri, uri=True)
     except sqlite3.Error as exc:
         raise CheckpointSchemaError(
             f"checkpoint database is not readable at {checkpoint_path}"
         ) from exc
+    try:
+        # Only the busy timeout applies to a reader: the journal mode is already
+        # fixed in the file by whichever writer set it, and a connection that
+        # cannot write a row has no foreign key to enforce. A reader can still be
+        # blocked behind a writer's lock, which is exactly what this bounds.
+        connection.execute(f"PRAGMA busy_timeout={timeout_ms}")
+    except sqlite3.Error as exc:
+        connection.close()
+        raise CheckpointSchemaError(
+            f"checkpoint database is not readable at {checkpoint_path}"
+        ) from exc
+    return connection
 
 
 def _object_signatures(
@@ -235,14 +284,22 @@ def _assert_exact_structure(
             )
 
 
-def install_checkpoint_schema_identity(checkpoint_path: Path) -> None:
+def install_checkpoint_schema_identity(
+    checkpoint_path: Path, *, busy_timeout_ms: int | None = None
+) -> None:
     """Install the identity over an exact unversioned LangGraph schema.
 
     An existing identity is validated, never overwritten. This prevents a
     staged generation from silently relabelling a newer or foreign store.
     """
+    timeout_ms = _resolve_busy_timeout_ms(busy_timeout_ms)
     connection = sqlite3.connect(str(checkpoint_path))
     try:
+        # Applied before the first statement: ``foreign_keys`` is a silent no-op
+        # inside an open transaction, and this connection writes DDL and a row to
+        # the same file the LangGraph saver holds open.
+        for statement in checkpoint_pragmas(timeout_ms):
+            connection.execute(statement)
         if ("table", _MARKER_TABLE) in _object_signatures(connection):
             validate_checkpoint_schema_connection(connection)
             return

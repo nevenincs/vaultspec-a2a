@@ -3,46 +3,13 @@ tags:
   - '#exec'
   - '#provider-error-taxonomy'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:e73ff95b87a6326af73e556e30b6ec73832ca81de2dbe4f460cddfa1a164805e'
+body_hash: 'sha256:7b31531c834754489ca0a1546beb222a41ac7578d1aec0d83eef355e5b514b33'
 step_id: 'S18'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace provider-error-taxonomy with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S18 and 2026-08-02-provider-error-taxonomy-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Align the failure reason bound to the consumer byte limit and ## Scope
-
-- `src/vaultspec_a2a/database/thread_repository.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
 
 # Align the failure reason bound to the consumer byte limit
 

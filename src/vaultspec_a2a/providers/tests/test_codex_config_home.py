@@ -17,7 +17,7 @@ import tempfile
 import time
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from pydantic import SecretStr
@@ -25,6 +25,7 @@ from pydantic import SecretStr
 from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
 from ...graph.enums import Provider
+from ...testing import armed_desktop_app_home
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
 from .._acp_mcp import codex_mcp_server_specs
@@ -40,7 +41,7 @@ from .._config_home_roots import ORPHAN_HOME_MIN_AGE_SECONDS, temp_home_root
 from ..lane_admission import PROVEN_WEB_LANES, is_web_lane_proven
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from .._json_contract import JsonObject
     from ..codex_chat_model import CodexChatModel
@@ -58,6 +59,41 @@ def _active_codex_leak_root() -> Path:
     leak check honest under both the armed and unarmed profile.
     """
     return temp_home_root() or Path(tempfile.gettempdir())
+
+
+@pytest.fixture
+def private_home_root(tmp_path: Path) -> Iterator[Path]:
+    """Point per-run home creation at a root no other process writes to.
+
+    The leak assertions below compare a glob of that root before and after a
+    failure. By default the root is the machine-wide temporary directory, shared
+    with every other lane on the machine, so a concurrent run creating its own
+    Codex home made the comparison fail for a reason that had nothing to do with
+    cleanup. Declaring the root through the settings surface - the same field an
+    armed desktop install sets - makes the comparison private without teaching
+    the tests a second way to find homes.
+
+    The steering is ASSERTED rather than assumed. If the declared root stopped
+    being what the production resolver returns, the glob would search a
+    directory nothing ever writes to and every leak assertion below would pass
+    VACUOUSLY - which is the exact failure :func:`_active_codex_leak_root`
+    exists to prevent, arriving through the fix for a different problem.
+
+    It arms the profile because ``desktop_temp_homes_dir`` is DERIVED from the
+    application home and has no setter; arming through the sanctioned helper
+    sets the field the property reads. That does move these three onto the armed
+    placement, and that costs no coverage: placement under each profile has its
+    own dedicated test below, while what these three assert is the cleanup
+    branch, which does not vary by root.
+    """
+    with armed_desktop_app_home(tmp_path / "app-home"):
+        root = _active_codex_leak_root()
+        assert root != Path(tempfile.gettempdir()), (
+            "the armed profile did not move the home root off the shared "
+            "temporary directory, so these assertions would still be exposed "
+            "to every other process on this machine"
+        )
+        yield root
 
 
 def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[str]:
@@ -453,6 +489,33 @@ def test_build_home_writes_config_and_copies_auth(tmp_path: Path) -> None:
         assert not home.exists()
 
 
+def test_unarmed_codex_model_still_uses_an_isolated_home(tmp_path: Path) -> None:
+    """An MCP-free turn cannot inherit the operator's ambient MCP servers."""
+    from ..codex_chat_model import CodexChatModel
+
+    base = tmp_path / "operator-codex-home"
+    base.mkdir()
+    (base / "auth.json").write_text('{"token": "x"}', encoding="utf-8")
+    (base / "config.toml").write_text(
+        '[mcp_servers.operator-owned]\ncommand = "never-inherit"\n',
+        encoding="utf-8",
+    )
+    model = CodexChatModel(
+        command=["codex", "app-server"],
+        codex_home=str(base),
+        web_search_mode=CodexWebSearchMode.CACHED,
+    )
+
+    home = model._build_codex_config_home()
+    try:
+        assert home != base
+        assert (home / "auth.json").read_text(encoding="utf-8") == '{"token": "x"}'
+        config = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+        assert config == {"web_search": CodexWebSearchMode.CACHED.value}
+    finally:
+        cleanup_codex_config_home(home)
+
+
 def test_copied_credential_is_owner_only_on_posix(tmp_path: Path) -> None:
     # The credential copy must not widen access. On POSIX the file is pinned to
     # 0o600 and the home to 0o700; on Windows chmod is a no-op and the per-user
@@ -678,7 +741,45 @@ def test_cleanup_is_none_safe_and_idempotent(tmp_path: Path) -> None:
     cleanup_codex_config_home(home)
 
 
-def test_build_self_cleans_on_copy_failure(tmp_path: Path) -> None:
+def test_cleanup_removes_home_by_default(tmp_path: Path) -> None:
+    """Verify that cleanup_codex_config_home removes the home by default."""
+    # Ensure the env var is unset (preservation: cleanup still happens)
+    environment = dict(os.environ)
+    environment.pop("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN", None)
+
+    home = build_codex_config_home([], tmp_path, web_search=CodexWebSearchMode.DISABLED)
+    assert home.exists()
+    # Run cleanup in a context where the env var is not set
+    saved_env = os.environ.pop("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN", None)
+    try:
+        cleanup_codex_config_home(home)
+        assert not home.exists()
+    finally:
+        if saved_env is not None:
+            os.environ["VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"] = saved_env
+
+
+def test_cleanup_retains_home_when_env_var_set(tmp_path: Path) -> None:
+    """Verify that cleanup_codex_config_home retains the home when env var is set."""
+    home = build_codex_config_home([], tmp_path, web_search=CodexWebSearchMode.DISABLED)
+    assert home.exists()
+    # Save the original env var and set the retention flag
+    saved_env = os.environ.get("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN")
+    try:
+        os.environ["VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"] = "1"
+        cleanup_codex_config_home(home)
+        # Home should still exist (fix: home retention when flag is set)
+        assert home.exists()
+    finally:
+        if saved_env is not None:
+            os.environ["VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"] = saved_env
+        else:
+            os.environ.pop("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN", None)
+
+
+def test_build_self_cleans_on_copy_failure(
+    tmp_path: Path, private_home_root: Path
+) -> None:
     # If the credential copy fails mid-build, the partially-built home (which may
     # already hold a credential) must not leak: the builder removes its own dir.
     base = tmp_path / "base"
@@ -697,7 +798,9 @@ def test_build_self_cleans_on_copy_failure(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_spawn_failure_cleans_credential_home(tmp_path: Path) -> None:
+async def test_spawn_failure_cleans_credential_home(
+    tmp_path: Path, private_home_root: Path
+) -> None:
     # The exact HIGH-1 scenario: the credential home is built, then the subprocess
     # SPAWN itself raises (here an invalid cwd) before a client exists. The home
     # must still be cleaned - exercising the `client is None` finally branch.
@@ -724,7 +827,7 @@ async def test_spawn_failure_cleans_credential_home(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_turn_failure_after_build_cleans_credential_home(
-    tmp_path: Path,
+    tmp_path: Path, private_home_root: Path
 ) -> None:
     # A failure AFTER the credential home is built (here the codex subprocess
     # exits immediately, so the handshake fails) must still clean the home - the
@@ -741,6 +844,7 @@ async def test_turn_failure_after_build_cleans_credential_home(
         harness_mcp_servers=["vaultspec-rag"],
         codex_home=str(base),
         timeout=10.0,
+        workspace_root=str(tmp_path),
     )
     pattern = os.path.join(str(_active_codex_leak_root()), "vaultspec-codex-home-*")
     before = set(glob.glob(pattern))
@@ -839,3 +943,96 @@ def test_codex_sweep_is_prefix_bound_and_never_collects_foreign_homes(
     codex_removed = sweep_orphan_codex_homes(root=tmp_path)
     assert codex_removed == [stale_codex]
     assert foreign.exists()  # untouched by the Codex-prefixed sweep
+
+
+# --- endpoint redirect on the Codex lane -----------------------------------
+
+
+def test_render_omits_any_provider_table_when_no_override_is_given() -> None:
+    # The served shape. A config home that named a provider table by default
+    # would silently move every run's traffic, so absence is the assertion that
+    # matters most here - not the presence case below.
+    parsed = tomllib.loads(
+        render_codex_config_toml(
+            codex_mcp_server_specs(["vaultspec-rag"]),
+            web_search=CodexWebSearchMode.DISABLED,
+        )
+    )
+    assert "model_providers" not in parsed
+    assert "model_provider" not in parsed
+
+
+def test_render_selects_the_provider_table_it_declares() -> None:
+    # Declaring [model_providers.X] without also setting model_provider = "X"
+    # renders an inert table: Codex would keep its own endpoint and the run
+    # would silently reach the real provider. Both halves, or neither.
+    parsed = tomllib.loads(
+        render_codex_config_toml(
+            codex_mcp_server_specs(["vaultspec-rag"]),
+            web_search=CodexWebSearchMode.DISABLED,
+            base_url_override="http://127.0.0.1:19999/v1",
+        )
+    )
+    selected = parsed["model_provider"]
+    provider = parsed["model_providers"][selected]
+    assert provider["base_url"] == "http://127.0.0.1:19999/v1"
+    # Not cosmetic: the installed app-server rejects the older "chat" value at
+    # config load, so a redirect declaring it fails before reaching any endpoint.
+    assert provider["wire_api"] == "responses"
+    # The MCP surface must survive the redirect; the override moves the endpoint,
+    # not the harness.
+    assert "vaultspec-rag" in parsed["mcp_servers"]
+
+
+def _override_config_from_child(base: Path, base_url: str | None) -> dict[str, Any]:
+    """Return the config.toml the model writes under a given environment.
+
+    Drives the REAL seam - environment -> Settings -> CodexChatModel ->
+    build_codex_config_home - in a child process, because Settings is read once
+    at import. Setting the field on the model instead would prove only that the
+    renderer works, which the tests above already cover; what is in question
+    here is whether a deployment's variable reaches the file Codex reads.
+    """
+    environment = dict(os.environ)
+    if base_url is None:
+        environment.pop("VAULTSPEC_CODEX_BASE_URL", None)
+    else:
+        environment["VAULTSPEC_CODEX_BASE_URL"] = base_url
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; import sys; "
+                "from vaultspec_a2a.providers.codex_chat_model import CodexChatModel; "
+                "from vaultspec_a2a.providers._codex_config_home import "
+                "cleanup_codex_config_home; "
+                "m = CodexChatModel(codex_home=sys.argv[1]); "
+                "h = m._build_codex_config_home(); "
+                "sys.stdout.write((h / 'config.toml').read_text(encoding='utf-8')); "
+                "cleanup_codex_config_home(h)"
+            ),
+            str(base),
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return tomllib.loads(proc.stdout)
+
+
+def test_deployment_variable_reaches_the_file_codex_reads(tmp_path: Path) -> None:
+    parsed = _override_config_from_child(tmp_path, "http://127.0.0.1:19998/v1")
+    selected = parsed["model_provider"]
+    assert parsed["model_providers"][selected]["base_url"] == (
+        "http://127.0.0.1:19998/v1"
+    )
+
+
+def test_unset_deployment_variable_leaves_the_provider_endpoint_alone(
+    tmp_path: Path,
+) -> None:
+    assert "model_providers" not in _override_config_from_child(tmp_path, None)

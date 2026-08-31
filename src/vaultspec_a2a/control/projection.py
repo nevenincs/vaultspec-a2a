@@ -11,11 +11,12 @@ from ..database import (
     get_pending_permission_requests,
     get_thread_execution_state,
 )
+from ..utils.coercion import coerce_object_list, coerce_object_mapping
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.models import (
+    from ..database import (
         PermissionRequestModel,
         ThreadExecutionStateModel,
         ThreadModel,
@@ -24,7 +25,12 @@ if TYPE_CHECKING:
 from ..graph.enums import PermissionOptionKind, PermissionType
 from ..ipc.schemas import ExecutionTaskProjectionPayload
 from ..streaming.types import classify_tool_kind
-from ..thread.enums import TERMINAL_STATUSES, ApprovalStatus, RepairStatus
+from ..thread.enums import (
+    TERMINAL_STATUS_VALUES,
+    ApprovalStatus,
+    RepairStatus,
+    ThreadStatus,
+)
 from ..thread.snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
     CheckpointProjection,
@@ -39,7 +45,6 @@ from ..thread.snapshots import (
 
 _PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
 _JSON_LIST_ADAPTER = TypeAdapter(list[object])
-_JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
 
 
 def _decode_json_list(raw: str | None, *, field_name: str) -> list[object]:
@@ -56,22 +61,6 @@ def _decode_json_list(raw: str | None, *, field_name: str) -> list[object]:
     except ValidationError as exc:
         msg = f"{field_name} must decode to a list"
         raise ValueError(msg) from exc
-
-
-def _json_object(value: object) -> dict[str, object] | None:
-    """Return a typed JSON object, or discard an unreadable sibling value."""
-    try:
-        return _JSON_OBJECT_ADAPTER.validate_python(value)
-    except ValidationError:
-        return None
-
-
-def _json_list(value: object) -> list[object] | None:
-    """Return a typed JSON list, or discard an unreadable sibling value."""
-    try:
-        return _JSON_LIST_ADAPTER.validate_python(value)
-    except ValidationError:
-        return None
 
 
 def _mark_execution_state_stale(snapshot: ThreadStateData) -> None:
@@ -108,6 +97,59 @@ def _mark_terminal_permission_residue(snapshot: ThreadStateData) -> None:
         RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
     }:
         snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+
+
+def _mark_no_artifact_produced(snapshot: ThreadStateData) -> None:
+    """Fail closed when a document-authoring run completed without output.
+
+    Unlike the two markers above, this does NOT touch ``repair_status`` /
+    ``execution_readiness``: those columns classify checkpoint-lineage
+    integrity, and the checkpoint here is genuinely healthy - readable and
+    internally consistent. The defect is that the run produced nothing, a
+    question repair_status was never asked. Overloading it would make "needs
+    reconciliation" ambiguous between checkpoint corruption and an empty
+    result, corrupting a signal that is currently correct.
+    """
+    snapshot.snapshot_complete = False
+    if "authoring_run_produced_no_proposal" not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append("authoring_run_produced_no_proposal")
+
+
+def apply_authoring_completion_check(
+    snapshot: ThreadStateData,
+    *,
+    thread_status: str,
+    requires_document_authoring: bool,
+    proposal_ids: list[str],
+    changeset_ids: list[str],
+) -> ThreadStateData:
+    """Flag a completed document-authoring run that produced no artifact.
+
+    A document-authoring preset (the research_adr phase machine or the solo
+    doc-editor lane) reaching ``completed`` with both
+    ``authoring_proposal_ids`` and ``authoring_changeset_ids`` empty means the
+    run's authoring tool call never landed - a silent-success gap where
+    ``status: completed`` reported clean while nothing was produced. Scoped to
+    the literal ``completed`` status (not the broader "completed" semantic
+    phase, which also covers ``archived``): the reported gap was a freshly
+    completed run, and archival is a distinct post-completion lifecycle this
+    check has not been proven against.
+
+    Non-authoring presets, and threads that have not reached this exact
+    status, pass through untouched. Callers must gate this on a checkpoint
+    that was actually read (``proposal_ids``/``changeset_ids`` derived from a
+    successfully loaded snapshot) - an unreadable checkpoint already carries
+    its own "unavailable" degraded reason, and asserting emptiness on top of
+    that would misreport "unread" as "produced nothing".
+    """
+    if (
+        requires_document_authoring
+        and thread_status == ThreadStatus.COMPLETED.value
+        and not proposal_ids
+        and not changeset_ids
+    ):
+        _mark_no_artifact_produced(snapshot)
+    return snapshot
 
 
 def _clear_non_actionable_pause_state(snapshot: ThreadStateData) -> None:
@@ -156,7 +198,7 @@ def _permission_data_from_model(
         tool_call = PermissionType.PLAN_APPROVAL.value
     options: list[PermissionOptionData] = []
     for raw_option in raw_options:
-        option = _json_object(raw_option)
+        option = coerce_object_mapping(raw_option)
         if option is None:
             continue
         options.append(
@@ -189,16 +231,16 @@ def _coerce_permission_kind(value: object) -> PermissionOptionKind:
 def _permission_data_from_interrupt(
     interrupt: ProjectedInterrupt,
 ) -> PermissionData | None:
-    payload = _json_object(interrupt.payload)
+    payload = coerce_object_mapping(interrupt.payload)
     if payload is None:
         return None
     if interrupt.interrupt_type == "permission_request":
         tool_name = str(payload.get("tool_name", "unknown"))
-        raw_options = _json_list(payload.get("options", []))
+        raw_options = coerce_object_list(payload.get("options", []))
         options: list[PermissionOptionData] = []
         if raw_options is not None:
             for option in raw_options:
-                typed_option = _json_object(option)
+                typed_option = coerce_object_mapping(option)
                 if typed_option is None:
                     continue
                 options.append(
@@ -237,7 +279,7 @@ def _permission_data_from_interrupt(
 
     if interrupt.interrupt_type == "plan_approval_request":
         feature = str(payload.get("feature", "unknown"))
-        plan_paths = _json_list(payload.get("plan_paths", []))
+        plan_paths = coerce_object_list(payload.get("plan_paths", []))
         exec_worker = str(payload.get("exec_worker", "unknown"))
         plan_summary = (
             f"{len(plan_paths)} plan document(s)" if plan_paths else "no plan documents"
@@ -396,7 +438,7 @@ def project_execution_state_model(
     raw_tasks = _decode_json_list(model.tasks_json, field_name="tasks_json")
     execution_tasks: list[ExecutionTaskData] = []
     for raw_task in raw_tasks:
-        task_data = _json_object(raw_task)
+        task_data = coerce_object_mapping(raw_task)
         if task_data is None:
             continue
         try:
@@ -464,7 +506,7 @@ async def enrich_snapshot_from_durable_state(
     snapshot.execution_readiness = thread.execution_readiness
     snapshot.approval_status = thread.approval_status
     snapshot.approval_request_id = thread.approval_request_id
-    is_terminal_thread = thread.status in {status.value for status in TERMINAL_STATUSES}
+    is_terminal_thread = thread.status in TERMINAL_STATUS_VALUES
 
     durable_permissions = await get_pending_permission_requests(
         session,
@@ -556,7 +598,7 @@ async def enrich_snapshot_from_execution_state(
 
     # Terminal threads should not merge execution state —
     # out-of-order terminal events can leave stale metadata on the row.
-    is_terminal = thread.status in {s.value for s in TERMINAL_STATUSES}
+    is_terminal = thread.status in TERMINAL_STATUS_VALUES
     if is_terminal:
         return snapshot
 

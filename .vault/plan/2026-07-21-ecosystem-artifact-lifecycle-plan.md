@@ -3,8 +3,8 @@ tags:
   - '#plan'
   - '#ecosystem-artifact-lifecycle'
 date: '2026-07-21'
-modified: '2026-07-21'
-body_hash: 'sha256:af01ef1f1c9c28f0512c3f416ba7cbcde67265654d980f88a8f76cd350de30e7'
+modified: '2026-08-05'
+body_hash: 'sha256:c7123dc504dba576038aea80c66dd1e866ffbc96f2a8a9d68ba786f26d7071e6'
 tier: L3
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
@@ -114,6 +114,32 @@ Remove test residue from the real state home and close ignore-rule gaps.
 - [x] `W03.P07.S20` - Move service test runtime directory creation out of the dataclass constructor into start; `src/vaultspec_a2a/service_tests/harness.py`.
 - [x] `W03.P07.S21` - Add teardown that removes the service test runtime directory after a run; `src/vaultspec_a2a/service_tests/harness.py`.
 - [x] `W03.P07.S22` - Add ignore rules for the generated artifacts that currently escape them; `.gitignore`.
+
+## Wave `W04` - Re-aim Layer 3 on the trace a2a owns
+
+Layer 3 shipped against a premise that observation has since disproved: no provider-native transcript is destroyed unread, because none is written on any lane a2a owns. Three real Codex turns settled it, the decisive one driven through this project's own production functions. The layer's protected quantity was never the file, though - it was visibility - and that concern survives its named artifact. This wave establishes what each provider lane actually persists and under whose retention, inventories the action events a2a currently drops, and amends the record so the obligation points at the gap that exists rather than the one that was assumed.
+
+### Phase `W04.P08` - Establish what each provider lane actually retains
+
+The user asked for the provider-based retention observations to be investigated explicitly, and they are the load-bearing unknown: the redirect is only correct if provider-native files genuinely are not a2a's to own. Codex is settled by observation. The ACP family - Claude, Z.ai, and Kimi, which share one chat model - writes into the operator's REAL config home, which is persistence outside a2a's ownership rather than an absence, and nobody has established what lands there or whether it is enumerable. Gemini and Kimi read operator-configured home paths whose contents were never inspected at all.
+
+- [x] `W04.P08.S25` - Inventory what the ACP family persists in the operator's real config home, and whether a2a can enumerate it; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_config_home_roots.py`.
+- [x] `W04.P08.S26` - Establish whether the Gemini and Kimi configured homes retain session content nobody has inspected; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/kimi_catalog.py`.
+- [x] `W04.P08.S27` - Declare or refuse a retention statement for each lane's persistence, through the existing artifact declaration home; `src/vaultspec_a2a/artifacts/retention.py, src/vaultspec_a2a/providers/_config_home_roots.py`.
+
+### Phase `W04.P09` - Inventory the action events the trace drops
+
+a2a's durable trace records what an agent SAID, not what it DID. Verified on the Codex lane: the turn consumer handles agent-message deltas, usage, and errors, and every other item event falls through unhandled, so an autonomous allowlisted command leaves no durable mark. Only human-gated actions are recorded. The equivalent question on the ACP family is unestablished - tool-call updates reach the live stream, but whether they reach any durable store was never checked. The inventory precedes the seam choice deliberately: choosing a capture point against an unverified inventory is the failure this project keeps finding.
+
+- [x] `W04.P09.S28` - Inventory which provider action events reach a durable store versus only the live stream, per lane; `src/vaultspec_a2a/providers/codex_chat_model.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/streaming/aggregator.py`.
+- [x] `W04.P09.S29` - Choose the action-event capture seam and bound it, or record why capture is refused; `src/vaultspec_a2a/streaming/aggregator.py, src/vaultspec_a2a/artifacts/retention.py`.
+
+### Phase `W04.P10` - Amend the record to match what was found
+
+The ADR is still proposed, so this is an in-place body amendment rather than a supersession. Layer 3 is redirected rather than struck, because striking it would discard a valid concern along with its wrong instrument, and keeping it conditional on a posture nobody intends to change would leave dead text. The ephemeral thread posture is ratified in the same pass: it is inherited rather than chosen, but it is correct, and stating why turns an accident into a decision with a recorded reversal condition.
+
+- [x] `W04.P10.S30` - Amend Layer 3 in place to name the a2a-owned trace and redirect the obligation at the said-versus-did gap; `.vault/adr/2026-07-21-ecosystem-artifact-lifecycle-adr.md`.
+- [x] `W04.P10.S31` - Ratify the ephemeral thread posture as a decision and record its reversal condition; `.vault/adr/2026-07-21-ecosystem-artifact-lifecycle-adr.md, src/vaultspec_a2a/providers/codex_chat_model.py`.
 
 ## Parallelization
 

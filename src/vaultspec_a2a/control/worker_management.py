@@ -17,9 +17,9 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -41,14 +41,18 @@ from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..utils.runtime_exec import module_command
 from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
+from .worker_status import WorkerConnectionStatus
 
 __all__ = [
     "LazyWorkerSpawner",
     "WorkerHealthProbe",
+    "WorkerLiveness",
     "WorkerState",
     "WorkerWatchdog",
     "probe_worker_health",
     "sweep_orphan_worker_logs",
+    "worker_liveness",
+    "worker_ready_and_ours",
 ]
 
 logger = logging.getLogger(__name__)
@@ -74,7 +78,7 @@ class WorkerState:
     onto ``app.state``.
     """
 
-    worker_status: str = "pending"
+    worker_status: str = WorkerConnectionStatus.PENDING.value
     worker_restart_count: int = 0
     worker_last_restart_reason: str | None = None
     worker_last_restart_detail: str | None = None
@@ -85,6 +89,97 @@ class WorkerState:
     worker_stderr_log_path: str | None = None
 
 
+@dataclass
+class WorkerLiveness:
+    """When the gateway last heard from its worker, and what it was running.
+
+    Sited beside the timeout rule that gives the value meaning, because the rule
+    is the only thing that makes a monotonic float mean "connected" or "stale".
+    Both readings are declared here as :meth:`is_fresh` and :meth:`is_stale`, and
+    they are deliberately not complements: at exactly the timeout neither holds,
+    and a worker never heard from is not stale, it has simply not started.
+
+    Recording contact and interpreting it used to sit apart. The stamp was an
+    undeclared attribute assigned inline at five sites, so neither reader could
+    assume it existed and both read it through a defaulted ``getattr`` with their
+    own copy of the validity guard. That defensiveness was not protection: an
+    absent stamp and a stamp nobody had written yet arrive identically, and both
+    surface as "worker unreachable" — the one failure the value exists to rule
+    out. A writer that must be reached through this type cannot forget it, and a
+    reader can now ask a question instead of guessing at a field.
+    """
+
+    last_contact_ts: float | None = None
+    active_threads: list[str] = field(default_factory=list)
+
+    def record_contact(
+        self,
+        *,
+        when: float | None = None,
+        active_threads: Sequence[str] | None = None,
+    ) -> None:
+        """Record that the worker was heard from.
+
+        *when* is a :func:`time.monotonic` reading, defaulting to now; a caller
+        supplies one only when contact happened measurably before it could say
+        so. *active_threads* is omitted by a caller that observed contact without
+        learning what the worker is running (a socket accept, a dispatch
+        acknowledgement) — omission leaves the last known set standing rather
+        than blanking it, which an empty list would.
+        """
+        self.last_contact_ts = time.monotonic() if when is None else when
+        if active_threads is not None:
+            self.active_threads = list(active_threads)
+
+    def age_seconds(self, *, now: float | None = None) -> float | None:
+        """Seconds since the last recorded contact, or ``None`` if never heard from.
+
+        A stamp that is not a finite real number reads as no contact at all. The
+        guard survives the move because ``app.state`` stays an untyped attribute
+        bag that an embedding host can seat anything on, and because both
+        predicates below must agree about a degenerate value rather than one
+        reading it as fresh and the other as stale.
+        """
+        stamp: object = self.last_contact_ts
+        if (
+            isinstance(stamp, bool)
+            or not isinstance(stamp, (int, float))
+            or not math.isfinite(stamp)
+        ):
+            return None
+        return (time.monotonic() if now is None else now) - stamp
+
+    def is_fresh(self, *, now: float | None = None) -> bool:
+        """Whether contact is recent enough to report the worker as connected."""
+        age = self.age_seconds(now=now)
+        return age is not None and age < settings.worker_heartbeat_timeout_seconds
+
+    def is_stale(self, *, now: float | None = None) -> bool:
+        """Whether contact was made and has since aged past the heartbeat timeout.
+
+        A worker never heard from is NOT stale. Reporting it as such would hand
+        the watchdog a crash signal for a worker that has not finished starting.
+        """
+        age = self.age_seconds(now=now)
+        return age is not None and age > settings.worker_heartbeat_timeout_seconds
+
+
+def worker_liveness(app_state: Any) -> WorkerLiveness:
+    """Return the liveness record on *app_state*, seating one when it has none.
+
+    The single accessor every writer and reader goes through. Seating on demand
+    keeps a host that embeds the internal router without the gateway lifespan
+    working, and costs nothing in meaning: a fresh record says the worker has
+    never been heard from, which is exactly what an app carrying no record knows.
+    """
+    existing = getattr(app_state, "worker_liveness", None)
+    if isinstance(existing, WorkerLiveness):
+        return existing
+    seated = WorkerLiveness()
+    app_state.worker_liveness = seated
+    return seated
+
+
 @dataclass(frozen=True, slots=True)
 class WorkerHealthProbe:
     """One authenticated worker health observation.
@@ -93,10 +188,19 @@ class WorkerHealthProbe:
     optional decoded object: it carries pairing evidence when readable, while
     ``None`` deliberately distinguishes unreadable evidence from a healthy
     occupant's absence only through ``healthy``.
+
+    ``indeterminate`` separates the two ways ``healthy`` can be False. A refused
+    connection PROVES no worker holds the port. A read that outran its budget
+    proves only that this observation did not finish in time - a worker busy
+    compiling a graph for an already-admitted run is unresponsive for seconds and
+    then answers normally. Callers that must not act on absence they did not
+    observe (run admission) read this and fall back to the watchdog's seated
+    state; callers that restart on a hung worker keep reading ``healthy`` alone.
     """
 
     healthy: bool
     body: Mapping[str, object] | None
+    indeterminate: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -326,8 +430,36 @@ async def probe_worker_health(
             return await _probe(client)
         async with httpx.AsyncClient(headers=_internal_auth_headers()) as owned:
             return await _probe(owned)
-    except Exception:
-        return WorkerHealthProbe(healthy=False, body=None)
+    except Exception as exc:
+        # An unreachable verdict decides run admission, so a silent swallow here
+        # makes an operator-visible 503 unexplainable: a refused worker, a timed
+        # out one, and a crashed one all present identically. Name the cause.
+        indeterminate = _is_indeterminate_probe_failure(exc)
+        logger.info(
+            "Worker health probe failed for %s: %s: %s (indeterminate=%s)",
+            url,
+            type(exc).__name__,
+            exc,
+            indeterminate,
+        )
+        return WorkerHealthProbe(healthy=False, body=None, indeterminate=indeterminate)
+
+
+def _is_indeterminate_probe_failure(exc: BaseException) -> bool:
+    """Whether *exc* leaves the worker's health genuinely unknown.
+
+    A connect failure is decisive evidence of absence: the transport reached the
+    port and nothing accepted. Every other transport failure - a read that outran
+    its budget, an exhausted client pool, a connection dropped mid-response - says
+    something about THIS observation, not about whether a worker exists. Timeouts
+    are classified before connect errors because ``ConnectTimeout`` is both, and
+    a connect that timed out is an absence observation, not an unknown one.
+    """
+    import httpx
+
+    if isinstance(exc, httpx.ConnectTimeout | httpx.ConnectError):
+        return False
+    return isinstance(exc, httpx.TransportError)
 
 
 def _same_gateway(worker_target: object, our_gateway: str) -> bool:
@@ -364,7 +496,7 @@ def _classify_worker_body(
     )
 
 
-async def _worker_ready_and_ours(
+async def worker_ready_and_ours(
     worker_url: str, *, current_generation: int = 0
 ) -> bool:
     """Whether a healthy worker at *worker_url* is provably THIS gateway's.
@@ -766,7 +898,7 @@ async def _await_worker_ready_inner(
         # requires the responding worker to declare THIS gateway as its target.
         if await _tcp_port_ready(
             "127.0.0.1", worker_port
-        ) and await _worker_ready_and_ours(worker_url, current_generation=generation):
+        ) and await worker_ready_and_ours(worker_url, current_generation=generation):
             elapsed = asyncio.get_event_loop().time() - started
             logger.info(
                 "Worker ready at %s (PID %d) in %.1fs",
@@ -1001,7 +1133,7 @@ class LazyWorkerSpawner:
                 # this attach requires the OWNED pairing verdict, which an
                 # externally-managed worker can never present - armed without
                 # auto-spawn is a misconfiguration and fails closed.
-                self._spawned = await _worker_ready_and_ours(
+                self._spawned = await worker_ready_and_ours(
                     self._worker_url, current_generation=self._generation
                 )
                 if not self._spawned:
@@ -1032,7 +1164,7 @@ class LazyWorkerSpawner:
             # check here would let a refused-eviction foreign orphan (spawn returned
             # None) be adopted as this gateway's worker.
             self._spawned = self._process is not None or (
-                await _worker_ready_and_ours(
+                await worker_ready_and_ours(
                     self._worker_url, current_generation=self._generation
                 )
             )
@@ -1130,8 +1262,8 @@ class WorkerWatchdog:
 
     Detection signals:
     1. ``worker_spawner.process.returncode`` is not None -- process crashed.
-    2. ``worker_last_heartbeat_ts`` stale beyond heartbeat timeout
-       -- worker unresponsive.
+    2. :meth:`WorkerLiveness.is_stale` -- no contact within the heartbeat
+       timeout, so the worker is unresponsive.
 
     Recovery: exponential backoff restarts (2s, 4s, 8s), circuit breaker
     coordination, and ``WorkerState`` state machine.
@@ -1153,7 +1285,7 @@ class WorkerWatchdog:
         # global inter-cycle cooldown that rate-limits a persistent crash signal.
         self._last_restart_cycle_ts: float | None = None
         # Initialise worker state
-        self._worker_state.worker_status = "pending"
+        self._worker_state.worker_status = WorkerConnectionStatus.PENDING.value
         self._worker_state.worker_restart_count = 0
         self._worker_state.worker_last_restart_reason = None
         self._worker_state.worker_last_restart_detail = None
@@ -1189,14 +1321,7 @@ class WorkerWatchdog:
 
     def _heartbeat_stale(self) -> bool:
         """Check if the last heartbeat is older than the timeout threshold."""
-        last_hb = getattr(self._app_state, "worker_last_heartbeat_ts", None)
-        if (
-            isinstance(last_hb, bool)
-            or not isinstance(last_hb, (int, float))
-            or not math.isfinite(last_hb)
-        ):
-            return False  # No heartbeat yet — not stale, just not started
-        return (time.monotonic() - last_hb) > settings.worker_heartbeat_timeout_seconds
+        return worker_liveness(self._app_state).is_stale()
 
     def _process_crashed(self) -> bool:
         """Check if the worker process has exited unexpectedly."""
@@ -1303,25 +1428,29 @@ class WorkerWatchdog:
         # at "down"/"pending" and make plain /health readiness lie. Track the live HTTP
         # probe every tick instead, so an adopted healthy worker reaches "up".
         if self._spawner.process is None:
-            self._worker_state.worker_status = "up" if http_ready else "down"
+            self._worker_state.worker_status = (
+                WorkerConnectionStatus.UP.value
+                if http_ready
+                else WorkerConnectionStatus.DOWN.value
+            )
             return
 
         # Promote to "up" only after a positive worker health probe.
-        if self._worker_state.worker_status == "pending":
+        if self._worker_state.worker_status == WorkerConnectionStatus.PENDING:
             if http_ready and not needs_recovery:
-                self._worker_state.worker_status = "up"
+                self._worker_state.worker_status = WorkerConnectionStatus.UP.value
                 return
             if not needs_recovery:
                 return
 
         # --- Healthy / degraded-but-alive: reconcile status, never restart ---
         if not needs_recovery:
-            if self._worker_state.worker_status == "up":
+            if self._worker_state.worker_status == WorkerConnectionStatus.UP:
                 return
             # Recovered from a transient state (a "down" worker stays down until a
             # real recovery flips it).
-            if self._worker_state.worker_status != "down":
-                self._worker_state.worker_status = "up"
+            if self._worker_state.worker_status != WorkerConnectionStatus.DOWN:
+                self._worker_state.worker_status = WorkerConnectionStatus.UP.value
             return
 
         # --- Needs recovery ---
@@ -1329,7 +1458,11 @@ class WorkerWatchdog:
         # (or a no-auto-spawn deployment) it reports the truth and leaves recovery to
         # the owner - never force-opening the breaker or spawning a competitor.
         if not self._owns_worker():
-            self._worker_state.worker_status = "up" if http_ready else "down"
+            self._worker_state.worker_status = (
+                WorkerConnectionStatus.UP.value
+                if http_ready
+                else WorkerConnectionStatus.DOWN.value
+            )
             return
 
         # Global inter-cycle cooldown: a persistent crash signal cannot spin restart
@@ -1350,7 +1483,7 @@ class WorkerWatchdog:
             reason,
             f" ({detail})" if detail else "",
         )
-        self._worker_state.worker_status = "restarting"
+        self._worker_state.worker_status = WorkerConnectionStatus.RESTARTING.value
         self._mark_restart_started(reason, detail)
 
         # Force circuit breaker open so dispatches return 503.
@@ -1368,10 +1501,10 @@ class WorkerWatchdog:
         self._mark_restart_finished(restarted, attempts)
         if restarted:
             self._cb.record_success()
-            self._worker_state.worker_status = "up"
+            self._worker_state.worker_status = WorkerConnectionStatus.UP.value
             logger.info("Worker restarted successfully")
         else:
-            self._worker_state.worker_status = "down"
+            self._worker_state.worker_status = WorkerConnectionStatus.DOWN.value
             logger.critical(
                 "Worker restart failed after %d attempts — "
                 "manual intervention required. "
@@ -1419,7 +1552,7 @@ class WorkerWatchdog:
             # verdict, elsewhere the declared-gateway_url signal - a bare
             # health 200 from a stranger on the port is not an adoptable
             # worker.
-            if await _worker_ready_and_ours(
+            if await worker_ready_and_ours(
                 self._spawner.worker_url,
                 current_generation=self._spawner.generation,
             ):

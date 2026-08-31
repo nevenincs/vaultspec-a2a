@@ -95,12 +95,21 @@ def test_declaring_an_absent_prerequisite_aborts_before_collection() -> None:
     assert "VAULTSPEC_ENGINE_SERVE_CMD" in combined, combined
 
 
-def test_absent_cross_repo_engine_skips_instead_of_failing() -> None:
+def test_absent_cross_repo_engine_is_disclosed_never_a_red_gate() -> None:
     """The cross-repo proof reports an absent dashboard, never a red gate.
 
     This is the whole point of the rule for the service tier: without the
     dashboard repository wired, the canonical service gate must not report a
     failure that says nothing about this repository's health.
+
+    The proof reaches that outcome by being WITHHELD rather than skipped, and the
+    distinction is not cosmetic. This proof is also billable, so cost gating
+    deselects it before the skip path can run - which means the skip path for
+    ``dashboard-engine`` is unreachable for as long as every proof needing it
+    spends a credential. A bare deselection is silent, so the run would have been
+    indistinguishable from one with nothing to withhold; the assertions below
+    pin the disclosure that closes that hole, naming both the prerequisite and
+    the runbook line that supplies it.
     """
     result = _pytest(
         "--override-ini",
@@ -112,7 +121,8 @@ def test_absent_cross_repo_engine_skips_instead_of_failing() -> None:
     )
     combined = result.stdout + result.stderr
     assert result.returncode == 0, combined
-    assert "1 skipped" in combined, combined
+    assert "withheld 1 live proof(s)" in combined, combined
+    assert "dashboard-engine" in combined, combined
     assert "VAULTSPEC_ENGINE_SERVE_CMD" in combined, combined
 
 
@@ -136,8 +146,15 @@ def test_live_provider_proofs_deselect_until_every_resource_is_declared() -> Non
         ),
     )
     combined = result.stdout + result.stderr
-    assert result.returncode == pytest.ExitCode.NO_TESTS_COLLECTED, combined
+    # Withheld, disclosed, and NOT red. Exit 5 would be the same red gate the
+    # rule refuses, reached through the exit status: a host with no dashboard
+    # repository would fail the service tier over a resource it was never
+    # expected to have. The proofs are still withheld - that is what the
+    # deselection count and the absence of any skip prove - and the disclosure
+    # is what keeps the withholding from being silent.
+    assert result.returncode == pytest.ExitCode.OK, combined
     assert "2 deselected" in combined, combined
+    assert "withheld 2 live proof(s)" in combined, combined
     assert "skipped" not in combined.casefold(), combined
 
 

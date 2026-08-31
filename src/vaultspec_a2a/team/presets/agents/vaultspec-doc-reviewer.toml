@@ -99,10 +99,6 @@ Do not pad findings with suggestions — list only what blocks the pass. The wri
 persona will re-propose; you will review again.
 """
 
-[agent.model]
-provider   = "claude"
-capability = "mid"
-
 [agent.capabilities]
 filesystem_read  = true
 filesystem_write = false

@@ -242,10 +242,16 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
     assert entry["args"][0] == "-m"
     assert entry["args"][1].endswith("authoring_stdio")
     env = {item["name"]: item["value"] for item in entry["env"]}
-    assert env["VAULTSPEC_AUTHORING_BASE_URL"] == _ENGINE_URL
+    # The advertised surface is serialized onto the CLI argv, so it carries
+    # ${NAME} references and never the real values; the CLI expands each from
+    # its own spawn environment at config-parse time. The sibling projection
+    # test below asserts the other half - that the real values ARE hoisted.
+    assert env["VAULTSPEC_AUTHORING_BASE_URL"] == "${VAULTSPEC_AUTHORING_BASE_URL}"
     # The provider sets run_id to the run's thread_id.
-    assert env["VAULTSPEC_AUTHORING_RUN_ID"] == _THREAD_ID
-    assert env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
+    assert env["VAULTSPEC_AUTHORING_RUN_ID"] == "${VAULTSPEC_AUTHORING_RUN_ID}"
+    assert env["VAULTSPEC_AUTHORING_BEARER"] == "${VAULTSPEC_AUTHORING_BEARER}"
+    # The real bearer never rides the argv-serialized surface.
+    assert "machine-bearer-xyz" not in json.dumps(servers)
 
     # The exact allowlist is still threaded so the CLI can invoke the bridged
     # tools headless.
@@ -254,7 +260,7 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
 
 
 @pytest.mark.asyncio
-async def test_stdio_binding_surfaces_bridge_into_workspace_projection(
+async def test_stdio_binding_hoists_secrets_without_touching_the_workspace(
     tmp_path: Path,
 ) -> None:
     """The real spawn projects the bridge into the run workspace as placeholders.
@@ -297,28 +303,19 @@ async def test_stdio_binding_surfaces_bridge_into_workspace_projection(
     recorded = json.loads(record_file.read_text(encoding="utf-8"))
     # No config-home redirect: the child resolves the operator's real login.
     assert recorded["config_home"] is None
-    mcp_json = recorded["workspace_mcp_json"]
-    assert mcp_json is not None, "subprocess saw no projected .mcp.json in its cwd"
-    cfg = json.loads(mcp_json)
-    bridge = cfg["mcpServers"]["vaultspec-authoring"]
-    assert bridge["type"] == "stdio"
-    assert bridge["args"] == ["-m", "vaultspec_a2a.protocols.mcp.authoring_stdio"]
-    # On-disk env is placeholders only.
-    disk_env = bridge["env"]
-    assert disk_env["VAULTSPEC_AUTHORING_BEARER"] == "${VAULTSPEC_AUTHORING_BEARER}"
-    # The real bearer NEVER appears on disk...
-    assert "machine-bearer-xyz" not in mcp_json
-    # ...but IS hoisted into the subprocess spawn env for the CLI to expand.
+    # Nothing is projected into the run workspace for MCP surfacing any more:
+    # the declared-surface invariant rides the session advertisement plus strict
+    # MCP mode, and the workspace projection channel it replaced was removed. A
+    # run that wrote one would be re-opening the ambient surface this closed.
+    assert recorded["workspace_mcp_json"] is None, (
+        "MCP surfacing must not write into the run workspace"
+    )
+    # The real bearer is hoisted into the subprocess spawn env, which is where
+    # the CLI expands the ${...} references the session surface carries.
     spawn_env = recorded["authoring_env"]
     assert spawn_env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
     assert spawn_env["VAULTSPEC_AUTHORING_RUN_ID"] == _THREAD_ID
-    # The confinement settings enable exactly the declared name.
-    settings_json = recorded["workspace_settings_json"]
-    assert settings_json is not None, "subprocess saw no confinement settings"
-    settings = json.loads(settings_json)
-    assert settings["enableAllProjectMcpServers"] is False
-    assert settings["enabledMcpjsonServers"] == ["vaultspec-authoring"]
-    # Both projections are inverted once the turn ends.
+    # Nothing is left behind in the run workspace either, on any path.
     assert not (tmp_path / ".mcp.json").exists()
     assert not (tmp_path / ".claude" / "settings.local.json").exists()
 

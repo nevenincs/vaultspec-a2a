@@ -11,10 +11,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..lifecycle import (
+from ...thread.enums import (
     VERDICT_APPROVED,
     VERDICT_REJECTED,
     VERDICT_REQUEST_CHANGES,
+)
+from ..lifecycle import (
     GapSignal,
     LifecycleEvent,
     StreamError,

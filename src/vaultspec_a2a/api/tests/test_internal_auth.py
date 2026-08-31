@@ -11,26 +11,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from ...control.config import settings
+from ...testing import settings_override as _settings_override
 from ...utils.enums import Environment
 from ..internal import internal_router
-
-
-class _SettingsOverride:
-    """Temporarily override settings attributes for a test (save/restore)."""
-
-    def __init__(self, **updates: object) -> None:
-        self._updates = updates
-        self._originals: dict[str, object] = {}
-
-    def __enter__(self) -> None:
-        for name, value in self._updates.items():
-            self._originals[name] = getattr(settings, name)
-            setattr(settings, name, value)
-
-    def __exit__(self, *_args: object) -> None:
-        for name, value in self._originals.items():
-            setattr(settings, name, value)
 
 
 def _app() -> FastAPI:
@@ -41,7 +24,7 @@ def _app() -> FastAPI:
 
 def test_internal_route_accepts_a_matching_bearer_token() -> None:
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.TESTING, internal_token="secret-token"
         ),
         TestClient(_app(), raise_server_exceptions=False) as client,
@@ -56,7 +39,7 @@ def test_internal_route_accepts_a_matching_bearer_token() -> None:
 
 def test_internal_route_rejects_a_mismatched_bearer_token() -> None:
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.TESTING, internal_token="secret-token"
         ),
         TestClient(_app(), raise_server_exceptions=False) as client,
@@ -74,7 +57,7 @@ def test_internal_route_rejects_a_mismatched_bearer_token() -> None:
 
 def test_internal_route_rejects_a_missing_authorization_header() -> None:
     with (
-        _SettingsOverride(
+        _settings_override(
             environment=Environment.TESTING, internal_token="secret-token"
         ),
         TestClient(_app(), raise_server_exceptions=False) as client,
@@ -86,7 +69,7 @@ def test_internal_route_rejects_a_missing_authorization_header() -> None:
 
 def test_internal_route_500s_when_token_unset_outside_development() -> None:
     with (
-        _SettingsOverride(environment=Environment.TESTING, internal_token=None),
+        _settings_override(environment=Environment.TESTING, internal_token=None),
         TestClient(_app(), raise_server_exceptions=False) as client,
     ):
         resp = client.post("/internal/heartbeat", json={"active_threads": []})

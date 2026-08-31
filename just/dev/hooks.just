@@ -12,11 +12,11 @@ bootstrap:
 
 # Install the repository-managed, path-agnostic prek hook.
 install: bootstrap
-    uv run --no-sync --frozen --no-default-groups --group dev python -m vaultspec_a2a.control.hooks install
+    uv run --no-sync --frozen --no-default-groups --group dev python -m dev.repo.hooks install
 
 # Remove the repository-managed prek hook.
 remove:
-    uv run --no-sync --frozen --no-default-groups --group dev python -m vaultspec_a2a.control.hooks remove
+    uv run --no-sync --frozen --no-default-groups --group dev python -m dev.repo.hooks remove
 
 # Run the locked read-only hook pipeline outside a commit attempt.
 run *ARGS:

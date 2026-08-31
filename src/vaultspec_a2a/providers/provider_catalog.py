@@ -25,6 +25,7 @@ __all__ = [
     "CatalogCacheSnapshot",
     "CatalogRefreshCache",
     "CatalogRefreshInvalidatedError",
+    "CatalogRefreshSuppressedError",
     "CatalogState",
     "CatalogStatus",
     "ControlKind",
@@ -38,6 +39,7 @@ __all__ = [
     "ProviderRecord",
     "SelectionReference",
     "StructuredProviderHealth",
+    "required_text",
 ]
 
 CATALOG_SCHEMA_VERSION: Final = 1
@@ -51,9 +53,16 @@ MAX_CAPABILITIES: Final = 64
 MAX_HEALTH_REASONS: Final = 16
 
 
-def _required_text(
+def required_text(
     value: str, field_name: str, *, max_length: int = MAX_TEXT_LENGTH
 ) -> str:
+    """Return *value* as a non-blank, already-normalized, bounded string, or raise.
+
+    Public because :mod:`provider_capabilities` shares this exact dataclass
+    invariant - a plain ``ValueError`` naming the field, not a lane's own
+    protocol-error dialect - and both modules would otherwise carry
+    identical bodies rather than a caller-side ``max_length`` override.
+    """
     if not value or value != value.strip():
         raise ValueError(f"{field_name} must be non-blank and already normalized")
     if len(value) > max_length:
@@ -63,7 +72,7 @@ def _required_text(
 
 def _optional_text(value: str | None, field_name: str) -> None:
     if value is not None:
-        _required_text(value, field_name)
+        required_text(value, field_name)
 
 
 def _utc(value: datetime, field_name: str) -> datetime:
@@ -135,6 +144,25 @@ class CatalogCacheCapacityError(RuntimeError):
     """The bounded cache has no expired inactive lane available for eviction."""
 
 
+class CatalogRefreshSuppressedError(RuntimeError):
+    """A lane's discovery was skipped because its last attempt recently failed.
+
+    Raised INSTEAD of running the loader, so a caller sees the same failure shape
+    it would have seen from the real attempt without paying that attempt's cost
+    again. ``failure_type`` is the class name of the exception the real attempt
+    raised - a type name, never a provider message, which can carry credentials,
+    URLs, or local paths.
+    """
+
+    def __init__(self, failure_type: str, retry_after_seconds: float) -> None:
+        super().__init__(
+            f"provider catalog discovery is suppressed after a {failure_type}; "
+            f"retrying in {retry_after_seconds:.1f}s"
+        )
+        self.failure_type = failure_type
+        self.retry_after_seconds = retry_after_seconds
+
+
 @dataclass(frozen=True, slots=True)
 class NativeControlOption:
     """One provider-issued value for a provider-native control."""
@@ -145,9 +173,9 @@ class NativeControlOption:
     description: str | None = None
 
     def __post_init__(self) -> None:
-        _required_text(self.option_id, "option_id")
-        _required_text(self.provider_value, "provider_value")
-        _required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
+        required_text(self.option_id, "option_id")
+        required_text(self.provider_value, "provider_value")
+        required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
         _optional_text(self.description, "description")
 
 
@@ -164,8 +192,8 @@ class NativeControl:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", tuple(self.options))
-        _required_text(self.control_id, "control_id")
-        _required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
+        required_text(self.control_id, "control_id")
+        required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
         if len(self.options) > MAX_OPTIONS:
             raise ValueError(
                 f"native control options exceed the {MAX_OPTIONS}-item limit"
@@ -173,7 +201,7 @@ class NativeControl:
         option_ids = tuple(option.option_id for option in self.options)
         _unique(option_ids, "native control option ids")
         if self.default_option_id is not None:
-            _required_text(self.default_option_id, "default_option_id")
+            required_text(self.default_option_id, "default_option_id")
             if self.default_option_id not in option_ids:
                 raise ValueError("default_option_id must name an advertised option")
         _optional_text(self.description, "description")
@@ -193,20 +221,20 @@ class ModelCatalogEntry:
     def __post_init__(self) -> None:
         object.__setattr__(self, "capabilities", tuple(self.capabilities))
         object.__setattr__(self, "native_control_ids", tuple(self.native_control_ids))
-        _required_text(self.entry_id, "entry_id")
-        _required_text(self.provider_value, "provider_value")
-        _required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
+        required_text(self.entry_id, "entry_id")
+        required_text(self.provider_value, "provider_value")
+        required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
         if len(self.capabilities) > MAX_CAPABILITIES:
             raise ValueError(f"capabilities exceed the {MAX_CAPABILITIES}-item limit")
         for capability in self.capabilities:
-            _required_text(capability, "capability")
+            required_text(capability, "capability")
         _unique(self.capabilities, "capabilities")
         if len(self.native_control_ids) > MAX_CONTROLS:
             raise ValueError(
                 f"model native control ids exceed the {MAX_CONTROLS}-item limit"
             )
         for control_id in self.native_control_ids:
-            _required_text(control_id, "model native control id")
+            required_text(control_id, "model native control id")
         _unique(self.native_control_ids, "model native control ids")
         _optional_text(self.description, "description")
 
@@ -224,7 +252,7 @@ class CatalogState:
     def __post_init__(self) -> None:
         object.__setattr__(self, "checked_at", _utc(self.checked_at, "checked_at"))
         if self.revision is not None:
-            _required_text(self.revision, "revision")
+            required_text(self.revision, "revision")
         _optional_text(self.reason, "catalog reason")
         if self.expires_at is not None:
             expires_at = _utc(self.expires_at, "expires_at")
@@ -258,7 +286,7 @@ class StructuredProviderHealth:
                 f"health reasons exceed the {MAX_HEALTH_REASONS}-item limit"
             )
         for reason in self.reasons:
-            _required_text(reason, "health reason")
+            required_text(reason, "health reason")
         _unique(self.reasons, "health reasons")
         expected = (
             self.configured is HealthState.AVAILABLE
@@ -312,8 +340,8 @@ class ProviderCatalogKey:
     execution_mode: str
 
     def __post_init__(self) -> None:
-        _required_text(self.provider_id, "provider_id")
-        _required_text(self.execution_mode, "execution_mode")
+        required_text(self.provider_id, "provider_id")
+        required_text(self.execution_mode, "execution_mode")
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,9 +398,9 @@ class ProviderRecord:
     catalog: ProviderCatalog
 
     def __post_init__(self) -> None:
-        _required_text(self.provider_id, "provider_id")
-        _required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
-        _required_text(self.execution_mode, "execution_mode")
+        required_text(self.provider_id, "provider_id")
+        required_text(self.display_name, "display_name", max_length=MAX_DISPLAY_LENGTH)
+        required_text(self.execution_mode, "execution_mode")
         if self.catalog.key != ProviderCatalogKey(
             provider_id=self.provider_id, execution_mode=self.execution_mode
         ):
@@ -387,8 +415,8 @@ class ControlSelection:
     option_id: str
 
     def __post_init__(self) -> None:
-        _required_text(self.control_id, "control_id")
-        _required_text(self.option_id, "option_id")
+        required_text(self.control_id, "control_id")
+        required_text(self.option_id, "option_id")
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,10 +432,10 @@ class SelectionReference:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "controls", tuple(self.controls))
-        _required_text(self.provider_id, "provider_id")
-        _required_text(self.execution_mode, "execution_mode")
-        _required_text(self.catalog_revision, "catalog_revision")
-        _required_text(self.entry_id, "entry_id")
+        required_text(self.provider_id, "provider_id")
+        required_text(self.execution_mode, "execution_mode")
+        required_text(self.catalog_revision, "catalog_revision")
+        required_text(self.entry_id, "entry_id")
         if self.schema_version != SELECTION_SCHEMA_VERSION:
             raise ValueError("unsupported selection schema_version")
         if len(self.controls) > MAX_CONTROLS:
@@ -452,6 +480,12 @@ class _StoredCatalog:
     deadline: float
 
 
+@dataclass(frozen=True, slots=True)
+class _StoredFailure:
+    failure_type: str
+    deadline: float
+
+
 @dataclass(slots=True)
 class _LaneLock:
     lock: asyncio.Lock
@@ -460,18 +494,46 @@ class _LaneLock:
 
 CatalogLoader = Callable[[ProviderCatalogKey], Awaitable[ProviderCatalog]]
 
+# How long a lane whose discovery RAISED is left alone before it is attempted
+# again. Deliberately far shorter than the success TTL: a failing lane is the
+# expensive case (its cost is a subprocess spawn or a network call run to its own
+# timeout), so it is the one that most needs a read to be warm, while a lane that
+# has come back should be noticed in seconds rather than minutes.
+DEFAULT_FAILURE_TTL: Final = timedelta(seconds=30)
+
 
 class CatalogRefreshCache:
-    """Concurrency-safe, per-lane single-flight TTL cache for catalog discovery."""
+    """Concurrency-safe, per-lane single-flight TTL cache for catalog discovery.
 
-    def __init__(self, ttl: timedelta, *, max_lanes: int = 128) -> None:
+    A lane that SUCCEEDS is cached for ``ttl``. A lane whose loader RAISES is
+    cached negatively for ``failure_ttl``: the failure is remembered so the next
+    read re-raises immediately instead of re-running discovery. Without that, a
+    failing lane is never stored at all and every subsequent read pays its full
+    cost - so a "warm" read of a registry containing one failing lane is not warm.
+
+    The two caches are separate on purpose. A negative entry never displaces a
+    lane's last good catalog: :meth:`peek` keeps returning that snapshot, which is
+    what lets a caller serve a stale-but-real catalog through an outage.
+    """
+
+    def __init__(
+        self,
+        ttl: timedelta,
+        *,
+        max_lanes: int = 128,
+        failure_ttl: timedelta = DEFAULT_FAILURE_TTL,
+    ) -> None:
         if ttl <= timedelta(0):
             raise ValueError("ttl must be positive")
         if max_lanes <= 0:
             raise ValueError("max_lanes must be positive")
+        if failure_ttl < timedelta(0):
+            raise ValueError("failure_ttl must not be negative")
         self._ttl = ttl
         self._max_lanes = max_lanes
+        self._failure_ttl = failure_ttl
         self._entries: dict[ProviderCatalogKey, _StoredCatalog] = {}
+        self._failures: dict[ProviderCatalogKey, _StoredFailure] = {}
         self._locks: dict[ProviderCatalogKey, _LaneLock] = {}
         self._generations: dict[ProviderCatalogKey, int] = {}
         self._index_lock = asyncio.Lock()
@@ -506,6 +568,40 @@ class CatalogRefreshCache:
         self._locks.pop(evicted, None)
         self._generations.pop(evicted, None)
 
+    def _suppression(
+        self, key: ProviderCatalogKey, now: float
+    ) -> CatalogRefreshSuppressedError | None:
+        """Return the error to raise for a lane still inside its failure TTL."""
+        failure = self._failures.get(key)
+        if failure is None:
+            return None
+        if now >= failure.deadline:
+            del self._failures[key]
+            return None
+        return CatalogRefreshSuppressedError(
+            failure.failure_type, failure.deadline - now
+        )
+
+    def _record_failure(self, key: ProviderCatalogKey, failure_type: str) -> None:
+        """Remember a failed lane, pruning expired records to stay bounded.
+
+        A zero ``failure_ttl`` disables negative caching entirely (every read
+        retries), which is why nothing is stored in that case rather than storing
+        an entry that is born expired.
+        """
+        ttl = self._failure_ttl.total_seconds()
+        if ttl <= 0:
+            return
+        now = monotonic()
+        for expired in [k for k, v in self._failures.items() if now >= v.deadline]:
+            del self._failures[expired]
+        if key not in self._failures and len(self._failures) >= self._max_lanes:
+            oldest = min(self._failures.items(), key=lambda item: item[1].deadline)[0]
+            del self._failures[oldest]
+        self._failures[key] = _StoredFailure(
+            failure_type=failure_type, deadline=now + ttl
+        )
+
     @staticmethod
     def _snapshot(entry: _StoredCatalog, now: float) -> CatalogCacheSnapshot:
         freshness = (
@@ -536,6 +632,12 @@ class CatalogRefreshCache:
         observed = current
         if not force_refresh and current is not None and now < current.deadline:
             return self._snapshot(current, now)
+        # An explicit refresh is a caller asking to retry now, so it is never
+        # suppressed; an ordinary read of a recently-failed lane is.
+        if not force_refresh:
+            suppressed = self._suppression(key, now)
+            if suppressed is not None:
+                raise suppressed
 
         lane = await self._lock_for(key)
         try:
@@ -546,9 +648,25 @@ class CatalogRefreshCache:
                     return self._snapshot(current, now)
                 if force_refresh and current is not None and current is not observed:
                     return self._snapshot(current, now)
+                # Re-checked under the lane lock: the whole point of negative
+                # caching is that the loser of a single-flight race must not run
+                # the discovery the winner just proved is failing.
+                if not force_refresh:
+                    suppressed = self._suppression(key, now)
+                    if suppressed is not None:
+                        raise suppressed
 
                 generation = self._generations.get(key, 0)
-                catalog = await loader(key)
+                try:
+                    catalog = await loader(key)
+                except Exception as exc:
+                    # Only fence-clean failures are remembered. A lane invalidated
+                    # mid-flight was explicitly asked to refresh, so suppressing
+                    # its next read would answer that request with the very
+                    # attempt it superseded.
+                    if self._generations.get(key, 0) == generation:
+                        self._record_failure(key, type(exc).__name__)
+                    raise
                 if catalog.key != key:
                     raise ValueError(
                         "catalog loader returned a different provider lane"
@@ -573,12 +691,18 @@ class CatalogRefreshCache:
                         )
                     self._make_capacity(key, monotonic())
                     self._entries[key] = stored
+                    self._failures.pop(key, None)
                 return self._snapshot(stored, monotonic())
         finally:
             await self._release_lock(key, lane)
 
     def invalidate(self, key: ProviderCatalogKey) -> None:
-        """Expire one lane without discarding its visible stale snapshot."""
+        """Expire one lane without discarding its visible stale snapshot.
+
+        Also drops any negative entry: invalidation is the explicit request to
+        re-attempt a lane, which a retained failure record would silently refuse.
+        """
+        self._failures.pop(key, None)
         if key not in self._entries and key not in self._locks:
             return
         self._generations[key] = self._generations.get(key, 0) + 1

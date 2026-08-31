@@ -3,46 +3,13 @@ tags:
   - '#exec'
   - '#provider-error-taxonomy'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-08-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:acaf8808dc8159589f27a094dcfa6567f553b4698cb55b30e891c3b601e1c300'
+body_hash: 'sha256:daacca29e4fa046a2dda6a8501c81760f0296be3537045ca5c1884d1abf29d2f'
 step_id: 'S33'
 related:
   - "[[2026-08-02-provider-error-taxonomy-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace provider-error-taxonomy with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S33 and 2026-08-02-provider-error-taxonomy-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Record a durable reason when a clarification resume is not delivered and ## Scope
-
-- `src/vaultspec_a2a/control/clarification_service.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
 
 # Record a durable reason when a clarification resume is not delivered
 

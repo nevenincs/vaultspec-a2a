@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
@@ -44,8 +45,15 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
+from ..thread.errors import ConfigError
 from ..utils.enums import CodexWebSearchMode
-from ._config_home_roots import sweep_orphan_homes, temp_home_root
+from ._acp_mcp import declared_harness_tools, is_known_harness_server
+from ._config_home_roots import (
+    ORPHAN_HOME_MIN_AGE_SECONDS,
+    sweep_orphan_homes,
+    temp_home_root,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -53,15 +61,43 @@ if TYPE_CHECKING:
     from ._json_contract import JsonObject
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "CODEX_CONFIG_HOME_DECLARATION",
     "SERVED_WEB_SEARCH_MODE",
     "build_codex_config_home",
     "cleanup_codex_config_home",
+    "registry_tools_divergence",
     "render_codex_config_toml",
     "resolve_codex_web_search_mode",
     "sweep_orphan_codex_homes",
 ]
 
+_OVERRIDE_PROVIDER = "vaultspec-override"
 _HOME_PREFIX = "vaultspec-codex-home-"
+
+# This home holds a copied credential, so its lifetime is a security property as
+# much as a disk one. Both bounds are real, and both need a caller: teardown runs
+# when the run unwinds, and the age-gated sweep runs only when some LATER Codex
+# home is built. An install that stops using this lane keeps whatever its last
+# crash left behind.
+CODEX_CONFIG_HOME_DECLARATION = ArtifactDeclaration(
+    name="codex-per-run-config-home",
+    root=f"<desktop_temp_homes_dir or system temp>/{_HOME_PREFIX}<random>/",
+    owner="providers._codex_config_home",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "cleanup_codex_config_home removes the tree when the run unwinds, and "
+        "build_codex_config_home itself removes a partially built home on any "
+        "failure path; a home orphaned by a crashed worker is removed by "
+        "sweep_orphan_codex_homes once untouched for "
+        f"{ORPHAN_HOME_MIN_AGE_SECONDS} seconds, which only runs when another "
+        "Codex home is built - no timer drives it"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    CODEX_CONFIG_HOME_DECLARATION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,10 +210,76 @@ def _restrict(path: Path) -> None:
         path.chmod(0o700 if path.is_dir() else 0o600)
 
 
+# The fields :func:`render_codex_config_toml` reads out of a spec, partitioned by
+# what enforces each. Stated as a partition and ASSERTED as one, so a field
+# rendered here later must be classified rather than silently written unchecked -
+# which is exactly how ``tools`` came to be the one rendered field nothing
+# compared.
+#
+# ``command``/``args`` are the launch identity, already compared against the
+# registry by ``registry_launch_divergence`` at the contract seam every Codex run
+# passes through before a home is built. Re-comparing them here would be a second
+# opinion about the same declaration. ``name`` keys the claim rather than being
+# part of it, and ``env`` legitimately varies per run - it carries the run's
+# project pin, so comparing it would refuse every pinned run.
+# The partition is asserted against the keys ``codex_mcp_server_specs`` actually
+# produces, never against a constant assembled from these three - a union of the
+# parts would agree with itself whatever the producer does.
+_SPEC_SURFACE_KEYS = ("tools",)
+_SPEC_LAUNCH_KEYS = ("command", "args")
+_SPEC_VARIANT_KEYS = ("name", "env")
+
+
+def registry_tools_divergence(spec: JsonObject, *, name: str) -> str | None:
+    """Return how *spec*'s tools differ from *name*'s registry declaration, or ``None``.
+
+    The single comparison of the surface a ``config.toml`` is about to auto-approve
+    against the surface the registry declares. ``enabled_tools`` is written from
+    the spec beside ``default_tools_approval_mode = "auto"``, so a divergent list
+    is not a cosmetic difference: it is an auto-approved allowlist nothing
+    verified. The rag server exposes ``reindex_vault`` and ``reindex_codebase``,
+    which the registry deliberately omits to honour the read-only composition
+    boundary; a spec naming them would have them written and admitted without a
+    prompt, under ``approval_policy = "never"``.
+
+    The comparison runs against :func:`declared_harness_tools` - the single reader
+    of the ``tools`` declaration, shared with the ACP allowlist and the served-tool
+    contract - rather than a fresh read of the registry, which would make this a
+    second opinion about what the registry declares.
+
+    A server the registry does not know is SKIPPED, not refused: the run's own
+    authoring bridge travels in this same list and carries no static registry
+    declaration to compare against. That bridge deliberately names every catalog
+    tool including mutating ones, so comparing it against a read-only declaration
+    would be wrong as well as impossible. Its trust root is that the engine
+    authored it, established where it is built.
+
+    Equality is strict and ordered, matching the docstring claim that
+    ``enabled_tools`` is exactly the registry's read tools. Production derives the
+    list from the same reader, so ordering can only differ in a spec assembled
+    beside the registry - which is the case this exists to catch.
+
+    Returns:
+        A redaction-free description of the divergence, or ``None`` when the spec
+        carries the declared surface or names a server the registry does not own.
+    """
+    if not is_known_harness_server(name):
+        return None
+    declared = declared_harness_tools(name)
+    actual = tuple(_optional_server_string_list(spec, "tools", server=name))
+    if actual != declared:
+        return (
+            f"declares the tools {list(actual)!r} where its registry entry "
+            f"declares {list(declared)!r}"
+        )
+    return None
+
+
 def render_codex_config_toml(
     specs: Sequence[JsonObject],
     *,
     web_search: CodexWebSearchMode,
+    base_url_override: str | None = None,
 ) -> str:
     """Render the ``config.toml`` body for the declared read-only servers.
 
@@ -189,6 +291,13 @@ def render_codex_config_toml(
     reads run without a prompt under the headless ``approval_policy = "never"``
     plus ``sandbox = "read-only"`` composition. Deterministic and stdlib-
     ``tomllib``-parseable.
+
+    "An exact allowlist" is ENFORCED here rather than assumed of the caller: every
+    registry-known spec's ``tools`` is compared against the registry's own
+    declaration (:func:`registry_tools_divergence`) before it is written, because
+    the pairing of a caller-supplied list with auto-approval is what makes a
+    divergent spec an auto-approved allowlist nothing verified. Specs the registry
+    does not own - the run's own authoring bridge - are skipped, not refused.
 
     *web_search* is written unconditionally, and FIRST. Unconditionally because
     Codex enables web search when the key is absent, so silence is a posture, not
@@ -202,20 +311,49 @@ def render_codex_config_toml(
     resolution yields ``disabled``, so a defaulted argument would render the gate
     binding invisible, and deleting the binding would leave every test green. A
     caller that has not decided the posture must fail to build, not build quietly.
+
+    *base_url_override*, when set, names a ``[model_providers.*]`` table and
+    selects it, redirecting the lane's API traffic at that endpoint. See
+    :func:`build_codex_config_home` for why the seam exists and why it stays
+    absent by default.
     """
     # Kept ahead of every table header; see the docstring for why this is a
     # correctness constraint rather than a layout preference.
     blocks: list[str] = [f"web_search = {_toml_str(web_search.value)}"]
+    if base_url_override:
+        # Same bare-key-before-tables constraint as web_search above.
+        blocks.append(
+            f"model_provider = {_toml_str(_OVERRIDE_PROVIDER)}\n\n"
+            f"[model_providers.{_OVERRIDE_PROVIDER}]\n"
+            f"name = {_toml_str(_OVERRIDE_PROVIDER)}\n"
+            f"base_url = {_toml_str(base_url_override)}\n"
+            # The installed app-server refuses "chat" outright at config load,
+            # which surfaces as a protocol error rather than as anything the
+            # provider said - the redirect has to speak the wire the CLI still
+            # supports or it never reaches an endpoint at all.
+            'wire_api = "responses"'
+        )
     for spec in specs:
         name = _required_server_string(spec, "name", server="<unnamed>")
         command = _required_server_string(spec, "command", server=name)
         args = _optional_server_string_list(spec, "args", server=name)
         tools = _optional_server_string_list(spec, "tools", server=name)
         environment = _optional_server_environment(spec, server=name)
+        divergence = registry_tools_divergence(spec, name=name)
+        if divergence is not None:
+            raise ConfigError(
+                f"refusing to write a Codex config for MCP server {name!r}, which "
+                f"{divergence}. This list becomes enabled_tools under "
+                'default_tools_approval_mode = "auto", so a spec carrying its own '
+                "surface under a registry name would auto-approve verbs the "
+                "registry withheld - resolve the spec from the registry rather "
+                "than assembling one beside it"
+            )
         key = _table_key(name)
         lines = [f"[mcp_servers.{key}]", f"command = {_toml_str(command)}"]
         lines.append(f"args = {_toml_str_array(args)}")
         # Read-verb allowlist: exactly the registry's read tools, auto-approved.
+        # "Exactly" is enforced above, not merely intended.
         lines.append(f"enabled_tools = {_toml_str_array(tools)}")
         lines.append('default_tools_approval_mode = "auto"')
         block = "\n".join(lines)
@@ -235,6 +373,7 @@ def build_codex_config_home(
     base_home: Path | None,
     *,
     web_search: CodexWebSearchMode,
+    base_url_override: str | None = None,
 ) -> Path:
     """Create a per-run ``CODEX_HOME`` carrying only the declared servers.
 
@@ -251,6 +390,17 @@ def build_codex_config_home(
     *web_search* is the run's web posture and is required - see
     :func:`render_codex_config_toml` for why it carries no default. Production
     always passes the output of :func:`resolve_codex_web_search_mode`.
+
+    *base_url_override* redirects the lane at a caller-named endpoint. It is
+    absent by default and must stay that way: this home exists precisely so a run
+    cannot inherit ambient configuration, and an override is a hole in that
+    property rather than a feature of it. It exists because the failure direction
+    of a provider lane is otherwise unobservable from outside the system - the
+    admitted lane succeeds on every input the gateway accepts - and a condition
+    taxonomy that can never be exercised against a real refusal is a claim rather
+    than a proof. The sibling ACP lane already accepts the same redirect through
+    its own base-URL variable, so this closes an asymmetry rather than opening a
+    new class of control.
     """
     # mkdtemp creates an owner-only (0700) directory, so the copied credential is
     # traversal-protected by the dir even before the file's own mode is set.
@@ -272,7 +422,12 @@ def build_codex_config_home(
                 # the temp tree is already user-scoped).
                 _restrict(dest)
         (home / "config.toml").write_text(
-            render_codex_config_toml(specs, web_search=web_search), encoding="utf-8"
+            render_codex_config_toml(
+                specs,
+                web_search=web_search,
+                base_url_override=base_url_override,
+            ),
+            encoding="utf-8",
         )
     except BaseException:
         # A mid-build failure (e.g. copy error) must not leak the dir with a
@@ -289,8 +444,18 @@ def build_codex_config_home(
 
 
 def cleanup_codex_config_home(home: Path | None) -> None:
-    """Best-effort removal of a per-run Codex config home; never raises."""
+    """Best-effort removal of a per-run Codex config home; never raises.
+
+    If VAULTSPEC_CODEX_CONFIG_HOME_RETAIN is set, the home is retained for
+    inspection and troubleshooting. Default behavior (unset) removes the home.
+    """
     if home is None:
+        return
+    if os.environ.get("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"):
+        logger.debug(
+            "Codex config home retained at %s per VAULTSPEC_CODEX_CONFIG_HOME_RETAIN",
+            home,
+        )
         return
     shutil.rmtree(home, ignore_errors=True)
 

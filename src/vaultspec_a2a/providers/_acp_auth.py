@@ -9,7 +9,6 @@ import json
 import logging
 from collections.abc import Mapping
 from contextlib import suppress
-from pathlib import Path
 from typing import Never
 
 from ..control.config import settings
@@ -20,7 +19,7 @@ from ._acp_types import (
     AcpResponseFutures,
     AcpSessionContext,
 )
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpAuthError, AcpErrorCode
 
 __all__: list[str] = []
@@ -60,7 +59,9 @@ def runtime_log_extra(
         "auth_mode": config.auth_mode,
         "use_exec": config.use_exec,
         "workspace_root_present": bool(config.workspace_root),
-        "cwd": config.workspace_root or config.cwd or str(Path.cwd()),
+        # Telemetry never fabricates a directory: an unsited lane is reported
+        # as absent rather than as whatever the serving process was started in.
+        "cwd": config.workspace_root or "<no-active-project>",
     }
     if process is not None:
         extra["process_pid"] = process.pid
@@ -310,7 +311,7 @@ async def authenticate_rpc(
         )
     if "error" in resp:
         raw_err = resp["error"]
-        err: JsonObject = raw_err if isinstance(raw_err, dict) else {}
+        err: JsonObject = lenient_json_object(raw_err)
         err_msg = str(err.get("message", "")) if err else str(raw_err)
         raw_code = err.get("code")
         err_code = (
@@ -342,7 +343,7 @@ async def authenticate_rpc(
             last_auth_url=last_auth_url,
         )
     result = resp.get("result")
-    return result if isinstance(result, dict) else {}
+    return lenient_json_object(result)
 
 
 async def wait_for_authenticate_response(

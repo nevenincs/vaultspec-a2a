@@ -14,8 +14,9 @@ from sqlalchemy.ext.asyncio import (
 
 from ....database import create_thread, seed_task_queue
 from ....database.models import Base
+from ....domain_config import domain_config
 from ....worker.task_queue_port import SqlTaskQueuePort
-from ...nodes.vault_reader import create_mount_node
+from ...nodes.vault_reader import build_initial_vault_index, create_mount_node
 
 
 def _make_state(
@@ -225,3 +226,44 @@ async def test_mount_no_queue_block_when_empty(
     )
     result = await mount(state)
     assert result == {"mounted_context": None}
+
+
+def test_the_index_keeps_the_most_recent_records_when_a_stage_exceeds_its_cap(
+    tmp_path: Path,
+) -> None:
+    """A capped stage must surrender its OLDEST records, never its newest.
+
+    The cap binds on real features - this repository's own vault holds 130 and 97
+    execution records for two of them - so which end is discarded decides what a
+    resuming run can see. Truncating from the front is silent and inverts the
+    answer: the run grounds on the first steps ever written and learns nothing
+    about the work it is resuming.
+
+    Written against the real glob and the real configured cap rather than a
+    stubbed one, so it fails if either the discard order or the pattern regresses.
+    """
+    cap = domain_config.vault_index_cap
+    feature = "capped-feature"
+    exec_dir = tmp_path / ".vault" / "exec" / f"2026-01-01-{feature}"
+    exec_dir.mkdir(parents=True)
+    # Zero-padded so ascending filename order is ascending step order, which is
+    # the convention the vault's own naming rules mandate.
+    total = cap + 5
+    for step in range(1, total + 1):
+        (exec_dir / f"2026-01-01-{feature}-P01-S{step:03d}.md").write_text(
+            "x", encoding="utf-8"
+        )
+
+    index = build_initial_vault_index(tmp_path, feature)
+    kept = index["exec"]
+
+    assert len(kept) == cap, f"expected the stage capped at {cap}, got {len(kept)}"
+    assert kept[-1].endswith(f"S{total:03d}.md"), (
+        "the newest execution record was discarded: the index ends at "
+        f"{kept[-1]!r}. Truncating from the head keeps a feature's oldest "
+        "records, which is the opposite of what a resuming run needs."
+    )
+    assert not any(entry.endswith("S001.md") for entry in kept), (
+        "the oldest record survived a full cap, so nothing was discarded from "
+        "the correct end"
+    )

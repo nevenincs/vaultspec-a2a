@@ -1,13 +1,21 @@
-"""Shared ACP subprocess lifecycle utilities.
+"""Shared subprocess lifecycle and diagnostic utilities.
 
 Provides platform-aware process spawning and tree killing for ACP agent
 subprocesses.  Used by ``acp_chat_model`` (production).
+
+Also home to :func:`redact_secrets`, the single masking rule for text a failed
+child wrote about itself. Every provider surface that retains a subprocess
+diagnostic shares one threat - a child reports its configuration when it fails,
+and configuration is where credentials live - so it shares one redactor rather
+than each deciding for itself. A per-module copy is how one such surface came to
+retain credentials verbatim while its neighbour masked them.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import subprocess
 import sys
 from contextlib import suppress
@@ -23,10 +31,35 @@ __all__ = [
     "attach_process_containment",
     "kill_process_tree",
     "process_containment",
+    "redact_secrets",
     "spawn_acp_process",
 ]
 
 logger = logging.getLogger(__name__)
+
+_SECRET_PATTERN = re.compile(
+    r"(?i)((?:[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*[=:]\s*"
+    r"|bearer\s+)(\S+)"
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Mask credential-shaped values in diagnostic text.
+
+    Provider subprocesses report their configuration when they fail, and
+    configuration is where credentials live, so a retained diagnostic tail is a
+    plausible place for a token to surface. Matches on the NAME rather than the
+    value shape: a token has no reliable shape, but the thing introducing it -
+    an assignment to something called a token, secret, key, password or
+    credential, or a bearer prefix - does.
+
+    Accepts a single line or a whole multi-line block. The separator between an
+    introducing name and its value spans newlines deliberately, so a value the
+    child wrote on the line after its name is masked too; the value itself is
+    non-whitespace and therefore never runs past its own line.
+    """
+    return _SECRET_PATTERN.sub(lambda m: f"{m.group(1)}<redacted>", text)
+
 
 # Attribute the run-owned provider's OS containment is stashed on so the shared
 # reaper can reach it from a bare ``Process`` handle without changing the

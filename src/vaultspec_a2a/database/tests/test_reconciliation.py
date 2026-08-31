@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...conftest import materialize_schema
 from ...database import (
     create_thread,
     get_thread,
     record_permission_request,
     record_permission_response_submission,
 )
-from ...database.models import Base
 from ...database.reconciliation import reconcile_threads_on_startup
 
 
@@ -23,10 +25,8 @@ async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
 ) -> None:
     """Missing checkpoint truth must win over a surviving permission row."""
     db_file = runtime_dir / "reconciliation.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -77,10 +77,8 @@ async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
 ) -> None:
     """Missing checkpoint truth must beat a surviving cancelling status."""
     db_file = runtime_dir / "reconciliation-cancelling.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -118,15 +116,84 @@ async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
 
 
 @pytest.mark.asyncio
+async def test_deleting_thread_with_pending_permission_is_never_swept(
+    runtime_dir,
+) -> None:
+    """A thread mid-teardown must stay invisible to startup reconciliation.
+
+    ``DELETING`` is a lifecycle sink with no valid outbound transition
+    (``thread.transitions``), set out of band by the deletion saga alone. Before
+    ``list_non_terminal_threads`` excluded it explicitly, this exact shape - a
+    pending permission survives restart AND its checkpoint is available, the
+    one branch that assigns a new thread status - would have driven
+    ``update_thread_status`` to request ``DELETING -> input_required`` and raise
+    ``InvalidTransitionError`` out of startup reconciliation.
+    """
+    db_file = runtime_dir / "reconciliation-deleting.db"
+    materialize_schema(Path(db_file))
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    checkpoints_file = runtime_dir / "checkpoints-deleting.db"
+    thread_id = "thread-deleting-pending-permission"
+
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        await checkpointer.setup()
+        checkpoint = empty_checkpoint()
+        checkpoint["id"] = "cp-deleting-pending-permission"
+        await checkpointer.aput(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            checkpoint,
+            {"source": "loop", "step": 1, "parents": {}},
+            {},
+        )
+
+        async with session_factory() as session:
+            await create_thread(session, thread_id=thread_id, status="deleting")
+            await record_permission_request(
+                session,
+                request_id=f"{thread_id}:perm-1",
+                thread_id=thread_id,
+                pause_reason_type="bash",
+                description="Allow action?",
+                allowed_options=[
+                    {
+                        "option_id": "allow_once",
+                        "name": "Allow once",
+                        "kind": "allow_once",
+                    }
+                ],
+                tool_call="bash",
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            summary = await reconcile_threads_on_startup(session, checkpointer)
+            await session.commit()
+            unswept = await get_thread(session, thread_id)
+
+    assert summary["repair_backlog"] == 0
+    assert summary["paused_resumable"] == 0
+    assert unswept is not None
+    assert unswept.status == "deleting"
+    assert unswept.repair_status == "healthy"
+    assert unswept.execution_readiness == "healthy"
+    assert unswept.recovery_epoch == 0
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
     runtime_dir,
 ) -> None:
     """Answered-not-applied rows must not be treated as user-paused on restart."""
     db_file = runtime_dir / "reconciliation-answered-pending-apply.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,

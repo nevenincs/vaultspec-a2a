@@ -15,6 +15,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from pydantic import PrivateAttr
 
+from ....conftest import materialize_schema
 from ....thread.state import TeamState
 from ...nodes.worker import create_worker_node
 
@@ -22,6 +23,11 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
 
 SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
+
+# The ACP lane now requires the run's active project at construction - it is no
+# longer inferred from the serving process - so these integration models name a
+# real directory the way a dispatched run does.
+_PROJECT = Path(__file__).resolve().parents[4]
 PYTHON_EXE = sys.executable
 
 
@@ -99,6 +105,7 @@ async def test_worker_execution_integration() -> None:
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "HelloWorld"],
         env_vars={},
+        workspace_root=str(_PROJECT),
     )
     node = create_worker_node(
         model=model,
@@ -120,6 +127,7 @@ async def test_worker_context_compaction_integration() -> None:
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "Compacted"],
         env_vars={},
+        workspace_root=str(_PROJECT),
     )
     node = create_worker_node(
         model=model,
@@ -143,6 +151,7 @@ async def test_worker_error_handling_integration() -> None:
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--error", "Internal agent failure"],
         env_vars={},
+        workspace_root=str(_PROJECT),
     )
     node = create_worker_node(
         model=model,
@@ -201,6 +210,7 @@ async def test_worker_turn_clears_consumed_approval_residue() -> None:
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "approved once"],
         env_vars={},
+        workspace_root=str(_PROJECT),
     )
     node = create_worker_node(
         model=model,
@@ -285,13 +295,11 @@ async def test_worker_dispatches_mark_complete_command_through_graph(
     )
 
     from ....database import create_thread, seed_task_queue
-    from ....database.models import Base
     from ....worker.task_queue_port import SqlTaskQueuePort
 
     db_file = tmp_path / "queue.db"
+    materialize_schema(Path(db_file.as_posix()))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file.as_posix()}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )

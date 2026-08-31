@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from ...tests.gateway_boot import free_port
+from ...testing.ports import free_port
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
 from ..registry import (
     ProcRecord,

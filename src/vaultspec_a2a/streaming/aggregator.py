@@ -7,7 +7,10 @@ Thin facade that delegates to focused sub-modules:
 - ``emitters.EventEmitters`` — event emission + state tracking
 - ``ingest.IngestManager`` — graph consumption lifecycle
 
-The public API is identical to the pre-decomposition monolith.
+This module declares ``EventAggregator`` and nothing else. ``SequencedEvent`` and
+``StreamableGraph`` moved to ``types`` in the decomposition and are imported here
+only to annotate the aggregator; they are not re-published, so the decomposition
+is what callers see rather than the shape it replaced.
 """
 
 import asyncio
@@ -27,11 +30,7 @@ from .subscribers import SubscriberManager
 from .transformer import project_run_progress
 from .types import SequencedEvent, StreamableGraph
 
-__all__ = [
-    "EventAggregator",
-    "SequencedEvent",
-    "StreamableGraph",
-]
+__all__ = ["EventAggregator"]
 
 
 class EventAggregator:

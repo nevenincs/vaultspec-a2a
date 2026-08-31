@@ -13,28 +13,40 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from langgraph.checkpoint.base import CheckpointTuple
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
+from ..authoring.contract import is_document_authoring_role
 from ..control.projection import (
+    apply_authoring_completion_check,
     apply_checkpoint_projection,
     clear_permissions_without_checkpoint_truth,
     enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
     reconcile_checkpoint_permissions_with_durable_state,
 )
+from ..control.run_discovery_service import reconcile_abandoned_reconciling_thread
 from ..control.snapshot import (
     MinimalState,
     enrich_snapshot_from_state,
     load_checkpoint_history_depth,
 )
 from ..database import get_thread
-from ..graph.enums import research_adr_semantic_phase
-from ..thread.enums import RepairStatus, ThreadStatus
+from ..graph.enums import SemanticPhase, research_adr_semantic_phase
+from ..team.team_config import load_agent_config, load_team_config
+from ..thread.enums import (
+    RepairStatus,
+    ReplayStatus,
+    ThreadStatus,
+    TranscriptAvailability,
+)
+from ..thread.errors import ConfigError
 from ..thread.snapshots import (
     ThreadStateData,
+    classify_transcript_availability,
     finalize_snapshot_replay_status,
     project_checkpoint_tuple,
 )
+from ..utils.coercion import coerce_object_mapping, coerce_string_list
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -59,18 +71,15 @@ CHANGESET_ID_FIELD = "authoring_changeset_ids"
 ACTIVE_FEATURE_FIELD = "active_feature"
 AUTHORING_SESSION_FIELD = "authoring_session_id"
 
-_STRING_KEYED_MAPPING = TypeAdapter(dict[str, object])
-_STRING_LIST = TypeAdapter(list[str])
-
 # --- Semantic authoring-phase projection -------
 
 # Terminal thread statuses map straight to a product-safe semantic phase.
-_SEMANTIC_TERMINAL: dict[str, str] = {
-    ThreadStatus.COMPLETED.value: "completed",
-    ThreadStatus.ARCHIVED.value: "completed",
-    ThreadStatus.FAILED.value: "failed",
-    ThreadStatus.CANCELLED.value: "cancelled",
-    ThreadStatus.CANCELLING.value: "cancelled",
+_SEMANTIC_TERMINAL: dict[str, SemanticPhase] = {
+    ThreadStatus.COMPLETED.value: SemanticPhase.COMPLETED,
+    ThreadStatus.ARCHIVED.value: SemanticPhase.COMPLETED,
+    ThreadStatus.FAILED.value: SemanticPhase.FAILED,
+    ThreadStatus.CANCELLED.value: SemanticPhase.CANCELLED,
+    ThreadStatus.CANCELLING.value: SemanticPhase.CANCELLED,
 }
 
 # Statuses / repair postures that mean the run needs recovery before it advances.
@@ -94,7 +103,7 @@ def project_semantic_phase(
     status: str,
     next_nodes: list[str],
     repair_status: str | None,
-) -> str:
+) -> SemanticPhase:
     """Project a product-safe semantic authoring phase for a run.
 
     Maps terminal and recovery states first, then the research_adr topology
@@ -111,32 +120,20 @@ def project_semantic_phase(
     if status in _RECOVERY_STATUSES or (
         repair_status is not None and repair_status in _RECOVERY_REPAIR
     ):
-        return "recovery_required"
+        return SemanticPhase.RECOVERY_REQUIRED
     for raw in next_nodes:
         phase = research_adr_semantic_phase(raw)
         if phase is not None:
             return phase
     if status == ThreadStatus.SUBMITTED.value:
-        return "starting"
-    return "running"
-
-
-def _string_list(value: object) -> list[str]:
-    """Return the non-empty string items of *value* when it is a list."""
-    try:
-        string_values = _STRING_LIST.validate_python(value, strict=True)
-    except ValidationError:
-        return []
-    return [item for item in string_values if item]
+        return SemanticPhase.STARTING
+    return SemanticPhase.RUNNING
 
 
 def _channel_values(checkpoint_tuple: CheckpointTuple) -> dict[str, object]:
     """Return the channel values of a checkpoint tuple, or an empty mapping."""
     channel_values: object = checkpoint_tuple.checkpoint.get("channel_values")
-    try:
-        return _STRING_KEYED_MAPPING.validate_python(channel_values, strict=True)
-    except ValidationError:
-        return {}
+    return coerce_object_mapping(channel_values) or {}
 
 
 async def read_run_snapshot(
@@ -180,9 +177,46 @@ def derive_run_authoring_ids(
         return [], []
     values = _channel_values(checkpoint_tuple)
     return (
-        _string_list(values.get(PROPOSAL_ID_FIELD)),
-        _string_list(values.get(CHANGESET_ID_FIELD)),
+        coerce_string_list(values.get(PROPOSAL_ID_FIELD), drop_empty=True) or [],
+        coerce_string_list(values.get(CHANGESET_ID_FIELD), drop_empty=True) or [],
     )
+
+
+def _preset_requires_document_authoring(team_preset: str | None) -> bool:
+    """Return whether *team_preset* runs at least one document-authoring role.
+
+    Deliberately role-based, not topology-based. The served
+    ``authoring_capability`` projection (``team_config.authoring_capability``)
+    keys on topology alone (``is_document_authoring_topology``, true only for
+    ``research_adr``), which misclassifies the solo doc-editor lane: its
+    topology is ``pipeline``, not ``research_adr``, so that predicate answers
+    "coding" for a preset that authors documents through the engine bridge.
+    Checking each worker's persona ``role`` against the authoring contract's
+    role set catches both the research_adr phase machine and the solo
+    doc-editor lane through one predicate, because ``DOCUMENT_AUTHORING_ROLES``
+    already unions both by construction.
+
+    Fails closed toward *not flagging*: a preset that cannot be resolved or
+    whose worker configs cannot be loaded returns ``False`` rather than
+    raising, so a run-status read never breaks over a config problem. An
+    unloadable preset already fails run-start elsewhere (fail-closed there),
+    so this module declining to guess at an unproven predicate does not mask
+    that defect.
+    """
+    if not team_preset:
+        return False
+    try:
+        team_config = load_team_config(team_preset)
+    except (ConfigError, ValidationError):
+        return False
+    for worker in team_config.workers:
+        try:
+            agent_config = load_agent_config(worker.agent_id)
+        except (ConfigError, ValidationError):
+            continue
+        if is_document_authoring_role(agent_config.role):
+            return True
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,12 +234,19 @@ class ThreadStateCapture:
     The gateway must derive every response field from this capture.  Keeping the
     tuple with its fully reconciled snapshot prevents a second checkpoint or
     thread read from mixing different moments of a progressing run.
+
+    ``transcript`` states whether the snapshot's messages are the run's record
+    or an artefact of an unread checkpoint. It is carried here rather than
+    re-derived by each reader because ``checkpoint_tuple`` alone cannot answer
+    it: a ``None`` tuple is a not-yet-dispatched run, a lost checkpoint, and an
+    unreachable checkpoint store all at once.
     """
 
     snapshot: ThreadStateData
     checkpoint_tuple: CheckpointTuple | None
     team_preset: str | None
     thread_metadata: str | None
+    transcript: TranscriptAvailability
 
 
 def _optional_str(value: object) -> str | None:
@@ -247,7 +288,29 @@ async def capture_thread_state(
         # Product run lookups must not surface it; the cleanup coordinator reads
         # it directly instead. Report it as absent so the route answers 404.
         return None
-    last_seq = aggregator.get_sequence(thread_id)
+    if thread.status == ThreadStatus.RECONCILING.value:
+        # T3's reconciler backstop (see run_discovery_service), reused here so
+        # a direct single-run status read resolves an abandoned reconciling
+        # thread too, not only the active-run list. `thread` is the same
+        # SQLAlchemy identity-mapped row `update_thread_status` would mutate
+        # (same session, same primary key), so a reconciliation performed here
+        # is already reflected on `thread` below with no re-fetch needed.
+        await reconcile_abandoned_reconciling_thread(db, thread_id)
+    # The durable column wins once it exists (captured at terminal settle,
+    # control/event_handlers.py::_handle_terminal_event, before the aggregator
+    # prunes its in-memory copy - F19). The live aggregator read is the
+    # fallback for a run that has not settled yet, where nothing has been
+    # captured because there is nothing terminal to capture: the run is still
+    # active and the aggregator's own counter is the current truth. A settled
+    # run whose row predates this column (last_sequence IS NULL forever, no
+    # captured value ever existed for it) falls back to the same pruned
+    # default 0 it always answered - a known limitation for rows written
+    # before the fix, not a regression this introduces.
+    last_seq = (
+        thread.last_sequence
+        if thread.last_sequence is not None
+        else aggregator.get_sequence(thread_id)
+    )
 
     snapshot = ThreadStateData(
         thread_id=thread_id,
@@ -323,7 +386,7 @@ async def capture_thread_state(
         checkpoint_error = True
         snapshot.snapshot_complete = False
         snapshot.degraded_reasons.append("checkpoint_timeout")
-        snapshot.replay_status = "unknown"
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
         snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
@@ -336,7 +399,7 @@ async def capture_thread_state(
         checkpoint_error = True
         snapshot.snapshot_complete = False
         snapshot.degraded_reasons.append("checkpoint_unavailable")
-        snapshot.replay_status = "unknown"
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
         snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
@@ -362,6 +425,22 @@ async def capture_thread_state(
         checkpoint_id=snapshot.checkpoint_id,
     )
 
+    # Gated on checkpoint_loaded, not merely captured_tuple: an unread
+    # checkpoint already carries its own "unavailable" degraded reason above,
+    # and asserting emptiness on top of an unread snapshot would misreport
+    # "unread" as "produced nothing" - see apply_authoring_completion_check.
+    if checkpoint_loaded:
+        proposal_ids, changeset_ids = derive_run_authoring_ids(captured_tuple)
+        snapshot = apply_authoring_completion_check(
+            snapshot,
+            thread_status=thread.status,
+            requires_document_authoring=_preset_requires_document_authoring(
+                thread.team_preset
+            ),
+            proposal_ids=proposal_ids,
+            changeset_ids=changeset_ids,
+        )
+
     finalized_snapshot = finalize_snapshot_replay_status(
         snapshot,
         checkpoint_loaded=checkpoint_loaded,
@@ -374,6 +453,12 @@ async def capture_thread_state(
         checkpoint_tuple=captured_tuple,
         team_preset=thread.team_preset,
         thread_metadata=thread.thread_metadata,
+        transcript=classify_transcript_availability(
+            checkpoint_loaded=checkpoint_loaded,
+            checkpoint_present=checkpoint_present,
+            checkpoint_error=checkpoint_error,
+            thread_status=thread.status,
+        ),
     )
 
 

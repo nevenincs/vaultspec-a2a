@@ -56,38 +56,6 @@ _THIS_MODULE = "src/vaultspec_a2a/providers/tests/test_lane_admission.py"
 # the one that actually shipped into a served profile on handshake-only evidence.
 UNPROVEN_LANES = (Provider.KIMI, Provider.GEMINI, Provider.OPENAI, Provider.ZHIPU)
 
-# The shipped violation this gate was built to expose, named exactly. The
-# `vaultspec-adr-research` preset ships two kimi-lane profiles and kimi is
-# handshake-proven only, so these roles name a lane the backend has never
-# completed work on. They are declared rather than tolerated: the sweep below
-# pins the offence set to this literal, so it still fails on a new offence, and
-# fails again when these are resolved.
-KNOWN_UNPROVEN_PRESET_LANES = tuple(
-    f"vaultspec-adr-research/{profile}/{agent} names unproven lane kimi"
-    for profile, agents in (
-        (
-            "kimi",
-            (
-                "vaultspec-adr-author",
-                "vaultspec-plan-author",
-                "vaultspec-researcher",
-                "vaultspec-synthesist",
-            ),
-        ),
-        (
-            "kimi-all",
-            (
-                "vaultspec-adr-author",
-                "vaultspec-doc-reviewer",
-                "vaultspec-plan-author",
-                "vaultspec-researcher",
-                "vaultspec-synthesist",
-            ),
-        ),
-    )
-    for agent in agents
-)
-
 
 def _team_with_profile(
     profile_provider: Provider | None = None,
@@ -172,16 +140,21 @@ class TestDeclaration:
             assert is_lane_admissible(provider) is False
 
     def test_declared_lanes_are_admissible(self) -> None:
+        # DETERMINISTIC is deliberately NOT here: it is admitted through
+        # IN_PROCESS_LANES instead, because no external transport exists to
+        # complete a turn against, so the completed-turn standard cannot be
+        # applied to it at all.
         assert set(PROVEN_TURN_LANES) == {
             Provider.CLAUDE,
             Provider.CODEX,
             Provider.ZAI,
         }
+        assert {Provider.MOCK, Provider.DETERMINISTIC} == IN_PROCESS_LANES
         for provider in (*PROVEN_TURN_LANES, *IN_PROCESS_LANES):
             assert is_lane_admissible(provider) is True
 
     def test_every_provider_is_classified(self) -> None:
-        """No enum member is unaccounted for: it is proven, in-process, or refused."""
+        """No enum member is unaccounted for: proven, supplemental, or refused."""
         for provider in Provider:
             admissible = is_lane_admissible(provider)
             declared = provider in PROVEN_TURN_LANES or provider in IN_PROCESS_LANES
@@ -322,11 +295,7 @@ class TestWebDeclaration:
         assert "completed-turn proof" in str(excinfo.value)
 
     def test_an_in_process_lane_can_never_be_web_proven(self) -> None:
-        """Turn-admissible is not enough: the in-process lanes hold no turn proof.
-
-        They spawn no CLI, so there is nothing there to retrieve with, and the
-        implication rejects them even though ``is_lane_admissible`` admits them.
-        """
+        """An in-process lane has no provider retrieval boundary to prove."""
         for lane in IN_PROCESS_LANES:
             assert is_lane_admissible(lane) is True
             with pytest.raises(ConfigError):
@@ -336,7 +305,7 @@ class TestWebDeclaration:
 
     def test_a_turn_proven_lane_is_accepted_by_the_implication(self) -> None:
         """The guard refuses incoherent pairs, not every pair."""
-        for lane in PROVEN_TURN_LANES:
+        for lane in set(PROVEN_TURN_LANES) - set(IN_PROCESS_LANES):
             _require_web_proof_implies_turn_proof(
                 {lane: WebLaneProof(test="t::t", proves="p")}, PROVEN_TURN_LANES
             )
@@ -462,18 +431,28 @@ class TestBundledPresetConformance:
     product actually serves.
     """
 
-    def test_the_shipped_unproven_lanes_are_exactly_the_known_ones(self) -> None:
-        """The sweep is pinned to the violation that exists, not to zero.
+    def test_no_shipped_preset_resolves_a_role_onto_an_unproven_lane(self) -> None:
+        """The sweep is pinned to zero, and zero is now structural.
 
-        Exact equality in both directions is the point: a NEW preset naming an
-        unproven lane fails here, and so does the day these stop offending -
-        whether kimi earns its completed-turn proof or the profiles are dropped,
-        whoever does it must come back and shrink this literal. A substring
-        tolerance would have silently absorbed both.
+        This used to pin the offence set to a literal naming nine roles: the
+        `vaultspec-adr-research` preset shipped two kimi profiles, and kimi is
+        handshake-proven only. That literal is gone with the profiles - the
+        catalog contract retired product model profiles, so no bundled preset
+        names an execution lane for the sweep to vet.
+
+        The sweep is kept rather than deleted because it is the guard against the
+        violation RETURNING: a preset that starts naming a lane again is checked
+        against the admission registry here, at the composition the product
+        actually serves.
+
+        A role that resolves to no provider is the expected state and is counted
+        rather than skipped silently, so "no offences" cannot be reached by the
+        sweep quietly resolving nothing at all.
         """
         loadable: list[str] = []
         unloadable: list[str] = []
         offences: list[str] = []
+        undeclared: list[str] = []
 
         for preset_id in sorted(discover_team_preset_ids()):
             try:
@@ -485,17 +464,28 @@ class TestBundledPresetConformance:
             for profile_id in sorted(team.effective_profiles()):
                 assignment = resolve_effective_assignment(team, profile_id)
                 for role in assignment.roles:
+                    if role.provider is None:
+                        # No lane named, so no lane to admit. The reason must be
+                        # the declared absence rather than a broken TOML, which
+                        # would otherwise hide a real preset regression here.
+                        assert role.resolution_error is not None
+                        assert "no provider is declared" in role.resolution_error, (
+                            f"{preset_id}/{profile_id}/{role.agent_id} fails to "
+                            f"resolve for an unexpected reason: "
+                            f"{role.resolution_error}"
+                        )
+                        undeclared.append(f"{preset_id}/{role.agent_id}")
+                        continue
                     assert role.resolution_error is None, (
-                        f"{preset_id}/{profile_id}/{role.agent_id} does not resolve: "
-                        f"{role.resolution_error}"
-                    )
-                    unproven = unproven_lanes_in(
-                        [role.provider, *role.fallback_providers]
+                        f"{preset_id}/{profile_id}/{role.agent_id} does not "
+                        f"resolve: {role.resolution_error}"
                     )
                     offences.extend(
                         f"{preset_id}/{profile_id}/{role.agent_id} names "
                         f"unproven lane {p.value}"
-                        for p in unproven
+                        for p in unproven_lanes_in(
+                            [role.provider, *role.fallback_providers]
+                        )
                     )
 
         # Guards against a vacuous pass: the sweep must actually have loaded the
@@ -506,22 +496,9 @@ class TestBundledPresetConformance:
         assert unloadable == [], unloadable
         assert "vaultspec-adr-research" in loadable
         assert len(loadable) >= 10, loadable
-        assert sorted(offences) == sorted(KNOWN_UNPROVEN_PRESET_LANES), offences
-
-    @pytest.mark.parametrize("profile_id", ("kimi", "kimi-all"))
-    def test_the_known_offending_profiles_are_refused_by_the_served_gate(
-        self, profile_id: str
-    ) -> None:
-        """The shipped violation is CONTAINED, which is what the gate is for.
-
-        The declaration above catalogues the offence; this asserts the product
-        does not serve it. Every lane is declared fully ready, so the only term
-        that can refuse the profile is admission - the exact state in which the
-        old credential-only gate served these profiles.
-        """
-        team = load_team_config("vaultspec-adr-research")
-        elig = _eligibility_of(team, profile_id, list(Provider))
-
-        assert elig.eligible is False
-        assert any("kimi" in reason for reason in elig.reasons), elig.reasons
-        assert any("completed-turn proof" in reason for reason in elig.reasons)
+        assert offences == [], offences
+        # And the sweep really did resolve the product presets down to their
+        # (absent) lane, rather than reporting zero because it resolved nothing.
+        assert any(u.startswith("vaultspec-adr-research/") for u in undeclared), (
+            undeclared
+        )

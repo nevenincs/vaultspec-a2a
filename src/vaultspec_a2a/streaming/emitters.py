@@ -38,7 +38,7 @@ from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from .buffering import BufferingManager
 from .node_metadata import node_metadata_fields
 from .subscribers import SubscriberManager
-from .types import SequencedEvent, classify_tool_kind, map_acp_option_kind
+from .types import SequencedEvent, classify_tool_kind, resolve_acp_option_kind
 
 logger = logging.getLogger(__name__)
 
@@ -359,8 +359,17 @@ class EventEmitters:
         status: ToolCallStatus | None = None,
         title: str | None = None,
         content: list[dict[str, str | None]] | None = None,
+        locations: list[dict[str, str | int | None]] | None = None,
     ) -> None:
-        """Emit a tool call update event (debounced)."""
+        """Emit a tool call update event (debounced).
+
+        ``locations`` was previously accepted by the ``ToolCallUpdate`` domain
+        event but had no parameter here to reach it, so a call site that
+        DOES observe what a tool call touched (a Codex file-change item, an
+        ACP-declared edit location) had no way to report it -- every update
+        served empty ``locations`` regardless of what the provider disclosed
+        (part of F17).
+        """
         now = time.monotonic()
         key = (thread_id, tool_call_id)
 
@@ -390,6 +399,7 @@ class EventEmitters:
             status=status,
             title=title,
             content=content,
+            locations=locations,
         )
         sequenced = SequencedEvent(event=event, sequence=seq)
 
@@ -646,7 +656,20 @@ class EventEmitters:
                 {
                     "option_id": opt.get("option_id", ""),
                     "name": opt.get("name", ""),
-                    "kind": str(map_acp_option_kind(opt.get("option_id", ""))),
+                    # Resolve from the DECLARED kind the relayed payload already
+                    # carries, not from the id. The id is free-form and
+                    # provider-defined, so deriving from it discards the one
+                    # field that says whether the option denies - which is how a
+                    # rejecting option under an id spelling neither "deny" nor
+                    # "reject" was once persisted as an approval. The resolver
+                    # still falls back to the id heuristic when the declaration
+                    # is missing or malformed, so nothing is lost when a payload
+                    # genuinely carries no kind.
+                    "kind": str(
+                        resolve_acp_option_kind(
+                            opt.get("kind"), opt.get("option_id", "")
+                        )
+                    ),
                 }
             )
         event = PermissionRequest(

@@ -10,13 +10,9 @@ climbing every tick and the breaker flapping open; post-fix it stays 0 and close
 
 from __future__ import annotations
 
-import http.server
 import subprocess
 import sys
-import threading
-from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -25,46 +21,18 @@ from ...control.config import settings
 from ...control.health import assemble_health_status
 from ...control.worker_management import (
     LazyWorkerSpawner,
+    WorkerLiveness,
     WorkerState,
     WorkerWatchdog,
 )
-from ...tests.gateway_boot import free_port
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-
-class _HealthHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self) -> None:
-        code = 200 if self.path == "/health" else 404
-        body = b"{}"
-        self.send_response(code)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, format: str, *args: Any) -> None:
-        """Silence the default stderr access log."""
-
-
-@contextmanager
-def _health_server() -> Iterator[int]:
-    """A real loopback HTTP server answering GET /health 200, yielding its port."""
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield port
-    finally:
-        server.shutdown()
-        server.server_close()
+from ...testing.listeners import health_listener
+from ...testing.ports import free_port
 
 
 def _stale_app_state(**singletons: object) -> SimpleNamespace:
     # A frozen heartbeat far past the timeout - the reseat-strands-worker signal.
     return SimpleNamespace(
-        worker_last_heartbeat_ts=0.0,
+        worker_liveness=WorkerLiveness(last_contact_ts=0.0),
         **singletons,
     )
 
@@ -127,7 +95,7 @@ def test_restart_cooldown_gate() -> None:
 
 @pytest.mark.asyncio
 async def test_external_healthy_worker_stale_heartbeat_is_not_restarted() -> None:
-    with _health_server() as port:
+    with health_listener() as port:
         spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=False)
         spawner.replace_process(None)  # adopted external worker: spawned, no process
         app_state = _stale_app_state(
@@ -159,7 +127,7 @@ async def test_adopted_worker_recovers_from_transient_down_to_up() -> None:
     owned-worker state machine's "down stays down until a real recovery" guard would
     freeze a healthy adopted worker at "down" and make plain /health readiness lie.
     """
-    with _health_server() as port:
+    with health_listener() as port:
         # auto_spawn True with no owned process is the same-gateway adoption shape.
         spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=True)
         spawner.replace_process(None)

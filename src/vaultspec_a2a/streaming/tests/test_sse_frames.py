@@ -6,13 +6,13 @@ import json
 
 import pytest
 
+from ...graph.enums import RESEARCH_ADR_NODE_PHASE
 from ..sse_frames import (
     MAX_PROGRESS_CONTENT_CHARS,
     MAX_SSE_FRAME_BYTES,
     SSE_FRAME_VERSION,
     catalog_worst_case_frame_bytes,
     encode_sse_frame,
-    semantic_phase_for_node,
 )
 
 
@@ -261,19 +261,37 @@ def test_clarification_pending_request_id_truncates_over_cap() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_semantic_phase_for_node_maps_research_adr_nodes() -> None:
-    assert semantic_phase_for_node("research_dispatch") == "researching"
-    assert semantic_phase_for_node("research_dispatch_researcher_00") == "researching"
-    assert semantic_phase_for_node("mount_synthesis") == "synthesizing_research"
-    assert semantic_phase_for_node("research_gate") == "awaiting_research_decision"
-    assert semantic_phase_for_node("adr_gate") == "awaiting_adr_decision"
+def test_stamped_frames_agree_with_the_shared_phase_map_for_every_node() -> None:
+    """Every node the graph declares stamps that node's phase onto the frame.
+
+    Asserted against the owning map rather than a copied node list, so a phase
+    added to the vocabulary is covered here the day it is added. Driven through
+    ``encode_sse_frame`` rather than the mapping function, because the stamping is
+    what this layer owes; a stamper that dropped the phase entirely would satisfy
+    a test that only called the function.
+    """
+    assert RESEARCH_ADR_NODE_PHASE, "the shared phase map must not be empty"
+    for node, expected in RESEARCH_ADR_NODE_PHASE.items():
+        frame = encode_sse_frame({"type": "agent_status", "node_name": node})
+        assert _data_payload(frame)["semantic_phase"] == expected, node
+        mounted = encode_sse_frame(
+            {"type": "agent_status", "node_name": f"mount_{node}"}
+        )
+        assert _data_payload(mounted)["semantic_phase"] == expected, node
 
 
-def test_semantic_phase_for_node_returns_none_for_non_research_adr() -> None:
-    assert semantic_phase_for_node("vaultspec-coder") is None
-    assert semantic_phase_for_node("supervisor") is None
-    assert semantic_phase_for_node("__end__") is None
-    assert semantic_phase_for_node("") is None
+def test_fan_out_nodes_stamp_the_researching_phase() -> None:
+    """The dispatch and researcher fan-out resolve by prefix, not by map entry."""
+    for node in ("research_dispatch", "research_dispatch_researcher_00"):
+        frame = encode_sse_frame({"type": "agent_status", "node_name": node})
+        assert _data_payload(frame)["semantic_phase"] == "researching", node
+
+
+@pytest.mark.parametrize("node", ["supervisor", "__end__", ""])
+def test_nodes_outside_the_topology_stamp_no_phase(node: str) -> None:
+    """A node the vocabulary does not cover never has a phase fabricated for it."""
+    frame = encode_sse_frame({"type": "agent_status", "node_name": node})
+    assert "semantic_phase" not in _data_payload(frame)
 
 
 def test_frame_is_stamped_with_semantic_phase_from_node_name() -> None:
@@ -315,8 +333,18 @@ def test_existing_semantic_phase_is_not_overwritten() -> None:
     assert payload["semantic_phase"] == "custom"
 
 
-def test_streaming_reads_the_shared_phase_vocabulary() -> None:
-    """The SSE stamper is the single shared graph.enums vocabulary, not a copy."""
-    from ...graph.enums import research_adr_semantic_phase
+def test_streaming_does_not_republish_the_phase_vocabulary() -> None:
+    """The stamper consumes graph.enums; it does not offer a second way in.
 
-    assert semantic_phase_for_node is research_adr_semantic_phase
+    The mapping was once re-exported from this module under a shorter name, so a
+    reader searching for the owner's spelling found no consumer here and a reader
+    searching for the short one found no owner. The surface that must REMAIN is
+    asserted alongside the absence, since an emptied module would satisfy the
+    absence on its own.
+    """
+    from .. import sse_frames
+
+    assert "semantic_phase_for_node" not in sse_frames.__all__
+    assert not hasattr(sse_frames, "semantic_phase_for_node")
+    assert "encode_sse_frame" in sse_frames.__all__
+    assert "enforce_progress_allowlist" in sse_frames.__all__

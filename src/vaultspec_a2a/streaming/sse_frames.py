@@ -44,15 +44,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, TypeGuard
 
-# Progress frames stamp the semantic phase from the single shared research_adr
-# vocabulary (graph.enums), which run-status also reads - one source of truth,
-# not a per-layer copy. Re-exported under the module's public name so callers
-# and tests keep importing it from here.
-from ..graph.enums import research_adr_semantic_phase as semantic_phase_for_node
+# The frame-kind vocabulary and the semantic-phase vocabulary are both owned by
+# graph.enums - one source of truth per vocabulary, not a per-layer copy. The
+# phase mapping is what run-status also reads, and it keeps the owner's spelling
+# here: the qualifier names the ONE topology it maps, and a shorter local name
+# would read as though it applied to any node.
+from ..graph.enums import ServerEventType, research_adr_semantic_phase
 
 # The wire event-type key pair is owned by ``thread.snapshots`` - the one layer
 # every producer and consumer of a relayed payload can import. Reading the frame
 # type through it keeps this catalog and the relay predicates on one rule.
+from ..thread.clarification import MAX_REQUEST_ID_CHARS
 from ..thread.snapshots import wire_event_type
 
 __all__ = [
@@ -62,7 +64,6 @@ __all__ = [
     "catalog_worst_case_frame_bytes",
     "encode_sse_frame",
     "enforce_progress_allowlist",
-    "semantic_phase_for_node",
 ]
 
 SSE_FRAME_VERSION = "v1"
@@ -291,26 +292,34 @@ _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
 # frame itself, so the loss is equivalent rather than a regression. It is left
 # uncatalogued rather than enumerated because nothing on the subscriber side
 # needs it; that judgement should be revisited if a consumer ever does.
+#
+# Keys are ``ServerEventType`` members wherever a member exists, so a value
+# respelled at the enum carries this catalog with it rather than silently
+# stranding an entry that can then never match. The three bare literals below -
+# ``thread_terminal``, ``stream_rejected``, ``progress_dropped`` - are transport
+# frame kinds the stream itself mints, which no graph event produces and the enum
+# therefore does not declare. Their spelling here is the mixture reading
+# correctly, not a conversion left half finished.
 _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
-    "message_chunk": {
+    ServerEventType.MESSAGE_CHUNK: {
         "content": _Text(MAX_PROGRESS_CONTENT_CHARS),
         "finish_reason": _Text(64),
     },
-    "thought_chunk": {"content": _Text(MAX_PROGRESS_CONTENT_CHARS)},
-    "tool_call_start": _TOOL_CALL_FIELDS,
-    "tool_call_update": _TOOL_CALL_FIELDS,
-    "artifact_update": {
+    ServerEventType.THOUGHT_CHUNK: {"content": _Text(MAX_PROGRESS_CONTENT_CHARS)},
+    ServerEventType.TOOL_CALL_START: _TOOL_CALL_FIELDS,
+    ServerEventType.TOOL_CALL_UPDATE: _TOOL_CALL_FIELDS,
+    ServerEventType.ARTIFACT_UPDATE: {
         "artifact_id": _Text(256),
         "filename": _Text(256),
         "append": _Flag(),
         "last_chunk": _Flag(),
     },
-    "agent_status": {
+    ServerEventType.AGENT_STATUS: {
         "state": _ENUM,
         "node_name": _Text(128),
         "detail": _Text(256),
     },
-    "team_status": {
+    ServerEventType.TEAM_STATUS: {
         "active_thread_ids": _TextList(64, 128),
         "agents": _ObjectList(
             64,
@@ -326,7 +335,7 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
             },
         ),
     },
-    "error": {
+    ServerEventType.ERROR: {
         "code": _Text(64),
         "message": _Text(512),
         "recoverable": _Flag(),
@@ -336,10 +345,10 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         "replay": _Flag(),
         "error_detail": _Text(512),
     },
-    "heartbeat": {"server_uptime_seconds": _Number()},
+    ServerEventType.HEARTBEAT: {"server_uptime_seconds": _Number()},
     "stream_rejected": {"reason": _Text(64)},
     "progress_dropped": {"reason": _Text(64), "dropped_type": _Text(64)},
-    "permission_request": {
+    ServerEventType.PERMISSION_REQUEST: {
         "request_id": _Text(128),
         "tool_call": _Text(128),
         "tool_kind": _ENUM,
@@ -354,10 +363,20 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     # attached them to the frame could not carry them across this boundary - the
     # catalog rebuilds by omission. A consumer correlates on the request id and
     # reads the questionnaire itself from run-status.
-    "clarification_pending": {"request_id": _Text(128)},
+    #
+    # The one field it does carry is bounded by the wire model's own cap rather
+    # than a matching number, because this bound TRUNCATES rather than refuses.
+    # Set below what the run mints and the nudge still arrives, carrying a
+    # silently shortened handle - and since correlation is the entire purpose of
+    # the frame, the consumer then re-reads run-status for a request id that
+    # does not exist. That failure needs no producer bug to occur: raising the
+    # minting cap alone is enough.
+    ServerEventType.CLARIFICATION_PENDING: {"request_id": _Text(MAX_REQUEST_ID_CHARS)},
     # A plan entry's ``content`` is model-authored plan text - document-body
     # adjacent, and nothing consumes it - so only its classification survives.
-    "plan_update": {"entries": _ObjectList(64, {"status": _ENUM, "priority": _ENUM})},
+    ServerEventType.PLAN_UPDATE: {
+        "entries": _ObjectList(64, {"status": _ENUM, "priority": _ENUM})
+    },
 }
 
 
@@ -464,7 +483,7 @@ def _stamp_semantic_phase(payload: Mapping[str, object]) -> Mapping[str, object]
     node_name = payload.get("node_name") or payload.get("agent_id")
     if not isinstance(node_name, str) or not node_name:
         return payload
-    phase = semantic_phase_for_node(node_name)
+    phase = research_adr_semantic_phase(node_name)
     if phase is None:
         return payload
     return {**payload, "semantic_phase": phase}

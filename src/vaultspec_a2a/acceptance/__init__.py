@@ -26,7 +26,6 @@ from ._harness import (
     DEFAULT_REQUIRED_ROLE,
     DEFAULT_TEAM_PRESET,
     CertifiedGateway,
-    GatewayBootError,
     certified_gateway,
 )
 
@@ -34,6 +33,5 @@ __all__ = [
     "DEFAULT_REQUIRED_ROLE",
     "DEFAULT_TEAM_PRESET",
     "CertifiedGateway",
-    "GatewayBootError",
     "certified_gateway",
 ]

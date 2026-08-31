@@ -84,7 +84,12 @@ def test_preset_is_a_coding_topology_so_the_bridge_is_legal() -> None:
     """
     cfg = load_team_config(_PRESET)
     assert cfg.is_document_authoring is False
-    assert authoring_capability(cfg.topology.type) == "coding"
+    # The COARSE capability is keyed on declared roles, so this lane reads
+    # ``document_authoring`` - it does author, through the bridge. That is a
+    # different question from the topology one this test is about, and the two
+    # deliberately disagree here.
+    assert authoring_capability(cfg) == "document_authoring"
     # It gates no phase document of its own: the human reviews its proposal through
     # the existing three-verdict lane, so it declares no phase-machine capability.
+    # Still topology-keyed, because this field claims OUTPUTS rather than roles.
     assert supported_capabilities(cfg.topology.type) == []

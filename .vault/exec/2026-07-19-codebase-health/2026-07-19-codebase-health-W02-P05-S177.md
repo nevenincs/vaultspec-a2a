@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#codebase-health'
 date: '2026-07-30'
-modified: '2026-07-30'
+modified: '2026-08-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:2a07bd5f14d288ffb350d7ef6ad1841bbcbfd50829ae72cbb701c1f0d5fde07c'
+body_hash: 'sha256:7d7f033e327bb9a4ab46cd14b3216f9663a5cf7146eb8dca6cf0ba954569b340'
 step_id: 'S177'
 related:
   - "[[2026-07-19-codebase-health-plan]]"
@@ -79,7 +79,6 @@ previously credential-sensitive. It is reachable only across two processes again
 store, since commits are serialized per run identifier in-process, and any subsequent
 retry still meets the strict durable binding. Threading a second rule through that path
 would have meant inventing the second mechanism this work exists to avoid.
-
 
 Reviewed PASS WITH FINDINGS - no critical, no high. The review reproduced the
 implementer's mutation probe independently, added a second probe on the edge wiring that

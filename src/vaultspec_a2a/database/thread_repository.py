@@ -20,8 +20,10 @@ if TYPE_CHECKING:
     from sqlalchemy.sql import Select
     from sqlalchemy.sql.elements import ColumnElement
 
+from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import (
     ACTIVE_STATUSES,
+    NON_ACTIVE_STATUSES,
     ApprovalStatus,
     ControlActionType,
     RepairStatus,
@@ -44,7 +46,6 @@ __all__ = [
     "ActiveThreadProjection",
     "create_thread",
     "delete_thread",
-    "delete_thread_execution_state",
     "get_thread",
     "get_thread_execution_state",
     "get_thread_metadata",
@@ -56,7 +57,6 @@ __all__ = [
     "record_thread_execution_state",
     "set_thread_approval_state",
     "set_thread_repair_state",
-    "update_thread_metadata",
     "update_thread_status",
 ]
 
@@ -69,10 +69,6 @@ class ActiveThreadProjection:
     status: str
     feature_tag: str | None
     created_at: datetime
-
-
-_MAX_DISCOVERY_WORKSPACE_ROOT_LENGTH = 4096
-_MAX_DISCOVERY_FEATURE_TAG_LENGTH = 128
 
 
 def _path_safe_run_id_clause() -> ColumnElement[bool]:
@@ -111,15 +107,12 @@ def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
     if (
         not isinstance(workspace, str)
         or not os.path.isabs(workspace)
-        or not 1 <= len(workspace) <= _MAX_DISCOVERY_WORKSPACE_ROOT_LENGTH
+        or not 1 <= len(workspace) <= MAX_WORKSPACE_ROOT_LENGTH
     ):
         workspace = None
     else:
         workspace = normalize_workspace_identity(workspace)
-    if (
-        not isinstance(feature, str)
-        or not 1 <= len(feature) <= _MAX_DISCOVERY_FEATURE_TAG_LENGTH
-    ):
+    if not isinstance(feature, str) or not 1 <= len(feature) <= MAX_FEATURE_TAG_LENGTH:
         feature = None
     return workspace, feature
 
@@ -142,7 +135,7 @@ async def create_thread(
     team_preset: str | None = None,
     repair_status: RepairStatus | str = RepairStatus.HEALTHY,
     repair_reason: str | None = None,
-    execution_readiness: str = "healthy",
+    execution_readiness: RepairStatus | str = RepairStatus.HEALTHY,
 ) -> ThreadModel:
     """Create a new orchestration thread."""
     coerced_status = _coerce_status(status)
@@ -208,8 +201,16 @@ async def list_threads(
     opts in with ``include_deleting`` for a cleanup or administrative view. The
     filter runs in the query so the total and pagination stay consistent with
     the page.
+
+    Also excludes legacy invalid identifiers, the same predicate
+    ``list_active_thread_page`` already applies before its ``LIMIT``: this is the
+    ``state=all`` history reading behind ``RunSummaryRecord``, which the gateway
+    schema types as ``PathSafeRunId``. Unlike discovery's capped page, this
+    listing has no size ceiling protecting it - one non-conforming row reaching
+    response serialization fails the whole page for every caller, not just the
+    one row - so the exclusion is unconditional rather than opt-in.
     """
-    filters = []
+    filters = [_path_safe_run_id_clause()]
     if status is not None:
         filters.append(ThreadModel.status == status.value)
     if not include_deleting:
@@ -233,17 +234,21 @@ async def list_threads(
 
 
 async def list_non_terminal_threads(session: AsyncSession) -> Sequence[ThreadModel]:
-    """Return all threads that still require orchestration attention."""
+    """Return all threads that still require orchestration attention.
+
+    Excludes every member of ``NON_ACTIVE_STATUSES`` - the terminal outcomes
+    plus ``ARCHIVED`` and ``DELETING`` - rather than a hand-typed subset. A
+    thread mid-teardown is a lifecycle sink with no valid outbound transition
+    (see ``thread.transitions``), so it must stay invisible to this sweep the
+    same way it is invisible to discovery; scoring it for repair alongside a
+    genuinely in-flight run risked a startup reconciliation pass raising
+    ``InvalidTransitionError`` against a row the deletion saga owns.
+    """
     stmt = (
         select(ThreadModel)
         .where(
             ThreadModel.status.not_in(
-                [
-                    ThreadStatus.COMPLETED.value,
-                    ThreadStatus.FAILED.value,
-                    ThreadStatus.CANCELLED.value,
-                    ThreadStatus.ARCHIVED.value,
-                ]
+                sorted(status.value for status in NON_ACTIVE_STATUSES)
             )
         )
         .order_by(ThreadModel.created_at.asc())
@@ -265,11 +270,20 @@ async def list_active_thread_page(
     if not 1 <= limit <= 101:
         msg = "active-thread page limit must be between 1 and 101"
         raise ValueError(msg)
-    if workspace_root is not None and not 1 <= len(workspace_root) <= 4096:
-        msg = "active-thread workspace selector must be between 1 and 4096 characters"
+    if (
+        workspace_root is not None
+        and not 1 <= len(workspace_root) <= MAX_WORKSPACE_ROOT_LENGTH
+    ):
+        msg = (
+            "active-thread workspace selector must be between 1 and "
+            f"{MAX_WORKSPACE_ROOT_LENGTH} characters"
+        )
         raise ValueError(msg)
-    if feature_tag is not None and not 1 <= len(feature_tag) <= 128:
-        msg = "active-thread feature selector must be between 1 and 128 characters"
+    if feature_tag is not None and not 1 <= len(feature_tag) <= MAX_FEATURE_TAG_LENGTH:
+        msg = (
+            "active-thread feature selector must be between 1 and "
+            f"{MAX_FEATURE_TAG_LENGTH} characters"
+        )
         raise ValueError(msg)
     if (after_created_at is None) != (after_id is None):
         msg = "active-thread keyset cursor requires both created_at and id"
@@ -480,7 +494,7 @@ async def set_thread_repair_state(
     *,
     repair_status: RepairStatus | str,
     repair_reason: str | None = None,
-    execution_readiness: str | None = None,
+    execution_readiness: RepairStatus | str | None = None,
     last_requested_action: ControlActionType | str | None = None,
     last_applied_action: ControlActionType | str | None = None,
     increment_generation: bool = False,
@@ -618,37 +632,6 @@ async def get_thread_execution_state(
 ) -> ThreadExecutionStateModel | None:
     """Return the latest execution-state projection for a thread."""
     return await session.get(ThreadExecutionStateModel, thread_id)
-
-
-async def delete_thread_execution_state(
-    session: AsyncSession,
-    thread_id: str,
-) -> bool:
-    """Delete the latest execution-state projection for a thread."""
-    model = await session.get(ThreadExecutionStateModel, thread_id)
-    if model is None:
-        return False
-    await session.delete(model)
-    await session.flush()
-    return True
-
-
-async def update_thread_metadata(
-    session: AsyncSession,
-    thread_id: str,
-    metadata: str | None,
-) -> ThreadModel | None:
-    thread = await session.get(ThreadModel, thread_id)
-    if thread is None:
-        return None
-    workspace_root, feature_tag = _discovery_selectors(metadata)
-    thread.thread_metadata = metadata
-    thread.workspace_root = workspace_root
-    thread.workspace_key = _workspace_key(workspace_root)
-    thread.feature_tag = feature_tag
-    thread.updated_at = _utcnow()
-    await session.flush()
-    return thread
 
 
 async def get_thread_metadata(session: AsyncSession, thread_id: str) -> str | None:

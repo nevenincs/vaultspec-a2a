@@ -5,6 +5,7 @@ tags:
 date: '2026-08-01'
 modified: '2026-08-01'
 body_schema: 'body-v1'
+body_hash: 'sha256:ea61bf40254bbd472f3b502d9a83bcdeb3a5178377f1dc28c23c64a49f93276f'
 related:
   - "[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]"
   - "[[2026-07-24-dashboard-bundled-runtime-adr]]"

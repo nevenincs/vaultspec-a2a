@@ -3,9 +3,10 @@ generated: true
 tags:
   - '#index'
   - '#tool-cores'
-date: '2026-08-01'
-modified: '2026-08-01'
+date: '2026-08-05'
+modified: '2026-08-05'
 body_schema: 'body-v1'
+body_hash: 'sha256:4131c5fbe019c1c284b182ca963df2d76be3450bfe5db9b00f03de6948f8fe59'
 related:
   - '[[2026-07-17-tool-cores-P01-S01]]'
   - '[[2026-07-17-tool-cores-P01-S02]]'
@@ -37,9 +38,22 @@ related:
   - '[[2026-07-17-tool-cores-dedup-audit]]'
   - '[[2026-07-17-tool-cores-plan]]'
   - '[[2026-07-17-tool-cores-research]]'
+  - '[[2026-08-01-tool-cores-P01-S01]]'
+  - '[[2026-08-01-tool-cores-P01-S02]]'
+  - '[[2026-08-01-tool-cores-P01-S03]]'
+  - '[[2026-08-01-tool-cores-P01-summary]]'
+  - '[[2026-08-01-tool-cores-P02-S04]]'
+  - '[[2026-08-01-tool-cores-P02-S05]]'
+  - '[[2026-08-01-tool-cores-P02-S06]]'
+  - '[[2026-08-01-tool-cores-P02-S07]]'
+  - '[[2026-08-01-tool-cores-P02-S13]]'
+  - '[[2026-08-01-tool-cores-P02-S14]]'
+  - '[[2026-08-01-tool-cores-P02-S22]]'
+  - '[[2026-08-01-tool-cores-P03-S11]]'
   - '[[2026-08-01-tool-cores-plan]]'
   - '[[2026-08-01-tool-cores-web-grounding-adr]]'
   - '[[2026-08-01-tool-cores-web-grounding-research]]'
+  - '[[2026-08-02-tool-cores-codex-isolation-p02s22-audit]]'
 ---
 
 # `tool-cores` feature index
@@ -57,6 +71,7 @@ Auto-generated index of all documents tagged with `#tool-cores`.
 
 - `2026-07-17-tool-cores-audit` - `tool-cores` audit: `S24 holistic safety and intent gate`
 - `2026-07-17-tool-cores-dedup-audit` - `tool-cores` audit: `P05.S23 vault dedup sweep — decision-vs-decision, decision-vs-code, and cross-plan reconciliation`
+- `2026-08-02-tool-cores-codex-isolation-p02s22-audit` - `tool-cores` audit: `Codex isolation P02.S22 review`
 
 ### exec
 
@@ -85,6 +100,18 @@ Auto-generated index of all documents tagged with `#tool-cores`.
 - `2026-07-17-tool-cores-P05-S23` - Sweep the vault via rag semantic search for duplicate or overlapping tool-cores records and reconcile any found, keeping one record per decision (executor-service)
 - `2026-07-17-tool-cores-P05-S24` - Run the mandatory code-review gate over all landed tool-cores changes for safety and intent, which must return PASS before close-out (vaultspec-code-reviewer)
 - `2026-07-17-tool-cores-P05-S25` - Reconcile the plan and exec records against what actually landed, ensuring every Step has its exec record and the Verification criteria are honestly closed (executor-service)
+- `2026-08-01-tool-cores-P01-S01` - Split the registry trust-root marker so network egress is its own declared axis: an entry or native tool set with no egress declaration is REFUSED fail-loud at the real composition seam, never defaulted, migrating the sole existing registry entry to declare no-egress in the same change so the tree stays green. Closes on a test that drives the production config-home and spawn composition path and proves the refusal fires for an undeclared entry (executor-core)
+- `2026-08-01-tool-cores-P01-S02` - Admit the typed web locator into the research-finding contract - kind web, url, retrieved-at ISO-8601, optional title and capped excerpt - enforced in the branch-side finding validation with caps. Closes on a graph-level test through the real dispatch, reducer, and checkpoint seam proving the locator survives into checkpointed state and reaches synthesis, never a direct field-set (executor-core)
+- `2026-08-01-tool-cores-P01-S03` - Extend the submit refusal structurally: when accumulated findings carry web locators, every distinct locator URL must appear in the proposed document body, else the document-conformance error routes the run into the existing revision loop. Closes on a test through the real submit path proving the refusal FIRES on an undisclosed URL, plus a mutation run demonstrating the test fails when the check is absent (executor-core)
+- `2026-08-01-tool-cores-P01-summary` - `tool-cores` P01 summary
+- `2026-08-01-tool-cores-P02-S04` - Introduce the proven-web-lanes activation gate consumed by both tool composition and persona-text composition, empty at landing, by EXTENDING the existing lane-admission module rather than declaring a second mechanism
+- `2026-08-01-tool-cores-P02-S05` - Compose the Claude and Z.ai web built-ins WebSearch and WebFetch into the autonomous allowlist by exact name for every document-authoring role, using the same role predicate that governs the native read floor, gated on the proven set, carrying the decided bounds through the first-party controls
+- `2026-08-01-tool-cores-P02-S06` - Enable Codex web search through the per-run config home in live mode as the served posture, gated on the proven set, with cached mode reachable by configuration for a deployment that prefers zero egress
+- `2026-08-01-tool-cores-P02-S07` - Compose the persona web-capability text lane-conditionally: the web-grounding paragraph with its citation obligations is injected for every document-authoring role only on lanes in the proven set, the existing no-online-access disclaimer stays the default, and preset descriptions remain unchanged in this Phase
+- `2026-08-01-tool-cores-P02-S13` - Land the web-locator extractor in the research producer so a real retrieval becomes a typed locator, and decide in the same change whether the producer normalises a malformed locator or the branch refuses it
+- `2026-08-01-tool-cores-P02-S14` - Close the two trust-structure findings the P01 review raised, as one change because they share a root
+- `2026-08-01-tool-cores-P03-S11` - Prove the Codex live-mode lane live to the completed-retrieval standard, additionally verifying the undocumented axis the decision record constrains - live web search actually surfacing and invoking under the read-only sandbox and never approval policy
+- `2026-08-01-tool-cores-P02-S22` - Always isolate Codex homes and surface redacted startup diagnostics
 
 ### plan
 

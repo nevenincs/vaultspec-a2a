@@ -51,13 +51,17 @@ from ..desktop._filesystem_authority import (
     resolve_directory_authority,
 )
 from ..desktop._platform_acl import (
-    restrict_windows_file as _restrict_windows_file,
+    confirm_opened_secret,
+    unfollowed_read_flags,
 )
 from ..desktop._platform_acl import (
-    windows_file_is_restricted as _windows_file_is_restricted,
+    harden_credential_path as _harden_credential_path,
 )
+from ..desktop._platform_acl import (
+    restrict_windows_file as _restrict_windows_file,
+)
+from ..utils.atomic_write import atomic_write_text
 from ..utils.coercion import coerce_int
-from .atomic_write import atomic_write_text
 
 __all__ = [
     "ARTIFACT_DECLARATIONS",
@@ -177,7 +181,7 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
                     return None
                 descriptor = os.open(
                     "service.token",
-                    os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                    unfollowed_read_flags(),
                     dir_fd=leased.dir_fd,
                 )
                 named = os.stat(
@@ -191,17 +195,7 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
                 named = expected.stat(follow_symlinks=False)
             try:
                 opened = os.fstat(descriptor)
-                if (
-                    not stat.S_ISREG(named.st_mode)
-                    or not stat.S_ISREG(opened.st_mode)
-                    or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)
-                ):
-                    return None
-                if os.name == "posix" and (
-                    opened.st_uid != os.geteuid() or opened.st_mode & 0o077
-                ):
-                    return None
-                if not _windows_file_is_restricted(expected):
+                if not confirm_opened_secret(descriptor, named=named, path=expected):
                     return None
                 with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
                     descriptor = -1
@@ -411,6 +405,28 @@ def port_has_listener(port: int, *, timeout: float) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
+def _harden_record_parent(parent: Path) -> None:
+    """Create *parent* and restrict it to its owner, on every platform.
+
+    Both discovery records sit beside a credential, so the directory holding them
+    carries the same owner-only guarantee the credential does, and neither writer
+    may publish into a directory it could not protect.
+
+    On Windows the directory is resolved to a real, non-link-like directory
+    BEFORE the access-control entry is applied. That step is the reason this is
+    not a bare call to the owner-restriction authority: applying a private DACL
+    through a junction would hand the guarantee to whatever the junction points
+    at, which is the one case an attacker gets to choose. POSIX keeps the mode it
+    is created with and is deliberately left alone here - resolving an authority
+    there would add a new refusal on a platform this change cannot exercise.
+    """
+    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        _harden_credential_path(parent)
+        return
+    _harden_credential_path(resolve_directory_authority(parent).path)
+
+
 def write_service_json(
     path: Path,
     *,
@@ -443,14 +459,7 @@ def write_service_json(
             "this would unlink the credential and downgrade the record to "
             "unauthenticated; pass allow_tokenless=True to un-publish on purpose"
         )
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if os.name == "posix":
-        path.parent.chmod(0o700)
-    else:
-        parent_authority = resolve_directory_authority(path.parent)
-        _restrict_windows_file(parent_authority.path)
-        if not _windows_file_is_restricted(parent_authority.path):
-            raise OSError("discovery parent does not have a private ACL")
+    _harden_record_parent(path.parent)
     record: dict[str, object] = {
         "port": port,
         "pid": pid,
@@ -782,8 +791,6 @@ def write_desktop_discovery(
         "owner": record.owner,
         "credential_reference": record.credential_reference,
     }
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if os.name == "posix":
-        path.parent.chmod(0o700)
+    _harden_record_parent(path.parent)
     atomic_write_text(path, json.dumps(payload), mode=0o600)
     return record

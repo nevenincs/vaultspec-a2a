@@ -31,11 +31,17 @@ spread across scenario files.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 import httpx
+import pytest
 
+from ..testing.catalog_selection import (
+    NoSelectableLaneError,
+    in_process_selection,
+    preset_in_process_provider,
+)
 from ..tests.gateway_boot import (
     GatewayBootError,
     armed_gateway_env,
@@ -52,11 +58,14 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+# ``GatewayBootError`` is raised here but declared by ``tests.gateway_boot``, which
+# holds it as ONE class for every tier - two same-named copies once diverged, so an
+# ``except`` written against one silently missed the other. Republishing it here
+# would hand the next tier a second place to import it from and start that again.
 __all__ = [
     "DEFAULT_REQUIRED_ROLE",
     "DEFAULT_TEAM_PRESET",
     "CertifiedGateway",
-    "GatewayBootError",
     "certified_gateway",
 ]
 
@@ -74,16 +83,87 @@ class CertifiedGateway:
     The verb helpers shape the exact public-surface requests once so scenarios
     read as assertions on real responses. Every helper presents the real
     attach-control credential; none uses the test-only authentication bypass.
+
+    Run-start requires an explicit catalog selection revalidated against the
+    catalog served for the run's workspace, so the run-bearing helpers resolve
+    one from this stack's own served catalog and site every run in the stack's
+    dedicated workspace directory. The resolution is cached per handle: prepare
+    and release must present byte-identical bodies for the release binding to
+    match, and one stack should pay its cold catalog build once.
     """
 
     base_url: str
     attach_token: str
     app_home: Path
+    workspace_root: Path
+    _run_fields: dict[str, Any] | None = field(default=None, init=False, repr=False)
 
     @property
     def auth_header(self) -> dict[str, str]:
         """The real attach-control Authorization header the dashboard presents."""
         return {"Authorization": f"Bearer {self.attach_token}"}
+
+    # -- explicit catalog selection -------------------------------------------
+
+    def run_fields(self) -> dict[str, Any]:
+        """The selection and metadata fields every run verb now requires.
+
+        Every verb this stack drives - prepare and release as much as start -
+        presents an in-process selection. The frozen selection wins outright at
+        compilation, so any other served lane would hand every role to a real
+        external provider, and deterministic certification must never spend.
+        This stack arms the in-process serving itself, so a catalog without one
+        means the arming failed; the scenario then skips naming the missing
+        serving rather than freezing whichever provider the host has installed.
+        """
+        return {
+            "selection": self._resolved_run_fields()["selection"],
+            "metadata": {"workspace_root": str(self.workspace_root)},
+        }
+
+    @property
+    def selected_provider_id(self) -> str:
+        """The provider id this stack's runs are frozen to.
+
+        Exposed so a scenario can assert that a started run was frozen to the
+        lane the harness actually selected, rather than restating a literal that
+        would keep passing if the resolution ever picked something else.
+        """
+        return str(self._resolved_run_fields()["provider_id"])
+
+    def _resolved_run_fields(self) -> dict[str, Any]:
+        """Resolve and cache this stack's one in-process selection."""
+        if self._run_fields is not None:
+            return self._run_fields
+        # The first catalog read for a workspace builds it cold, probing every
+        # registered lane; its budget is deliberately its own rather than a
+        # verb helper's.
+        with self.client(timeout=240.0) as client:
+            response = client.get(
+                "/v1/provider-catalog",
+                params={"workspace_root": str(self.workspace_root)},
+            )
+        if response.status_code != 200:
+            raise GatewayBootError(
+                f"the certification stack could not serve its provider "
+                f"catalog: {response.status_code} {response.text}"
+            )
+        try:
+            # This stack's runs all execute DEFAULT_TEAM_PRESET (see run_fields'
+            # own docstring: every verb presents ONE cached selection) - so the
+            # preference this resolves must be that preset's, not the run-start
+            # verb's own default team_preset argument, which no caller overrides.
+            selection = in_process_selection(
+                response.json(),
+                prefer_provider_id=preset_in_process_provider(DEFAULT_TEAM_PRESET),
+            )
+        except NoSelectableLaneError as exc:
+            pytest.skip(f"this certification stack cannot present a selection: {exc}")
+        self._run_fields = {
+            "provider_id": selection["provider_id"],
+            "selection": selection,
+        }
+        return self._run_fields
 
     def client(self, *, timeout: float = 30.0) -> httpx.Client:
         """A synchronous authenticated client bound to the gateway base URL."""
@@ -115,6 +195,7 @@ class CertifiedGateway:
                     "stage": "prepare",
                     "run_id": run_id,
                     "autonomous": True,
+                    **self.run_fields(),
                 },
             )
 
@@ -135,6 +216,7 @@ class CertifiedGateway:
                     "reservation_id": reservation_id,
                     "run_id": run_id,
                     "autonomous": True,
+                    **self.run_fields(),
                 },
             )
 
@@ -160,6 +242,7 @@ class CertifiedGateway:
                         "tokens": {role: "tok-certification"},
                         "engine_bearer": "bearer",
                     },
+                    **self.run_fields(),
                 },
             )
 
@@ -220,6 +303,12 @@ def certified_gateway(
     """
     app_home = workdir / "app-home"
     app_home.mkdir(parents=True, exist_ok=True)
+    # Every run this stack starts is sited in one real directory: the run-start
+    # verb requires the active project, and the catalog it revalidates against is
+    # served per workspace, so the handle and the runs it drives must name the
+    # same one.
+    workspace_root = workdir / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
     seed_credentials(app_home, attach=attach_token, ownership=ownership_capability)
     seat_valid_database(app_home)
 
@@ -231,6 +320,12 @@ def certified_gateway(
         env = armed_gateway_env(
             app_home, gateway_port=gateway_port, worker_port=worker_port
         )
+        # Arm the in-process lane serving this stack exists to certify against.
+        # The lanes are hidden by default so no product deployment can offer
+        # fixed content beside a real provider; certification is exactly the
+        # deployment that must select one, because an executing run here may
+        # never spend. Set before *extra_env* so a caller can still override it.
+        env["VAULTSPEC_SERVE_IN_PROCESS_LANES"] = "true"
         if settlement_url is not None:
             env["VAULTSPEC_DESKTOP_SETTLEMENT_URL"] = settlement_url
         env.update(extra_env)
@@ -255,7 +350,10 @@ def certified_gateway(
 
     try:
         yield CertifiedGateway(
-            base_url=base, attach_token=attach_token, app_home=app_home
+            base_url=base,
+            attach_token=attach_token,
+            app_home=app_home,
+            workspace_root=workspace_root,
         )
     finally:
         reap_gateway(proc)

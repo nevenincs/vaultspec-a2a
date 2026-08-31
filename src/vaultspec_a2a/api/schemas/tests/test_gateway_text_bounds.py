@@ -13,8 +13,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from ....thread.clarification import MAX_RUN_MESSAGE_CHARS
 from ..gateway import (
-    MAX_RUN_MESSAGE_CHARS,
     ProviderCatalogSelection,
     RunClarificationRespondRequest,
     RunStartRequest,
@@ -38,6 +38,7 @@ def _run_start(message: str, **changes: object) -> RunStartRequest:
         **changes,
     }
     return RunStartRequest.model_validate(payload)
+
 
 # Genuine multibyte samples: CJK at three UTF-8 bytes, an astral-plane emoji at
 # four, and a combining sequence whose character count differs from its visible

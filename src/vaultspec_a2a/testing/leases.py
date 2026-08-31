@@ -40,6 +40,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..lifecycle import is_pid_alive, procs_home
 
 if TYPE_CHECKING:
@@ -47,6 +48,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
+    "ARTIFACT_DECLARATIONS",
+    "LEASE_MARKER_DECLARATION",
     "LEASE_TTL_MS",
     "Lease",
     "LeaseAcquisitionTimeoutError",
@@ -70,6 +73,37 @@ _FUTURE_SKEW_TOLERANCE_MS = 10_000
 
 _EXCLUSIVE_SUFFIX = ".lease"
 _SHARED_SUFFIX = ".shared"
+
+# Shipped test-support that writes into the operator's machine-global home, which
+# is the same class as the service-test runtime directories and is declared for
+# the same reason: it is this project's code leaving state on a real machine.
+#
+# Unusually for this codebase, the enforcement here is genuinely complete, so the
+# declaration records what exists rather than an absence. A marker is unlinked on
+# release, and one abandoned by a crash is reclaimed by ANY later contender for
+# the same key - the reap is inline in the acquire path, not a separate sweeper
+# that could fall out of step with what it is meant to collect.
+LEASE_MARKER_DECLARATION = ArtifactDeclaration(
+    name="test-lease-marker",
+    root=(
+        f"<procs_home>/leases/<key>{_EXCLUSIVE_SUFFIX} and "
+        f"<procs_home>/leases/<key>.<n>{_SHARED_SUFFIX}"
+    ),
+    owner="testing.leases",
+    disposition=RetentionDisposition.SESSION_SCOPED,
+    mechanism=(
+        "Lease.release unlinks the holder's own marker, and _reap_dead_marker "
+        "drops any marker whose holder is provably gone - judged on BOTH pid "
+        f"liveness and an mtime younger than {LEASE_TTL_MS}ms, since a process "
+        "can outlive its own heartbeat writer. The reap runs inline on every "
+        "acquire and every shared-holder scan rather than in a separate sweeper, "
+        "so residue is collected by the next contender for the same key. The one "
+        "gap: a key nobody ever contends again keeps its dead marker, and the "
+        "leases directory itself is never removed"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (LEASE_MARKER_DECLARATION,)
 _KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 # Distinguishes multiple shared holds by one process; see _try_acquire_shared.
 _SHARED_SEQ = itertools.count()

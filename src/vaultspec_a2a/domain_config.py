@@ -88,14 +88,21 @@ class DomainConfig(BaseModel):
     ingest_event_stall_timeout_seconds: float = Field(
         default=90.0,
         description=(
-            "Ingest: maximum seconds to wait for the NEXT astream_events event "
-            "before treating the graph run as stalled (S37). Independent of a "
-            "team's own step_timeout_seconds (a per-node budget LangGraph is "
-            "supposed to enforce internally, but was observed live to not "
-            "always fire) — this is an unconditional outer bound on the ingest "
-            "loop itself, so a genuine wedge fails loud and retriable instead "
-            "of leaving a thread stuck RUNNING forever with no checkpoint, no "
-            "error, and no log line."
+            "Ingest: FLOOR on the seconds to wait for the NEXT astream_events "
+            "event before treating the graph run as stalled (S37). Independent "
+            "of a team's own step_timeout_seconds (a per-node budget LangGraph "
+            "is supposed to enforce internally, but was observed live to not "
+            "always fire) in the sense that this backstop never trusts "
+            "step_timeout to fire on its own — but it is a floor, not a fixed "
+            "value: a run whose compiled graph carries a wider step_timeout "
+            "(streaming/ingest.py's _effective_stall_timeout) is bounded by "
+            "that wider budget instead, so a node using exactly the silence "
+            "its own team preset sanctions (a long tool call, extended "
+            "reasoning on an ACP-backed lane) is never killed by this floor. "
+            "A genuine wedge on a preset with no wider step budget still fails "
+            "loud and retriable at this value instead of leaving a thread "
+            "stuck RUNNING forever with no checkpoint, no error, and no log "
+            "line."
         ),
     )
 
@@ -116,7 +123,12 @@ class DomainConfig(BaseModel):
 
     anchor_path_cap: int = Field(
         default=10,
-        description="Maximum anchor paths returned by the workspace anchoring module.",
+        description=(
+            "Maximum anchor paths per DOC TYPE surfaced by the workspace "
+            "anchoring module. Applied per type rather than as a total, so a "
+            "run carrying every vault stage can surface this many times the "
+            "number of stages present."
+        ),
     )
     max_context_refs: int = Field(
         default=50,
@@ -124,7 +136,12 @@ class DomainConfig(BaseModel):
     )
     vault_index_cap: int = Field(
         default=50,
-        description="Maximum vault index entries surfaced to the agent per turn.",
+        description=(
+            "Maximum vault index entries per STAGE surfaced to the agent. "
+            "Applied per stage rather than as a per-turn total, so a run "
+            "carrying every stage can surface this many times the number of "
+            "stages present. Contrast max_context_refs, which is a true total."
+        ),
     )
     mount_token_ceiling: int = Field(
         default=20_000,
@@ -184,6 +201,23 @@ class DomainConfig(BaseModel):
         description=(
             "Seconds a desktop run-admission prepare reservation is held before it "
             "expires and frees its bounded slot when no commit binds it."
+        ),
+    )
+    run_start_catalog_budget_seconds: float = Field(
+        default=120.0,
+        description=(
+            "Wall-clock budget a run start will wait for the provider catalog of its "
+            "workspace before refusing retryably. On expiry the build continues in "
+            "the background, so the retry is served warm rather than paying the cold "
+            "cost again. This bounds a HUNG build, not a slow one: a cold build "
+            "probes every registered lane over subprocess spawns and network calls, "
+            "and a lane that FAILS costs the most of all, because it fails by running "
+            "its own timeout out. Measured cold at 18-24s on a developer host with "
+            "every lane answering, and above a minute on a loaded host with lanes "
+            "timing out. A budget under that legitimate worst case refuses work that "
+            "would have succeeded. Only the COLD build costs this: a failing lane is "
+            "now negatively cached, so the retry this budget promises is warm even "
+            "during a provider outage."
         ),
     )
 

@@ -18,17 +18,21 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 import httpx
-from pydantic import TypeAdapter, ValidationError
 
-from ..database import list_threads, update_thread_status
-from ..database.session import get_session_factory
+from ..database import get_session_factory, list_threads, update_thread_status
 from ..domain_config import domain_config
-from ..ipc.schemas import DispatchRequest, DispatchResponse, to_dispatch_action
+from ..ipc.schemas import (
+    DispatchRequest,
+    DispatchResponse,
+    to_dispatch_action,
+)
 from ..providers.team_selection import (
     TeamSelectionError,
     frozen_team_selection_from_record,
 )
 from ..thread.enums import ControlActionType, ThreadStatus
+from ..utils.coercion import coerce_object_mapping, coerce_string_list
+from ._thread_metadata import workspace_root_from_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,24 +58,6 @@ logger = logging.getLogger(__name__)
 # first occurrence logs in full, every Nth repeat thereafter logs in full, the
 # rest only advance the counter a batch-end summary reports.
 _REDISPATCH_LOG_EVERY_N = 5
-_STRING_KEYED_MAPPING = TypeAdapter(dict[str, object])
-_STRING_LIST = TypeAdapter(list[str])
-
-
-def _string_keyed_mapping(value: object) -> dict[str, object] | None:
-    """Validate an untrusted JSON value as a string-keyed mapping."""
-    try:
-        return _STRING_KEYED_MAPPING.validate_python(value, strict=True)
-    except ValidationError:
-        return None
-
-
-def _string_list(value: object) -> list[str] | None:
-    """Validate an untrusted JSON value as a list of strings."""
-    try:
-        return _STRING_LIST.validate_python(value, strict=True)
-    except ValidationError:
-        return None
 
 
 def _frozen_model_assignment(
@@ -84,24 +70,24 @@ def _frozen_model_assignment(
         return None, frozen.compiler_map()
 
     frozen_record = metadata.get("model_profile")
-    frozen_record_mapping = _string_keyed_mapping(frozen_record)
+    frozen_record_mapping = coerce_object_mapping(frozen_record)
     if frozen_record_mapping is None:
         return None, {}
 
     profile_value = frozen_record_mapping.get("profile_id")
     profile_id = profile_value if isinstance(profile_value, str) else None
-    roles_value = _string_keyed_mapping(frozen_record_mapping.get("roles"))
+    roles_value = coerce_object_mapping(frozen_record_mapping.get("roles"))
     if roles_value is None:
         return profile_id, {}
 
     assignment: dict[str, dict[str, object]] = {}
     for agent_id, role_value in roles_value.items():
-        role_mapping = _string_keyed_mapping(role_value)
+        role_mapping = coerce_object_mapping(role_value)
         if role_mapping is None:
             continue
         provider = role_mapping.get("provider")
         capability = role_mapping.get("capability")
-        fallback = _string_list(role_mapping.get("fallback", []))
+        fallback = coerce_string_list(role_mapping.get("fallback", []))
         if (
             not isinstance(provider, str)
             or not (isinstance(capability, str) or capability is None)
@@ -344,7 +330,7 @@ async def redispatch_reconciling_threads(
                 if thread.thread_metadata:
                     try:
                         raw_metadata: object = json.loads(thread.thread_metadata)
-                        parsed_metadata = _string_keyed_mapping(raw_metadata)
+                        parsed_metadata = coerce_object_mapping(raw_metadata)
                         if parsed_metadata is not None:
                             meta = parsed_metadata
                     except json.JSONDecodeError:
@@ -377,12 +363,33 @@ async def redispatch_reconciling_threads(
                         thread.id,
                     )
                     continue
-                workspace_root_value = meta.get("workspace_root")
-                workspace_root = (
-                    workspace_root_value
-                    if isinstance(workspace_root_value, str)
-                    else None
-                )
+                # A reconciling thread inherits the active project it was created
+                # with; the sweep never re-derives one. Refusing HERE, per thread,
+                # is what keeps the sweep going: constructing the dispatch without
+                # a project raises inside the ingest validator, and that exception
+                # aborts the whole pass, so one unrecoverable thread would strand
+                # every healthy one behind it.
+                workspace_root = workspace_root_from_metadata(meta)
+                if workspace_root is None:
+                    await update_thread_status(
+                        db,
+                        thread.id,
+                        ThreadStatus.FAILED,
+                        failure_reason=(
+                            "run carries no active project: its stored metadata "
+                            "names no workspace_root, so it cannot be re-sited"
+                        ),
+                    )
+                    await db.commit()
+                    _log_redispatch_failure_ladder(
+                        failure_counts,
+                        failure_thread_ids,
+                        "no_active_project",
+                        thread.id,
+                        "Refusing to re-dispatch thread %s with no active project",
+                        thread.id,
+                    )
+                    continue
                 dispatch = DispatchRequest(
                     action=to_dispatch_action(ControlActionType.INGEST),
                     thread_id=thread.id,

@@ -33,7 +33,10 @@ from .types import (
     NODE_BOUNDARY_EVENTS,
     PASSTHROUGH_EVENTS,
     StreamableGraph,
+    action_detail_projection,
     classify_tool_kind,
+    map_action_item_status,
+    parse_action_detail,
     resolve_acp_option_kind,
 )
 
@@ -81,6 +84,92 @@ def _artifact_label_from_tool_input(file_path: str) -> str:
     return PurePath(normalized).name or "artifact"
 
 
+async def _emit_completed_action(
+    thread_id: str,
+    agent_id: str,
+    tool_call_id: str,
+    item_type: str,
+    detail: dict[str, Any],
+    emitters: EventEmitters,
+) -> None:
+    """Register and immediately resolve a Codex one-shot completed-action item.
+
+    Codex reports these only on ``item/completed`` (see
+    ``codex_chat_model._completed_action_chunk`` - "a started command has no
+    exit code"), so there is no separate live start phase to observe: this
+    site sees the whole lifecycle at once. It still emits a start-then-update
+    pair, matching ``_translate_tool_start``/``_translate_tool_end`` (the
+    genuine-``BaseTool`` path) so both lanes reach the wire through the same
+    two-event shape a consumer already expects.
+    """
+    status = map_action_item_status(detail.get("status"))
+    content, locations = action_detail_projection(item_type, detail)
+    await emitters.emit_tool_call_start(
+        thread_id=thread_id,
+        agent_id=agent_id,
+        tool_call_id=tool_call_id,
+        title=item_type,
+        kind=classify_tool_kind(item_type),
+    )
+    await emitters.emit_tool_call_update(
+        thread_id=thread_id,
+        agent_id=agent_id,
+        tool_call_id=tool_call_id,
+        status=status,
+        content=content,
+        locations=locations,
+    )
+
+
+async def _translate_tool_call_chunks(
+    chunk: Any,
+    thread_id: str,
+    effective_agent_id: str,
+    emitters: EventEmitters,
+) -> None:
+    """Translate a streamed chunk's ``tool_call_chunks`` into tool-call events.
+
+    Provider-internal tool activity (an ACP CLI's own built-in tools, a
+    Codex ``commandExecution``/``fileChange``/``mcpToolCall`` action) never
+    goes through a real LangChain ``BaseTool``/``ToolNode``, so
+    ``on_tool_start``/``on_tool_end`` never fire for it - the only place this
+    activity reaches ``astream_events`` at all is as ``tool_call_chunks`` on
+    an ``AIMessageChunk`` flowing through ``on_chat_model_stream``. This was
+    previously not read here (only ``chunk.content`` was), so every one of
+    these calls stayed unregistered for the run's entire live stream and
+    could only be reconstructed - incorrectly, permanently PENDING - from
+    checkpoint state after the run ended (F17).
+    """
+    tool_call_chunks = getattr(chunk, "tool_call_chunks", None)
+    if not tool_call_chunks:
+        return
+    known = emitters.get_tool_call_states(thread_id)
+    for tc in tool_call_chunks:
+        tc_id = tc.get("id")
+        if not isinstance(tc_id, str) or not tc_id:
+            continue
+        name = tc.get("name") or "unknown_tool"
+        detail = parse_action_detail(tc.get("args"))
+        if detail is not None and "status" in detail:
+            # Codex's completed-action shape: a single self-contained
+            # terminal report, not a plain registration.
+            await _emit_completed_action(
+                thread_id, effective_agent_id, tc_id, name, detail, emitters
+            )
+            continue
+        if tc_id in known:
+            # Already registered (the initial chunk, or an earlier
+            # partial-args delta for the same id) - do not re-register.
+            continue
+        await emitters.emit_tool_call_start(
+            thread_id=thread_id,
+            agent_id=effective_agent_id,
+            tool_call_id=tc_id,
+            title=name,
+            kind=classify_tool_kind(name),
+        )
+
+
 async def _translate_chat_model_stream(
     event_data: dict[str, Any],
     thread_id: str,
@@ -91,6 +180,9 @@ async def _translate_chat_model_stream(
 ) -> None:
     chunk = event_data.get("data", {}).get("chunk")
     if chunk is not None:
+        await _translate_tool_call_chunks(
+            chunk, thread_id, effective_agent_id, emitters
+        )
         content = getattr(chunk, "content", "")
         if isinstance(content, list):
             for block in content:

@@ -23,6 +23,7 @@ from .provider_catalog import (
     AuthenticationState,
     CacheFreshness,
     CatalogRefreshCache,
+    CatalogRefreshSuppressedError,
     CatalogState,
     CatalogStatus,
     HealthState,
@@ -44,6 +45,12 @@ _DISPLAY_NAMES = {
     Provider.OPENAI: "OpenAI",
     Provider.ZAI: "Z.ai",
     Provider.ZHIPU: "Zhipu AI",
+    # The in-process lanes name themselves as such wherever they are displayed.
+    # They are served only to a deployment that armed them, but a served lane is
+    # a lane a human can read, and one that returns fixed or replayed content
+    # must not be presentable as an ordinary provider.
+    Provider.DETERMINISTIC: "Deterministic (in-process)",
+    Provider.MOCK: "Mock (in-process tape replay)",
 }
 
 
@@ -70,12 +77,23 @@ class ProviderCatalogService:
         factory: ProviderFactory | None = None,
         ttl: timedelta = PROVIDER_CATALOG_CACHE_TTL,
         max_workspace_scopes: int = _MAX_WORKSPACE_SCOPES,
+        serve_in_process_lanes: bool | None = None,
     ) -> None:
         if max_workspace_scopes <= 0:
             raise ValueError("max_workspace_scopes must be positive")
         self._factory = factory or ProviderFactory()
         self._ttl = ttl
         self._max_workspace_scopes = max_workspace_scopes
+        # Forwarded to the registration factory, which already accepts it and
+        # documents why: an explicit value is the same decision a caller that
+        # knows its own posture would make, "so the policy is exercisable
+        # without reaching into the process environment". Dropping it here left
+        # the environment as the only transport, and a process-wide variable is
+        # inherited by every gateway child this service's callers spawn - so
+        # arming a lane for one caller silently rearmed it for unrelated
+        # subprocesses. ``None`` keeps the served gateway's behaviour exactly:
+        # consult the deployment's declaration.
+        self._serve_in_process_lanes = serve_in_process_lanes
         self._scopes: OrderedDict[str, _WorkspaceScope] = OrderedDict()
         self._scope_lock = asyncio.Lock()
 
@@ -100,7 +118,10 @@ class ProviderCatalogService:
                         "provider catalog workspace capacity is busy"
                     )
                 del self._scopes[inactive]
-            registrations = self._factory.catalog_registrations(Path(workspace_root))
+            registrations = self._factory.catalog_registrations(
+                Path(workspace_root),
+                serve_in_process_lanes=self._serve_in_process_lanes,
+            )
             scope = _WorkspaceScope(
                 registrations=registrations,
                 cache=CatalogRefreshCache(
@@ -152,6 +173,22 @@ class ProviderCatalogService:
         refresh_failed = False
         try:
             snapshot = await scope.cache.get(key, load)
+        except CatalogRefreshSuppressedError as exc:
+            # Not a fresh failure: this lane failed recently and is inside its
+            # retry backoff, so no discovery ran. Logged distinctly from a real
+            # attempt so a reader can tell a lane that is failing from a lane that
+            # is merely being left alone, and at debug because a burst of reads
+            # during one outage would otherwise fill the log with one fact.
+            logger.debug(
+                "provider catalog refresh suppressed for %s/%s after a %s, "
+                "retrying in %.1fs",
+                key.provider_id,
+                key.execution_mode,
+                exc.failure_type,
+                exc.retry_after_seconds,
+            )
+            refresh_failed = True
+            snapshot = scope.cache.peek(key)
         except Exception as exc:
             # Provider exception text may contain credentials, URLs, or local paths.
             # Keep diagnostics to the type locally and serve a fixed safe reason.

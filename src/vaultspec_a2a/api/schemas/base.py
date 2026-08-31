@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from .enums import ServerEventType
+from ...graph.enums import ServerEventType
 
 __all__ = [
     "EventEnvelope",

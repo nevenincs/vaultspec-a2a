@@ -5,9 +5,11 @@ from auth logic and session lifecycle RPCs.
 """
 
 import asyncio
+import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from langchain_core.outputs import ChatGenerationChunk
 
@@ -24,6 +26,67 @@ type AcpResponseFutures = dict[int, AcpResponseFuture]
 PermissionCallback = Callable[[str, JsonObject, list[JsonObject]], Awaitable[str]]
 
 
+def require_workspace_root(value: str | None, *, surface: str) -> Path:
+    """Return the run's workspace root, or refuse to invent one.
+
+    Every directory an agent lane touches - the subprocess spawn directory, the
+    environment resolution root, the session working directory, and the
+    filesystem and terminal sandbox roots - is the active project the run was
+    created with. There is no default. The absent case used to resolve to the
+    serving process's own working directory, which put agent execution and its
+    sandbox boundary inside this service's tree; a sandbox root derived from
+    ambient process state is not a boundary at all.
+
+    Reaching this raise means a run was admitted without an active project,
+    which the run-creation seam refuses, so it indicates a construction path
+    that bypassed it rather than a user error.
+    """
+    if not value:
+        msg = (
+            f"{surface} requires the run's workspace root; none was supplied. "
+            "The active project is carried from run creation and is never "
+            "derived from the serving process."
+        )
+        raise ValueError(msg)
+    return Path(value)
+
+
+# Windows extended-length prefix. ``Path.resolve()`` emits it for long paths and
+# for some UNC spellings, and the engine's wire form strips it, so the two
+# authorities would compare unequal for the same directory unless one form wins.
+_EXTENDED_LENGTH_PREFIX = "\\\\?\\"
+
+
+def canonical_project_root(value: str | Path) -> str:
+    """Return one project root in the single form enforcement compares against.
+
+    The research found five spellings of the active project across four
+    authorities - the engine's wire form, the run's stored path, a case-folded
+    discovery digest, a search service's per-call root, and a command-line
+    target - agreeing only because one read seam re-normalised another. A
+    comparison between two of those spellings is a comparison between two
+    conventions, so every value entering a scope decision is reduced here first.
+
+    The reduction is: user expansion, symlink and ``..`` collapse, extended-length
+    prefix removal, and case normalisation for the platforms whose filesystems are
+    case-insensitive. Resolution is non-strict - a root that does not exist still
+    reduces to a stable key, because refusing a call is a decision the permission
+    layer must be able to reach without touching the filesystem's answer.
+    """
+    resolved = Path(value).expanduser()
+    try:
+        resolved = resolved.resolve()
+    except OSError:
+        # A path the OS will not even resolve (an unreachable UNC share, a
+        # detached drive) still has to yield a key rather than propagate an
+        # error into a permission decision.
+        resolved = Path(os.path.abspath(str(resolved)))
+    text = str(resolved)
+    if text.startswith(_EXTENDED_LENGTH_PREFIX):
+        text = text[len(_EXTENDED_LENGTH_PREFIX) :]
+    return os.path.normcase(text)
+
+
 @dataclass(frozen=True)
 class AcpModelConfig:
     """Frozen snapshot of read-only ACP model configuration.
@@ -36,7 +99,6 @@ class AcpModelConfig:
     agent_config: AgentConfig | None
     permission_callback: PermissionCallback | None
     workspace_root: str | None
-    cwd: str | None
     command: list[str]
     # repr=False keeps injected auth tokens out of the frozen config's default
     # dataclass repr (env_vars redaction audit).
@@ -70,6 +132,45 @@ class AcpModelConfig:
     # Exact session-wide provider config values frozen at run admission, keyed
     # by the ACP adapter's advertised configuration option id.
     desired_config_options: dict[str, str] = field(default_factory=dict)
+
+    def bound_project_root(self) -> str | None:
+        """Return the project this run is bound to, or ``None`` if it has none.
+
+        ``workspace_root`` is already the active project the run was created
+        with - the value every directory the lane touches is derived from. This
+        reader is what makes it usable as an AUTHORITY rather than only as a
+        starting directory: it hands back the canonical form, so a caller
+        comparing against it cannot accidentally compare spellings.
+
+        ``None`` is not "unrestricted". It means the run reached this seam
+        without an active project, which run creation refuses, so a caller
+        deciding whether to permit something must read it as "no authority to
+        permit against" - see :meth:`binds_project_path`.
+        """
+        if not self.workspace_root:
+            return None
+        return canonical_project_root(self.workspace_root)
+
+    def binds_project_path(self, candidate: str | Path) -> bool:
+        """Return whether *candidate* lies inside the project the run is bound to.
+
+        Containment rather than equality, because a path UNDER the run's project
+        is still the run's project: refusing a subdirectory would refuse
+        legitimately scoped work while closing nothing. A parent of the bound
+        project is NOT contained - widening the scope upward is exactly the
+        escape this answers.
+
+        Returns ``False`` when the run carries no project. A run with no bound
+        project has no authority to compare against, and a comparison that
+        cannot be made is not a comparison that passed.
+        """
+        bound = self.bound_project_root()
+        if bound is None:
+            return False
+        # Both sides are already reduced to the canonical key, so this is a pure
+        # lexical containment test over normalised text - no second normalisation
+        # convention can creep in here.
+        return Path(canonical_project_root(candidate)).is_relative_to(Path(bound))
 
 
 @dataclass

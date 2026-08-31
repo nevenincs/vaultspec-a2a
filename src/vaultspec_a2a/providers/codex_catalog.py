@@ -10,21 +10,31 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 from ..utils import package_version
+from ._catalog_fields import (
+    CatalogFieldReader,
+    display_label,
+    display_text,
+    local_id,
+    optional_description,
+)
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
+from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
+    MAX_CONTROLS,
+    MAX_MODELS,
+    MAX_OPTIONS,
     AuthenticationState,
     CatalogState,
     CatalogStatus,
@@ -44,12 +54,8 @@ __all__ = [
 ]
 
 _MAX_FRAME_BYTES: Final = 1_048_576
-_MAX_OUTPUT_BYTES: Final = 1_048_576
 _MAX_FRAMES_PER_RESPONSE: Final = 64
 _MAX_PAGES: Final = 16
-_MAX_MODELS: Final = 256
-_MAX_CONTROLS: Final = 32
-_MAX_OPTIONS: Final = 128
 _MODEL_PAGE_SIZE: Final = 100
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
@@ -72,43 +78,12 @@ class CodexCatalogDiscovery:
     authentication: AuthenticationState
 
 
-@dataclass(slots=True)
-class _OutputBudget:
-    consumed: int = 0
-
-    def charge(self, size: int) -> None:
-        self.consumed += size
-        if self.consumed > _MAX_OUTPUT_BYTES:
-            raise CodexCatalogProtocolError("Codex discovery output exceeds one MiB")
+def _protocol_error(message: str) -> CodexCatalogProtocolError:
+    """Raise Codex's own dialect of a discovery protocol refusal."""
+    return CodexCatalogProtocolError(f"Codex {message}")
 
 
-def _text(value: JsonValue | None, *, field: str) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
-        raise CodexCatalogProtocolError(
-            f"Codex catalog field {field!r} must be a normalized non-blank string"
-        )
-    if len(value) > 1_024:
-        raise CodexCatalogProtocolError(
-            f"Codex catalog field {field!r} exceeds 1024 characters"
-        )
-    return value
-
-
-def _optional_description(value: JsonValue | None) -> str | None:
-    if not isinstance(value, str) or not value or value != value.strip():
-        return None
-    return value[:1_024]
-
-
-def _display(value: JsonValue | None, fallback: str) -> str:
-    if isinstance(value, str) and value and value == value.strip():
-        return value[:256]
-    return fallback[:256]
-
-
-def _local_id(namespace: str, provider_value: str) -> str:
-    encoded = f"{namespace}\0{provider_value}".encode()
-    return hashlib.sha256(encoded).hexdigest()[:32]
+_FIELDS: Final = CatalogFieldReader(_protocol_error)
 
 
 def _objects(
@@ -170,25 +145,25 @@ def _control(
         seen.add(provider_value)
         options.append(
             NativeControlOption(
-                option_id=_local_id(namespace, provider_value),
+                option_id=local_id(namespace, provider_value),
                 provider_value=provider_value,
                 display_name=option_name,
                 description=description,
             )
         )
-    if len(options) > _MAX_OPTIONS:
+    if len(options) > MAX_OPTIONS:
         raise CodexCatalogProtocolError(
-            f"Codex model {field!r} options exceed {_MAX_OPTIONS} items"
+            f"Codex model {field!r} options exceed {MAX_OPTIONS} items"
         )
     default_option_id = (
-        _local_id(namespace, default_value)
+        local_id(namespace, default_value)
         if default_value is not None and default_value in seen
         else None
     )
     return NativeControl(
         control_id=control_id,
         kind=kind,
-        display_name=f"{display_name} for {model_name}"[:256],
+        display_name=display_label(f"{display_name} for {model_name}"),
         options=tuple(options),
         default_option_id=default_option_id,
     )
@@ -200,14 +175,14 @@ def _reasoning_values(model: JsonObject) -> tuple[tuple[str, str, str | None], .
         _objects(
             model.get("supportedReasoningEfforts"),
             field="supportedReasoningEfforts",
-            limit=_MAX_OPTIONS,
+            limit=MAX_OPTIONS,
         )
     ):
-        value = _text(
+        value = _FIELDS.required_text(
             option.get("reasoningEffort"),
             field=f"supportedReasoningEfforts[{index}].reasoningEffort",
         )
-        values.append((value, value, _optional_description(option.get("description"))))
+        values.append((value, value, optional_description(option.get("description"))))
     return tuple(values)
 
 
@@ -218,28 +193,30 @@ def _service_tier_values(
     if isinstance(service_tiers, list) and service_tiers:
         values: list[tuple[str, str, str | None]] = []
         for index, option in enumerate(
-            _objects(service_tiers, field="serviceTiers", limit=_MAX_OPTIONS)
+            _objects(service_tiers, field="serviceTiers", limit=MAX_OPTIONS)
         ):
-            value = _text(option.get("id"), field=f"serviceTiers[{index}].id")
+            value = _FIELDS.required_text(
+                option.get("id"), field=f"serviceTiers[{index}].id"
+            )
             values.append(
                 (
                     value,
-                    _display(option.get("name"), value),
-                    _optional_description(option.get("description")),
+                    display_text(option.get("name"), value),
+                    optional_description(option.get("description")),
                 )
             )
         return tuple(values)
     speed_tiers = model.get("additionalSpeedTiers")
     if speed_tiers is None:
         return ()
-    if not isinstance(speed_tiers, list) or len(speed_tiers) > _MAX_OPTIONS:
+    if not isinstance(speed_tiers, list) or len(speed_tiers) > MAX_OPTIONS:
         raise CodexCatalogProtocolError(
             "Codex catalog field 'additionalSpeedTiers' must be a bounded list"
         )
     return tuple(
         (
-            _text(value, field=f"additionalSpeedTiers[{index}]"),
-            _text(value, field=f"additionalSpeedTiers[{index}]"),
+            _FIELDS.required_text(value, field=f"additionalSpeedTiers[{index}]"),
+            _FIELDS.required_text(value, field=f"additionalSpeedTiers[{index}]"),
             None,
         )
         for index, value in enumerate(speed_tiers)
@@ -288,16 +265,18 @@ def catalog_from_app_server(
     controls: list[NativeControl] = []
     seen_models: set[str] = set()
     for page_index, page in enumerate(model_pages):
-        remaining = _MAX_MODELS - len(models)
+        # Pages accumulate into one catalog, so each page is bounded by what the
+        # bound leaves rather than by the whole bound.
+        remaining = MAX_MODELS - len(models)
         page_models = _objects(
-            page.get("data"), field=f"pages[{page_index}].data", limit=_MAX_MODELS
+            page.get("data"), field=f"pages[{page_index}].data", limit=MAX_MODELS
         )
         if len(page_models) > remaining:
             raise CodexCatalogProtocolError(
-                f"Codex catalog exceeds {_MAX_MODELS} models"
+                f"Codex catalog exceeds {MAX_MODELS} models"
             )
         for model_index, model in enumerate(page_models):
-            value = _text(
+            value = _FIELDS.required_text(
                 model.get("model"),
                 field=f"pages[{page_index}].data[{model_index}].model",
             )
@@ -306,8 +285,8 @@ def catalog_from_app_server(
                     "Codex catalog contains duplicate model values"
                 )
             seen_models.add(value)
-            entry_id = _local_id(f"{key.provider_id}:{key.execution_mode}:model", value)
-            model_name = _display(model.get("displayName"), value)
+            entry_id = local_id(f"{key.provider_id}:{key.execution_mode}:model", value)
+            model_name = display_text(model.get("displayName"), value)
             raw_default_effort = model.get("defaultReasoningEffort")
             default_effort = (
                 raw_default_effort if isinstance(raw_default_effort, str) else None
@@ -344,7 +323,7 @@ def catalog_from_app_server(
                     entry_id=entry_id,
                     provider_value=value,
                     display_name=model_name,
-                    description=_optional_description(model.get("description")),
+                    description=optional_description(model.get("description")),
                     capabilities=capabilities,
                     native_control_ids=tuple(
                         control.control_id
@@ -353,9 +332,9 @@ def catalog_from_app_server(
                     ),
                 )
             )
-            if len(controls) > _MAX_CONTROLS:
+            if len(controls) > MAX_CONTROLS:
                 raise CodexCatalogProtocolError(
-                    f"Codex catalog exceeds {_MAX_CONTROLS} native controls"
+                    f"Codex catalog exceeds {MAX_CONTROLS} native controls"
                 )
     now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     if not models:
@@ -412,23 +391,16 @@ async def _read_response(
     *,
     request_id: int,
     timeout: float,
-    output_budget: _OutputBudget,
+    output_budget: OutputBudget,
 ) -> JsonObject:
-    for _ in range(_MAX_FRAMES_PER_RESPONSE):
-        raw = await asyncio.wait_for(stdout.readline(), timeout=timeout)
-        if not raw:
-            break
-        if len(raw) > _MAX_FRAME_BYTES:
-            raise CodexCatalogProtocolError("Codex discovery frame exceeds one MiB")
-        output_budget.charge(len(raw))
-        try:
-            value = _JSON_OBJECT.validate_json(raw)
-        except (ValidationError, UnicodeDecodeError):
-            continue
-        if value.get("id") == request_id:
-            return value
-    raise CodexCatalogProtocolError(
-        f"Codex discovery received no response for request {request_id}"
+    return await read_response(
+        stdout,
+        request_id=request_id,
+        timeout=timeout,
+        output_budget=output_budget,
+        max_frames=_MAX_FRAMES_PER_RESPONSE,
+        max_frame_bytes=_MAX_FRAME_BYTES,
+        protocol_error=_protocol_error,
     )
 
 
@@ -439,7 +411,7 @@ async def _request(
     method: str,
     params: JsonObject,
     timeout: float,
-    output_budget: _OutputBudget,
+    output_budget: OutputBudget,
 ) -> JsonObject:
     if process.stdin is None or process.stdout is None:
         raise CodexCatalogProtocolError("Codex discovery stdio is unavailable")
@@ -469,28 +441,6 @@ async def _notify_initialized(process: asyncio.subprocess.Process) -> None:
     await process.stdin.drain()
 
 
-async def _drain_stderr(
-    stderr: asyncio.StreamReader | None,
-    process: asyncio.subprocess.Process,
-    metadata: Mapping[str, object] | None,
-    output_budget: _OutputBudget,
-) -> None:
-    if stderr is None:
-        return
-    while chunk := await stderr.read(65_536):
-        try:
-            output_budget.charge(len(chunk))
-        except CodexCatalogProtocolError:
-            await kill_process_tree(process, metadata)
-            raise
-
-
-async def _cancel(task: asyncio.Task[None]) -> None:
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
-
-
 async def discover_codex_catalog(
     command: tuple[str, ...],
     *,
@@ -506,9 +456,9 @@ async def discover_codex_catalog(
     process = await spawn_acp_process(
         list(command), dict(env), cwd, use_exec=False, metadata=metadata
     )
-    output_budget = _OutputBudget()
+    output_budget = OutputBudget(_protocol_error)
     stderr_task = asyncio.create_task(
-        _drain_stderr(process.stderr, process, metadata, output_budget)
+        drain_stderr(process.stderr, process, metadata, output_budget)
     )
     outcome: CodexCatalogDiscovery | None = None
     failure: BaseException | None = None
@@ -589,7 +539,7 @@ async def discover_codex_catalog(
     cleanup_steps.extend(
         [
             ("codex-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("codex-catalog-stderr", lambda: _cancel(stderr_task)),
+            ("codex-catalog-stderr", lambda: cancel_task(stderr_task)),
         ]
     )
     cleanup_failures = await run_independent_cleanups(*cleanup_steps)

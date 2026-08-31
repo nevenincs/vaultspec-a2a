@@ -9,6 +9,7 @@ No pid is ever killed except one this module started.
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import subprocess
@@ -19,10 +20,10 @@ from typing import Any
 
 import pytest
 
+from ...authoring.discovery import SERVICE_JSON_ENV
 from ...control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ..discovery import is_pid_alive
 from ..manager import (
-    _ENGINE_SERVICE_JSON_ENV,
     LifecycleError,
     _build_cwd_for,
     _serve_cwd_for,
@@ -107,7 +108,7 @@ def test_render_command_substitutes_port_and_workspace() -> None:
     assert rendered == ["serve", "--port", "18901", "--ws", "/tmp/ws"]
 
 
-def test_spawn_rotates_an_over_cap_log_to_a_dot_one_sibling(tmp_path) -> None:
+def test_spawn_rotates_an_over_cap_log_to_a_dot_one_sibling(tmp_path: Path) -> None:
     """A redirect log already at the size cap is rotated, not appended forever."""
     from .. import manager as manager_module
 
@@ -130,7 +131,7 @@ def test_spawn_rotates_an_over_cap_log_to_a_dot_one_sibling(tmp_path) -> None:
     assert b"fresh boot" in log_path.read_bytes()
 
 
-def test_spawn_does_not_rotate_a_log_under_the_cap(tmp_path) -> None:
+def test_spawn_does_not_rotate_a_log_under_the_cap(tmp_path: Path) -> None:
     """A log well under the cap keeps appending - no spurious rotation."""
     log_path = tmp_path / "small.log"
     log_path.write_text("prior boot\n", encoding="utf-8")
@@ -149,7 +150,7 @@ def test_spawn_does_not_rotate_a_log_under_the_cap(tmp_path) -> None:
     assert b"this boot" in contents
 
 
-def test_resolve_finds_unique_and_rejects_missing_and_ambiguous(tmp_path) -> None:
+def test_resolve_finds_unique_and_rejects_missing_and_ambiguous(tmp_path: Path) -> None:
     write_record(_record(name="alpha", role="scratch", port=18900), home=tmp_path)
     assert resolve("alpha", home=tmp_path).name == "alpha"
 
@@ -177,7 +178,7 @@ def test_tree_kill_fells_a_live_child_and_is_idempotent_on_dead() -> None:
     assert tree_kill(child.pid) is True
 
 
-def test_kill_verb_removes_the_record_after_felling_the_tree(tmp_path) -> None:
+def test_kill_verb_removes_the_record_after_felling_the_tree(tmp_path: Path) -> None:
     child = _sleeper()
     try:
         write_record(_record(name="killme", pid=child.pid, port=18902), home=tmp_path)
@@ -191,7 +192,7 @@ def test_kill_verb_removes_the_record_after_felling_the_tree(tmp_path) -> None:
             child.wait()
 
 
-def test_kill_verb_deletes_the_record_log_file(tmp_path) -> None:
+def test_kill_verb_deletes_the_record_log_file(tmp_path: Path) -> None:
     """A killed record's runtime log is deleted - nothing will append to it again."""
     child = _sleeper()
     log_file = tmp_path / "killme.log"
@@ -215,7 +216,7 @@ def test_kill_verb_deletes_the_record_log_file(tmp_path) -> None:
             child.wait()
 
 
-def test_kill_verb_tolerates_a_missing_log_file(tmp_path) -> None:
+def test_kill_verb_tolerates_a_missing_log_file(tmp_path: Path) -> None:
     """A record whose log_path was already removed must not fail the kill."""
     child = _sleeper()
     try:
@@ -236,7 +237,9 @@ def test_kill_verb_tolerates_a_missing_log_file(tmp_path) -> None:
             child.wait()
 
 
-def test_attach_succeeds_on_a_bound_port_and_fails_on_a_dead_pid(tmp_path) -> None:
+def test_attach_succeeds_on_a_bound_port_and_fails_on_a_dead_pid(
+    tmp_path: Path,
+) -> None:
     # A real bound port held by this (live) process.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -258,7 +261,7 @@ def test_attach_succeeds_on_a_bound_port_and_fails_on_a_dead_pid(tmp_path) -> No
         attach("gone", home=tmp_path)
 
 
-def test_resume_restarts_a_died_record_on_its_original_port(tmp_path) -> None:
+def test_resume_restarts_a_died_record_on_its_original_port(tmp_path: Path) -> None:
     original_port = 18904
     record = _record(
         name="revive",
@@ -293,7 +296,7 @@ def test_resume_restarts_a_died_record_on_its_original_port(tmp_path) -> None:
         tree_kill(child.pid)
 
 
-def test_resume_that_never_becomes_ready_is_atomic(tmp_path) -> None:
+def test_resume_that_never_becomes_ready_is_atomic(tmp_path: Path) -> None:
     """A respawn that never binds is felled and the prior record left unchanged.
 
     Proves the S04/S07 readiness-gated single-generation commit against a real
@@ -318,7 +321,7 @@ def test_resume_that_never_becomes_ready_is_atomic(tmp_path) -> None:
     assert persisted.pid == record.pid
 
 
-def test_rerun_that_never_becomes_ready_is_atomic(tmp_path) -> None:
+def test_rerun_that_never_becomes_ready_is_atomic(tmp_path: Path) -> None:
     """A rerun whose respawn never binds raises without publishing a new pid.
 
     Proves S107/S149 against real children: rerun fells the running tree, then the
@@ -358,7 +361,7 @@ def _hold_loopback_port() -> tuple[socket.socket, int]:
     return holder, holder.getsockname()[1]
 
 
-def test_resume_kill_failure_leaves_the_generation_unchanged(tmp_path) -> None:
+def test_resume_kill_failure_leaves_the_generation_unchanged(tmp_path: Path) -> None:
     """S97: a foreign holder on the record's port makes resume atomic.
 
     Models a resume kill failure - the old generation (or an un-reaped orphan)
@@ -389,7 +392,7 @@ def test_resume_kill_failure_leaves_the_generation_unchanged(tmp_path) -> None:
         holder.close()
 
 
-def test_rerun_kill_failure_leaves_the_generation_unchanged(tmp_path) -> None:
+def test_rerun_kill_failure_leaves_the_generation_unchanged(tmp_path: Path) -> None:
     """S152: the rerun analogue of the foreign-holder atomicity proof.
 
     rerun fells the running tree, then a foreign holder on the record's port keeps
@@ -415,7 +418,7 @@ def test_rerun_kill_failure_leaves_the_generation_unchanged(tmp_path) -> None:
         tree_kill(old.pid)
 
 
-def test_reap_clears_dead_and_stale_but_keeps_live(tmp_path) -> None:
+def test_reap_clears_dead_and_stale_but_keeps_live(tmp_path: Path) -> None:
     write_record(_record(name="corpse", pid=_dead_pid(), port=18906), home=tmp_path)
     child = _sleeper()
     try:
@@ -430,7 +433,9 @@ def test_reap_clears_dead_and_stale_but_keeps_live(tmp_path) -> None:
         tree_kill(child.pid)
 
 
-def test_reap_deletes_the_dead_records_log_but_keeps_the_live_ones(tmp_path) -> None:
+def test_reap_deletes_the_dead_records_log_but_keeps_the_live_ones(
+    tmp_path: Path,
+) -> None:
     """Reap deletes a dead/stale record's log file but never a live one's."""
     corpse_log = tmp_path / "corpse.log"
     corpse_log.write_text("orphaned output\n", encoding="utf-8")
@@ -481,7 +486,7 @@ def _serve_config(serve: list[str], band: tuple[int, int]) -> ProcsConfig:
     return ProcsConfig(resident={}, roles={"scratch": role})
 
 
-def test_serve_up_boots_registers_and_picks_distinct_ports(tmp_path) -> None:
+def test_serve_up_boots_registers_and_picks_distinct_ports(tmp_path: Path) -> None:
     serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
     config = _serve_config(serve, band=(18990, 18992))
 
@@ -507,7 +512,42 @@ def test_serve_up_boots_registers_and_picks_distinct_ports(tmp_path) -> None:
         tree_kill(second.pid)
 
 
-def test_serve_up_raises_when_no_band_port_yields_a_listener(tmp_path) -> None:
+def test_serve_up_reports_boot_failure_through_the_structured_log(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A boot that exhausts its band must leave an ERROR behind, not just raise.
+
+    The regression this guards is a silent one: every band-port attempt failed
+    quietly and the terminal failure reached only the caller's stderr as a
+    traceback, so the structured log an operator greps recorded a clean boot
+    sequence for a gateway that never came up. Asserting the raise alone (the test
+    below) passed throughout that period - the raise was never the missing part.
+
+    Real subprocesses and a real two-port band, as in the sibling test; only the
+    log is inspected here.
+    """
+    config = _serve_config([sys.executable, "-c", "pass"], band=(18996, 18997))
+    with (
+        caplog.at_level(logging.WARNING, logger="vaultspec_a2a.lifecycle.manager"),
+        pytest.raises(LifecycleError),
+    ):
+        serve_up("scratch", "logged", home=tmp_path, config=config, ready_timeout=3.0)
+
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors, "band exhaustion raised without recording an ERROR"
+    assert "no band port yielded a live listener" in errors[0].getMessage()
+    # ``extra=`` fields land in the record's __dict__ rather than on the class,
+    # which is how the sibling logging tests read them too.
+    assert errors[0].__dict__["role"] == "scratch"
+    assert errors[0].__dict__["proc_name"] == "logged"
+
+    # Each failed attempt is accounted for, so an operator can see WHICH ports
+    # were tried rather than only that the band was exhausted.
+    attempts = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert {r.__dict__["port"] for r in attempts} == {18996, 18997}
+
+
+def test_serve_up_raises_when_no_band_port_yields_a_listener(tmp_path: Path) -> None:
     # A serve command that exits immediately never binds; a 2-port band bounds the
     # retry loop so the exhaustion is fast and deterministic.
     config = _serve_config([sys.executable, "-c", "pass"], band=(18994, 18995))
@@ -595,11 +635,11 @@ def test_serve_env_injects_engine_service_json_only_when_set() -> None:
         owner="s",
         engine_service_json="C:/seat/service.json",
     )
-    assert with_seat[_ENGINE_SERVICE_JSON_ENV] == "C:/seat/service.json"
+    assert with_seat[SERVICE_JSON_ENV] == "C:/seat/service.json"
     assert with_seat["VAULTSPEC_WORKER_PORT"] == "18110"
     # An unset seat injects nothing (records predating the field keep prior behaviour).
     without = _serve_env(role, port=18110, workspace="ws", name="w1", owner="s")
-    assert _ENGINE_SERVICE_JSON_ENV not in without
+    assert SERVICE_JSON_ENV not in without
 
 
 def _pairing_role() -> RoleConfig:
@@ -614,7 +654,9 @@ def _pairing_role() -> RoleConfig:
     )
 
 
-def test_serve_env_injects_gateway_url_and_reads_the_internal_token(tmp_path) -> None:
+def test_serve_env_injects_gateway_url_and_reads_the_internal_token(
+    tmp_path: Path,
+) -> None:
     token_file = tmp_path / "tok"
     token_file.write_text("s3cr3t\n")  # trailing newline must be stripped
     env = _serve_env(
@@ -638,7 +680,7 @@ def test_serve_env_injects_gateway_url_and_reads_the_internal_token(tmp_path) ->
     assert WORKER_URL_ENV not in bare
 
 
-def test_serve_up_refuses_a_missing_token_file_with_no_residue(tmp_path) -> None:
+def test_serve_up_refuses_a_missing_token_file_with_no_residue(tmp_path: Path) -> None:
     serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
     config = _serve_config(serve, band=(18990, 18992))
     # The token-file read happens after reserve_port but before spawn; the refusal
@@ -656,7 +698,7 @@ def test_serve_up_refuses_a_missing_token_file_with_no_residue(tmp_path) -> None
     assert not list(tmp_path.glob("*.reserved"))
 
 
-def test_serve_env_fails_loud_on_a_missing_or_empty_token_file(tmp_path) -> None:
+def test_serve_env_fails_loud_on_a_missing_or_empty_token_file(tmp_path: Path) -> None:
     with pytest.raises(LifecycleError, match="unreadable"):
         _serve_env(
             _pairing_role(),
@@ -693,7 +735,9 @@ _PAIRING_PROBE_SERVE = (
 )
 
 
-def test_serve_up_records_and_injects_the_worker_gateway_pairing(tmp_path) -> None:
+def test_serve_up_records_and_injects_the_worker_gateway_pairing(
+    tmp_path: Path,
+) -> None:
     sentinel = tmp_path / "pairing.txt"
     token_file = tmp_path / "tok"
     token_file.write_text("tok-abc\n")
@@ -740,7 +784,7 @@ _ENV_PROBE_SERVE = (
 )
 
 
-def test_serve_up_records_and_injects_engine_service_json(tmp_path) -> None:
+def test_serve_up_records_and_injects_engine_service_json(tmp_path: Path) -> None:
     sentinel = tmp_path / "seen-env.txt"
     seat = str(tmp_path / "engine-service.json")
     serve = [sys.executable, "-c", _ENV_PROBE_SERVE, "{port}", str(sentinel)]
@@ -765,7 +809,7 @@ def test_serve_up_records_and_injects_engine_service_json(tmp_path) -> None:
         tree_kill(record.pid)
 
 
-def test_resume_reproduces_recorded_engine_service_json(tmp_path) -> None:
+def test_resume_reproduces_recorded_engine_service_json(tmp_path: Path) -> None:
     sentinel = tmp_path / "resume-env.txt"
     seat = str(tmp_path / "engine-service.json")
     serve = [sys.executable, "-c", _ENV_PROBE_SERVE, "{port}", str(sentinel)]
@@ -793,7 +837,7 @@ def test_resume_reproduces_recorded_engine_service_json(tmp_path) -> None:
         tree_kill(updated.pid)
 
 
-def test_serve_up_injects_the_port_into_the_child_env(tmp_path) -> None:
+def test_serve_up_injects_the_port_into_the_child_env(tmp_path: Path) -> None:
     # The child binds a port it learns ONLY from the injected env var (never argv),
     # so a live listener proves serve_up wired render_env into the child environment.
     config = _serve_config_with_env(
@@ -811,7 +855,7 @@ def test_serve_up_injects_the_port_into_the_child_env(tmp_path) -> None:
         tree_kill(record.pid)
 
 
-def test_build_cwd_uses_build_repo_and_serve_cwd_ignores_it(tmp_path) -> None:
+def test_build_cwd_uses_build_repo_and_serve_cwd_ignores_it(tmp_path: Path) -> None:
     serve_dir = tmp_path / "serve"
     build_dir = tmp_path / "build"
     # Unset build_repo: build falls back to the serve repo (single-tree roles).
@@ -827,7 +871,9 @@ def test_build_cwd_uses_build_repo_and_serve_cwd_ignores_it(tmp_path) -> None:
     assert _serve_cwd_for(split) == serve_dir
 
 
-def test_rebuild_runs_the_build_in_the_build_repo_not_the_serve_repo(tmp_path) -> None:
+def test_rebuild_runs_the_build_in_the_build_repo_not_the_serve_repo(
+    tmp_path: Path,
+) -> None:
     serve_dir = tmp_path / "serve"
     build_dir = tmp_path / "build"
     serve_dir.mkdir()
@@ -882,7 +928,7 @@ def _require_repo_config(serve: list[str], band: tuple[int, int]) -> ProcsConfig
     return ProcsConfig(resident={}, roles={"scratch": role})
 
 
-def test_serve_up_refuses_require_repo_role_without_repo(tmp_path) -> None:
+def test_serve_up_refuses_require_repo_role_without_repo(tmp_path: Path) -> None:
     serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
     config = _require_repo_config(serve, band=(18990, 18992))
     # No repo passed: a data-seating role must refuse rather than default to the
@@ -894,7 +940,9 @@ def test_serve_up_refuses_require_repo_role_without_repo(tmp_path) -> None:
     assert not list(tmp_path.glob("*.reserved"))
 
 
-def test_serve_up_allows_a_require_repo_role_with_an_explicit_repo(tmp_path) -> None:
+def test_serve_up_allows_a_require_repo_role_with_an_explicit_repo(
+    tmp_path: Path,
+) -> None:
     serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
     config = _require_repo_config(serve, band=(18990, 18992))
     record = serve_up(
@@ -911,7 +959,7 @@ def test_serve_up_allows_a_require_repo_role_with_an_explicit_repo(tmp_path) -> 
         tree_kill(record.pid)
 
 
-def test_rerun_refuses_require_repo_role_before_killing(tmp_path) -> None:
+def test_rerun_refuses_require_repo_role_before_killing(tmp_path: Path) -> None:
     # A real live process behind a require_repo record with an empty repo: rerun must
     # refuse at entry (like serve_up/resume) WITHOUT first killing it - a lifecycle
     # verb that fells the process and then declines to restart it is the bug.
@@ -932,7 +980,9 @@ def test_rerun_refuses_require_repo_role_before_killing(tmp_path) -> None:
         tree_kill(child.pid)
 
 
-def test_resume_refuses_a_require_repo_role_without_an_explicit_repo(tmp_path) -> None:
+def test_resume_refuses_a_require_repo_role_without_an_explicit_repo(
+    tmp_path: Path,
+) -> None:
     config = _require_repo_config(
         [sys.executable, "-c", "import time; time.sleep(60)"], band=(18990, 18992)
     )
@@ -946,7 +996,7 @@ def test_resume_refuses_a_require_repo_role_without_an_explicit_repo(tmp_path) -
         resume("revive", home=tmp_path, config=config)
 
 
-def test_serve_up_captures_build_repo_into_the_record(tmp_path) -> None:
+def test_serve_up_captures_build_repo_into_the_record(tmp_path: Path) -> None:
     serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
     config = _serve_config(serve, band=(18990, 18992))
     engine_repo = str(tmp_path / "engine")
@@ -983,7 +1033,7 @@ _BIND_AND_RECORD_PID = (
 
 
 def test_serve_up_reaps_the_owned_tree_when_commit_fails_after_readiness(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """A commit failure after readiness reaps the ready owned process (S05).
 
@@ -1038,36 +1088,7 @@ def test_confirm_terminated_detects_a_live_and_a_dead_pid() -> None:
     # Once felled, it confirms terminated.
     assert _confirm_terminated(child.pid, timeout=10.0) is True
 
-
-@pytest.mark.skipif(
-    sys.platform != "win32",
-    reason="only the Windows path shells out to taskkill; POSIX signals with "
-    "os.kill, which does not block, so it has no wait to bound",
-)
-def test_the_taskkill_wait_is_bounded_by_the_callers_kill_budget() -> None:
-    """A killer that outlives the budget is felled rather than waited on.
-
-    ``taskkill`` normally returns in well under a second, but nothing here
-    guaranteed that: the call carried no timeout at all, so a wedged one hung
-    whichever synchronous teardown verb reached it - and ``serve_up`` releases
-    its held port reservations in a ``finally`` that a hung call never reaches.
-
-    Handing the seam a budget that is already spent drives the timeout branch
-    against a real ``taskkill`` process rather than a stand-in. The assertion is
-    the property the fix is for: the call comes back on its own budget instead of
-    waiting on the killer. It does not fabricate a wedged ``taskkill`` - that
-    would take a purpose-built executable, since Windows resolves a bare command
-    name to ``.exe`` only - so what is proven is that the bound is applied and
-    the killer reaped, not the pathological case in the wild.
-    """
-    from ..manager import _TASKKILL_REAP_WAIT, _win_taskkill_tree
-
-    child = _sleeper()
-    try:
-        spent = time.monotonic()
-        _win_taskkill_tree(child.pid, deadline=spent)
-        elapsed = time.monotonic() - spent
-        assert elapsed <= _TASKKILL_REAP_WAIT + 2.0
-    finally:
-        tree_kill(child.pid)
-        assert wait_pid_dead(child.pid)
+    # tree_kill's bounded-wedged-killer property (formerly tested here against
+    # the private _win_taskkill_tree/_TASKKILL_REAP_WAIT this module owned) now
+    # lives with the shared async primitive tree_kill wraps - see
+    # utils/tests/test_process.py's taskkill-budget test.

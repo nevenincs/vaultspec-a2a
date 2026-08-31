@@ -11,22 +11,31 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 from ._acp_auth import is_auth_required_error
+from ._catalog_fields import (
+    display_text,
+    local_id,
+    optional_description,
+    optional_text,
+)
 from ._cleanup import CleanupStep, run_independent_cleanups
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import JsonObject, JsonValue, lenient_json_object
+from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .acp_exceptions import AcpErrorCode, AcpSessionError
 from .provider_catalog import (
+    MAX_CONTROLS,
+    MAX_MODELS,
+    MAX_OPTIONS,
     AuthenticationState,
     CatalogState,
     CatalogStatus,
@@ -46,11 +55,7 @@ __all__ = [
 ]
 
 _MAX_FRAME_BYTES: Final = 1_048_576
-_MAX_OUTPUT_BYTES: Final = 1_048_576
 _MAX_FRAMES: Final = 64
-_MAX_MODELS: Final = 256
-_MAX_CONTROLS: Final = 32
-_MAX_OPTIONS: Final = 128
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _SUPPORTED_CONTROL_CATEGORIES: Final = frozenset({"thought_level", "model_config"})
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
@@ -72,22 +77,14 @@ class AcpCatalogDiscovery:
     authentication: AuthenticationState
 
 
-@dataclass(slots=True)
-class _OutputBudget:
-    consumed: int = 0
-
-    def charge(self, size: int) -> None:
-        self.consumed += size
-        if self.consumed > _MAX_OUTPUT_BYTES:
-            raise AcpCatalogProtocolError(
-                "ACP discovery output exceeds one MiB",
-                code=AcpErrorCode.INTERNAL_ERROR,
-            )
+def _protocol_error(message: str) -> AcpCatalogProtocolError:
+    """Raise ACP's own dialect of a discovery protocol refusal."""
+    return AcpCatalogProtocolError(f"ACP {message}", code=AcpErrorCode.INTERNAL_ERROR)
 
 
 def _rpc_error(method: str, error: JsonValue) -> AcpSessionError:
     """Classify an ACP failure without retaining provider-controlled text."""
-    detail = error if isinstance(error, dict) else {}
+    detail = lenient_json_object(error)
     code = detail.get("code")
     safe_code = (
         code
@@ -124,27 +121,6 @@ def _unauthenticated_discovery(key: ProviderCatalogKey) -> AcpCatalogDiscovery:
     )
 
 
-def _text(value: JsonValue | None) -> str | None:
-    return (
-        value if isinstance(value, str) and value and value == value.strip() else None
-    )
-
-
-def _display(value: JsonValue | None, fallback: str) -> str:
-    text = _text(value) or fallback
-    return text[:256]
-
-
-def _description(value: JsonValue | None) -> str | None:
-    text = _text(value)
-    return None if text is None else text[:1024]
-
-
-def _local_id(namespace: str, provider_value: str) -> str:
-    body = f"{namespace}\0{provider_value}".encode()
-    return hashlib.sha256(body).hexdigest()[:32]
-
-
 def _objects(
     value: JsonValue | None, *, field: str, limit: int
 ) -> tuple[JsonObject, ...]:
@@ -174,7 +150,7 @@ def _flatten_options(
     flattened: list[JsonObject] = []
     for option in _objects(value, field=field, limit=limit):
         nested = option.get("options")
-        if isinstance(nested, list) and _text(option.get("value")) is None:
+        if isinstance(nested, list) and optional_text(option.get("value")) is None:
             flattened.extend(_objects(nested, field=f"{field}.options", limit=limit))
         else:
             flattened.append(option)
@@ -188,7 +164,7 @@ def _flatten_options(
 
 def _option_value(option: JsonObject) -> str | None:
     for field in ("value", "modelId", "id"):
-        if value := _text(option.get(field)):
+        if value := optional_text(option.get(field)):
             return value
     return None
 
@@ -213,12 +189,12 @@ def _models_from_options(
         seen.add(value)
         models.append(
             ModelCatalogEntry(
-                entry_id=_local_id(namespace, value),
+                entry_id=local_id(namespace, value),
                 provider_value=value,
-                display_name=_display(
+                display_name=display_text(
                     option.get("name") or option.get("displayName"), value
                 ),
-                description=_description(option.get("description")),
+                description=optional_description(option.get("description")),
             )
         )
     return tuple(models)
@@ -229,7 +205,7 @@ def _control_from_option(
 ) -> NativeControl | None:
     if option.get("type") != "select":
         return None
-    config_id = _text(option.get("configId")) or _text(option.get("id"))
+    config_id = optional_text(option.get("configId")) or optional_text(option.get("id"))
     if config_id is None:
         raise AcpCatalogProtocolError(
             f"ACP {category} option has no config identifier",
@@ -237,7 +213,7 @@ def _control_from_option(
         )
     choices: list[NativeControlOption] = []
     for choice in _flatten_options(
-        option.get("options"), field=f"{config_id}.options", limit=_MAX_OPTIONS
+        option.get("options"), field=f"{config_id}.options", limit=MAX_OPTIONS
     ):
         value = _option_value(choice)
         if value is None:
@@ -247,18 +223,18 @@ def _control_from_option(
             )
         choices.append(
             NativeControlOption(
-                option_id=_local_id(f"{namespace}:{config_id}", value),
+                option_id=local_id(f"{namespace}:{config_id}", value),
                 provider_value=value,
-                display_name=_display(
+                display_name=display_text(
                     choice.get("name") or choice.get("displayName"), value
                 ),
-                description=_description(choice.get("description")),
+                description=optional_description(choice.get("description")),
             )
         )
     current = option.get("currentValue")
     current_value = current if isinstance(current, str) else None
     default_option_id = (
-        _local_id(f"{namespace}:{config_id}", current_value)
+        local_id(f"{namespace}:{config_id}", current_value)
         if current_value is not None
         and any(choice.provider_value == current_value for choice in choices)
         else None
@@ -271,10 +247,10 @@ def _control_from_option(
     return NativeControl(
         control_id=config_id,
         kind=kind,
-        display_name=_display(option.get("name"), config_id),
+        display_name=display_text(option.get("name"), config_id),
         options=tuple(choices),
         default_option_id=default_option_id,
-        description=_description(option.get("description")),
+        description=optional_description(option.get("description")),
     )
 
 
@@ -286,10 +262,13 @@ def _normalized_payload(
     config_options = _objects(
         result.get("configOptions"),
         field="configOptions",
-        limit=_MAX_CONTROLS + 1,
+        # ACP carries the model selector in the same list as the controls, so a
+        # session advertising the full complement of controls plus its one model
+        # selector is legitimate and must survive this early bound.
+        limit=MAX_CONTROLS + 1,
     )
     for option in config_options:
-        category = _text(option.get("category"))
+        category = optional_text(option.get("category"))
         if category == "model":
             if models:
                 raise AcpCatalogProtocolError(
@@ -298,7 +277,7 @@ def _normalized_payload(
                 )
             models = _models_from_options(
                 _flatten_options(
-                    option.get("options"), field="model.options", limit=_MAX_MODELS
+                    option.get("options"), field="model.options", limit=MAX_MODELS
                 ),
                 namespace=f"{key.provider_id}:{key.execution_mode}:model",
             )
@@ -310,20 +289,20 @@ def _normalized_payload(
             )
             if control is not None:
                 controls.append(control)
-                if len(controls) > _MAX_CONTROLS:
+                if len(controls) > MAX_CONTROLS:
                     raise AcpCatalogProtocolError(
-                        f"ACP session advertises more than {_MAX_CONTROLS} controls",
+                        f"ACP session advertises more than {MAX_CONTROLS} controls",
                         code=AcpErrorCode.INTERNAL_ERROR,
                     )
 
     legacy = result.get("models")
-    legacy_models = legacy if isinstance(legacy, dict) else {}
+    legacy_models = lenient_json_object(legacy)
     if not models and legacy_models:
         models = _models_from_options(
             _objects(
                 legacy_models.get("availableModels"),
                 field="models.availableModels",
-                limit=_MAX_MODELS,
+                limit=MAX_MODELS,
             ),
             namespace=f"{key.provider_id}:{key.execution_mode}:model",
         )
@@ -399,27 +378,16 @@ async def _read_response(
     *,
     request_id: int,
     timeout: float,
-    output_budget: _OutputBudget,
+    output_budget: OutputBudget,
 ) -> JsonObject:
-    for _ in range(_MAX_FRAMES):
-        raw = await asyncio.wait_for(stdout.readline(), timeout=timeout)
-        if not raw:
-            break
-        if len(raw) > _MAX_FRAME_BYTES:
-            raise AcpCatalogProtocolError(
-                "ACP discovery frame exceeds one MiB",
-                code=AcpErrorCode.INTERNAL_ERROR,
-            )
-        output_budget.charge(len(raw))
-        try:
-            value = _JSON_OBJECT.validate_json(raw)
-        except (ValidationError, UnicodeDecodeError):
-            continue
-        if value.get("id") == request_id:
-            return value
-    raise AcpCatalogProtocolError(
-        f"ACP discovery received no response for request {request_id}",
-        code=AcpErrorCode.INTERNAL_ERROR,
+    return await read_response(
+        stdout,
+        request_id=request_id,
+        timeout=timeout,
+        output_budget=output_budget,
+        max_frames=_MAX_FRAMES,
+        max_frame_bytes=_MAX_FRAME_BYTES,
+        protocol_error=_protocol_error,
     )
 
 
@@ -430,7 +398,7 @@ async def _request(
     method: str,
     params: JsonObject,
     timeout: float,
-    output_budget: _OutputBudget,
+    output_budget: OutputBudget,
 ) -> JsonObject:
     if process.stdin is None or process.stdout is None:
         raise AcpCatalogProtocolError("ACP discovery stdio is unavailable")
@@ -457,28 +425,6 @@ async def _request(
     return result
 
 
-async def _drain_stderr(
-    stderr: asyncio.StreamReader | None,
-    process: asyncio.subprocess.Process,
-    metadata: Mapping[str, object] | None,
-    output_budget: _OutputBudget,
-) -> None:
-    if stderr is None:
-        return
-    while chunk := await stderr.read(65_536):
-        try:
-            output_budget.charge(len(chunk))
-        except AcpCatalogProtocolError:
-            await kill_process_tree(process, metadata)
-            raise
-
-
-async def _cancel(task: asyncio.Task[None]) -> None:
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
-
-
 async def discover_acp_catalog(
     command: tuple[str, ...],
     *,
@@ -495,9 +441,9 @@ async def discover_acp_catalog(
     process = await spawn_acp_process(
         list(command), dict(env), cwd, use_exec=use_exec, metadata=metadata
     )
-    output_budget = _OutputBudget()
+    output_budget = OutputBudget(_protocol_error)
     stderr_task = asyncio.create_task(
-        _drain_stderr(process.stderr, process, metadata, output_budget)
+        drain_stderr(process.stderr, process, metadata, output_budget)
     )
     outcome: AcpCatalogDiscovery | None = None
     failure: BaseException | None = None
@@ -517,6 +463,13 @@ async def discover_acp_catalog(
             timeout=timeout,
             output_budget=output_budget,
         )
+        # Prompt-free, but still a REAL session: the CLI partitions its config
+        # home by this cwd and writes a transcript there, exactly as a run's
+        # session does. That makes discovery a creating seam for
+        # acp-cli-session-transcript (declared in ``acp_chat_model``) and the
+        # higher-frequency one, since one catalog read probes every lane. A
+        # caller passing a per-invocation directory leaves a partition per
+        # invocation behind; passing a stable one leaves a single partition.
         session = await _request(
             process,
             request_id=1,
@@ -540,7 +493,7 @@ async def discover_acp_catalog(
     cleanup_steps.extend(
         [
             ("acp-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("acp-catalog-stderr", lambda: _cancel(stderr_task)),
+            ("acp-catalog-stderr", lambda: cancel_task(stderr_task)),
         ]
     )
     cleanup_failures = await run_independent_cleanups(*cleanup_steps)

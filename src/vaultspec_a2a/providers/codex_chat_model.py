@@ -18,12 +18,11 @@ the ChatGPT-session auth mode.
 import asyncio
 import json
 import logging
-import re
 from collections import deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import override
+from typing import Final, override
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -38,7 +37,13 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.messages.ai import (
+    InputTokenDetails,
+    OutputTokenDetails,
+    UsageMetadata,
+)
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langgraph.errors import GraphBubbleUp
 from pydantic import Field, TypeAdapter, ValidationError
 
 from ..control.config import settings
@@ -47,37 +52,26 @@ from ..utils import package_version
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
 from ._acp_mcp import codex_mcp_server_specs
+from ._acp_types import PermissionCallback, require_workspace_root
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._codex_config_home import (
     build_codex_config_home,
     cleanup_codex_config_home,
     resolve_codex_web_search_mode,
 )
-from ._json_contract import JsonObject, JsonValue
+from ._codex_permission import (
+    DECLINE_ACTION,
+    ELICITATION_METHOD,
+    CodexPermissionRung,
+    elicitation_response,
+)
+from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
-from ._subprocess import kill_process_tree, spawn_acp_process
+from ._subprocess import kill_process_tree, redact_secrets, spawn_acp_process
 from .conditions import ProviderCondition, condition_from_codex_turn_error
 from .lane_admission import is_web_lane_proven
 
 logger = logging.getLogger(__name__)
-
-_SECRET_PATTERN = re.compile(
-    r"(?i)((?:[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*[=:]\s*"
-    r"|bearer\s+)(\S+)"
-)
-
-
-def _redact(line: str) -> str:
-    """Mask credential-shaped values in a diagnostic line.
-
-    Provider subprocesses report their configuration when they fail, and
-    configuration is where credentials live, so a retained diagnostic tail is a
-    plausible place for a token to surface. Matches on the NAME rather than the
-    value shape: a token has no reliable shape, but the thing introducing it -
-    an assignment to something called a token, secret, key, password or
-    credential, or a bearer prefix - does.
-    """
-    return _SECRET_PATTERN.sub(lambda m: f"{m.group(1)}<redacted>", line)
 
 
 async def drain_stderr_into(
@@ -101,7 +95,7 @@ async def drain_stderr_into(
                 break
             text = line.decode("utf-8", errors="replace").rstrip()
             if text:
-                tail.append(_redact(text))
+                tail.append(redact_secrets(text))
     except (OSError, ValueError, asyncio.CancelledError):
         return
 
@@ -210,6 +204,76 @@ def _turn_error_message(error: JsonValue) -> str:
     return "codex app-server reported an error"
 
 
+#: The item kinds that record an ACTION rather than speech. Taken from the
+#: app-server's own generated protocol schema (``codex app-server
+#: generate-json-schema``), whose thread-item union discriminates on this field,
+#: rather than from a guess at the wire vocabulary.
+_ACTION_ITEM_TYPES: Final = frozenset({"commandExecution", "fileChange", "mcpToolCall"})
+
+
+def _completed_action_chunk(params: JsonObject) -> ChatGenerationChunk | None:
+    """Project a completed action item onto a tool-call chunk, or None.
+
+    This lane consumed only speech - message deltas, usage, errors - so a run
+    that executed a command left no durable trace of having done so. The ACP
+    family already records its actions, and it does it by riding the model's own
+    stream: a tool-call chunk aggregates into the response message, the worker
+    node returns that message as state, and state is checkpointed. Emitting the
+    same shape here is PARITY with a mechanism already proven durable, not a new
+    store - which is why no retention declaration accompanies it. A separate
+    action log would have been a third at-rest copy of what one lane already
+    checkpoints.
+
+    ``item/completed`` is the seam rather than ``item/started`` because a
+    completed item carries the outcome. A started command has no exit code, and
+    a record of "a command began" that never says whether it succeeded answers
+    the question worse than not recording it.
+
+    Returns ``None`` for speech items and for anything unrecognised. The item
+    union carries eighteen variants and gains more over time; a lane that
+    guessed at unknown kinds would put invented structure into a checkpoint,
+    which is worse than the silence this replaces.
+    """
+    item = lenient_json_object(params.get("item"))
+    item_type = item.get("type")
+    if not isinstance(item_type, str) or item_type not in _ACTION_ITEM_TYPES:
+        return None
+    item_id = item.get("id")
+    if not isinstance(item_id, str) or not item_id:
+        return None
+    # Only the fields the schema marks REQUIRED for each variant are read, so a
+    # payload that grows optional fields cannot change what is recorded here.
+    if item_type == "commandExecution":
+        detail: JsonObject = {
+            "command": item.get("command"),
+            "cwd": item.get("cwd"),
+            "status": item.get("status"),
+            "exit_code": item.get("exitCode"),
+        }
+    elif item_type == "fileChange":
+        detail = {"changes": item.get("changes"), "status": item.get("status")}
+    else:
+        detail = {
+            "server": item.get("server"),
+            "tool": item.get("tool"),
+            "arguments": item.get("arguments"),
+            "status": item.get("status"),
+        }
+    return ChatGenerationChunk(
+        message=AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {
+                    "id": item_id,
+                    "name": item_type,
+                    "args": json.dumps(detail),
+                    "index": 0,
+                }
+            ],
+        )
+    )
+
+
 def _turn_failure(
     error: JsonValue, *, message: str | None = None, will_retry: JsonValue = None
 ) -> _CodexProtocolError:
@@ -224,6 +288,37 @@ def _turn_failure(
         message if message is not None else _turn_error_message(error),
         condition=condition_from_codex_turn_error(error),
         will_retry=will_retry if isinstance(will_retry, bool) else None,
+    )
+
+
+def _carry_condition(
+    failure: _CodexProtocolError, observed: _CodexProtocolError | None
+) -> _CodexProtocolError:
+    """Return *failure*, restoring a discriminator its own frame does not carry.
+
+    The app-server's error union splits in two: a handful of variants are
+    objects that forward the provider's HTTP status, and the rest are bare
+    strings with no payload at all. A provider refusal routinely arrives as one
+    of the payload-free ones, so the frame that ENDS the turn can be
+    unclassifiable while the attempts that preceded it forwarded the actual
+    status. Taking the terminal frame's word alone in that case reports the
+    floor member for a refusal whose cause was observed moments earlier.
+
+    So the message always comes from the terminal frame, which is the truthful
+    account of how the turn ended, and the condition falls back to what an
+    earlier frame actually forwarded - never the reverse, and never when the
+    terminal frame classified itself.
+    """
+    if (
+        observed is None
+        or failure.condition is not ProviderCondition.UNKNOWN
+        or observed.condition is ProviderCondition.UNKNOWN
+    ):
+        return failure
+    return _CodexProtocolError(
+        failure.message,
+        condition=observed.condition,
+        will_retry=failure.will_retry,
     )
 
 
@@ -266,6 +361,53 @@ def _required_string_field(message: JsonObject, field: str, *, context: str) -> 
     return value
 
 
+def _token_count(breakdown: JsonObject, field: str) -> int:
+    """Read one non-negative token counter, treating absence as zero.
+
+    Absent optional counters (``cacheWriteInputTokens`` carries a schema
+    default) are genuinely zero. A present but non-integer or negative value is
+    a protocol violation and is refused rather than silently coerced, because a
+    wrong token count becomes a wrong persisted accounting row.
+    """
+    value = breakdown.get(field)
+    if value is None:
+        return 0
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise _CodexProtocolError(
+            f"codex token usage field {field!r} must be a non-negative integer"
+        )
+    return value
+
+
+def _usage_metadata(breakdown: JsonObject) -> UsageMetadata:
+    """Map a codex ``TokenUsageBreakdown`` onto LangChain's usage contract.
+
+    ``totalTokens`` is carried through as reported rather than recomputed: it is
+    the provider's own accounting, and substituting a local sum would quietly
+    paper over a disagreement worth seeing. The cache and reasoning counters are
+    preserved in the standard detail sub-dicts instead of being discarded — they
+    are exactly the fields that explain a surprising bill.
+    """
+    return UsageMetadata(
+        input_tokens=_token_count(breakdown, "inputTokens"),
+        output_tokens=_token_count(breakdown, "outputTokens"),
+        total_tokens=_token_count(breakdown, "totalTokens"),
+        input_token_details=InputTokenDetails(
+            cache_read=_token_count(breakdown, "cachedInputTokens"),
+            cache_creation=_token_count(breakdown, "cacheWriteInputTokens"),
+        ),
+        output_token_details=OutputTokenDetails(
+            reasoning=_token_count(breakdown, "reasoningOutputTokens"),
+        ),
+    )
+
+
+# Put on the notification queue when the reader reaches end-of-stream, so a turn
+# consumer waiting for its next frame learns the provider is gone instead of
+# sitting out the full idle budget. Identity-compared, never parsed.
+_STREAM_CLOSED: JsonObject = {"__codex_stream_closed__": True}
+
+
 class _CodexAppServerClient:
     """Minimal JSON-RPC-over-stdio client for a spawned ``codex app-server``.
 
@@ -280,6 +422,7 @@ class _CodexAppServerClient:
         process: asyncio.subprocess.Process,
         *,
         metadata: Mapping[str, object] | None = None,
+        permission_rung: CodexPermissionRung | None = None,
     ) -> None:
         if process.stdin is None or process.stdout is None:
             raise RuntimeError("codex app-server failed to open stdio pipes")
@@ -287,6 +430,16 @@ class _CodexAppServerClient:
         self._stdin = process.stdin
         self._stdout = process.stdout
         self._metadata = metadata
+        self._permission_rung = permission_rung
+        # Decisions run as tasks because the reader loop is synchronous and a
+        # supervised rung is not: holding references keeps them from being
+        # garbage-collected mid-flight, which would strand codex waiting on a
+        # request nobody is answering any more.
+        self._decision_tasks: set[asyncio.Task[None]] = set()
+        # A graph suspension raised by a supervised rung, held for the turn
+        # consumer to re-raise. The RPC it interrupted is answered immediately so
+        # the provider is never left blocked on a request the graph parked.
+        self.pending_interrupt: BaseException | None = None
         self._next_id = 1
         self._pending: dict[int, asyncio.Future[JsonObject]] = {}
         self.notifications: asyncio.Queue[JsonObject] = asyncio.Queue()
@@ -379,6 +532,13 @@ class _CodexAppServerClient:
             # the only startup diagnostic behind a generic connection error.
             if self._pending:
                 self._fail_pending(await self._unexpected_eof_error())
+            # Requests are not the only thing that can be waiting. A turn
+            # consumer blocks on the NOTIFICATION queue, which an EOF used to
+            # leave untouched - so a provider that exited without a terminal
+            # frame stranded the turn for the whole idle budget and then
+            # reported a timeout, describing a process that had already been
+            # gone for ten minutes. Announce the close on that channel too.
+            self.notifications.put_nowait(_STREAM_CLOSED)
 
     def _dispatch(self, message: JsonObject) -> None:
         raw_id = message.get("id")
@@ -387,9 +547,23 @@ class _CodexAppServerClient:
         )
         raw_method = message.get("method")
         method = raw_method if isinstance(raw_method, str) and raw_method else None
-        # Server-initiated request (has both id and method): we support none, so
-        # answer with a JSON-RPC "method not found" to keep the stream unblocked.
+        # Server-initiated request (has both id and method). The tool-approval
+        # request is answered on its own terms; anything else is still refused,
+        # but LOUDLY. A silent method-not-found here is what made every bridged
+        # write vanish: codex resolves an unanswered approval as not granted and
+        # hands the model "user rejected MCP tool call" while the turn still
+        # settles completed, so the refusal has to be visible in a log to ever be
+        # noticed again.
         if msg_id is not None and method:
+            if method == ELICITATION_METHOD and self._permission_rung is not None:
+                self._schedule_elicitation_decision(msg_id, message)
+                return
+            logger.warning(
+                "codex app-server sent an unsupported server-initiated request "
+                "%r; answering method-not-found, which the provider will treat "
+                "as a refusal",
+                method,
+            )
             self._send({"id": msg_id, "error": {"code": -32601, "message": method}})
             return
         if msg_id is not None:
@@ -412,7 +586,49 @@ class _CodexAppServerClient:
             future.set_result(result)
             return
         if method:
+            # Observed before the turn consumer sees it: the approval request for
+            # a tool call arrives immediately after the item frame that names the
+            # tool, and the elicitation payload itself carries no tool name.
+            if self._permission_rung is not None:
+                self._permission_rung.observe(
+                    method, lenient_json_object(message.get("params"))
+                )
             self.notifications.put_nowait(message)
+
+    def _schedule_elicitation_decision(self, msg_id: int, message: JsonObject) -> None:
+        """Decide one tool-approval request off the reader loop, then answer it.
+
+        The reader must not block: a supervised decision can wait on a human, and
+        codex keeps streaming other frames meanwhile. Every outcome answers the
+        request - a raised decision is a decline, never an unanswered frame that
+        would hang the turn until the idle backstop fired.
+        """
+        rung = self._permission_rung
+        if rung is None:
+            return
+        params = lenient_json_object(message.get("params"))
+
+        async def _decide() -> None:
+            action = DECLINE_ACTION
+            try:
+                action = await rung.decide(params)
+            except GraphBubbleUp as exc:
+                # A supervised rung suspended the graph to ask a human. Hold it
+                # for the turn consumer to re-raise, and free the provider now.
+                self.pending_interrupt = exc
+            except Exception:
+                logger.exception(
+                    "Codex permission decision failed; declining (fail-closed)"
+                )
+            if self._closed:
+                return
+            self._send(elicitation_response(msg_id, action))
+            with suppress(Exception):
+                await self._stdin.drain()
+
+        task = asyncio.create_task(_decide())
+        self._decision_tasks.add(task)
+        task.add_done_callback(self._decision_tasks.discard)
 
     def _fail_pending(self, exc: BaseException) -> None:
         for future in self._pending.values():
@@ -459,7 +675,11 @@ class _CodexAppServerClient:
         # await carries a deadline and a task that misses it is abandoned rather
         # than allowed to hold the session open.
         async def _cancel_reader_tasks() -> None:
-            for task in (self._reader_task, self._stderr_task):
+            for task in (
+                self._reader_task,
+                self._stderr_task,
+                *tuple(self._decision_tasks),
+            ):
                 if task is None:
                     continue
                 task.cancel()
@@ -489,7 +709,6 @@ class CodexChatModel(BaseChatModel):
     model_name: str | None = None
     effort: str | None = None
     service_tier: str | None = None
-    cwd: str | None = None
     workspace_root: str | None = None
     codex_home: str | None = None
     # Per-model override of the deployment's web-search posture, resolved against
@@ -508,6 +727,17 @@ class CodexChatModel(BaseChatModel):
     # through the closed registry) because the bridge is a per-run, non-registry
     # spec the worker builds fresh every turn from the engine catalog.
     authoring_mcp_server: JsonObject | None = Field(default=None, exclude=True)
+    # The Codex counterpart of ``AcpChatModel.permission_callback``, in the same
+    # field shape so the two lanes converge: the worker node wires a supervised
+    # run's human rung onto any model that DECLARES this attribute
+    # (``_resolve_effective_worker_model``), which is why its absence used to
+    # skip Codex silently rather than fail. Left unset, the lane is autonomous
+    # and decides against the run's composed surface.
+    permission_callback: PermissionCallback | None = Field(
+        default=None,
+        description="Optional async callback for custom permission handling.",
+        exclude=True,
+    )
     approval_policy: str = "never"
     sandbox: str = "read-only"
     # Bounds the startup and per-request RPC waits only - the single-shot calls
@@ -554,6 +784,53 @@ class CodexChatModel(BaseChatModel):
         """
         return self.model_copy(update={"authoring_mcp_server": spec})
 
+    def _compose_mcp_specs(self) -> list[JsonObject]:
+        """Return the MCP servers this turn declares, harness first then bridge.
+
+        The single composition: the ``config.toml`` the provider reads and the
+        permission rung that approves its calls are both derived from this one
+        list, so the surface a run auto-approves cannot drift from the surface it
+        actually delivered. The authoring bridge never replaces a same-named
+        harness entry - the two cannot collide in practice, but the order keeps
+        the harness registry as the trust root regardless.
+        """
+        specs = (
+            codex_mcp_server_specs(
+                self.harness_mcp_servers, project_root=self.workspace_root
+            )
+            if self.harness_mcp_servers
+            else []
+        )
+        if self.authoring_mcp_server is not None:
+            known = {
+                _required_string_field(spec, "name", context="MCP server")
+                for spec in specs
+            }
+            authoring_name = _required_string_field(
+                self.authoring_mcp_server, "name", context="authoring MCP server"
+            )
+            if authoring_name not in known:
+                specs = [*specs, self.authoring_mcp_server]
+        return specs
+
+    def _composed_tool_pairs(self) -> frozenset[tuple[str, str]]:
+        """Return every ``(server, tool)`` this turn composed.
+
+        The exact set the autonomous permission rung may approve. Read from the
+        same specs that become the ``enabled_tools`` allowlist, so a tool the run
+        never declared can never be approved by it.
+        """
+        pairs: set[tuple[str, str]] = set()
+        for spec in self._compose_mcp_specs():
+            name = _required_string_field(spec, "name", context="MCP server")
+            tools = spec.get("tools")
+            if not isinstance(tools, list):
+                continue
+            pairs.update(
+                (name, tool) for tool in tools if isinstance(tool, str) and tool
+            )
+        return frozenset(pairs)
+
     def _build_codex_config_home(self) -> Path:
         """Build the worker-owned per-run CODEX_HOME for this Codex turn.
 
@@ -580,20 +857,11 @@ class CodexChatModel(BaseChatModel):
         entire activation surface for the capability on this lane: a lane with no
         recorded retrieval proof emits ``disabled`` and can reach nothing.
         """
-        specs = (
-            codex_mcp_server_specs(self.harness_mcp_servers)
-            if self.harness_mcp_servers
-            else []
-        )
-        if self.authoring_mcp_server is not None:
-            known: set[str] = set()
-            for spec in specs:
-                known.add(_required_string_field(spec, "name", context="MCP server"))
-            authoring_name = _required_string_field(
-                self.authoring_mcp_server, "name", context="authoring MCP server"
-            )
-            if authoring_name not in known:
-                specs = [*specs, self.authoring_mcp_server]
+        # The Codex lane carries harness NAMES across the seam and renders its
+        # specs here, so the run's project is applied at render time rather than
+        # to an already-rendered spec as the ACP lane does. Same channel, same
+        # refusal to invent a root when the run names none.
+        specs = self._compose_mcp_specs()
         base = self.codex_home or settings.codex_home
         base_home = Path(base) if base else Path.home() / ".codex"
         configured = self.web_search_mode
@@ -606,6 +874,7 @@ class CodexChatModel(BaseChatModel):
                 web_proven=is_web_lane_proven(self.provider),
                 configured=configured,
             ),
+            base_url_override=settings.codex_base_url_override,
         )
 
     @override
@@ -641,12 +910,20 @@ class CodexChatModel(BaseChatModel):
             content=message.content,
             additional_kwargs=message.additional_kwargs,
             response_metadata=message.response_metadata,
+            # Carried across the chunk-to-message boundary explicitly: dropping
+            # it here is what made the turn's real token accounting invisible to
+            # every caller of the non-streaming path.
+            usage_metadata=(
+                message.usage_metadata if isinstance(message, AIMessageChunk) else None
+            ),
         )
         return ChatResult(generations=[ChatGeneration(message=final)])
 
     def _workspace(self) -> Path:
         """Return the one precedence-resolved workspace path for a Codex turn."""
-        return Path(self.workspace_root or self.cwd or str(Path.cwd()))
+        return require_workspace_root(
+            self.workspace_root, surface="Codex turn workspace"
+        )
 
     def _build_env(self, workspace: Path) -> dict[str, str]:
         """Return the subprocess env: scrubbed base plus an optional CODEX_HOME.
@@ -692,7 +969,10 @@ class CodexChatModel(BaseChatModel):
         # carries no version constraint by design - this check is what makes the
         # declaration trustworthy - and it is memoized per launch identity.
         await verify_harness_mcp_contract(
-            codex_mcp_server_specs(self.harness_mcp_servers), env=env
+            codex_mcp_server_specs(
+                self.harness_mcp_servers, project_root=self.workspace_root
+            ),
+            env=env,
         )
 
         codex_config_home: Path | None = None
@@ -713,7 +993,14 @@ class CodexChatModel(BaseChatModel):
                 use_exec=False,
                 metadata=metadata,
             )
-            client = _CodexAppServerClient(process, metadata=metadata)
+            client = _CodexAppServerClient(
+                process,
+                metadata=metadata,
+                permission_rung=CodexPermissionRung(
+                    allowed_tools=self._composed_tool_pairs(),
+                    permission_callback=self.permission_callback,
+                ),
+            )
             await asyncio.wait_for(
                 client.request(
                     "initialize",
@@ -796,14 +1083,55 @@ class CodexChatModel(BaseChatModel):
         Zero or less disables the backstop, matching the setting's contract.
         """
         idle_limit = settings.acp_turn_idle_timeout_seconds
+        # The last error the lane announced it would retry past. Held rather
+        # than raised: see the `error` branch below.
+        deferred: _CodexProtocolError | None = None
+        # Latest thread-cumulative token usage seen this turn. The thread is
+        # started ``ephemeral`` immediately before a single ``turn/start``, so
+        # its cumulative total IS this invocation's usage - and unlike the
+        # per-request ``last`` breakdown it stays correct when a turn makes
+        # several model requests behind a tool loop. Held and emitted once at
+        # completion rather than per frame, because chunk addition SUMS usage
+        # metadata and would otherwise multiply-count the same tokens.
+        usage: UsageMetadata | None = None
         while True:
-            message = await asyncio.wait_for(
-                client.notifications.get(),
-                timeout=idle_limit if idle_limit > 0 else None,
-            )
+            try:
+                message = await asyncio.wait_for(
+                    client.notifications.get(),
+                    timeout=idle_limit if idle_limit > 0 else None,
+                )
+                if message is _STREAM_CLOSED:
+                    # The provider is gone and never stated a result. If it
+                    # announced a retry on the way out, that attempt is the
+                    # truest thing anyone said about this turn - report it
+                    # rather than a bare "stream ended", which describes the
+                    # transport and not the failure the operator is chasing.
+                    if deferred is not None:
+                        raise _carry_condition(deferred, None)
+                    # Otherwise reuse the SAME diagnostic the request path
+                    # builds for an early exit: the child's real status and its
+                    # bounded, redacted stderr tail. A bare "stream ended" here
+                    # would describe the transport and throw away the only
+                    # evidence of why the provider left.
+                    raise await client._unexpected_eof_error()
+            except TimeoutError:
+                # A lane that announced a retry and then went quiet has already
+                # told us why it was struggling. Reporting the silence instead
+                # would replace a typed, actionable refusal with a bare timeout.
+                if deferred is not None:
+                    raise deferred from None
+                raise
+            # A supervised rung that suspended the graph did so to ask a human,
+            # and the answer cannot arrive inside this turn. Surface it here
+            # rather than streaming on: the provider has already been freed with
+            # a decline, so continuing would report a refused tool call as the
+            # turn's own outcome and lose the pending question entirely.
+            if client.pending_interrupt is not None:
+                raise client.pending_interrupt
+
             method = message.get("method")
             raw_params = message.get("params")
-            params = raw_params if isinstance(raw_params, dict) else {}
+            params = lenient_json_object(raw_params)
 
             if method == "item/agentMessage/delta":
                 if params.get("threadId") not in (None, thread_id):
@@ -811,9 +1139,47 @@ class CodexChatModel(BaseChatModel):
                 delta = params.get("delta")
                 if isinstance(delta, str) and delta:
                     yield ChatGenerationChunk(message=AIMessageChunk(content=delta))
+            elif method == "item/completed":
+                if params.get("threadId") not in (None, thread_id):
+                    continue
+                action = _completed_action_chunk(params)
+                if action is not None:
+                    yield action
             elif method == "error":
-                raise _turn_failure(
+                failure = _turn_failure(
                     params.get("error"), will_retry=params.get("willRetry")
+                )
+                if failure.will_retry:
+                    # The lane stated it is about to try again, so this frame
+                    # announces an attempt rather than an outcome. Raising here
+                    # both cancelled a retry the provider was already making and
+                    # reported the attempt's own wording as the failure - which
+                    # is how a refused credential came to be described as
+                    # "Reconnecting... 1/5". Hold it as the fallback for a stream
+                    # that ends without ever stating a result, and keep reading.
+                    # An attempt that named a condition is kept over one that did
+                    # not, since it is the only frame that may ever carry the
+                    # provider's forwarded status.
+                    if (
+                        deferred is None
+                        or deferred.condition is ProviderCondition.UNKNOWN
+                    ):
+                        deferred = failure
+                    continue
+                raise _carry_condition(failure, deferred)
+            elif method == "thread/tokenUsage/updated":
+                if params.get("threadId") not in (None, thread_id):
+                    continue
+                usage = _usage_metadata(
+                    _required_object_field(
+                        _required_object_field(
+                            params,
+                            "tokenUsage",
+                            context="thread/tokenUsage/updated notification",
+                        ),
+                        "total",
+                        context="thread/tokenUsage/updated tokenUsage",
+                    )
                 )
             elif method == "turn/completed":
                 if params.get("threadId") not in (None, thread_id):
@@ -823,5 +1189,11 @@ class CodexChatModel(BaseChatModel):
                 )
                 status = turn.get("status")
                 if status != "completed":
-                    raise _failed_turn_error(turn, status)
+                    raise _carry_condition(_failed_turn_error(turn, status), deferred)
+                if usage is not None:
+                    # Empty content so the accumulated message text is unchanged;
+                    # this frame exists only to carry the turn's accounting.
+                    yield ChatGenerationChunk(
+                        message=AIMessageChunk(content="", usage_metadata=usage)
+                    )
                 return

@@ -15,8 +15,10 @@ advances the inner review loop. The feature tag and topic are configurable so a
 parameterized harness can assert the materialized document stems.
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
+from enum import StrEnum
 from typing import override
 
 from langchain_core.callbacks import (
@@ -24,15 +26,52 @@ from langchain_core.callbacks import (
     CallbackManagerForLLMRun,
 )
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    ToolMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 from ..team.team_config import AgentConfig
+from ._acp_types import PermissionCallback
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["DeterministicResearchAdrChatModel"]
+
+
+class _DeterministicScript(StrEnum):
+    """Named in-process scenarios selected by their bundled agent identity."""
+
+    TOOL_CALL = "tool_call"
+    PERMISSION_PAUSE = "permission_pause"
+    FAILURE = "failure"
+    CANCEL_WINDOW = "cancel_window"
+    RELAY_BURST = "relay_burst"
+
+
+# These agents deliberately select a scenario through the same ``AgentConfig``
+# injection that the production ``ProviderFactory`` uses for the role-keyed
+# research_adr content. They are not mock/tape aliases: each remains entirely
+# in-process and exists only to exercise a real BaseChatModel/worker seam.
+_SCRIPT_BY_AGENT_ID: dict[str, _DeterministicScript] = {
+    "deterministic-tool-call": _DeterministicScript.TOOL_CALL,
+    "deterministic-permission-pause": _DeterministicScript.PERMISSION_PAUSE,
+    "deterministic-failure": _DeterministicScript.FAILURE,
+    "deterministic-cancel-window": _DeterministicScript.CANCEL_WINDOW,
+    "deterministic-relay-burst": _DeterministicScript.RELAY_BURST,
+}
+
+_SCRIPTED_TOOL_CALL_ID = "deterministic-mark-task-complete"
+_SCRIPTED_PERMISSION_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("allow_once", "Allow once"),
+    ("deny_once", "Deny once"),
+)
+_RELAY_BURST_CHUNKS = 1100
+_RELAY_BURST_CHUNK_BYTES = 4096
 
 # Canonical research_adr worker roles (the authoring contract's
 # RESEARCH_ADR_ROLES), matched as a suffix of the AgentConfig id so both bare
@@ -146,6 +185,11 @@ def _role_of(agent_id: str | None) -> str | None:
     return None
 
 
+def _script_of(agent_id: str | None) -> _DeterministicScript | None:
+    """Return the explicit deterministic scenario selected by an agent id."""
+    return _SCRIPT_BY_AGENT_ID.get(agent_id) if agent_id else None
+
+
 class DeterministicResearchAdrChatModel(BaseChatModel):
     """In-process ``BaseChatModel`` returning fixed research_adr role content.
 
@@ -158,7 +202,9 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
     feature_tag: str = "acceptance-harness"
     topic: str = "research_adr acceptance"
     agent_config: AgentConfig | None = Field(default=None, exclude=True)
-    permission_callback: object | None = Field(default=None, exclude=True)
+    permission_callback: PermissionCallback | None = Field(default=None, exclude=True)
+
+    _cancel_window_entered: asyncio.Event = PrivateAttr(default_factory=asyncio.Event)
 
     @property
     @override
@@ -190,6 +236,70 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         )
         return f"Deterministic content for `{self.topic}`."
 
+    async def wait_for_cancel_window(self) -> None:
+        """Wait until the cancellation scenario has entered its blocking turn."""
+        await self._cancel_window_entered.wait()
+
+    async def _scripted_result(
+        self,
+        script: _DeterministicScript,
+        messages: list[BaseMessage],
+    ) -> ChatResult:
+        """Execute one bounded non-tape scenario through this real model."""
+        if script is _DeterministicScript.TOOL_CALL:
+            settled = any(
+                isinstance(message, ToolMessage)
+                and message.tool_call_id == _SCRIPTED_TOOL_CALL_ID
+                for message in messages
+            )
+            if settled:
+                response = AIMessage(content="Deterministic task queue update settled.")
+            else:
+                response = AIMessage(
+                    content="Marking the deterministic task complete.",
+                    tool_calls=[
+                        {
+                            "id": _SCRIPTED_TOOL_CALL_ID,
+                            "name": "mark_task_complete",
+                            "args": {"task_id": "D-1"},
+                            "type": "tool_call",
+                        }
+                    ],
+                )
+            return ChatResult(generations=[ChatGeneration(message=response)])
+
+        if script is _DeterministicScript.PERMISSION_PAUSE:
+            callback = self.permission_callback
+            if callback is None:
+                raise RuntimeError(
+                    "deterministic permission-pause scenario requires the worker "
+                    "permission callback"
+                )
+            option_id = await callback(
+                "deterministic_permission",
+                {"purpose": "exercise the generic supervised permission seam"},
+                [
+                    {"optionId": choice_id, "name": name}
+                    for choice_id, name in _SCRIPTED_PERMISSION_OPTIONS
+                ],
+            )
+            response = AIMessage(
+                content=f"Deterministic permission approved with {option_id}."
+            )
+            return ChatResult(generations=[ChatGeneration(message=response)])
+
+        if script is _DeterministicScript.FAILURE:
+            raise RuntimeError("deterministic scripted provider failure")
+
+        if script is _DeterministicScript.CANCEL_WINDOW:
+            self._cancel_window_entered.set()
+            await asyncio.Event().wait()
+            raise AssertionError(
+                "deterministic cancellation window unexpectedly closed"
+            )
+
+        raise AssertionError(f"unhandled deterministic script {script!r}")
+
     @override
     def _generate(
         self,
@@ -214,7 +324,10 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         **kwargs: object,
     ) -> ChatResult:
         """Return the resolved role content as a single AIMessage."""
-        del messages, stop, run_manager, kwargs  # interface-required, unused
+        del stop, run_manager, kwargs  # interface-required, unused
+        script = _script_of(self.agent_config.id if self.agent_config else None)
+        if script is not None:
+            return await self._scripted_result(script, messages)
         content = self._content_for_role()
         return ChatResult(
             generations=[ChatGeneration(message=AIMessage(content=content))]
@@ -230,5 +343,25 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Yield the resolved role content as a single streaming chunk."""
         del messages, stop, run_manager, kwargs  # interface-required, unused
+        script = _script_of(self.agent_config.id if self.agent_config else None)
+        if script is _DeterministicScript.CANCEL_WINDOW:
+            self._cancel_window_entered.set()
+            await asyncio.Event().wait()
+            raise AssertionError(
+                "deterministic streaming cancellation window unexpectedly closed"
+            )
+        if script is _DeterministicScript.RELAY_BURST:
+            for index in range(_RELAY_BURST_CHUNKS):
+                # One 4 KiB chunk reaches the production aggregator's immediate
+                # flush threshold, so every yield becomes one real progress frame.
+                # Yield control as well so the bounded subscriber queue can drain.
+                prefix = f"{index:04d}:"
+                content = prefix + "r" * (_RELAY_BURST_CHUNK_BYTES - len(prefix))
+                yield ChatGenerationChunk(message=AIMessageChunk(content=content))
+                await asyncio.sleep(0)
+            # Keep the real run open after the burst so a second relay subscriber
+            # can ask for a cursor the resident ring has already evicted.
+            await asyncio.Event().wait()
+            raise AssertionError("deterministic relay burst window unexpectedly closed")
         content = self._content_for_role()
         yield ChatGenerationChunk(message=AIMessageChunk(content=content))

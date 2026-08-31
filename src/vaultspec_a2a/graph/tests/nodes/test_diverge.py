@@ -224,6 +224,7 @@ async def test_diverge_stage_accumulates_findings_and_joins() -> None:
         synthesis_name="synthesis",
         specs=_SPECS,
         make_researcher=lambda spec: create_researcher_node(spec, _fake_producer),
+        researcher_metadata={},
     )
     builder.add_node("synthesis", synthesis_node)
     builder.add_edge(START, dispatch)
@@ -252,6 +253,7 @@ async def test_wire_diverge_stage_rejects_empty_specs() -> None:
             synthesis_name="synthesis",
             specs=[],
             make_researcher=lambda spec: create_researcher_node(spec, _fake_producer),
+            researcher_metadata={},
         )
 
 
@@ -311,6 +313,7 @@ async def test_web_locators_reach_synthesis_and_survive_the_checkpoint(
             synthesis_name="synthesis",
             specs=_WEB_SPECS,
             make_researcher=lambda spec: create_researcher_node(spec, _fake_producer),
+            researcher_metadata={},
         )
         builder.add_node("synthesis", synthesis_node)
         builder.add_edge(START, dispatch)

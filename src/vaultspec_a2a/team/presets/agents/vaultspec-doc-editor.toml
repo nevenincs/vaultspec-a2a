@@ -80,10 +80,6 @@ deliberately left alone, and anything the instruction implied that you
 could not verify.
 """
 
-[agent.model]
-provider   = "claude"
-capability = "high"
-
 [agent.capabilities]
 filesystem_read  = true
 filesystem_write = false

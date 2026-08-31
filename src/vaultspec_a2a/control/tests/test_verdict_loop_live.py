@@ -37,8 +37,10 @@ its sibling.
 
 from __future__ import annotations
 
+import pathlib
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -65,6 +67,7 @@ from ...authoring import (
     LifecycleEvent,
     mint_actor_token,
 )
+from ...conftest import materialize_schema
 from ...database import (
     create_thread,
     get_permission_request,
@@ -72,7 +75,6 @@ from ...database import (
     record_permission_request,
     update_thread_status,
 )
-from ...database.models import Base
 from ...graph.nodes.phase_gate import create_phase_gate_node
 from ...ipc.schemas import DispatchRequest
 from ...thread.actor_tokens import ActorTokenBundle
@@ -92,6 +94,10 @@ if TYPE_CHECKING:
     from ...worker.graph_lifecycle import RegisteredCompiledGraph
 
 _CACHE_KEY = ("verdict-loop-live", None, False)
+
+# Every dispatch names an active project, as a real one does. This package's own
+# directory is real, absolute, and present on either platform.
+_WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 
 
 @pytest_asyncio.fixture
@@ -221,9 +227,8 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
 
     # --- a2a side: real DB, real checkpointer, real worker, real graph ---
     db_file = tmp_path / "vl.db"
+    materialize_schema(Path(db_file))
     db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with db_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(
         db_engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -255,6 +260,7 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
             # --- real ingest through the real worker HTTP route ---
             ingest = DispatchRequest(
                 action="ingest",
+                workspace_root=_WORKSPACE,
                 thread_id=thread_id,
                 content="drive to the gate",
                 team_preset="verdict-loop-live",

@@ -12,8 +12,8 @@ related:
 supersedes:
   - '2026-07-21-capsule-install-layout-adr'
 superseded_by: '2026-08-01-dashboard-bundled-runtime-subordination-adr'
-modified: '2026-08-01'
-body_hash: 'sha256:0c59a12a444838254a7d6aee535a353d876d9d9c2873b32909b5b519a9e333a2'
+modified: '2026-08-02'
+body_hash: 'sha256:209157782b120db914e5af3f26a0a5f890c189afdbf0b0f3aaaa244ab7d188df'
 ---
 # `dashboard-bundled-runtime` adr: `a2a is a dashboard-bundled runtime, not an installable product` | (**status:** `superseded`)
 

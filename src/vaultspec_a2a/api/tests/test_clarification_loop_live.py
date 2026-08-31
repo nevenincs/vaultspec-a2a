@@ -25,6 +25,7 @@ recorded stub call.
 from __future__ import annotations
 
 import asyncio
+import itertools
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
@@ -51,7 +52,7 @@ from ...thread.enums import ControlActionType, ThreadStatus
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from .clarification_harness import loopback_callback_bridge, park_clarification
-from .conftest import make_app
+from .conftest import async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -64,6 +65,7 @@ if TYPE_CHECKING:
     from ...worker.graph_lifecycle import GraphCacheKey
 
 _BUNDLE_FREE_PRESET = "mock-success-single"
+_RUN_SEQ = itertools.count(1)
 _CACHE_KEY: GraphCacheKey = ("clarification-loop-live", None, False)
 
 type SessionFactory = async_sessionmaker[AsyncSession]
@@ -94,7 +96,12 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
     ) as gateway_client:
         create_resp = await gateway_client.post(
             "/v1/runs",
-            json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+            json={
+                "team_preset": _BUNDLE_FREE_PRESET,
+                "message": "plan it",
+                "run_id": f"clarify-loop-{next(_RUN_SEQ):02d}",
+                **await async_catalog_run_fields(gateway_client),
+            },
         )
         assert create_resp.status_code == 201
         thread_id = create_resp.json()["run_id"]
@@ -203,7 +210,12 @@ async def test_new_prompt_resumes_the_parked_graph_as_a_real_human_turn(
     ) as gateway_client:
         create_resp = await gateway_client.post(
             "/v1/runs",
-            json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+            json={
+                "team_preset": _BUNDLE_FREE_PRESET,
+                "message": "plan it",
+                "run_id": f"clarify-loop-{next(_RUN_SEQ):02d}",
+                **await async_catalog_run_fields(gateway_client),
+            },
         )
         assert create_resp.status_code == 201
         thread_id = create_resp.json()["run_id"]
@@ -282,7 +294,12 @@ async def test_decline_resumes_the_parked_graph_with_the_fixed_marker(
     ) as gateway_client:
         create_resp = await gateway_client.post(
             "/v1/runs",
-            json={"team_preset": _BUNDLE_FREE_PRESET, "message": "plan it"},
+            json={
+                "team_preset": _BUNDLE_FREE_PRESET,
+                "message": "plan it",
+                "run_id": f"clarify-loop-{next(_RUN_SEQ):02d}",
+                **await async_catalog_run_fields(gateway_client),
+            },
         )
         assert create_resp.status_code == 201
         thread_id = create_resp.json()["run_id"]

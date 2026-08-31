@@ -17,7 +17,6 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from ...graph.enums import MODEL_MAP, Model, Provider
 from ...utils.enums import AcpRequestId
 from .._acp_session import _select_desired_config_options, _select_desired_model
 from .._acp_types import AcpModelConfig, AcpSessionContext
@@ -25,7 +24,12 @@ from .._json_contract import JsonObject
 from ..acp_exceptions import AcpErrorCode, AcpSessionError
 from ._acp_frames import read_acp_frame
 
-_DESIRED = MODEL_MAP[Provider.CLAUDE][Model.LOW]
+# An opaque model identifier standing for the value frozen into a run's role
+# assignment. Deliberately a literal rather than a lookup: an external lane's
+# models are named by the catalog that lane serves, so the selection seam must
+# carry whatever string it is handed. Reading a repository-authored name here
+# would test the adapter against a vocabulary no provider actually speaks.
+_DESIRED = "opaque-catalog-model-id"
 _CONFIG_ID = "model-selection"
 _SESSION_ID = "session-under-test"
 _TIMEOUT = 10.0
@@ -81,7 +85,6 @@ def _config(desired_model: str | None) -> AcpModelConfig:
         agent_config=None,
         permission_callback=None,
         workspace_root=None,
-        cwd=None,
         command=["echo"],
         env_vars={},
         session_id=None,
@@ -113,9 +116,7 @@ async def test_native_control_uses_its_advertised_session_option_id(
         }
     ]
     task = asyncio.create_task(
-        _select_desired_config_options(
-            echo_context, config, _SESSION_ID, advertised
-        )
+        _select_desired_config_options(echo_context, config, _SESSION_ID, advertised)
     )
     frame = await read_acp_frame(
         echo_context.stdout, AcpRequestId.SESSION_SET_CONFIG_OPTION, timeout=_TIMEOUT

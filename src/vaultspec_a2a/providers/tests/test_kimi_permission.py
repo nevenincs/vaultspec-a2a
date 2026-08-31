@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from .._acp_rpc_handlers import _kimi_autonomous_option_id, on_request_permission
+from .._acp_rpc_handlers import _autonomous_option_id, on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
 from .._json_contract import JsonObject, JsonValue
 
@@ -32,7 +32,6 @@ def _config(
         agent_config=None,
         permission_callback=permission_callback,
         workspace_root=None,
-        cwd=None,
         command=["kimi", "acp"],
         env_vars={},
         session_id=None,
@@ -79,7 +78,7 @@ async def _decide(name: str, config: AcpModelConfig, ctx: AcpSessionContext) -> 
 )
 def test_autonomous_kimi_auto_approves_exact_read_tools(title: str) -> None:
     cfg = _config(acp_family="kimi")
-    assert _kimi_autonomous_option_id(title, cfg, _OPTIONS) == "approve"
+    assert _autonomous_option_id(title, cfg, _OPTIONS) == "approve"
 
 
 @pytest.mark.parametrize(
@@ -99,7 +98,7 @@ def test_autonomous_kimi_auto_approves_exact_read_tools(title: str) -> None:
 )
 def test_autonomous_kimi_rejects_everything_else(title: str) -> None:
     cfg = _config(acp_family="kimi")
-    assert _kimi_autonomous_option_id(title, cfg, _OPTIONS) == "reject"
+    assert _autonomous_option_id(title, cfg, _OPTIONS) == "reject"
 
 
 @pytest.mark.asyncio

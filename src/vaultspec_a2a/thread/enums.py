@@ -10,16 +10,34 @@ __all__ = [
     "ACTIVE_STATUSES",
     "NON_ACTIVE_STATUSES",
     "TERMINAL_STATUSES",
+    "TERMINAL_STATUS_VALUES",
     "ApprovalStatus",
     "CleanupKind",
     "ControlActionResultStatus",
     "ControlActionType",
+    "DegradedReason",
     "InvalidTransitionError",
     "PermissionRequestStatus",
     "RepairStatus",
+    "ReplayStatus",
     "TaskQueueStatus",
     "ThreadStatus",
+    "TranscriptAvailability",
 ]
+
+
+#: The reviewer verdict vocabulary, shared by the authoring lifecycle and the
+#: graph's phase gate. It lives here rather than in either consumer because
+#: neither can import the other: `authoring.submitter` already imports the
+#: phase-gate seam signal, so the reverse direction would cycle. This module
+#: imports nothing but ``StrEnum``, which is what makes it reachable from both.
+#:
+#: Left as plain strings rather than a StrEnum deliberately: these values cross
+#: the engine boundary as raw JSON in both directions, and both consumers
+#: compare them against decoded wire values.
+VERDICT_APPROVED = "approved"
+VERDICT_REJECTED = "rejected"
+VERDICT_REQUEST_CHANGES = "request_changes"
 
 
 class ThreadStatus(StrEnum):
@@ -39,7 +57,14 @@ class ThreadStatus(StrEnum):
 
 
 class RepairStatus(StrEnum):
-    """Repair and readiness classification distinct from lifecycle."""
+    """Repair and readiness classification distinct from lifecycle.
+
+    Types BOTH durable columns that carry this classification:
+    ``threads.repair_status`` and ``threads.execution_readiness``. The two ask
+    different questions — what is wrong with this run, and is it fit to resume —
+    but they answer from this one closed set, so a new member becomes available
+    to both at once and neither can drift into a private vocabulary.
+    """
 
     HEALTHY = "healthy"
     PAUSED_RESUMABLE = "paused_resumable"
@@ -48,6 +73,93 @@ class RepairStatus(StrEnum):
     CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
     NEEDS_RECONCILIATION = "needs_reconciliation"
     OPERATOR_INTERVENTION_REQUIRED = "operator_intervention_required"
+
+
+class ReplayStatus(StrEnum):
+    """How much of a run's event history the snapshot could actually replay.
+
+    Answers a different question from :class:`RepairStatus`: that one classifies
+    what is WRONG with a run, this one classifies how far the reader got. A
+    ``durable`` replay walked the stored history whole; ``best_effort`` served
+    what the live aggregator held because the durable history was not reachable;
+    ``gap_detected`` walked it and found a hole. ``unknown`` is the honest
+    starting value and the answer whenever the checkpoint could not be read at
+    all - deliberately not collapsed into ``gap_detected``, because "there is a
+    hole here" and "I could not look" are different claims and only the first
+    accuses the store.
+    """
+
+    DURABLE = "durable"
+    BEST_EFFORT = "best_effort"
+    GAP_DETECTED = "gap_detected"
+    UNKNOWN = "unknown"
+
+
+class DegradedReason(StrEnum):
+    """Why a run snapshot is less than complete, in terms a program can match.
+
+    These are the machine-readable members of a run snapshot's degradation list.
+    They are deliberately NOT the same vocabulary as the service-state
+    degradation list, which carries human-readable prose ("worker is down") for
+    an operator to read rather than tokens for a client to branch on. The two
+    share a field name and nothing else, so they stay separate declarations.
+
+    Membership follows the reader's fault lines: what could not be read
+    (``*_UNAVAILABLE``, ``*_UNREADABLE``, ``*_TIMEOUT``), what was read but is
+    not current (``*_STALE``), what should have been present and was not
+    (``*_MISSING``), and what was present but contradicts another store
+    (the permission residue and cross-store mismatch members).
+    """
+
+    AUTHORING_RUN_PRODUCED_NO_PROPOSAL = "authoring_run_produced_no_proposal"
+    CHECKPOINT_HISTORY_TIMEOUT = "checkpoint_history_timeout"
+    CHECKPOINT_HISTORY_UNAVAILABLE = "checkpoint_history_unavailable"
+    CHECKPOINT_HISTORY_UNKNOWN = "checkpoint_history_unknown"
+    CHECKPOINT_MISSING = "checkpoint_missing"
+    CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW = (
+        "checkpoint_permission_without_durable_row"
+    )
+    CHECKPOINT_TIMEOUT = "checkpoint_timeout"
+    CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
+    EXECUTION_STATE_PROJECTION_MISSING = "execution_state_projection_missing"
+    EXECUTION_STATE_PROJECTION_STALE = "execution_state_projection_stale"
+    EXECUTION_STATE_PROJECTION_UNREADABLE = "execution_state_projection_unreadable"
+    INTERRUPT_PAYLOAD_UNREADABLE = "interrupt_payload_unreadable"
+    INTERRUPT_PAYLOAD_UNTYPED = "interrupt_payload_untyped"
+    PENDING_PERMISSION_WITHOUT_CHECKPOINT_TRUTH = (
+        "pending_permission_without_checkpoint_truth"
+    )
+    PERMISSION_PROJECTION_UNREADABLE = "permission_projection_unreadable"
+    TERMINAL_THREAD_PENDING_PERMISSION_RESIDUE = (
+        "terminal_thread_pending_permission_residue"
+    )
+    UNKNOWN = "unknown"
+
+
+class TranscriptAvailability(StrEnum):
+    """Why a run's conversation is, or is not, readable from its checkpoint.
+
+    A run's transcript lives only in the checkpoint, so an unread checkpoint
+    yields an empty message list that is indistinguishable from a run that
+    genuinely said nothing. This classification is what tells the two apart, and
+    it exists so no reader has to infer loss from an empty list.
+
+    ``NOT_YET_RECORDED`` is the only non-fault absence: the run has not been
+    dispatched, so there is nothing to have lost. ``MISSING`` and ``UNREADABLE``
+    are both faults and differ in whether the checkpoint is gone or merely
+    unreachable right now.
+
+    A run whose transcript was deliberately released under a retention policy
+    would be a fourth, non-fault member. It is deliberately absent: no
+    production seam prunes a checkpoint today, so every absence really is a
+    fault, and a member with no producer would let a genuine loss be dismissed
+    as intended.
+    """
+
+    AVAILABLE = "available"
+    NOT_YET_RECORDED = "not_yet_recorded"
+    MISSING = "missing"
+    UNREADABLE = "unreadable"
 
 
 class ControlActionType(StrEnum):
@@ -123,6 +235,19 @@ TERMINAL_STATUSES: frozenset[ThreadStatus] = frozenset(
         ThreadStatus.FAILED,
         ThreadStatus.CANCELLED,
     }
+)
+
+#: The same set as the wire and column strings it is stored and served as.
+#:
+#: Every consumer that compares a DECODED value - a database column, a JSON
+#: body, a relay frame - needs the strings rather than the members, and each was
+#: rebuilding them inline. That is not merely repetition: an inline rebuild is a
+#: set comprehension re-evaluated on every call in per-thread projection code,
+#: and the hand-written variants had already drifted, one of them naming an
+#: "error" status this vocabulary has never had. Derived from the authority
+#: directly above, so a member added there arrives here in the same edit.
+TERMINAL_STATUS_VALUES: frozenset[str] = frozenset(
+    status.value for status in TERMINAL_STATUSES
 )
 
 NON_ACTIVE_STATUSES: frozenset[ThreadStatus] = TERMINAL_STATUSES | frozenset(

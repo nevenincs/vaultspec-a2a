@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import pathlib
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -78,6 +79,10 @@ def _make_bridge(
 
 # Default cache key for test graphs.
 _TEST_CACHE_KEY = ("test-preset", None, False)
+
+# Every dispatch names an active project, as a real one does. This package's own
+# directory is real, absolute, and present on either platform.
+_WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 
 
 def _inject_graph(
@@ -310,6 +315,7 @@ class TestHandleDispatch:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 req = DispatchRequest(
                     action="ingest",
+                    workspace_root=_WORKSPACE,
                     thread_id="t-no-graph",
                     content="Hello",
                     recursion_limit=25,
@@ -390,6 +396,7 @@ class TestHandleDispatch:
 
                 req = DispatchRequest(
                     action="ingest",
+                    workspace_root=_WORKSPACE,
                     thread_id="t-1",
                     content="Hello",
                     recursion_limit=25,
@@ -484,6 +491,7 @@ class TestGraphInputBuilding:
         """
         req = DispatchRequest(
             action="ingest",
+            workspace_root=_WORKSPACE,
             thread_id="t-init",
             content="Hello",
             team_preset="vaultspec-solo-coder",
@@ -513,6 +521,7 @@ class TestGraphInputBuilding:
         so LangGraph preserves checkpoint values and _replace_plan is not triggered."""
         req = DispatchRequest(
             action="ingest",
+            workspace_root=_WORKSPACE,
             thread_id="t-followup",
             content="Follow-up question",
             recursion_limit=25,
@@ -533,6 +542,7 @@ class TestGraphInputBuilding:
         """thread_id in graph_input must match the request thread_id."""
         req = DispatchRequest(
             action="ingest",
+            workspace_root=_WORKSPACE,
             thread_id="thread-xyz",
             content="test",
             recursion_limit=25,
@@ -544,6 +554,7 @@ class TestGraphInputBuilding:
         """SDD blackboard fields are included in graph_input on first ingest."""
         req = DispatchRequest(
             action="ingest",
+            workspace_root=_WORKSPACE,
             thread_id="t-sdd",
             content="Hello",
             team_preset="vaultspec-solo-coder",
@@ -567,6 +578,7 @@ class TestGraphInputBuilding:
         """Fresh checkpoints carry every restart-required SDD field."""
         req = DispatchRequest(
             action="ingest",
+            workspace_root=_WORKSPACE,
             thread_id="t-sdd-empty",
             content="Hello",
             team_preset="vaultspec-solo-coder",
@@ -586,6 +598,7 @@ class TestGraphInputBuilding:
 
         req = DispatchRequest(
             action="ingest",
+            workspace_root=_WORKSPACE,
             thread_id="t-preamble",
             content="User question",
             context_preamble="You are a helpful assistant.",
@@ -604,6 +617,7 @@ class TestGraphInputBuilding:
         """When both content and context_preamble are absent, messages is empty."""
         req = DispatchRequest(
             action="ingest",
+            workspace_root=_WORKSPACE,
             thread_id="t-empty",
             recursion_limit=25,
         )
@@ -616,6 +630,7 @@ class TestGraphInputBuilding:
         """
         req = DispatchRequest(
             action="ingest",
+            workspace_root=_WORKSPACE,
             thread_id="t-sdd-followup",
             content="Follow up",
             active_feature="auth-flow",
@@ -692,7 +707,7 @@ class TestLazyRecompilation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                cache_key = ("vaultspec-solo-coder", "/some/path", False)
+                cache_key = ("vaultspec-solo-coder", _WORKSPACE, False)
                 _inject_graph(executor, "t-preset", cache_key=cache_key)
                 assert executor.graph_count == 1
             finally:
@@ -805,6 +820,7 @@ class TestPreRunGuardTraceFidelity:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 req = DispatchRequest(
                     action=guards.runtime_mode,
+                    workspace_root=_WORKSPACE,
                     thread_id="t-guard-no-graph",
                     content="hello",
                     option_id="allow_once",
@@ -829,6 +845,7 @@ class TestPreRunGuardTraceFidelity:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 req = DispatchRequest(
                     action=guards.runtime_mode,
+                    workspace_root=_WORKSPACE,
                     thread_id="t-guard-slot",
                     content="hello",
                     option_id="allow_once",
@@ -855,6 +872,7 @@ class TestPreRunGuardTraceFidelity:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 req = DispatchRequest(
                     action=guards.runtime_mode,
+                    workspace_root=_WORKSPACE,
                     thread_id="t-guard-compile",
                     content="hello",
                     option_id="allow_once",
@@ -887,6 +905,7 @@ class TestPreRunGuardTraceFidelity:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 ingest_req = DispatchRequest(
                     action="ingest",
+                    workspace_root=_WORKSPACE,
                     thread_id="t-actions",
                     content="hello",
                     recursion_limit=25,
@@ -1038,6 +1057,7 @@ class TestSettleOrdering:
                 await executor.handle_dispatch(
                     DispatchRequest(
                         dispatch_id="stable-message-dispatch",
+                        workspace_root=_WORKSPACE,
                         action="ingest",
                         thread_id=thread_id,
                         content="continue",
@@ -1079,6 +1099,7 @@ class TestSettleOrdering:
                 _install_completing_graph(executor, thread_id)
                 req = DispatchRequest(
                     action="ingest",
+                    workspace_root=_WORKSPACE,
                     thread_id=thread_id,
                     content="build it",
                     team_preset="settle-preset",
@@ -1133,6 +1154,7 @@ class TestSettleOrdering:
                 await executor.handle_dispatch(
                     DispatchRequest(
                         action="ingest",
+                        workspace_root=_WORKSPACE,
                         thread_id=thread_id,
                         content="build it",
                         team_preset="settle-gated-preset",
@@ -1365,6 +1387,7 @@ class TestUnhandledDispatchTerminal:
                 await executor._fail_unhandled_dispatch(
                     DispatchRequest(
                         action="ingest",
+                        workspace_root=_WORKSPACE,
                         thread_id=thread_id,
                         content="build it",
                         recursion_limit=10,
@@ -1458,6 +1481,7 @@ class TestPreRunRefusalsCarryTheirReason:
                 await executor.handle_dispatch(
                     DispatchRequest(
                         action="ingest",
+                        workspace_root=_WORKSPACE,
                         thread_id=thread_id,
                         content="build it",
                         recursion_limit=10,
@@ -1504,6 +1528,7 @@ class TestPreRunRefusalsCarryTheirReason:
                 await executor._settle_run(
                     DispatchRequest(
                         action="ingest",
+                        workspace_root=_WORKSPACE,
                         thread_id=thread_id,
                         content="build it",
                         recursion_limit=10,
@@ -1552,6 +1577,7 @@ class TestPreRunRefusalsCarryTheirReason:
                 await executor._settle_run(
                     DispatchRequest(
                         action="ingest",
+                        workspace_root=_WORKSPACE,
                         thread_id=thread_id,
                         content="build it",
                         recursion_limit=10,
@@ -1634,6 +1660,7 @@ class TestPreRunRefusalsCarryTheirReason:
 
                 first = DispatchRequest(
                     action="ingest",
+                    workspace_root=_WORKSPACE,
                     thread_id=thread_id,
                     content="build it",
                     team_preset="boom-preset",
@@ -1692,6 +1719,7 @@ class TestPreRunRefusalsCarryTheirReason:
                 await executor._reject_compile_failure(
                     DispatchRequest(
                         action=guards.runtime_mode,
+                        workspace_root=_WORKSPACE,
                         thread_id=thread_id,
                         content="build it",
                         option_id="allow_once",
@@ -1786,6 +1814,7 @@ class TestTheFailureStashCannotOutliveItsRun:
                 await executor._fail_unhandled_dispatch(
                     DispatchRequest(
                         action="ingest",
+                        workspace_root=_WORKSPACE,
                         thread_id=thread_id,
                         content="build it",
                         recursion_limit=10,
@@ -1811,6 +1840,7 @@ class TestTheFailureStashCannotOutliveItsRun:
                 await executor._settle_run(
                     DispatchRequest(
                         action="ingest",
+                        workspace_root=_WORKSPACE,
                         thread_id=thread_id,
                         content="build it again",
                         recursion_limit=10,
@@ -1856,6 +1886,7 @@ class TestTheFailureStashCannotOutliveItsRun:
                 await executor._fail_unhandled_dispatch(
                     DispatchRequest(
                         action="ingest",
+                        workspace_root=_WORKSPACE,
                         thread_id=thread_id,
                         content="build it",
                         recursion_limit=10,

@@ -76,10 +76,13 @@ _EXPECT_ENV = "VAULTSPEC_PROVIDER_CONDITION_EXPECT"
 #: from an engine discovery file, so this proof needs no engine at all.
 _WORKSPACE_ENV = "VAULTSPEC_PROVIDER_CONDITION_WORKSPACE"
 
-#: The preset the provocation rides. A coding topology deliberately: it authors no
-#: document, so the run needs no engine session and no actor tokens, and the only
-#: thing standing between run-start and a provider turn is the provider itself.
-_PROBE_PRESET = "vaultspec-solo-coder"
+#: The preset the provocation rides. Bridge-free deliberately, and that is not a
+#: convenience: a preset declaring an authoring bridge is refused at run-start
+#: with 422 unless the engine has minted a per-role actor token, so a bridged
+#: preset cannot reach a provider on a gateway alone at all. This one declares no
+#: bridge and no surfaces, so the only thing standing between run-start and a
+#: provider turn is the provider itself.
+_PROBE_PRESET = "provider-condition-probe"
 
 #: A refusal does not arrive promptly. The lane treats several conditions as
 #: retryable and exhausts a backoff schedule first - a rejected credential took

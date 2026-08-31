@@ -219,10 +219,19 @@ async def _setup_checkpointer(checkpoint_path: Path) -> None:
     """Create the real LangGraph tables without claiming migration completion."""
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+    from ..control.config import settings
+    from ..database.checkpoint_schema import checkpoint_pragmas
+
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         await checkpointer.setup()
-        await checkpointer.conn.execute("PRAGMA journal_mode=WAL")
-        await checkpointer.conn.execute("PRAGMA busy_timeout=5000")
+        # The connection posture comes from the one place that owns it, which
+        # exists precisely so the checkpoint writers cannot drift apart again.
+        # This path had restated it and drifted anyway: it hardcoded the busy
+        # timeout instead of reading the configured one, and omitted the
+        # foreign-key pragma the owner documents as per-connection and therefore
+        # required on every connection.
+        for statement in checkpoint_pragmas(settings.sqlite_busy_timeout_ms):
+            await checkpointer.conn.execute(statement)
 
 
 async def _apply_mutations(

@@ -28,6 +28,18 @@ from ..factory import (
 )
 from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatalogKey
 
+# The exact model values a run freezes into its role assignment for each external
+# lane. Literals rather than lookups: an external provider's models are named by
+# the catalog that provider serves, so the repository holds no map to read them
+# from and the factory admits only the frozen value it is handed. What these
+# tests pin is that the value SURVIVES construction unaltered, which is a
+# property of the plumbing and not of the particular string.
+_FROZEN_CLAUDE_MODEL = "claude-frozen-entry"
+_FROZEN_GEMINI_MODEL = "gemini-frozen-entry"
+_FROZEN_KIMI_MODEL = "kimi-frozen-entry"
+_FROZEN_ZAI_MODEL = "zai-frozen-entry"
+_FROZEN_ZHIPU_MODEL = "zhipu-frozen-entry"
+
 
 def get_model_attr(model_obj: BaseChatModel) -> str | None:
     """Helper to get model name from different LangChain model classes."""
@@ -35,7 +47,7 @@ def get_model_attr(model_obj: BaseChatModel) -> str | None:
 
 
 def test_catalog_registrations_are_execution_mode_specific() -> None:
-    registrations = ProviderFactory().catalog_registrations()
+    registrations = ProviderFactory().catalog_registrations(Path.cwd())
     assert tuple(registration.key for registration in registrations) == (
         ProviderCatalogKey("claude", f"claude-agent-acp:{settings.acp_backend}"),
         ProviderCatalogKey("codex", "codex-app-server"),
@@ -46,7 +58,9 @@ def test_catalog_registrations_are_execution_mode_specific() -> None:
         ProviderCatalogKey("zhipu", "zhipu-openai-compatible-api"),
     )
     with pytest.raises(ValueError, match="no catalog registration"):
-        ProviderFactory().catalog_registration(ProviderCatalogKey("openai", "api"))
+        ProviderFactory().catalog_registration(
+            ProviderCatalogKey("openai", "api"), Path.cwd()
+        )
 
 
 @pytest.mark.asyncio
@@ -60,7 +74,7 @@ def test_catalog_registrations_are_execution_mode_specific() -> None:
 async def test_unverified_catalog_lanes_are_truthfully_unavailable(
     key: ProviderCatalogKey,
 ) -> None:
-    discovery = await ProviderFactory().catalog_registration(key).discover()
+    discovery = await ProviderFactory().catalog_registration(key, Path.cwd()).discover()
     assert discovery.catalog.key == key
     assert discovery.catalog.state.status is CatalogStatus.UNAVAILABLE
     assert discovery.catalog.models == ()
@@ -104,10 +118,14 @@ def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
     """binary backend injects CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN=1 into env_vars."""
     if _BIN_PATH is None:
         _assert_binary_backend_unavailable(
-            lambda: ProviderFactory().create(Provider.CLAUDE, backend="binary")
+            lambda: ProviderFactory().create(
+                Provider.CLAUDE, model="catalog-model", backend="binary"
+            )
         )
         return
-    model = ProviderFactory().create(Provider.CLAUDE, backend="binary")
+    model = ProviderFactory().create(
+        Provider.CLAUDE, model="catalog-model", backend="binary"
+    )
     assert isinstance(model, AcpChatModel)
     assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
     assert model.command == [str(_BIN_PATH)]
@@ -130,10 +148,14 @@ def test_provider_factory_claude_never_injects_an_env_token() -> None:
     """
     if _BIN_PATH is None:
         _assert_binary_backend_unavailable(
-            lambda: ProviderFactory().create(Provider.CLAUDE, backend="binary")
+            lambda: ProviderFactory().create(
+                Provider.CLAUDE, model="catalog-model", backend="binary"
+            )
         )
         return
-    model = ProviderFactory().create(Provider.CLAUDE, backend="binary")
+    model = ProviderFactory().create(
+        Provider.CLAUDE, model="catalog-model", backend="binary"
+    )
     assert isinstance(model, AcpChatModel)
     assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in model.env_vars
@@ -145,36 +167,40 @@ def test_provider_factory_claude_binary_sets_use_exec() -> None:
     """binary backend sets use_exec=True on AcpChatModel (no cmd.exe shim needed)."""
     if _BIN_PATH is None:
         _assert_binary_backend_unavailable(
-            lambda: ProviderFactory().create(Provider.CLAUDE, backend="binary")
+            lambda: ProviderFactory().create(
+                Provider.CLAUDE, model="catalog-model", backend="binary"
+            )
         )
         return
-    model = ProviderFactory().create(Provider.CLAUDE, backend="binary")
+    model = ProviderFactory().create(
+        Provider.CLAUDE, model="catalog-model", backend="binary"
+    )
     assert isinstance(model, AcpChatModel)
     assert model.use_exec is True
 
 
 def test_provider_factory_claude_retains_requested_model_for_acp_selection() -> None:
-    """A profile-resolved Claude tier must survive factory construction."""
+    """A frozen Claude catalog value must survive factory construction."""
     if _BIN_PATH is None:
         _assert_binary_backend_unavailable(
             lambda: ProviderFactory().create(
-                Provider.CLAUDE, model=Model.LOW, backend="binary"
+                Provider.CLAUDE, model=_FROZEN_CLAUDE_MODEL, backend="binary"
             )
         )
         return
-    model = ProviderFactory().create(Provider.CLAUDE, model=Model.LOW, backend="binary")
+    model = ProviderFactory().create(
+        Provider.CLAUDE, model=_FROZEN_CLAUDE_MODEL, backend="binary"
+    )
     assert isinstance(model, AcpChatModel)
-    expected = MODEL_MAP[Provider.CLAUDE][Model.LOW]
-    assert model.desired_model == expected
-    assert model._config.desired_model == expected
+    assert model.desired_model == _FROZEN_CLAUDE_MODEL
+    assert model._config.desired_model == _FROZEN_CLAUDE_MODEL
 
 
 def test_provider_factory_gemini_creates_acp() -> None:
     """Verify Gemini provider creates AcpChatModel with the correct ACP command."""
-    model = ProviderFactory().create(Provider.GEMINI)
+    model = ProviderFactory().create(Provider.GEMINI, model=_FROZEN_GEMINI_MODEL)
     assert isinstance(model, AcpChatModel)
-    expected_model = MODEL_MAP[Provider.GEMINI][Model.MID]
-    assert model.command[1:] == ["--model", expected_model, "--acp"]
+    assert model.command[1:] == ["--model", _FROZEN_GEMINI_MODEL, "--acp"]
 
 
 def test_classify_gemini_command_uses_explicit_executable_metadata() -> None:
@@ -275,9 +301,9 @@ def test_provider_factory_zai_creates_acp_via_claude_wrapper() -> None:
     """Z.ai rides the claude-agent-acp wrapper: same command as the Claude path."""
     if not _CLAUDE_ACP_JS.exists():
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
-            ProviderFactory().create(Provider.ZAI)
+            ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
         return
-    model = ProviderFactory().create(Provider.ZAI)
+    model = ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
     assert isinstance(model, AcpChatModel)
     assert model.command == ["node", str(_CLAUDE_ACP_JS)]
     assert model.provider == Provider.ZAI.value
@@ -287,25 +313,24 @@ def test_provider_factory_zai_creates_acp_via_claude_wrapper() -> None:
 
 
 def test_provider_factory_zai_retains_requested_model_for_acp_selection() -> None:
-    """A profile-resolved Z.ai tier must reach the shared Claude ACP model."""
+    """A frozen Z.ai catalog value must reach the shared Claude ACP model."""
     if not _CLAUDE_ACP_JS.exists():
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
-            ProviderFactory().create(Provider.ZAI, model=Model.LOW)
+            ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
         return
-    model = ProviderFactory().create(Provider.ZAI, model=Model.LOW)
+    model = ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
     assert isinstance(model, AcpChatModel)
-    expected = MODEL_MAP[Provider.ZAI][Model.LOW]
-    assert model.desired_model == expected
-    assert model._config.desired_model == expected
+    assert model.desired_model == _FROZEN_ZAI_MODEL
+    assert model._config.desired_model == _FROZEN_ZAI_MODEL
 
 
 def test_provider_factory_zai_injects_configured_token() -> None:
     """When a Z.ai token is configured, both Anthropic gateway vars are injected."""
     if not _CLAUDE_ACP_JS.exists():
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
-            ProviderFactory().create(Provider.ZAI)
+            ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
         return
-    model = ProviderFactory().create(Provider.ZAI)
+    model = ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
     assert isinstance(model, AcpChatModel)
     if settings.zai_auth_token and settings.zai_auth_token.strip():
         assert model.env_vars["ANTHROPIC_AUTH_TOKEN"] == settings.zai_auth_token
@@ -326,13 +351,12 @@ def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
 
             classify_provider_command(Provider.KIMI)
         return
-    model = ProviderFactory().create(Provider.KIMI)
+    model = ProviderFactory().create(Provider.KIMI, model=_FROZEN_KIMI_MODEL)
     assert isinstance(model, AcpChatModel)
     # Kimi drives its own agent, NOT the claude-agent-acp wrapper.
     assert model.command[-1] == "acp"
     assert "kimi" in model.command[0].lower()
-    expected_model = MODEL_MAP[Provider.KIMI][Model.MID]
-    assert model.command[1:] == ["-m", expected_model, "acp"]
+    assert model.command[1:] == ["-m", _FROZEN_KIMI_MODEL, "acp"]
     assert model.provider == Provider.KIMI.value
     # The backend family discriminator: kimi omits the Claude allowedTools _meta.
     assert model.acp_family == "kimi"
@@ -454,9 +478,10 @@ def test_provider_factory_explicit_string_model() -> None:
 
 def test_provider_factory_zhipu_mapping() -> None:
     """Verify Zhipu AI (GLM) mapping to OpenAI-compatible ChatOpenAI."""
-    model = ProviderFactory().create(Provider.ZHIPU, api_key="static-test-key")
-    expected_model = MODEL_MAP[Provider.ZHIPU][Model.HIGH]
-    assert get_model_attr(model) == expected_model
+    model = ProviderFactory().create(
+        Provider.ZHIPU, model=_FROZEN_ZHIPU_MODEL, api_key="static-test-key"
+    )
+    assert get_model_attr(model) == _FROZEN_ZHIPU_MODEL
     assert isinstance(model, ChatOpenAI)
     assert "bigmodel.cn" in str(model.openai_api_base)
 
@@ -464,7 +489,9 @@ def test_provider_factory_zhipu_mapping() -> None:
 def test_provider_factory_gemini_with_workspace_root() -> None:
     """Verify that workspace_root kwarg is forwarded to AcpChatModel for Gemini."""
     ws = Path("Y:/code/test")
-    model = ProviderFactory().create(Provider.GEMINI, workspace_root=ws)
+    model = ProviderFactory().create(
+        Provider.GEMINI, model=_FROZEN_GEMINI_MODEL, workspace_root=ws
+    )
     assert isinstance(model, AcpChatModel)
     assert model.workspace_root == str(ws)
 
@@ -551,7 +578,7 @@ def test_compiler_uses_the_next_exact_frozen_lane_when_primary_is_unavailable() 
         }
     }
 
-    model, provider, capability = _resolve_model_for_worker(
+    model, provider, capability, _frozen_model = _resolve_model_for_worker(
         worker_ref,
         agent,
         team,
@@ -573,25 +600,61 @@ class TestProviderAdmission:
     without building a model.
     """
 
-    def test_a_default_resolves_to_the_mapped_model(self) -> None:
+    def test_an_internal_default_resolves_to_the_mapped_model(self) -> None:
+        """The in-process lanes keep a default: no catalog enumerates them."""
         from ..factory import _admit_and_resolve_model_name
 
-        resolved = _admit_and_resolve_model_name(Provider.CLAUDE, None)
+        resolved = _admit_and_resolve_model_name(Provider.DETERMINISTIC, None)
 
         assert (
             resolved
-            == MODEL_MAP[Provider.CLAUDE][PROVIDER_DEFAULT_MODELS[Provider.CLAUDE]]
+            == MODEL_MAP[Provider.DETERMINISTIC][
+                PROVIDER_DEFAULT_MODELS[Provider.DETERMINISTIC]
+            ]
         )
 
-    def test_a_model_enum_resolves_through_the_map(self) -> None:
+    def test_an_internal_model_enum_resolves_through_the_map(self) -> None:
         from ..factory import _admit_and_resolve_model_name
 
-        level = PROVIDER_DEFAULT_MODELS[Provider.CLAUDE]
-        resolved = _admit_and_resolve_model_name(Provider.CLAUDE, level)
+        level = PROVIDER_DEFAULT_MODELS[Provider.DETERMINISTIC]
+        resolved = _admit_and_resolve_model_name(Provider.DETERMINISTIC, level)
 
-        assert resolved == MODEL_MAP[Provider.CLAUDE][level]
+        assert resolved == MODEL_MAP[Provider.DETERMINISTIC][level]
+
+    def test_an_external_lane_has_no_implicit_default(self) -> None:
+        """Omitting a model may not silently choose the artifact producer.
+
+        A repository-authored default for an external lane would name a model
+        that provider never advertised, so admission refuses instead.
+        """
+        from ..factory import _admit_and_resolve_model_name
+
+        with pytest.raises(ValueError, match="exact model value frozen"):
+            _admit_and_resolve_model_name(Provider.CLAUDE, None)
+
+    def test_an_external_lane_refuses_a_capability_tier(self) -> None:
+        """Capability tiers are not a shared vocabulary across providers."""
+        from ..factory import _admit_and_resolve_model_name
+
+        with pytest.raises(ValueError, match="exact model value frozen"):
+            _admit_and_resolve_model_name(Provider.CLAUDE, Model.MID)
+
+    def test_the_refusal_is_not_reported_as_an_unsupported_provider(self) -> None:
+        """Supported-ness and having a repo-authored default are separate facts.
+
+        Claude remains a supported lane; it simply carries no default any more.
+        Reporting the absent selection as an unsupported provider would send an
+        operator hunting the wrong defect.
+        """
+        from ..factory import _admit_and_resolve_model_name
+
+        with pytest.raises(ValueError) as excinfo:
+            _admit_and_resolve_model_name(Provider.CLAUDE, None)
+
+        assert "Unsupported provider" not in str(excinfo.value)
 
     def test_a_raw_string_passes_through_unvalidated(self) -> None:
+        """The exact frozen catalog value is how an external lane is selected."""
         from ..factory import _admit_and_resolve_model_name
 
         resolved = _admit_and_resolve_model_name(Provider.CLAUDE, "some-custom-name")

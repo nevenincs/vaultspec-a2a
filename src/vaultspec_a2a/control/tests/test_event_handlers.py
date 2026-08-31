@@ -1,6 +1,8 @@
 """Focused replay/idempotency tests for worker->gateway event handlers."""
 
 import json
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -8,6 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...api.schemas.events import PermissionRequestEvent
+from ...conftest import materialize_schema
 from ...control.action_lease import claim_control_action
 from ...control.drain import DrainGate
 from ...control.event_handlers import (
@@ -23,8 +27,10 @@ from ...database import (
     record_permission_response_submission,
     set_thread_approval_state,
 )
-from ...database.models import Base, ControlActionModel, ThreadModel
+from ...database.models import ControlActionModel, ThreadModel
+from ...graph.enums import ServerEventType
 from ...streaming.aggregator import EventAggregator
+from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionType
 
 
@@ -85,9 +91,8 @@ async def engine(tmp_path_factory: pytest.TempPathFactory):
     """Create a file-backed engine for replay-focused control tests."""
     case_dir = tmp_path_factory.mktemp("control-event-handler-db")
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
 
@@ -236,6 +241,55 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         assert thread is not None
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
+
+
+@pytest.mark.asyncio
+async def test_terminal_event_expires_pending_plan_approval_projection(
+    session_factory,
+) -> None:
+    """Terminal relay settles a parked plan approval without residue."""
+    async with session_factory() as session:
+        thread = await create_thread(session, title="Terminal plan approval")
+        await session.commit()
+        thread_id = thread.id
+
+    request_id = f"{thread_id}:plan-approval-terminal"
+    await _handle_permission_event(
+        thread_id,
+        {
+            "type": "plan_approval_request",
+            "request_id": request_id,
+            "description": "Approve the plan before completion",
+            "options": [
+                {
+                    "option_id": "approve",
+                    "name": "Approve Plan",
+                    "kind": "allow_once",
+                }
+            ],
+            "tool_call": "plan_approval",
+        },
+        session_factory=session_factory,
+    )
+
+    await _handle_terminal_event(
+        thread_id,
+        {"event_type": "thread_terminal", "status": "completed"},
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        permission = await get_permission_request(session, request_id)
+        assert permission is not None
+        assert permission.request_status == "expired_by_terminal_state"
+
+        thread = await session.get(ThreadModel, thread_id)
+        assert thread is not None
+        assert thread.status == "completed"
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
+        assert thread.approval_reason is None
+        assert thread.approval_response_action_id is None
 
 
 @pytest.mark.asyncio
@@ -546,3 +600,60 @@ async def test_terminal_db_failure_releases_and_clears_public_state() -> None:
         assert aggregator.get_subscriptions(client_id) == frozenset()
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_persisted_description_matches_what_the_stream_showed(
+    session_factory,
+) -> None:
+    """The durable row holds exactly what the operator was streamed.
+
+    Two readers truncate the same worker-supplied text at different times: this
+    handler before writing the row, and the wire model when the frame is built.
+    A reload re-reads the row, so a stream permitted to carry more than the row
+    stores would show text live that vanishes on refresh - which is the bug the
+    shared bound exists to prevent, and the one a second declaration reopens.
+
+    Driven end to end against a real migrated SQLite database and the real wire
+    model, from a single pathological description, so the two truncations are
+    compared rather than each compared to a number written down twice.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session, title="Bounded Description", status="running"
+        )
+        await session.commit()
+
+    oversize = "d" * (MAX_PERMISSION_DESCRIPTION_CHARS * 3)
+    # The trap has to be live: a description already within the bound would let
+    # this pass with both truncations removed.
+    assert len(oversize) > MAX_PERMISSION_DESCRIPTION_CHARS
+
+    await _handle_permission_event(
+        thread.id,
+        {
+            "type": "permission_request",
+            "request_id": "bounded-description",
+            "description": oversize,
+            "options": [],
+        },
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        stored = await get_permission_request(session, "bounded-description")
+
+    streamed = PermissionRequestEvent(
+        type=ServerEventType.PERMISSION_REQUEST,
+        thread_id=thread.id,
+        agent_id="agent-1",
+        timestamp=datetime.now(UTC),
+        sequence=1,
+        request_id="bounded-description",
+        description=oversize,
+        options=[],
+    )
+
+    assert stored is not None
+    assert len(stored.description) < len(oversize)
+    assert stored.description == streamed.description

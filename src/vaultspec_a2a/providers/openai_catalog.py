@@ -9,8 +9,6 @@ provider-native controls or capabilities.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -20,8 +18,15 @@ from typing import Final
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
-from ._json_contract import JsonObject, JsonValue
+from ._catalog_fields import (
+    CatalogFieldReader,
+    display_label,
+    local_id,
+    model_list_revision,
+)
+from ._json_contract import JsonObject
 from .provider_catalog import (
+    MAX_MODELS,
     AuthenticationState,
     CatalogState,
     CatalogStatus,
@@ -38,7 +43,6 @@ __all__ = [
 ]
 
 _MAX_RESPONSE_BYTES: Final = 1_048_576
-_MAX_MODELS: Final = 256
 _MAX_API_KEY_LENGTH: Final = 4_096
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
@@ -61,17 +65,12 @@ class OpenAICompatibleCatalogDiscovery:
     authentication: AuthenticationState
 
 
-def _text(value: JsonValue | None, *, field: str) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
-        raise OpenAICompatibleCatalogError(
-            f"OpenAI-compatible catalog field {field!r} must be a normalized "
-            "non-blank string"
-        )
-    if len(value) > 1_024:
-        raise OpenAICompatibleCatalogError(
-            f"OpenAI-compatible catalog field {field!r} exceeds 1024 characters"
-        )
-    return value
+def _protocol_error(message: str) -> OpenAICompatibleCatalogError:
+    """Raise this lane's own dialect of a catalog contract refusal."""
+    return OpenAICompatibleCatalogError(f"OpenAI-compatible {message}")
+
+
+_FIELDS: Final = CatalogFieldReader(_protocol_error)
 
 
 def _models_url(base_url: str) -> str:
@@ -107,19 +106,7 @@ def _api_key(value: str) -> str:
 
 
 def _entry_id(key: ProviderCatalogKey, provider_value: str) -> str:
-    namespace = f"{key.provider_id}:{key.execution_mode}:model"
-    encoded = f"{namespace}\0{provider_value}".encode()
-    return hashlib.sha256(encoded).hexdigest()[:32]
-
-
-def _revision(key: ProviderCatalogKey, models: tuple[ModelCatalogEntry, ...]) -> str:
-    payload = {
-        "provider_id": key.provider_id,
-        "execution_mode": key.execution_mode,
-        "models": [model.provider_value for model in models],
-    }
-    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return local_id(f"{key.provider_id}:{key.execution_mode}:model", provider_value)
 
 
 def _unavailable_catalog(
@@ -177,9 +164,9 @@ def catalog_from_model_list(
         raise OpenAICompatibleCatalogError(
             "OpenAI-compatible model-list data must be a list"
         )
-    if len(raw_models) > _MAX_MODELS:
+    if len(raw_models) > MAX_MODELS:
         raise OpenAICompatibleCatalogError(
-            f"OpenAI-compatible model-list exceeds {_MAX_MODELS} models"
+            f"OpenAI-compatible model-list exceeds {MAX_MODELS} models"
         )
     model_values: set[str] = set()
     for index, raw_model in enumerate(raw_models):
@@ -197,8 +184,12 @@ def catalog_from_model_list(
                 f"OpenAI-compatible model-list data[{index}].created must be "
                 "a non-negative integer"
             )
-        _text(raw_model.get("owned_by"), field=f"data[{index}].owned_by")
-        model_value = _text(raw_model.get("id"), field=f"data[{index}].id")
+        _FIELDS.required_text(
+            raw_model.get("owned_by"), field=f"data[{index}].owned_by"
+        )
+        model_value = _FIELDS.required_text(
+            raw_model.get("id"), field=f"data[{index}].id"
+        )
         if model_value in model_values:
             raise OpenAICompatibleCatalogError(
                 "OpenAI-compatible model-list contains duplicate identifiers"
@@ -215,7 +206,7 @@ def catalog_from_model_list(
         ModelCatalogEntry(
             entry_id=_entry_id(key, model_value),
             provider_value=model_value,
-            display_name=model_value[:256],
+            display_name=display_label(model_value),
         )
         for model_value in sorted(model_values)
     )
@@ -224,7 +215,7 @@ def catalog_from_model_list(
         state=CatalogState(
             status=CatalogStatus.AVAILABLE,
             checked_at=now,
-            revision=_revision(key, models),
+            revision=model_list_revision(key, models),
             expires_at=now + _CATALOG_TTL,
         ),
         models=models,

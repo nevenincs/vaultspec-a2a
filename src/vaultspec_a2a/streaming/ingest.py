@@ -23,12 +23,12 @@ from ..thread.errors import describe_exception_chain
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .transformer import (
-    StreamableGraph,
     _GraphInterrupt,
     _GraphRecursionError,
     emit_interrupt_events,
     process_langgraph_event,
 )
+from .types import StreamableGraph
 
 __all__ = ["IngestManager", "IngestStallTimeoutError"]
 
@@ -51,7 +51,56 @@ class IngestStallTimeoutError(TimeoutError):
     branch below as LangGraph's own step_timeout by default; ``ingest()``
     checks for this MORE SPECIFIC type first so the reported reason names the
     stall (not a generic step_timeout) whenever this is the one that fired.
+
+    "Unconditional" describes that it never trusts step_timeout to fire, not
+    that it ignores step_timeout's VALUE: a run whose team preset legitimately
+    permits a single step up to (say) 1800s -- a real incident, an ACP-backed
+    node doing a long tool call or extended reasoning with no protocol frame
+    to relay -- must never be preemptable by an outer bound narrower than that
+    same run's own declared budget. ``_effective_stall_timeout`` below is what
+    keeps this bound the wider of the two, so a node using exactly the silence
+    its own configuration sanctions is never mistaken for a wedge.
     """
+
+
+# Margin (seconds) added atop a run's own configured ``graph.step_timeout``
+# when it is used to widen the stall bound below the global default. This
+# outer watchdog exists BECAUSE step_timeout was observed to not always fire
+# on its own, so once it is the wider budget for this run, the outer bound
+# must still leave it room to fire (and be reported through its own, more
+# specific STEP_TIMEOUT branch) before this one preempts it -- an outer bound
+# equal to the inner one it backstops would race it, not back it up.
+_STEP_TIMEOUT_STALL_MARGIN_SECONDS = 30.0
+
+
+def _effective_stall_timeout(graph: StreamableGraph) -> float:
+    """Return the stall budget for *graph*, never narrower than its own step budget.
+
+    Live incident: a preset can legitimately declare ``step_timeout_seconds``
+    in the hundreds or low thousands (a real ACP-backed authoring node doing a
+    long tool call or extended reasoning between protocol frames), while the
+    global ``ingest_event_stall_timeout_seconds`` default is a much smaller
+    flat number meant to catch a genuinely wedged graph quickly. Reading only
+    the global default made the "unconditional outer bound" DOCSTRING above
+    strictly tighter than the very step budget it exists to back up, so any
+    node using the silence its own configuration sanctioned was killed first
+    by the outer watchdog, reporting a stall that never happened at the level
+    the run's own operator would recognise as a fault.
+
+    ``graph.step_timeout`` is the compiled Pregel attribute the compiler sets
+    from the team TOML (``graph/compiler.py``); it is absent from the
+    ``StreamableGraph`` protocol (a test double, or a graph compiled without a
+    configured step_timeout, need not carry it), so it is read defensively
+    and the global default is kept whenever it is missing or not the wider
+    bound.
+    """
+    global_default = domain_config.ingest_event_stall_timeout_seconds
+    node_step_timeout = getattr(graph, "step_timeout", None)
+    if isinstance(node_step_timeout, int | float) and (
+        node_step_timeout + _STEP_TIMEOUT_STALL_MARGIN_SECONDS > global_default
+    ):
+        return float(node_step_timeout) + _STEP_TIMEOUT_STALL_MARGIN_SECONDS
+    return global_default
 
 
 def _summarize_ingest_exception(exc: BaseException) -> str:
@@ -226,7 +275,7 @@ class IngestManager:
         cancel_event = self._get_cancel_event(thread_id)
         _is_interrupt = False
         _outcome = ThreadStatus.COMPLETED
-        stall_timeout = domain_config.ingest_event_stall_timeout_seconds
+        stall_timeout = _effective_stall_timeout(graph)
         with self._telemetry.start_span(
             "aggregator.ingest",
             thread_id=thread_id,
@@ -255,9 +304,18 @@ class IngestManager:
                     except StopAsyncIteration:
                         break
                     except TimeoutError as exc:
+                        # Scoped to the exact signal this watchdog reads --
+                        # astream_events -- rather than "the graph" broadly: a
+                        # node can be doing real, sanctioned work (a long tool
+                        # call, extended reasoning) that legitimately relays
+                        # no LangGraph event for a stretch, and this bound is
+                        # already widened past this run's own step_timeout
+                        # (see _effective_stall_timeout) before it ever fires,
+                        # so a client reading this message is not told the
+                        # run produced nothing when only this one channel did.
                         raise IngestStallTimeoutError(
-                            f"Ingest stalled: no event from the graph for over "
-                            f"{stall_timeout:.0f}s"
+                            "Ingest stalled: astream_events produced no new "
+                            f"event for over {stall_timeout:.0f}s"
                         ) from exc
                     if on_graph_started is not None:
                         await on_graph_started()

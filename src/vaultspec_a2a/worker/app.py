@@ -36,14 +36,16 @@ from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 
-from ..control.config import settings
+from ..control.config import GATEWAY_URL_ALT_ENV, GATEWAY_URL_ENV, settings
 from ..control.worker_management import (
     GATEWAY_LIFETIME_ENV,
     WORKER_GENERATION_ENV,
 )
 from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
+from ..lifecycle.pairing import DispatchPairingStatus, resolve_worker_gateway_target
 from ..lifecycle.registration import deregister_serve, register_serve
+from ..providers.warmup import warm_model_imports
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..utils import (
     BearerVerdict,
@@ -66,6 +68,31 @@ logger = logging.getLogger(__name__)
 WorkerApp = FastAPI
 
 
+async def _warm_model_imports() -> None:
+    """Load the model stack in the background while the worker serves.
+
+    The compile path offloads this import too, so correctness never depends on
+    this task: it only decides whether the FIRST run of a worker's life pays the
+    several seconds up front or overlaps them with the idle window before a
+    dispatch arrives. Started after the app is serving rather than before,
+    because blocking readiness on it would trade a slow first run for a slow
+    spawn, and the gateway waits on readiness.
+
+    A failure is logged and dropped HERE only. The compile path performs the same
+    import and will raise there, where the run it belongs to can be failed
+    truthfully, so nothing is hidden by declining to take the worker down over a
+    warm-up.
+    """
+    try:
+        await run_sync(warm_model_imports)
+    except Exception:
+        logger.warning(
+            "Model stack warm-up failed; the first run will load it inline",
+            exc_info=True,
+            extra={"action": "model_warmup_failed"},
+        )
+
+
 async def _verify_dispatch_token(
     authorization: str | None = Header(None),
 ) -> None:
@@ -78,6 +105,7 @@ async def _verify_dispatch_token(
         authorization,
         token=settings.internal_token,
         environment=settings.environment,
+        environment_declared=settings.environment_declared,
     )
     if verdict is BearerVerdict.MISCONFIGURED:
         raise HTTPException(status_code=500, detail=detail)
@@ -99,6 +127,8 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     2. Create the ``WorkerBridge`` HTTP client.
     3. Instantiate the ``Executor`` with checkpointer + bridge.
     4. Launch the heartbeat loop as a background task.
+    5. Launch the model-stack warm-up as a background task, so the first run
+       does not pay its import cost inline.
 
     On shutdown the heartbeat is cancelled and the bridge client closed.
     """
@@ -110,6 +140,33 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # attributed separately from the gateway in Jaeger/OTLP backends.
     configure_telemetry(service_name="vaultspec-worker")
     logger.info("Telemetry configured (service=vaultspec-worker)")
+
+    # Worker -> gateway pairing (the master-bug guard's missing other half): a band
+    # worker whose gateway target was never explicitly configured auto-derives the
+    # SAME resident default (settings._derive_service_urls) the observed bug hit -
+    # it then heartbeats a dead or foreign gateway forever with nothing louder than
+    # log noise. Learn a live band gateway when it is unambiguous, and refuse to
+    # boot (mirroring the gateway's own dispatch-pairing guard) rather than run
+    # broken when the pairing cannot be resolved safely.
+    gateway_url_explicit = bool(
+        os.environ.get(GATEWAY_URL_ENV) or os.environ.get(GATEWAY_URL_ALT_ENV)
+    )
+    resolved_gateway_url, pairing_status, pairing_message = (
+        resolve_worker_gateway_target(
+            settings.gateway_url,
+            gateway_url_explicit=gateway_url_explicit,
+            worker_port=settings.worker_port,
+        )
+    )
+    if pairing_status is DispatchPairingStatus.MISPAIRED:
+        raise RuntimeError(pairing_message)
+    app.state.gateway_pairing_warning = None
+    if resolved_gateway_url != settings.gateway_url:
+        logger.info("Worker gateway pairing: %s", pairing_message)
+        settings.gateway_url = resolved_gateway_url
+    elif pairing_status is DispatchPairingStatus.UNPAIRED:
+        logger.warning("Worker gateway pairing: %s", pairing_message)
+        app.state.gateway_pairing_warning = pairing_message
 
     async with open_checkpointer() as checkpointer:
         bridge = WorkerBridge(
@@ -158,7 +215,13 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         worker_record = register_serve(
             "worker-dev",
             settings.worker_port,
-            workspace=str(settings.workspace_root),
+            # Absent is the empty string the registry documents, never the
+            # rendering of None: workspace_root carries no default, so
+            # stringifying it unconditionally registers the literal "None" as a
+            # directory for every process that never had one.
+            workspace=""
+            if settings.workspace_root is None
+            else str(settings.workspace_root),
             command=[
                 "python",
                 "-m",
@@ -173,6 +236,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
             # Start the periodic heartbeat loop as a background task.
             tg.start_soon(bridge.heartbeat_loop, 10.0)
+            tg.start_soon(_warm_model_imports)
 
             logger.info("Worker %s ready on port %d", worker_id, settings.worker_port)
 
@@ -289,11 +353,20 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         from a stale orphan still pointing at a dead dev-band gateway. Without
         this provenance the spawn path would blindly adopt the orphan and it
         would heartbeat a dead port forever.
+
+        ``gateway_pairing_warning`` surfaces the non-fatal half of the worker's
+        own boot-time pairing guard (``resolve_worker_gateway_target``): a band
+        worker whose target could not be learned unambiguously and fell back to
+        the auto-derived default. ``None`` when the target was explicit, learned,
+        or the worker is not on a band port.
         """
         return {
             "status": "ok",
             "service": "worker",
             "gateway_url": settings.gateway_url,
+            "gateway_pairing_warning": getattr(
+                app.state, "gateway_pairing_warning", None
+            ),
             "worker_port": settings.worker_port,
             "database_backend": settings.resolved_database_backend,
             "checkpoint_backend": settings.resolved_checkpoint_backend,

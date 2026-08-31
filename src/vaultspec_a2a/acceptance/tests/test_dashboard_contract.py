@@ -31,9 +31,13 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
+from ...testing.sse import read_frame
+from ...thread.enums import (
+    TERMINAL_STATUS_VALUES,
+    TERMINAL_STATUSES,
+    ThreadStatus,
+)
 from .. import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET
-from ._sse import read_frame
 from .conftest import wait_for_terminal
 
 if TYPE_CHECKING:
@@ -106,7 +110,20 @@ def test_authenticated_start_creates_a_dispatched_run(
     assert body["run_id"] == run_id
     assert body["eligible"] is True
     assert body["status"]
-    assert body["profile_id"]
+
+    # The one execution authority a start discloses is the frozen assignment; the
+    # retired profile pair is deliberately absent from this response rather than
+    # served empty, so asserting a `profile_id` here would demand a field the
+    # contract removed. What must hold is that every required role was frozen to
+    # the lane this stack selected - the in-process one, which cannot spend.
+    assert "profile_id" not in body
+    frozen = body["frozen_assignment"]
+    assert frozen["digest"]
+    assignments = frozen["assignments"]
+    assert {item["role_id"] for item in assignments} == {DEFAULT_REQUIRED_ROLE}
+    assert all(
+        item["provider_id"] == gateway.selected_provider_id for item in assignments
+    )
 
     # The durable run exists (unlike a prepare) - status resolves it.
     status = gateway.status(run_id)
@@ -187,7 +204,9 @@ async def _open_terminal_frame(
     ):
         assert response.status_code == 200, response
         assert response.headers["content-type"].startswith("text/event-stream")
-        return await read_frame(response.aiter_lines(), wanted="thread_terminal")
+        return await read_frame(
+            response.aiter_lines(), wanted="thread_terminal", timeout=30.0
+        )
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -216,7 +235,7 @@ async def test_authenticated_progress_stream_relays_bounded_lifecycle_frame(
 
     # Permitted identity present...
     assert frame["thread_id"] == run_id
-    assert frame["status"] in {status.value for status in TERMINAL_STATUSES}
+    assert frame["status"] in TERMINAL_STATUS_VALUES
     # ...forbidden bodies absent from the encoded frame.
     for forbidden in ("content", "prompt", "document", "diff", "old_text", "new_text"):
         assert forbidden not in raw, f"forbidden field {forbidden!r} crossed the edge"

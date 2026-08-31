@@ -191,3 +191,55 @@ def test_clarification_request_id_ceiling_is_not_below_what_a2a_mints() -> None:
         "would refuse a handle this side issued, leaving the run parked on a "
         "question that cannot be answered through the edge."
     )
+
+
+def _engine_str_slice(source: str, name: str) -> tuple[str, ...]:
+    """Return the string literals an engine `const NAME: &[&str] = &[...];` lists.
+
+    Order is preserved rather than sorted away: the two sides are one enumerated
+    vocabulary, and a reader comparing them should be comparing the declaration,
+    not a normalization of it.
+    """
+    match = re.search(
+        rf"const\s+{re.escape(name)}\s*:\s*&\[&str\]\s*=\s*&\[(.*?)\];",
+        source,
+        re.DOTALL,
+    )
+    assert match is not None, (
+        f"the engine contract module no longer declares {name!r} as a string "
+        "slice; this gate reads it by name, so a rename or a computed value "
+        "needs this reader updated rather than the assertion dropped"
+    )
+    return tuple(re.findall(r'"([^"]*)"', match.group(1)))
+
+
+def test_provider_condition_vocabulary_is_the_same_set_on_both_sides() -> None:
+    """Red when either side names a provider condition the other does not.
+
+    This gate exists because the coupling is asymmetric and silent in the
+    direction that costs the most. The engine validates an incoming condition
+    against its own copy of the vocabulary and REFUSES a value it does not
+    recognise, at the write boundary. So the day this side emits a new member
+    without the engine having been taught it, the engine does not lose one
+    field - it refuses to settle that run at all. The remedy is a release
+    ordering nothing else enforces: teach the engine first.
+
+    The reverse drift is harmless but worth catching too, since a member the
+    engine accepts and this side never emits is a remediation affordance no
+    user can ever reach, and it will look implemented.
+
+    Read from the engine's source rather than from a running engine for the
+    same reason as the bounds above: the declaration is the contract.
+    """
+    from ...providers.conditions import ProviderCondition
+
+    engine_members = _engine_str_slice(_contract_source(), "A2A_PROVIDER_CONDITIONS")
+    a2a_members = tuple(member.value for member in ProviderCondition)
+
+    assert engine_members == a2a_members, (
+        f"provider condition vocabulary drift: engine A2A_PROVIDER_CONDITIONS="
+        f"{list(engine_members)}, a2a ProviderCondition={list(a2a_members)}. A "
+        "member this side emits that the engine does not name is refused at the "
+        "engine's write boundary, which loses the whole run's settlement rather "
+        "than one field, so the engine has to learn a new member first."
+    )

@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import uvicorn
@@ -30,8 +31,9 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...api.tests.conftest import make_app
-from ...database.models import Base
+from ...conftest import materialize_schema
 from ...lifecycle.discovery import service_json_path, write_service_json
+from ...testing.catalog_selection import in_process_selection
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -106,10 +108,37 @@ class _GatewayFixture:
         self._loop.close()
 
     async def _make_engine(self) -> Any:
+        materialize_schema(Path(self._tmp / "test.db"))
         engine = create_async_engine(f"sqlite+aiosqlite:///{self._tmp / 'test.db'}")
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
         return engine
+
+
+def _in_process_lane_arguments(base: str) -> dict[str, str]:
+    """Return the provider/mode/entry arguments naming a served in-process lane.
+
+    A TEST may choose an entry; production code may not. What is asserted by
+    using it here is that the CLI carries the caller's choice through to the
+    gateway intact, not that any particular model is right - so the choice must
+    be a lane that bills nothing, which is the one guarantee the shared
+    mechanism makes.
+
+    Only three of the reference's fields are returned. The CLI's own resolver
+    reads the catalog and supplies the revision, and that resolution is part of
+    what this test exercises; handing it a revision would skip it.
+    """
+    import httpx
+
+    response = httpx.get(
+        f"{base}/v1/provider-catalog",
+        params={"workspace_root": str(Path.cwd())},
+        timeout=180.0,
+    )
+    assert response.status_code == 200, response.text
+    selection = in_process_selection(response.json())
+    return {
+        key: str(selection[key])
+        for key in ("provider_id", "execution_mode", "entry_id")
+    }
 
 
 def _run_cli(
@@ -147,7 +176,7 @@ def test_cli_uses_matching_loopback_discovery_token(tmp_path: Any) -> None:
             environment["VAULTSPEC_A2A_HOME"] = str(a2a_home)
             result = _run_cli("presets", "--url", srv.base, env=environment)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["api_version"] == "v1"
 
 
@@ -172,7 +201,7 @@ def test_configured_cli_token_precedes_matching_discovery_token(tmp_path: Any) -
             environment["VAULTSPEC_A2A_GATEWAY_TOKEN"] = configured
             result = _run_cli("presets", "--url", srv.base, env=environment)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["api_version"] == "v1"
 
 
@@ -180,17 +209,23 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
     with _GatewayFixture(tmp_path) as gw, _ThreadedServer(gw.app) as srv:
         # presets-list
         presets = _run_cli("presets", "--url", srv.base)
-        assert presets.returncode == 0, presets.stderr
+        assert presets.returncode == 0, presets.stdout + presets.stderr
         pbody = json.loads(presets.stdout)
         assert pbody["api_version"] == "v1"
         assert any(p["id"] == _PRESET for p in pbody["presets"])
 
         # doctor (service-state)
         doctor = _run_cli("doctor", "--url", srv.base)
-        assert doctor.returncode == 0, doctor.stderr
+        assert doctor.returncode == 0, doctor.stdout + doctor.stderr
         assert json.loads(doctor.stdout)["api_version"] == "v1"
 
         # run start -> status -> cancel
+        # The operator names the lane and entry; the CLI resolves only the
+        # catalog revision. Read here from the same served catalog rather than
+        # hardcoded, so this proves the real end-to-end path.
+        catalog = _run_cli("presets", "--url", srv.base)
+        assert catalog.returncode == 0, catalog.stdout + catalog.stderr
+        lane = _in_process_lane_arguments(srv.base)
         start = _run_cli(
             "run",
             "start",
@@ -198,21 +233,27 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
             _PRESET,
             "--message",
             "build it",
+            "--provider",
+            lane["provider_id"],
+            "--execution-mode",
+            lane["execution_mode"],
+            "--entry",
+            lane["entry_id"],
             "--autonomous",
             "--url",
             srv.base,
         )
-        assert start.returncode == 0, start.stderr
+        assert start.returncode == 0, start.stdout + start.stderr
         run_id = json.loads(start.stdout)["run_id"]
         assert run_id
         assert gw.worker.dispatches, "run start must dispatch to the worker"
 
         status = _run_cli("run", "status", run_id, "--url", srv.base)
-        assert status.returncode == 0, status.stderr
+        assert status.returncode == 0, status.stdout + status.stderr
         assert json.loads(status.stdout)["run_id"] == run_id
 
         cancel = _run_cli("run", "cancel", run_id, "--url", srv.base)
-        assert cancel.returncode == 0, cancel.stderr
+        assert cancel.returncode == 0, cancel.stdout + cancel.stderr
         assert json.loads(cancel.stdout)["api_version"] == "v1"
 
         # unknown run -> non-zero exit with the error body printed
@@ -276,5 +317,5 @@ def test_cli_reports_installed_package_version() -> None:
     from ...utils import package_version
 
     result = _run_cli("--version")
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert package_version() in result.stdout

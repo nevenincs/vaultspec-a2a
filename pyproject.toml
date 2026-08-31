@@ -38,8 +38,6 @@ dependencies = [
   "alembic>=1.15.1",
   "click>=8.1",
   "langsmith>=0.3.1",
-  "torch>=2.13.0",
-  "vaultspec-rag[mcp]",
 ]
 
 [project.optional-dependencies]
@@ -49,6 +47,18 @@ server = [
   "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
   "psycopg[binary,pool]>=3.2.9",
 ]
+# Semantic search over the vault and the codebase. NOT a runtime dependency of
+# the gateway: no module here imports `vaultspec_rag` or `torch`, and the presets
+# that use it name `vaultspec-rag` as an out-of-process MCP SERVER rather than
+# importing anything. This project orchestrates agents; it runs no model itself
+# and needs no tensor runtime.
+#
+# Kept out of the base install because it is not free. `vaultspec-rag` pulls
+# `sentence-transformers`, which pulls `transformers`, and `langchain_core`
+# imports `transformers` at module scope inside a try/except purely to record
+# whether it is available - so merely HAVING it installed added roughly thirteen
+# seconds to any import that reached the language-model package, in a process
+# that never used a tokenizer.
 rag = [
   "torch>=2.4",
   "vaultspec-rag[mcp]>=0.3.8",
@@ -57,13 +67,15 @@ rag = [
 [project.scripts]
 vaultspec-a2a = "vaultspec_a2a.cli.main:main"
 
-# The resource-aware execution plugin loads through the pytest11 entry point,
-# NOT through addopts: a lane that replaces addopts wholesale (the toolchain's
-# service target does, via --override-ini) must still run under the leases,
-# groups, and admission the plugin provides. An addopts channel is strippable;
-# this one is not.
-[project.entry-points.pytest11]
-vaultspec-a2a-testing = "vaultspec_a2a.testing.plugin"
+# No `[project.entry-points.pytest11]` here, deliberately. The resource-aware
+# execution plugin must survive a lane that replaces addopts wholesale (the
+# toolchain's service target does, via --override-ini), but a pytest11 entry
+# point buys that at the price of a GLOBAL side effect: it auto-loads into
+# every pytest session in any environment that installs this package, where the
+# plugin's refusal of non-loadgroup distribution breaks a consumer's
+# `pytest -n auto` and its session registration writes leases under their home.
+# The repository-root conftest.py loads it instead - equally unreachable from
+# addopts, and scoped to this checkout.
 
 [dependency-groups]
 docs = [
@@ -122,7 +134,7 @@ tooling = [
   "tenacity>=9.0.0",
   "tomlkit>=0.15.0",
   "ty>=0.0.15",
-  "vaultspec-core>=0.1.48,<0.2",
+  "vaultspec-core>=0.1.56,<0.2",
   # Dead-code detection. Advisory: it infers reachability it cannot always see,
   # so a finding is a lead to confirm rather than a verdict.
   "vulture>=2.16",
@@ -138,7 +150,7 @@ dev = [
 # caller (the dashboard release pipeline), not by ordinary development.
 freeze = [
   "pyinstaller>=6.11",
-  "vaultspec-core>=0.1.48,<0.2",
+  "vaultspec-core>=0.1.56,<0.2",
 ]
 all = [
   { include-group = "docs" },
@@ -167,7 +179,13 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.vaultspec-rag.mcp-extra]
-location = "[project].dependencies"
+# Points at the optional extra, not the base dependency list. The entry was
+# originally injected here into `[project].dependencies`, which made a
+# development search tool - and the tensor runtime behind it - mandatory for
+# every install of an agent-orchestration service that imports neither. This
+# key is the tool's own bookkeeping, so it has to name the extra or the entry
+# gets re-added to the base list on the next managed sync.
+location = "[project].optional-dependencies.rag"
 managed = "vaultspec-rag[mcp]"
 added = true
 [build-system]
@@ -190,10 +208,22 @@ packages = ["src/vaultspec_a2a"]
 #
 # Excluded: all test harnesses and certification-only preset assets. Source-run
 # and Compose certification still use these files from the checkout.
+#
+# `testing/` is test-EXECUTION machinery (declared resources, machine-global
+# leases, xdist grouping, session admission). Its only importers are the test
+# trees excluded above, so shipping it put a consumer-facing pytest plugin
+# inside a headless orchestration package. It stays a source-run facility.
+#
+# The development harness itself - the prek hook installer, the build-artifact
+# cleaner, and the Vaultspec enrollment driver - lives under `dev/`, outside the
+# package root, so it cannot reach the wheel at all rather than relying on a
+# denylist entry to keep it out.
 exclude = [
   "**/tests",
   "**/tests/**",
   "src/vaultspec_a2a/conftest.py",
+  "src/vaultspec_a2a/testing",
+  "src/vaultspec_a2a/testing/**",
   "src/vaultspec_a2a/desktop_tests",
   "src/vaultspec_a2a/desktop_tests/**",
   "src/vaultspec_a2a/service_tests",
@@ -207,6 +237,25 @@ exclude = [
   "src/vaultspec_a2a/team/presets/teams/mock-*.toml",
   "src/vaultspec_a2a/team/presets/teams/*-mock.toml",
   "src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research-deterministic.toml",
+  # Certification-only lanes that the mock-* patterns above do not match by
+  # name. Every one is a scripted fixture - forced failure, a bridge-free
+  # provider-condition probe, and the in-process scenarios that drive a tool
+  # call, a supervised permission pause, and a cancellation window - so they
+  # belong with the other certification variants: available in source and
+  # Compose, absent from a product wheel. The agent halves are listed beside
+  # their teams because a scenario agent is no more shippable than the scenario
+  # that names it.
+  "src/vaultspec_a2a/team/presets/teams/deterministic-failure.toml",
+  "src/vaultspec_a2a/team/presets/teams/provider-condition-probe.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-cancel-window.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-permission-pause.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-tool-call.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-failure.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-cancel-window.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-permission-pause.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-tool-call.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-relay-burst.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-relay-burst.toml",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
@@ -218,7 +267,8 @@ exclude = [
 # replaces sys.stdout/stderr in memory only — no CloseHandle, no silent death.
 # The resource-aware execution plugin (declaration-derived xdist groups,
 # machine-global leases, registry-backed endpoints, session admission) loads
-# through its pytest11 entry point, so an addopts override cannot strip it.
+# through the repository-root conftest.py, so an addopts override cannot strip
+# it and no consumer environment inherits it.
 addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not service"]
 # log_cli is opt-in, not a default: every module logger streaming live into
 # every run buries the pass/fail signal in noise, and failing-test log capture

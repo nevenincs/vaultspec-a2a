@@ -8,7 +8,9 @@ initialisation through Alembic.
 import logging
 import sqlite3
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Request
 from sqlalchemy import event, text
@@ -19,6 +21,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from .models import Base
 
@@ -26,6 +29,11 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = [
+    "APPLICATION_DATABASE_DECLARATION",
+    "ARTIFACT_DECLARATIONS",
+    "WalCheckpointResult",
+    "application_session_factory",
+    "checkpoint_wal",
     "close_db",
     "get_db",
     "get_engine",
@@ -35,9 +43,68 @@ __all__ = [
     "verify_wal_mode",
 ]
 
+# The store this module creates on first connect. Permanence is the right answer
+# and is separable from the honest part: the FILE should outlive every process,
+# but nothing bounds what accumulates INSIDE it, and no row class here carries an
+# age or count limit. The -wal sidecar's ceiling is conditional, which is why
+# ``checkpoint_wal`` reports a blocked checkpoint rather than tuning around it.
+APPLICATION_DATABASE_DECLARATION = ArtifactDeclaration(
+    name="application-database",
+    root="<database_path> (plus its -wal and -shm sidecars)",
+    owner="database.session",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "this is the system of record for runs, threads, artifacts, and the "
+        "durable control journal; a run's history is what makes restart "
+        "reconciliation and after-the-fact inspection possible, so the store must "
+        "outlive every process that opens it"
+    ),
+    mechanism=(
+        "no automatic bound on rows: growth is reclaimed only by operator-timed "
+        "verbs (`admin clear --yes` empties application rows, `admin migrate "
+        "--fix` truncates the log and VACUUMs pages back to the operating "
+        "system). The -wal sidecar settles at SQLite's autocheckpoint ceiling ONLY "
+        "while no connection holds an open read transaction; one held transaction "
+        "makes it grow linearly with writes and no setting defends against that"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    APPLICATION_DATABASE_DECLARATION,
+)
+
 # Module-level singletons (set via ``init_db``)
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+
+# Two settings are deliberately NOT in the connect posture below. Both were
+# proposed as fixes for a database that only ever grows; neither survives
+# measurement, and the reasons are recorded here because the absences are the
+# decision.
+#
+# ``wal_autocheckpoint`` is left at SQLite's default of 1000 pages. It is already
+# in force - the default is a working ceiling, not an unset knob - and under
+# sustained writes with no reader holding a snapshot the log settles near 4 MiB
+# and stays there. Restating the default in code would change no behaviour and
+# could not be tested apart from it. The ceiling's real limit is that it holds
+# only while no connection sits in an open READ TRANSACTION: SQLite cannot
+# checkpoint past the oldest live reader snapshot, so a held read transaction
+# pins every frame written after it and the log then grows linearly for as long
+# as it is held. No autocheckpoint value defends against that - only not holding
+# the transaction does - which is why ``checkpoint_wal`` below reports the
+# condition instead of trying to tune around it.
+#
+# ``auto_vacuum`` cannot be set here at all: the ``journal_mode=WAL`` in the
+# connect listener writes the database header, and once the header exists
+# ``auto_vacuum`` is
+# fixed for the life of the file - a later pragma is accepted and silently leaves
+# it at NONE. Changing it on an existing install demands a whole-file VACUUM
+# rewrite, which is what ``admin migrate --fix`` already offers as an explicit,
+# operator-timed act. INCREMENTAL would not earn the trade either: measured
+# against a store whose rows had all been deleted, ``incremental_vacuum``
+# returned a single 4 KiB page where a full VACUUM returned essentially the whole
+# 8 MiB file. Returning space to the operating system therefore stays an
+# administrative verb rather than a cost on every commit.
 
 
 def _set_wal_mode(dbapi_conn: sqlite3.Connection, _connection_record: object) -> None:
@@ -61,6 +128,87 @@ def _set_wal_mode(dbapi_conn: sqlite3.Connection, _connection_record: object) ->
     cursor.execute(f"PRAGMA busy_timeout={settings.sqlite_busy_timeout_ms}")
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
+
+
+CheckpointMode = Literal["PASSIVE", "FULL", "RESTART", "TRUNCATE"]
+
+# Interpolating the mode into the statement is only safe because it is checked
+# against this set first; SQLite does not accept a bound parameter in a PRAGMA.
+_CHECKPOINT_MODES: frozenset[str] = frozenset(
+    ("PASSIVE", "FULL", "RESTART", "TRUNCATE")
+)
+
+
+@dataclass(frozen=True, slots=True)
+class WalCheckpointResult:
+    """The outcome of one ``PRAGMA wal_checkpoint``.
+
+    SQLite reports a checkpoint it could not finish by returning ``busy=1`` with
+    the statement still succeeding - no exception, no warning. A caller that
+    discards the row cannot tell a log that was truncated from one that was left
+    exactly as it found it, which is how a reclaim path comes to report success
+    while reclaiming nothing.
+    """
+
+    blocked: bool
+    log_pages: int
+    checkpointed_pages: int
+
+    @property
+    def fully_checkpointed(self) -> bool:
+        """True when every frame in the log was written back to the database."""
+        return not self.blocked and self.log_pages == self.checkpointed_pages
+
+
+def checkpoint_wal(
+    connection: sqlite3.Connection,
+    *,
+    mode: CheckpointMode = "TRUNCATE",
+) -> WalCheckpointResult:
+    """Checkpoint the write-ahead log, reporting whether it actually completed.
+
+    ``TRUNCATE`` both writes the log back into the database and resets the file
+    to zero length, which is the only mode that returns the log's space to the
+    operating system.
+
+    Args:
+        connection: An open SQLite connection to the database to checkpoint.
+        mode: The checkpoint mode to request.
+
+    Returns:
+        The parsed ``(busy, log, checkpointed)`` row.  A database not in WAL mode
+        reports ``-1`` page counts, which is a successful no-op rather than a
+        failure - there is no log to checkpoint.
+
+    Raises:
+        ValueError: If ``mode`` is not a SQLite checkpoint mode.
+    """
+    if mode not in _CHECKPOINT_MODES:
+        msg = f"Unknown SQLite checkpoint mode: {mode!r}"
+        raise ValueError(msg)
+
+    row = connection.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+    if row is None:
+        # Defensive: every SQLite version in support returns a row here.
+        return WalCheckpointResult(blocked=False, log_pages=-1, checkpointed_pages=-1)
+
+    busy, log_pages, checkpointed_pages = (int(value) for value in row[:3])
+    result = WalCheckpointResult(
+        blocked=bool(busy),
+        log_pages=log_pages,
+        checkpointed_pages=checkpointed_pages,
+    )
+    if result.blocked:
+        logger.warning(
+            "SQLite %s checkpoint was blocked: %d of %d write-ahead log pages "
+            "were written back and the log was not reset. A connection is "
+            "holding an open read transaction, and the log will keep growing "
+            "until it is released.",
+            mode,
+            result.checkpointed_pages,
+            result.log_pages,
+        )
+    return result
 
 
 def _resolve_database_url(database: Path | str | None) -> str:
@@ -148,6 +296,23 @@ def get_session_factory(
     return factory
 
 
+def application_session_factory() -> async_sessionmaker[AsyncSession] | None:
+    """Return the process session factory, or ``None`` if none was initialized.
+
+    The read-only companion to :func:`get_session_factory`, which CREATES an
+    engine from ambient settings when none exists. That lazy creation is right
+    for a process that owns a database and has simply not opened it yet, and
+    wrong for one that owns none at all: it manufactures a connection to a
+    settings-derived path and fails at the first query, with nothing naming the
+    absent database as the cause.
+
+    Callers that can proceed without durability - an event projection whose
+    store is optional - ask this instead, so "this process has no database" stays
+    a fact they can read rather than an exception they have to interpret.
+    """
+    return _session_factory
+
+
 async def init_db(
     database: Path | str | None = None,
     *,
@@ -174,9 +339,17 @@ async def init_db(
     Returns:
         The initialised ``AsyncEngine``.
     """
+    global _session_factory
+
     url = _resolve_database_url(database)
     engine = get_engine(url, echo=echo)
-    get_session_factory(engine)
+    # Seat the APPLICATION factory, not merely a factory for this engine.
+    # ``get_session_factory`` deliberately leaves the singleton alone when handed
+    # an explicit engine - an explicit engine means "one bound to this", not
+    # "adopt this process-wide" - so passing one here built a factory and left
+    # the process still reporting no database. This IS the initialisation entry
+    # point, so establishing that fact is exactly its job.
+    _session_factory = get_session_factory(engine)
 
     if url == "sqlite+aiosqlite:///:memory:":
         async with engine.begin() as conn:

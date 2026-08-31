@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from ...providers.factory import capsule_acp_entry, capsule_node_executable
+from .._platform_acl import windows_file_is_restricted
 from ..profile import (
     DesktopProfile,
     DesktopProfileError,
@@ -145,6 +146,31 @@ def test_resolve_accepts_creatable_but_absent_app_home(tmp_path: Path) -> None:
 
     assert not absent_home.exists()
     assert profile.app_home == absent_home
+
+
+def test_ensure_restricts_the_state_directories_to_their_owner(
+    tmp_path: Path,
+) -> None:
+    """The databases must not be readable by other local users.
+
+    The credential files one level over were already restricted while the state
+    directory holding the databases was not, though it carries thread content,
+    the permission-decision log, and every agent conversation in the checkpoint
+    store. The DIRECTORY is the unit: SQLite writes ``-wal`` and ``-shm`` beside
+    each database and the write-ahead log holds recently committed rows, so
+    restricting only the database files would leave the newest data exposed.
+    """
+    capsule = _build_capsule(tmp_path / "capsule")
+    profile = DesktopProfile.resolve(tmp_path / "app", capsule)
+
+    profile.ensure()
+
+    # The general predicate, not the credential-file one: that predicate requires
+    # a regular file by design and reports every directory unrestricted.
+    for directory in profile.state.provisioned_directories:
+        assert windows_file_is_restricted(directory), (
+            f"{directory} is not owner-restricted"
+        )
 
 
 def test_ensure_materialises_only_provisioned_directories(tmp_path: Path) -> None:

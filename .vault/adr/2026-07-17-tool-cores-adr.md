@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#tool-cores'
 date: '2026-07-17'
-modified: '2026-08-01'
-body_hash: 'sha256:33dd3d884f62f08f11a7954d6559e26175967ac19c983146ce0b4126b48cf0d1'
+modified: '2026-08-03'
+body_hash: 'sha256:f2001fcef1b83da0ca4fe056bdbb49ccd34ae0ef5ee528e0f5135b70b3fbdbf5'
 related:
   - '[[2026-07-17-tool-cores-research]]'
   - '[[2026-08-01-tool-cores-web-grounding-research]]'
@@ -14,6 +14,7 @@ related:
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
   - '[[2026-07-15-graph-agent-framework-harness-plan]]'
 ---
+
 # `tool-cores` adr: `read-only grounding tools for graph document agents` | (**status:** `accepted`)
 
 ## Problem Statement
@@ -283,3 +284,51 @@ The decision itself - tool admission, role scope, per-lane posture, evidence
 citation, refusal discipline, and the per-lane proof gate before a persona may
 claim online access - is recorded in `2026-08-01-tool-cores-web-grounding-adr`
 and is not restated here. Grounding for it is `2026-08-01-tool-cores-web-grounding-research`.
+
+## Amendment (2026-08-03, vaultspec-core read admission - the upstream gate resolved)
+
+**Context.** The shared-leg gate held that a `vaultspec-core` read entry joins the
+registry only if an upstream read-only launch mode appears, and the Opens carried it
+forward; at the time of decision `vaultspec-mcp` exposed all nine verbs with no
+restricted launch. `vaultspec-core` 0.1.56 (released 2026-08-01) resolves the gate:
+`vaultspec-mcp --read-only` registers a positive allowlist of exactly `status`, `find`,
+a fix-less `check` whose handler hard-codes validation-only and whose server extension
+rejects a smuggled `fix` argument, and `discover`; `create`, `edit`, `plan_progress`,
+`plan_edit`, and `invoke` are never registered, so no write-capable tool exists in the
+process. The server binds its project once at launch through `VAULTSPEC_TARGET_DIR`
+(else its own cwd; the MCP entrypoint accepts no `--target`), and its tool surface
+carries no per-call project argument: a `status` target reduces to a plan stem matched
+against the bound project's own plans, and `invoke` - absent in read-only mode -
+reserves `--target` in every mode.
+
+**Decision.** We will admit a `vaultspec-core` entry to the harness registry, launched
+`uvx --from vaultspec-core vaultspec-mcp --read-only`, declaring
+`status`/`find`/`check`/`discover`, `read_only` true, no network egress, root-pinned
+through `VAULTSPEC_TARGET_DIR`, with runtime acquisition and no desktop availability.
+The requirement carries no version constraint, per the registry's standing policy: the
+floor is behavioral - a pre-0.1.56 resolution fails at launch on the unknown option and
+is refused at the contract seam rather than surfaced wide. Admission is conditioned on
+two enforcement changes before any preset serves the capability: the harness contract
+verification asserts the served tool surface EQUALS the declared set for this entry, so
+a lost `--read-only` flag becomes a refused launch instead of a silently widened
+surface (the current subset-only check would pass a full-mode server); and a live test
+completes a real turn invoking a declared `vaultspec-core` tool on a lane before any
+served profile advertises it, per the completed-work standard. The rejected option of
+this record - composing the full write-capable server constrained only by the
+allowlist - remains rejected; the uniform autonomous refusal of uncovered calls
+narrows that option's window but leaves a vault write one layer from the model, and
+leaves the supervised rung able to approve one.
+
+**Consequences.** Document agents gain structured vault reads - orientation rollups and
+grounding traces, document discovery with blob hashes, validation-only health checks,
+and verb-catalog search - beside the semantic recall the rag entry already serves; the
+single registry gains its second entry and both delivery shapes consume it unchanged.
+The version floor is honest but implicit: nothing pins 0.1.56, and the failure mode for
+an older resolution is a refused spawn, accepted as fail-loud. The pin variable is the
+CLI's own global target-resolution variable, so on lanes that hoist pin values into the
+CLI process environment it becomes ambient for terminal children, re-targeting any
+agent-run `vaultspec-core` CLI at the pinned project; bounded today by terminal-less
+document roles and the permission rung, named as a residual risk, dissolvable by a
+future upstream MCP-only pin variable. The `check` declaration is safe only under the
+read-only launch's fix-less registration; absent the exact-surface assertion it is
+dropped to the conservative three.

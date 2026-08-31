@@ -24,7 +24,8 @@ import socket
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING, Any, cast
+from pathlib import Path
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -47,9 +48,7 @@ from ..tests.gateway_boot import (
 )
 from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from ._catalog import catalog_selection
 
 # A "provider" that launches three long-lived children modelling the authoring,
 # projected-project, and harness MCP descendants, prints their pids, then sleeps.
@@ -155,7 +154,6 @@ def _terminal_config(workspace_root: str) -> AcpModelConfig:
         agent_config=None,
         permission_callback=None,
         workspace_root=workspace_root,
-        cwd=None,
         command=["python"],
         env_vars={},
         session_id=None,
@@ -266,7 +264,12 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
             script=_GATEWAY,
             gateway_port=gateway_port,
             env=armed_gateway_env(
-                app_home, gateway_port=gateway_port, worker_port=worker_port
+                app_home,
+                gateway_port=gateway_port,
+                worker_port=worker_port,
+                # This module admits runs against the in-process mock lane
+                # (see ``_catalog.py``); the gateway must serve one to select.
+                extra={"VAULTSPEC_SERVE_IN_PROCESS_LANES": "true"},
             ),
             log_handle=log_handle,
         )
@@ -276,6 +279,7 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     )
     try:
         # First demand spawns the gateway-owned worker inside its containment.
+        _workspace = str(Path.cwd())
         with httpx.Client(base_url=base, timeout=60.0) as client:
             start = client.post(
                 "/v1/runs",
@@ -284,6 +288,13 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
                     "team_preset": _PRESET,
                     "message": "build it",
                     "autonomous": True,
+                    "run_id": "owned-process-tree-01",
+                    # The workspace anchors the selection, which run start
+                    # revalidates against the catalog served for it.
+                    "metadata": {"workspace_root": _workspace},
+                    "selection": catalog_selection(
+                        base, auth["Authorization"], _workspace
+                    ),
                     "actor_tokens": {
                         "tokens": {"coder": "tok-coder"},
                         "engine_bearer": "bearer",

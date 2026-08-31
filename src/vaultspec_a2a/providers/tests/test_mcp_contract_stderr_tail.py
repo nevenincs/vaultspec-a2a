@@ -1,4 +1,4 @@
-"""Bounding and grapheme safety of the probed server's stderr tail.
+"""Bounding, redaction, and grapheme safety of the probed server's stderr tail.
 
 The tail is elided from the left, so the cut lands at an arbitrary character
 offset in whatever the server wrote. Two things can go wrong there and neither
@@ -6,6 +6,12 @@ shows up in ASCII: the elision marker can be added on top of a full-width slice
 and push the result past its own ceiling, and the cut can strand a combining mark
 whose base character was just discarded - which then renders onto the marker
 rather than as itself.
+
+The tail is also the last point this text is under our control: it is embedded
+into a refusal that reaches a client-visible failure reason, and the servers it
+describes include runtime-acquired ones. So what a failing child wrote about its
+own configuration is masked here, before the cut - the two operations interact,
+and only one order is safe.
 """
 
 from __future__ import annotations
@@ -55,6 +61,71 @@ def test_multibyte_stderr_survives_as_characters() -> None:
     """A short non-ASCII diagnostic round-trips rather than arriving mangled."""
     message = "サーバーの起動に失敗しました"
     assert _tail_of(message) == message
+
+
+@pytest.mark.parametrize(
+    ("line", "must_not_contain"),
+    [
+        ("ANTHROPIC_AUTH_TOKEN=sk-ant-secret", "sk-ant-secret"),
+        ("Authorization: Bearer sk-live-9f8e7d", "sk-live-9f8e7d"),
+        ("OPENAI_API_KEY: sk-proj-zzz", "sk-proj-zzz"),
+        ("my_password = hunter2", "hunter2"),
+        ("VAULTSPEC_A2A_GATEWAY_TOKEN=abc123", "abc123"),
+    ],
+)
+def test_credential_shapes_are_masked_in_the_tail(
+    line: str, must_not_contain: str
+) -> None:
+    """Every shape the sibling lane masks is masked here too."""
+    tail = _tail_of(line)
+
+    assert must_not_contain not in tail
+    assert "<redacted>" in tail
+
+
+def test_an_ordinary_diagnostic_reaches_the_tail_intact() -> None:
+    """The admitted case: a tail with nothing to mask arrives whole.
+
+    Redaction that ate the diagnostic would defeat the only reason the tail is
+    retained, and a masking-only assertion cannot tell that outcome apart from
+    one where there was nothing to mask.
+    """
+    diagnostic = (
+        "error: no interpreter found for python 3.13\n"
+        "resolved 0 packages in 12ms\n"
+        "server exited with code 2"
+    )
+
+    assert _tail_of(diagnostic) == diagnostic
+
+
+def test_a_credential_cut_by_the_bound_leaves_no_unredacted_fragment() -> None:
+    """Masking must precede the cut, or the cut leaves a bare value behind.
+
+    A credential straddling the elision point loses the NAME that introduces it
+    to the discarded half, so a redactor applied to the surviving half has
+    nothing left to recognise: the tail would then open on a raw fragment of the
+    value. The payload places the cut inside the value on purpose.
+    """
+    budget = _STDERR_TAIL_CHARS - len(_STDERR_ELISION)
+    secret = "sk-live-" + "z" * 40
+    survivor = 20  # How much of the value a naive left cut would have kept.
+    lead = "a" * 200
+    trailer = "b" * (budget - survivor)
+    payload = f"{lead}AUTH_TOKEN={secret}{trailer}"
+    assert len(payload) > _STDERR_TAIL_CHARS, "payload does not trigger a cut"
+
+    # Guard the guard: confirm the raw slice really would strand the fragment.
+    stranded = payload[-budget:]
+    assert stranded.startswith(secret[-survivor:]), (
+        "test payload does not reproduce the defect it asserts against"
+    )
+
+    tail = _tail_of(payload)
+
+    assert secret[-survivor:] not in tail
+    assert secret not in tail
+    assert len(tail) <= _STDERR_TAIL_CHARS
 
 
 def test_cut_never_strands_a_combining_mark_onto_the_marker() -> None:

@@ -108,18 +108,90 @@ class TestAgentConfigFromToml:
 # ---------------------------------------------------------------------------
 
 
+def _loadable(team_id: str) -> TeamConfig | None:
+    """Load a bundled team, or ``None`` when it is a deliberately-invalid fixture.
+
+    Several presets exist precisely to fail validation, so a sweep over the whole
+    bundled set has to tolerate them without swallowing a real regression: the
+    caller still asserts which teams it actually reached.
+    """
+    try:
+        return load_team_config(team_id)
+    except (ConfigError, ValidationError):
+        return None
+
+
+def _product_persona_ids() -> list[str]:
+    """Every bundled persona that is not an internal in-process test lane.
+
+    Globbed rather than listed so a persona added later is covered on arrival.
+    The ``mock-``/``deterministic-`` lanes are excluded because they are the one
+    category the catalog contract still permits to be fixture-pinned: they run
+    in-process, no catalog enumerates them, and their content is role-keyed.
+    """
+    return sorted(
+        path.stem
+        for path in _AGENTS_DIR.glob("*.toml")
+        if not path.stem.startswith(("mock-", "deterministic-"))
+    )
+
+
 class TestAgentModelConfig:
     """Verify provider/capability fields on preset agents."""
 
-    def test_supervisor_uses_max_capability(self) -> None:
-        """Supervisor is bound to the MAX capability tier."""
-        cfg = load_agent_config("vaultspec-supervisor")
-        assert cfg.model.capability == Model.MAX
+    @pytest.mark.parametrize("agent_id", _product_persona_ids())
+    def test_no_product_persona_declares_provider_or_capability(
+        self, agent_id: str
+    ) -> None:
+        """A product persona carries topology and prompt, never model policy.
 
-    def test_coder_uses_high_capability(self) -> None:
-        """Coder is configured at HIGH capability."""
-        cfg = load_agent_config("vaultspec-coder")
-        assert cfg.model.capability == Model.HIGH
+        This inverts what these tests used to assert. They pinned each persona to
+        a provider and a capability tier, which is precisely the policy the
+        catalog contract removes from presets: a run's provider and model are
+        chosen at run start from the catalog its lane serves, so a persona that
+        named one would be competing with the user's actual selection.
+
+        Asserted per persona rather than in aggregate so a failure names the file
+        to fix, and derived from a glob so re-adding an ``[agent.model]`` block to
+        any bundled persona fails here rather than silently reintroducing the
+        policy.
+        """
+        cfg = load_agent_config(agent_id)
+        assert cfg.model.provider is None, (
+            f"{agent_id} declares provider {cfg.model.provider}; product presets "
+            "carry no provider policy under the catalog contract"
+        )
+        assert cfg.model.capability is None, (
+            f"{agent_id} declares capability {cfg.model.capability}; a capability "
+            "tier is model policy and is chosen at run start, not in the preset"
+        )
+        assert cfg.model.provider_fallback == [], (
+            f"{agent_id} declares a provider fallback; an execution fallback is an "
+            "explicit served selection at run start, never a preset default"
+        )
+
+    def test_the_persona_sweep_is_not_vacuous(self) -> None:
+        """The glob above finds the real product personas.
+
+        A parametrization that collected nothing would report green over every
+        persona in the tree, which is the failure mode this whole guard exists to
+        prevent one layer down.
+        """
+        ids = _product_persona_ids()
+        assert len(ids) >= 8, ids
+        assert "vaultspec-supervisor" in ids
+        assert "vaultspec-coder" in ids
+        assert not [i for i in ids if i.startswith(("mock-", "deterministic-"))]
+
+    def test_internal_lanes_stay_fixture_pinned(self) -> None:
+        """The in-process lanes keep their pinning, which the contract permits.
+
+        Without this the guard above could be "satisfied" by stripping every
+        persona in the tree, which would break the deterministic certification
+        lanes that have no catalog to select from.
+        """
+        cfg = load_agent_config("deterministic-tool-call")
+        assert cfg.model.provider == Provider.DETERMINISTIC
 
     def test_agent_model_config_all_optional(self) -> None:
         """AgentModelConfig fields are all optional (None by default)."""
@@ -366,40 +438,91 @@ class TestTeamConfigFromToml:
         assert cfg.harness.authoring_bridge is True
         assert cfg.is_document_authoring is False
 
-    def test_doc_editor_served_profiles_name_only_admissible_lanes(self) -> None:
-        """agent-flow D3: every served doc-editor profile resolves to a proven lane.
+    def test_doc_editor_names_no_lane_at_all(self) -> None:
+        """agent-flow D3, in its strengthened form: the preset names no lane.
 
-        `no-unproven-providers-in-served-profiles`: a profile may name a provider
-        lane only once a live test has completed a real turn on it. The proven set
-        is READ from the admission registry rather than restated here, so this
-        fails when a preset names a lane the registry does not admit, and does not
-        quietly go stale when a lane earns or loses its proof.
+        `no-unproven-providers-in-served-profiles` admits a lane into a served
+        profile only after a live test completed a real turn on it. This used to
+        resolve the doc-editor down the precedence chain and check the resulting
+        lane against the admission registry.
 
-        Covers every declared profile plus the implicit team-defaults overlay,
-        resolving the doc-editor's one worker down the real precedence chain.
+        Under the catalog contract there is no resulting lane to check: the preset
+        carries no provider policy, so the question "which lane does this preset
+        name?" has the answer "none". That is a STRICTLY stronger position than
+        the old one - a preset that names nothing cannot name something unproven -
+        so the rule is enforced by asserting the absence rather than vetting a
+        value. The admission gate still runs, at run start, against the lane the
+        user actually selected from the served catalog.
         """
         cfg = load_team_config("vaultspec-doc-editor")
         agent_cfg = load_agent_config("vaultspec-doc-editor")
         worker_ref = cfg.workers[0]
 
-        for profile_id, profile in cfg.effective_profiles().items():
-            overlay = profile.roles.get(worker_ref.agent_id)
-            provider = None
-            if overlay is not None and overlay.provider is not None:
-                provider = overlay.provider
-            elif worker_ref.model.provider is not None:
-                provider = worker_ref.model.provider
-            elif agent_cfg.model.provider is not None:
-                provider = agent_cfg.model.provider
-            elif cfg.defaults.provider is not None:
-                provider = cfg.defaults.provider
-            assert provider is not None, (
-                f"profile {profile_id!r} leaves the doc-editor with no provider"
+        assert cfg.defaults.provider is None
+        assert cfg.defaults.capability is None
+        assert agent_cfg.model.provider is None
+        assert worker_ref.model.provider is None
+        assert cfg.profiles == {}, (
+            "the doc-editor declares a model profile again; a product preset "
+            "carries topology, personas, tools, and role requirements only"
+        )
+
+    def test_no_bundled_product_preset_names_an_execution_lane(self) -> None:
+        """The invariant behind the case above, swept over every shipped preset.
+
+        Checked by sweep rather than by roster so a preset added later is covered
+        on arrival, and so re-introducing provider policy anywhere in the bundled
+        product set fails here. The in-process lanes are excluded by the same
+        carve-out that lets them stay fixture-pinned: they have no catalog to be
+        selected from.
+
+        The admission registry is still consulted, for the one case that would
+        otherwise slip through: a preset that DOES name a lane must at minimum
+        name an admissible one, so a deliberate future exception cannot smuggle in
+        an unproven lane while this guard is being loosened.
+        """
+        swept: list[str] = []
+        for team_id in sorted(discover_team_preset_ids()):
+            if team_id.startswith(("mock-", "deterministic-")):
+                continue
+            try:
+                cfg = load_team_config(team_id)
+            except (ConfigError, ValidationError):
+                continue
+            if any(
+                worker.model.provider in (Provider.MOCK, Provider.DETERMINISTIC)
+                for worker in cfg.workers
+            ) or cfg.defaults.provider in (Provider.MOCK, Provider.DETERMINISTIC):
+                # A certification preset pinned to an in-process lane, named
+                # without the id prefix. Same carve-out, detected by what it
+                # declares rather than by how it is spelled.
+                continue
+            swept.append(team_id)
+            assert cfg.defaults.provider is None, (
+                f"{team_id} declares a team-default provider; product presets "
+                "carry no provider policy under the catalog contract"
             )
-            assert is_lane_admissible(provider), (
-                f"profile {profile_id!r} resolves doc-editor to {provider.value!r}: "
-                f"{lane_admission_reason(provider)}"
+            assert cfg.profiles == {}, (
+                f"{team_id} declares model profile(s) {sorted(cfg.profiles)}; "
+                "product model profiles are retired by the catalog contract"
             )
+            for worker in cfg.workers:
+                assert worker.model.provider is None, (
+                    f"{team_id} pins worker {worker.agent_id} to "
+                    f"{worker.model.provider}"
+                )
+                agent_cfg = load_agent_config(worker.agent_id)
+                assert agent_cfg.model.provider is None or is_lane_admissible(
+                    agent_cfg.model.provider
+                ), (
+                    f"{team_id}/{worker.agent_id} names "
+                    f"{agent_cfg.model.provider}: "
+                    f"{lane_admission_reason(agent_cfg.model.provider)}"
+                )
+
+        assert "vaultspec-adr-research" in swept, swept
+        assert "vaultspec-doc-editor" in swept, swept
+        assert "vaultspec-solo-coder" in swept, swept
 
 
 # ---------------------------------------------------------------------------
@@ -803,11 +926,6 @@ class TestDocumentAuthoringPersonas:
         cfg = load_agent_config("vaultspec-researcher")
         assert cfg.role == "researcher"
 
-    def test_researcher_uses_mid_capability(self) -> None:
-        """Researcher uses mid capability tier (economical for fan-out)."""
-        cfg = load_agent_config("vaultspec-researcher")
-        assert cfg.model.capability == Model.MID
-
     def test_researcher_no_filesystem_write(self) -> None:
         """Researcher must not author documents directly."""
         cfg = load_agent_config("vaultspec-researcher")
@@ -818,11 +936,6 @@ class TestDocumentAuthoringPersonas:
         cfg = load_agent_config("vaultspec-synthesist")
         assert cfg.capabilities.filesystem_write is False
 
-    def test_synthesist_uses_high_capability(self) -> None:
-        """Synthesist uses high capability tier for quality document synthesis."""
-        cfg = load_agent_config("vaultspec-synthesist")
-        assert cfg.model.capability == Model.HIGH
-
     def test_synthesist_sentinel_in_prompt(self) -> None:
         """Synthesist system prompt contains the RESEARCH READY sentinel."""
         cfg = load_agent_config("vaultspec-synthesist")
@@ -832,11 +945,6 @@ class TestDocumentAuthoringPersonas:
         """ADR author authors via engine proposals, not direct filesystem writes."""
         cfg = load_agent_config("vaultspec-adr-author")
         assert cfg.capabilities.filesystem_write is False
-
-    def test_adr_author_uses_high_capability(self) -> None:
-        """ADR author uses high capability tier for quality ADR authoring."""
-        cfg = load_agent_config("vaultspec-adr-author")
-        assert cfg.model.capability == Model.HIGH
 
     def test_adr_author_sentinel_in_prompt(self) -> None:
         """ADR author system prompt contains the ADR READY sentinel."""
@@ -872,18 +980,6 @@ class TestDocumentAuthoringPersonas:
         cfg = load_agent_config("vaultspec-doc-reviewer")
         assert "PASS" in cfg.persona.system_prompt
         assert "REVISION REQUIRED" in cfg.persona.system_prompt
-
-    def test_doc_reviewer_uses_claude_provider(self) -> None:
-        """Doc-reviewer uses the CLAUDE subscription provider.
-
-        Subscription-first (ADR 2026-02-25 llm-context-provider-abstraction):
-        Claude/Gemini CLI subscriptions are the primary tier; OpenAI/Zhipu are
-        fallback only. All four research_adr document personas pin to Claude so
-        the headless acceptance run authenticates on the proven subscription
-        path rather than a fallback-tier API key.
-        """
-        cfg = load_agent_config("vaultspec-doc-reviewer")
-        assert cfg.model.provider == Provider.CLAUDE
 
     def test_no_request_apply_in_writer_prompts(self) -> None:
         """Writer persona prompts explicitly prohibit request_apply calls."""
@@ -989,109 +1085,25 @@ class TestModelProfiles:
     (config, not a mock).
     """
 
-    def test_bundled_adr_research_exposes_fast_profile(self) -> None:
-        """The reference `fast` profile lowers EVERY role, not a subset.
+    def test_no_bundled_preset_declares_a_model_profile(self) -> None:
+        """The bundled product set ships no model profile at all.
 
-        This asserted a two-role partial overlay until the profile was made
-        total. The partial shape was the defect: `fast` is the profile a
-        cost-ceilinged live certification selects, and an authoring role absent
-        from the overlay fell through to its own configured capability - so a run
-        chosen for its explicit floor silently billed two roles at a higher tier.
-        A cost ceiling that only some roles observe is not a ceiling.
+        Three tests used to live here pinning the shape of the `fast`, `kimi`, and
+        `kimi-all` profiles of the adr-research preset. They are gone with the
+        profiles themselves: a model profile IS provider/capability policy, and it
+        is the named retirement of the catalog contract.
 
-        Every worker the team declares must therefore appear here, which is what
-        makes the profile's own description - all-low execution across every role
-        - true rather than aspirational.
+        The schema below is deliberately kept and still tested, because a
+        workspace may still declare its own team TOML; what the product no longer
+        does is ship one.
         """
-        cfg = load_team_config("vaultspec-adr-research")
-        assert "fast" in cfg.profiles
-        fast = cfg.profiles["fast"]
-        assert fast.display_name == "Fast"
-
-        declared_workers = {worker.agent_id for worker in cfg.workers}
-        assert set(fast.roles) == declared_workers, (
-            "the fast profile must overlay every declared worker; a role missing "
-            "here falls through to its own capability and escapes the ceiling"
-        )
-        assert all(
-            overlay.capability == Model.LOW for overlay in fast.roles.values()
-        ), "every fast overlay must pin LOW, or the profile is not all-low"
-
-    def test_every_preset_fast_profile_is_a_total_low_ceiling(self) -> None:
-        """`fast` means all-low in EVERY preset that serves it, not just one.
-
-        The adr-research case above is checked by name; this is the invariant
-        behind it, swept across whatever presets actually exist rather than a
-        hardcoded roster that goes stale the moment a preset is added. A team
-        shipping a partial `fast` is the original defect reintroduced under a
-        different file name.
-
-        Capability only. Provider is a separate axis: it is routing, not a
-        ceiling, and stays deliberately selective so a mixed lane keeps roles on
-        the team default. Asserting providers here would force every lane total
-        and collapse the mixed and single-provider profiles into duplicates.
-        """
-        checked: list[str] = []
-        for team_id in sorted(discover_team_preset_ids()):
-            try:
-                cfg = load_team_config(team_id)
-            except (ConfigError, ValidationError):
-                # Deliberately-invalid presets exist as loader fixtures; profile
-                # shape is meaningless for a team that cannot load at all.
-                continue
-            fast = cfg.profiles.get("fast")
-            if fast is None:
-                continue
-            checked.append(team_id)
-            declared_workers = {worker.agent_id for worker in cfg.workers}
-            assert set(fast.roles) == declared_workers, (
-                f"{team_id}: fast must overlay every declared worker; "
-                f"missing {sorted(declared_workers - set(fast.roles))}"
-            )
-            assert all(
-                overlay.capability == Model.LOW for overlay in fast.roles.values()
-            ), f"{team_id}: every fast overlay must pin LOW"
-
-        assert checked, "no preset declares a fast profile — the sweep proved nothing"
-
-    def test_bundled_adr_research_exposes_kimi_profile(self) -> None:
-        """The `kimi` profile routes authoring to Kimi while ceilinged everywhere.
-
-        The two axes move independently, and this is what separates `kimi` from
-        its `kimi-all` sibling:
-
-        - **Capability** is a ceiling, so it must be TOTAL. Every declared role
-          carries LOW, the reviewer included. The reviewer was once omitted from
-          the overlay entirely, which let it fall through to its own capability
-          and bill above the ceiling the profile advertises.
-        - **Provider** is a routing choice, so it is SELECTIVE. The four
-          authoring roles pin Kimi; the reviewer holds ``None`` and keeps the
-          team default, which is precisely the "mixed" the display name promises.
-
-        Asserting only role membership would make this test pass for `kimi-all`
-        as well, so the reviewer's unset provider is the discriminating claim.
-        The credential gate lives in run-start eligibility, not the TOML.
-        """
-        cfg = load_team_config("vaultspec-adr-research")
-        assert "kimi" in cfg.profiles
-        kimi = cfg.profiles["kimi"]
-        assert kimi.display_name == "Kimi (mixed)"
-
-        declared_workers = {worker.agent_id for worker in cfg.workers}
-        assert set(kimi.roles) == declared_workers, (
-            "the capability ceiling must cover every declared role; one missing "
-            "here falls through and bills above the advertised floor"
-        )
-        assert all(overlay.capability == Model.LOW for overlay in kimi.roles.values())
-
-        authoring = set(declared_workers) - {"vaultspec-doc-reviewer"}
-        assert all(kimi.roles[role].provider == Provider.KIMI for role in authoring)
-        # The discriminator against `kimi-all`: routed by ceiling, not by lane.
-        assert kimi.roles["vaultspec-doc-reviewer"].provider is None
-        assert (
-            cfg.profiles["kimi-all"].roles["vaultspec-doc-reviewer"].provider
-            == Provider.KIMI
-        ), "kimi-all must differ from kimi, or one of the two is dead weight"
+        declaring = {
+            team_id: sorted(cfg.profiles)
+            for team_id in sorted(discover_team_preset_ids())
+            for cfg in [_loadable(team_id)]
+            if cfg is not None and cfg.profiles
+        }
+        assert declaring == {}, declaring
 
     def test_effective_profiles_injects_implicit_team_defaults(self) -> None:
         cfg = load_team_config("vaultspec-adr-research")
@@ -1100,8 +1112,8 @@ class TestModelProfiles:
         assert cfg.default_profile_id == "team-defaults"
         assert effective["team-defaults"].display_name == "Team defaults"
         assert effective["team-defaults"].roles == {}
-        # Declared profiles ride alongside the implicit default.
-        assert "fast" in effective
+        # The implicit default is now the ONLY profile a bundled preset serves.
+        assert set(effective) == {"team-defaults"}
 
     def _team_dict(self, profiles: dict[str, object]) -> dict[str, object]:
         return {

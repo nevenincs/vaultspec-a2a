@@ -83,9 +83,21 @@ logger = logging.getLogger(__name__)
 
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(dict[str, JsonValue])
 
-# The hardcoded final provider fallback when no layer sets a provider (mirrors
-# the compiler's historical default).
-_DEFAULT_PROVIDER = Provider.CLAUDE
+# What an undeclared provider resolves to. There is deliberately no fallback
+# constant here: a repository-authored provider chosen because nothing declared
+# one is an implicit default, which the catalog contract retires outright. A
+# product preset carries no provider policy at all now, so this is the ORDINARY
+# outcome for one rather than an edge case - and a run's actual provider is
+# chosen at run start from the catalog its lane serves, not resolved from here.
+#
+# Absence travels as a ``resolution_error`` rather than as a substitute value,
+# reusing the channel an unresolvable role already uses: eligibility refuses the
+# role and reports the reason, so the surface says "nothing is declared" instead
+# of naming a provider no preset asked for.
+_UNDECLARED_PROVIDER_REASON = (
+    "no provider is declared for this role; a run selects its provider and model "
+    "at run start from the catalog its execution lane serves"
+)
 
 # The production acceptance-gate term: still open until the research-to-ADR
 # capability passes. Reported honestly as an ineligibility reason.
@@ -95,12 +107,20 @@ _ACCEPTANCE_GATE_REASON = (
 
 
 class AssignmentSource(StrEnum):
-    """Which precedence layer a resolved value came from (ADR exposure field)."""
+    """Which precedence layer a resolved value came from (ADR exposure field).
+
+    ``UNDECLARED`` is the honest bottom of the chain: no layer supplied the value.
+    It exists because the alternative was reporting a repository-authored fallback
+    as ``TEAM_DEFAULT`` - a label asserting a preset declared something it never
+    declared, which is a worse failure than an absent value because it cannot be
+    told apart from a real declaration.
+    """
 
     PROFILE = "profile"
     WORKER = "worker"
     AGENT = "agent"
     TEAM_DEFAULT = "team_default"
+    UNDECLARED = "undeclared"
 
 
 # Precedence rank (lower wins) for collapsing per-field sources to one coarse
@@ -110,6 +130,7 @@ _SOURCE_RANK: dict[AssignmentSource, int] = {
     AssignmentSource.WORKER: 1,
     AssignmentSource.AGENT: 2,
     AssignmentSource.TEAM_DEFAULT: 3,
+    AssignmentSource.UNDECLARED: 4,
 }
 
 
@@ -120,11 +141,17 @@ class RoleAssignment:
     Holds provider/capability as enums (the resolver's source of truth) plus the
     stable concrete ``model_name`` that is safe to expose. Never carries a
     credential, token, env value, or path.
+
+    ``provider`` is ``None`` when no precedence layer declared one. That is not a
+    failure to resolve so much as nothing to resolve: it is the normal state of a
+    product preset under the catalog contract, and it always arrives together
+    with a ``resolution_error`` so every consumer reaches the same verdict through
+    the one channel rather than each inventing a substitute.
     """
 
     role_id: str
     agent_id: str
-    provider: Provider
+    provider: Provider | None
     capability: Model | None
     model_name: str
     fallback_providers: list[Provider]
@@ -206,7 +233,7 @@ def resolve_role_assignment(
     """
     overlay = profile_overlay
 
-    provider: Provider
+    provider: Provider | None
     provider_source: AssignmentSource
     if overlay is not None and overlay.provider is not None:
         provider, provider_source = overlay.provider, AssignmentSource.PROFILE
@@ -218,7 +245,7 @@ def resolve_role_assignment(
         provider = team_config.defaults.provider
         provider_source = AssignmentSource.TEAM_DEFAULT
     else:
-        provider, provider_source = _DEFAULT_PROVIDER, AssignmentSource.TEAM_DEFAULT
+        provider, provider_source = None, AssignmentSource.UNDECLARED
 
     capability: Model | None
     capability_source: AssignmentSource
@@ -234,7 +261,7 @@ def resolve_role_assignment(
         capability = team_config.defaults.capability
         capability_source = AssignmentSource.TEAM_DEFAULT
     else:
-        capability, capability_source = None, AssignmentSource.TEAM_DEFAULT
+        capability, capability_source = None, AssignmentSource.UNDECLARED
 
     if overlay is not None and overlay.provider_fallback:
         fallback_providers = list(overlay.provider_fallback)
@@ -245,10 +272,15 @@ def resolve_role_assignment(
     else:
         fallback_providers = list(team_config.defaults.provider_fallback)
 
-    effective_capability = capability or PROVIDER_DEFAULT_MODELS.get(
-        provider, Model.MID
-    )
-    model_name = MODEL_MAP.get(provider, {}).get(effective_capability, "")
+    # Only the in-process lanes have a default capability or a concrete name to
+    # look up; an external lane names its own models through its catalog, and an
+    # undeclared lane has nothing to look up at all.
+    model_name = ""
+    if provider is not None:
+        effective_capability = capability or PROVIDER_DEFAULT_MODELS.get(
+            provider, Model.MID
+        )
+        model_name = MODEL_MAP.get(provider, {}).get(effective_capability, "")
 
     return RoleAssignment(
         role_id=agent_config.role,
@@ -259,6 +291,7 @@ def resolve_role_assignment(
         fallback_providers=fallback_providers,
         provider_source=provider_source,
         capability_source=capability_source,
+        resolution_error=None if provider is not None else _UNDECLARED_PROVIDER_REASON,
     )
 
 
@@ -297,12 +330,12 @@ def resolve_effective_assignment(
                 RoleAssignment(
                     role_id=worker_ref.agent_id,
                     agent_id=worker_ref.agent_id,
-                    provider=_DEFAULT_PROVIDER,
+                    provider=None,
                     capability=None,
                     model_name="",
                     fallback_providers=[],
-                    provider_source=AssignmentSource.TEAM_DEFAULT,
-                    capability_source=AssignmentSource.TEAM_DEFAULT,
+                    provider_source=AssignmentSource.UNDECLARED,
+                    capability_source=AssignmentSource.UNDECLARED,
                     resolution_error=str(exc),
                 )
             )
@@ -331,9 +364,9 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
     string is safe - it names what is missing, never a secret value.
     """
     if provider in (Provider.MOCK, Provider.DETERMINISTIC):
-        # Both are in-process fakes with no credential and no launch command:
-        # MOCK proxies the VidaiMock tape server, DETERMINISTIC runs entirely
-        # in-process (the research_adr acceptance provider). Always runnable.
+        # Neither provider needs a credential or launch command. This readiness
+        # probe says construction can proceed, not that MOCK's external tape
+        # server is reachable or that it can satisfy the completion floor.
         return ProviderReadiness(provider=provider, ready=True)
 
     if provider == Provider.CLAUDE:
@@ -489,6 +522,13 @@ def _lane_refusal(role: RoleAssignment) -> str | None:
     anywhere in the role refuses the role. Every offending lane is named, not
     just the first, so one refusal reports the whole problem.
     """
+    if role.provider is None:
+        # Not reachable through evaluate_profile_eligibility, which refuses an
+        # undeclared role before admission is consulted. Stated as a refusal
+        # anyway rather than returning None: a future caller that skipped that
+        # branch would otherwise have an undeclared role pass the admission gate,
+        # which is the one verdict that must never fail open.
+        return "role resolves to no provider, so no execution lane can be admitted"
     unproven = unproven_lanes_in([role.provider, *role.fallback_providers])
     if not unproven:
         return None
@@ -533,13 +573,20 @@ def evaluate_profile_eligibility(
 
     role_results: list[RoleEligibility] = []
     for role in assignment.roles:
-        if role.resolution_error is not None:
+        # An undeclared provider always carries a resolution_error, so the two
+        # conditions name one state; both are tested because this is the branch
+        # that guarantees no later term can reach a role without a lane.
+        if role.resolution_error is not None or role.provider is None:
             role_results.append(
                 RoleEligibility(
                     role_id=role.role_id,
                     agent_id=role.agent_id,
                     eligible=False,
-                    reason=f"role does not resolve: {role.resolution_error}",
+                    reason=(
+                        f"role does not resolve: {role.resolution_error}"
+                        if role.resolution_error is not None
+                        else "role resolves to no provider"
+                    ),
                 )
             )
             continue
@@ -658,9 +705,20 @@ class FrozenAssignment:
 
 
 def freeze_assignment(assignment: ProfileAssignment) -> FrozenAssignment:
-    """Freeze a resolved assignment into a safe, digest-stamped, persistable form."""
+    """Freeze a resolved assignment into a safe, digest-stamped, persistable form.
+
+    Refuses a role that resolves to no provider. A freeze is the durable record a
+    restart replays verbatim, so writing a substitute provider into it would make
+    a fabrication permanent and indistinguishable from a real one - the failure
+    this refusal exists to prevent is a run that restarts onto a lane nobody chose.
+    """
     roles: dict[str, JsonObject] = {}
     for role in assignment.roles:
+        if role.provider is None:
+            raise ConfigError(
+                f"cannot freeze role {role.agent_id!r} of profile "
+                f"{assignment.profile_id!r}: {role.resolution_error}"
+            )
         roles[role.agent_id] = {
             "role_id": role.role_id,
             "provider": role.provider.value,

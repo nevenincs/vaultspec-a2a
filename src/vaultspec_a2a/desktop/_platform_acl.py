@@ -24,9 +24,12 @@ from functools import cache
 from pathlib import Path
 
 __all__ = [
+    "confirm_opened_secret",
     "credential_file_is_owner_restricted",
-    "harden_credential_file",
+    "harden_credential_path",
+    "owner_only_mode",
     "restrict_windows_file",
+    "unfollowed_read_flags",
     "windows_current_user_sid",
     "windows_file_is_restricted",
 ]
@@ -209,14 +212,29 @@ def windows_file_is_restricted(path: Path) -> bool:
         kernel32.LocalFree(descriptor)
 
 
-def harden_credential_file(path: Path) -> None:
-    """Restrict *path* to its owner: ``0o600`` on POSIX, a private DACL on Windows.
+def owner_only_mode(path: Path) -> int:
+    """Return the POSIX mode that restricts *path* to its owner.
 
-    Fails closed on Windows if the applied DACL does not read back as owner-
-    restricted so a caller never trusts a file it could not actually protect.
+    A directory needs its execute bit to stay traversable, so the two kinds are
+    not interchangeable: ``0o600`` on a directory strips traversal and makes
+    everything beneath it unreachable, while ``chmod`` itself still reports
+    success. The failure therefore surfaces far from its cause, which is why the
+    distinction is decided here rather than at each call site.
+    """
+    return 0o700 if path.is_dir() else 0o600
+
+
+def harden_credential_path(path: Path) -> None:
+    """Restrict *path* to its owner: POSIX mode bits, or a private DACL on Windows.
+
+    Covers both files and directories, because callers protect both - a
+    credential file, and the state directory whose databases must not be
+    readable beside it. Fails closed on Windows if the applied DACL does not read
+    back as owner-restricted, so a caller never trusts a path it could not
+    actually protect.
     """
     if os.name == "posix":
-        os.chmod(path, 0o600)
+        os.chmod(path, owner_only_mode(path))
         return
     restrict_windows_file(path)
     if not windows_file_is_restricted(path):
@@ -240,4 +258,79 @@ def credential_file_is_owner_restricted(path: Path) -> bool:
         return False
     if os.name == "posix":
         return info.st_uid == os.geteuid() and not (info.st_mode & 0o077)
+    return windows_file_is_restricted(path)
+
+
+def unfollowed_read_flags() -> int:
+    """Return the read-only open flags that refuse to traverse a link.
+
+    Declared once because its most important property is a negative one that no
+    call site can see locally: ``O_NOFOLLOW`` DOES NOT EXIST ON WINDOWS, where
+    ``getattr`` yields zero and the flag silently contributes nothing. A reader
+    that opens a planted symlink with these flags on Windows reads straight
+    through it.
+
+    The flags are therefore a defence in depth, never the guarantee. What
+    actually refuses a link on the shipping platform is the explicit
+    stat-by-name and regular-file test that must run BEFORE this open, and the
+    descriptor identity confirmation that must run after it. Callers keep both;
+    :func:`confirm_opened_secret` is the second half.
+
+    The per-platform extras are absent-safe in the same way and mean nothing
+    beyond hygiene here: ``O_CLOEXEC`` keeps a secret out of a forked child on
+    POSIX, ``O_BINARY`` suppresses newline translation on Windows.
+    """
+    return (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
+
+
+def confirm_opened_secret(
+    descriptor: int, *, named: os.stat_result, path: Path
+) -> bool:
+    """Return whether an open descriptor is the owner-restricted file that was checked.
+
+    Closes the window between inspecting a secret by name and reading it. Every
+    property a caller verified about the NAME is re-asked of the DESCRIPTOR it
+    actually holds, so a file swapped between the two - the moment a symlink
+    attack needs - is caught even where the open could not refuse the swap
+    itself.
+
+    Three things are confirmed, and each fails a different substitution: both
+    the named and the opened file are regular, so a directory or device
+    substituted for either is refused; their device and inode agree, so a
+    different file at the same name is refused; and the descriptor is
+    owner-restricted, so a file that became reachable by another account between
+    the two observations is refused.
+
+    Owner-restriction is asked of the descriptor rather than the name wherever
+    the platform allows it, because the name can be re-pointed after the answer
+    is given and the descriptor cannot. On Windows the discretionary
+    access-control list is only reachable by name, so that one check is
+    necessarily by-name and callers keep their own by-name link refusal in front
+    of it.
+
+    Args:
+        descriptor: An open descriptor for the secret being read.
+        named: The pre-open ``lstat`` result the caller validated by name.
+        path: The name *descriptor* was opened from, for the Windows list read.
+
+    Returns:
+        Whether the descriptor may be read. ``False`` is one outcome - this is
+        not the file that was checked - and each caller maps it to its own
+        refusal.
+    """
+    try:
+        opened = os.fstat(descriptor)
+    except OSError:
+        return False
+    if not stat.S_ISREG(named.st_mode) or not stat.S_ISREG(opened.st_mode):
+        return False
+    if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+        return False
+    if os.name == "posix":
+        return opened.st_uid == os.geteuid() and not (opened.st_mode & 0o077)
     return windows_file_is_restricted(path)

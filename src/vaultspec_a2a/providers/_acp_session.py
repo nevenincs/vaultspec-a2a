@@ -4,8 +4,6 @@ Extracted from the original monolithic ``_acp_session.py``.
 Data carriers live in ``_acp_types``, auth logic in ``_acp_auth``.
 """
 
-import asyncio
-import json
 import logging
 from pathlib import Path
 
@@ -20,14 +18,16 @@ from ._acp_auth import (
 )
 from ._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from ._acp_mcp import require_declared_surface
+from ._acp_request import await_response, issue_request
 from ._acp_types import (
     AcpModelConfig,
     AcpResponseFuture,
     AcpSessionContext,
     InitializeResult,
     SessionSetupResult,
+    require_workspace_root,
 )
-from ._json_contract import JsonObject, JsonValue
+from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpErrorCode, AcpSessionError
 
 __all__: list[str] = []
@@ -235,25 +235,23 @@ async def _select_config_option(
             code=AcpErrorCode.INVALID_PARAMS,
         )
     rpc_id = AcpRequestId.SESSION_SET_CONFIG_OPTION
-    ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
-    request: JsonObject = {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "method": "session/set_config_option",
-        "params": {
+    future = await issue_request(
+        ctx.response_futures,
+        stdin=ctx.stdin,
+        stdin_lock=ctx.stdin_lock,
+        rpc_id=rpc_id,
+        method="session/set_config_option",
+        params={
             "sessionId": session_id,
             "configId": config_id,
             "value": desired_value,
         },
-    }
-    async with ctx.stdin_lock:
-        ctx.stdin.write(json.dumps(request).encode("utf-8") + b"\n")
-        await ctx.stdin.drain()
-    response = await asyncio.wait_for(
-        ctx.response_futures[rpc_id], timeout=settings.acp_startup_timeout_seconds
+    )
+    response = await await_response(
+        future, timeout=settings.acp_startup_timeout_seconds
     )
     if "error" in response:
-        error = _json_object(response["error"])
+        error = lenient_json_object(response["error"])
         message = str(error.get("message", response["error"]))
         raise AcpSessionError(
             f"ACP session/set_config_option failed: {message}",
@@ -308,14 +306,9 @@ async def _select_desired_config_options(
     return selected
 
 
-def _json_object(value: JsonValue | None) -> JsonObject:
-    """Return one protocol object or an empty object for malformed data."""
-    return value if isinstance(value, dict) else {}
-
-
 def _error_code(value: JsonValue | None) -> int:
     """Read one numeric JSON-RPC error code with the standard fallback."""
-    code = _json_object(value).get("code")
+    code = lenient_json_object(value).get("code")
     return (
         code
         if isinstance(code, int) and not isinstance(code, bool)
@@ -329,12 +322,13 @@ async def initialize_session(
 ) -> InitializeResult:
     """Send ACP initialize request and return capabilities + auth methods."""
     rpc_id = AcpRequestId.INITIALIZE
-    ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
-    req: JsonObject = {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "method": "initialize",
-        "params": {
+    future = await issue_request(
+        ctx.response_futures,
+        stdin=ctx.stdin,
+        stdin_lock=ctx.stdin_lock,
+        rpc_id=rpc_id,
+        method="initialize",
+        params={
             "protocolVersion": 1,
             "clientCapabilities": {
                 "fs": {
@@ -366,17 +360,11 @@ async def initialize_session(
             },
             "clientInfo": {"name": "vaultspec", "version": "1.0.0"},
         },
-    }
-    async with ctx.stdin_lock:
-        ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await ctx.stdin.drain()
-    try:
-        resp = await asyncio.wait_for(
-            ctx.response_futures[rpc_id],
-            timeout=settings.acp_startup_timeout_seconds,
-        )
-    except TimeoutError:
-        logger.error(
+    )
+    resp = await await_response(
+        future,
+        timeout=settings.acp_startup_timeout_seconds,
+        on_timeout=lambda: logger.error(
             "ACP initialize timed out",
             extra=runtime_log_extra(
                 config,
@@ -385,8 +373,8 @@ async def initialize_session(
                 timeout_seconds=settings.acp_startup_timeout_seconds,
                 stderr_event_count=ctx.stderr_event_count,
             ),
-        )
-        raise
+        ),
+    )
     if "error" in resp:
         # M22: use domain exception with explicit cause information
         logger.error(
@@ -404,11 +392,11 @@ async def initialize_session(
             code=_error_code(resp.get("error")),
         )
     res = resp.get("result")
-    result = _json_object(res)
+    result = lenient_json_object(res)
     capabilities = result.get("agentCapabilities")
     auth_methods = result.get("authMethods")
     return InitializeResult(
-        agent_capabilities=capabilities if isinstance(capabilities, dict) else {},
+        agent_capabilities=lenient_json_object(capabilities),
         auth_methods=[method for method in auth_methods if isinstance(method, dict)]
         if isinstance(auth_methods, list)
         else [],
@@ -427,7 +415,13 @@ async def setup_session(
     Writes session-scoped mutables (``tool_calls``, ``agent_modes``) to
     ``ctx`` internally.
     """
-    working_dir = config.workspace_root or config.cwd or str(Path.cwd())
+    working_dir = str(
+        require_workspace_root(config.workspace_root, surface="ACP session cwd")
+    )
+    # Opening a session here makes the CLI partition its config home by this cwd
+    # and persist a transcript into the OPERATOR's home - the run-side creating
+    # seam for acp-cli-session-transcript (declared in ``acp_chat_model``). The
+    # catalog probe in ``acp_catalog`` is the other. Nothing here may reclaim it.
     method = "session/new"
     mcp_servers = session_surface_mcp_servers(config)
     params: JsonObject = {"cwd": working_dir, "mcpServers": mcp_servers}
@@ -470,23 +464,18 @@ async def setup_session(
     attempted_auth = False
     while True:
         rpc_id = AcpRequestId.SESSION_SETUP
-        ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": method,
-            "params": params,
-        }
-        async with ctx.stdin_lock:
-            ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await ctx.stdin.drain()
-        try:
-            resp = await asyncio.wait_for(
-                ctx.response_futures[rpc_id],
-                timeout=settings.acp_startup_timeout_seconds,
-            )
-        except TimeoutError:
-            logger.error(
+        future = await issue_request(
+            ctx.response_futures,
+            stdin=ctx.stdin,
+            stdin_lock=ctx.stdin_lock,
+            rpc_id=rpc_id,
+            method=method,
+            params=params,
+        )
+        resp = await await_response(
+            future,
+            timeout=settings.acp_startup_timeout_seconds,
+            on_timeout=lambda: logger.error(
                 "ACP session setup timed out",
                 extra=runtime_log_extra(
                     config,
@@ -495,13 +484,13 @@ async def setup_session(
                     timeout_seconds=settings.acp_startup_timeout_seconds,
                     stderr_event_count=ctx.stderr_event_count,
                 ),
-            )
-            raise
+            ),
+        )
         if "error" not in resp:
             break
         err = resp["error"]
         err_code = _error_code(err)
-        error = _json_object(err)
+        error = lenient_json_object(err)
         err_msg = str(error.get("message", err)) if error else str(err)
         if not attempted_auth and auth_methods and is_auth_required_error(err):
             attempted_auth = True
@@ -593,16 +582,14 @@ async def setup_prompt(
 ) -> AcpResponseFuture:
     """Send the initial prompt."""
     rpc_id = AcpRequestId.SESSION_PROMPT
-    ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
     prompt = list[JsonValue](blocks)
-    req: JsonObject = {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "method": "session/prompt",
-        "params": {"sessionId": active_session_id, "prompt": prompt},
-    }
-    async with ctx.stdin_lock:
-        ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await ctx.stdin.drain()
+    future = await issue_request(
+        ctx.response_futures,
+        stdin=ctx.stdin,
+        stdin_lock=ctx.stdin_lock,
+        rpc_id=rpc_id,
+        method="session/prompt",
+        params={"sessionId": active_session_id, "prompt": prompt},
+    )
     ctx.prompt_id_ref.append(rpc_id)
-    return ctx.response_futures[rpc_id]
+    return future

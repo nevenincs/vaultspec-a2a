@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...control.action_lease import ControlActionClaim, claim_control_action
@@ -50,6 +51,39 @@ def _make_config(db_path: Path) -> Config:
     cfg = Config(str(_ALEMBIC_INI))
     cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_path}")
     return cfg
+
+
+def _resolve_head_revision() -> str:
+    """Return the head revision declared by the packaged migration chain.
+
+    Reading the revision graph opens no database: ``ScriptDirectory`` consults
+    only ``script_location``. The URL below satisfies the config builder and is
+    never connected. Deriving head from the chain — through the project's own
+    ``build_migration_config``, the single source of truth for where migrations
+    live — is what keeps the "reached head" assertions true for every future
+    revision instead of turning each new migration into a test edit.
+
+    Raises:
+        RuntimeError: If the chain does not resolve to exactly one head, which
+            is how two revisions sharing a ``down_revision`` present. That is a
+            broken chain, and it fails here with the branch named rather than
+            as an opaque error from whichever test upgraded first.
+    """
+    heads = ScriptDirectory.from_config(
+        build_migration_config("sqlite+aiosqlite:///:memory:")
+    ).get_heads()
+    if len(heads) != 1:
+        msg = (
+            "the packaged migration chain must resolve to exactly one head; "
+            f"found {sorted(heads)}"
+        )
+        raise RuntimeError(msg)
+    return heads[0]
+
+
+#: The revision an ``upgrade``/``stamp`` to ``head`` must land on. Derived from
+#: the chain rather than hardcoded, so adding a migration needs no edit here.
+_HEAD_REVISION = _resolve_head_revision()
 
 
 def _get_tables(db_path: Path) -> set[str]:
@@ -243,7 +277,7 @@ class TestAlembicUpgradeDowngrade:
         row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
         conn.close()
         assert row is not None
-        assert row[0] == "0013"
+        assert row[0] == _HEAD_REVISION
 
     def test_upgrade_head_rewrites_legacy_created_status(
         self, runtime_dir: Path
@@ -523,7 +557,7 @@ class TestRunMigrations:
             conn.close()
 
         assert version is not None
-        assert version[0] == "0013"
+        assert version[0] == _HEAD_REVISION
 
     @pytest.mark.asyncio
     async def test_run_migrations_with_percent_directory_reaches_head(
@@ -543,7 +577,7 @@ class TestRunMigrations:
             conn.close()
 
         assert version is not None
-        assert version[0] == "0013"
+        assert version[0] == _HEAD_REVISION
 
     @pytest.mark.asyncio
     async def test_concurrent_run_migrations_upgrades_both_databases(
@@ -569,5 +603,5 @@ class TestRunMigrations:
                 conn.close()
 
             assert version is not None
-            assert version[0] == "0013"
+            assert version[0] == _HEAD_REVISION
             assert _get_tables(database) >= _APP_TABLES

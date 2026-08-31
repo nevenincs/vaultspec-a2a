@@ -41,7 +41,7 @@ from ..service_tests._live_desktop_gateway import (
     ATTACH_CREDENTIAL,
     armed_gateway,
 )
-from ..tests.gateway_boot import free_port
+from ..testing.ports import free_port
 from ..utils.process import ProcessContainment
 from ._provider_catalog_live import (
     LIVE_PROVIDER_PREREQUISITES,

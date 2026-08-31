@@ -1,0 +1,26 @@
+[team]
+id           = "deterministic-tool-call"
+display_name = "Deterministic Tool Call"
+description  = "ProviderFactory scenario for one real task-queue tool call."
+
+[team.defaults]
+provider   = "deterministic"
+capability = "mid"
+
+[team.topology]
+type  = "pipeline"
+order = ["deterministic-tool-call"]
+
+[team.permissions]
+auto_approve = false
+
+[team.persona]
+directive = "Run the in-process deterministic tool-call scenario."
+
+[team.graph]
+step_timeout_seconds = 60
+recursion_limit      = 10
+
+[[team.workers]]
+agent_id = "deterministic-tool-call"
+

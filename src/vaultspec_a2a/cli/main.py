@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -332,10 +333,90 @@ def run() -> None:
     """Start, inspect, and cancel runs via the run-* verbs."""
 
 
+def _resolve_catalog_selection(
+    base: str,
+    *,
+    workspace_root: str,
+    provider_id: str,
+    execution_mode: str,
+    entry_id: str,
+) -> dict[str, Any]:
+    """Resolve the operator's named entry against the served catalog.
+
+    The operator names the provider, the execution mode, and the entry; this only
+    looks up the catalog REVISION those names are current against, because a
+    revision is a fact of what is served rather than a choice anyone makes. It
+    deliberately never ranks entries, reads a display name as a quality or price
+    signal, or falls back to "the first one" - a run's artifacts are produced by
+    what the caller chose, and choosing on their behalf is how a CLI quietly
+    decides what a provider charges for.
+    """
+    # The catalog is resolved in the caller's project: what a lane serves is a
+    # property of the workspace the run will execute in, not of the gateway.
+    resp = _request(
+        "GET",
+        f"{base}/v1/provider-catalog",
+        params={"workspace_root": workspace_root},
+        timeout=_RUN_START_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        _emit(resp)
+        raise SystemExit(1)
+    providers = resp.json().get("providers", [])
+    for record in providers:
+        if (
+            record.get("provider_id") != provider_id
+            or record.get("execution_mode") != execution_mode
+        ):
+            continue
+        catalog = record.get("catalog") or {}
+        entries = catalog.get("models") or []
+        for entry in entries:
+            if entry.get("entry_id") == entry_id:
+                return {
+                    "schema_version": 1,
+                    "provider_id": provider_id,
+                    "execution_mode": execution_mode,
+                    "catalog_revision": (catalog.get("state") or {}).get("revision"),
+                    "entry_id": entry_id,
+                    "controls": {},
+                }
+        offered = ", ".join(str(e.get("entry_id")) for e in entries) or "(none)"
+        raise click.ClickException(
+            f"provider {provider_id!r} in mode {execution_mode!r} serves no entry "
+            f"{entry_id!r}. It currently offers: {offered}"
+        )
+    lanes = ", ".join(
+        f"{r.get('provider_id')}/{r.get('execution_mode')}" for r in providers
+    )
+    raise click.ClickException(
+        f"no served lane {provider_id!r}/{execution_mode!r}. Served lanes are: "
+        f"{lanes or '(none)'}. Run `presets` to see what this gateway offers."
+    )
+
+
 @run.command("start")
 @click.option("--preset", required=True, help="Team preset id.")
 @click.option("--message", required=True, help="Opening message for the run.")
 @click.option("--title", default=None, help="Optional run title.")
+@click.option(
+    "--provider", "provider_id", required=True, help="Served provider id to run on."
+)
+@click.option(
+    "--execution-mode", required=True, help="Execution mode of the served lane."
+)
+@click.option("--entry", "entry_id", required=True, help="Catalog entry id to run.")
+@click.option(
+    "--workspace",
+    "workspace",
+    default=None,
+    help="Active project root for the run. Defaults to the current directory.",
+)
+@click.option(
+    "--run-id",
+    default=None,
+    help="Stable run/idempotency id. Generated when omitted.",
+)
 @click.option(
     "--autonomous/--supervised",
     "autonomous",
@@ -347,18 +428,53 @@ def run_start(
     preset: str,
     message: str,
     title: str | None,
+    provider_id: str,
+    execution_mode: str,
+    entry_id: str,
+    workspace: str | None,
+    run_id: str | None,
     autonomous: bool | None,
     url: str | None,
 ) -> None:
-    """Start a run via the run-start verb."""
-    body: dict[str, Any] = {"team_preset": preset, "message": message}
+    """Start a run via the run-start verb.
+
+    The provider, execution mode, and entry are REQUIRED rather than defaulted.
+    A model is named by the catalog its provider serves, so there is no
+    repository-side default that could be correct, and picking one silently
+    would decide on the operator's behalf what produces their artifacts.
+    """
+    base = _base_url(url)
+    # ONE workspace value for both the catalog lookup and the run's declared
+    # project. What a lane serves is a property of the project the run executes
+    # in, so resolving the entry against one root and then running in another
+    # would freeze a selection that was never offered for that project. The
+    # gateway refuses to infer this from the serving process, and it is right
+    # to: the caller owns the active project.
+    #
+    # The launch directory is that caller's own statement of which project they
+    # mean, which is why the fallback anchors there and not at any root this
+    # repository could resolve for them.
+    workspace_root = str(
+        Path(workspace).resolve() if workspace else Path.cwd()  # storage-anchor-ok
+    )
+    body: dict[str, Any] = {
+        "team_preset": preset,
+        "message": message,
+        "run_id": run_id or f"cli-{uuid.uuid4().hex}",
+        "metadata": {"workspace_root": workspace_root},
+        "selection": _resolve_catalog_selection(
+            base,
+            workspace_root=workspace_root,
+            provider_id=provider_id,
+            execution_mode=execution_mode,
+            entry_id=entry_id,
+        ),
+    }
     if title is not None:
         body["title"] = title
     if autonomous is not None:
         body["autonomous"] = autonomous
-    resp = _request(
-        "POST", f"{_base_url(url)}/v1/runs", json=body, timeout=_RUN_START_TIMEOUT
-    )
+    resp = _request("POST", f"{base}/v1/runs", json=body, timeout=_RUN_START_TIMEOUT)
     _emit(resp)
 
 

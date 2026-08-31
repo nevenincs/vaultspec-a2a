@@ -93,6 +93,15 @@ from ..control.run_start_policy import required_role_ids
 from ..graph.enums import PermissionOptionKind, ToolKind
 from ..team.team_config import load_team_config
 from ..testing import resolve_gateway_url
+from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
+from ._provider_catalog_live import (
+    LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
+    LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
+    live_provider_catalog_selector_is_configured,
+    live_provider_override_selector_is_configured,
+    override_selection_from_served_catalog,
+    selection_from_served_catalog,
+)
 
 # A doc-authoring role may only ever need read-only research tools; any other
 # tool-permission request (a write/execute/unclassified kind) is a real acceptance
@@ -194,15 +203,31 @@ _MODE_POLICY_ID = "authoring.operation_modes"
 _PRESET_DETERMINISTIC = "vaultspec-adr-research-deterministic"
 _PRESET_LIVE = "vaultspec-adr-research"
 
-# Provider-axis profiles overlaid on the live preset. `codex` routes the
-# three research/authoring roles to the codex
-# app-server provider (doc-reviewer stays claude); `zai` routes them to Z.ai. The
-# Z.ai lane is credential-gated - the env var the harness skips on when absent.
-_PROFILE_CODEX = "codex"
-_PROFILE_ZAI = "zai"
+# The provider axis, after model profiles were retired.
+#
+# It used to be a `profile_id` naming an overlay declared inside the live preset
+# (`codex`, `zai`, `codex-all`). A preset carries no provider policy now, so the
+# axis moved to where the lane is actually chosen: the run-start `selection` (the
+# whole-team lane) plus per-role `overrides`. The intent is unchanged and each
+# lane below still makes its own distinct claim - a MIXED lane runs two providers
+# in one run, an ALL lane runs exactly one - but the identifiers are supplied by
+# the operator from the currently served catalog rather than authored here.
+#
+# A case names only the PROVIDER it certifies, never a model: the entry, the
+# native control, and its option are opaque operator-supplied values, and a lane
+# whose configured selection names a different provider skips rather than
+# silently certifying the wrong one.
+_LANE_CODEX = "codex"
+_LANE_ZAI = "zai"
+_LANE_CLAUDE = "claude"
 _ZAI_CREDENTIAL_ENV = "ZAI_AUTH_TOKEN"
-# The single-provider Codex lane: every role including the doc-reviewer.
-_PROFILE_CODEX_ALL = "codex-all"
+
+# The role a MIXED lane routes to the second (override) provider - the inner
+# doc-reviewer, exactly as the retired `codex`/`zai` overlays did. Spelled as the
+# worker AGENT ID because that is what `required_role_ids` yields and therefore
+# the key run-start validates `overrides` against; a role-name spelling here
+# would be refused as an unknown role.
+_MIXED_OVERRIDE_ROLE = "vaultspec-doc-reviewer"
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,11 +248,24 @@ class AcceptanceCase:
                        operation-modes auto-approval) or :data:`POLICY_HUMAN`
                        (human reject-with-notes -> revision -> approve -> apply) -
                        keyed by gate ordinal name, in gate order.
-    profile_id:        The model profile selected at run-start (the provider axis).
-                       ``team-defaults`` (the implicit empty overlay) keeps the
-                       preset's own per-role providers; a named profile
-                       (e.g. ``codex``) overlays per-role providers on top, so one
-                       preset drives several provider lanes.
+    lane_provider:     The provider this lane certifies, or ``None`` for a lane
+                       that is provider-agnostic (the deterministic in-process
+                       cases, which take whatever selectable lane the gateway
+                       serves). When set, the operator's configured live
+                       selection MUST name this provider or the case skips - a
+                       lane that quietly certified whichever provider happened to
+                       be configured would be reporting someone else's result.
+    requires_live_selection:
+                       The lane must run on the operator-configured REAL
+                       provider lane, even when it claims no specific
+                       provider. Without this a provider-agnostic case would
+                       accept whatever the gateway serves - including an
+                       in-process lane - and a "real-provider" proof would
+                       quietly stop being one.
+    override_roles:    Roles routed to the SECOND declared lane, making the run
+                       genuinely mixed-provider. Non-empty requires the override
+                       selector to be configured; absent it the case skips rather
+                       than degrading to a single-lane run under a mixed label.
     required_env:      Environment variables that MUST be present for the lane to
                        run. A missing one is an honest skip-with-reason naming the
                        variable (a credential-gated lane), never a faked pass.
@@ -245,7 +283,9 @@ class AcceptanceCase:
     roles: tuple[str, ...]
     expected_doc_kinds: tuple[str, ...]
     gate_policy: dict[str, str] = field(default_factory=dict)
-    profile_id: str = "team-defaults"
+    lane_provider: str | None = None
+    requires_live_selection: bool = False
+    override_roles: tuple[str, ...] = ()
     required_env: tuple[str, ...] = ()
     autonomous: bool = False
 
@@ -256,7 +296,9 @@ def _research_adr_case(
     gate_policy: dict[str, str],
     *,
     preset: str = _PRESET_DETERMINISTIC,
-    profile_id: str = "team-defaults",
+    lane_provider: str | None = None,
+    requires_live_selection: bool = False,
+    override_roles: tuple[str, ...] = (),
     required_env: tuple[str, ...] = (),
     autonomous: bool = False,
 ) -> AcceptanceCase:
@@ -277,7 +319,9 @@ def _research_adr_case(
         roles=tuple(required_role_ids(load_team_config(preset))),
         expected_doc_kinds=("research", "adr"),
         gate_policy=gate_policy,
-        profile_id=profile_id,
+        lane_provider=lane_provider,
+        requires_live_selection=requires_live_selection,
+        override_roles=override_roles,
         required_env=required_env,
         autonomous=autonomous,
     )
@@ -303,7 +347,7 @@ CASE_LIVE_MIXED = _research_adr_case(
     "pw7-acceptance-live",
     {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
     preset=_PRESET_LIVE,
-    profile_id="fast",
+    lane_provider=_LANE_CLAUDE,
 )
 # The headless-autonomous live lane: AUTO at both gates AND autonomous dispatch,
 # so the worker never wires the permission-interrupt callback and a live model's
@@ -314,7 +358,7 @@ CASE_LIVE_AUTO = _research_adr_case(
     "pw7-acceptance-liveauto",
     {"research": POLICY_AUTO, "adr": POLICY_AUTO},
     preset=_PRESET_LIVE,
-    profile_id="fast",
+    lane_provider=_LANE_CLAUDE,
     autonomous=True,
 )
 # The provider-axis lanes. Both use the live preset with a mixed-provider
@@ -328,14 +372,16 @@ CASE_CODEX = _research_adr_case(
     "pw7-acceptance-codex",
     {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
     preset=_PRESET_LIVE,
-    profile_id=_PROFILE_CODEX,
+    lane_provider=_LANE_CODEX,
+    override_roles=(_MIXED_OVERRIDE_ROLE,),
 )
 CASE_ZAI = _research_adr_case(
     "zai",
     "pw7-acceptance-zai",
     {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
     preset=_PRESET_LIVE,
-    profile_id=_PROFILE_ZAI,
+    lane_provider=_LANE_ZAI,
+    override_roles=(_MIXED_OVERRIDE_ROLE,),
     required_env=(_ZAI_CREDENTIAL_ENV,),
 )
 # The single-provider Codex lane: every role, doc-reviewer included, routes to
@@ -348,7 +394,7 @@ CASE_CODEX_ALL = _research_adr_case(
     "pw7-acceptance-codex-all",
     {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
     preset=_PRESET_LIVE,
-    profile_id=_PROFILE_CODEX_ALL,
+    lane_provider=_LANE_CODEX,
 )
 
 _ALL_CASES = (
@@ -392,6 +438,112 @@ def _runtime_budget_for(case: AcceptanceCase) -> float:
     base = 180.0
     budget = base + sum(per_gate.get(p, 300.0) for p in case.gate_policy.values())
     return budget * (4.0 if _is_live_lane(case) else 1.0)
+
+
+async def _served_catalog(gateway_url: str, workspace_root: str) -> JsonObject:
+    """Read the catalog this workspace is actually served, cold-build budget included.
+
+    A first read on a gateway probes every registered lane over real subprocesses
+    and network calls, so this carries its own generous timeout rather than the
+    status-poll one.
+    """
+    async with httpx.AsyncClient() as hc:
+        response = await hc.get(
+            f"{gateway_url}/v1/provider-catalog",
+            params={"workspace_root": workspace_root},
+            headers=_GATEWAY_AUTH_HEADERS,
+            timeout=240.0,
+        )
+    assert response.status_code == 200, (
+        f"the stack could not serve its provider catalog: "
+        f"{response.status_code} {response.text}"
+    )
+    return _json_object(response.json(), at="gateway provider-catalog response")
+
+
+def _deterministic_selection(catalog: JsonObject) -> JsonObject:
+    """Select an in-process lane for a case that makes no provider claim.
+
+    The deterministic lanes assert on the document loop and its gates, not on
+    which provider produced the text, so any in-process lane satisfies them.
+    "Any SELECTABLE lane" is a different and much wider thing: on a host holding
+    a live provider session that resolves to a real metered lane, which would
+    have this suite billing a provider for a case whose whole point is that no
+    provider claim is being made. The mechanism cannot return one.
+    """
+    try:
+        return in_process_selection(catalog)
+    except NoSelectableLaneError as exc:
+        pytest.skip(
+            f"a deterministic case cannot present a valid selection: {exc}. "
+            "Cases that DO make a provider claim declare their lane explicitly "
+            "instead."
+        )
+
+
+async def _resolve_selection(
+    case: AcceptanceCase, gateway_url: str, workspace_root: str
+) -> tuple[JsonObject, dict[str, JsonObject]]:
+    """Resolve the run-start selection (and any per-role overrides) for *case*.
+
+    This is where the retired provider-axis PROFILES now live. A profile used to
+    name lanes inside the preset; the same routing is expressed here as the
+    whole-team ``selection`` plus per-role ``overrides``, with the opaque
+    identifiers supplied by the operator instead of authored in the repository.
+
+    Every way this cannot honestly run is a SKIP naming what is missing, never a
+    quiet substitution: certifying a provider the case does not claim, or running
+    a "mixed" lane on one provider, would both report a result nobody asked for.
+    """
+    catalog = await _served_catalog(gateway_url, workspace_root)
+
+    if case.lane_provider is None and not case.requires_live_selection:
+        return _deterministic_selection(catalog), {}
+
+    if not live_provider_catalog_selector_is_configured():
+        claim = (
+            f"certifies the {case.lane_provider!r} provider"
+            if case.lane_provider is not None
+            else "runs on a real provider"
+        )
+        pytest.skip(
+            f"the {case.label} lane {claim}, which needs an explicit served "
+            "selection: export "
+            + ", ".join(LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON)
+            + " naming a current entry on that lane."
+        )
+    selection = selection_from_served_catalog(catalog)
+    if case.lane_provider is not None and (selection.provider_id != case.lane_provider):
+        pytest.skip(
+            f"the {case.label} lane certifies {case.lane_provider!r}, but the "
+            f"configured live selection names {selection.provider_id!r}. Skipped "
+            "rather than run, because a pass here would be recorded against a "
+            "provider this lane makes no claim about."
+        )
+
+    if not case.override_roles:
+        return selection.model_dump(mode="json"), {}
+
+    if not live_provider_override_selector_is_configured():
+        pytest.skip(
+            f"the {case.label} lane is MIXED-provider - it routes "
+            f"{', '.join(case.override_roles)} to a second lane - so it needs a "
+            "second explicit selection: export "
+            + ", ".join(LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON)
+            + ". Skipped rather than degraded to a single-lane run, which would "
+            "keep the MIXED label on a run proving nothing mixed."
+        )
+    override = override_selection_from_served_catalog(catalog)
+    if override.provider_id == selection.provider_id:
+        pytest.skip(
+            f"the {case.label} lane needs two DIFFERENT providers, but both the "
+            f"primary and override selections name {override.provider_id!r}. That "
+            "run would be single-provider wearing a mixed label."
+        )
+    override_body = override.model_dump(mode="json")
+    return selection.model_dump(mode="json"), {
+        role: dict(override_body) for role in case.override_roles
+    }
 
 
 def _case_param(case: AcceptanceCase) -> ParameterSet:
@@ -983,6 +1135,11 @@ class AcceptanceHarness:
     engine_bearer: str
     vault_root: Path
     gateway_url: str
+    # The resolved run-start selection and per-role overrides. Injected by the
+    # test rather than resolved here so every "cannot honestly run" path is a
+    # pytest.skip at collection-adjacent scope, not an exception mid-run.
+    selection: JsonObject = field(default_factory=dict)
+    overrides: dict[str, JsonObject] = field(default_factory=dict)
     run_id: str = field(default_factory=lambda: f"pw7-{int(time.time())}")
     phases_seen: list[str] = field(default_factory=list)
     materializations: list[Materialization] = field(default_factory=list)
@@ -993,6 +1150,15 @@ class AcceptanceHarness:
     _permission_violations: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        # Run-start refuses a body with no selection, and would do so as an opaque
+        # 422 deep inside a booted stack. A harness built without one is a wiring
+        # mistake in the caller, so it is named here instead - at construction,
+        # before any token is minted or any provider is spawned.
+        assert self.selection, (
+            "AcceptanceHarness was built with no run-start selection; resolve one "
+            "with _resolve_selection(case, gateway_url, workspace_root) and pass "
+            "it in. Run-start has no implicit provider default to fall back on."
+        )
         # A UNIQUE per-run feature tag: the engine's create refuses to overwrite an
         # existing document at the predicted path (path-collision gate), so a fixed
         # per-lane tag makes a re-run's apply fail on the prior run's leftover doc.
@@ -1035,10 +1201,15 @@ class AcceptanceHarness:
             "team_preset": self.case.preset,
             "message": self.case.prompt,
             "run_id": run_id,
-            "profile_id": self.case.profile_id,
+            # The explicit served selection replaces the retired profile_id.
+            # run-start refuses a body without it and revalidates it against
+            # the catalog served for this workspace.
+            "selection": self.selection,
             "actor_tokens": {"tokens": tokens, "engine_bearer": self.engine_bearer},
             "metadata": meta,
         }
+        if self.overrides:
+            body["overrides"] = self.overrides
         if feature is not None:
             body["feature_tag"] = feature
         if self.case.autonomous:
@@ -1698,12 +1869,17 @@ async def test_pw7_research_adr_materializes_two_documents(
     if stack is None:
         external_prerequisite.absent("loopback-stack")
     gateway_url, engine_base_url, engine_bearer, vault_root = stack
+    selection, overrides = await _resolve_selection(
+        case, gateway_url, str(vault_root.parent)
+    )
     harness = AcceptanceHarness(
         case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
         gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
     )
 
     gates_driven = await harness.run()

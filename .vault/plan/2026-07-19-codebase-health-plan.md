@@ -3,8 +3,8 @@ tags:
   - '#plan'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-07-31'
-body_hash: 'sha256:51d4ac26b48cc4bc1ad40058bb599224069bcf26f9f6d71f1c9e563fe1c47aff'
+modified: '2026-08-02'
+body_hash: 'sha256:f521d2114f357f7a543297eecf4d8d6a4caa58f60112cec4f1f491c5aec67826'
 tier: L3
 related:
   - '[[2026-07-19-codebase-health-adr]]'
@@ -21,16 +21,6 @@ related:
   - '[[2026-07-19-observability-lanes-plan]]'
   - '[[2026-07-17-tool-cores-adr]]'
 ---
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the
-       related: field above.
-     - The related: field carries the AUTHORISING documents
-       (ADR, research, reference, prior plan) for every Step in
-       this plan. Steps inherit this chain; per-row reference
-       footers do not exist.
-     - NEVER use [[wiki-links]] or markdown links in the
-       document body. -->
 
 <!-- RETIRED: P19, S30, S31, S32, S83, S84, S85, S86, S88, S100, S111, S112, S113, S145, S146, S147, S148, S158, S162, S164, S165, S166, S167, S168, S169 -->
 

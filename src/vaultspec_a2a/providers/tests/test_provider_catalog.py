@@ -10,6 +10,7 @@ from typing import cast
 import pytest
 
 from ..provider_catalog import (
+    MAX_DISPLAY_LENGTH,
     AdmissionState,
     AuthenticationState,
     CacheFreshness,
@@ -130,8 +131,8 @@ def test_catalog_contract_detaches_every_caller_owned_sequence() -> None:
 
 
 def test_catalog_contract_rejects_unbounded_display_metadata() -> None:
-    with pytest.raises(ValueError, match="256-character limit"):
-        ModelCatalogEntry("entry-a", "provider-model-a", "x" * 257)
+    with pytest.raises(ValueError, match=f"{MAX_DISPLAY_LENGTH}-character limit"):
+        ModelCatalogEntry("entry-a", "provider-model-a", "x" * (MAX_DISPLAY_LENGTH + 1))
 
 
 def test_catalog_rejects_model_references_to_unadvertised_controls() -> None:

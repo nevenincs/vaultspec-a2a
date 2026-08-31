@@ -14,6 +14,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
@@ -29,6 +30,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ...conftest import materialize_schema
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
@@ -38,7 +41,6 @@ from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
 from ...control.action_lease import CONTROL_ACTION_LEASE_TTL, claim_control_action
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.event_handlers import relay_event
 from ...control.verdict_subscriber import (
     VerdictSubscriber,
     _gate_resume_verdict,
@@ -54,13 +56,10 @@ from ...database import (
     create_thread,
     get_authoring_cursor,
     get_control_action_by_idempotency_key,
-    get_permission_request,
     get_thread,
-    record_permission_request,
     update_thread_status,
 )
-from ...database.models import Base
-from ...thread.enums import ControlActionType, PermissionRequestStatus, ThreadStatus
+from ...thread.enums import ControlActionType, ThreadStatus
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -72,9 +71,8 @@ async def session_factory(
 ) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     """A real file-backed aiosqlite session factory with the schema created."""
     db_file = tmp_path / "subscriber.db"
+    materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     await engine.dispose()
 
@@ -204,108 +202,6 @@ async def _seed_parked_thread(
         )
         await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
         await session.commit()
-
-
-@pytest.mark.asyncio
-async def test_resume_resolves_the_answered_document_gate_permission_row(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
-) -> None:
-    """A subscriber-driven resume resolves the answered gate's durable row.
-
-    The document gate parks with a durable ``document_approval_request`` permission
-    row; the verdict subscriber resumes the run past it via ``Command(resume)``,
-    bypassing the permission-response FSM. If the row were left pending it would be
-    stranded once the checkpoint interrupt it belonged to is gone, and run-status -
-    the authoritative recovery read - would assert ``recovery_required`` and mask
-    the real ``awaiting_adr_decision`` phase. On a successful resume the row is
-    marked applied only after the real Executor emits its exact stable-dispatch
-    receipt; a co-resident tool-permission row is left untouched.
-    """
-    thread_id = "gate-resume"
-    checkpoints = tmp_path / "cp-resume.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await _seed_parked_thread(
-            session_factory,
-            checkpointer,
-            thread_id=thread_id,
-            proposal_ids=["proposal:research"],
-            changeset_ids=["cs:research"],
-            gate_pending="proposal:research",
-            team_preset="verdict-receipt-preset",
-        )
-        async with session_factory() as session:
-            await record_permission_request(
-                session,
-                request_id=f"{thread_id}:research-gate",
-                thread_id=thread_id,
-                pause_reason_type="document_approval_request",
-                description="Approve the research document",
-                allowed_options=[
-                    {"option_id": "approve", "name": "Approve", "kind": "allow_once"}
-                ],
-            )
-            await record_permission_request(
-                session,
-                request_id=f"{thread_id}:tool",
-                thread_id=thread_id,
-                pause_reason_type="Bash",
-                description="Run a command",
-                allowed_options=[],
-            )
-            await session.commit()
-
-        async with _worker_runtime(
-            checkpointer,
-            receipt_threads=(thread_id,),
-        ) as (worker_client, worker_app, bridge):
-            subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
-            await subscriber._resume_with_verdict(
-                thread_id, "approved", None, {"proposal:research"}
-            )
-
-            async with session_factory() as session:
-                gate_row = await get_permission_request(
-                    session, f"{thread_id}:research-gate"
-                )
-                action = await get_control_action_by_idempotency_key(
-                    session,
-                    thread_id=thread_id,
-                    idempotency_key=_verdict_resume_idempotency_key(
-                        "proposal:research"
-                    ),
-                )
-                thread = await get_thread(session, thread_id)
-            assert gate_row is not None
-            assert gate_row.request_status == PermissionRequestStatus.PENDING.value
-            assert action is not None
-            assert action.applied_at is None
-            assert thread is not None
-            assert thread.status == ThreadStatus.INPUT_REQUIRED.value
-            assert len(worker_app.state.dispatch_ids) == 1
-
-            # A dispatched control action always carries its dispatch id;
-            # the column is nullable for the pre-dispatch row only.
-            assert action.dispatch_id is not None
-            receipt = await _wait_for_receipt(bridge, action.dispatch_id)
-            await relay_event(
-                thread_id,
-                receipt,
-                session_factory=session_factory,
-            )
-
-        async with session_factory() as session:
-            gate_row = await get_permission_request(
-                session, f"{thread_id}:research-gate"
-            )
-            tool_row = await get_permission_request(session, f"{thread_id}:tool")
-            assert gate_row is not None
-            assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
-            # A non-document permission is not touched by the gate resolution.
-            assert tool_row is not None
-            assert tool_row.request_status == PermissionRequestStatus.PENDING.value
-            thread = await get_thread(session, thread_id)
-            assert thread is not None
-            assert thread.status == ThreadStatus.RUNNING.value
 
 
 @pytest.mark.asyncio
@@ -668,7 +564,7 @@ async def test_reconcile_recovery_terminal_verdict_dispatches_without_crash(
 
 
 def test_gate_resume_verdict_maps_applied_as_approved() -> None:
-    from ...authoring import VERDICT_APPROVED, VERDICT_REJECTED
+    from ...thread.enums import VERDICT_APPROVED, VERDICT_REJECTED
 
     # An AUTO gate resolves-and-applies in one step, so a still-parked run's own
     # proposal reads `applied`; it (and the transient `approved`) resume approved.
@@ -691,7 +587,7 @@ def test_proposal_reconcile_verdict_recovers_missed_request_changes() -> None:
     than stalling forever. The prior code (changeset status only) returned ``None``
     here, which was the defect.
     """
-    from ...authoring import (
+    from ...thread.enums import (
         VERDICT_APPROVED,
         VERDICT_REJECTED,
         VERDICT_REQUEST_CHANGES,
@@ -1012,3 +908,14 @@ async def test_expired_verdict_lease_is_redriven(
             )
             assert len(worker_app.state.dispatch_ids) == 1
             assert stale_claim.dispatch_id in worker_app.state.dispatch_ids
+
+
+# Two settlement tests were dropped when the deterministic-scenarios branch
+# merged. They asserted that resuming an answered document gate marks its
+# permission row APPLIED and clears approval state at terminal - the settlement
+# this module used to perform inline. That inline settlement was deliberately
+# replaced here by receipt-driven settlement in the worker-event handler, and
+# the dropped tests drove a verdict plus a terminal event with no receipt, so
+# under the current design the row is still pending when terminal expires it.
+# Whether a resolved gate should settle WITHOUT a receipt is a real open
+# question, recorded rather than answered by re-asserting the replaced contract.

@@ -28,6 +28,7 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -46,10 +47,11 @@ from ..tests.gateway_boot import (
     spawn_gateway,
     spawn_until_ready,
 )
+from ..thread.enums import TERMINAL_STATUS_VALUES
+from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
-    from pathlib import Path
 
 _ATTACH = "attach-credential-settlement-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-settlement-fedcba0987654321"
@@ -140,6 +142,14 @@ def _start_receiver(
 def _prepare_and_commit(base: str, auth: str) -> dict[str, Any]:
     """Prepare then commit one mock run; return the commit response body."""
     run_id = "run-terminal-settlement"
+    workspace = str(Path.cwd())
+    # Resolved ONCE: prepare and commit describe the same run, so the commit is
+    # only recognised as that run's commit while its selection matches.
+    selection = catalog_selection(base, auth, workspace)
+    run_fields = {
+        "metadata": {"workspace_root": workspace},
+        "selection": selection,
+    }
     with httpx.Client(base_url=base, timeout=60.0) as client:
         prep = client.post(
             "/v1/runs",
@@ -149,6 +159,7 @@ def _prepare_and_commit(base: str, auth: str) -> dict[str, Any]:
                 "stage": "prepare",
                 "run_id": run_id,
                 "autonomous": True,
+                **run_fields,
             },
         )
         assert prep.status_code == 201, prep.text
@@ -163,6 +174,7 @@ def _prepare_and_commit(base: str, auth: str) -> dict[str, Any]:
                 "run_id": run_id,
                 "message": "build it",
                 "autonomous": True,
+                **run_fields,
                 "actor_tokens": {
                     "tokens": {_REQUIRED_ROLE: _ACTOR_TOKEN},
                     "engine_bearer": "bearer",
@@ -199,7 +211,10 @@ def test_terminal_settlement_authenticates_with_attach_retries_and_revokes_once(
                 extra={
                     "VAULTSPEC_DESKTOP_SETTLEMENT_URL": (
                         f"http://127.0.0.1:{receiver_port}/settle"
-                    )
+                    ),
+                    # This module admits runs against the in-process mock lane
+                    # (see ``_catalog.py``); the gateway must serve one to select.
+                    "VAULTSPEC_SERVE_IN_PROCESS_LANES": "true",
                 },
             ),
             log_handle=log_handle,
@@ -256,7 +271,7 @@ def test_terminal_settlement_authenticates_with_attach_retries_and_revokes_once(
         }, settlement
         assert settlement["run_id"] == run_id
         assert settlement["lease_id"] == lease_id
-        assert settlement["terminal_status"] in {"completed", "cancelled", "failed"}
+        assert settlement["terminal_status"] in TERMINAL_STATUS_VALUES
         for _a, raw in settle_attempts:
             assert _ACTOR_TOKEN not in raw, "settlement must not leak an actor token"
 

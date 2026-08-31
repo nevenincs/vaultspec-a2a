@@ -18,12 +18,18 @@ from ...graph.enums import (
     ToolKind,
 )
 from ...thread.enums import ThreadStatus
-from .events import PlanEntry, ToolCallContent, ToolCallLocation
+from ...thread.models import PlanEntry
+from .events import ToolCallContent, ToolCallLocation
 
 __all__ = [
+    "AgentSnapshot",
     "ArtifactSnapshot",
+    "ClarificationQuestionSnapshot",
+    "ClarificationRequestSnapshot",
     "ExecutionTaskSnapshot",
     "MessageSnapshot",
+    "PermissionOptionSnapshot",
+    "PermissionSnapshot",
     "ThreadStateSnapshot",
     "ToolCallSnapshot",
 ]
@@ -59,17 +65,17 @@ class ArtifactSnapshot(BaseModel):
     complete: bool
 
 
-class _PermissionSnapshot(BaseModel):
+class PermissionSnapshot(BaseModel):
     """Outstanding permission request in a state snapshot."""
 
     request_id: str
     description: str
-    options: list["_PermissionOptionSnapshot"]
+    options: list["PermissionOptionSnapshot"]
     tool_call: str | None = None
     tool_kind: ToolKind | None = None
 
 
-class _ClarificationQuestionSnapshot(BaseModel):
+class ClarificationQuestionSnapshot(BaseModel):
     """Layer 1 equivalent of ``thread.snapshots.ClarificationQuestionData``."""
 
     id: str
@@ -79,7 +85,7 @@ class _ClarificationQuestionSnapshot(BaseModel):
     options: list[str] = Field(default_factory=list)
 
 
-class _ClarificationRequestSnapshot(BaseModel):
+class ClarificationRequestSnapshot(BaseModel):
     """Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.
 
     A pending mid-run clarification, disclosed on ``run-status`` so a reload
@@ -88,10 +94,10 @@ class _ClarificationRequestSnapshot(BaseModel):
     """
 
     request_id: str
-    questions: list[_ClarificationQuestionSnapshot] = Field(default_factory=list)
+    questions: list[ClarificationQuestionSnapshot] = Field(default_factory=list)
 
 
-class _PermissionOptionSnapshot(BaseModel):
+class PermissionOptionSnapshot(BaseModel):
     """Permission option within a snapshot."""
 
     option_id: str
@@ -99,7 +105,7 @@ class _PermissionOptionSnapshot(BaseModel):
     kind: PermissionOptionKind
 
 
-class _AgentSnapshot(BaseModel):
+class AgentSnapshot(BaseModel):
     """Wire projection of the canonical agent descriptor within a snapshot.
 
     Mirrors ``thread.snapshots.AgentData``.
@@ -110,6 +116,7 @@ class _AgentSnapshot(BaseModel):
     state: AgentLifecycleState
     provider: Provider | None = None
     model: Model | None = None
+    model_name: str | None = None
     role: str = ""
     display_name: str = ""
     description: str = ""
@@ -140,11 +147,11 @@ class ThreadStateSnapshot(BaseModel):
     status: ThreadStatus
     messages: list[MessageSnapshot] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
-    pending_permissions: list[_PermissionSnapshot] = Field(default_factory=list)
-    pending_clarification: _ClarificationRequestSnapshot | None = None
+    pending_permissions: list[PermissionSnapshot] = Field(default_factory=list)
+    pending_clarification: ClarificationRequestSnapshot | None = None
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
     plan: list[PlanEntry] = Field(default_factory=list)
-    agents: list[_AgentSnapshot] = Field(default_factory=list)
+    agents: list[AgentSnapshot] = Field(default_factory=list)
     last_sequence: int
     checkpoint_id: str | None = None
     checkpoint_created_at: datetime | None = None

@@ -1,7 +1,9 @@
 """Tests for the EventAggregator central event bus."""
 
 import asyncio
+import json
 import sys
+from collections.abc import AsyncIterator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -9,6 +11,7 @@ from typing import Any, ClassVar, cast
 import pytest
 from langchain_core.messages import AIMessageChunk
 from langgraph.errors import GraphInterrupt
+from langgraph.types import Command
 
 from ...domain_config import domain_config
 from ...graph.enums import (
@@ -32,8 +35,9 @@ from ...providers import AcpPromptError, ProviderCondition
 from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
-from ..aggregator import EventAggregator, SequencedEvent, StreamableGraph
+from ..aggregator import EventAggregator
 from ..ingest import _summarize_ingest_exception
+from ..types import SequencedEvent, StreamableGraph
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -44,6 +48,33 @@ from ..ingest import _summarize_ingest_exception
 def aggregator() -> EventAggregator:
     """Return a fresh EventAggregator for each test."""
     return EventAggregator()
+
+
+async def _ingest(
+    aggregator: EventAggregator,
+    *,
+    thread_id: str,
+    agent_id: str,
+    graph: StreamableGraph,
+    graph_input: dict[str, Any] | Command[Any] | None,
+    config: dict[str, Any],
+) -> str:
+    """Call ``EventAggregator.ingest`` through a fully typed seam.
+
+    ``EventAggregator.ingest`` declares ``graph_input`` against a bare,
+    unparameterized ``Command`` generic, which strict type checking treats as
+    partially unknown at every call site. This wrapper pins the type once so
+    the many call sites below get a resolved return type instead of each
+    repeating the same cast.
+    """
+    typed_ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    return await typed_ingest(
+        thread_id=thread_id,
+        agent_id=agent_id,
+        graph=graph,
+        graph_input=graph_input,
+        config=config,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -930,6 +961,254 @@ class TestLangGraphEventProcessing:
 
 
 # ---------------------------------------------------------------------------
+# Provider-internal tool-call chunks (F17): commandExecution/fileChange/
+# mcpToolCall never go through a real BaseTool/ToolNode, so the only place
+# their activity reaches astream_events is tool_call_chunks on a streamed
+# AIMessageChunk -- previously read nowhere, so every one of these calls
+# stayed unregistered for a run's whole live stream.
+# ---------------------------------------------------------------------------
+
+
+def _action_chunk_event(
+    run_id: str, tool_call_id: str, item_type: str, detail: dict[str, Any]
+) -> dict[str, Any]:
+    """Build an on_chat_model_stream event shaped like a provider action chunk.
+
+    Mirrors what ``codex_chat_model._completed_action_chunk`` actually
+    constructs: a chunk with empty ``content`` and one ``tool_call_chunks``
+    entry whose ``args`` is the JSON-encoded action detail (carrying its own
+    ``status``), driven through the real production seam
+    (``EventAggregator.process_langgraph_event``) rather than calling the
+    transformer's private helpers directly.
+    """
+    return {
+        "event": "on_chat_model_stream",
+        "run_id": run_id,
+        "metadata": {},
+        "data": {
+            "chunk": AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "id": tool_call_id,
+                        "name": item_type,
+                        "args": json.dumps(detail),
+                        "index": 0,
+                    }
+                ],
+            )
+        },
+    }
+
+
+class TestProviderActionToolCallChunks:
+    """F17: a provider action item's terminal status/content/locations must
+    reach a ToolCallStart + ToolCallUpdate pair instead of being dropped."""
+
+    @pytest.mark.asyncio
+    async def test_a_completed_command_execution_reaches_a_terminal_status(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A completed commandExecution action advances past PENDING.
+
+        Fails on unfixed code: chunk.tool_call_chunks was never read, so
+        neither event below is emitted and the queue stays empty.
+        """
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        await aggregator.process_langgraph_event(
+            event_data=_action_chunk_event(
+                run_id="run-cmd",
+                tool_call_id="call_1",
+                item_type="commandExecution",
+                detail={
+                    "command": "certutil -hashfile x sha256",
+                    "cwd": "C:\\work",
+                    "status": "completed",
+                    "exit_code": 0,
+                },
+            ),
+            thread_id="thread-1",
+            agent_id="agent-1",
+        )
+
+        sequenced_all: list[SequencedEvent] = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        domain_events = [s.event for s in sequenced_all]
+
+        starts = [e for e in domain_events if isinstance(e, ToolCallStart)]
+        updates = [e for e in domain_events if isinstance(e, ToolCallUpdate)]
+        assert len(starts) == 1, f"expected one ToolCallStart, got: {domain_events}"
+        assert starts[0].tool_call_id == "call_1"
+        assert starts[0].title == "commandExecution"
+        assert len(updates) == 1, f"expected one ToolCallUpdate, got: {domain_events}"
+        update = updates[0]
+        assert update.tool_call_id == "call_1"
+        assert update.status == ToolCallStatus.COMPLETED
+        assert update.content is not None
+        update_text = update.content[0]["text"]
+        assert update_text is not None
+        assert "certutil" in update_text
+
+    @pytest.mark.asyncio
+    async def test_a_policy_rejected_command_reaches_failed_not_completed(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A rejected/failed action is distinguishable from success.
+
+        This is the exact live incident: a commandExecution item the model
+        narrated as policy-rejected ("wrapped PowerShell inside PowerShell")
+        must never be reported the same way as a successful call. Any status
+        this repo does not recognise as a success is FAILED, never a silent
+        COMPLETED.
+        """
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        await aggregator.process_langgraph_event(
+            event_data=_action_chunk_event(
+                run_id="run-cmd-rejected",
+                tool_call_id="call_2",
+                item_type="commandExecution",
+                detail={
+                    "command": "powershell -Command 'certutil ...'",
+                    "cwd": "C:\\work",
+                    "status": "failed",
+                    "exit_code": None,
+                },
+            ),
+            thread_id="thread-1",
+            agent_id="agent-1",
+        )
+
+        sequenced_all: list[SequencedEvent] = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        updates = [
+            s.event for s in sequenced_all if isinstance(s.event, ToolCallUpdate)
+        ]
+        assert len(updates) == 1
+        assert updates[0].status == ToolCallStatus.FAILED
+        assert updates[0].status != ToolCallStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_an_unrecognised_status_spelling_still_fails_closed(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A status this repo has not catalogued is FAILED, never COMPLETED.
+
+        The app-server's status vocabulary is not owned by this codebase; an
+        unfamiliar spelling (a future "declined", "aborted", ...) must not
+        be misread as success just because it is unrecognised.
+        """
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        await aggregator.process_langgraph_event(
+            event_data=_action_chunk_event(
+                run_id="run-cmd-unknown",
+                tool_call_id="call_3",
+                item_type="commandExecution",
+                detail={"command": "x", "status": "declined", "exit_code": None},
+            ),
+            thread_id="thread-1",
+            agent_id="agent-1",
+        )
+
+        sequenced_all: list[SequencedEvent] = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        updates = [
+            s.event for s in sequenced_all if isinstance(s.event, ToolCallUpdate)
+        ]
+        assert len(updates) == 1
+        assert updates[0].status == ToolCallStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_a_file_change_action_populates_locations(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A completed fileChange action reports the paths it touched.
+
+        F17 also named empty ``locations`` on every one of the 15 stuck
+        tool calls as part of the defect - a frontend could never show what
+        any call touched.
+        """
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        await aggregator.process_langgraph_event(
+            event_data=_action_chunk_event(
+                run_id="run-file",
+                tool_call_id="call_4",
+                item_type="fileChange",
+                detail={
+                    "changes": [{"path": "src/module.py"}, {"path": "README.md"}],
+                    "status": "completed",
+                },
+            ),
+            thread_id="thread-1",
+            agent_id="agent-1",
+        )
+
+        sequenced_all: list[SequencedEvent] = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        updates = [
+            s.event for s in sequenced_all if isinstance(s.event, ToolCallUpdate)
+        ]
+        assert len(updates) == 1
+        assert updates[0].status == ToolCallStatus.COMPLETED
+        assert updates[0].locations is not None
+        paths = {loc["path"] for loc in updates[0].locations}
+        assert paths == {"src/module.py", "README.md"}
+
+    @pytest.mark.asyncio
+    async def test_a_plain_registration_chunk_is_not_re_registered_on_repeat(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A tool call with no status (ACP's own registration shape) starts
+        pending and is registered only once, even across repeated chunks for
+        the same id (e.g. partial-arg-streaming deltas)."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        raw_input_chunk = {
+            "event": "on_chat_model_stream",
+            "run_id": "run-acp",
+            "metadata": {},
+            "data": {
+                "chunk": AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "id": "call_acp_1",
+                            "name": "read_file",
+                            "args": json.dumps({"path": "a.py"}),
+                            "index": 0,
+                        }
+                    ],
+                )
+            },
+        }
+        await aggregator.process_langgraph_event(
+            event_data=raw_input_chunk, thread_id="thread-1", agent_id="agent-1"
+        )
+        await aggregator.process_langgraph_event(
+            event_data=raw_input_chunk, thread_id="thread-1", agent_id="agent-1"
+        )
+
+        sequenced_all: list[SequencedEvent] = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        starts = [s.event for s in sequenced_all if isinstance(s.event, ToolCallStart)]
+        assert len(starts) == 1
+        assert starts[0].status == ToolCallStatus.PENDING
+
+
+# ---------------------------------------------------------------------------
 # Token chunk batching
 # ---------------------------------------------------------------------------
 
@@ -1307,7 +1586,8 @@ class TestEmitInterruptEvents:
         graph = _InterruptingGraph(state)
 
         config = {"configurable": {"thread_id": "thread-interrupt"}}
-        await aggregator.ingest(
+        await _ingest(
+            aggregator,
             thread_id="thread-interrupt",
             agent_id="supervisor",
             graph=graph,
@@ -1316,7 +1596,7 @@ class TestEmitInterruptEvents:
         )
 
         # Drain all events from the queue
-        sequenced_events = []
+        sequenced_events: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_events.append(queue.get_nowait())
 
@@ -1354,7 +1634,8 @@ class TestEmitInterruptEvents:
         graph = _SilentGraph(state)
 
         config = {"configurable": {"thread_id": "thread-normal"}}
-        await aggregator.ingest(
+        await _ingest(
+            aggregator,
             thread_id="thread-normal",
             agent_id="supervisor",
             graph=graph,
@@ -1362,7 +1643,7 @@ class TestEmitInterruptEvents:
             config=config,
         )
 
-        sequenced_all = []
+        sequenced_all: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_all.append(queue.get_nowait())
         domain_events = [s.event for s in sequenced_all]
@@ -1386,7 +1667,8 @@ class TestEmitInterruptEvents:
         graph = _InterruptingGraph(state)
 
         config = {"configurable": {"thread_id": "thread-empty-interrupts"}}
-        await aggregator.ingest(
+        await _ingest(
+            aggregator,
             thread_id="thread-empty-interrupts",
             agent_id="supervisor",
             graph=graph,
@@ -1394,7 +1676,7 @@ class TestEmitInterruptEvents:
             config=config,
         )
 
-        sequenced_all = []
+        sequenced_all: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_all.append(queue.get_nowait())
         domain_events = [s.event for s in sequenced_all]
@@ -1420,7 +1702,8 @@ class TestEmitInterruptEvents:
         graph = _InterruptingGraph(state)
 
         config = {"configurable": {"thread_id": "thread-other-interrupt"}}
-        await aggregator.ingest(
+        await _ingest(
+            aggregator,
             thread_id="thread-other-interrupt",
             agent_id="supervisor",
             graph=graph,
@@ -1428,7 +1711,7 @@ class TestEmitInterruptEvents:
             config=config,
         )
 
-        sequenced_all = []
+        sequenced_all: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_all.append(queue.get_nowait())
         domain_events = [s.event for s in sequenced_all]
@@ -1444,7 +1727,7 @@ class TestEmitInterruptEvents:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-default-opts"])
 
-        interrupt_payload = {
+        interrupt_payload: dict[str, object] = {
             "type": "permission_request",
             "tool_name": "shell_exec",
             "tool_input": {},
@@ -1457,7 +1740,8 @@ class TestEmitInterruptEvents:
         graph = _InterruptingGraph(state)
 
         config = {"configurable": {"thread_id": "thread-default-opts"}}
-        await aggregator.ingest(
+        await _ingest(
+            aggregator,
             thread_id="thread-default-opts",
             agent_id="supervisor",
             graph=graph,
@@ -1465,7 +1749,7 @@ class TestEmitInterruptEvents:
             config=config,
         )
 
-        sequenced_all = []
+        sequenced_all: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_all.append(queue.get_nowait())
         domain_events = [s.event for s in sequenced_all]
@@ -1517,7 +1801,8 @@ class TestRecursionLimitDetection:
 
         graph = _RecursingGraph()
         config = {"configurable": {"thread_id": "thread-recurse"}}
-        await aggregator.ingest(
+        await _ingest(
+            aggregator,
             thread_id="thread-recurse",
             agent_id="supervisor",
             graph=graph,
@@ -1525,7 +1810,7 @@ class TestRecursionLimitDetection:
             config=config,
         )
 
-        sequenced_all = []
+        sequenced_all: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_all.append(queue.get_nowait())
         domain_events = [s.event for s in sequenced_all]
@@ -1583,7 +1868,8 @@ class TestGenericIngestExceptionDetection:
 
         graph = _FailingGraph()
         config = {"configurable": {"thread_id": "thread-generic-fail"}}
-        await aggregator.ingest(
+        await _ingest(
+            aggregator,
             thread_id="thread-generic-fail",
             agent_id="supervisor",
             graph=graph,
@@ -1591,7 +1877,7 @@ class TestGenericIngestExceptionDetection:
             config=config,
         )
 
-        sequenced_all = []
+        sequenced_all: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_all.append(queue.get_nowait())
         domain_events = [s.event for s in sequenced_all]
@@ -1705,13 +1991,20 @@ _PROVIDER_REFUSAL = "Your credit balance is too low to access the Anthropic API.
 _PROVIDER_ERROR_CODE = -32000
 
 
-def _failing_provider_graph(lane: str, *, error_kind: str | None = None) -> object:
+def _failing_provider_graph(
+    lane: str, *, workspace_root: str, error_kind: str | None = None
+) -> object:
     """Compile a real one-worker graph whose provider refuses the prompt.
 
     ``error_kind`` attaches the adapter's categorical discriminator to the
     refusal, which is how a lane names anything other than the credential
     failure a bare refusal defaults to. It rides the internal-error code because
     that is the code the real adapter's kind-bearing frames carry.
+
+    ``workspace_root`` is the run's active project. The lane refuses to invent
+    one, so omitting it fails the turn during environment resolution - before a
+    prompt is ever sent, and therefore before the provider refusal these tests
+    exist to observe.
     """
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.graph import END, StateGraph
@@ -1732,6 +2025,7 @@ def _failing_provider_graph(lane: str, *, error_kind: str | None = None) -> obje
         command=command,
         env_vars={},
         provider=lane,
+        workspace_root=workspace_root,
     )
     builder = StateGraph(cast("Any", TeamState))
     builder.add_node("coder", create_worker_node(model, "You are a coder.", "coder"))
@@ -1751,24 +2045,28 @@ class TestProviderFailureReachesTheReason:
 
     @pytest.mark.asyncio
     async def test_a_provider_refusal_names_itself_in_the_failure_reason(
-        self, aggregator: EventAggregator
+        self, aggregator: EventAggregator, tmp_path: Path
     ) -> None:
         """The reason names the provider's type, code, message and lane."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-provider-fail"])
         config = {"configurable": {"thread_id": "thread-provider-fail"}}
 
-        outcome = await aggregator.ingest(
+        outcome = await _ingest(
+            aggregator,
             thread_id="thread-provider-fail",
             agent_id="supervisor",
-            graph=cast("StreamableGraph", _failing_provider_graph("zai")),
+            graph=cast(
+                "StreamableGraph",
+                _failing_provider_graph("zai", workspace_root=str(tmp_path)),
+            ),
             graph_input={"messages": [], "thread_id": "thread-provider-fail"},
             config=config,
         )
 
         assert outcome == "failed"
 
-        sequenced_all = []
+        sequenced_all: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_all.append(queue.get_nowait())
         error_events = [
@@ -1797,7 +2095,7 @@ class TestProviderFailureReachesTheReason:
 
     @pytest.mark.asyncio
     async def test_the_same_reason_is_offered_for_the_durable_column(
-        self, aggregator: EventAggregator
+        self, aggregator: EventAggregator, tmp_path: Path
     ) -> None:
         """A reloading client gets the same answer the live stream got.
 
@@ -1808,15 +2106,19 @@ class TestProviderFailureReachesTheReason:
         aggregator.subscribe("client-2", ["thread-provider-durable"])
         config = {"configurable": {"thread_id": "thread-provider-durable"}}
 
-        await aggregator.ingest(
+        await _ingest(
+            aggregator,
             thread_id="thread-provider-durable",
             agent_id="supervisor",
-            graph=cast("StreamableGraph", _failing_provider_graph("claude")),
+            graph=cast(
+                "StreamableGraph",
+                _failing_provider_graph("claude", workspace_root=str(tmp_path)),
+            ),
             graph_input={"messages": [], "thread_id": "thread-provider-durable"},
             config=config,
         )
 
-        sequenced_all = []
+        sequenced_all: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_all.append(queue.get_nowait())
         error_events = [
@@ -1826,6 +2128,7 @@ class TestProviderFailureReachesTheReason:
 
         reason = aggregator.take_failure_reason("thread-provider-durable")
         assert reason == error_events[-1].message
+        assert reason is not None
         assert _PROVIDER_REFUSAL in reason
         # Bounded: the durable column and its cross-repo consumer both refuse an
         # overlong reason, so the reason a provider fault produces must fit.
@@ -1865,23 +2168,27 @@ class TestRecoverabilityFollowsTheCondition:
         thread_id: str,
         client_id: str,
         error_kind: str | None,
+        workspace_root: str,
     ) -> ErrorOccurred:
         """Drive one real provider refusal and return the error frame it emitted."""
         queue = aggregator.add_subscriber(client_id)
         aggregator.subscribe(client_id, [thread_id])
 
-        await aggregator.ingest(
+        await _ingest(
+            aggregator,
             thread_id=thread_id,
             agent_id="supervisor",
             graph=cast(
                 "StreamableGraph",
-                _failing_provider_graph("claude", error_kind=error_kind),
+                _failing_provider_graph(
+                    "claude", workspace_root=workspace_root, error_kind=error_kind
+                ),
             ),
             graph_input={"messages": [], "thread_id": thread_id},
             config={"configurable": {"thread_id": thread_id}},
         )
 
-        sequenced_all = []
+        sequenced_all: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_all.append(queue.get_nowait())
         error_events = [
@@ -1892,7 +2199,7 @@ class TestRecoverabilityFollowsTheCondition:
 
     @pytest.mark.asyncio
     async def test_a_transient_refusal_is_served_as_recoverable(
-        self, aggregator: EventAggregator
+        self, aggregator: EventAggregator, tmp_path: Path
     ) -> None:
         """A rate refusal reaches the client as recoverable, because it is.
 
@@ -1904,6 +2211,7 @@ class TestRecoverabilityFollowsTheCondition:
             thread_id="thread-recoverable-throttled",
             client_id="client-throttled",
             error_kind="rate_limit",
+            workspace_root=str(tmp_path),
         )
 
         assert err.code == ProviderCondition.THROTTLED.value
@@ -1911,7 +2219,7 @@ class TestRecoverabilityFollowsTheCondition:
 
     @pytest.mark.asyncio
     async def test_a_credential_refusal_is_served_as_unrecoverable(
-        self, aggregator: EventAggregator
+        self, aggregator: EventAggregator, tmp_path: Path
     ) -> None:
         """A credential failure stays unrecoverable, and for a stated reason.
 
@@ -1923,6 +2231,7 @@ class TestRecoverabilityFollowsTheCondition:
             thread_id="thread-recoverable-unauth",
             client_id="client-unauth",
             error_kind="authentication_failed",
+            workspace_root=str(tmp_path),
         )
 
         assert err.code == ProviderCondition.UNAUTHENTICATED.value
@@ -1930,7 +2239,7 @@ class TestRecoverabilityFollowsTheCondition:
 
     @pytest.mark.asyncio
     async def test_the_graph_and_the_client_read_one_retryability_judgement(
-        self, aggregator: EventAggregator
+        self, aggregator: EventAggregator, tmp_path: Path
     ) -> None:
         """What the client is told matches what the retry policy would do.
 
@@ -1952,6 +2261,7 @@ class TestRecoverabilityFollowsTheCondition:
                 thread_id=thread_id,
                 client_id=client_id,
                 error_kind=kind,
+                workspace_root=str(tmp_path),
             )
 
             # The same condition, presented to the retry policy in the shape a
@@ -1982,9 +2292,9 @@ class _StallingGraph:
 
     async def astream_events(
         self, graph_input: object, config: object, *, version: str
-    ):
+    ) -> AsyncIterator[dict[str, Any]]:
         await asyncio.sleep(3600)  # never reached under the test's tiny timeout
-        yield  # pragma: no cover -- make it an async generator
+        yield {}  # pragma: no cover -- make it an async generator
 
     async def aget_state(self, config: object) -> object:
         return type(
@@ -1993,6 +2303,41 @@ class _StallingGraph:
 
 
 assert issubclass(_StallingGraph, StreamableGraph)  # protocol drift guard
+
+
+class _LongStepBudgetGraph:
+    """Graph stub carrying a compiled ``step_timeout``, quiet within that budget.
+
+    Reproduces the live false-positive: a team preset can declare
+    ``step_timeout_seconds`` far above the global ingest-stall default (e.g.
+    1800s for an ACP-backed authoring node doing a long tool call or extended
+    reasoning between protocol frames -- ``graph/compiler.py`` sets exactly
+    this on the compiled Pregel object from the team TOML). ``astream_events``
+    here goes quiet for longer than the tiny global default this test
+    configures, but still well inside ``step_timeout`` -- the shape of a node
+    using precisely the silence its own run sanctioned, not a wedge.
+    """
+
+    step_timeout = 0.5
+
+    async def astream_events(
+        self, graph_input: object, config: object, *, version: str
+    ) -> AsyncIterator[dict[str, Any]]:
+        await asyncio.sleep(0.3)
+        yield {
+            "event": "on_chain_end",
+            "run_id": "r1",
+            "name": "worker",
+            "metadata": {},
+        }
+
+    async def aget_state(self, config: object) -> object:
+        return type(
+            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
+        )()
+
+
+assert issubclass(_LongStepBudgetGraph, StreamableGraph)  # protocol drift guard
 
 
 class TestIngestStallWatchdog:
@@ -2013,7 +2358,8 @@ class TestIngestStallWatchdog:
         # at all, this fails the test loudly in 5s rather than hanging the
         # suite for the graph's simulated hour-long stall.
         outcome = await asyncio.wait_for(
-            aggregator.ingest(
+            _ingest(
+                aggregator,
                 thread_id="thread-stall",
                 agent_id="supervisor",
                 graph=graph,
@@ -2025,7 +2371,7 @@ class TestIngestStallWatchdog:
 
         assert outcome == "failed"
 
-        sequenced_all = []
+        sequenced_all: list[SequencedEvent] = []
         while not queue.empty():
             sequenced_all.append(queue.get_nowait())
         domain_events = [s.event for s in sequenced_all]
@@ -2051,7 +2397,8 @@ class TestIngestStallWatchdog:
         graph = _StallingGraph()
         config = {"configurable": {"thread_id": "thread-stall-reason"}}
         outcome = await asyncio.wait_for(
-            aggregator.ingest(
+            _ingest(
+                aggregator,
                 thread_id="thread-stall-reason",
                 agent_id="supervisor",
                 graph=graph,
@@ -2084,7 +2431,8 @@ class TestIngestStallWatchdog:
         )()
         graph = _SilentGraph(state)
         config = {"configurable": {"thread_id": "thread-normal"}}
-        outcome = await aggregator.ingest(
+        outcome = await _ingest(
+            aggregator,
             thread_id="thread-normal",
             agent_id="supervisor",
             graph=graph,
@@ -2093,3 +2441,40 @@ class TestIngestStallWatchdog:
         )
         assert outcome == "completed"
         assert aggregator.take_failure_reason("thread-normal") is None
+
+    @pytest.mark.asyncio
+    async def test_a_node_within_its_own_step_budget_is_not_killed_by_the_global_floor(
+        self, aggregator: EventAggregator, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A silent stretch under the run's OWN step_timeout must not trip the
+        watchdog, even when it exceeds the flat global default.
+
+        Reproduces the live incident this fix addresses: an ADR-authoring
+        node's ACP subprocess legitimately went quiet -- a long tool call, or
+        extended reasoning with no protocol frame to relay -- for longer than
+        the global default but comfortably inside the team preset's own much
+        larger step_timeout_seconds (1800s on the real preset that failed).
+        The unconditional outer bound, blind to that run's own configured
+        budget, killed a healthy run and reported "no event from the graph"
+        while the run was doing exactly the long-running work its own
+        configuration sanctioned. Fails on the unfixed code (the global
+        default alone bounds the wait, so the 0.3s quiet stretch below trips
+        it well before astream_events yields) and passes once the effective
+        bound is widened to the graph's own step_timeout.
+        """
+        monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.1)
+        graph = _LongStepBudgetGraph()
+        config = {"configurable": {"thread_id": "thread-long-step"}}
+        outcome = await asyncio.wait_for(
+            _ingest(
+                aggregator,
+                thread_id="thread-long-step",
+                agent_id="supervisor",
+                graph=graph,
+                graph_input={"messages": []},
+                config=config,
+            ),
+            timeout=5.0,
+        )
+        assert outcome == "completed"
+        assert aggregator.take_failure_reason("thread-long-step") is None

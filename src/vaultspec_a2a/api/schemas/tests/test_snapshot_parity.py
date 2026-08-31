@@ -25,15 +25,16 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from pydantic import BaseModel
 
 from ....graph.enums import AgentLifecycleState, Model, Provider
 from ....ipc.schemas import ExecutionTaskProjectionPayload
 from ....thread import snapshots as domain
+from .. import events
 from .. import snapshots as wire
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
-    from pydantic import BaseModel
 
 # The mirrored declarations, domain type paired with the wire model it projects
 # onto.  Every pair is asserted field-for-field below.
@@ -41,13 +42,19 @@ _MIRRORS: tuple[tuple[type[DataclassInstance], type[BaseModel]], ...] = (
     (domain.MessageData, wire.MessageSnapshot),
     (domain.ToolCallData, wire.ToolCallSnapshot),
     (domain.ArtifactData, wire.ArtifactSnapshot),
-    (domain.PermissionOptionData, wire._PermissionOptionSnapshot),
-    (domain.PermissionData, wire._PermissionSnapshot),
-    (domain.ClarificationQuestionData, wire._ClarificationQuestionSnapshot),
-    (domain.ClarificationRequestData, wire._ClarificationRequestSnapshot),
-    (domain.AgentData, wire._AgentSnapshot),
+    (domain.PermissionOptionData, wire.PermissionOptionSnapshot),
+    (domain.PermissionData, wire.PermissionSnapshot),
+    (domain.ClarificationQuestionData, wire.ClarificationQuestionSnapshot),
+    (domain.ClarificationRequestData, wire.ClarificationRequestSnapshot),
+    (domain.AgentData, wire.AgentSnapshot),
     (domain.ExecutionTaskData, wire.ExecutionTaskSnapshot),
     (domain.ThreadStateData, wire.ThreadStateSnapshot),
+    # The BROADCAST mirrors of the same two domain types. They were unguarded:
+    # the registration check below scans the DOMAIN side, and both domain types
+    # were already registered against their snapshot mirror, so a second wire
+    # mirror of an already-registered type was invisible to it.
+    (domain.AgentData, events.AgentSummary),
+    (domain.PermissionOptionData, events.PermissionOption),
 )
 
 # The docstring convention every mirrored domain dataclass declares.  The
@@ -128,6 +135,36 @@ def test_every_declared_mirror_is_registered() -> None:
     assert not unregistered, (
         f"{sorted(c.__name__ for c in unregistered)} declare themselves mirrors "
         f"but are absent from _MIRRORS, so no test compares their fields."
+    )
+
+
+def test_every_wire_mirror_is_registered() -> None:
+    """Each WIRE model claiming to mirror a domain type must be covered too.
+
+    The check above scans the domain side, so it only ever asks whether a
+    mirrored domain type is registered ONCE. A domain type with two wire mirrors
+    - a snapshot projection and a broadcast projection - satisfied it as soon as
+    either was registered, leaving the other comparing its fields against
+    nothing. That is not hypothetical: the broadcast agent mirror drifted from
+    the descriptor it names, and the incident this guard exists for was exactly
+    provider and model reaching clients as null.
+
+    Scanning the wire side closes the direction the domain scan cannot see.
+    """
+    registered = {wire_cls for _, wire_cls in _MIRRORS}
+    declared: set[type[BaseModel]] = set()
+    for module in (wire, events):
+        for obj in vars(module).values():
+            if (
+                isinstance(obj, type)
+                and issubclass(obj, BaseModel)
+                and "Mirrors ``thread.snapshots." in (obj.__doc__ or "")
+            ):
+                declared.add(obj)
+    unregistered = declared - registered
+    assert not unregistered, (
+        f"{sorted(c.__name__ for c in unregistered)} name a domain type they "
+        "mirror but are absent from _MIRRORS, so nothing compares their fields."
     )
 
 

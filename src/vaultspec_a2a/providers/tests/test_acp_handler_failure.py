@@ -80,7 +80,6 @@ def _config() -> AcpModelConfig:
         agent_config=None,
         permission_callback=None,
         workspace_root=None,
-        cwd=None,
         command=["echo"],
         env_vars={},
         session_id=None,

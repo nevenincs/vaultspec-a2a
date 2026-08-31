@@ -3,13 +3,15 @@ tags:
   - '#adr'
   - '#tool-cores'
 date: '2026-08-01'
-modified: '2026-08-01'
+modified: '2026-08-05'
 body_schema: 'body-v1'
+body_hash: 'sha256:4204699b283838c7ddf90b55fda25eb067e6bdc476cfae2c57843e1ee0136d97'
 related:
   - '[[2026-08-01-tool-cores-web-grounding-research]]'
   - '[[2026-07-17-tool-cores-adr]]'
   - '[[2026-07-17-tool-cores-research]]'
   - '[[2026-07-15-agent-harness-provisioning-adr]]'
+  - '[[2026-08-04-canonical-homes-audit]]'
 ---
 # `tool-cores` adr: `web grounding` | (**status:** `accepted`)
 
@@ -496,3 +498,230 @@ decision, and the third amendment records the split with its rationale. The
 one decision it leaves open - which binding the hosted-API lanes take - is
 owed as an amendment here when that work is planned, together with the plan
 Step that does not exist today.
+
+## Amendment - the dynamic gate re-landed, smaller (2026-08-05, curator reconciliation)
+
+The preceding section ("The gate ruling and the mechanism residue") states
+that the dynamic gate was withdrawn with the entry and that "the residue that
+survives is static." That sentence is behind the tree: a dynamic gate has
+since re-landed. This amendment records the mechanism, its narrower shape, and
+why it does not reverse the withdrawal - and where the reconciliation rests on
+reasoning rather than a proved reading, it says which.
+
+**What landed.** Commit `7f4e1ea3` (2026-08-04) re-landed a dynamic lane
+gate, centralized in the resolution stage every harness composition already
+passes through: `resolve_harness_mcp_capabilities`
+(`src/vaultspec_a2a/providers/_acp_mcp.py:658-740`). A declared name whose
+registry entry states `network_egress` resolves only on a lane carrying
+recorded completed-retrieval proof; otherwise it lands in the resolution's
+unavailable set with code `lane_unproven_egress` (`_acp_mcp.py:717-729`). The
+gate keys on the DECLARED axis through `harness_server_egresses`
+(`_acp_mcp.py:634-647`) and on the existing lane predicate
+`is_web_lane_proven` (`src/vaultspec_a2a/providers/lane_admission.py:411-420`),
+and it fails closed on an omitted lane: `None` - a caller that stated no lane,
+a model that declared none - is refused, because absence of a lane is not
+permission. Two follow-ups completed the wiring: the research producer now
+states its lane (`75a6aeae`, 2026-08-04), and the desktop attached-server
+re-resolution asks its inner question under the same lane as the outer call
+(`9e0ef0ef`, 2026-08-05, `_acp_mcp.py:1281-1285`).
+
+**Why this is not the withdrawn gate returning.** The withdrawal named three
+surfaces, and all three remain absent - each PROVED against the tree,
+2026-08-05:
+
+- **No separate admission seam.** The gate is a conditional inside the one
+  resolution stage every composition already routes through, not a dedicated
+  seam a caller could forget to consult. `_acp_mcp.py:717` is the only egress
+  gating in the module (whole-file reading).
+- **No harness-server proof half.** The lane declaration carries native
+  evidence only: `WebLaneProof` records the native built-ins the proven
+  retrieval exercised (`lane_admission.py:129-152`). No per-server proof
+  record exists anywhere in the tree.
+- **No served eligibility term.** `is_web_lane_proven` has exactly three
+  production consumers: this resolver (`_acp_mcp.py:717`), the compiler's
+  persona-capability seam (`src/vaultspec_a2a/graph/compiler.py:864-866`),
+  and the codex web-mode resolution
+  (`src/vaultspec_a2a/providers/codex_chat_model.py:753`). Served-profile
+  eligibility consults completed-turn admission only; web proof enters no
+  eligibility verdict.
+
+The re-landed mechanism is therefore strictly smaller than what was
+withdrawn: it introduces no proof record, no admission seam, and no served
+term, and it reuses the one lane declaration that already exists for native
+tool activation. It is also exactly what the reconciliation amendment above
+affirmed in prospect - "the gate guards only whatever future reviewed entry
+declares egress" - keyed on the declared axis, never on entry identity. So
+the disagreement between text and tree is stale TEXT, not a reversed
+decision, and this amendment is the correction.
+
+**The honest caveat, stated so it is not rediscovered as a gap.** The refusal
+branch is production-unreachable today: the frozen registry holds no egressing
+entry, and the `lane_unproven_egress` code has no producer outside
+`_acp_mcp.py` and no test that reaches it (PROVED: the literal appears
+nowhere else in the tree). The withdrawal's own reasoning condemned a
+proof-gated seam over a permanently empty subject set as dead capability, and
+for one day - the gate re-landed 2026-08-04, the admission ruling below is
+dated 2026-08-05 - the branch stood on nothing but the tripwire docstring's
+expectation of a future admission. What resolves the tension is that ruling:
+the subject set is empty today but no longer PERMANENTLY empty, and the
+coverage that would exercise the branch is deliberately owed at admission
+time rather than faked now against a test-built registry the frozen
+construction seam would never admit. One judgment here is REASONED rather
+than proved: that the re-landing was a deliberate arming of the axis rather
+than an accidental contradiction of this record. The commit message and the
+mechanism's shape both say arming, but no decision record said so before this
+one - which is precisely the defect this amendment closes.
+
+The residue sentence is restated to match the tree. The residue is static AND
+dynamic. Static: the declared-egress set is asserted empty by the tripwire
+whose deliberate edit is the admission act
+(`src/vaultspec_a2a/team/tests/test_persona_web_claims.py:142-146`). Dynamic:
+the lane gate above, dormant over that same empty set, is the
+composition-time half that arms the moment a reviewed entry declares egress.
+Everything else in the superseded sentence's section stands unchanged.
+
+## Amendment - egress admission ruled: admissible in principle, no candidate qualifies, web delivery foreclosed (2026-08-05, owner ruling)
+
+The ruling recorded here was made 2026-08-05 and until now lived only in a
+task card and one campaign audit entry
+(`2026-08-04-canonical-homes-audit`, finding
+`the-admission-decision-conditional-yes-nothing-admitted`). A decision with no
+decision record is the defect class this vault exists to prevent, so this
+amendment is the ruling's home; the audit entry and the task card are
+pointers from here on. Nothing in this amendment admits anything.
+
+**Placement, decided and recorded.** This ruling lands as an in-place
+amendment rather than as its own ADR, for three reasons. First, condition (d)
+below - taken verbatim from the ruling - names THIS record as the target of
+any future admission amendment, so the policy governing those amendments
+belongs in the record they will amend. Second, a sibling accepted ADR on the
+same scope (this registry's egress axis and what may join it) would fragment
+one governing decision across two records. Third, this record's own
+convention reserves a superseding record for reversing the central choice,
+and this ruling reverses nothing: it confirms the closed registry and arms
+the axis this record created. The rejected alternative - a standalone
+admission-policy ADR - was schema-viable (`vault check schema` requires an
+ADR to reference research, which the same
+`2026-08-01-tool-cores-web-grounding-research` would satisfy) but was
+rejected on the fragmentation ground alone, because it is a policy about this
+mechanism, not a new subject.
+
+**The ruling.** An egressing harness MCP server MAY be admitted in
+principle. A categorical "never" would recreate the dead-capability class
+this record's own campaign condemns, and the registry's tripwire names the
+admission act as an expected future event - its failure message ends "or a
+real capability that owes this guard an update"
+(`test_persona_web_claims.py:142-146`); the mechanism was built expressive,
+not prohibitive. But no candidate qualifies today, and one whole category is
+permanently out of reach.
+
+**Admission requires ALL of the following.** Ownership (a) and the entry's
+own per-lane completed-work proof (e) are the load-bearing conditions.
+
+- **(a) Ownership.** The discriminating property that survived this record's
+  own reason-corrections (the reconciliation amendment above) is ownership -
+  not credentials, billing, or pinnability. A third-party-operated,
+  contract-less endpoint fails permanently.
+- **(b) Not web-search/fetch delivery.** Foreclosed, not conditional. Web
+  reach is first-party on the CLI lanes and framework-bound on hosted-API
+  lanes, "never by a server this registry mounts" (the registry's own
+  standing comment, `_acp_mcp.py:354-360`). Re-admitting a web-delivery
+  server would reverse this record's central delivery choice and is therefore
+  a SUPERSESSION, never an amendment - this ruling cannot reopen it, and does
+  not. What stays admissible is a non-web-delivery capability that happens to
+  egress: a first-party documentation or index service is the standing
+  example.
+- **(c) Full trust-root declaration through the construction seam.**
+  `_declare_registry` (`_acp_mcp.py:197-286`): `network_egress` true,
+  `read_only` stated (a write-capable egressing entry is constructible but
+  unsurfaceable - the surfacing policy lives at `_require_read_only`,
+  `_acp_mcp.py:928-948`), `root_pin` stated or explicitly null,
+  `exact_surface` stated, and no `env` (the field is refused at construction,
+  `bd5b6b2d`, `_acp_mcp.py:272-282`).
+- **(d) The decision record before the guard edit.** An in-place amendment to
+  this record naming the entry, its owner, its capability, its bounds, and
+  its per-lane proofs - landed before or with the tripwire edit, never after.
+- **(e) The entry's own completed-work proof per served lane.** Lane
+  web-proof does NOT discharge this; see the floor paragraph below.
+
+**The lanes are exactly the members of `PROVEN_WEB_LANES` at admission
+time.** Verified 2026-08-05 as `{claude, codex}`
+(`lane_admission.py:262-293`). kimi (handshake-only), gemini
+(construction-only), openai, zhipu, any garbage lane, and an unstated lane
+are all refused.
+
+**Two different emptinesses, two different remedies - do not read one as the
+other.** `PROVEN_WEB_LANES` is NOT empty: the gate's PREDICATE has two live
+members. What is empty is the gate's SUBJECT set - the registry entries that
+declare egress, asserted empty by the tripwire. An empty predicate would be
+cured by a lane's live retrieval proof; the empty subject set is cured only
+by the full admission path above. A recent working note asserted "nothing
+egresses" of the predicate and had to be corrected: it is true of the
+registry's entries only. Any future reader finding one emptiness must check
+which one they are holding before acting on it.
+
+**The lane predicate is a FLOOR, not the admission.** Two questions exist,
+and the gate answers only the first: (1) may outward reach compose on this
+lane at all - `is_web_lane_proven`; (2) has THIS server completed real work
+on this lane - a separate, stronger claim. Claude's recorded proof is
+native-`WebFetch`-only (`lane_admission.py:277-291`); codex's is a
+config-posture retrieval with no allowlistable tool name at all
+(`lane_admission.py:263-276`). NEITHER ever exercised MCP-server-mediated
+egress, and the lane catalog's own principle forbids evidence inheritance
+across mechanisms (`lane_admission.py:200-205`,
+`catalog_lane_admission_reason`). So every (server, lane) pair needs its own
+proof on the transport actually served - which is condition (e), and why
+credential readiness, lane web-proof, and every other floor property are
+necessary but never sufficient.
+
+**Evidence that suffices, per (server, lane).** A shipped registry entry
+(never a hand-built or test-only member) -> resolution with the lane stated
+-> production composition (`compose_harness_mcp_servers` +
+`harness_allowed_tool_names` on claude; `codex_mcp_server_specs` ->
+`build_codex_config_home` on codex) -> a real spawned session -> the agent
+invokes the server's tool -> a real retrieval completes -> the content lands
+in checkpointed state, asserted on A VALUE ONLY THE LIVE SOURCE COULD
+SUPPLY. Plus the negative half in the same file: `lane=None` and a
+handshake-only lane yield `lane_unproven_egress`, the server absent from the
+launch specs, its tools absent from the allowlist.
+
+**What does not count as proof** - written down before any candidate exists,
+because every item on this list has been mistaken for proof in this
+repository: `tools/list` contract verification passing; the server process
+spawning; rendering into `.claude.json` or `config.toml`; resolution
+returning the name available; the model SAYING it used the tool without the
+live-only-value assertion; any mocked, patched, or replayed transport;
+credential or readiness checks.
+
+**Precondition the admitting change must close: an egressing registry entry
+has NO BOUNDS AXIS.** Verified:
+`_require_bounds_match_the_egress_axis(NATIVE_TOOL_EGRESS,
+NATIVE_WEB_TOOL_BOUNDS)` (`_acp_mcp.py:1594-1632`) binds usage bounds to
+NATIVE tool names only, and `NATIVE_WEB_TOOL_BOUNDS` (`_acp_mcp.py:1553-1568`)
+declares bounds for `WebSearch` and `WebFetch` alone. An admitted egressing
+MCP tool would pass a real gate and then reach outward uncapped while its
+native siblings are capped per branch. The admitting change must either
+extend a bounds declaration to egressing registry entries or record
+explicitly why the server's own throttling suffices. Recorded here as a
+precondition, deliberately NOT fixed now: a bounds surface for entries that
+cannot exist would be the dead-capability class again.
+
+**Owed at admission, not before.** The two tests that would exercise the
+gate become writable when a candidate exists, and must assert DIRECTION and
+reason-truthfulness: the research producer's stated lane observably changes
+composition - a proven lane admits, an absent or unproven lane strips
+(`75a6aeae`); and the desktop attached-server re-resolution answers under
+the same lane as the outer call (`9e0ef0ef`). Also recommended then: split
+the served refusal so "no lane was stated" is distinguishable from "this
+lane carries no recorded proof" - today's single reason
+(`_UNPROVEN_EGRESS_REASON`, `_acp_mcp.py:369-372`) blames the lane for a
+caller's omission, as the resolver's own desktop commentary already notes
+(`_acp_mcp.py:1274-1280`).
+
+**This ruling does NOT authorize:** admitting any server; any
+web-search/fetch delivery server under any framing; widening
+`PROVEN_WEB_LANES` or `PROVEN_TURN_LANES`; `WebSearch` on claude; serving
+kimi, gemini, openai, or zhipu; evidence inheritance of any kind; editing
+the tripwire ahead of the entry's own proof; test-only registry members.
+Nothing is admitted by this amendment, and nothing remains open under it
+until a candidate entry exists.

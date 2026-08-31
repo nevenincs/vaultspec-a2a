@@ -121,9 +121,12 @@ async def test_team_status_reports_the_resolved_provider_and_model(
     worker = agents[_WORKER_ID]
     assert worker.provider == Provider.DETERMINISTIC.value
     assert worker.model == Model.LOW.value
-    # The agent's own TOML declares "claude"; seeing it here would mean the
-    # route reported a configured default rather than the resolved assignment.
-    assert load_agent_config(_WORKER_ID).model.provider == Provider.CLAUDE
+    # The discriminator: the persona's own TOML declares NO provider, so the
+    # value above cannot have been copied from it and can only have come from
+    # resolving the team's declaration. (It used to declare "claude", and this
+    # asserted the route did not report that instead; the persona carries no
+    # model policy now, so the same claim is made from the other direction.)
+    assert load_agent_config(_WORKER_ID).model.provider is None
 
 
 @pytest.mark.asyncio

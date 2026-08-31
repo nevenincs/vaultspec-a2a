@@ -18,13 +18,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.config import settings
 from ...control.worker_management import (
     _evict_stale_worker,
     _worker_stderr_log_path,
     sweep_orphan_worker_logs,
 )
 from ...lifecycle.registry import ProcRecord, now_ms, write_record
+from ...testing import settings_override
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -33,18 +33,9 @@ if TYPE_CHECKING:
 
 @contextmanager
 def _a2a_home(path: Path) -> Iterator[None]:
-    """Point ``settings.a2a_home`` at *path* for the duration, then restore it.
-
-    Mirrors the sanctioned direct-attribute-swap seam used across this suite
-    (e.g. the ``_internal_token`` override in ``test_worker_provenance.py``) -
-    a real attribute on the live settings object, not a mock.
-    """
-    original = settings.a2a_home
-    settings.a2a_home = path
-    try:
+    """Point ``settings.a2a_home`` at *path* for the duration, then restore it."""
+    with settings_override(a2a_home=path):
         yield
-    finally:
-        settings.a2a_home = original
 
 
 def _make_handler() -> type[http.server.BaseHTTPRequestHandler]:

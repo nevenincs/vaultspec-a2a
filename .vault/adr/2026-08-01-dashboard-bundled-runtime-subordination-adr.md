@@ -11,6 +11,7 @@ supersedes:
   - '2026-07-24-dashboard-bundled-runtime-adr'
 modified: '2026-08-01'
 body_schema: 'body-v1'
+body_hash: 'sha256:04698cc25572a9dbcb557394c0a461f644acd7bff651b6a2fd45a0b39a8d57fd'
 ---
 # `dashboard-bundled-runtime` adr: `the dashboard is the authority; a2a supplies what it requires` | (**status:** `accepted`)
 

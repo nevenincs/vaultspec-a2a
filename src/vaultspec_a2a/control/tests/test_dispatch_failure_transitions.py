@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
@@ -16,6 +19,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...api.tests.clarification_harness import park_clarification
+from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.clarification_service import respond_to_clarification
 from ...control.message_service import send_followup_message
@@ -25,7 +29,6 @@ from ...database import (
     create_thread,
     get_thread,
 )
-from ...database.models import Base
 from ...providers.conditions import ProviderCondition
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
@@ -33,7 +36,6 @@ from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from pathlib import Path
 
 
 @pytest_asyncio.fixture
@@ -43,9 +45,8 @@ async def engine(
     """Create a file-backed engine for dispatch-failure tests."""
     case_dir = tmp_path_factory.mktemp("dispatch-failure-db")
     db_file = case_dir / "test.db"
+    materialize_schema(Path(db_file))
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
 
@@ -56,6 +57,18 @@ async def session_factory(
 ) -> async_sessionmaker[AsyncSession]:
     """Provide an async session factory bound to the test engine."""
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+# A follow-up inherits the active project its run was created with, so a thread
+# seeded for a dispatch-behaviour test needs a real one: without it the message
+# service refuses before reaching the behaviour under test. The directory is
+# real because the refusal is about presence, not shape.
+_ACTIVE_PROJECT = tempfile.mkdtemp(prefix="vaultspec-active-project-")
+
+
+def _active_project_metadata() -> str:
+    """Return thread metadata naming a real active project."""
+    return json.dumps({"workspace_root": _ACTIVE_PROJECT})
 
 
 @pytest.mark.asyncio
@@ -131,6 +144,7 @@ async def test_a_definitely_undelivered_followup_records_why_it_did_not_arrive(
             title="Definite non-delivery",
             repair_status="healthy",
             execution_readiness="healthy",
+            metadata=_active_project_metadata(),
         )
         await session.commit()
 

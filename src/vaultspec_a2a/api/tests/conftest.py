@@ -16,13 +16,14 @@ checkpointer implementation, not a ``MemorySaver`` stub.
 
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, cast
 
 import httpx
 import pytest
 import pytest_asyncio
+import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport
@@ -34,11 +35,12 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner
-from ...database.models import Base
 from ...streaming.aggregator import EventAggregator
+from ...testing.catalog_selection import in_process_selection
 from ..app import create_app
 
 type SessionFactory = async_sessionmaker[AsyncSession]
@@ -88,10 +90,12 @@ async def engine(
 ) -> AsyncIterator[AsyncEngine]:
     """File-backed async SQLAlchemy engine with all tables created."""
     case_dir = tmp_path_factory.mktemp("api-test-db")
-    db_file = case_dir / "test.db"
+    # Copy the session schema template instead of replaying the DDL. The DDL is
+    # byte-identical every time and cost ~340ms - more than this package's tests
+    # spent doing their actual work. The database is still per-test and still
+    # real; only its materialization changes.
+    db_file = materialize_schema(case_dir / "test.db")
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
 
@@ -231,6 +235,39 @@ class _InProcessWorker:
 type AppFixture = tuple[FastAPI, EventAggregator, _InProcessWorker, AsyncSqliteSaver]
 
 
+_SESSION_CATALOG_SERVICE: Any = None
+
+
+def _session_catalog_service() -> Any:
+    """Return the process-wide provider catalog service, serving in-process lanes.
+
+    Built once and reused. See the note at its injection site in `make_app` for
+    why per-app construction was the wrong default.
+
+    The in-process lanes are armed through the CONSTRUCTOR, never the process
+    environment. These suites spawn real gateway subprocesses, and the
+    environment is inherited: arming a lane process-wide for this service would
+    silently rearm it for every child and change the lane inventory served to
+    tests that have nothing to do with selection. The argument declares this
+    caller's posture and reaches nothing else.
+
+    Arming at all is what lets the run-bearing fixtures below select a lane that
+    bills nothing. Unarmed, the only selectable lane on a developer machine
+    holding a live provider session is that real provider - so every suite that
+    starts a run was freezing a metered lane to assert on gateway plumbing.
+    """
+    global _SESSION_CATALOG_SERVICE
+    if _SESSION_CATALOG_SERVICE is None:
+        from datetime import timedelta
+
+        from ...providers.provider_catalog_service import ProviderCatalogService
+
+        _SESSION_CATALOG_SERVICE = ProviderCatalogService(
+            ttl=timedelta(hours=6), serve_in_process_lanes=True
+        )
+    return _SESSION_CATALOG_SERVICE
+
+
 def make_app(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
@@ -260,6 +297,20 @@ def make_app(
 
     worker = _InProcessWorker()
 
+    # ONE catalog service for the whole session, not one per app.
+    #
+    # The service owns a real TTL cache, but `make_app` builds a fresh app per
+    # test, so a per-app service threw that cache away and re-probed every
+    # provider lane on every test - measured at ~15s each, which dominated the
+    # runtime of every suite that starts a run. The probe result is a property
+    # of the machine and workspace, not of the app under test, so rebuilding it
+    # per test is pure waste rather than isolation.
+    #
+    # Sharing the real production object keeps the real code path: the cache
+    # being exercised is the one that ships, its TTL is simply widened past the
+    # length of a suite so a long run does not re-probe mid-flight.
+    app.state.provider_catalog_service = _session_catalog_service()
+
     # Store singletons in app.state so WebSocket handlers can read them
     app.state.aggregator = aggregator
     app.state.checkpointer = checkpointer
@@ -285,3 +336,119 @@ def make_app(
     app.state.db_session_factory = session_factory
 
     return app, aggregator, worker, checkpointer
+
+
+_CATALOG_FIELD_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def catalog_run_fields(
+    client: Any, *, workspace_root: str | None = None
+) -> dict[str, Any]:
+    """Return the run-start fields an explicit catalog selection now requires.
+
+    Run-start refuses a body without a ``selection``, and revalidates that
+    selection against the catalog SERVED FOR ITS WORKSPACE - so a hand-written
+    reference is refused even when its shape is perfect. The reference is read
+    from the live served catalog the way a real client must, through the shared
+    selection mechanism, which returns an IN-PROCESS lane and refuses to return
+    any other. These suites assert on gateway plumbing, so the lane that answers
+    must be the one that bills nothing.
+
+    A canned literal would be the tempting shortcut and would be wrong twice
+    over: it would break whenever the catalog's revision moved, and it would let
+    a test assert against a lane the gateway would never serve. Reading keeps
+    the fixture honest about what the gateway is offering at that moment.
+
+    ``workspace_root`` is returned alongside because the same gate refuses a
+    selection with no existing workspace to anchor it in.
+    """
+    root = workspace_root or str(Path.cwd())
+    cached = _CATALOG_FIELD_CACHE.get(root)
+    if cached is not None:
+        return {
+            "selection": dict(cached["selection"]),
+            "metadata": dict(cached["metadata"]),
+        }
+    response = client.get("/v1/provider-catalog", params={"workspace_root": root})
+    assert response.status_code == 200, response.text
+    fields: dict[str, Any] = {
+        "selection": in_process_selection(response.json()),
+        "metadata": {"workspace_root": root},
+    }
+    _CATALOG_FIELD_CACHE[root] = fields
+    return {
+        "selection": dict(fields["selection"]),
+        "metadata": dict(fields["metadata"]),
+    }
+
+
+async def async_catalog_run_fields(
+    client: Any, *, workspace_root: str | None = None
+) -> dict[str, Any]:
+    """The async twin of :func:`catalog_run_fields`, for httpx.AsyncClient callers.
+
+    Deliberately a twin rather than a shared core: the sync and async clients do
+    not share a request method, and the alternative - threading a maybe-awaitable
+    through one function - reads worse than two short ones that each do the
+    obvious thing. Both consume the same cache, so whichever runs first pays for
+    the catalog and the other does not.
+    """
+    root = workspace_root or str(Path.cwd())
+    cached = _CATALOG_FIELD_CACHE.get(root)
+    if cached is None:
+        # Read on a budget of its OWN. Callers build clients with short timeouts
+        # to assert the gateway answers promptly; the first catalog read in a
+        # process also probes every provider lane and legitimately outlasts that.
+        # Borrowing the caller's budget made a cold probe look like an
+        # unresponsive gateway. Later reads come from the cache above.
+        #
+        # The budget is widened PER REQUEST rather than by building a second
+        # client. A second client keeps only the caller's base_url and silently
+        # drops its TRANSPORT, so every in-process caller - anything on
+        # ``httpx.ASGITransport``, whose base_url is an unroutable name like
+        # ``http://test`` - resolved that name against real DNS and died with
+        # ``getaddrinfo failed``. Those callers only ever passed when an earlier
+        # real-socket test had already warmed the cache above, so the failure
+        # moved with test order. Reusing the caller's client keeps its transport.
+        response = await client.get(
+            "/v1/provider-catalog",
+            params={"workspace_root": root},
+            timeout=180.0,
+        )
+        assert response.status_code == 200, response.text
+        cached = {
+            "selection": in_process_selection(response.json()),
+            "metadata": {"workspace_root": root},
+        }
+        _CATALOG_FIELD_CACHE[root] = cached
+    return {
+        "selection": dict(cached["selection"]),
+        "metadata": dict(cached["metadata"]),
+    }
+
+
+@asynccontextmanager
+async def _live_server(app: FastAPI) -> AsyncIterator[str]:
+    """Serve *app* on an ephemeral loopback port and yield its base URL.
+
+    A real uvicorn server on a real TCP socket, not ``ASGITransport``: an SSE
+    consumer must read frames while the producer is still emitting, and the
+    in-memory transport buffers a whole response before returning one.
+    """
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=0, log_level="warning", lifespan="on"
+    )
+    server = uvicorn.Server(config)
+    task = asyncio.create_task(server.serve())
+    try:
+        for _ in range(500):
+            if server.started and server.servers:
+                break
+            await asyncio.sleep(0.01)
+        assert server.started and server.servers, "uvicorn did not start"
+        port = server.servers[0].sockets[0].getsockname()[1]
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        with suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(task, timeout=5.0)

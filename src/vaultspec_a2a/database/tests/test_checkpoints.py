@@ -11,31 +11,14 @@ from __future__ import annotations
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...control.config import settings
+from ...testing import settings_override as _settings_override
 from ..checkpoints import open_checkpointer
-
-
-class _SettingsOverride:
-    """Temporarily override settings attributes for a test (save/restore)."""
-
-    def __init__(self, **updates: object) -> None:
-        self._updates = updates
-        self._originals: dict[str, object] = {}
-
-    def __enter__(self) -> None:
-        for name, value in self._updates.items():
-            self._originals[name] = getattr(settings, name)
-            setattr(settings, name, value)
-
-    def __exit__(self, *_args: object) -> None:
-        for name, value in self._originals.items():
-            setattr(settings, name, value)
 
 
 @pytest.mark.asyncio
 async def test_sqlite_checkpointer_enables_wal_and_busy_timeout(tmp_path) -> None:
     db_file = tmp_path / "checkpoints.sqlite"
-    with _SettingsOverride(
+    with _settings_override(
         checkpoint_backend="sqlite",
         checkpoint_database_url=f"sqlite+aiosqlite:///{db_file}",
     ):

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from typing import Any
 
 from fastapi import (
@@ -27,18 +26,48 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.security import HTTPBearer
 
 from ..control.config import settings
 from ..control.event_handlers import (
     _handle_execution_state_event,
     relay_event,
 )
+from ..control.worker_management import worker_liveness
+from ..graph.enums import ServerEventType
 from ..thread.snapshots import normalize_wire_event_type
 from ..utils import BearerVerdict, verify_internal_bearer
 
 __all__ = ["internal_router"]
 
 logger = logging.getLogger(__name__)
+
+# Distinguishes "this app declared no database" from "this app declared nothing".
+# Both used to arrive as ``None``, and the durable event handlers cannot tell them
+# apart from a bare value: the first must skip the write, the second must use the
+# process database the gateway opened at boot.
+_UNDECLARED = object()
+
+
+def _app_session_factory(app: Any) -> Any:
+    """Resolve the database an app relays durable events into.
+
+    An app that SETS ``db_session_factory`` has declared what it has, including
+    ``None`` for "nothing" - a host embedding this router without a store, and the
+    reading that makes a skipped projection correct rather than accidental. An app
+    that never sets it has declared nothing, which is the gateway's own case: it
+    seats no attribute and relays into the process database ``init_db`` opened.
+
+    Reading a bare ``None`` for both is what let an app with no database write into
+    whichever database some unrelated component had initialized in the same
+    process.
+    """
+    from ..database import application_session_factory
+
+    declared = getattr(app.state, "db_session_factory", _UNDECLARED)
+    if declared is _UNDECLARED:
+        return application_session_factory()
+    return declared
 
 
 def _validate_event_envelope(
@@ -55,19 +84,60 @@ def _validate_event_envelope(
         )
 
 
+#: Declares the internal-IPC bearer in the generated OpenAPI document.
+#:
+#: A SEPARATE scheme from the gateway's ``GatewayServiceToken``, because it is a
+#: separate credential: this plane verifies ``settings.internal_token``, the
+#: gateway<->worker IPC secret, not the attach credential that lifecycle discovery
+#: publishes for external callers. Declaring both under one scheme would tell a
+#: reader the two surfaces accept the same token, which they do not.
+#:
+#: Declared here rather than beside :func:`verify_internal_bearer`: that module is
+#: framework-free by design and leaves transport mapping to each caller, so a
+#: FastAPI security object belongs on this side of the boundary.
+#:
+#: ``auto_error=False`` keeps it inert - the raw header below is still what the
+#: verifier compares, and the 401/500 mapping stays in one place.
+#:
+#: Attached per HTTP ROUTE rather than to the router, and that placement is
+#: load-bearing: this router also carries the worker WebSocket, router-level
+#: dependencies apply to WebSocket routes too, and ``HTTPBearer`` resolves only
+#: against an HTTP request - mounting it on the router raises
+#: ``TypeError: HTTPBearer.__call__() missing 1 required positional argument:
+#: 'request'`` and drops the worker connection. The router keeps the raw-header
+#: verifier, which both scopes can satisfy.
+internal_bearer_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="InternalIpcToken",
+    description=(
+        "Internal gateway-to-worker IPC token. Not the gateway service token: "
+        "these routes are the worker's callback surface, not a client surface."
+    ),
+)
+
+#: Declaration-only dependency for the HTTP routes below. Never read; depending
+#: on it is what puts the security requirement on these operations in the
+#: published contract.
+_declare_internal_bearer = Depends(internal_bearer_scheme)
+
+
 async def _verify_internal_token(
-    authorization: str | None = Header(None),
+    authorization: str | None = Header(None, include_in_schema=False),
 ) -> None:
     """Verify bearer token for internal IPC endpoints.
 
     Skipped when settings.internal_token is None **and** the environment
     is DEVELOPMENT.  In production/staging/testing, a missing token is a
     configuration error. Delegates the rule to the shared IPC bearer verifier.
+
+    Runs for the WebSocket route as well as the HTTP ones, so it reads the raw
+    header rather than a security object; see :data:`internal_bearer_scheme`.
     """
     verdict, detail = verify_internal_bearer(
         authorization,
         token=settings.internal_token,
         environment=settings.environment,
+        environment_declared=settings.environment_declared,
     )
     if verdict is BearerVerdict.MISCONFIGURED:
         raise HTTPException(status_code=500, detail=detail)
@@ -79,6 +149,15 @@ internal_router = APIRouter(
     prefix="/internal",
     tags=["internal"],
     dependencies=[Depends(_verify_internal_token)],
+    # Both refusals belong to the gate every route here sits behind, not to any
+    # one verb. Note the misconfiguration case is a 500 on this plane, where the
+    # gateway's attach gate answers 503: an unset internal token outside
+    # DEVELOPMENT is this service's own configuration error, not a dependency
+    # that might yet become available.
+    responses={
+        401: {"description": "Missing or invalid internal IPC token."},
+        500: {"description": "Internal IPC token is not configured."},
+    },
 )
 
 
@@ -158,7 +237,7 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
             },
         )
         return
-    session_factory = getattr(websocket.app.state, "db_session_factory", None)
+    session_factory = _app_session_factory(websocket.app)
     agg = getattr(websocket.app.state, "aggregator", None)
     # Read the seated gate rather than get-or-creating it: a gate that has never
     # been seated has admitted nothing, so there is nothing to release.
@@ -184,6 +263,7 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
         websocket.headers.get("authorization"),
         token=settings.internal_token,
         environment=settings.environment,
+        environment_declared=settings.environment_declared,
     )
     if verdict is not BearerVerdict.OK:
         await websocket.close(code=1008, reason="Unauthorized")
@@ -194,7 +274,9 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
 
     # Store reference so supervisor can check connectivity
     websocket.app.state.worker_ws = websocket
-    websocket.app.state.worker_last_heartbeat_ts = time.monotonic()
+    # The accept itself is contact, but it says nothing about what the worker is
+    # running, so no thread set is claimed here.
+    worker_liveness(websocket.app.state).record_contact()
 
     try:
         while True:
@@ -209,10 +291,9 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
             msg_type = msg.get("type", "")
 
             match msg_type:
-                case "heartbeat":
-                    websocket.app.state.worker_last_heartbeat_ts = time.monotonic()
-                    websocket.app.state.worker_active_threads = msg.get(
-                        "active_threads", []
+                case ServerEventType.HEARTBEAT:
+                    worker_liveness(websocket.app.state).record_contact(
+                        active_threads=msg.get("active_threads", [])
                     )
                     logger.debug(
                         "Worker heartbeat: %d active threads",
@@ -243,7 +324,7 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
         websocket.app.state.worker_ws = None
 
 
-@internal_router.get("/health")
+@internal_router.get("/health", dependencies=[_declare_internal_bearer])
 async def internal_health() -> dict[str, str]:
     """Readiness probe -- confirms the internal API is accepting connections."""
     return {"status": "ok", "service": "gateway"}
@@ -254,7 +335,7 @@ async def internal_health() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-@internal_router.post("/events")
+@internal_router.post("/events", dependencies=[_declare_internal_bearer])
 async def receive_worker_event(request: Request) -> dict[str, str]:
     """Receive a single event from the worker and relay to browser clients.
 
@@ -292,13 +373,13 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
         thread_id,
         payload,
         agg=agg,
-        session_factory=getattr(request.app.state, "db_session_factory", None),
+        session_factory=_app_session_factory(request.app),
         drain_gate=getattr(request.app.state, "drain_gate", None),
     )
     return {"status": "ok"}
 
 
-@internal_router.post("/events/batch")
+@internal_router.post("/events/batch", dependencies=[_declare_internal_bearer])
 async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     """Receive a batch of events from the worker.
 
@@ -338,7 +419,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
             detail="No relay target available -- gateway not ready",
         )
 
-    session_factory = getattr(request.app.state, "db_session_factory", None)
+    session_factory = _app_session_factory(request.app)
     drain_gate = getattr(request.app.state, "drain_gate", None)
 
     for idx, evt in enumerate(events):
@@ -365,7 +446,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@internal_router.post("/heartbeat")
+@internal_router.post("/heartbeat", dependencies=[_declare_internal_bearer])
 async def receive_worker_heartbeat(request: Request) -> dict[str, str]:
     """Receive a heartbeat from the worker.
 
@@ -373,8 +454,9 @@ async def receive_worker_heartbeat(request: Request) -> dict[str, str]:
     liveness without a persistent WebSocket connection.
     """
     body: dict[str, Any] = await request.json()
-    request.app.state.worker_last_heartbeat_ts = time.monotonic()
-    request.app.state.worker_active_threads = body.get("active_threads", [])
+    worker_liveness(request.app.state).record_contact(
+        active_threads=body.get("active_threads", [])
+    )
     logger.debug(
         "Worker heartbeat (HTTP): %d active threads",
         len(body.get("active_threads", [])),

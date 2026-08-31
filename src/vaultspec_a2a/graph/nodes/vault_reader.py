@@ -2,8 +2,8 @@
 
 The mount node also owns the canonical ``build_initial_vault_index`` scan so the
 same glob logic seeds the index at compile time and refreshes it on every mount
-pass. ``compiler`` re-exports the function to
-preserve the historical ``graph.compiler.build_initial_vault_index`` surface.
+pass. Callers seeding an index import it from here; the ``graph`` package's lazy
+entry point resolves to this module for the same reason.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages.utils import count_tokens_approximately
 
+from ...context.stage import VAULT_STAGE_PATTERNS
 from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
 
@@ -35,15 +36,6 @@ _DOC_SEPARATOR = "--- MOUNTED: {path} ---"
 _DOC_FOOTER = "--- END ---"
 _QUEUE_PHASES = frozenset({PipelinePhase.PLAN, PipelinePhase.EXEC})
 
-_VAULT_STAGE_PATTERNS: dict[str, str] = {
-    PipelinePhase.RESEARCH: ".vault/research/*{tag}*.md",
-    "reference": ".vault/reference/*{tag}*.md",
-    PipelinePhase.ADR: ".vault/adr/*{tag}*.md",
-    PipelinePhase.PLAN: ".vault/plan/*{tag}*.md",
-    PipelinePhase.EXEC: ".vault/exec/*{tag}*/**/*.md",
-    PipelinePhase.AUDIT: ".vault/audit/*{tag}*.md",
-}
-
 
 def build_initial_vault_index(
     workspace_root: Path | None,
@@ -56,9 +48,23 @@ def build_initial_vault_index(
     if workspace_root is None:
         return {}
     index: dict[str, list[str]] = {}
-    for stage, pattern in _VAULT_STAGE_PATTERNS.items():
+    for stage, pattern in VAULT_STAGE_PATTERNS.items():
         resolved = pattern.replace("{tag}", _glob.escape(feature_tag))
-        matches = sorted(workspace_root.glob(resolved))[: domain_config.vault_index_cap]
+        # The TAIL, not the head. Identifiers sort ascending (W01-P01-S01 first),
+        # so truncating from the front kept a feature's OLDEST records and
+        # discarded everything recent - which inverts what a resuming run needs,
+        # and does it silently. Two features in this repository's own vault hold
+        # 130 and 97 execution records against a cap of 50, so this bound is not
+        # hypothetical: those runs were grounding on their first fifty steps.
+        #
+        # The ordering is lexicographic, so recency here is APPROXIMATE: it is
+        # exact across waves and phases, and degrades within a phase once step
+        # numbers pass two digits (S144 sorts before S87). Approximate recency is
+        # strictly better than guaranteed staleness, and a true ordering needs a
+        # numeric key over the canonical identifier segments rather than a
+        # filesystem timestamp, which a checkout rewrites.
+        cap = domain_config.vault_index_cap
+        matches = sorted(workspace_root.glob(resolved))[-cap:]
         if matches:
             index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
     return index

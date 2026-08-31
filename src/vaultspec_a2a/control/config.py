@@ -9,7 +9,8 @@ a drop-in replacement for the former ``core.config.Settings``.
 """
 
 import json
-from pathlib import Path
+import logging
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import (
@@ -29,16 +30,36 @@ if TYPE_CHECKING:
 
 # Defaults for path-override fields.  Computed once at module import relative to
 # this file: control/config.py → control → vaultspec_a2a → src → project-root.
-_DEFAULT_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent
+# This walk leaves the installed package, which is exactly what the storage-anchor
+# gate refuses everywhere else.  It is allowed HERE and only here because this is
+# the override seam itself: the value exists to be replaced by
+# VAULTSPEC_PROJECT_ROOT, and a deployment that does not replace it holds no
+# canonical data at this path — the database and the A2A home anchor elsewhere.
+_DEFAULT_PROJECT_ROOT: Path = (
+    Path(__file__).resolve().parent.parent.parent.parent  # storage-anchor-ok
+)
 # Machine-global A2A home for runtime state.  Kept outside the repo and
 # outside .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 _DEFAULT_A2A_HOME: Path = Path.home() / ".vaultspec-a2a"
+# The ONE dotenv file this package ever reads, resolved from __file__ rather than
+# from the process working directory.  pydantic-settings resolves a bare ".env"
+# against the launch directory, so any directory a process happened to start in
+# could inject configuration — ports, endpoints, API keys — into a served process.
+# Anchoring the lookup here keeps a checkout-local .env working for developers
+# while making the launch directory irrelevant; in a non-editable install the
+# path lands beside the installed package, where no such file is shipped, so a
+# deployed process is configured only by its real environment.
+_CHECKOUT_ENV_FILE: Path = _DEFAULT_PROJECT_ROOT / ".env"
 
 # Canonical env-var names for the worker<->gateway pairing. Defined here (the owner
 # of these settings) and imported wherever the value is written into a child
 # environment, so the name lives in exactly one place (never a mirrored literal).
 INTERNAL_TOKEN_ENV = "VAULTSPEC_INTERNAL_TOKEN"
 GATEWAY_URL_ENV = "VAULTSPEC_GATEWAY_URL"
+# The MCP-scoped alternate spelling of GATEWAY_URL_ENV (see the gateway_url Field
+# below): a single named constant so the alias lives in one place rather than as a
+# literal repeated at every explicit-configuration check.
+GATEWAY_URL_ALT_ENV = "VAULTSPEC_MCP_API_BASE_URL"
 WORKER_URL_ENV = "VAULTSPEC_WORKER_URL"
 
 # Canonical service-endpoint defaults. This module is the ONE home for every
@@ -50,12 +71,135 @@ WORKER_URL_ENV = "VAULTSPEC_WORKER_URL"
 DEFAULT_MOCK_API_BASE = "http://localhost:8100"
 DEFAULT_OTLP_ENDPOINT = "http://localhost:4317"
 
+DEFAULT_REPAIR_JOURNAL_RETENTION_BOOTS: int = 10
+"""Boots of startup-repair history retained per thread.
+
+Startup reconciliation appends a ``repair_started``/``repair_finished`` pair per
+non-terminal thread on every boot, keyed by a recovery epoch the same pass
+increments, so the key never repeats and the class grows with restart count
+rather than with work.
+
+Counted in BOOTS rather than rows deliberately. This is NOT a recovery horizon
+and must not be read as one: no code path reads a repair row back, so the value
+that would be safe on recovery grounds is zero. What it buys is operator
+hindsight - how many restarts of repair history survive for someone diagnosing a
+thread that will not resume - which is a legibility judgement, not a derivation.
+Rows would hide that judgement behind a boot-frequency conversion; boots state it
+plainly.
+"""
+
+logger = logging.getLogger(__name__)
+
+# The synchronous SQLAlchemy driver this project ships for each supported backend.
+# Keyed on the SQLAlchemy *backend* name rather than on the full drivername, so the
+# mapping resolves identically for a bare scheme (``postgresql://``), an async
+# driver (``postgresql+asyncpg://``), and an already-synchronous one
+# (``postgresql+psycopg://``). Only psycopg v3 and the stdlib sqlite driver are
+# declared dependencies; psycopg2 - which SQLAlchemy would otherwise select for a
+# bare ``postgresql://`` scheme - is not installed.
+_SYNC_DRIVERNAMES: dict[str, str] = {
+    "postgresql": "postgresql+psycopg",
+    "sqlite": "sqlite",
+}
+
+
+def _synchronous_url(url: str, *, setting: str) -> str:
+    """Return the synchronous SQLAlchemy URL equivalent of ``url``.
+
+    The driver is replaced through the parsed URL structure rather than by
+    substring substitution: a substring replace is a silent no-op on a URL that
+    declares no driver, and it corrupts any URL whose password or query value
+    happens to contain the replaced text.
+
+    Raises ``ValueError`` when the URL cannot be parsed or names a backend with no
+    synchronous driver shipped here, so a broken URL is refused at its source
+    rather than reaching ``create_engine`` inside a destructive admin command.
+    """
+    # Imported lazily: SQLAlchemy costs roughly a quarter-second to import, and the
+    # settings module sits on the CLI startup path. Every consumer of the derived
+    # URL has already paid that cost.
+    from sqlalchemy.engine.url import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    try:
+        parsed = make_url(url)
+    except ArgumentError as exc:
+        # The URL itself is never echoed: it routinely carries a password.
+        msg = f"{setting} is not a parseable SQLAlchemy URL."
+        raise ValueError(msg) from exc
+
+    backend = parsed.get_backend_name()
+    drivername = _SYNC_DRIVERNAMES.get(backend)
+    if drivername is None:
+        msg = (
+            f"{setting} names the {backend!r} backend, which has no synchronous "
+            f"driver in this project; expected one of {sorted(_SYNC_DRIVERNAMES)}."
+        )
+        raise ValueError(msg)
+
+    return parsed.set(drivername=drivername).render_as_string(hide_password=False)
+
+
+def _warn_seating_discard(env_name: str, supplied: object, derived: object) -> None:
+    """Report that the desktop profile discarded an explicitly configured value.
+
+    The desktop profile is the single derivation authority for mutable paths, so
+    the override itself is correct and deliberate. Only its silence was a defect:
+    an operator who sets both the application home and an explicit path had no
+    signal that the latter never took effect.
+    """
+    logger.warning(
+        "VAULTSPEC_DESKTOP_APP_HOME is set, so the desktop profile derives every "
+        "mutable path: the explicitly configured %s=%r is discarded in favour of "
+        "%r. Unset one of the two to resolve the conflict.",
+        env_name,
+        supplied,
+        derived,
+    )
+
+
+def _is_absolute_path(raw: str) -> bool:
+    """Return whether ``raw`` is absolute under either path convention.
+
+    These settings name paths on the DEPLOYMENT host, which is not necessarily the
+    host validating them: a Windows workstation legitimately reads a container
+    configuration naming ``/app/data``, and ``pathlib`` there calls that relative.
+    Accepting either convention keeps the check aimed at the hazard — a path
+    resolved against whatever working directory the process inherited — rather than
+    at the validating machine's operating system.
+    """
+    return PurePosixPath(raw).is_absolute() or PureWindowsPath(raw).is_absolute()
+
+
+def _require_absolute_sqlite_path(url: str, *, setting: str) -> None:
+    """Reject a SQLite URL whose file path is working-directory relative.
+
+    Call only for a store whose RESOLVED backend is sqlite. A Postgres URL's path
+    component names a database on a server rather than a file, so it has no
+    absoluteness to check; ``:memory:`` names no file either. Neither can be
+    relocated by a working directory, so neither carries the hazard.
+
+    Assumes the URL already parses — the synchronous-derivation validator runs
+    first and refuses anything that does not.
+    """
+    from sqlalchemy.engine.url import make_url
+
+    database = make_url(url).database
+    if database is None or database == ":memory:" or _is_absolute_path(database):
+        return
+
+    msg = (
+        f"{setting} must be absolute. A relative URL resolves against the process "
+        "working directory, so the gateway and CLI can silently open different files."
+    )
+    raise ValueError(msg)
+
 
 class InfraConfig(BaseSettings):
     """Infrastructure fields — ports, hosts, URLs, keys, filesystem paths."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_CHECKOUT_ENV_FILE,
         env_file_encoding="utf-8",
         env_prefix="VAULTSPEC_",
         extra="ignore",
@@ -93,7 +237,10 @@ class InfraConfig(BaseSettings):
         default="sqlite+aiosqlite:///vaultspec.db",
         description=(
             "SQLAlchemy async database URL.  Must match the selected "
-            "database_backend scheme (sqlite+aiosqlite or postgresql+asyncpg)."
+            "database_backend scheme (sqlite+aiosqlite or postgresql+asyncpg).  "
+            "Left unset, the bare file name above is anchored to a2a_home, so "
+            "the store is ~/.vaultspec-a2a/vaultspec.db rather than a "
+            "launch-relative file."
         ),
     )
     checkpoint_database_url: str | None = Field(
@@ -123,7 +270,18 @@ class InfraConfig(BaseSettings):
         alias="VAULTSPEC_DB_POOL_MAX_OVERFLOW",
         description="SQLAlchemy QueuePool max_overflow for Postgres engine.",
     )
-    workspace_root: Path = Field(default=Path("./workspaces"))
+    workspace_root: Path | None = Field(
+        default=None,
+        description=(
+            "Optional label for the workspace this process serves. It sites NO "
+            "agent: agent working directories come from the per-run "
+            "metadata.workspace_root the caller supplies, and the only readers of "
+            "this field pass it as the 'workspace' label on a dev process-registry "
+            "record. Unset by default, because the former './workspaces' default "
+            "advertised a managed store that is never created and never used; the "
+            "armed desktop profile seats its own derived workspace tree here."
+        ),
+    )
     project_root: Path = Field(
         default_factory=lambda: _DEFAULT_PROJECT_ROOT,
         alias="VAULTSPEC_PROJECT_ROOT",
@@ -256,6 +414,19 @@ class InfraConfig(BaseSettings):
             "indexed, live). Unset serves live on a web-proven lane."
         ),
     )
+    # Redirects the Codex lane's API traffic at a named endpoint. Codex resolves
+    # its endpoint from its config home rather than an environment variable, so
+    # without this the lane cannot be pointed anywhere - and a lane that only ever
+    # succeeds cannot demonstrate what it does when a provider refuses. Unset in
+    # every served deployment; set it only to drive a provider-refusal proof.
+    codex_base_url_override: str | None = Field(
+        default=None,
+        validation_alias="VAULTSPEC_CODEX_BASE_URL",
+        description=(
+            "Point the Codex lane at an alternate API endpoint. Unset serves the "
+            "provider's own endpoint."
+        ),
+    )
     # Kimi Code reads persisted aliases from KIMI_CODE_HOME (default ~/.kimi-code).
     # KIMI_MODEL_* defines a temporary provider and is valid only as a complete
     # name/key/base tuple. Current names precede retained legacy key/base aliases.
@@ -335,7 +506,7 @@ class InfraConfig(BaseSettings):
         default="",
         validation_alias=AliasChoices(
             GATEWAY_URL_ENV,
-            "VAULTSPEC_MCP_API_BASE_URL",
+            GATEWAY_URL_ALT_ENV,
         ),
         description=(
             "Base URL for reaching the gateway HTTP API. Used by the worker "
@@ -427,6 +598,19 @@ class InfraConfig(BaseSettings):
         default="conservative",
         description="Startup reconciliation strategy for non-terminal threads.",
         alias="VAULTSPEC_REPAIR_STRATEGY",
+    )
+    repair_journal_retention_boots: int = Field(
+        default=DEFAULT_REPAIR_JOURNAL_RETENTION_BOOTS,
+        ge=0,
+        description=(
+            "Boots of startup-repair history kept per thread. Reconciliation "
+            "appends a started/finished pair per non-terminal thread on every "
+            "boot under a key that never repeats, so the class grows with "
+            "restart count rather than with work. No code path reads a repair "
+            "row, so this bounds operator hindsight only - never a recovery, "
+            "replay, or redrive window. Zero retains every row."
+        ),
+        alias="VAULTSPEC_REPAIR_JOURNAL_RETENTION_BOOTS",
     )
 
     # Authoring verdict subscriber
@@ -768,7 +952,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_CHECKOUT_ENV_FILE,
         env_file_encoding="utf-8",
         env_prefix="VAULTSPEC_",
         extra="ignore",
@@ -810,6 +994,10 @@ class Settings(DomainSettingsConfig, InfraConfig):
         When armed, the database, checkpoint, workspace, and A2A-home paths derive
         from the application home through the desktop profile's single derivation
         authority, so no mutable path resolves relative to the launch directory.
+        That derivation outranks an explicitly configured value by design; when it
+        actually displaces one, it says so. ``model_fields_set`` distinguishes a
+        genuinely supplied value from an untouched default, so an unconfigured boot
+        stays silent rather than emitting noise every operator learns to ignore.
         """
         if self.desktop_app_home is None:
             return self
@@ -819,13 +1007,163 @@ class Settings(DomainSettingsConfig, InfraConfig):
         from ..desktop.profile import derive_state_paths
 
         state = derive_state_paths(self.desktop_app_home)
-        self.a2a_home = state.app_home
-        self.workspace_root = state.workspaces_root
-        self.database_url = f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
-        self.checkpoint_database_url = (
+        derived_database_url = f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
+        derived_checkpoint_url = (
             f"sqlite+aiosqlite:///{state.checkpoint_path.as_posix()}"
         )
+
+        # Read before any assignment below: assigning a field marks it as set.
+        explicit = self.model_fields_set
+        if "a2a_home" in explicit:
+            _warn_seating_discard("VAULTSPEC_A2A_HOME", self.a2a_home, state.app_home)
+        if "workspace_root" in explicit:
+            _warn_seating_discard(
+                "VAULTSPEC_WORKSPACE_ROOT", self.workspace_root, state.workspaces_root
+            )
+        if "database_url" in explicit:
+            _warn_seating_discard(
+                "VAULTSPEC_DATABASE_URL", self.database_url, derived_database_url
+            )
+        if "checkpoint_database_url" in explicit:
+            _warn_seating_discard(
+                "VAULTSPEC_CHECKPOINT_DATABASE_URL",
+                self.checkpoint_database_url,
+                derived_checkpoint_url,
+            )
+
+        self.a2a_home = state.app_home
+        self.workspace_root = state.workspaces_root
+        self.database_url = derived_database_url
+        self.checkpoint_database_url = derived_checkpoint_url
         return self
+
+    @model_validator(mode="after")
+    def _validate_synchronous_url_derivation(self) -> Self:
+        """Refuse a configured URL that has no synchronous SQLAlchemy equivalent.
+
+        The admin and command-line paths - schema creation and the destructive
+        ``db clear`` - run on synchronous engines built from these URLs. Leaving the
+        check to those call sites means a shipped-configuration typo first surfaces
+        part-way through a destructive command; here it surfaces at boot.
+
+        Declared after the desktop seating so it validates the URLs the process will
+        actually use, not the ones the seating is about to replace. The anchoring
+        that follows only ever swaps a relative SQLite path for an absolute one, so
+        it cannot change the backend or driver this validator just accepted.
+        """
+        _synchronous_url(self.database_url, setting="VAULTSPEC_DATABASE_URL")
+        if self.checkpoint_database_url is not None:
+            _synchronous_url(
+                self.checkpoint_database_url,
+                setting="VAULTSPEC_CHECKPOINT_DATABASE_URL",
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _anchor_and_require_absolute_paths(self) -> Self:
+        """Anchor unset mutable paths, then refuse any that stayed relative.
+
+        A working-directory-relative store is a silent split-brain: the gateway and
+        the CLI resolve the same configured value against different directories and
+        open different files, each convinced it holds the whole picture. The ruling
+        is to fail loud rather than resolve quietly, so an explicitly supplied
+        relative value is rejected and never rewritten.
+
+        The shipped database DEFAULT was itself relative, and
+        ``settings = Settings()`` runs at module import — rejecting it would make
+        the package unimportable on a fresh checkout. So a default the operator
+        never touched is anchored instead, which keeps the store in one place
+        without the working-directory dependence. ``model_fields_set`` separates
+        the two cases.
+
+        The anchor is ``a2a_home``, NOT ``project_root``. Two reasons, and the
+        second is the decisive one:
+
+        * ``project_root`` defaults to a ``__file__``-derived constant. In a
+          non-editable install that constant resolves into the Python library
+          directory, so anchoring there writes the default store to
+          ``.../lib/vaultspec.db`` — inside the interpreter's own tree, where an
+          upgrade or a reinstall discards it.
+        * The schema is already built for ONE machine-global store. Runs are
+          partitioned by ``threads.workspace_key``, hashed from the per-run
+          ``metadata.workspace_root`` the caller supplies, and the ``0008``/``0009``
+          migrations backfill and index on exactly that column. A per-checkout
+          database fragments that partitioned store across as many files as there
+          happen to be checkouts. ``a2a_home`` is where the machine-global runtime
+          state already lives — process logs, the discovery ``service.json`` — so
+          the database joins its own kind rather than founding a third convention.
+
+        ORDERING: declared after ``_seat_desktop_profile``, which replaces every
+        mutable path with an absolute derived from the application home. Run before
+        it — or as a field validator, which fires earlier still — and every armed
+        desktop boot would be rejected on the relative default it was about to
+        discard. ``cli.service`` injects absolute URLs into the child environment for
+        the same reason, and those arrive as explicitly-set values that pass here
+        untouched.
+        """
+        # ``as_posix`` before the check, never ``str``: a container path arriving on
+        # a Windows host is a ``WindowsPath`` whose ``str`` uses backslashes, which
+        # neither pure flavour then reads as absolute.
+        if not _is_absolute_path(self.a2a_home.as_posix()):
+            msg = (
+                "VAULTSPEC_A2A_HOME must be absolute: it anchors the default "
+                "database location and every runtime-state directory."
+            )
+            raise ValueError(msg)
+        if not _is_absolute_path(self.project_root.as_posix()):
+            msg = (
+                "VAULTSPEC_PROJECT_ROOT must be absolute: checkout-relative "
+                "assets are resolved against it."
+            )
+            raise ValueError(msg)
+
+        explicit = self.model_fields_set
+        if "database_url" not in explicit:
+            anchored = (self.a2a_home / "vaultspec.db").as_posix()
+            self.database_url = f"sqlite+aiosqlite:///{anchored}"
+
+        # Resolving the backends here is load-bearing twice over. It raises when a
+        # declared backend and its URL disagree — the synchronous admin engines
+        # built from these values have no other validation seam — and it decides
+        # which stores carry a filesystem path at all, since only a SQLite store
+        # can be relocated by a working directory. Reading it here rather than in
+        # the sync-URL properties keeps that enforcement at boot and out of a
+        # discarded binding a later cleanup would take for dead code.
+        if self.resolved_database_backend == "sqlite":
+            _require_absolute_sqlite_path(
+                self.database_url, setting="VAULTSPEC_DATABASE_URL"
+            )
+        if (
+            self.checkpoint_database_url is not None
+            and self.resolved_checkpoint_backend == "sqlite"
+        ):
+            _require_absolute_sqlite_path(
+                self.checkpoint_database_url,
+                setting="VAULTSPEC_CHECKPOINT_DATABASE_URL",
+            )
+        # Nothing to anchor: the field carries no default to repair, so a value
+        # here is always one an operator or the desktop seating actually supplied.
+        if self.workspace_root is not None and not _is_absolute_path(
+            self.workspace_root.as_posix()
+        ):
+            msg = (
+                "VAULTSPEC_WORKSPACE_ROOT must be absolute. A relative path "
+                "resolves against the process working directory, so the gateway "
+                "and CLI can silently open different directories."
+            )
+            raise ValueError(msg)
+        return self
+
+    @property
+    def environment_declared(self) -> bool:
+        """Whether the operator DECLARED an environment rather than inheriting one.
+
+        The environment setting has a default, so its value alone cannot say
+        whether anyone chose it. Security decisions that key on the development
+        environment need that difference: reading a defaulted value as consent
+        turns "nobody configured this" into "authentication is off".
+        """
+        return "environment" in self.model_fields_set
 
     @property
     def is_dev(self) -> bool:
@@ -969,10 +1307,12 @@ class Settings(DomainSettingsConfig, InfraConfig):
 
     @property
     def database_sync_url(self) -> str:
-        """Return a synchronous SQLAlchemy URL for admin/CLI operations."""
-        if self.resolved_database_backend == "sqlite":
-            return self.database_url.replace("+aiosqlite", "", 1)
-        return self.database_url.replace("+asyncpg", "+psycopg", 1)
+        """Return a synchronous SQLAlchemy URL for admin/CLI operations.
+
+        URL/backend agreement is enforced at construction rather than here, so this
+        reads as the pure derivation it is.
+        """
+        return _synchronous_url(self.database_url, setting="VAULTSPEC_DATABASE_URL")
 
     @property
     def checkpoint_sync_url(self) -> str:
@@ -982,10 +1322,12 @@ class Settings(DomainSettingsConfig, InfraConfig):
         is configured, matching the runtime savers: the two stores share one file
         by default and split only when explicitly configured.
         """
-        url = self.checkpoint_database_url or self.database_url
-        if self.resolved_checkpoint_backend == "sqlite":
-            return url.replace("+aiosqlite", "", 1)
-        return url.replace("+asyncpg", "+psycopg", 1)
+        if self.checkpoint_database_url is None:
+            return _synchronous_url(self.database_url, setting="VAULTSPEC_DATABASE_URL")
+        return _synchronous_url(
+            self.checkpoint_database_url,
+            setting="VAULTSPEC_CHECKPOINT_DATABASE_URL",
+        )
 
     def validate_postgres_requirement(self) -> None:
         """Fail fast when Postgres-backed dependencies are required but absent."""

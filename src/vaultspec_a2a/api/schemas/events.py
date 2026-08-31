@@ -8,21 +8,23 @@ and TypeScript sides.
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 from ...graph.enums import (
     AgentLifecycleState,
     Model,
     PermissionOptionKind,
     Provider,
+    ServerEventType,
     ToolCallStatus,
     ToolKind,
 )
+from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.models import PlanEntry
 from .base import EventEnvelope
-from .enums import ServerEventType
 
 __all__ = [
+    "MAX_TOOL_CALL_CHARS",
     # Event models
     "AgentStatusEvent",
     # Component models
@@ -46,6 +48,49 @@ __all__ = [
     "ToolCallLocation",
     "ToolCallStartEvent",
     "ToolCallUpdateEvent",
+]
+
+
+# ---------------------------------------------------------------------------
+# Bounded caller-controlled text
+# ---------------------------------------------------------------------------
+
+#: Cap on the tool identifier a permission request names. Tool names are
+#: identifiers, sized alongside the other bounded identifiers on this wire.
+MAX_TOOL_CALL_CHARS = 256
+
+
+def _bounded(limit: int) -> BeforeValidator:
+    """Build a validator that TRUNCATES over-long text instead of refusing it.
+
+    These fields carry content an LLM can be induced to produce, so they need a
+    bound. The bound has to shorten rather than reject, which is the opposite of
+    the request schemas in ``gateway.py``: those face inbound callers, where
+    refusing a malformed request is the correct and safe answer. These models
+    are the outbound projection, built in ``api/event_adapter.py`` from an
+    already-accepted domain event with no error handling around the
+    construction. A ``max_length`` there would turn an over-long description
+    into a raised ``ValidationError``, and the permission frame it killed is the
+    only thing telling the operator that a run is waiting on them — so the run
+    would hang, unattended, on a cap meant to protect it. Truncating keeps the
+    frame deliverable and the bound enforced.
+    """
+
+    def _truncate(value: object) -> object:
+        if isinstance(value, str) and len(value) > limit:
+            return value[:limit]
+        return value
+
+    return BeforeValidator(_truncate)
+
+
+BoundedDescription = Annotated[
+    str,
+    _bounded(MAX_PERMISSION_DESCRIPTION_CHARS),
+    Field(max_length=MAX_PERMISSION_DESCRIPTION_CHARS),
+]
+BoundedToolCall = Annotated[
+    str, _bounded(MAX_TOOL_CALL_CHARS), Field(max_length=MAX_TOOL_CALL_CHARS)
 ]
 
 
@@ -104,6 +149,11 @@ class AgentSummary(BaseModel):
     Mirrors ``thread.snapshots.AgentData``, which is the one place the field set
     is decided; provider/model stay optional because an agent can be observed
     before its model assignment resolves.
+
+    ``model`` additionally stays ``None`` for the whole life of a FROZEN run:
+    that path resolves a concrete catalog entry instead of a capability tier, so
+    there is no tier to report. ``model_name`` carries what such a run actually
+    executed and is the field to read when asking which model ran.
     """
 
     agent_id: str
@@ -111,6 +161,7 @@ class AgentSummary(BaseModel):
     state: AgentLifecycleState
     provider: Provider | None = None
     model: Model | None = None
+    model_name: str | None = None
     role: str = ""
     display_name: str = ""
     description: str = ""
@@ -178,9 +229,9 @@ class PermissionRequestEvent(EventEnvelope):
         ServerEventType.PERMISSION_REQUEST
     )
     request_id: str
-    description: str
+    description: BoundedDescription
     options: list[PermissionOption]
-    tool_call: str | None = None
+    tool_call: BoundedToolCall | None = None
     tool_kind: ToolKind | None = None
 
 

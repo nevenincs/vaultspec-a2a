@@ -8,6 +8,7 @@ cross-session durability, and cascade-delete behaviour.
 
 import json
 from collections.abc import AsyncGenerator
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -50,7 +51,6 @@ from .. import (
     sum_cost_by_agent,
     sum_cost_by_thread,
     supersede_permission_requests,
-    update_thread_metadata,
     update_thread_status,
 )
 from .. import session as _session_module
@@ -501,37 +501,6 @@ class TestThreadCRUD:
             await create_thread(session, nickname=nickname, title="second")
 
     @pytest.mark.asyncio
-    async def test_update_thread_metadata(self, session: AsyncSession) -> None:
-        """update_thread_metadata should update the thread_metadata field."""
-        thread = await create_thread(session, title="Meta Update")
-        assert thread.thread_metadata is None
-
-        new_meta = '{"workspace_root": "Y:/code/updated"}'
-        updated = await update_thread_metadata(session, thread.id, new_meta)
-        assert updated is not None
-        assert updated.thread_metadata == new_meta
-        assert updated.id == thread.id
-
-    @pytest.mark.asyncio
-    async def test_update_thread_metadata_not_found(
-        self, session: AsyncSession
-    ) -> None:
-        """update_thread_metadata returns None for a non-existent thread."""
-        result = await update_thread_metadata(session, "nonexistent-id", '{"x": 1}')
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_update_thread_metadata_clear(self, session: AsyncSession) -> None:
-        """update_thread_metadata can clear metadata by passing None."""
-        meta = '{"workspace_root": "Y:/code/vaultspec"}'
-        thread = await create_thread(session, title="Clear Meta", metadata=meta)
-        assert thread.thread_metadata == meta
-
-        cleared = await update_thread_metadata(session, thread.id, None)
-        assert cleared is not None
-        assert cleared.thread_metadata is None
-
-    @pytest.mark.asyncio
     async def test_create_thread_invalid_status_raises(
         self, session: AsyncSession
     ) -> None:
@@ -753,7 +722,8 @@ class TestCostTrackingCRUD:
 
         Accepts any ``CostTrackingModel`` field as a keyword argument.
         Defaults: ``provider="claude"``, ``model="max"``, tokens and cost
-        are zero.
+        are zero. Costs are ``Decimal``: the column stores exact decimals, so
+        a float here would test a conversion the production writer never does.
         """
         defaults: dict[str, object] = {
             "id": uuid4().hex,
@@ -761,7 +731,7 @@ class TestCostTrackingCRUD:
             "model": "max",
             "input_tokens": 0,
             "output_tokens": 0,
-            "estimated_cost": 0.0,
+            "estimated_cost": Decimal(0),
         }
         return CostTrackingModel(**(defaults | kwargs))
 
@@ -774,13 +744,13 @@ class TestCostTrackingCRUD:
             agent_id="coder-1",
             input_tokens=1000,
             output_tokens=500,
-            estimated_cost=0.05,
+            estimated_cost=Decimal("0.05"),
         )
         saved = await append_cost_record(session, record)
         assert saved.id is not None
         assert saved.input_tokens == record.input_tokens
         assert saved.output_tokens == record.output_tokens
-        assert saved.estimated_cost == pytest.approx(record.estimated_cost)
+        assert saved.estimated_cost == record.estimated_cost
 
     @pytest.mark.asyncio
     async def test_sum_cost_by_thread(self, session: AsyncSession) -> None:
@@ -791,7 +761,7 @@ class TestCostTrackingCRUD:
             agent_id="coder-1",
             input_tokens=1000,
             output_tokens=500,
-            estimated_cost=0.05,
+            estimated_cost=Decimal("0.05"),
         )
         r2 = self._make_cost_record(
             thread_id=thread.id,
@@ -800,7 +770,7 @@ class TestCostTrackingCRUD:
             model="high",
             input_tokens=2000,
             output_tokens=800,
-            estimated_cost=0.03,
+            estimated_cost=Decimal("0.03"),
         )
         await append_cost_record(session, r1)
         await append_cost_record(session, r2)
@@ -811,7 +781,7 @@ class TestCostTrackingCRUD:
         expected_cost = r1.estimated_cost + r2.estimated_cost
         assert totals["input_tokens"] == expected_input
         assert totals["output_tokens"] == expected_output
-        assert totals["estimated_cost"] == pytest.approx(expected_cost)
+        assert totals["estimated_cost"] == expected_cost
 
     @pytest.mark.asyncio
     async def test_sum_cost_by_thread_empty(self, session: AsyncSession) -> None:
@@ -820,7 +790,7 @@ class TestCostTrackingCRUD:
         totals = await sum_cost_by_thread(session, thread.id)
         assert totals["input_tokens"] == 0
         assert totals["output_tokens"] == 0
-        assert totals["estimated_cost"] == pytest.approx(0.0)
+        assert totals["estimated_cost"] == Decimal(0)
 
     @pytest.mark.asyncio
     async def test_sum_cost_by_agent(self, session: AsyncSession) -> None:
@@ -833,7 +803,7 @@ class TestCostTrackingCRUD:
             agent_id="coder-1",
             input_tokens=500,
             output_tokens=200,
-            estimated_cost=0.02,
+            estimated_cost=Decimal("0.02"),
         )
         r2 = self._make_cost_record(
             thread_id=t2.id,
@@ -841,7 +811,7 @@ class TestCostTrackingCRUD:
             model="high",
             input_tokens=700,
             output_tokens=300,
-            estimated_cost=0.04,
+            estimated_cost=Decimal("0.04"),
         )
         await append_cost_record(session, r1)
         await append_cost_record(session, r2)
@@ -852,7 +822,7 @@ class TestCostTrackingCRUD:
         expected_cost = r1.estimated_cost + r2.estimated_cost
         assert totals["input_tokens"] == expected_input
         assert totals["output_tokens"] == expected_output
-        assert totals["estimated_cost"] == pytest.approx(expected_cost)
+        assert totals["estimated_cost"] == expected_cost
 
     @pytest.mark.asyncio
     async def test_sum_cost_by_agent_empty(self, session: AsyncSession) -> None:
@@ -860,7 +830,7 @@ class TestCostTrackingCRUD:
         totals = await sum_cost_by_agent(session, "nonexistent-agent")
         assert totals["input_tokens"] == 0
         assert totals["output_tokens"] == 0
-        assert totals["estimated_cost"] == pytest.approx(0.0)
+        assert totals["estimated_cost"] == Decimal(0)
 
 
 # ---------------------------------------------------------------------------

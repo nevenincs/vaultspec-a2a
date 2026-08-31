@@ -31,7 +31,6 @@ def _make_config(workspace_root: str) -> AcpModelConfig:
         agent_config=None,
         permission_callback=None,
         workspace_root=workspace_root,
-        cwd=None,
         command=["echo"],
         env_vars={},
         session_id=None,

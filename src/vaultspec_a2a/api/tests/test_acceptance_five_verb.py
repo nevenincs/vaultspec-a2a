@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import pathlib
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -36,7 +37,7 @@ from ...thread.enums import ThreadStatus
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 from .clarification_harness import new_state_graph
-from .conftest import make_app
+from .conftest import async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -45,6 +46,9 @@ if TYPE_CHECKING:
     from ...thread.state import TeamState
     from ...worker.graph_lifecycle import RegisteredCompiledGraph
 
+# Every dispatch names an active project, as a real one does. This package's own
+# directory is real, absolute, and present on either platform.
+_WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 _CODER_TOKEN = "secret-coder-acceptance"
 _REVIEWER_TOKEN = "secret-reviewer-acceptance"
 _BEARER = "secret-bearer-acceptance"
@@ -173,6 +177,7 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
             _install_multirole_graph(executor, thread_id)
             req = DispatchRequest(
                 action="ingest",
+                workspace_root=_WORKSPACE,
                 thread_id=thread_id,
                 content="build and review",
                 team_preset=_PRESET,
@@ -265,6 +270,10 @@ async def test_run_start_carries_no_token_into_logs(
         "engine_bearer": _BEARER,
     }
     async with _live_server(app) as base, httpx.AsyncClient(base_url=base) as client:
+        # Derived OUTSIDE the capture: the catalog probe is setup, not the run
+        # under test, and the assertion below is sharpest when the captured window
+        # holds only the run-start that carries the tokens.
+        run_fields = await async_catalog_run_fields(client)
         with caplog_all() as records:
             resp = await client.post(
                 "/v1/runs",
@@ -273,9 +282,11 @@ async def test_run_start_carries_no_token_into_logs(
                     "message": "go",
                     "autonomous": True,
                     "actor_tokens": bundle,
+                    "run_id": "accept-token-log",
+                    **run_fields,
                 },
             )
-            assert resp.status_code == 201
+            assert resp.status_code == 201, resp.text
             # The worker received the tokens on the dispatch (transport works)...
             assert worker.dispatches[-1]["actor_tokens"]["tokens"]["coder"] == (
                 _CODER_TOKEN

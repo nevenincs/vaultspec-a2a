@@ -35,7 +35,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,19 +68,27 @@ from ...control.thread_service import (
     process_metadata,
 )
 from ...control.thread_state_service import (
-    build_thread_state,
     capture_thread_state,
     derive_run_authoring_ids,
     derive_run_semantic_context,
     project_semantic_phase,
 )
-from ...database import get_thread, get_thread_metadata
+from ...control.worker_management import worker_liveness
+from ...database import (
+    get_db,
+    get_permission_logs_by_thread,
+    get_permission_request,
+    get_thread,
+    get_thread_metadata,
+    normalize_workspace_identity,
+)
 from ...database.checkpoints import Checkpointer
-from ...database.permission_repository import get_permission_request
-from ...database.session import get_db
-from ...database.thread_repository import normalize_workspace_identity
 from ...domain_config import domain_config
-from ...providers.provider_catalog import ControlSelection, SelectionReference
+from ...providers.provider_catalog import (
+    ControlSelection,
+    ProviderRecord,
+    SelectionReference,
+)
 from ...providers.provider_catalog_service import (
     ProviderCatalogScopeCapacityError,
     ProviderCatalogService,
@@ -99,15 +107,22 @@ from ...thread.clarification import (
     ClarificationResolution,
     pending_clarification,
 )
-from ...thread.constants import DEFAULT_SUPERVISOR_ID
+from ...thread.constants import (
+    DEFAULT_SUPERVISOR_ID,
+    MAX_FEATURE_TAG_LENGTH,
+    MAX_WORKSPACE_ROOT_LENGTH,
+)
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import (
     TERMINAL_STATUSES,
     PermissionRequestStatus,
     ThreadStatus,
+    TranscriptAvailability,
 )
 from ...thread.errors import NicknameConflictError
-from .._utils import mark_worker_connected, trace_headers
+from ...utils.coercion import coerce_object_mapping
+from .._utils import trace_headers
+from ..auth import authenticate_request
 from ..dependencies import (
     get_aggregator,
     get_checkpointer,
@@ -115,7 +130,6 @@ from ..dependencies import (
     get_services,
     get_worker_client,
     get_worker_spawner,
-    require_attach,
 )
 from ..run_admission import (
     commit_singleflight,
@@ -145,6 +159,7 @@ from ..schemas.gateway import (
     RunMessageRequest,
     RunMessageResponse,
     RunPendingPermission,
+    RunPermissionDecision,
     RunPermissionRespondRequest,
     RunPermissionRespondResponse,
     RunPrepareResponse,
@@ -158,6 +173,7 @@ from ..schemas.gateway import (
     ServiceStateResponse,
     TeamStatusV1Response,
     TopologyPosition,
+    WorkerLifecycleState,
 )
 from ..schemas.provider_catalog import ProviderCatalogResponse
 from ..schemas.snapshots import ThreadStateSnapshot
@@ -165,7 +181,15 @@ from ..thread_stream import build_thread_stream_response
 
 router = APIRouter(
     prefix="/v1",
-    dependencies=[Depends(require_attach)],
+    dependencies=[Depends(authenticate_request)],
+    # Every route here is behind the attach gate, so both refusals are properties
+    # of the router rather than of any one verb. They were absent from the
+    # published contract, which documented only success and validation failure -
+    # a client generated from it modeled 401 as an unexpected transport error.
+    responses={
+        401: {"description": "Missing or invalid gateway service token."},
+        503: {"description": "Gateway service token is not configured."},
+    },
 )
 logger = logging.getLogger(__name__)
 
@@ -175,7 +199,6 @@ logger = logging.getLogger(__name__)
 _DEGRADED_CHECK_STATUSES: frozenset[str] = frozenset(
     {"error", "open", "down", "restarting", "half_open", "timeout"}
 )
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
 def provider_catalog_service(app: FastAPI) -> ProviderCatalogService:
@@ -187,14 +210,6 @@ def provider_catalog_service(app: FastAPI) -> ProviderCatalogService:
     return service
 
 
-def _object_mapping(value: object) -> dict[str, object] | None:
-    """Narrow an unstructured value to an object-keyed mapping."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError:
-        return None
-
-
 def _metadata_object(metadata_json: str | None) -> dict[str, object] | None:
     """Decode durable metadata only when it is a JSON object."""
     if not metadata_json:
@@ -203,7 +218,7 @@ def _metadata_object(metadata_json: str | None) -> dict[str, object] | None:
         decoded: object = json.loads(metadata_json)
     except (json.JSONDecodeError, TypeError):
         return None
-    return _object_mapping(decoded)
+    return coerce_object_mapping(decoded)
 
 
 def _string_field(record: dict[str, object], field: str) -> str | None:
@@ -252,7 +267,10 @@ def admission_broker(app: FastAPI) -> AdmissionBroker:
 
 
 def _admission_readiness(
-    app_state: Any, *, worker_probe_ready: bool | None = None
+    app_state: Any,
+    *,
+    worker_probe_ready: bool | None = None,
+    worker_adoptable: bool | None = None,
 ) -> AdmissionReadiness:
     """Project the seated desktop readiness facts into an admission-readiness view.
 
@@ -262,7 +280,9 @@ def _admission_readiness(
     model and service-state verb serve, never a second computation.
     """
     readiness = assemble_desktop_readiness(
-        app_state=app_state, worker_probe_ready=worker_probe_ready
+        app_state=app_state,
+        worker_probe_ready=worker_probe_ready,
+        worker_adoptable=worker_adoptable,
     )
     return AdmissionReadiness(
         worker_state=readiness.worker_state,
@@ -276,12 +296,43 @@ def _admission_readiness(
 async def _probe_admission_readiness(
     app_state: Any, worker_client: httpx.AsyncClient
 ) -> AdmissionReadiness:
-    from ...control.worker_management import probe_worker_health
+    from ...control.worker_management import (
+        probe_worker_health,
+        worker_ready_and_ours,
+    )
 
-    reachable = (
-        await probe_worker_health(settings.worker_url, client=worker_client)
-    ).healthy
-    return _admission_readiness(app_state, worker_probe_ready=reachable)
+    probe = await probe_worker_health(settings.worker_url, client=worker_client)
+    reachable = probe.healthy
+    # An indeterminate probe (the worker did not answer inside the budget) is not
+    # an observation of absence, so it must not be reported as one: pass no live
+    # verdict and let the readiness authority fall back to the watchdog's seated
+    # worker state. A worker compiling a graph for an already-admitted run is
+    # unresponsive for seconds, and refusing an unrelated admission on that basis
+    # made every concurrent run-start fail while the first one booted.
+    probe_verdict: bool | None = None if probe.indeterminate else reachable
+    # Reachability and provenance are different questions, and admission needs
+    # both: "some process holds this port" is exactly what a squatting orphan
+    # satisfies. Only asked when the port answered at all, so the refusal path
+    # costs nothing extra.
+    #
+    # The generation must come from the spawner that issued it. It is the highest
+    # generation this gateway has minted, and a worker reporting a HIGHER one
+    # classifies as unidentified - so defaulting it to zero here would disown our
+    # own restarted worker on its own admission path.
+    spawner = getattr(app_state, "worker_spawner", None)
+    generation = getattr(spawner, "generation", 0)
+    adoptable: bool | None
+    if probe.indeterminate:
+        # Provenance is unknown for the same reason health is; the promotion this
+        # feeds requires an affirmative True, so None neither promotes nor demotes.
+        adoptable = None
+    else:
+        adoptable = reachable and await worker_ready_and_ours(
+            settings.worker_url, current_generation=generation
+        )
+    return _admission_readiness(
+        app_state, worker_probe_ready=probe_verdict, worker_adoptable=adoptable
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +385,6 @@ class _RunDispatchResult:
     thread_id: str
     status: str
     nickname: str | None
-    profile_id: str | None
     frozen: Any | None
     replayed: bool
 
@@ -370,14 +420,11 @@ async def _create_run_core(
     # existing run rather than starting a second one (dispatch-exactly-once).
     existing = await get_thread(db, body.run_id)
     if existing is not None:
-        existing_profile = _replay_identity_or_conflict(
-            existing.id, existing.thread_metadata, body
-        )
+        _replay_identity_or_conflict(existing.id, existing.thread_metadata, body)
         return _RunDispatchResult(
             thread_id=existing.id,
             status=existing.status,
             nickname=existing.nickname,
-            profile_id=existing_profile,
             frozen=_read_persisted_team_selection(existing.thread_metadata),
             replayed=True,
         )
@@ -409,6 +456,7 @@ async def _create_run_core(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    logger.info("commit step: load_preset")
     team_config = _load_preset_or_refuse(body.team_preset, ws_root)
     effective_feature = body.feature_tag or (
         metadata.feature_tag if metadata is not None else None
@@ -422,6 +470,7 @@ async def _create_run_core(
     if not eligibility.eligible:
         raise HTTPException(status_code=422, detail=eligibility.reason)
 
+    logger.info("commit step: validate_selection")
     frozen = await _validate_and_freeze_selection_or_refuse(
         request.app, body, team_config, ws_root
     )
@@ -515,14 +564,11 @@ async def _create_run_core(
                 # replay gets: same run id plus the same request is the winner's
                 # run replayed, and a colliding body is a different intention that
                 # must be refused rather than answered with someone else's run.
-                winner_profile = _replay_identity_or_conflict(
-                    winner.id, winner.thread_metadata, body
-                )
+                _replay_identity_or_conflict(winner.id, winner.thread_metadata, body)
                 return _RunDispatchResult(
                     thread_id=winner.id,
                     status=winner.status,
                     nickname=winner.nickname,
-                    profile_id=winner_profile,
                     frozen=_read_persisted_team_selection(winner.thread_metadata),
                     replayed=True,
                 )
@@ -538,7 +584,7 @@ async def _create_run_core(
         # event in the relay handler.
         persisted = True
         if result.dispatched:
-            mark_worker_connected(request)
+            worker_liveness(request.app.state).record_contact()
 
         # A dispatch failure the policy resolved to FAILED is the one durable
         # outcome no terminal event ever follows: the run is already terminal and
@@ -557,7 +603,6 @@ async def _create_run_core(
             thread_id=result.thread_id,
             status=result.status,
             nickname=result.nickname,
-            profile_id=None,
             frozen=frozen,
             replayed=False,
         )
@@ -589,8 +634,6 @@ async def _run_direct_start(
         status=result.status,
         nickname=result.nickname,
         eligible=True,
-        profile_id=result.profile_id,
-        assignments=await _disclose_frozen(result.frozen),
         frozen_assignment=_modern_frozen_disclosure(result.frozen),
     )
 
@@ -610,6 +653,7 @@ async def _run_prepare(
     is created. A capacity-exhausted or role-invalid prepare is refused with a
     503 carrying the safe reason.
     """
+    logger.info("commit step: workspace_root")
     ws_root = _prepare_workspace_root(body)
     team_config = _load_preset_or_refuse(body.team_preset, ws_root)
     frozen = await _validate_and_freeze_selection_or_refuse(
@@ -631,6 +675,24 @@ async def _run_prepare(
         or outcome.reservation_id is None
         or outcome.lease_id is None
     ):
+        # The refusal reason is deliberately one safe sentence, so it cannot say
+        # WHICH of the three readiness legs failed. Those facts are already
+        # probed and carried on the outcome, and already served on the
+        # service-state surface, so logging them here discloses nothing new -
+        # and without them a refusal is only diagnosable by re-deriving the
+        # probe by hand, which is how three admission failures stayed open.
+        refused = outcome.readiness
+        logger.warning(
+            "run admission refused: reason=%s worker_state=%s "
+            "provider_eligibility=%s run_admission=%s eligible_providers=%s "
+            "readiness_reasons=%s",
+            outcome.reason,
+            refused.worker_state.value,
+            refused.provider_eligibility.value,
+            refused.run_admission.value,
+            ",".join(refused.eligible_providers) or "none",
+            "; ".join(refused.reasons) or "none",
+        )
         raise HTTPException(status_code=503, detail=outcome.reason)
     readiness = outcome.readiness
     return RunPrepareResponse(
@@ -665,6 +727,7 @@ async def _run_commit(
     if body.reservation_id is None:  # pragma: no cover - guarded by the schema
         raise HTTPException(status_code=422, detail="commit requires a reservation id")
     run_id = body.run_id
+    logger.info("commit entered: run_id=%s reservation=%s", run_id, body.reservation_id)
     async with commit_singleflight(request.app).hold(run_id):
         return await _run_commit_locked(
             request,
@@ -698,9 +761,7 @@ async def _run_commit_locked(
     if existing is not None:
         canonical_body = _canonical_replay_body(existing.thread_metadata, body)
         commit_digest = request_digest(canonical_body, prepared=False)
-        existing_frozen = _read_persisted_frozen(existing.thread_metadata)
         existing_modern = _read_persisted_team_selection(existing.thread_metadata)
-        existing_profile = existing_frozen.profile_id if existing_frozen else None
         binding = _persisted_lease_binding(existing.thread_metadata)
         if binding is None:
             raise HTTPException(
@@ -724,10 +785,6 @@ async def _run_commit_locked(
             status=existing.status,
             lease_id=binding.lease_id,
             nickname=existing.nickname,
-            profile_id=existing_profile,
-            assignments=(
-                await _disclose_frozen(existing_frozen) if existing_frozen else []
-            ),
             frozen_assignment=_modern_frozen_disclosure(existing_modern),
         )
     ws_root = _prepare_workspace_root(body)
@@ -744,15 +801,35 @@ async def _run_commit_locked(
     # refusal releases the reservation so a failed commit leaks nothing.
     from ...control.worker_management import probe_worker_health
 
-    worker_reachable = (
-        await probe_worker_health(settings.worker_url, client=worker_client)
-    ).healthy
-    readiness = _admission_readiness(request.app.state)
+    logger.info("commit step: probe_worker")
+    probe = await probe_worker_health(settings.worker_url, client=worker_client)
+    # Same tri-state as prepare: only a probe that OBSERVED absence may report it.
+    # An indeterminate one defers to the watchdog's seated state, so a worker busy
+    # with an in-flight run stays execution-ready for the next commit.
+    readiness = _admission_readiness(
+        request.app.state,
+        worker_probe_ready=None if probe.indeterminate else probe.healthy,
+    )
+    worker_reachable = readiness.worker_state is WorkerLifecycleState.READY
     execution = evaluate_execution_eligibility(
         worker_reachable=worker_reachable,
         provider_eligibility=readiness.provider_eligibility,
     )
     if not execution.eligible:
+        # Same disclosure the prepare refusal carries: a commit 503 otherwise
+        # says only that something was ineligible, which cannot be told apart
+        # from a refusal about the reservation itself.
+        logger.warning(
+            "run commit refused as ineligible: reason=%s worker_state=%s "
+            "worker_probe=%s provider_eligibility=%s reservation=%s",
+            execution.reason,
+            readiness.worker_state.value,
+            "indeterminate"
+            if probe.indeterminate
+            else ("healthy" if probe.healthy else "absent"),
+            readiness.provider_eligibility.value,
+            reservation_id,
+        )
         await _release_ineligible_reservation(broker, reservation_id, canonical_body)
         raise HTTPException(status_code=503, detail=execution.reason)
 
@@ -763,6 +840,12 @@ async def _run_commit_locked(
         reservation_id,
         binding_digest=request_digest(canonical_body, prepared=True),
         presented_roles=presented_roles,
+    )
+    logger.info(
+        "commit broker verdict: reservation=%s committed=%s reason=%s",
+        reservation_id,
+        outcome.committed,
+        outcome.reason or "none",
     )
     if not outcome.committed or outcome.lease_id is None:
         raise HTTPException(status_code=409, detail=outcome.reason)
@@ -837,8 +920,6 @@ async def _run_commit_locked(
         status=result.status,
         lease_id=outcome.lease_id,
         nickname=result.nickname,
-        profile_id=result.profile_id,
-        assignments=await _disclose_frozen(result.frozen),
         frozen_assignment=_modern_frozen_disclosure(result.frozen),
     )
 
@@ -967,6 +1048,66 @@ def _canonical_replay_body(
     )
 
 
+async def _catalog_records_within_budget(
+    app: FastAPI, canonical: str
+) -> tuple[ProviderRecord, ...]:
+    """Read *canonical*'s catalog records under a bounded wall-clock budget.
+
+    A WARM catalog answers from the per-lane cache immediately, which is the
+    normal case: a client cannot produce a valid selection without having read
+    the catalog first. The cold case is real anyway - a gateway restart, or the
+    workspace scope evicted under capacity, between that read and this start -
+    and building cold probes every registered lane over subprocesses and the
+    network. A request absorbing that is indistinguishable to the caller from a
+    hung gateway.
+
+    Shared by BOTH readers of the catalog - the run start that revalidates a
+    selection and the ``provider-catalog`` verb that serves one. The verb is the
+    colder of the two by construction: it is the read a client makes precisely
+    when it has no selection yet, so it is the caller that most often meets an
+    unbuilt workspace. Leaving it on the unbounded service call made a lane that
+    wedged hang the verb for as long as the lane took, with no refusal a client
+    could act on.
+
+    The build is SHIELDED rather than cancelled on expiry. Cancelling it would
+    make every retry pay the same cold cost and never converge; letting it finish
+    populates the per-lane single-flight cache, so the caller's retry is warm.
+    The refusal is therefore a genuine "not yet", not a failure.
+    """
+    service = provider_catalog_service(app)
+    build = asyncio.ensure_future(service.records(canonical))
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(build), domain_config.run_start_catalog_budget_seconds
+        )
+    except TimeoutError:
+        # The shielded build outlives this request. Consume its outcome so a
+        # later failure is neither an unretrieved-exception warning nor silent.
+        build.add_done_callback(_log_detached_catalog_build)
+        logger.warning(
+            "refused: provider catalog for workspace=%s did not build within "
+            "%.1fs; the build continues and a retry will be served warm",
+            canonical,
+            domain_config.run_start_catalog_budget_seconds,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="the provider catalog for this workspace is still being built",
+        ) from None
+
+
+def _log_detached_catalog_build(task: asyncio.Future[Any]) -> None:
+    """Record how a catalog build that outlived its request finished."""
+    if task.cancelled():
+        logger.warning("detached provider catalog build was cancelled")
+        return
+    error = task.exception()
+    if error is not None:
+        logger.warning(
+            "detached provider catalog build failed: %s", type(error).__name__
+        )
+
+
 async def _validate_and_freeze_selection_or_refuse(
     app: FastAPI,
     body: RunStartRequest,
@@ -980,14 +1121,23 @@ async def _validate_and_freeze_selection_or_refuse(
             detail="explicit provider selection requires an existing workspace_root",
         )
     canonical = normalize_workspace_identity(str(workspace_root))
-    if len(canonical) > 4096 or not Path(canonical).is_dir():
+    if len(canonical) > MAX_WORKSPACE_ROOT_LENGTH or not Path(canonical).is_dir():
         raise HTTPException(
             status_code=422,
             detail="workspace_root must identify an existing directory",
         )
     try:
-        records = await provider_catalog_service(app).records(canonical)
+        records = await _catalog_records_within_budget(app, canonical)
     except ProviderCatalogScopeCapacityError:
+        # Disclosed for the same reason the admission refusals are: a bare 503
+        # here is indistinguishable from an admission or eligibility refusal,
+        # and this one is about the catalog's bounded workspace scopes rather
+        # than about the run at all.
+        logger.warning(
+            "run refused: provider catalog workspace scope capacity exhausted "
+            "for workspace=%s",
+            canonical,
+        )
         raise HTTPException(
             status_code=503,
             detail="provider catalog workspace capacity is temporarily busy",
@@ -1052,7 +1202,7 @@ def _persisted_request_digest(metadata_json: str | None) -> str | None:
 
 def _replay_identity_or_conflict(
     run_id: str, metadata_json: str | None, body: RunStartRequest
-) -> str | None:
+) -> None:
     """Refuse a same-run-id request that is not a replay of the durable run.
 
     The single encoding of run-start replay identity, applied wherever a request
@@ -1062,12 +1212,11 @@ def _replay_identity_or_conflict(
     one? - and a second encoding of the answer would be free to drift from the
     first.
 
-    Two things are compared. The frozen model profile is already immutable on the
-    durable run, so a request naming a different one can never be served. Beyond
-    that single field, every other behaviour-affecting field - the prompt, the
-    preset, the feature tag, the feedback batch - is folded into the persisted
-    replay fingerprint, so a differing request is refused rather than silently
-    answered with the durable run and its distinct intention discarded.
+    Every behaviour-affecting field - the prompt, the preset, the feature tag,
+    the feedback batch, and the canonicalized catalog selection - is folded into
+    the persisted replay fingerprint, so a differing request is refused rather
+    than silently answered with the durable run and its distinct intention
+    discarded.
 
     Credential VALUES are deliberately not part of that fingerprint. A replay
     returns the ORIGINAL run and never adopts the retry's bundle, and
@@ -1078,18 +1227,13 @@ def _replay_identity_or_conflict(
     stored fingerprint is compared under the rule it was written with, so a run
     created before that classification still replays.
 
-    Returns:
-        The run's persisted profile id, or ``None`` when the run carries no
-        frozen profile record.
-
     Raises:
-        HTTPException: 409 when the profile or the request fingerprint differs.
+        HTTPException: 409 when the request fingerprint differs.
     """
-    existing_profile = _persisted_profile_id(metadata_json)
     # ``None`` means the digest is unknown - an older run, or one whose id this
     # service minted - not that the request was empty; refusing on it would
-    # break a legitimate replay. Such a request is compared on the frozen
-    # profile alone, which is narrower rather than absent.
+    # break a legitimate replay. Such a request passes the identity check
+    # unfingerprinted, which is narrower rather than absent.
     persisted_digest = _persisted_request_digest(metadata_json)
     canonical_body = _canonical_replay_body(metadata_json, body)
     if persisted_digest is not None and not replay_digest_matches(
@@ -1103,7 +1247,6 @@ def _replay_identity_or_conflict(
                 "original run"
             ),
         )
-    return existing_profile
 
 
 def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:
@@ -1124,9 +1267,8 @@ def _persisted_lease_id(metadata_json: str | None) -> str | None:
         return binding.lease_id
     data = _metadata_object(metadata_json)
     lease = data.get(_RUN_LEASE_METADATA_KEY) if data is not None else None
-    try:
-        lease_object = _JSON_OBJECT.validate_python(lease)
-    except ValidationError:
+    lease_object = coerce_object_mapping(lease)
+    if lease_object is None:
         return None
     lease_id = lease_object.get("lease_id")
     if (
@@ -1147,9 +1289,8 @@ def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | No
     data = _metadata_object(metadata_json)
     if data is None:
         return None
-    try:
-        lease = _JSON_OBJECT.validate_python(data.get(_RUN_LEASE_METADATA_KEY))
-    except ValidationError:
+    lease = coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
+    if lease is None:
         return None
     lease_id = lease.get("lease_id")
     reservation_id = lease.get("reservation_id")
@@ -1266,12 +1407,6 @@ def _modern_frozen_disclosure(
     return FrozenTeamAssignmentSummary.model_validate(frozen.disclosure())
 
 
-def _persisted_profile_id(metadata_json: str | None) -> str | None:
-    """Read only the persisted profile id from thread metadata, or None."""
-    frozen = _read_persisted_frozen(metadata_json)
-    return frozen.profile_id if frozen is not None else None
-
-
 def _frozen_disclosure(frozen: Any) -> list[RoleAssignmentSummary]:
     """Build the safe per-role disclosure from a frozen assignment record.
 
@@ -1382,8 +1517,12 @@ def _raise_for_dispatch_failure(
 async def active_runs_endpoint(
     request: Request,
     state: Literal["active", "all"] = Query(default="active"),
-    workspace_root: str | None = Query(default=None, min_length=1, max_length=4096),
-    feature_tag: str | None = Query(default=None, min_length=1, max_length=128),
+    workspace_root: str | None = Query(
+        default=None, min_length=1, max_length=MAX_WORKSPACE_ROOT_LENGTH
+    ),
+    feature_tag: str | None = Query(
+        default=None, min_length=1, max_length=MAX_FEATURE_TAG_LENGTH
+    ),
     status: ThreadStatus | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -1634,7 +1773,7 @@ async def run_cancel_endpoint(
     raise_for_cancel_failure(result, resource_noun="Run")
 
     if result.cancelled:
-        mark_worker_connected(request)
+        worker_liveness(request.app.state).record_contact()
 
     # Cancellation is the drain's tool and is never itself admission-gated. When
     # a cancel settles the run terminally here (e.g. a submitted-but-undispatched
@@ -1663,6 +1802,13 @@ async def run_cancel_endpoint(
 # ---------------------------------------------------------------------------
 
 
+# The transcript verdicts that mean a run's record was LOST rather than never
+# written. Absence on a run that has not been dispatched is normal and excluded.
+_TRANSCRIPT_FAULTS: frozenset[TranscriptAvailability] = frozenset(
+    {TranscriptAvailability.MISSING, TranscriptAvailability.UNREADABLE}
+)
+
+
 def snapshot_to_wire(data: Any) -> ThreadStateSnapshot:
     """Project the domain run-state snapshot onto its wire model.
 
@@ -1689,17 +1835,40 @@ async def run_history_endpoint(
     wide read for a consumer that wants the record: transcript, agents, plan,
     pending answers, and the run's metadata.
 
+    "Whole" is a promise about honesty, not about always having everything. The
+    transcript lives only in the checkpoint, and a checkpoint can be gone or
+    unreachable; when it is, this answers 200 with the durable half of the
+    record it CAN read - status, agents, plan, permissions, metadata - and says
+    plainly that the transcript is not part of it. Refusing the whole read over
+    an absent transcript would cost the caller the half that survived, and
+    answering an unqualified empty message list would be worse still: silent
+    loss dressed as a run that never spoke.
+
     The state snapshot is embedded rather than restated, so this response cannot
     drift from the snapshot it reports.
     """
-    snapshot = await build_thread_state(
+    capture = await capture_thread_state(
         db,
         thread_id=run_id,
         aggregator=aggregator,
         checkpointer=checkpointer,
     )
-    if snapshot is None:
+    if capture is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    snapshot = capture.snapshot
+
+    # A run past dispatch owes a transcript. Reporting the absence on the wire
+    # serves the caller; logging it serves the operator, who otherwise learns of
+    # the loss only if someone happens to read this run and happens to look. A
+    # not-yet-dispatched run owes nothing yet and is deliberately not logged.
+    if capture.transcript in _TRANSCRIPT_FAULTS:
+        logger.warning(
+            "run history: run %s (status %s) has no readable transcript (%s); "
+            "reporting the record without it",
+            run_id,
+            snapshot.status,
+            capture.transcript.value,
+        )
 
     # Absent metadata is stored as null OR as an empty string depending on how
     # the run was created, and an empty string is not parseable JSON - so the
@@ -1724,10 +1893,29 @@ async def run_history_endpoint(
                 "metadata model; reporting it absent",
                 run_id,
             )
+    # The settled counterpart to the snapshot's PENDING permissions. A gate leaves
+    # the pending list as soon as it is answered, and a terminal run expires
+    # whatever was still outstanding, so a decision a human actually made was
+    # durable in the audit log and readable on no surface at all. This is the wide
+    # read - reporting the record is its job.
+    decisions = await get_permission_logs_by_thread(db, run_id)
+
     return RunHistoryResponse(
         run_id=run_id,
         state=snapshot_to_wire(snapshot),
         metadata=metadata,
+        transcript_available=capture.transcript is TranscriptAvailability.AVAILABLE,
+        transcript_status=capture.transcript,
+        permission_decisions=[
+            RunPermissionDecision(
+                tool_name=decision.tool_name,
+                action=decision.action,
+                option_id=decision.option_id,
+                agent_id=decision.agent_id,
+                responded_at=decision.responded_at,
+            )
+            for decision in decisions
+        ],
     )
 
 
@@ -1777,7 +1965,7 @@ async def team_status_endpoint(
     status = await build_team_status(
         db=db,
         aggregator=aggregator,
-        heartbeat_threads=getattr(request.app.state, "worker_active_threads", []),
+        heartbeat_threads=worker_liveness(request.app.state).active_threads,
     )
     return TeamStatusV1Response(
         agents=[
@@ -1910,6 +2098,10 @@ async def run_message_endpoint(
 
     if result.failure_type == FailureType.NOT_FOUND:
         raise HTTPException(status_code=404, detail="Run not found")
+    if result.failure_type == FailureType.NO_ACTIVE_PROJECT:
+        # Same status the run-creation seam returns for the same missing
+        # invariant, so one rule reads identically at both entry points.
+        raise HTTPException(status_code=422, detail=result.error_detail)
     if result.failure_type in (
         FailureType.INPUT_REQUIRED,
         FailureType.TERMINAL,
@@ -1918,7 +2110,7 @@ async def run_message_endpoint(
         raise HTTPException(status_code=409, detail=result.error_detail)
 
     if result.dispatched:
-        mark_worker_connected(request)
+        worker_liveness(request.app.state).record_contact()
 
     if result.failure_type is not None:
         # A follow-up the service resolved to FAILED settles the run terminally
@@ -2006,7 +2198,7 @@ async def run_permission_respond_endpoint(
     )
 
     if result.dispatched:
-        mark_worker_connected(request)
+        worker_liveness(request.app.state).record_contact()
     if result.circuit_open:
         raise HTTPException(status_code=503, detail=result.error_detail)
     if result.error_detail:
@@ -2082,7 +2274,7 @@ async def run_clarification_respond_endpoint(
         )
 
     if result.dispatched:
-        mark_worker_connected(request)
+        worker_liveness(request.app.state).record_contact()
     return RunClarificationRespondResponse(
         run_id=result.thread_id,
         request_id=result.request_id,
@@ -2101,7 +2293,7 @@ async def run_clarification_respond_endpoint(
 @router.get("/provider-catalog", response_model=ProviderCatalogResponse)
 async def provider_catalog_endpoint(
     request: Request,
-    workspace_root: str = Query(min_length=1, max_length=4096),
+    workspace_root: str = Query(min_length=1, max_length=MAX_WORKSPACE_ROOT_LENGTH),
 ) -> ProviderCatalogResponse:
     """Serve prompt-free, execution-lane-specific catalogs for one workspace."""
     supplied_keys = set(request.query_params.keys())
@@ -2119,13 +2311,13 @@ async def provider_catalog_endpoint(
             status_code=422, detail="workspace_root must be an absolute directory"
         )
     canonical = normalize_workspace_identity(workspace_root)
-    if len(canonical) > 4096 or not Path(canonical).is_dir():
+    if len(canonical) > MAX_WORKSPACE_ROOT_LENGTH or not Path(canonical).is_dir():
         raise HTTPException(
             status_code=422,
             detail="workspace_root must identify an existing directory",
         )
     try:
-        records = await provider_catalog_service(request.app).records(canonical)
+        records = await _catalog_records_within_budget(request.app, canonical)
     except ProviderCatalogScopeCapacityError:
         raise HTTPException(
             status_code=503,
@@ -2141,7 +2333,9 @@ async def provider_catalog_endpoint(
 
 @router.get("/presets", response_model=PresetsListResponse)
 async def presets_list_endpoint(
-    workspace_root: str | None = Query(default=None, max_length=4096),
+    workspace_root: str | None = Query(
+        default=None, max_length=MAX_WORKSPACE_ROOT_LENGTH
+    ),
 ) -> PresetsListResponse:
     """List team presets truthfully, marking each loadable or unloadable.
 
@@ -2245,7 +2439,7 @@ def _summarize_preset(
         # produce lands before the graph ever runs, where nothing downstream can
         # observe it.
         required_roles=required_role_ids(tc),
-        authoring_capability=authoring_capability(tc.topology.type),
+        authoring_capability=authoring_capability(tc),
         is_mock=is_mock,
         origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
         supported_capabilities=supported_capabilities(tc.topology.type),
@@ -2295,15 +2489,21 @@ def _summarize_profiles(
             acceptance_gate_passed=False,
             harness=harness,
         )
+        # A role with no declared provider serves an EMPTY provider_id and is not
+        # probed for readiness: there is no lane to probe, and substituting one
+        # would advertise a provider no preset declared. The reason travels in
+        # resolution_error, which the eligibility verdict above already reflects.
         assignments = [
             RoleAssignmentSummary(
                 role_id=role.role_id,
                 agent_id=role.agent_id,
-                provider_id=role.provider.value,
+                provider_id=role.provider.value if role.provider is not None else "",
                 capability=role.capability.value if role.capability else None,
                 model_name=role.model_name or None,
                 fallback_providers=[p.value for p in role.fallback_providers],
-                provider_ready=_ready(role.provider).ready,
+                provider_ready=(
+                    _ready(role.provider).ready if role.provider is not None else False
+                ),
                 source=role.source.value,
                 resolution_error=role.resolution_error,
             )
@@ -2381,10 +2581,10 @@ async def service_state_endpoint(
         # serves the same payload and must not carry it.
         include_pairing=True,
     )
-    checks = _object_mapping(full.get("checks")) or {}
-    database_check = _object_mapping(checks.get("database")) or {}
-    checkpoint_check = _object_mapping(checks.get("checkpoint")) or {}
-    worker_check = _object_mapping(checks.get("worker")) or {}
+    checks = coerce_object_mapping(full.get("checks")) or {}
+    database_check = coerce_object_mapping(checks.get("database")) or {}
+    checkpoint_check = coerce_object_mapping(checks.get("checkpoint")) or {}
+    worker_check = coerce_object_mapping(checks.get("worker")) or {}
     database_ready = _string_field(database_check, "status") == "ok"
     checkpoint_ready = _string_field(checkpoint_check, "status") == "ok"
     worker_ready = _string_field(worker_check, "status") == "ok"
@@ -2412,7 +2612,7 @@ async def service_state_endpoint(
     # degradation signals.
     degraded_reasons: list[str] = []
     for name, check_value in checks.items():
-        check = _object_mapping(check_value)
+        check = coerce_object_mapping(check_value)
         if check is None:
             continue
         status_value = _string_field(check, "status")

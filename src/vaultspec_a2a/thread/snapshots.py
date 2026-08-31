@@ -16,7 +16,14 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ..graph.enums import AgentLifecycleState, Model, PermissionType, Provider
-from .enums import RepairStatus, ThreadStatus
+from .enums import (
+    TERMINAL_STATUSES,
+    DegradedReason,
+    RepairStatus,
+    ReplayStatus,
+    ThreadStatus,
+    TranscriptAvailability,
+)
 from .models import PlanEntry
 
 if TYPE_CHECKING:
@@ -46,6 +53,7 @@ __all__ = [
     "clarification_data_from_interrupt",
     "classify_message_role",
     "classify_permission_pause_reason",
+    "classify_transcript_availability",
     "coerce_model",
     "coerce_provider",
     "derive_message_id",
@@ -94,11 +102,11 @@ LOCALLY_RESPONDABLE_PAUSE_CAUSES: frozenset[str] = PLAN_APPROVAL_PAUSE_CAUSES - 
     "document_approval_request"
 }
 
-# Map aggregator outcome strings to ThreadStatus enum values.
+# Map aggregator outcome strings to ThreadStatus enum values. Derived from the
+# TERMINAL_STATUSES authority (thread/enums.py) rather than restated, so a
+# status added there cannot silently miss this map.
 TERMINAL_STATUS_MAP: dict[str, str] = {
-    ThreadStatus.COMPLETED: ThreadStatus.COMPLETED,
-    ThreadStatus.FAILED: ThreadStatus.FAILED,
-    ThreadStatus.CANCELLED: ThreadStatus.CANCELLED,
+    status.value: status.value for status in TERMINAL_STATUSES
 }
 
 # Checkpoint error → repair status mapping.  Used by snapshot replay
@@ -360,7 +368,7 @@ class ArtifactData:
 
 @dataclass(slots=True)
 class PermissionOptionData:
-    """Layer 1 equivalent of ``_PermissionOptionSnapshot``."""
+    """Layer 1 equivalent of ``PermissionOptionSnapshot``."""
 
     option_id: str
     name: str
@@ -369,7 +377,7 @@ class PermissionOptionData:
 
 @dataclass(slots=True)
 class PermissionData:
-    """Layer 1 equivalent of ``_PermissionSnapshot``."""
+    """Layer 1 equivalent of ``PermissionSnapshot``."""
 
     request_id: str
     description: str
@@ -380,7 +388,7 @@ class PermissionData:
 
 @dataclass(slots=True)
 class ClarificationQuestionData:
-    """Layer 1 equivalent of ``_ClarificationQuestionSnapshot``.
+    """Layer 1 equivalent of ``ClarificationQuestionSnapshot``.
 
     One bounded question within a pending clarification request.
     """
@@ -394,7 +402,7 @@ class ClarificationQuestionData:
 
 @dataclass(slots=True)
 class ClarificationRequestData:
-    """Layer 1 equivalent of ``_ClarificationRequestSnapshot``.
+    """Layer 1 equivalent of ``ClarificationRequestSnapshot``.
 
     A pending mid-run clarification request. ``request_id`` is the same
     checkpoint-derived interrupt id every other interrupt
@@ -416,6 +424,13 @@ class AgentData:
     project from this type rather than redeclaring the field set. ``state``,
     ``provider``, and ``model`` carry the real enums so an unknown value cannot
     survive as an arbitrary string all the way to the wire.
+
+    ``model_name`` is deliberately a plain string, and is the one field here
+    that cannot be an enum: it holds the provider-issued catalog identifier a
+    frozen run actually executed (``mock-high``, and so on), whereas ``model``
+    holds a four-value capability tier. They are not two spellings of one fact.
+    A frozen run resolves no capability at all, so ``model`` is ``None`` on
+    those runs and this field is the only disclosure of what ran.
     """
 
     agent_id: str
@@ -423,6 +438,7 @@ class AgentData:
     state: AgentLifecycleState
     provider: Provider | None = None
     model: Model | None = None
+    model_name: str | None = None
     role: str = ""
     display_name: str = ""
     description: str = ""
@@ -545,6 +561,7 @@ def build_agent_descriptor(
         state=state,
         provider=coerce_provider(summary.get("provider")),
         model=coerce_model(summary.get("model")),
+        model_name=summary.get("model_name") or None,
         role=summary.get("role", ""),
         display_name=summary.get("display_name", ""),
         description=summary.get("description", ""),
@@ -766,6 +783,63 @@ def normalize_artifacts(artifacts_raw: list[Any]) -> list[dict[str, Any]]:
     return normalized
 
 
+# The only statuses a run can hold before its first checkpoint exists: it is
+# marked running on dispatch, and can be cancelled during that same window. An
+# absent checkpoint in any OTHER status means the record was lost, not unwritten.
+_PRE_TRANSCRIPT_STATUSES: frozenset[str] = frozenset(
+    {
+        ThreadStatus.SUBMITTED.value,
+        ThreadStatus.RUNNING.value,
+        ThreadStatus.CANCELLING.value,
+    }
+)
+
+
+def classify_transcript_availability(
+    *,
+    checkpoint_loaded: bool,
+    checkpoint_present: bool,
+    checkpoint_error: bool,
+    thread_status: str,
+) -> TranscriptAvailability:
+    """Classify whether a run's conversation is readable from its checkpoint.
+
+    Takes the SAME four facts as :func:`finalize_snapshot_replay_status` and
+    sits beside it deliberately: both answer from one checkpoint read, and
+    splitting them across modules would let the replay verdict and the
+    transcript verdict drift out of agreement on the same run.
+
+    Distinct from the replay verdict rather than derived from it. Replay status
+    answers "can this run resume", which folds the not-yet-dispatched case and
+    an unreadable checkpoint store together under ``unknown``. Those are
+    opposite answers to "is the transcript lost": one is a run that has said
+    nothing yet, the other is a record we cannot read.
+
+    Absence is excused ONLY in the states a run can legitimately reach before
+    its first checkpoint write, and that window is real: a run is marked running
+    the moment it dispatches, well before the worker writes anything, and it can
+    be cancelled inside that window. Calling ordinary startup a loss would fire
+    the signal on healthy traffic and teach every reader to ignore it.
+
+    Every other state is held to owe a transcript, including the states that are
+    still "active". A run parked on an interrupt was checkpointed to park, and a
+    run in a recovery state advanced far enough for recovery to be needed, so an
+    absent checkpoint there is a loss and not a run that has yet to speak -
+    excusing those would soft-pedal exactly the cases most likely to BE the
+    loss.
+    """
+    if checkpoint_loaded:
+        return TranscriptAvailability.AVAILABLE
+    if checkpoint_error or checkpoint_present:
+        # ``checkpoint_present`` without ``checkpoint_loaded`` means the tuple
+        # was read but its projection raised: the record exists and this reader
+        # could not render it, which is unreadable, not missing.
+        return TranscriptAvailability.UNREADABLE
+    if thread_status in _PRE_TRANSCRIPT_STATUSES:
+        return TranscriptAvailability.NOT_YET_RECORDED
+    return TranscriptAvailability.MISSING
+
+
 def finalize_snapshot_replay_status(
     snapshot: Any,
     *,
@@ -780,24 +854,24 @@ def finalize_snapshot_replay_status(
     ``snapshot_complete``, and ``degraded_reasons`` attributes.
     """
     if checkpoint_loaded:
-        snapshot.replay_status = "durable"
+        snapshot.replay_status = ReplayStatus.DURABLE.value
     elif checkpoint_error:
         snapshot.snapshot_complete = False
-        snapshot.replay_status = "unknown"
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
     elif checkpoint_present:
         snapshot.snapshot_complete = False
-        snapshot.replay_status = "best_effort"
+        snapshot.replay_status = ReplayStatus.BEST_EFFORT.value
     elif thread_status == ThreadStatus.SUBMITTED.value:
         snapshot.snapshot_complete = True
-        snapshot.replay_status = "unknown"
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
     else:
         snapshot.snapshot_complete = False
-        if "checkpoint_missing" not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append("checkpoint_missing")
+        if DegradedReason.CHECKPOINT_MISSING not in snapshot.degraded_reasons:
+            snapshot.degraded_reasons.append(DegradedReason.CHECKPOINT_MISSING.value)
         repair = CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"]
         with contextlib.suppress(AttributeError):
             snapshot.repair_status = repair.value
         with contextlib.suppress(AttributeError):
             snapshot.execution_readiness = repair.value
-        snapshot.replay_status = "gap_detected"
+        snapshot.replay_status = ReplayStatus.GAP_DETECTED.value
     return snapshot

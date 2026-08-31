@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 import pytest
@@ -25,14 +26,22 @@ if TYPE_CHECKING:
 
     from .authoring.discovery import EngineEndpoint
 
-# Suppress OTel metric exporter noise during tests.  The trace SDK stays
-# active so span-creation tests work.  The metric reader's periodic export
-# would otherwise hit localhost:4317 and log UNAVAILABLE errors.
-# OTEL_METRICS_EXPORTER=none disables the metric export pipeline entirely.
+# Build no OTel exporter during tests. The trace SDK stays ACTIVE so
+# span-creation tests keep working; only the export side is off, so nothing
+# starts an export thread and no run competes with a collector that is not
+# there. A suite that needs real export - the Jaeger round-trip - overrides
+# both of these for its own subprocesses.
+#
+# These replace an earlier arrangement that left both exporters built and aimed
+# them at a non-routable TEST-NET address, on the theory that spans would then
+# be dropped silently. They are not: the gRPC exporter cannot distinguish an
+# unreachable collector from a slow one, so it retried on ten-second deadlines
+# and logged every failure for the life of the process. Worse, the metric half
+# was never off at all - OTEL_METRICS_EXPORTER is an SDK auto-configuration
+# variable, and this project builds its providers by hand, so until the
+# telemetry module began reading it the value changed nothing.
+os.environ.setdefault("OTEL_TRACES_EXPORTER", "none")
 os.environ.setdefault("OTEL_METRICS_EXPORTER", "none")
-# Point the trace exporter at a non-routable address so BatchSpanProcessor
-# silently drops spans instead of retrying against localhost:4317.
-os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://198.51.100.1:4317")
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +71,10 @@ os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://198.51.100.1:4317")
 
 DECLARE_OPTION = "--require-prerequisite"
 _COLLECTION_PREREQUISITES_MARK = "requires_prerequisites"
+
+#: How many billable proofs collection withheld, read at session end to keep a
+#: fully-withheld run from exiting as "no tests collected".
+_WITHHELD_LIVE_PROOFS: pytest.StashKey[int] = pytest.StashKey()
 
 
 class ExternalPrerequisite:
@@ -176,6 +189,16 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
             "branch's a2a gateway and worker with "
             "VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then export "
             "VAULTSPEC_ENGINE_SERVICE_JSON and select -m service"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "gateway",
+        what="a reachable a2a gateway, with no engine and no worker required",
+        supply=(
+            "boot this branch's a2a gateway and worker on matching ports and "
+            "export VAULTSPEC_GATEWAY_URL (or leave it to the process registry's "
+            "gateway-dev entry)"
         ),
         probe=None,
     ),
@@ -385,6 +408,45 @@ def pytest_collection_modifyitems(
     if deselected:
         config.hook.pytest_deselected(items=deselected)
         items[:] = selected
+        _report_cost_deselection(config, deselected, declared)
+
+
+def _report_cost_deselection(
+    config: pytest.Config,
+    deselected: list[pytest.Item],
+    declared: frozenset[str],
+) -> None:
+    """Say out loud which live proofs were withheld, and what would admit them.
+
+    A plain deselection is SILENT: pytest reports a count and nothing else, so a
+    run that withheld every cross-repository proof is indistinguishable at a
+    glance from one that had nothing to withhold. That is the same confusion the
+    skip path exists to remove - an absent prerequisite and a real pass reading
+    identically - reappearing on the cost-gated axis, where it also hides the
+    fact that the skip path for those prerequisites is unreachable while the
+    proofs needing them are billable.
+
+    Written through the terminal reporter rather than raised, because withholding
+    a billable proof is correct behaviour being disclosed, not a failure.
+    """
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is None:
+        return
+    missing: set[str] = set()
+    for item in deselected:
+        missing |= _collection_prerequisites(item) - declared
+    if not missing:
+        return
+    config.stash[_WITHHELD_LIVE_PROOFS] = len(deselected)
+    reporter.write_line(
+        f"withheld {len(deselected)} live proof(s) pending prerequisite(s): "
+        f"{', '.join(sorted(missing))}",
+        yellow=True,
+    )
+    for name in sorted(missing):
+        rule = _BY_ID.get(name)
+        if rule is not None:
+            reporter.write_line(f"  {name}: supply it by {rule.supply}", yellow=True)
 
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
@@ -426,7 +488,81 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
     )
 
 
-def pytest_sessionfinish(session: pytest.Session) -> None:
-    """Fail the session when a guaranteed prerequisite produced a skip instead."""
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Settle the session's exit status against both prerequisite outcomes.
+
+    A guaranteed prerequisite that produced a skip is a failure: the caller said
+    the resource was present, so a skip means the run did not prove what it
+    claimed to.
+
+    The opposite case has to be corrected in the other direction. Withholding
+    every billable proof leaves nothing to run, and pytest reports that as
+    ``EXIT_NOTESTSCOLLECTED``, which CI reads as a failure - the red gate this
+    rule exists to prevent, arriving through the exit status rather than a raised
+    error. A host without the dashboard repository would fail the service tier
+    while saying nothing about this repository's health.
+
+    That correction is deliberately narrow: it rewrites ONLY that one exit code,
+    and only when collection actually withheld something, so an empty run for any
+    other reason - a mistyped path, a marker matching nothing - still reports 5.
+    """
     if _declared_prerequisite_skips():
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+        return
+    if (
+        exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED
+        and session.config.stash.get(_WITHHELD_LIVE_PROOFS, 0) > 0
+    ):
+        session.exitstatus = pytest.ExitCode.OK
+
+
+# ---------------------------------------------------------------------------
+# Schema materialization - one DDL run per session, not one per test
+# ---------------------------------------------------------------------------
+
+_SCHEMA_TEMPLATE: Path | None = None
+
+
+def schema_template() -> Path:
+    """Return a SQLite file carrying the full schema, built once per session.
+
+    ``Base.metadata.create_all`` costs ~340ms and is byte-identical on every
+    call, so running it per test was the single largest fixture cost in the
+    suite - larger than the tests themselves in the api package. It is a pure
+    function of the model metadata, so nothing about a test can change its
+    result and nothing is isolated by repeating it.
+
+    Callers copy this file rather than share it: each test still gets its own
+    real database with real DDL-created tables, so isolation is unchanged. Only
+    the way the schema is MATERIALIZED changes - a 5ms file copy instead of a
+    340ms DDL replay.
+    """
+    global _SCHEMA_TEMPLATE
+    if _SCHEMA_TEMPLATE is None:
+        import tempfile
+
+        from sqlalchemy import create_engine
+
+        from .database.models import Base
+
+        target = Path(tempfile.mkdtemp(prefix="vaultspec-schema-")) / "template.db"
+        # Built through the SYNCHRONOUS driver deliberately: callers are async
+        # fixtures already inside a running loop, and `asyncio.run` cannot nest.
+        # The emitted DDL is identical either way - the schema is a property of
+        # the metadata, not of the driver that writes it.
+        engine = create_engine(f"sqlite:///{target}")
+        try:
+            Base.metadata.create_all(engine)
+        finally:
+            engine.dispose()
+        _SCHEMA_TEMPLATE = target
+    return _SCHEMA_TEMPLATE
+
+
+def materialize_schema(db_path: Path) -> Path:
+    """Give *db_path* the full schema by copying the session template."""
+    import shutil
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(schema_template(), db_path)
+    return db_path

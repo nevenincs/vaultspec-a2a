@@ -13,13 +13,15 @@ import psutil
 import pytest
 
 from ...workspace.environment import resolve_env_vars
+from .._stdio_rpc import OutputBudget
 from ..kimi_catalog import (
     KimiCatalogProtocolError,
-    _OutputBudget,
+    _protocol_error,
     catalog_from_provider_list,
     discover_kimi_catalog,
 )
 from ..provider_catalog import (
+    MAX_CONTROLS,
     AuthenticationState,
     CatalogStatus,
     ControlKind,
@@ -146,9 +148,12 @@ def test_native_control_bound_fails_before_normalized_contract_construction() ->
     template = models.get("configured-alias")
     assert isinstance(template, dict)
     result["models"] = {
-        f"alias-{index}": {**template, "model": f"wire-{index}"} for index in range(33)
+        f"alias-{index}": {**template, "model": f"wire-{index}"}
+        for index in range(MAX_CONTROLS + 1)
     }
-    with pytest.raises(KimiCatalogProtocolError, match="32 native controls"):
+    with pytest.raises(
+        KimiCatalogProtocolError, match=f"{MAX_CONTROLS} native controls"
+    ):
         catalog_from_provider_list(result, key=_KEY)
 
 
@@ -167,11 +172,12 @@ def test_revision_tracks_wire_target_and_effort_choices() -> None:
 
 
 def test_stdout_and_stderr_share_one_aggregate_output_budget() -> None:
-    budget = _OutputBudget()
+    budget = OutputBudget(_protocol_error)
     budget.charge(700_000)
     budget.charge(348_576)
-    with pytest.raises(KimiCatalogProtocolError, match="exceeds one MiB"):
+    with pytest.raises(KimiCatalogProtocolError) as raised:
         budget.charge(1)
+    assert str(raised.value) == "Kimi discovery output exceeds one MiB"
 
 
 def _installed_kimi() -> str:

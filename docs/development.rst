@@ -169,6 +169,29 @@ may create ignored caches or build output. ``just dev code repair`` explicitly
 applies Ruff fixes and formatting; it doesn't repair Ty, Deptry, test, or
 documentation findings.
 
+Regenerate the published OpenAPI contract
+-----------------------------------------
+
+The repository-root ``openapi.json`` is the published Hypertext Transfer
+Protocol (HTTP) contract, and the unit gate binds it to the application it
+documents. ``src/vaultspec_a2a/api/tests/test_openapi_artifact.py`` asserts that
+the committed file is valid UTF-8 JavaScript Object Notation (JSON), documents
+every served path and no unserved one, reports the running version, carries no
+development-record identifiers, and matches ``create_app().openapi()`` field for
+field.
+
+Any change to a route, request model, response model, or security declaration
+therefore fails that test until the artifact is regenerated. The test module is
+its own regeneration script, and this is the only supported way to rewrite the
+file:
+
+.. code-block:: console
+
+   uv run --no-sync python -m vaultspec_a2a.api.tests.test_openapi_artifact
+
+Don't hand-edit ``openapi.json``. It's generated output, and the exact-match
+assertion will reject any edit that the application doesn't itself produce.
+
 Continue with :doc:`operations` for runtime commands and :doc:`architecture`
 for ownership boundaries. Before proposing changes, read the `contribution
 guide <https://github.com/nevenincs/vaultspec-a2a/blob/main/CONTRIBUTING.md>`_;

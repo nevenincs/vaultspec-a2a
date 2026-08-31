@@ -1,26 +1,31 @@
-"""Model-profiles handover evidence battery.
+"""Selection-freeze and provider-readiness evidence battery.
 
-Live, mock-free evidence for the verification list that the gateway
-tests do not already cover. The already-covered items (bundled + workspace
-discovery, mock-preset marking, one-invalid-preset isolation, heterogeneous
-team-defaults disclosure, unknown-profile rejection) are exercised by
-``test_gateway_live.py``; this module adds the net-new evidence:
+Live, mock-free evidence that the gateway tests do not already cover. This
+battery originally evidenced the retired model-profile contract; each case
+either moved with its subject onto the explicit catalog-selection contract or
+was retired because the state it guarded is no longer producible:
 
-- A frozen assignment survives a REAL gateway restart (a second app instance
-  built on the same durable stores reproduces it without re-resolving).
-- Changing the workspace profile after launch does not mutate the running run.
-- Discovery and launch disclose byte-identical effective assignments and bind
-  to the one canonical resolver function (identity, not merely equal behaviour).
+- A frozen team selection survives a REAL gateway restart (a second app
+  instance built on the same durable stores reproduces it byte-for-byte
+  without re-dispatching), which is also the catalog-drift immunity evidence:
+  the read path consults only the durable record, never a live catalog.
+- Launch freezes exactly the SERVED catalog entry: the frozen lane reproduces
+  the selection's provider, execution mode, revision, and entry against the
+  catalog read the picker consumed, so the picker's truth cannot drift from
+  execution's.
 - No credential/token material lands in the persisted run metadata DB row.
 - A missing provider credential yields an unavailable readiness with a safe
   reason, and a present credential flips it - proven by manipulating REAL
-  settings in a spawned process environment, never by monkeypatching the running
-  one.
-- An eligible declared fallback makes an otherwise-unready role eligible, using
-  the real readiness probe over real (scrubbed) settings.
+  settings in a spawned process environment, never by monkeypatching the
+  running one.
+- An eligible declared fallback rescues an unready-but-admissible primary and
+  must NOT rescue an unproven one, using the real readiness probe.
 
-The real Research -> ADR run on the served assignments is driven separately
-by another executor with its own engine instance and is not duplicated here.
+Retired with the profile contract, not migrated: the workspace-TOML drift case
+(teams no longer carry provider or model policy, and the run envelope is
+rebuilt from the durable record alone, so the re-resolution channel it guarded
+does not exist) and the discovery/launch shared-resolver case (the profile
+resolver is gone; its successor subject is the served-catalog binding above).
 """
 
 from __future__ import annotations
@@ -29,22 +34,27 @@ import json
 import subprocess
 import sys
 import textwrap
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
 
 from ...database import get_thread
 from .conftest import make_app
-from .test_gateway_live import _live_server
+from .test_gateway_live import _PRESET, _live_server, _run_fields
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Provider credential env vars scrubbed to force a deterministic missing-credential
-# state in the spawned probe, regardless of the host developer's environment.
+# Provider credential env vars neutralised to force a deterministic
+# missing-credential state in the spawned probe. Settings pin their dotenv
+# source to the checkout root, so a spawned process cannot escape it by cwd
+# alone; each key is instead OVERRIDDEN with an empty value, which outranks the
+# dotenv layer in the real settings resolution order.
 _CREDENTIAL_ENV_KEYS = (
     "ZHIPU_API_KEY",
+    "ZAI_AUTH_TOKEN",
+    "ZAI_API_KEY",
     "OPENAI_API_KEY",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -58,62 +68,21 @@ _CREDENTIAL_ENV_KEYS = (
 _DUMMY_ZHIPU_KEY = "ci-probe-not-a-real-key-0000"
 
 
-def _ws_team_toml(*, researcher_capability: str) -> str:
-    """A workspace-local star team on the mock provider with a ``fast`` profile.
-
-    The mock provider is always ready, so run-start succeeds without a token
-    bundle and eligibility never turns on a real credential. ``fast`` lowers the
-    researcher's capability so profile attribution is observable.
-    """
-    return "\n".join(
-        [
-            "[team]",
-            'id = "ws-evidence"',
-            'display_name = "WS Evidence"',
-            "[team.defaults]",
-            'provider = "mock"',
-            "[team.topology]",
-            'type = "star"',
-            "[[team.workers]]",
-            'agent_id = "vaultspec-researcher"',
-            "[team.profiles.fast]",
-            'display_name = "Fast"',
-            "[team.profiles.fast.roles.vaultspec-researcher]",
-            'provider = "mock"',
-            f'capability = "{researcher_capability}"',
-        ]
-    )
-
-
-def _write_ws_team(root: Path, *, researcher_capability: str = "low") -> None:
-    teams_dir = root / ".vaultspec" / "teams"
-    teams_dir.mkdir(parents=True, exist_ok=True)
-    (teams_dir / "ws-evidence.toml").write_text(
-        _ws_team_toml(researcher_capability=researcher_capability), encoding="utf-8"
-    )
-
-
-def _ws_metadata(root: Path) -> dict:
-    return {"workspace_root": str(root)}
-
-
 @pytest.mark.asyncio(loop_scope="function")
-async def test_frozen_assignment_survives_real_gateway_restart(
-    session_factory, checkpointer, tmp_path
+async def test_frozen_selection_survives_real_gateway_restart(
+    session_factory, checkpointer
 ) -> None:
-    """A frozen assignment persists across a real gateway restart.
+    """A frozen team selection persists across a real gateway restart.
 
-    Evidence: restart durably reproduces the frozen effective assignment and does
-    not re-dispatch. A first app freezes and persists the ``fast`` profile; a
-    SECOND app instance - fresh aggregator, circuit breaker, and worker, but the
-    same durable DB and checkpointer - serves run-status with the identical profile
-    and per-role assignment, and dispatches nothing. This scopes to durable
-    reproduction; that the run reads the frozen record rather than silently
-    re-resolving to changed config is the drift test's job.
+    Evidence: restart durably reproduces the frozen execution authority and
+    does not re-dispatch. A first app freezes and persists the explicit
+    selection; a SECOND app instance - fresh aggregator, circuit breaker, and
+    worker, but the same durable DB and checkpointer - serves run-status with
+    the byte-identical freeze and dispatches nothing. The second instance
+    never consults a catalog on this path, which is the drift-immunity claim
+    made concrete: what a run launched with cannot change because the world
+    did.
     """
-    _write_ws_team(tmp_path)
-
-    # First gateway instance: start the run, freezing + persisting the profile.
     app1, _agg1, _worker1, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app1) as base1,
@@ -122,18 +91,17 @@ async def test_frozen_assignment_survives_real_gateway_restart(
         start = await client1.post(
             "/v1/runs",
             json={
-                "team_preset": "ws-evidence",
+                "run_id": "evidence-restart",
+                "team_preset": _PRESET,
                 "message": "go",
-                "profile_id": "fast",
-                "metadata": _ws_metadata(tmp_path),
+                "autonomous": True,
+                **await _run_fields(client1),
             },
         )
         assert start.status_code == 201, start.text
-        started = start.json()
-        run_id = started["run_id"]
-        assert started["profile_id"] == "fast"
-        first_assignments = started["assignments"]
-        assert first_assignments
+        frozen = start.json()["frozen_assignment"]
+        assert frozen, "run-start must disclose the freeze it created"
+        assert frozen["assignments"]
 
     # Second gateway instance on the SAME durable stores: a genuine restart.
     app2, _agg2, worker2, _cp2 = make_app(session_factory, checkpointer)
@@ -141,139 +109,95 @@ async def test_frozen_assignment_survives_real_gateway_restart(
         _live_server(app2) as base2,
         httpx.AsyncClient(base_url=base2, timeout=10.0) as client2,
     ):
-        status = await client2.get(f"/v1/runs/{run_id}")
+        status = await client2.get("/v1/runs/evidence-restart")
         assert status.status_code == 200
         sbody = status.json()
-        assert sbody["profile_id"] == "fast"
-        # The per-role assignment is reproduced verbatim from the durable record.
-        assert sbody["assignments"] == first_assignments
-        researcher = {a["agent_id"]: a for a in sbody["assignments"]}[
-            "vaultspec-researcher"
-        ]
-        assert researcher["capability"] == "low"
-        assert researcher["source"] == "profile"
+        # The freeze is reproduced verbatim from the durable record.
+        assert sbody["frozen_assignment"] == frozen
+        # The legacy profile pair stays empty: this run never had a profile.
+        assert sbody["profile_id"] is None
+        assert sbody["assignments"] == []
         # A restart that only reads status must not re-dispatch the run.
         assert worker2.dispatches == []
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_workspace_drift_after_launch_does_not_mutate_run(
-    session_factory, checkpointer, tmp_path
+async def test_launch_freezes_the_served_catalog_entry(
+    session_factory, checkpointer
 ) -> None:
-    """Editing the workspace profile after launch does not change a live run.
+    """The freeze reproduces exactly the catalog entry the picker was served.
 
-    Evidence: the run's models are frozen at launch. After freezing ``fast`` at
-    ``low`` capability, the workspace TOML is rewritten to ``high``; run-status
-    still discloses the originally frozen ``low`` assignment, proving the run
-    reads its frozen record and never silently re-resolves to changed defaults.
+    Evidence that the picker's truth cannot drift from execution's, restated
+    for the selection contract: the catalog read is the picker, and every role
+    the launch freezes must name that read's provider, execution mode,
+    revision, and entry - with the entry's display name carried through and
+    the exact provider model value resolved server-side, present but never
+    required from the caller.
     """
-    _write_ws_team(tmp_path, researcher_capability="low")
-
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        start = await client.post(
-            "/v1/runs",
-            json={
-                "team_preset": "ws-evidence",
-                "message": "go",
-                "profile_id": "fast",
-                "metadata": _ws_metadata(tmp_path),
-            },
+        fields = await _run_fields(client)
+        selection = cast("dict[str, Any]", fields["selection"])
+        metadata = cast("dict[str, Any]", fields["metadata"])
+        catalog = await client.get(
+            "/v1/provider-catalog",
+            params={"workspace_root": metadata["workspace_root"]},
         )
-        assert start.status_code == 201, start.text
-        run_id = start.json()["run_id"]
-        frozen_researcher = {a["agent_id"]: a for a in start.json()["assignments"]}[
-            "vaultspec-researcher"
-        ]
-        assert frozen_researcher["capability"] == "low"
-
-        # Drift the workspace profile after launch: same id, different capability.
-        _write_ws_team(tmp_path, researcher_capability="high")
-
-        status = await client.get(f"/v1/runs/{run_id}")
-        assert status.status_code == 200
-        drifted = {a["agent_id"]: a for a in status.json()["assignments"]}[
-            "vaultspec-researcher"
-        ]
-        # The frozen capability wins over the drifted workspace default.
-        assert drifted["capability"] == "low"
-
-
-@pytest.mark.asyncio(loop_scope="function")
-async def test_discovery_and_launch_resolve_through_one_function(
-    session_factory, checkpointer, tmp_path
-) -> None:
-    """Discovery and launch disclose byte-identical effective assignments.
-
-    Evidence that the picker's truth cannot drift from execution's: the presets
-    discovery path and the run-start launch path resolve the same team + profile
-    through the shared resolver and disclose byte-identical per-role assignments
-    (provider, capability, model, source, fallbacks). The two live endpoints
-    agreeing field-for-field is the observable constraint; a same-module identity
-    assertion would be tautological, so the behavioural equality carries the claim
-    (with the drift test proving the launch side reads a frozen record, not a
-    re-resolution).
-    """
-    _write_ws_team(tmp_path)
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-    async with (
-        _live_server(app) as base,
-        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
-    ):
-        presets = await client.get(
-            "/v1/presets", params={"workspace_root": str(tmp_path)}
+        assert catalog.status_code == 200, catalog.text
+        record = next(
+            item
+            for item in catalog.json()["providers"]
+            if item["provider_id"] == selection["provider_id"]
+            and item["execution_mode"] == selection["execution_mode"]
         )
-        assert presets.status_code == 200
-        ws_team = {p["id"]: p for p in presets.json()["presets"]}["ws-evidence"]
-        disc_profiles = {p["id"]: p for p in ws_team["profiles"]}
-        disc_fast = {a["agent_id"]: a for a in disc_profiles["fast"]["assignments"]}
+        served_revision = record["catalog"]["state"]["revision"]
+        entry = next(
+            model
+            for model in record["catalog"]["models"]
+            if model["entry_id"] == selection["entry_id"]
+        )
 
         start = await client.post(
             "/v1/runs",
             json={
-                "team_preset": "ws-evidence",
+                "run_id": "evidence-catalog-binding",
+                "team_preset": _PRESET,
                 "message": "go",
-                "profile_id": "fast",
-                "metadata": _ws_metadata(tmp_path),
+                "autonomous": True,
+                **fields,
             },
         )
         assert start.status_code == 201, start.text
-        launch_fast = {a["agent_id"]: a for a in start.json()["assignments"]}
-
-        # The two paths agree field-for-field on the shared disclosure keys.
-        shared_keys = (
-            "role_id",
-            "agent_id",
-            "provider_id",
-            "capability",
-            "model_name",
-            "source",
-            "fallback_providers",
-        )
-        assert set(disc_fast) == set(launch_fast)
-        for agent_id, launch_role in launch_fast.items():
-            disc_role = disc_fast[agent_id]
-            for key in shared_keys:
-                assert disc_role[key] == launch_role[key], (agent_id, key)
+        frozen = start.json()["frozen_assignment"]
+        assert frozen["assignments"]
+        for role in frozen["assignments"]:
+            assert role["provider_id"] == selection["provider_id"]
+            assert role["execution_mode"] == selection["execution_mode"]
+            assert role["catalog_revision"] == served_revision
+            assert role["entry_id"] == selection["entry_id"]
+            assert role["model_display_name"] == entry["display_name"]
+            # The exact provider value is server-resolved from the entry; it
+            # must be present in the freeze without the caller supplying it.
+            assert role["model_name"]
 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_persists_no_secrets_in_db_row(
-    session_factory, checkpointer, tmp_path
+    session_factory, checkpointer
 ) -> None:
     """Actor tokens never land in the persisted run metadata DB row.
 
-    Evidence: run-start receives a real actor-token bundle but must persist only
-    the safe frozen assignment. The thread's ``thread_metadata`` DB column is read
-    back directly and asserted to contain neither the submitted token values nor
-    any credential marker, while still carrying the frozen ``model_profile``.
+    Evidence: run-start receives a real actor-token bundle but must persist
+    only the safe frozen selection. The thread's ``thread_metadata`` DB column
+    is read back directly and asserted to contain neither the submitted token
+    values nor any credential marker, while still carrying the frozen
+    selection record a restart reads.
     """
-    _write_ws_team(tmp_path)
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-    token_value = "tok-secret-researcher-value"
+    token_value = "tok-secret-coder-value"
     bearer_value = "bearer-secret-value"
     async with (
         _live_server(app) as base,
@@ -282,14 +206,15 @@ async def test_run_start_persists_no_secrets_in_db_row(
         start = await client.post(
             "/v1/runs",
             json={
-                "team_preset": "ws-evidence",
+                "run_id": "evidence-no-secrets",
+                "team_preset": _PRESET,
                 "message": "go",
-                "profile_id": "fast",
-                "metadata": _ws_metadata(tmp_path),
+                "autonomous": True,
                 "actor_tokens": {
-                    "tokens": {"vaultspec-researcher": token_value},
+                    "tokens": {"coder": token_value},
                     "engine_bearer": bearer_value,
                 },
+                **await _run_fields(client),
             },
         )
         assert start.status_code == 201, start.text
@@ -300,9 +225,10 @@ async def test_run_start_persists_no_secrets_in_db_row(
     assert thread is not None
     raw_metadata = thread.thread_metadata or ""
 
-    # The frozen profile record is persisted (restart reads it) ...
+    # The frozen selection record is persisted (restart reads it) ...
     persisted = json.loads(raw_metadata)
-    assert persisted["model_profile"]["profile_id"] == "fast"
+    assert persisted["provider_catalog_selection"]["schema_version"] == 1
+    assert persisted["provider_catalog_selection"]["roles"]
     # ... but no token, bearer, or credential material appears in the DB row.
     lowered = raw_metadata.lower()
     assert token_value not in raw_metadata
@@ -387,9 +313,10 @@ _PROBE_SCRIPT = textwrap.dedent(
 def _run_probe(tmp_path: Path, env: dict[str, str]) -> dict:
     """Run the readiness probe in a spawned process with *env*, return its JSON.
 
-    Spawned with ``cwd`` at an empty dir so pydantic-settings finds no ``.env`` and
-    reads only the injected process environment - the real settings path, never a
-    monkeypatch of the running interpreter.
+    The spawned interpreter resolves the REAL settings path - process env over
+    the checkout-root dotenv - so credential state is controlled entirely by
+    the injected environment, never by a monkeypatch of the running
+    interpreter.
     """
     script = tmp_path / "readiness_probe.py"
     script.write_text(_PROBE_SCRIPT, encoding="utf-8")
@@ -406,20 +333,27 @@ def _run_probe(tmp_path: Path, env: dict[str, str]) -> dict:
 
 
 def _scrubbed_env() -> dict[str, str]:
+    """The host env with every provider credential overridden to empty.
+
+    Overridden rather than popped: settings pin their dotenv source to the
+    checkout root, so a popped key would simply be refilled from that file in
+    the spawned process. An empty process-env value outranks the dotenv layer
+    and reads as "not configured" to the readiness probe.
+    """
     import os
 
     env = dict(os.environ)
     for key in _CREDENTIAL_ENV_KEYS:
-        env.pop(key, None)
+        env[key] = ""
     return env
 
 
 def test_missing_credential_yields_unavailable_with_safe_reason(tmp_path) -> None:
     """A scrubbed credential env yields an unavailable provider + safe reason.
 
-    Evidence: with every provider credential removed from the spawned process env,
-    the real ``probe_provider_readiness`` reports Zhipu unready with a reason that
-    names what is missing and leaks no secret value.
+    Evidence: with every provider credential neutralised in the spawned process
+    env, the real ``probe_provider_readiness`` reports Zhipu unready with a
+    reason that names what is missing and leaks no secret value.
     """
     env = _scrubbed_env()
     out = _run_probe(tmp_path, env)

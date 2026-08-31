@@ -72,10 +72,6 @@ UNINVESTIGATED section listing what is out of scope or unverified.
 - No hedging boilerplate; no closing summary.
 """
 
-[agent.model]
-provider   = "claude"
-capability = "mid"
-
 [agent.capabilities]
 filesystem_read  = true
 filesystem_write = false

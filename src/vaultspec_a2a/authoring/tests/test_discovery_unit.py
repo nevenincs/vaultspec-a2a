@@ -12,11 +12,11 @@ from __future__ import annotations
 import json
 import os
 import time
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing.listeners import health_listener
 from ..discovery import SERVICE_JSON_ENV, EngineEndpoint, resolve_engine
 
 if TYPE_CHECKING:
@@ -184,37 +184,6 @@ def test_retry_returns_none_when_the_engine_stays_unreachable(
     assert time.monotonic() - started < 5.0
 
 
-@contextmanager
-def _live_health_listener() -> Iterator[int]:
-    """Run a real HTTP listener that answers ``/health`` 200, yield its port.
-
-    Used to PROVE heartbeat rejection: a candidate pointed at this live listener
-    would resolve if its heartbeat were accepted, so a resolution that never
-    returns this listener's token proves the heartbeat gate rejected the record
-    before the (successful) liveness probe - not that the port was merely dead.
-    """
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-    class _Health(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            self.send_response(200)
-            self.end_headers()
-
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Health)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield server.server_address[1]
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)
-
-
 _REJECT_MARKER_TOKEN = "reject-me-heartbeat-token"
 
 
@@ -244,7 +213,7 @@ def test_a_bad_heartbeat_is_rejected_even_against_a_live_engine(
     (never a machine-global fallback that happened to be live) makes the
     assertion exact.
     """
-    with _live_health_listener() as port:
+    with health_listener() as port:
         record = tmp_path / "service.json"
         record.write_text(
             json.dumps(
@@ -275,7 +244,7 @@ def test_a_fresh_heartbeat_against_the_same_live_engine_does_resolve(
     must resolve the marker token, proving the only difference that blocks the
     stale/malformed cases above is the heartbeat gate itself.
     """
-    with _live_health_listener() as port:
+    with health_listener() as port:
         record = tmp_path / "service.json"
         record.write_text(
             json.dumps(

@@ -16,9 +16,17 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
+from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
-from ..tests.gateway_boot import GatewayBootError, free_port
+from ..testing.catalog_selection import (
+    NoSelectableLaneError,
+    in_process_selection,
+    preset_in_process_provider,
+)
+from ..testing.ports import free_port
+from ..tests.gateway_boot import GatewayBootError
+from ..utils.process import detached_spawn_kwargs
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -29,6 +37,8 @@ _WatchedProcess = tuple[str, "subprocess.Popen[str]", Path]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "service" / "docker-compose.integration.yml"
+
+
 # Service-test runtime lives in the machine-global A2A home, not inside
 # .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 RUNTIME_ROOT = settings.a2a_home / "runtime" / "service-tests"
@@ -36,6 +46,17 @@ RUNTIME_ROOT = settings.a2a_home / "runtime" / "service-tests"
 # worker. It is the single source: injected into the worker env and presented on
 # the harness's own worker probes, which the gated worker surface now requires.
 _INTERNAL_TOKEN = "vaultspec-integration-token"
+# The engine-facing /v1 bearer this harness gives its gateway. The whole /v1
+# router sits behind the attach gate, so without presenting this every call the
+# harness makes - create, list, state, cancel - is a 401 and no service test can
+# reach the surface it exists to certify.
+#
+# Deliberately NOT _INTERNAL_TOKEN: that is the worker IPC secret, and the two
+# planes must never alias ("never shared with worker IPC or embedded in
+# discovery"). Configuring it explicitly is also what makes it knowable here at
+# all - left unset the gateway mints a per-process credential the harness has no
+# way to learn.
+_GATEWAY_SERVICE_TOKEN = "vaultspec-integration-gateway-token"
 
 
 def _compose_env(ports: dict[str, int], project_name: str) -> dict[str, str]:
@@ -100,6 +121,16 @@ def _spawn_process(
     log_path: Path,
 ) -> tuple[subprocess.Popen[str], Any]:
     log_file = log_path.open("w", encoding="utf-8", buffering=1)
+    # The canonical detach flags, not a local Windows-only flag: teardown here
+    # goes exclusively through tree_kill's pid-tree walk (see _stop_process),
+    # which discovers descendants by OS process relationship rather than by
+    # process-group membership, so detaching into a POSIX session on the way in
+    # costs nothing on the way out. It is a deliberate convergence with the
+    # gateway/worker children spawned elsewhere in this test tier (e.g.
+    # ``tests.gateway_boot.spawn_gateway(new_session=True)``), not an accident:
+    # this site previously left POSIX unconsidered, isolating the child from a
+    # stray SIGINT delivered to the harness's own foreground process group.
+    flags = detached_spawn_kwargs()
     proc = subprocess.Popen(
         args,
         cwd=REPO_ROOT,
@@ -107,7 +138,8 @@ def _spawn_process(
         stdout=log_file,
         stderr=subprocess.STDOUT,
         text=True,
-        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        creationflags=flags.creationflags,
+        start_new_session=flags.start_new_session,
     )
     return proc, log_file
 
@@ -184,6 +216,25 @@ fact. Bounding the count keeps recent post-mortems available while stopping the
 unbounded accumulation in the operator's machine-global home.
 """
 
+# The bound here is on the COUNT of directories, not on any one directory's size,
+# and it is applied by the harness itself at the moment it first writes. That
+# ordering is the enforcement: a stack constructed but never started leaves
+# nothing behind, because the sweep and the mkdir share one call site.
+RUNTIME_DIR_DECLARATION = ArtifactDeclaration(
+    name="service-test-runtime-dir",
+    root="<a2a_home>/runtime/service-tests/<compose_project_name>/",
+    owner="service_tests.harness",
+    disposition=RetentionDisposition.BOUNDED_BY_SIZE,
+    mechanism=(
+        f"sweep_stale_runtime_dirs keeps the {RETAINED_RUNTIME_DIRS} most recently "
+        "modified directories and removes the rest, run from _ensure_runtime_dir "
+        "at the point something first writes; no bound applies to any single "
+        "directory's contents, so one run's compose logs can be arbitrarily large"
+    ),
+)
+
+ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (RUNTIME_DIR_DECLARATION,)
+
 
 def sweep_stale_runtime_dirs(
     *, keep: Path | None = None, root: Path | None = None
@@ -237,6 +288,12 @@ class ServiceStack:
     _gateway_log: Any | None = field(default=None, init=False, repr=False)
     _worker_log: Any | None = field(default=None, init=False, repr=False)
     _stopped: bool = field(default=False, init=False, repr=False)
+    # One served selection per (workspace, preset). The first catalog read on a
+    # gateway builds it cold across every registered lane, so it is paid once per
+    # session rather than once per run.
+    _selection_cache: dict[str, dict[str, Any]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         # Resolve only. Creating the directory here meant constructing a stack -
@@ -271,7 +328,14 @@ class ServiceStack:
         self.artifacts[name] = payload
 
     def _client(self, *, timeout: float | None = 10.0) -> httpx.Client:
-        return httpx.Client(base_url=self.gateway_url, timeout=timeout)
+        # Every /v1 route is behind the attach gate, so the bearer belongs on the
+        # shared client rather than on individual calls - one call built without
+        # it is a 401 that reads like a broken route.
+        return httpx.Client(
+            base_url=self.gateway_url,
+            timeout=timeout,
+            headers={"Authorization": f"Bearer {_GATEWAY_SERVICE_TOKEN}"},
+        )
 
     def gateway_client(self, *, timeout: float | None = 10.0) -> httpx.Client:
         """Return a gateway-scoped HTTP client for public API calls."""
@@ -371,13 +435,27 @@ class ServiceStack:
                 "VAULTSPEC_WORKER_PORT": str(self.ports["worker"]),
                 "VAULTSPEC_PORT": str(self.ports["gateway"]),
                 "VAULTSPEC_INTERNAL_TOKEN": _INTERNAL_TOKEN,
+                "VAULTSPEC_A2A_GATEWAY_TOKEN": _GATEWAY_SERVICE_TOKEN,
                 "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
                 "VAULTSPEC_PROJECT_ROOT": str(REPO_ROOT),
                 "MOCK_API_BASE": self.vidaimock_url,
+                # Arm the in-process lanes. This stack has no provider
+                # credentials, and a run now has to present a selection naming a
+                # lane the gateway reports selectable - so without this the
+                # catalog offers nothing selectable at all and every run here is
+                # unstartable. The mock lane additionally needs a tape server,
+                # which MOCK_API_BASE above supplies, so both in-process lanes
+                # are served and the mock presets can select their own.
+                "VAULTSPEC_SERVE_IN_PROCESS_LANES": "true",
                 "OTEL_EXPORTER_OTLP_ENDPOINT": (
                     f"http://127.0.0.1:{self.ports['jaeger_otlp']}"
                 ),
                 "OTEL_EXPORTER_OTLP_INSECURE": "true",
+                # This tier boots a real Jaeger and wants spans in it, so it
+                # opts back IN: the root conftest switches trace export off for
+                # ordinary suites, and this environment starts from a copy of
+                # the pytest process's own.
+                "OTEL_TRACES_EXPORTER": "otlp",
                 "OTEL_METRICS_EXPORTER": "none",
                 "OTEL_SDK_DISABLED": "false",
             }
@@ -668,6 +746,54 @@ class ServiceStack:
             self.record("jaeger-traces", payload)
             return payload
 
+    def catalog_selection(
+        self, workspace_root: str, team_preset: str
+    ) -> dict[str, Any]:
+        """Return a served selection for *team_preset*, from this stack's gateway.
+
+        A selection cannot be hand-written: run start revalidates it against the
+        catalog served FOR THIS WORKSPACE, so it has to name a lane this gateway
+        actually reports selectable, at that lane's current revision.
+
+        The lane is chosen to match what the preset is FOR. These presets run the
+        in-process lanes - the mock lane replays a tape, the deterministic lane
+        answers from fixed role-keyed content - and picking anything else would
+        change what the test exercises. So an external lane is never selected
+        here even when one is available: on a developer machine with a real
+        provider session this would otherwise quietly send certification traffic
+        to a billable lane, which is a worse failure than not running.
+        """
+        cache_key = f"{workspace_root}|{team_preset}"
+        cached = self._selection_cache.get(cache_key)
+        if cached is not None:
+            return dict(cached)
+
+        # A first read builds the catalog cold, probing every registered lane.
+        with self._client(timeout=240.0) as client:
+            resp = client.get(
+                "/v1/provider-catalog", params={"workspace_root": workspace_root}
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+
+        # The lane the preset is pinned to, so a mock preset keeps replaying its
+        # tape rather than being answered by the deterministic lane. Refusing a
+        # non-in-process lane is the mechanism's own guarantee now, not this
+        # file's: it will not hand back a billable lane even if one is the only
+        # selectable thing this stack serves.
+        try:
+            selection = in_process_selection(
+                payload, prefer_provider_id=preset_in_process_provider(team_preset)
+            )
+        except NoSelectableLaneError as exc:
+            raise GatewayBootError(
+                f"a {team_preset!r} run cannot present a valid selection: {exc}"
+            ) from exc
+        self._selection_cache[cache_key] = selection
+        # Copied per call so a caller mutating its body cannot reach the cache
+        # and silently change what every later run in the session selects.
+        return dict(selection)
+
     def create_thread(
         self,
         *,
@@ -677,16 +803,35 @@ class ServiceStack:
         autonomous: bool | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Start a run, supplying the fields run-start now requires.
+
+        Three of them are not optional and none was being sent: a path-safe
+        ``run_id``, an explicit served ``selection``, and a metadata envelope
+        naming an existing ``workspace_root``. They are defaulted here rather
+        than pushed onto eleven call sites, because none of the three is what any
+        of those tests is about - they assert cancellation, lifecycle,
+        permissions, and streaming - while a caller that DOES care (two of them
+        supply their own workspace) still overrides by passing metadata.
+        """
+        # Path-safe by construction: run ids reach the filesystem, and the
+        # schema pattern refuses anything else.
+        run_id = f"svc-{uuid.uuid4().hex}"
+        meta: dict[str, Any] = dict(metadata) if metadata else {}
+        workspace_root = str(meta.get("workspace_root") or self.runtime_dir)
+        Path(workspace_root).mkdir(parents=True, exist_ok=True)
+        meta["workspace_root"] = workspace_root
+
         body: dict[str, Any] = {
             "message": initial_message,
             "team_preset": team_preset,
+            "run_id": run_id,
+            "selection": self.catalog_selection(workspace_root, team_preset),
+            "metadata": meta,
         }
         if title is not None:
             body["title"] = title
         if autonomous is not None:
             body["autonomous"] = autonomous
-        if metadata is not None:
-            body["metadata"] = metadata
         with self._client(timeout=30.0) as client:
             resp = client.post("/v1/runs", json=body)
             resp.raise_for_status()

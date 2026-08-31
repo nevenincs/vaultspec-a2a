@@ -10,22 +10,17 @@ a gateway. No mocks, monkeypatches, or settings mutation.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
-from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
 from ...control.config import Settings
 from ...desktop.profile import DesktopProfileError, derive_state_paths
 from ...providers.factory import capsule_acp_entry, capsule_node_executable
+from ...testing import armed_environment
 from ..main import _DesktopServePlan, _prepare_desktop_serve
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 _MODULE = "vaultspec_a2a.cli.main"
 
@@ -39,21 +34,6 @@ def _build_capsule(root: Path) -> Path:
         asset.parent.mkdir(parents=True, exist_ok=True)
         asset.write_text(content, encoding="utf-8")
     return root
-
-
-@contextmanager
-def _applied_env(updates: dict[str, str]) -> Iterator[None]:
-    """Apply environment updates, restoring the prior environment afterwards."""
-    prior = {key: os.environ.get(key) for key in updates}
-    os.environ.update(updates)
-    try:
-        yield
-    finally:
-        for key, value in prior.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
 
 
 def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
@@ -82,7 +62,7 @@ def test_prepare_desktop_serve_arms_a_real_settings(tmp_path: Path) -> None:
     assert app_home.is_dir()
 
     state = derive_state_paths(app_home)
-    with _applied_env(plan.env):
+    with armed_environment(**plan.env):
         armed = Settings()
     assert armed.desktop_app_home == app_home
     assert armed.a2a_home == state.app_home

@@ -7,63 +7,29 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter, ValidationError
+from ..testing.payloads import (
+    json_object,
+    json_object_list,
+    required_bool,
+    required_text,
+)
+from ._state import select_option_id, thread_state, wait_for_state
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     import httpx
 
+    from ..providers._json_contract import JsonObject
     from .harness import ServiceStack
 
 
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
-
-
-def _json_object(value: object, *, at: str) -> dict[str, object]:
-    """Narrow one real service payload to an object at the wire boundary."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError as exc:
-        raise TypeError(f"expected an object at {at}: {exc}") from exc
-
-
-def _json_object_list(value: object, *, at: str) -> list[dict[str, object]]:
-    """Narrow one real service payload to an object list at the wire boundary."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(value)
-    except ValidationError as exc:
-        raise TypeError(f"expected an object list at {at}: {exc}") from exc
-
-
-def _required_text(body: dict[str, object], field: str, *, at: str) -> str:
-    """Read one required text field from a validated service payload."""
-    value = body.get(field)
-    if not isinstance(value, str):
-        raise AssertionError(f"{at}.{field} was not text: {value!r}")
-    return value
-
-
-def _required_bool(body: dict[str, object], field: str, *, at: str) -> bool:
-    """Read one required boolean field from a validated service payload."""
-    value = body.get(field)
-    if not isinstance(value, bool):
-        raise AssertionError(f"{at}.{field} was not boolean: {value!r}")
-    return value
-
-
-def _thread_state(stack: ServiceStack, thread_id: str) -> dict[str, object]:
-    """Read the real service state before inspecting its public fields."""
-    return _json_object(stack.get_thread_state(thread_id), at="thread state")
-
-
-def _is_terminal_event(event: dict[str, object]) -> bool:
+def _is_terminal_event(event: JsonObject) -> bool:
     """Stop the first real stream only at its terminal event."""
     return event.get("type") == "thread_terminal"
 
 
-def _is_replayed_terminal_event(event: dict[str, object]) -> bool:
+def _is_replayed_terminal_event(event: JsonObject) -> bool:
     """Stop the replay stream at the completed terminal replay."""
     return (
         event.get("type") == "thread_terminal"
@@ -72,50 +38,29 @@ def _is_replayed_terminal_event(event: dict[str, object]) -> bool:
     )
 
 
-def _is_completed_state(state: dict[str, object]) -> bool:
+def _is_completed_state(state: JsonObject) -> bool:
     """Recognise the final state after the real permission resume."""
     return state.get("status") == "completed"
-
-
-def _select_option_id(
-    request: dict[str, object],
-    *,
-    label: str,
-) -> str:
-    target = label.casefold()
-    for option in _json_object_list(request.get("options"), at="permission options"):
-        option_id = option.get("option_id")
-        option_name = option.get("name")
-        option_label = option.get("label")
-        for candidate in (option_id, option_name, option_label):
-            if (
-                isinstance(candidate, str)
-                and candidate.casefold() == target
-                and isinstance(option_id, str)
-                and option_id
-            ):
-                return option_id
-    raise AssertionError(f"permission option {label!r} not found: {request}")
 
 
 def _read_sse_frames(
     response: httpx.Response,
     *,
-    stop_when: Callable[[dict[str, object]], bool],
+    stop_when: Callable[[JsonObject], bool],
     timeout: float = 120.0,
-) -> list[dict[str, object]]:
+) -> list[JsonObject]:
     deadline = time.monotonic() + timeout
-    events: list[dict[str, object]] = []
+    events: list[JsonObject] = []
     fields: dict[str, list[str]] = {"data": []}
 
-    def _flush() -> dict[str, object] | None:
+    def _flush() -> JsonObject | None:
         data_lines = fields.get("data", [])
         if not data_lines:
             fields.clear()
             fields["data"] = []
             return None
         decoded: object = json.loads("\n".join(data_lines))
-        payload = _json_object(decoded, at="SSE frame")
+        payload = json_object(decoded, at="SSE frame")
         fields.clear()
         fields["data"] = []
         return payload
@@ -139,33 +84,15 @@ def _read_sse_frames(
     raise AssertionError(f"timed out waiting for SSE event; events={events!r}")
 
 
-def _wait_for_state(
-    stack: ServiceStack,
-    thread_id: str,
-    predicate: Callable[[dict[str, object]], bool],
-    *,
-    timeout: float = 120.0,
-) -> dict[str, object]:
-    deadline = time.monotonic() + timeout
-    last_state: dict[str, object] | None = None
-    while time.monotonic() < deadline:
-        state = _thread_state(stack, thread_id)
-        last_state = state
-        if predicate(state):
-            return state
-        time.sleep(1.0)
-    raise AssertionError(f"timed out waiting for thread {thread_id}: {last_state}")
-
-
 def _wait_for_pending_permission(
     stack: ServiceStack,
     thread_id: str,
     *,
     timeout: float = 120.0,
-) -> dict[str, object]:
+) -> JsonObject:
     """Wait until a permission pause is fully resumable and durably projected."""
 
-    def _is_resumable_permission(state: dict[str, object]) -> bool:
+    def _is_resumable_permission(state: JsonObject) -> bool:
         return (
             bool(state.get("pending_permissions"))
             and state.get("status") == "input_required"
@@ -173,7 +100,7 @@ def _wait_for_pending_permission(
             and state.get("snapshot_complete") is True
         )
 
-    return _wait_for_state(stack, thread_id, _is_resumable_permission, timeout=timeout)
+    return wait_for_state(stack, thread_id, _is_resumable_permission, timeout=timeout)
 
 
 def _trigger_after(
@@ -198,27 +125,27 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         team_preset="mock-human-in-loop",
         title="service stream follow-up",
     )
-    created_body = _json_object(created, at="created thread")
-    thread_id = _required_text(created_body, "run_id", at="created thread")
+    created_body = json_object(created, at="created thread")
+    thread_id = required_text(created_body, "run_id", at="created thread")
 
     paused = _wait_for_pending_permission(service_stack, thread_id)
     service_stack.record(f"sse-paused:{thread_id}", paused)
 
-    pending_permissions = _json_object_list(
+    pending_permissions = json_object_list(
         paused.get("pending_permissions"), at="paused thread pending permissions"
     )
     assert pending_permissions, "paused thread had no pending permission"
     request = pending_permissions[0]
-    initial_result: dict[str, dict[str, object]] = {}
+    initial_result: dict[str, JsonObject] = {}
     initial_errors: list[BaseException] = []
 
     def _approve() -> None:
         try:
-            initial_result["response"] = _json_object(
+            initial_result["response"] = json_object(
                 service_stack.respond_permission(
-                    _required_text(request, "request_id", at="pending permission"),
+                    required_text(request, "request_id", at="pending permission"),
                     thread_id=thread_id,
-                    option_id=_select_option_id(request, label="approve"),
+                    option_id=select_option_id(request, label="approve"),
                 ),
                 at="permission response",
             )
@@ -241,17 +168,17 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     assert approved is not None, (
         "permission approval callback did not return a response"
     )
-    assert _required_bool(approved, "accepted", at="permission response") is True
+    assert required_bool(approved, "accepted", at="permission response") is True
     assert (
-        _required_text(approved, "action_status", at="permission response")
+        required_text(approved, "action_status", at="permission response")
         == "accepted_not_applied"
     )
-    assert _required_bool(approved, "applied", at="permission response") is False
+    assert required_bool(approved, "applied", at="permission response") is False
     assert any(event.get("type") == "thread_terminal" for event in initial_events)
     assert any(event.get("status") == "completed" for event in initial_events)
     service_stack.record(f"sse-initial:{thread_id}", initial_events)
 
-    completed = _wait_for_state(
+    completed = wait_for_state(
         service_stack,
         thread_id,
         _is_completed_state,
@@ -259,15 +186,13 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     service_stack.record(f"sse-completed:{thread_id}", completed)
     assistant_messages = [
         message
-        for message in _json_object_list(
+        for message in json_object_list(
             completed.get("messages"), at="completed messages"
         )
         if message.get("role") == "assistant"
     ]
     assert assistant_messages, "resume flow should emit a deterministic assistant reply"
-    assert _required_text(
-        assistant_messages[-1], "content", at="assistant message"
-    ) == (
+    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
         "Permission approved. The privileged command completed successfully "
         "and the task is now finished."
     )
@@ -284,17 +209,17 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     assert any(event.get("type") == "thread_terminal" for event in follow_up_events)
     assert follow_up_events[-1].get("status") == "completed"
     assert (
-        _required_bool(follow_up_events[-1], "replay", at="terminal replay frame")
+        required_bool(follow_up_events[-1], "replay", at="terminal replay frame")
         is True
     )
 
-    final_state = _thread_state(service_stack, thread_id)
+    final_state = thread_state(service_stack, thread_id)
     user_messages = [
         message
-        for message in _json_object_list(
+        for message in json_object_list(
             final_state.get("messages"), at="final messages"
         )
-        if _required_text(message, "role", at="final message") == "user"
+        if required_text(message, "role", at="final message") == "user"
     ]
     assert len(user_messages) == 1
 
@@ -307,7 +232,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     assert rejected.status_code == 409
     service_stack.record(
         f"sse-follow-up-rejected:{thread_id}",
-        _json_object(rejected.json(), at="rejected follow-up response"),
+        json_object(rejected.json(), at="rejected follow-up response"),
     )
 
     service_stack.record(f"sse-follow-up:{thread_id}", follow_up_events)

@@ -34,7 +34,7 @@ import httpx
 import pytest
 import yaml
 
-from ..tests.gateway_boot import free_port
+from ..testing.ports import free_port
 
 if TYPE_CHECKING:
     from collections.abc import Generator

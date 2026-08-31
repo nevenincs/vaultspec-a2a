@@ -19,6 +19,7 @@ from ..openai_catalog import (
     discover_openai_compatible_catalog,
 )
 from ..provider_catalog import (
+    MAX_MODELS,
     AuthenticationState,
     CatalogStatus,
     ProviderCatalogKey,
@@ -161,9 +162,13 @@ def test_empty_duplicate_oversized_and_paginated_lists_fail_closed() -> None:
     with pytest.raises(OpenAICompatibleCatalogError, match="duplicate identifiers"):
         catalog_from_model_list(_model_list("same", "same"), key=_KEY)
 
-    with pytest.raises(OpenAICompatibleCatalogError, match="exceeds 256 models"):
+    with pytest.raises(
+        OpenAICompatibleCatalogError, match=f"exceeds {MAX_MODELS} models"
+    ):
         catalog_from_model_list(
-            _model_list(*(f"provider/model-{index}" for index in range(257))),
+            _model_list(
+                *(f"provider/model-{index}" for index in range(MAX_MODELS + 1))
+            ),
             key=_KEY,
         )
 

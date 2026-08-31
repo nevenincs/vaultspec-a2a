@@ -1,10 +1,16 @@
 """Shared real-process gateway boot for every tier that spawns the product.
 
 This module is the single home of the primitives every real-process tier needs
-to stand a production gateway up and take it down again: port allocation,
-death-aware readiness, bind-race retry, whole-tree reaping, the child gateway
-program, the seated application home it boots over, and the sanitised
-environment an out-of-tree subprocess is given.
+to stand a production gateway up and take it down again: death-aware readiness,
+bind-race retry, whole-tree reaping, the child gateway program, the seated
+application home it boots over, and the sanitised environment an out-of-tree
+subprocess is given.
+
+Acquiring the ports it boots on is a separate concept with its own home,
+:mod:`vaultspec_a2a.testing.ports`, and this consumes it. Nothing about holding
+a scratch-band reservation is specific to a gateway - most callers of that
+helper never boot one - so keeping it here made a general primitive reachable
+only through a gateway module.
 
 It lives at the package-root test tier rather than inside any one test package
 on purpose. ``desktop_tests``, ``acceptance``, ``service_tests`` and every
@@ -40,32 +46,32 @@ until later boots time out too, turning one real failure into a cascade.
 
 from __future__ import annotations
 
-import atexit
 import contextlib
 import json
 import os
-import socket
 import subprocess
 import sys
-import threading
 import time
 from typing import IO, TYPE_CHECKING, Literal
 
 import httpx
 
-from ..desktop._platform_acl import harden_credential_file
+from ..desktop._platform_acl import harden_credential_path
 from ..desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
     OWNERSHIP_CAPABILITY_NAME,
 )
 from ..desktop.profile import derive_state_paths
-from ..lifecycle.discovery import port_has_listener
+from ..testing.ports import (
+    allocate_free_ports,
+    hold_for_process_lifetime,
+    reserve_scratch_ports,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
 
-    from ..lifecycle import PortReservation
 
 __all__ = [
     "READINESS_TIMEOUT",
@@ -74,7 +80,6 @@ __all__ = [
     "armed_gateway_env",
     "await_gateway_ready",
     "clean_subprocess_environment",
-    "free_port",
     "gateway_script",
     "reap_gateway",
     "seat_valid_database",
@@ -102,21 +107,6 @@ READINESS_TIMEOUT = 60.0
 _LOG_TAIL_BYTES = 4096
 
 _MIGRATE_MODULE = "vaultspec_a2a.cli.main"
-
-# MEASURED on a Windows 11 host, 50 calls each: a connect to a port a real
-# listener holds is ACCEPTED in ~3.4 ms, while a connect to an unheld loopback
-# port does NOT get a prompt refusal - it runs the full budget and reports "no
-# listener" by TIMING OUT. So this constant is the per-probe cost of the common
-# (free) case, not a rarely-hit ceiling: at 0.25 s, one `free_port()` costs
-# ~263 ms and a gateway/worker pair ~524 ms.
-#
-# Kept at 0.25 s deliberately rather than tuned down. The margin over a real
-# listener's 3.4 ms answer is ~70x, and the failure mode of being too impatient
-# is the exact bug this function exists to fix: declaring an occupied port free
-# and handing it to a child. Production's own `_port_is_free` is more patient
-# still (0.5 s). Wall-clock is the cheaper thing to spend here.
-_PORT_PROBE_TIMEOUT = 0.25
-_PORT_ATTEMPTS = 20
 
 GatewayLogLevel = Literal["info", "warning"]
 
@@ -180,158 +170,6 @@ def gateway_script(*, log_level: GatewayLogLevel) -> str:
     the script constants.
     """
     return _GATEWAY_SCRIPT_INFO if log_level == "info" else _GATEWAY_SCRIPT_QUIET
-
-
-# Scratch-band reservations held by this process. A standalone ``free_port``
-# caller gives no teardown moment, so its reservation is held for the process
-# lifetime and tidied at exit; a holder that dies untidily is reclaimed by the
-# registry's pid-death rule regardless, so a crashed run never wedges the band.
-#
-# Held markers are HEARTBEATED: registry reservation liveness treats a marker
-# older than its TTL (five minutes) as reclaimable regardless of pid, and a
-# full suite runs far longer than that, so an unrefreshed hold would silently
-# decay back to bind-probe behaviour mid-run - a late-binding worker could
-# find its promised port taken, and a never-binding negative-test port could
-# be claimed and bound under the test. One daemon thread touches every held
-# marker's mtime well inside the TTL, making "held for the process lifetime"
-# actually true.
-_HELD_RESERVATIONS: list[PortReservation] = []
-_HELD_LOCK = threading.Lock()
-_HOLD_REFRESH_INTERVAL_S = 60.0
-_HOLD_REFRESH_STOP: threading.Event | None = None
-
-
-def _refresh_held_markers_once() -> None:
-    """Touch every held marker's mtime; missing files are tolerated."""
-    with _HELD_LOCK:
-        paths = [reservation.path for reservation in _HELD_RESERVATIONS]
-    for path in paths:
-        with contextlib.suppress(OSError):
-            os.utime(path)
-
-
-def _release_held_reservations() -> None:
-    from ..lifecycle import release_reservation
-
-    stop = _HOLD_REFRESH_STOP
-    if stop is not None:
-        stop.set()
-    while _HELD_RESERVATIONS:
-        release_reservation(_HELD_RESERVATIONS.pop())
-
-
-def _hold_for_process_lifetime(reservation: PortReservation) -> None:
-    global _HOLD_REFRESH_STOP
-    if _HOLD_REFRESH_STOP is None:
-        stop = threading.Event()
-        _HOLD_REFRESH_STOP = stop
-
-        def _refresh_loop() -> None:
-            while not stop.wait(_HOLD_REFRESH_INTERVAL_S):
-                _refresh_held_markers_once()
-
-        threading.Thread(
-            target=_refresh_loop, name="held-reservation-refresh", daemon=True
-        ).start()
-        atexit.register(_release_held_reservations)
-    with _HELD_LOCK:
-        _HELD_RESERVATIONS.append(reservation)
-
-
-def _reserve_scratch(count: int) -> list[PortReservation] | None:
-    """*count* registry reservations from the scratch band, or ``None``.
-
-    ``None`` - never an exception - when the committed band config is
-    unavailable or the band is exhausted, so every caller degrades to the
-    ephemeral-candidate path instead of failing a run over allocation policy.
-    The default-safe property lives here: allocation arbitrates through the
-    machine-global registry FIRST, and the OS-candidate probe is the fallback,
-    not the norm.
-    """
-    from ..lifecycle import (
-        ProcsConfigError,
-        load_procs_config,
-        release_reservation,
-        reserve_port,
-    )
-
-    try:
-        config = load_procs_config()
-        role = config.role("scratch")
-    except ProcsConfigError:
-        return None
-    reservations: list[PortReservation] = []
-    try:
-        for _ in range(count):
-            reservations.append(reserve_port("scratch", role, config=config))
-    except (RuntimeError, OSError):
-        for reservation in reservations:
-            release_reservation(reservation)
-        return None
-    return reservations
-
-
-def free_port() -> int:
-    """Return a loopback port with no listener answering on it.
-
-    Default-safe: the port comes from a registry reservation over the scratch
-    band, held for this process's lifetime, so a concurrent test session, a
-    parallel agent, or a lifecycle boot can never be handed the same number
-    while this process lives. The ephemeral OS-candidate probe below is the
-    FALLBACK for a missing config or an exhausted band, not the primary path.
-
-    A reservation is not a bind, so the negative-test reading of this function
-    is preserved: the returned port has no listener answering on it, which is
-    what those callers assert against. A test wanting a claim scoped to a
-    context rather than the process takes
-    ``vaultspec_a2a.testing.ports.reserved_port`` directly.
-    """
-    reservations = _reserve_scratch(1)
-    if reservations is None:
-        return _allocate_candidates(1)[0]
-    _hold_for_process_lifetime(reservations[0])
-    return reservations[0].port
-
-
-def _allocate_candidates(count: int) -> list[int]:
-    """Allocate *count* DISTINCT unoccupied loopback ports in one go (fallback).
-
-    Every socket is bound before any is released, so the kernel cannot issue the
-    same number twice within one call. Allocating in sequence instead can: the
-    first port is released before the second is requested, and a measured
-    200-call sample re-issued a number twice. A gateway told to serve its worker
-    on its own port dies on the second bind - recoverable, because
-    :func:`spawn_until_ready` retries a dead child, but it burns an attempt on a
-    self-inflicted collision and reports it as an opaque boot failure.
-
-    Bind-to-port-zero ALONE is not a free-port test on Windows: without
-    ``SO_EXCLUSIVEADDRUSE`` a plain ``bind`` to a port another process already
-    serves on ``0.0.0.0`` SUCCEEDS, so each kernel choice is confirmed with
-    ``lifecycle.discovery.port_has_listener`` - the same connect probe
-    production trusts - while the binding is still held (this socket never
-    listens, so an ACCEPTED connect can only be a foreign listener). The
-    result is still a candidate that nothing reserves, which is why the
-    reservation path above is the primary and this the fallback.
-    """
-    for _ in range(_PORT_ATTEMPTS):
-        with contextlib.ExitStack() as stack:
-            candidates: list[int] = []
-            for _slot in range(count):
-                sock = stack.enter_context(
-                    socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                )
-                sock.bind(("127.0.0.1", 0))
-                candidates.append(int(sock.getsockname()[1]))
-            occupied = any(
-                port_has_listener(port, timeout=_PORT_PROBE_TIMEOUT)
-                for port in candidates
-            )
-        if not occupied:
-            return candidates
-    raise GatewayBootError(
-        f"no {count} unoccupied loopback port(s) after {_PORT_ATTEMPTS} ephemeral "
-        "allocations; every candidate already had a listener answering on it"
-    )
 
 
 def _log_tail(log_path: Path | None) -> str:
@@ -433,11 +271,11 @@ def spawn_until_ready(
         # hold), falling back to one atomic candidate call so the pair cannot
         # collide with itself: a gateway handed its own port for its worker
         # would die on the second bind and burn a retry.
-        reservations = _reserve_scratch(2)
+        reservations = reserve_scratch_ports(2)
         if reservations is not None:
             gateway_port, worker_port = (r.port for r in reservations)
         else:
-            gateway_port, worker_port = _allocate_candidates(2)
+            gateway_port, worker_port = allocate_free_ports(2)
         proc = spawn(gateway_port, worker_port)
         base = f"http://127.0.0.1:{gateway_port}"
         try:
@@ -471,7 +309,7 @@ def spawn_until_ready(
             # process lifetime; pid-death reclaim retires it if we die.
             gateway_reservation, worker_reservation = reservations
             release_reservation(gateway_reservation)
-            _hold_for_process_lifetime(worker_reservation)
+            hold_for_process_lifetime(worker_reservation)
         return proc, gateway_port, worker_port, base
     raise AssertionError(
         f"gateway did not boot within {attempts} attempts; last: {last_boot_error}"
@@ -545,7 +383,7 @@ def seed_credentials(app_home: Path, *, attach: str, ownership: str) -> Path:
     ):
         path = state.credentials_dir / name
         path.write_text(secret, encoding="utf-8")
-        harden_credential_file(path)
+        harden_credential_path(path)
     return state.credentials_dir
 
 

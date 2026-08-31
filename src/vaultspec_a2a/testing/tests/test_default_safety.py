@@ -16,7 +16,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from ...lifecycle import load_procs_config
-from ...tests.gateway_boot import free_port
+from ..ports import free_port
 from ..sessions import SESSION_LEASE_KEY, effective_worker_count
 
 if TYPE_CHECKING:
@@ -56,7 +56,7 @@ def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None
         "import json, sys, time\n"
         "from pathlib import Path\n"
         "from vaultspec_a2a.lifecycle import load_procs_config\n"
-        "from vaultspec_a2a.tests.gateway_boot import free_port\n"
+        "from vaultspec_a2a.testing.ports import free_port\n"
         "ports = [free_port() for _ in range(10)]\n"
         "band = load_procs_config().role('scratch').band\n"
         "assert all(p in band for p in ports), (\n"
@@ -128,6 +128,14 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
             "-m",
             "pytest",
             str(suite / "test_hold.py"),
+            # Named explicitly: these suites live outside the checkout,
+            # and the plugin loads from the repository root conftest rather
+            # than a pytest11 entry point, so conftest discovery from the
+            # test file never reaches it. Without this the holder registers
+            # no session lease at all and the wait below stalls against a
+            # peer that was never admitted.
+            "-p",
+            "vaultspec_a2a.testing.plugin",
             "-p",
             "no:cacheprovider",
             "-q",
@@ -154,6 +162,13 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
                 "-m",
                 "pytest",
                 str(suite / "test_quick.py"),
+                # The admitting run needs the plugin for the same reason the
+                # holder does, and more pointedly: the worker-count verdict this
+                # test reads comes from the plugin's own report header, so
+                # without it there is no header to read and no admission to
+                # observe.
+                "-p",
+                "vaultspec_a2a.testing.plugin",
                 "-p",
                 "no:cacheprovider",
                 "-n",
@@ -187,11 +202,7 @@ def test_held_reservations_are_heartbeated_past_the_ttl() -> None:
 
     from ...lifecycle import now_ms
     from ...lifecycle.registry import RESERVATION_TTL_MS, _reservation_is_live
-    from ...tests.gateway_boot import (
-        _HELD_RESERVATIONS,
-        _refresh_held_markers_once,
-        free_port,
-    )
+    from ..ports import _HELD_RESERVATIONS, _refresh_held_markers_once, free_port
 
     port = free_port()
     reservation = next(r for r in _HELD_RESERVATIONS if r.port == port)

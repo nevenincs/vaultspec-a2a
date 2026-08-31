@@ -23,11 +23,52 @@ __all__ = [
     "PermissionType",
     "PipelinePhase",
     "Provider",
+    "SemanticPhase",
+    "ServerEventType",
     "ToolCallStatus",
     "ToolKind",
     "is_rejection_response",
     "research_adr_semantic_phase",
 ]
+
+
+class ServerEventType(StrEnum):
+    """Discriminator for server-to-client progress-stream events.
+
+    Sited here rather than beside the wire schemas because both sides of the
+    worker-to-gateway boundary need it: the schema package types its frames on
+    it, and the interprocess serializer decides a frame's kind from it. It had
+    been declared once as an API-only enum and restated as eleven string
+    literals in that serializer - a closed vocabulary copied by hand, which is
+    how an event kind added on one side and missed on the other relays with no
+    kind at all. The serializer's own docstring records that happening.
+    """
+
+    AGENT_STATUS = "agent_status"
+    MESSAGE_CHUNK = "message_chunk"
+    THOUGHT_CHUNK = "thought_chunk"
+    TOOL_CALL_START = "tool_call_start"
+    TOOL_CALL_UPDATE = "tool_call_update"
+    PERMISSION_REQUEST = "permission_request"
+    # Snake_case because this is a FRAME KIND, and every frame kind is snake_case.
+    # The originating specification writes it hyphenated, but that is its house
+    # style for naming things rather than evidence about the token: it hyphenates
+    # the edge verbs too, and those genuinely ARE hyphenated on the wire
+    # (``/ops/a2a/run-start`` is a real URL). So two spellings coexist here on
+    # purpose - edge verbs hyphenated, progress-stream frame kinds snake_case -
+    # and this member belongs to the second family. Do not "align" the verbs to
+    # match it; that would break the edge. A consumer-visible spelling stays a
+    # one-line change here if the hyphen ever proves literal for frame kinds too.
+    CLARIFICATION_PENDING = "clarification_pending"
+    ARTIFACT_UPDATE = "artifact_update"
+    PLAN_UPDATE = "plan_update"
+    TEAM_STATUS = "team_status"
+    ERROR = "error"
+    # No graph event produces this one: it is a transport-level keepalive the
+    # stream emits on its own. So this vocabulary is deliberately WIDER than the
+    # serializer's dispatch, and a reader comparing the two must not treat the
+    # difference as a missing case.
+    HEARTBEAT = "heartbeat"
 
 
 class PipelinePhase(StrEnum):
@@ -211,38 +252,21 @@ class Model(StrEnum):
     MAX = "max"
 
 
-# Concrete model name mapping as of February 2026
+# Concrete model names for the INTERNAL in-process lanes only.
+#
+# An external provider's models are its own to name: they are enumerated from
+# that provider's live catalog, revalidated at run start, and frozen per role
+# into the run's durable assignment. A repository-authored name for an external
+# lane could only ever be a stale guess at an account-specific, region-specific,
+# CLI-version-specific fact, so no such entry exists here and the factory
+# refuses to invent one.
+#
+# The two lanes below are exempt because they are not external: they execute
+# in-process, no catalog exists to enumerate them, and their content is
+# role-keyed rather than model-keyed, which makes these names inert selectors
+# rather than model policy. ``providers/in_process_catalog.py`` serves them from
+# this map.
 MODEL_MAP: dict[Provider, dict[Model, str]] = {
-    Provider.CLAUDE: {
-        Model.LOW: "haiku",
-        Model.MID: "sonnet",
-        Model.HIGH: "opus",
-        Model.MAX: "opus",
-    },
-    Provider.GEMINI: {
-        Model.LOW: "gemini-2.5-flash",
-        Model.MID: "gemini-3-flash-preview",
-        Model.HIGH: "gemini-3.1-pro-preview",
-        Model.MAX: "gemini-3.1-pro-preview",
-    },
-    Provider.OPENAI: {
-        Model.LOW: "gpt-5-mini",
-        Model.MID: "gpt-5.2-pro",
-        Model.HIGH: "gpt-5.3-codex",
-        Model.MAX: "gpt-5.3-codex",
-    },
-    # Codex drives `codex app-server`'s JSON-RPC surface directly (non-ACP); the
-    # names are real Codex model ids verified against `model/list` on codex-cli
-    # 0.144.4 (an unknown id fails the turn). gpt-5.6-sol is the account default.
-    Provider.CODEX: {
-        Model.LOW: "gpt-5.4-mini",
-        Model.MID: "gpt-5.5",
-        Model.HIGH: "gpt-5.6-sol",
-        Model.MAX: "gpt-5.6-sol",
-    },
-    # Deterministic in-process acceptance provider: content is role-keyed, not
-    # model-keyed, so these names are inert selectors kept only to satisfy the
-    # MODEL_MAP contract.
     Provider.DETERMINISTIC: {
         Model.LOW: "deterministic",
         Model.MID: "deterministic",
@@ -255,49 +279,17 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
         Model.HIGH: "mock-high",
         Model.MAX: "mock-max",
     },
-    Provider.ZHIPU: {
-        Model.LOW: "glm-4.7-flash",
-        Model.MID: "glm-4.7-flagship",
-        Model.HIGH: "glm-5",
-        Model.MAX: "glm-5",
-    },
-    # Z.ai serves the same GLM family over an Anthropic-Messages-compatible
-    # endpoint consumed through the Claude ACP path; the model names mirror
-    # Provider.ZHIPU.
-    Provider.ZAI: {
-        # Z.ai runs through the Claude ACP adapter, whose negotiated picker
-        # accepts Claude capability aliases and resolves them at the gateway.
-        Model.LOW: "haiku",
-        Model.MID: "sonnet",
-        Model.HIGH: "opus",
-        Model.MAX: "opus",
-    },
-    # Kimi (Moonshot AI) drives its own `kimi acp` agent; the factory injects
-    # the profile-resolved model through KIMI_MODEL_NAME. The names are the
-    # kimi-k2 family the installed kimi-cli 1.49.0 recognizes (source guards on
-    # `startswith("kimi-k2")`),
-    # with the thinking variant at the higher tiers. The account's exact
-    # available ids are confirmed only on KIMI_API_KEY arrival (P05).
-    Provider.KIMI: {
-        Model.LOW: "kimi-k2",
-        Model.MID: "kimi-k2",
-        Model.HIGH: "kimi-k2-thinking",
-        Model.MAX: "kimi-k2-thinking",
-    },
 }
 
 
-# Default model mapping (capability level per provider)
+# Default capability level for the internal in-process lanes only.
+#
+# An external provider has no implicit default: omitting a model may not
+# silently choose what produces an artifact, so a run must carry an explicit
+# served selection instead.
 PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
-    Provider.CLAUDE: Model.MID,
-    Provider.CODEX: Model.HIGH,
     Provider.DETERMINISTIC: Model.MID,
-    Provider.GEMINI: Model.MID,
-    Provider.KIMI: Model.MID,
     Provider.MOCK: Model.MID,
-    Provider.OPENAI: Model.HIGH,
-    Provider.ZAI: Model.MID,
-    Provider.ZHIPU: Model.HIGH,
 }
 
 
@@ -305,26 +297,69 @@ PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
 # research_adr node -> semantic authoring phase
 # ---------------------------------------------------------------------------
 
+
+class SemanticPhase(StrEnum):
+    """What a run is product-visibly doing, in terms that name no graph node.
+
+    The one vocabulary for a run's semantic position, served on run-status as
+    ``semantic_phase``, on the run-start and commit acknowledgements as
+    ``semantic_status``, and stamped onto progress frames. Those three fields
+    ask the same question at different moments, so they answer from this set.
+
+    It is deliberately wider than the authoring phases alone. A run outside the
+    research_adr topology, or between nodes, is honestly ``RUNNING`` rather than
+    given a fabricated authoring phase, and a run that has not dispatched is
+    ``STARTING``. The terminal members collapse the lifecycle pairs a product
+    reader cannot act on separately: an archived run reads ``COMPLETED`` and a
+    cancelling one reads ``CANCELLED``, because the distinction is a lifecycle
+    fact and this vocabulary is a product one.
+
+    ``RECOVERY_REQUIRED`` is the only member that is not a position: it says the
+    run cannot advance until it is repaired, which is what a reader needs before
+    any phase detail matters.
+    """
+
+    STARTING = "starting"
+    RUNNING = "running"
+    RESEARCHING = "researching"
+    SYNTHESIZING_RESEARCH = "synthesizing_research"
+    REVIEWING_RESEARCH = "reviewing_research"
+    AWAITING_RESEARCH_DECISION = "awaiting_research_decision"
+    WRITING_ADR = "writing_adr"
+    REVIEWING_ADR = "reviewing_adr"
+    AWAITING_ADR_DECISION = "awaiting_adr_decision"
+    WRITING_PLAN = "writing_plan"
+    REVIEWING_PLAN = "reviewing_plan"
+    AWAITING_PLAN_DECISION = "awaiting_plan_decision"
+    RECOVERY_REQUIRED = "recovery_required"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 # Canonical map from a research_adr structural node name to the product-safe
 # semantic authoring phase. The node names are graph-owned (the research_adr
 # topology in the compiler), so this lives here as the single source both the
 # run-status projection (control) and the SSE frame stamping (streaming) import,
 # rather than duplicating the vocabulary in each layer. The dispatch/researcher
 # fan-out nodes map by prefix (see ``research_adr_semantic_phase``).
-RESEARCH_ADR_NODE_PHASE: dict[str, str] = {
-    "synthesis": "synthesizing_research",
-    "research_review": "reviewing_research",
-    "research_gate": "awaiting_research_decision",
-    "adr_author": "writing_adr",
-    "adr_review": "reviewing_adr",
-    "adr_gate": "awaiting_adr_decision",
-    "plan_author": "writing_plan",
-    "plan_review": "reviewing_plan",
-    "plan_gate": "awaiting_plan_decision",
+#
+# Valued by :class:`SemanticPhase` member rather than by literal, so a node
+# mapped to a phase this vocabulary does not contain cannot be written here.
+RESEARCH_ADR_NODE_PHASE: dict[str, SemanticPhase] = {
+    "synthesis": SemanticPhase.SYNTHESIZING_RESEARCH,
+    "research_review": SemanticPhase.REVIEWING_RESEARCH,
+    "research_gate": SemanticPhase.AWAITING_RESEARCH_DECISION,
+    "adr_author": SemanticPhase.WRITING_ADR,
+    "adr_review": SemanticPhase.REVIEWING_ADR,
+    "adr_gate": SemanticPhase.AWAITING_ADR_DECISION,
+    "plan_author": SemanticPhase.WRITING_PLAN,
+    "plan_review": SemanticPhase.REVIEWING_PLAN,
+    "plan_gate": SemanticPhase.AWAITING_PLAN_DECISION,
 }
 
 
-def research_adr_semantic_phase(node_name: str) -> str | None:
+def research_adr_semantic_phase(node_name: str) -> SemanticPhase | None:
     """Map a research_adr node name to its semantic authoring phase, or None.
 
     Strips the ``mount_`` prefix, resolves the dispatch and researcher
@@ -337,5 +372,5 @@ def research_adr_semantic_phase(node_name: str) -> str | None:
     if not node or node == "__end__":
         return None
     if node.startswith("research_dispatch"):
-        return "researching"
+        return SemanticPhase.RESEARCHING
     return RESEARCH_ADR_NODE_PHASE.get(node)

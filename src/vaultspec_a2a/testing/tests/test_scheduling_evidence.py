@@ -72,6 +72,16 @@ def _run_pytest(
             "-m",
             "pytest",
             str(suite_dir),
+            # Loaded explicitly because this runs OUTSIDE the checkout. The
+            # plugin is deliberately not a pytest11 entry point - that would
+            # auto-load it into every consumer's session - so the repository
+            # root conftest loads it instead, and a suite generated into a temp
+            # directory never sees that conftest. Without this the mini-suites
+            # run with no resource layer at all, and every assertion that a
+            # violation is REFUSED passes for the wrong reason: nothing was
+            # there to refuse it.
+            "-p",
+            "vaultspec_a2a.testing.plugin",
             "-p",
             "no:cacheprovider",
             "-q",
@@ -80,6 +90,15 @@ def _run_pytest(
         capture_output=True,
         text=True,
         timeout=300,
+        # LOAD-BEARING, not cosmetic. With no ini file anywhere above a suite
+        # generated into the system temp directory, the child resolves its
+        # rootdir from the working directory - so running here makes it the
+        # suite. Drop this and the rootdir becomes the checkout, the argument
+        # then sits outside it, and pytest descends from the drive root
+        # enumerating the system temp directory on the way: measured at 18-26s
+        # per collection instead of under a second, and failing outright when
+        # another process deletes one of the tens of thousands of entries
+        # mid-walk (1 run in 4). A sibling module hit exactly that.
         cwd=suite_dir,
         env=env,
     )

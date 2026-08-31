@@ -25,9 +25,9 @@ from fastapi import FastAPI
 if TYPE_CHECKING:
     from types import TracebackType
 
+from ...desktop._platform_acl import windows_file_is_restricted
 from ..discovery import (
     DiscoveryState,
-    _windows_file_is_restricted,
     another_resident_is_live,
     classify_discovery,
     is_pid_alive,
@@ -110,7 +110,7 @@ def test_classifier_covers_absent_fresh_stale_malformed(tmp_path) -> None:
     if os.name == "posix":
         assert handoff.stat().st_mode & 0o077 == 0
     elif os.name == "nt":
-        assert _windows_file_is_restricted(path.parent)
+        assert windows_file_is_restricted(path.parent)
         acl = subprocess.run(
             ["icacls.exe", str(handoff)],
             check=True,
@@ -232,8 +232,8 @@ def test_writer_replaces_preexisting_broad_directory_authority(tmp_path: Path) -
     if os.name == "posix":
         assert home.stat().st_mode & 0o077 == 0
     else:
-        assert _windows_file_is_restricted(home)
-        assert _windows_file_is_restricted(home / "service.token")
+        assert windows_file_is_restricted(home)
+        assert windows_file_is_restricted(home / "service.token")
 
 
 def test_pid_liveness_and_ownership(tmp_path) -> None:

@@ -15,15 +15,17 @@ import pytest
 
 from ...control.config import settings
 from ...workspace.environment import resolve_env_vars
+from .._stdio_rpc import OutputBudget
 from ..codex_catalog import (
     CodexCatalogProtocolError,
     _authentication,
-    _OutputBudget,
+    _protocol_error,
     _rpc_error,
     catalog_from_app_server,
     discover_codex_catalog,
 )
 from ..provider_catalog import (
+    MAX_CONTROLS,
     AuthenticationState,
     CatalogStatus,
     ControlKind,
@@ -209,9 +211,14 @@ def test_duplicate_models_and_native_control_bounds_fail_closed() -> None:
             {"webSearch": False, "imageGeneration": False, "namespaceTools": False},
             key=_KEY,
         )
-    with pytest.raises(CodexCatalogProtocolError, match="32 native controls"):
+    with pytest.raises(
+        CodexCatalogProtocolError, match=f"{MAX_CONTROLS} native controls"
+    ):
+        # Each model carries a reasoning-effort and a service-tier control, so
+        # this is the smallest model count that can exceed the bound.
+        overflow = MAX_CONTROLS // 2 + 1
         catalog_from_app_server(
-            ({"data": [_model(f"model-{index}") for index in range(17)]},),
+            ({"data": [_model(f"model-{index}") for index in range(overflow)]},),
             {"webSearch": False, "imageGeneration": False, "namespaceTools": False},
             key=_KEY,
         )
@@ -252,11 +259,12 @@ def test_provider_error_text_is_not_retained() -> None:
 
 
 def test_stdout_and_stderr_share_one_aggregate_output_budget() -> None:
-    budget = _OutputBudget()
+    budget = OutputBudget(_protocol_error)
     budget.charge(700_000)
     budget.charge(348_576)
-    with pytest.raises(CodexCatalogProtocolError, match="exceeds one MiB"):
+    with pytest.raises(CodexCatalogProtocolError) as raised:
         budget.charge(1)
+    assert str(raised.value) == "Codex discovery output exceeds one MiB"
 
 
 def _real_codex_inputs() -> tuple[tuple[str, ...], dict[str, str]]:

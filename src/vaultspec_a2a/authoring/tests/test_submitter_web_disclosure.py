@@ -23,6 +23,7 @@ That ordering is the property the mutation run exercises.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -110,6 +111,21 @@ def _web_finding(*urls: str, thread: str = "t-01") -> dict[str, Any]:
     }
 
 
+#: An absolute path standing in for the run's active project. The submitter
+#: binds it at construction and mints an engine scope from it; what that needs
+#: is an ABSOLUTE path, not an existing directory, so nothing is created here.
+#:
+#: It was a real ``mkdtemp`` until a sweep for import-time I/O found it: a
+#: directory made while the module was merely IMPORTED, by tests claiming to do
+#: no I/O at all, and never removed afterwards. Import-time work is invisible to
+#: both purity mechanisms - it is neither a call in a test body nor a fixture in
+#: a closure - so the claim looked sound from either angle.
+#:
+#: Derived from this file rather than written as a literal because a POSIX-style
+#: absolute path is NOT absolute on Windows, where it carries no drive.
+_ACTIVE_PROJECT = str(Path(__file__).parent / "active-project-stand-in")
+
+
 def _internal_finding() -> dict[str, Any]:
     """A finding whose locators are the internal `path:line` entries."""
     return {
@@ -136,7 +152,12 @@ def _state(body: str, findings: list[Any] | None = None) -> TeamState:
 
 
 def _submitter() -> DocumentProposalSubmitter:
-    """The production submitter, credentialed for the research phase."""
+    """The production submitter, credentialed and project-bound for research.
+
+    The construction site binds the run's active project, as the worker
+    lifecycle does: a submitter that names no project refuses before it reads
+    the document at all, which would mask the disclosure refusal under test.
+    """
     store = RunTokenStore()
     store.register(
         _THREAD,
@@ -145,6 +166,7 @@ def _submitter() -> DocumentProposalSubmitter:
     return DocumentProposalSubmitter(
         engine_base_url=_UNREACHABLE_ENGINE,
         token_store=store,
+        workspace_root=_ACTIVE_PROJECT,
         phases={
             PipelinePhase.RESEARCH: PhaseAuthoringSpec(
                 document_role=_ROLE,

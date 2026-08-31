@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import select
 
 from ..database import (
+    ControlActionModel,
     get_control_action_by_idempotency_key,
     get_thread,
     mark_control_action_applied,
     settle_control_action_lease,
 )
-from ..database.models import ControlActionModel
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.clarification import (
     ClarificationAnswers,
@@ -37,6 +37,7 @@ from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
 )
+from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
 from .repair_transitions import record_undelivered_dispatch
@@ -91,20 +92,20 @@ class ClarificationRecoverySummary:
 
 
 def _idempotency_key(request_id: str) -> str:
+    """Build this action's key as a READABLE prefix, never a digest.
+
+    Its siblings in ``thread.idempotency`` hash their inputs, and converging
+    this one onto them would look like an obvious cleanup. It would break
+    restart recovery silently. The recovery sweep below finds every unapplied
+    clarification action with ``idempotency_key.like(f"{_IDEMPOTENCY_PREFIX}%")``
+    - a prefix match that a sha256 digest cannot satisfy, because a digest has
+    no queryable prefix. The query would simply match nothing, parked leases
+    would never be redriven, and nothing would raise.
+
+    So the difference from its siblings is a REQUIREMENT, not drift. Any change
+    here has to move the recovery query with it.
+    """
     return f"{_IDEMPOTENCY_PREFIX}{request_id}"
-
-
-def _workspace_root(metadata_json: str | None) -> str | None:
-    if not metadata_json:
-        return None
-    try:
-        decoded: object = json.loads(metadata_json)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(decoded, dict):
-        return None
-    root = cast("dict[str, object]", decoded).get("workspace_root")
-    return root if isinstance(root, str) and root else None
 
 
 def _checkpoint_receipt(checkpoint_tuple: object | None, request_id: str) -> str | None:
@@ -292,7 +293,7 @@ async def respond_to_clarification(
     thread_status = thread.status
     worker_generation = thread.repair_generation
     team_preset = thread.team_preset
-    workspace_root = _workspace_root(thread.thread_metadata)
+    workspace_root = dispatchable_workspace_root(thread.thread_metadata)
 
     claim = await claim_control_action(
         db,

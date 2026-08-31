@@ -16,8 +16,10 @@ from ...control.config import Settings
 from ..enums import Environment, LogLevel
 from ..logging import (
     JSONFormatter,
+    LivenessPollFilter,
     OTelCorrelationFilter,
     _assert_no_stdout_handler,
+    _DemoteToWarning,
     configure_logging,
     reconfigure_console_utf8,
 )
@@ -235,3 +237,180 @@ def test_otel_correlation_filter_leaves_record_clean_without_active_span() -> No
     assert "span_id" not in record.__dict__
     assert "trace_sampled" not in record.__dict__
     assert "service_name" not in record.__dict__
+
+
+def test_json_formatter_survives_a_computed_false_exc_info() -> None:
+    """A falsy ``exc_info`` flag must not cost the record.
+
+    ``Logger._log`` normalises only truthy ``exc_info`` values, so a caller
+    passing a computed flag lands ``False`` on the record verbatim. The OTLP
+    gRPC exporter does exactly this on every transport error it does not
+    classify as unknown, and the formatter used to raise ``TypeError`` on it -
+    which discards the record, silencing the very failures the lane exists to
+    report.
+    """
+    logger = logging.getLogger("test.exc_info.false")
+    logger.setLevel(logging.WARNING)
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JSONFormatter())
+    logger.handlers = [handler]
+    logger.propagate = False
+
+    try:
+        logger.warning("transport unavailable", exc_info=bool(0))
+    finally:
+        logger.handlers.clear()
+
+    emitted = stream.getvalue()
+    assert "--- Logging error ---" not in emitted, emitted
+    payload = json.loads(emitted.strip())
+    assert payload["message"] == "transport unavailable"
+    assert "exception" not in payload
+
+
+def test_json_formatter_renders_every_exc_info_shape() -> None:
+    """Instance, populated tuple, and an unresolved raw flag all render a traceback."""
+    formatter = JSONFormatter()
+
+    def render(exc_info: object) -> dict[str, object]:
+        record = logging.LogRecord(
+            name="test.exc_info.shapes",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="boom",
+            args=(),
+            exc_info=exc_info,  # ty: ignore[invalid-argument-type]
+        )
+        return json.loads(formatter.format(record))
+
+    try:
+        raise ValueError("the real cause")
+    except ValueError as exc:
+        from_instance = render(exc)
+        from_tuple = render(sys.exc_info())
+        # A record built outside Logger._log keeps the raw flag; the live
+        # exception is what Logger._log would have resolved it to.
+        from_flag = render(True)
+
+    for payload in (from_instance, from_tuple, from_flag):
+        assert "ValueError: the real cause" in str(payload["exception"])
+
+
+def test_json_formatter_omits_exception_for_an_empty_exc_info_tuple() -> None:
+    """``exc_info=True`` raised with no live exception must not invent one."""
+    record = logging.LogRecord(
+        name="test.exc_info.empty",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=1,
+        msg="boom",
+        args=(),
+        exc_info=(None, None, None),
+    )
+    assert "exception" not in json.loads(JSONFormatter().format(record))
+
+
+def _access_record(path: str, status: int, *, name: str = "uvicorn.access"):
+    """Build a record shaped exactly as uvicorn's access logger emits one.
+
+    uvicorn formats ``'%s - "%s %s HTTP/%s" %d'`` against
+    ``(client, method, path_with_query, http_version, status)``; the filter reads
+    positions 2 and 4, so the tuple must match that contract rather than a
+    convenient stand-in.
+    """
+    return logging.LogRecord(
+        name=name,
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("127.0.0.1:1", "GET", path, "1.1", status),
+        exc_info=None,
+    )
+
+
+def test_liveness_poll_filter_drops_only_successful_probe_lines() -> None:
+    """The probe is dropped when it is boring and kept when it is not."""
+    f = LivenessPollFilter()
+
+    # Boring: a supervisor confirming the process is still alive.
+    assert not f.filter(_access_record("/health", 200))
+    assert not f.filter(_access_record("/internal/health", 204))
+    assert not f.filter(_access_record("/health?probe=1", 200))
+
+    # Not boring: the probe is now telling you something.
+    assert f.filter(_access_record("/health", 503))
+    assert f.filter(_access_record("/internal/health", 401))
+
+    # Not a probe at all - real traffic must never be silenced to reduce volume.
+    assert f.filter(_access_record("/v1/runs", 200))
+    assert f.filter(_access_record("/v1/service", 200))
+
+
+def test_liveness_poll_filter_leaves_application_loggers_alone() -> None:
+    """Only uvicorn's access lane is filtered, whatever a record looks like."""
+    f = LivenessPollFilter()
+    assert f.filter(_access_record("/health", 200, name="vaultspec_a2a.api"))
+    assert f.filter(
+        logging.LogRecord(
+            name="uvicorn.error",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="/health",
+            args=(),
+            exc_info=None,
+        )
+    )
+
+
+def test_liveness_poll_filter_keeps_records_it_cannot_parse() -> None:
+    """An unrecognised shape is kept: silence must never be the default."""
+    f = LivenessPollFilter()
+    for args in ((), ("only", "three", "args"), ("c", "GET", "/health", "1.1", "xx")):
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="%s",
+            args=args,
+            exc_info=None,
+        )
+        assert f.filter(record)
+
+
+def test_export_failures_are_demoted_so_error_keeps_its_meaning() -> None:
+    """An absent collector is a deployment condition, reported below ERROR.
+
+    Guards the level, not the message: the record still travels, so a genuinely
+    misconfigured collector remains visible.
+    """
+    f = _DemoteToWarning()
+    record = logging.LogRecord(
+        name="opentelemetry.exporter.otlp.proto.grpc.exporter",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=1,
+        msg="Failed to export traces to localhost:4317",
+        args=(),
+        exc_info=None,
+    )
+    assert f.filter(record)
+    assert record.levelno == logging.WARNING
+    assert record.levelname == "WARNING"
+
+    # Anything already below ERROR is untouched.
+    warned = logging.LogRecord(
+        name="opentelemetry.exporter.otlp.proto.grpc.exporter",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="exporting",
+        args=(),
+        exc_info=None,
+    )
+    assert f.filter(warned)
+    assert warned.levelno == logging.INFO

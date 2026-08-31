@@ -44,7 +44,13 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from ..thread.errors import HarnessToolContractError
-from ._acp_mcp import declared_harness_tools, is_known_harness_server
+from ._acp_mcp import (
+    declared_harness_tools,
+    harness_server_exact_surface,
+    is_known_harness_server,
+    registry_launch_divergence,
+)
+from ._subprocess import redact_secrets
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -97,11 +103,18 @@ def _drop_orphaned_combining_marks(text: str) -> str:
 
 
 def _stderr_tail(captured: TextIO) -> str:
-    """Return a trimmed, prefixed tail of the probed server's stderr, or ``""``.
+    """Return a trimmed, prefixed, redacted tail of the server's stderr, or ``""``.
 
     The capture is a real on-disk temporary file rather than an in-memory buffer
     because the stdio client hands the handle straight to the OS as the child's
     stderr, which needs a true file descriptor.
+
+    Redaction happens HERE rather than at the raise sites, because this return
+    value is embedded verbatim into a refusal whose message reaches a run's
+    client-visible failure reason: masking at the single point the text escapes
+    is a property no future caller of the tail can forget to apply. The servers
+    reached by this probe include runtime-acquired ones, so what a failing child
+    writes about its own configuration is not text this project controls.
     """
     try:
         captured.flush()
@@ -111,6 +124,12 @@ def _stderr_tail(captured: TextIO) -> str:
         return ""
     if not text:
         return ""
+    # Redact BEFORE the cut, in both directions. A cut through a credential
+    # discards the name that introduces it and leaves the tail opening on a bare
+    # fragment of the value, which nothing downstream can still recognise as one;
+    # and the mask is not the same width as what it replaces, so applying it
+    # afterwards would move the result off the ceiling enforced just below.
+    text = redact_secrets(text)
     if len(text) > _STDERR_TAIL_CHARS:
         kept = text[-(_STDERR_TAIL_CHARS - len(_STDERR_ELISION)) :]
         text = _STDERR_ELISION + _drop_orphaned_combining_marks(kept)
@@ -171,6 +190,7 @@ async def verify_declared_tool_contract(
     command: str,
     args: Sequence[str],
     declared: Sequence[str],
+    exact_surface: bool = False,
     env: Mapping[str, str] | None = None,
     timeout: float = CONTRACT_PROBE_TIMEOUT_SECONDS,
 ) -> None:
@@ -201,7 +221,13 @@ async def verify_declared_tool_contract(
     async with _probe_lock:
         if key in _verified:
             return
-        launch = _launch_description(command, args)
+        # Masked HERE rather than inside the description helper: this binding is
+        # what escapes, embedded into every refusal below and from there into a
+        # run's client-visible failure reason. The helper stays a plain
+        # description for any caller whose output does not leave the process. No
+        # bound is applied to this string anywhere, so unlike the stderr tail
+        # there is no cut for the mask to have to precede.
+        launch = redact_secrets(_launch_description(command, args))
         # A real on-disk temporary file, text-wrapped: the stdio client hands the
         # handle to the OS as the child's stderr, so it needs a true file
         # descriptor - an in-memory buffer cannot serve as one.
@@ -240,6 +266,34 @@ async def verify_declared_tool_contract(
                     f"that serves them."
                     f"{_stderr_tail(captured_stderr)}"
                 )
+
+            # Serving MORE than was declared is also a contract break, because for
+            # a server whose RESTRICTED LAUNCH is the safety case the extra tools
+            # are the unsafe ones. A registry entry that lost its restricting
+            # argument would start the full server, still satisfy the check above,
+            # and hand the model every verb the restriction existed to withhold -
+            # a silently widened surface that reads as a passing verification.
+            #
+            # Declared-equals-served is the assertion, not declared-subset-of; the
+            # strict session surface mounts exactly what a server offers, so what
+            # the run may CALL is bounded by the permission layer while what it is
+            # HANDED is bounded only here.
+            undeclared = (
+                [tool for tool in served if tool not in declared]
+                if exact_surface
+                else []
+            )
+            if undeclared:
+                raise HarnessToolContractError(
+                    f"harness MCP server {name!r} serves tool(s) it does not "
+                    f"declare: {', '.join(sorted(undeclared))}. Launched as "
+                    f"{launch!r}. A server that offers more than the registry "
+                    f"declares is refused rather than surfaced: the undeclared "
+                    f"tools reach the model's tool list even though the run may "
+                    f"not call them. Either the launch lost a restricting "
+                    f"argument, or the registry declaration is stale."
+                    f"{_stderr_tail(captured_stderr)}"
+                )
         _verified.add(key)
 
 
@@ -271,11 +325,27 @@ async def verify_harness_mcp_contract(
             raise HarnessToolContractError(
                 f"harness MCP server {name!r} has no launch command to verify"
             )
+        # Refused BEFORE the probe, which is what makes this the second half of
+        # the same closure rather than a restatement of it. The arguments below
+        # are read off the spec in hand, so a spec borrowing a reviewed name would
+        # otherwise have its own command SPAWNED here - and then admitted, because
+        # the served-tool contract is satisfied by any server that serves the
+        # declared names. This seam runs on every lane; the session allowlist that
+        # holds the same line runs only on the strict claude one.
+        divergence = registry_launch_divergence(spec, name=name)
+        if divergence is not None:
+            raise HarnessToolContractError(
+                f"harness MCP server {name!r} {divergence}; refusing to probe a "
+                "launch the registry did not declare. Verifying the served tools "
+                "of an unreviewed command would certify the name rather than the "
+                "server behind it."
+            )
         await verify_declared_tool_contract(
             name=name,
             command=command,
             args=_launch_args(spec, name=name),
             declared=declared_harness_tools(name),
+            exact_surface=harness_server_exact_surface(name),
             env=env,
             timeout=timeout,
         )

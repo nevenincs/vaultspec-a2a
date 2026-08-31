@@ -22,9 +22,12 @@ from enum import StrEnum
 from importlib import resources
 from pathlib import Path
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
-from ..authoring.contract import is_document_authoring_topology
+from ..authoring.contract import (
+    is_document_authoring_role,
+    is_document_authoring_topology,
+)
 from ..graph.enums import Model, Provider
 from ..thread.clarification import (
     CLARIFICATION_TOPOLOGIES,
@@ -57,6 +60,8 @@ __all__ = [
     "AgentModelConfig",
     "AgentPermissionsConfig",
     "AgentPersonaConfig",
+    "AuthoringCapability",
+    "DocumentCapability",
     "ResearchThreadSpec",
     "SupervisorConfig",
     "TeamConfig",
@@ -155,19 +160,86 @@ def is_mock_preset(preset_id: str) -> bool:
     return preset_id.startswith("mock-")
 
 
-def authoring_capability(topology_type: TopologyType) -> str:
-    """Return the coarse authoring capability a topology delivers.
+class AuthoringCapability(StrEnum):
+    """The coarse kind of work a preset delivers.
 
-    ``document_authoring`` for the research_adr document phase machine; ``coding``
-    for the coder topologies. This is diagnostic truth for the Rust backend, not
-    product curation text.
+    A two-member split rather than a spectrum: a consumer branches on whether a
+    preset produces vault documents or source changes, and nothing served today
+    distinguishes finer than that.
+
+    Naming what this does NOT decide, because the field's name invites the
+    assumption: this is a DESCRIPTION of a preset, not a gate on one. Nothing in
+    the run-admission path reads it - the submitter gate reaches the same
+    underlying question through its own derivation - so a wrong value here
+    misinforms a reader and refuses nobody.
     """
-    if topology_type == TopologyType.RESEARCH_ADR:
-        return "document_authoring"
-    return "coding"
+
+    CODING = "coding"
+    DOCUMENT_AUTHORING = "document_authoring"
 
 
-def supported_capabilities(topology_type: TopologyType) -> list[str]:
+class DocumentCapability(StrEnum):
+    """One concrete vault document a preset's topology can produce.
+
+    Distinct from :class:`AuthoringCapability`, which says only WHETHER a preset
+    authors documents; this says WHICH. The two are served side by side and a
+    reader needs both, so they are not collapsible: a preset can be
+    document-authoring while producing a set this vocabulary does not yet name.
+
+    Members follow the research_adr phase machine's three gated outputs. The
+    vocabulary is deliberately narrower than the set of documents the wider
+    system knows about - an audit or a reference record has no producing
+    topology here, and a member with no producer would advertise a deliverable
+    no preset can deliver.
+    """
+
+    RESEARCH_DOCUMENT = "research_document"
+    ARCHITECTURE_DECISION = "architecture_decision"
+    PLAN_DOCUMENT = "plan_document"
+
+
+def authoring_capability(team_config: "TeamConfig") -> AuthoringCapability:
+    """Return the coarse authoring capability a preset delivers.
+
+    Keyed on the DECLARED ROLES of the preset's workers, not on its topology. A
+    preset is ``document_authoring`` when any worker holds a role from the
+    authoring contract's document-role set, and ``coding`` otherwise.
+
+    The distinction is not academic and topology-keying got it wrong: the solo
+    doc-editor lane runs a ``pipeline`` topology while genuinely authoring
+    documents through the engine bridge, so a topology key reported ``coding``
+    for a preset that authors. Roles follow the content; topology follows the
+    graph shape, and only one of those is what this field claims.
+
+    THIS DELIBERATELY DISAGREES with the submitter gate in
+    ``worker/graph_lifecycle.py``, which keys on topology. That gate answers a
+    different question - "does this preset submit over the direct worker-to-engine
+    HTTP path?" - and ``research_adr`` genuinely does while the doc-editor lane
+    submits through the model's bridged tool instead. Two true answers to two
+    different questions. Do not "align" them; the agreement they used to show was
+    the symptom of one key answering both questions, and answering one of them
+    wrongly.
+
+    Fails closed toward ``coding``: a worker whose agent config cannot be loaded
+    is skipped rather than raised on, matching the role-based predicate the
+    run-status projection already uses. A preset that is entirely unloadable
+    never reaches this function - the listing reports it ``loadable=False`` with
+    no descriptive fields at all - so the fail-closed path here covers only the
+    narrower case of one bad agent reference inside an otherwise valid preset.
+    The consequence is an understatement (``coding`` for a preset that may
+    author), never a false authoring claim.
+    """
+    for worker in team_config.workers:
+        try:
+            agent_config = load_agent_config(worker.agent_id)
+        except (ConfigError, ValidationError):
+            continue
+        if is_document_authoring_role(agent_config.role):
+            return AuthoringCapability.DOCUMENT_AUTHORING
+    return AuthoringCapability.CODING
+
+
+def supported_capabilities(topology_type: TopologyType) -> list[DocumentCapability]:
     """Return the concrete document outputs a topology can produce.
 
     The research_adr phase machine authors a research document, an architecture
@@ -176,9 +248,33 @@ def supported_capabilities(topology_type: TopologyType) -> list[str]:
     this mission surface. Diagnostic truth for the Rust backend, not product
     curation text: the declaration is the served truth the dashboard renders, so it
     extends in lockstep with the topology rather than trailing it.
+
+    Extending in lockstep is why this asks the authoring contract rather than
+    comparing against one topology by name. The two are indistinguishable while
+    the contract names a single document-authoring topology, and they diverge
+    the moment it names a second: the predicate admits it, a name comparison
+    keeps answering "coding" with no capabilities, and the dashboard renders a
+    document-authoring preset as a plain coding one.
+
+    Deliberately still keyed on TOPOLOGY while ``authoring_capability`` above has
+    moved to roles, and the asymmetry is the point. That field says WHETHER a
+    preset authors, which the roles answer correctly. This one claims WHICH
+    documents a preset can PRODUCE, and a role set cannot support that claim: the
+    bundled failure fixture declares two document-authoring roles while its
+    recursion budget guarantees it never finishes, so keying outputs off roles
+    would advertise three deliverables it structurally cannot deliver. The cost
+    of staying is that the solo doc-editor lane reports no capabilities - an
+    understatement, which a client can act on safely, rather than a false claim,
+    which it cannot tell apart from a real one. A per-role output map and a
+    declared product/certification classification are what make re-keying this
+    field safe; until both exist, understatement is the correct answer.
     """
-    if topology_type == TopologyType.RESEARCH_ADR:
-        return ["research_document", "architecture_decision", "plan_document"]
+    if is_document_authoring_topology(topology_type):
+        return [
+            DocumentCapability.RESEARCH_DOCUMENT,
+            DocumentCapability.ARCHITECTURE_DECISION,
+            DocumentCapability.PLAN_DOCUMENT,
+        ]
     return []
 
 
@@ -737,6 +833,36 @@ class TeamConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _resolve_preset_path(
+    filename_id: str,
+    workspace_root: Path | None,
+    *,
+    subdir: str,
+    preset_dir: Path,
+) -> Path | None:
+    """Resolve the two-level discovery path shared by agent and team loading.
+
+    Checks ``{workspace_root}/.vaultspec/{subdir}/{filename_id}.toml`` first
+    (when a workspace is given), then the bundled *preset_dir* - the single
+    "workspace override, else bundled preset" mechanism both
+    :func:`load_agent_config` and :func:`load_team_config` resolve against, so
+    the ordering can only drift in one place. Returns ``None`` when neither
+    candidate exists; the caller raises its own typed not-found error, since
+    that type differs per config kind.
+    """
+    candidates: list[Path] = []
+    if workspace_root is not None:
+        candidates.append(
+            workspace_root / ".vaultspec" / subdir / f"{filename_id}.toml"
+        )
+    candidates.append(preset_dir / f"{filename_id}.toml")
+
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
 def load_agent_config(
     agent_id: str,
     workspace_root: Path | None = None,
@@ -765,16 +891,12 @@ def load_agent_config(
             r"[a-zA-Z_][a-zA-Z0-9_\-]{{0,62}} (alphanumeric, underscores, hyphens)."
         )
 
-    candidates: list[Path] = []
-    if workspace_root is not None:
-        candidates.append(workspace_root / ".vaultspec" / "agents" / f"{agent_id}.toml")
-    candidates.append(_PRESET_AGENTS_DIR / f"{agent_id}.toml")
-
-    for path in candidates:
-        if path.is_file():
-            return AgentConfig.from_toml(path)
-
-    raise AgentConfigNotFoundError(agent_id)
+    path = _resolve_preset_path(
+        agent_id, workspace_root, subdir="agents", preset_dir=_PRESET_AGENTS_DIR
+    )
+    if path is None:
+        raise AgentConfigNotFoundError(agent_id)
+    return AgentConfig.from_toml(path)
 
 
 def load_team_config(
@@ -803,13 +925,9 @@ def load_team_config(
             r"[a-zA-Z_][a-zA-Z0-9_\-]{{0,62}}."
         )
 
-    candidates: list[Path] = []
-    if workspace_root is not None:
-        candidates.append(workspace_root / ".vaultspec" / "teams" / f"{team_id}.toml")
-    candidates.append(_PRESET_TEAMS_DIR / f"{team_id}.toml")
-
-    for path in candidates:
-        if path.is_file():
-            return TeamConfig.from_toml(path)
-
-    raise TeamConfigNotFoundError(team_id)
+    path = _resolve_preset_path(
+        team_id, workspace_root, subdir="teams", preset_dir=_PRESET_TEAMS_DIR
+    )
+    if path is None:
+        raise TeamConfigNotFoundError(team_id)
+    return TeamConfig.from_toml(path)

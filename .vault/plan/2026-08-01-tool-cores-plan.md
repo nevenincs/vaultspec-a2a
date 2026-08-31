@@ -3,8 +3,8 @@ tags:
   - '#plan'
   - '#tool-cores'
 date: '2026-08-01'
-modified: '2026-08-01'
-body_hash: 'sha256:0957e022dcc6dbfe1a9d67922b29516725c19584d3a99aac2fc9c418104bec72'
+modified: '2026-08-02'
+body_hash: 'sha256:816311ce212901f14f09757e5664646e94552d115302238a2ec9f8d5fc977262'
 tier: L2
 related:
   - '[[2026-08-01-tool-cores-web-grounding-adr]]'
@@ -69,6 +69,7 @@ Compose the provider-native web tools, their bounds, and the lane-conditional pe
 - [ ] `P02.S19` - Deliver web search to the hosted-API lanes, which the owner directive requires and no seam currently serves. The command-line lanes carry first-party search and are composed through the native allowlist; `the hosted lanes reached as model endpoints rather than subprocesses have no built-in equivalent, so the framework must bind a search tool to the model directly. This is the gap the directive opened: every provider lane must be able to search the web, and a lane that cannot is not an acceptable resting state. The same proven-lane gate governs the CLAIM as elsewhere - delivery is universal, assertion is earned - so a hosted lane gets the tool bound and stays unproven until a live retrieval is demonstrated on it. Note the adjacent refusal this exposes: a harness-armed run whose hosted provider has no mount surface is currently refused before spawn rather than served, which is honest but incomplete, and the same binding seam is what would close it. Closes on a composition test proving a hosted model receives a bound search tool through the real seam, and on the refusal path either resolving or being recorded as deliberately out of scope; `src/vaultspec_a2a/providers/factory.py`.
 - [ ] `P02.S20` - Deliver web search to the hosted-API lanes, which no seam currently serves. The command-line lanes carry first-party search composed through the native allowlist; `the hosted lanes reached as model endpoints have no built-in equivalent, so the framework must bind a search tool to the model directly. Every provider lane must be able to search the web, and a lane that cannot is not an acceptable resting state. The proven-lane gate governs the CLAIM as elsewhere - delivery is universal, assertion is earned - so a hosted lane gets the tool bound and stays unproven until a live retrieval is demonstrated on it. Closes on a composition test proving a hosted model receives a bound search tool through the real seam; `src/vaultspec_a2a/providers/factory.py`.
 - [ ] `P02.S21` - Bind a web search tool to the hosted-API lanes through the framework, since they reach the model as an endpoint rather than a subprocess and carry no first-party equivalent; `src/vaultspec_a2a/providers/factory.py`.
+- [x] `P02.S22` - Always isolate Codex homes and surface redacted startup diagnostics; `src/vaultspec_a2a/providers/codex_chat_model.py and providers tests`.
 
 ### Phase `P03` - Per-lane live proof and activation
 

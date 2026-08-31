@@ -8,8 +8,9 @@ backed service endpoint resolution (``endpoints``), and the pytest plugin
 (``plugin``) that derives scheduling groups, timeout backstops, and lease
 acquisition from the declarations.
 
-The plugin is loaded through the ``-p vaultspec_a2a.testing.plugin`` entry in
-the suite's configured ``addopts``; importing this facade does not register it.
+The plugin is loaded by the repository-root ``conftest.py``, which is the one
+channel that neither an ``addopts`` override can strip nor a consumer
+environment can inherit; importing this facade does not register it.
 """
 
 from .endpoints import (
@@ -18,6 +19,11 @@ from .endpoints import (
     resolve_service,
     resolve_worker_url,
 )
+from .environment import (
+    armed_desktop_app_home,
+    armed_environment,
+    settings_override,
+)
 from .leases import (
     LEASE_TTL_MS,
     Lease,
@@ -25,7 +31,17 @@ from .leases import (
     hold_lease,
     lease_home,
 )
-from .ports import SCRATCH_ROLE, reserved_port
+from .links import plant_link_to_file
+from .markers import apply_layer_markers
+from .ports import (
+    SCRATCH_ROLE,
+    PortAllocationError,
+    allocate_free_ports,
+    free_port,
+    hold_for_process_lifetime,
+    reserve_scratch_ports,
+    reserved_port,
+)
 from .progress import (
     LivenessWatch,
     ProgressDeadline,
@@ -33,6 +49,12 @@ from .progress import (
     ResourceDiedError,
     registry_watch,
     wait_for,
+)
+from .purity import (
+    IMPURE_FIXTURES,
+    SERVICE_MARKER,
+    forfeits_purity,
+    uses_impure_fixture,
 )
 from .resources import (
     MARKER_NAME,
@@ -56,15 +78,18 @@ from .sessions import (
 
 __all__ = [
     "CPU_BUDGET_ENV",
+    "IMPURE_FIXTURES",
     "LEASE_TTL_MS",
     "MARKER_NAME",
     "RESOURCES",
     "SCRATCH_PREFIX",
     "SCRATCH_ROLE",
+    "SERVICE_MARKER",
     "SESSION_LEASE_KEY",
     "Lease",
     "LeaseAcquisitionTimeoutError",
     "LivenessWatch",
+    "PortAllocationError",
     "ProgressDeadline",
     "ProgressStalledError",
     "ResolvedService",
@@ -72,19 +97,30 @@ __all__ = [
     "ResourceDeclarationError",
     "ResourceDiedError",
     "ResourceSpec",
+    "allocate_free_ports",
+    "apply_layer_markers",
+    "armed_desktop_app_home",
+    "armed_environment",
     "declared_claims",
     "effective_worker_count",
     "exclusive_keys",
+    "forfeits_purity",
+    "free_port",
+    "hold_for_process_lifetime",
     "hold_lease",
     "lease_home",
     "live_peer_sessions",
     "machine_cpu_budget",
+    "plant_link_to_file",
     "register_session",
     "registry_watch",
+    "reserve_scratch_ports",
     "reserved_port",
     "resolve_gateway_url",
     "resolve_service",
     "resolve_spec",
     "resolve_worker_url",
+    "settings_override",
+    "uses_impure_fixture",
     "wait_for",
 ]

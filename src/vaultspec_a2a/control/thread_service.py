@@ -35,13 +35,13 @@ from ..database import (
     update_thread_status,
 )
 from ..domain_config import domain_config
-from ..graph.compiler import build_initial_vault_index
-from ..ipc.schemas import DispatchRequest, to_dispatch_action
+from ..graph.nodes.vault_reader import build_initial_vault_index
+from ..ipc.schemas import DispatchRequest, canonical_project_root, to_dispatch_action
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
-    TERMINAL_STATUSES,
+    TERMINAL_STATUS_VALUES,
     ApprovalStatus,
     CleanupKind,
     ControlActionType,
@@ -273,7 +273,7 @@ async def list_threads_service(
         execution_readiness = t.execution_readiness
         approval_status = t.approval_status
         approval_request_id = t.approval_request_id
-        is_terminal_thread = t.status in {status.value for status in TERMINAL_STATUSES}
+        is_terminal_thread = t.status in TERMINAL_STATUS_VALUES
         execution_state = await get_thread_execution_state(db, t.id)
         checkpoint_id: str | None = None
         checkpoint_present = False
@@ -364,7 +364,10 @@ class ThreadCreationRequest:
     nickname: str | None
     metadata: ThreadMetadata | None
     metadata_json: str | None
-    workspace_root: Path | None
+    # The minted active project, as :func:`process_metadata` returned it. Not
+    # optional: admission is where the project becomes real, so a creation
+    # request that names none is not a run this service can site.
+    workspace_root: Path
     actor_tokens: ActorTokenBundle | None = None
     # model-profiles: the selected profile id and its frozen effective
     # per-role assignment (agent_id -> {provider, capability, fallback}), threaded
@@ -389,25 +392,53 @@ def process_metadata(
     metadata: ThreadMetadata | None,
     thread_id: str,
     team_preset: str | None,
-) -> tuple[Path | None, str | None, str | None]:
+) -> tuple[Path, str, str]:
     """Validate and enrich thread metadata.
 
     Returns ``(workspace_root, nickname, metadata_json)``.
 
+    This is the admission seam for the active project. Every run that becomes
+    durable passes through here, so the requirement is enforced once, at the
+    point a run is created, rather than left to the layers below - where the
+    absence used to resolve into whatever directory the worker happened to be
+    started in, siting agent subprocesses and their filesystem sandboxes in this
+    service's own tree.
+
+    It is also where the project is MINTED. The caller's spelling is turned into
+    the run's canonical one exactly once here, and written back into the
+    envelope before it is serialised, so the durable record and the run's first
+    dispatch carry the same string. Every later dispatch - follow-up,
+    clarification response, verdict resume, crash recovery - reads the project
+    back out of that record, so all of them now name the run's project in the
+    spelling it was admitted with instead of re-deriving one of their own.
+
+    The durable discovery selector is unaffected: it hashes a case-folded
+    symlink resolution of this value, and that resolution is idempotent, so an
+    already-minted root hashes to the key the caller's raw spelling always
+    produced and existing rows keep matching.
+
     Raises:
-        ValueError: If ``workspace_root`` is not an existing directory.
+        ValueError: If the metadata envelope is absent, if its
+            ``workspace_root`` is blank or relative, or if it is not an existing
+            directory.
     """
     if metadata is None:
-        return None, None, None
+        msg = (
+            "run requires an active project: metadata.workspace_root is missing. "
+            "The active project is supplied by the caller that owns it and is "
+            "never inferred from the serving process."
+        )
+        raise ValueError(msg)
 
     import pathlib
 
-    ws_root = pathlib.Path(metadata.workspace_root).resolve()
+    ws_root = pathlib.Path(canonical_project_root(metadata.workspace_root))
     if not ws_root.is_dir():
         msg = (
             f"workspace_root is not an existing directory: {metadata.workspace_root!r}"
         )
         raise ValueError(msg)
+    metadata.workspace_root = str(ws_root)
 
     if metadata.feature_tag and not metadata.context_refs:
         metadata.context_refs = discover_context_refs(ws_root, metadata.feature_tag)
@@ -536,7 +567,7 @@ async def create_and_dispatch_thread(
         action=to_dispatch_action(ControlActionType.INGEST),
         thread_id=thread.id,
         team_preset=req.team_preset,
-        workspace_root=str(req.workspace_root) if req.workspace_root else None,
+        workspace_root=str(req.workspace_root),
         autonomous=effective_autonomous,
         metadata_json=req.metadata_json,
         content=req.initial_message,

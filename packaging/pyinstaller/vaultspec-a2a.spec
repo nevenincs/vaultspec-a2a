@@ -36,7 +36,26 @@ hiddenimports = [
 # resolves them lazily only under those profiles. Exclude them explicitly so a
 # build environment that happens to have the extras installed cannot bloat the
 # binary or pull an unshippable native closure into the shipped tree.
+# setuptools is a BUILD tool that PyInstaller drags into its own output: it is
+# PyInstaller's dependency, not the runtime's. Nothing here imports it or
+# `pkg_resources` - the shipped onedir carried `setuptools/` and no
+# `pkg_resources/` at all, which is the shape of a package nothing asked for.
+#
+# It is excluded because of what it SHIPS, not its size. `setuptools` vendors
+# `jaraco.text`, whose sample data file is literally named `Lorem ipsum.txt`,
+# and a space is not a portable install path segment. The dashboard's product
+# builder refuses the composed tree over it:
+#
+#     vaultspec-product-build: composed file name is not a portable install
+#     path: invalid composed tree: unsafe portable path segment
+#     "Lorem ipsum.txt"
+#
+# That refusal took out all four Compose legs of vaultspec-dashboard v0.1.7 and
+# is why that release carries no assets.
 excludes = [
+    "setuptools",
+    "pkg_resources",
+    "_distutils_hack",
     "torch",
     "torchvision",
     "torchaudio",

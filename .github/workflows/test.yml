@@ -1,6 +1,9 @@
 name: Tests
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 permissions:
   contents: read
@@ -10,6 +13,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  workflow-lint:
+    name: Workflow lint (actionlint)
+    # actionlint is the only thing that reads these files before GitHub itself
+    # does. It earns a gate here for one failure class this fleet keeps paying
+    # for: a `runs-on:` label that no registered runner carries. That does not
+    # fail at dispatch - it QUEUES, unbounded, producing no logs and no failure,
+    # which is the most expensive way this pipeline can break, because it is
+    # indistinguishable from a busy fleet while it happens.
+    #
+    # Not hypothetical here. `bootstrap-branch.yml` targets
+    # `[self-hosted, dev-runner]`; this repository has no registered runners, and
+    # every one of that workflow's historical runs was cancelled by hand rather
+    # than completing.
+    #
+    # The labels this repository is permitted to schedule onto are enumerated in
+    # .github/actionlint.yaml, which actionlint reads automatically. Adding a new
+    # runner label means declaring it there, which is the point: the declaration
+    # is what makes a typo detectable.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Lint GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.11
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 45

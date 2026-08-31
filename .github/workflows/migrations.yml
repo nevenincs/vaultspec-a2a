@@ -31,8 +31,15 @@ jobs:
       - name: Synchronize locked migration environment
         run: uv sync --locked --no-default-groups --extra server --group tooling
 
+      # alembic.ini ships sqlalchemy.url empty so that a bare run cannot migrate
+      # a database nobody named, so the round trip supplies its own throwaway
+      # store. All three commands must address the SAME file for the downgrade
+      # to have anything to undo, which rules out an in-memory URL: each command
+      # is a separate process and would get its own empty database.
       - name: Exercise migration round trip
+        env:
+          MIGRATION_URL: sqlite+aiosqlite:///${{ runner.temp }}/migration-round-trip.db
         run: |
-          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic upgrade head
-          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic downgrade base
-          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic upgrade head
+          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic -x sqlalchemy_url="$MIGRATION_URL" upgrade head
+          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic -x sqlalchemy_url="$MIGRATION_URL" downgrade base
+          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic -x sqlalchemy_url="$MIGRATION_URL" upgrade head

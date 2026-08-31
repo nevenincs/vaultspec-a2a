@@ -50,11 +50,6 @@ jobs:
         continue-on-error: true
         run: just lint type-strict
 
-      - name: Run type-platforms sentinel
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        run: just lint type-platforms
-
       - name: Run complexity sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true

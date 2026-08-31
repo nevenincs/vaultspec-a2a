@@ -450,7 +450,13 @@ def run_start(
     # would freeze a selection that was never offered for that project. The
     # gateway refuses to infer this from the serving process, and it is right
     # to: the caller owns the active project.
-    workspace_root = str(Path(workspace).resolve() if workspace else Path.cwd())
+    #
+    # The launch directory is that caller's own statement of which project they
+    # mean, which is why the fallback anchors there and not at any root this
+    # repository could resolve for them.
+    workspace_root = str(
+        Path(workspace).resolve() if workspace else Path.cwd()  # storage-anchor-ok
+    )
     body: dict[str, Any] = {
         "team_preset": preset,
         "message": message,

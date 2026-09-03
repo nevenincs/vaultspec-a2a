@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#tool-cores'
 date: '2026-07-17'
-modified: '2026-08-04'
-body_hash: 'sha256:88a494b4114fcbb491faba40f0572e79a1610c7366c2ce9ae94f890c0d866708'
+modified: '2026-08-05'
+body_hash: 'sha256:6b1da10a9a6a08bd8cb6e172df7ff1dcf6b368806fb36c17af7a782098e23c87'
 related:
   - "[[2026-07-17-tool-cores-adr]]"
   - "[[2026-07-17-tool-cores-plan]]"
@@ -910,7 +910,6 @@ defect in the desktop lane rather than a test expectation problem.
 
 The ADR ordering question raised at the top of this thread remains open on its
 own merits, but it is NOT what these three tests are failing on.
-
 
 ## Closed (2026-08-04): the worker was never gone, only busy
 

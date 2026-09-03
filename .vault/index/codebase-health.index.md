@@ -3,9 +3,10 @@ generated: true
 tags:
   - '#index'
   - '#codebase-health'
-date: '2026-07-25'
-modified: '2026-07-25'
-body_hash: 'sha256:ecec5fbb3883bffb71d18745a82b446c4d89403c55674689058c35a020b2ef33'
+date: '2026-08-05'
+modified: '2026-08-05'
+body_schema: 'body-v1'
+body_hash: 'sha256:7acd2086f5b71d281927f9eea3ff7e904146027215e4f0ab18cd0563dffd06a2'
 related:
   - '[[2026-07-19-codebase-health-W01-P01-S01]]'
   - '[[2026-07-19-codebase-health-W01-P01-S02]]'
@@ -29,19 +30,27 @@ related:
   - '[[2026-07-19-codebase-health-W01-P03-S12]]'
   - '[[2026-07-19-codebase-health-W01-P03-S13]]'
   - '[[2026-07-19-codebase-health-W01-P03-S14]]'
+  - '[[2026-07-19-codebase-health-W01-P03-S181]]'
   - '[[2026-07-19-codebase-health-W01-P04-S15]]'
   - '[[2026-07-19-codebase-health-W01-P04-S16]]'
+  - '[[2026-07-19-codebase-health-W02-P05-S177]]'
+  - '[[2026-07-19-codebase-health-W02-P05-S178]]'
   - '[[2026-07-19-codebase-health-W02-P05-S17]]'
   - '[[2026-07-19-codebase-health-W02-P05-S18]]'
   - '[[2026-07-19-codebase-health-W02-P05-S19]]'
   - '[[2026-07-19-codebase-health-W02-P05-S20]]'
   - '[[2026-07-19-codebase-health-W02-P06-S159]]'
+  - '[[2026-07-19-codebase-health-W02-P06-S179]]'
+  - '[[2026-07-19-codebase-health-W02-P06-S180]]'
   - '[[2026-07-19-codebase-health-W02-P06-S23]]'
   - '[[2026-07-19-codebase-health-W02-P06-S24]]'
   - '[[2026-07-19-codebase-health-W02-P06-S26]]'
   - '[[2026-07-19-codebase-health-W02-P06-S27]]'
   - '[[2026-07-19-codebase-health-W02-P06-S98]]'
   - '[[2026-07-19-codebase-health-W02-P06-S99]]'
+  - '[[2026-07-19-codebase-health-W02-P07-S183]]'
+  - '[[2026-07-19-codebase-health-W02-P08-S33]]'
+  - '[[2026-07-19-codebase-health-W02-P08-S34]]'
   - '[[2026-07-19-codebase-health-W03-P09-S35]]'
   - '[[2026-07-19-codebase-health-W03-P09-S36]]'
   - '[[2026-07-19-codebase-health-W03-P09-S37]]'
@@ -104,6 +113,7 @@ related:
   - '[[2026-07-22-codebase-health-orphan-surface-ownership-audit]]'
   - '[[2026-07-22-codebase-health-tooling-prohibition-certification-audit]]'
   - '[[2026-07-24-codebase-health-adr]]'
+  - '[[2026-07-31-codebase-health-semantic-dedup-audit]]'
 ---
 
 # `codebase-health` feature index
@@ -123,6 +133,7 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-w01-p01-s03-review-audit` - `codebase-health` audit: `W01.P01.S03 process-registry prerequisite certification review`
 - `2026-07-22-codebase-health-orphan-surface-ownership-audit` - `codebase-health` audit: `cross-repository ownership of the workspace exports`
 - `2026-07-22-codebase-health-tooling-prohibition-certification-audit` - `codebase-health` audit: `certification of the prohibited-pattern removal`
+- `2026-07-31-codebase-health-semantic-dedup-audit` - `codebase-health` audit: `semantic deduplication sweep`
 
 ### exec
 
@@ -215,6 +226,14 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 - `2026-07-19-codebase-health-W05-P20-S142` - Run the canonical A2A unit gate with just dev test unit
 - `2026-07-19-codebase-health-W05-P20-S144` - Run the A2A real-process acceptance suites
 - `2026-07-19-codebase-health-W05-P20-S87` - Run the canonical A2A code-quality gate with just dev code check
+- `2026-07-19-codebase-health-W01-P03-S181` - Answer the delete verb with its five distinct outcomes and carry abandoned cleanup item kinds through the service result
+- `2026-07-19-codebase-health-W02-P05-S177` - Classify credential values out of the plain-start replay fingerprint and stamp each persisted fingerprint with the rule that computed it
+- `2026-07-19-codebase-health-W02-P06-S179` - Keep the stream subscriber registration inside its cleanup guard so a raise cannot strand a bounded slot
+- `2026-07-19-codebase-health-W02-P08-S34` - Classify every Wave W02 review finding and append unresolved work to the audit queue
+- `2026-07-19-codebase-health-W02-P05-S178` - Release the drain gate on every terminal run outcome and complete the bounded quiescence wait at shutdown
+- `2026-07-19-codebase-health-W02-P06-S180` - Close the progress frame-type catalog with per-field allowlists and bounds and project unknown types onto identity keys
+- `2026-07-19-codebase-health-W02-P07-S183` - Answer a permission request through a run-scoped versioned verb
+- `2026-07-19-codebase-health-W02-P08-S33` - Run the formal architecture security resource-bound and quality review for Wave W02
 
 ### plan
 

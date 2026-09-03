@@ -1,0 +1,255 @@
+---
+tags:
+  - '#exec'
+  - '#desktop-product-profile'
+date: '2026-07-18'
+modified: '2026-09-03'
+body_schema: 'body-v2'
+body_hash: 'sha256:78a30a3250b82ef8417fa457aabacbafb4f63b5dac4306cd00741623ae2112ad'
+related:
+  - "[[2026-07-18-desktop-product-profile-plan]]"
+---
+
+<!-- Machine-owned: filename and frontmatter, scaffolded by
+     `vaultspec-core vault exec log`; never hand-edit. Add no
+     frontmatter fields. Wiki-links belong in `related:` only, never in the body.
+
+     ONE ledger per plan, replacing one document per Step. The Step identity
+     the plan's ids provide moves from the filename into the row's first
+     column, so a Step still maps to a real artifact. -->
+
+# `desktop-product-profile` ledger
+
+## Changes
+
+<!-- MECHANICAL LOG, append-only, one line per path touched per Step:
+       - `S##` `A` `path`   added
+       - `S##` `M` `path`   modified
+       - `S##` `D` `path`   deleted
+       - `S##` `R` `old` -> `new`   renamed
+     Paths are repo-relative, in backticks. No prose, no sentences: the Step
+     row states the intent and the commit carries the diff. Example:
+
+       - `S01` `M` `src/vaultspec_core/cli/exec_cmd.py`
+       - `S01` `A` `src/vaultspec_core/cli/tests/test_exec_cmd.py`
+       - `S02` `D` `src/legacy/shim.py`
+
+     Optional per-Step check line:
+       - `S01` `verify:` `<command>` -> `pass` | `fail`
+
+     Rows are appended in Step order and never rewritten. Only rows in this
+     section register a Step as covered; a `## Notes` section is added ONLY on
+     exception (data loss, skipped work, a scaffold left in code, a persistent
+     failure) and is otherwise omitted. -->
+- `S01` `T` `pyproject.toml`
+- `S02` `T` `uv.lock`
+- `S03` `T` `package-lock.json`
+- `S04` `T` `src/vaultspec_a2a/providers/_acp_mcp.py`
+- `S05` `T` `src/vaultspec_a2a/desktop_tests/`
+- `S05` `T` `pyproject.toml`
+- `S05` `T` `uv.lock`
+- `S06` `T` `pyproject.toml`
+- `S07` `T` `src/vaultspec_a2a/database/migrate.py`
+- `S08` `T` `src/vaultspec_a2a/team/team_config.py`
+- `S09` `T` `src/vaultspec_a2a/providers/factory.py`
+- `S09` `T` `src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py`
+- `S10` `T` `schemas/desktop-capsule-manifest.json`
+- `S11` `T` `src/vaultspec_a2a/desktop/manifest.py`
+- `S11` `T` `src/vaultspec_a2a/desktop/__init__.py`
+- `S11` `T` `src/vaultspec_a2a/desktop/tests/test_manifest.py`
+- `S11` `T` `src/vaultspec_a2a/desktop/tests/fixtures/component-manifest-canonical-v1.b64`
+- `S11` `T` `src/vaultspec_a2a/desktop/tests/fixtures/component-manifest-canonical-v1.sha256`
+- `S12` `T` `src/vaultspec_a2a/desktop_tests/test_component_contract.py`
+- `S12` `T` `src/vaultspec_a2a/desktop_tests/fixtures/dashboard-release-manifest.json`
+- `S13` `T` `scripts/build_desktop_capsule.py`
+- `S14` `T` `scripts/verify_desktop_capsule.py`
+- `S15` `T` `.github/workflows/desktop-capsule.yml`
+- `S16` `T` `src/vaultspec_a2a/desktop/profile.py`
+- `S17` `T` `src/vaultspec_a2a/control/config.py`
+- `S18` `T` `src/vaultspec_a2a/cli/main.py`
+- `S19` `T` `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`
+- `S20` `T` `src/vaultspec_a2a/database/`
+- `S21` `T` `src/vaultspec_a2a/desktop/transaction.py`
+- `S22` `T` `src/vaultspec_a2a/desktop/migration.py`
+- `S23` `T` `src/vaultspec_a2a/cli/main.py`
+- `S24` `T` `src/vaultspec_a2a/desktop_tests/test_migration_entrypoint.py`
+- `S25` `T` `src/vaultspec_a2a/desktop/snapshot.py`
+- `S26` `T` `src/vaultspec_a2a/desktop/snapshot.py`
+- `S26` `T` `src/vaultspec_a2a/desktop/contract.py`
+- `S26` `T` `src/vaultspec_a2a/desktop/manifest.py`
+- `S26` `T` `src/vaultspec_a2a/desktop/migration.py`
+- `S26` `T` `src/vaultspec_a2a/database/checkpoint_schema.py`
+- `S26` `T` `src/vaultspec_a2a/database/compatibility.py`
+- `S26` `T` `src/vaultspec_a2a/database/migrations/__init__.py`
+- `S26` `T` `schemas/desktop-capsule-manifest.json`
+- `S26` `T` `src/vaultspec_a2a/desktop/tests/fixtures/component-manifest-canonical-v1.b64`
+- `S26` `T` `src/vaultspec_a2a/desktop/tests/fixtures/component-manifest-canonical-v1.sha256`
+- `S26` `T` `src/vaultspec_a2a/desktop/tests/test_contract.py`
+- `S26` `T` `src/vaultspec_a2a/desktop/tests/test_manifest.py`
+- `S26` `T` `src/vaultspec_a2a/desktop/tests/test_migration.py`
+- `S26` `T` `src/vaultspec_a2a/database/tests/test_checkpoint_schema.py`
+- `S26` `T` `src/vaultspec_a2a/database/tests/test_checkpoint_state_migration.py`
+- `S26` `T` `src/vaultspec_a2a/database/tests/test_compatibility.py`
+- `S27` `T` `src/vaultspec_a2a/cli/main.py`
+- `S28` `T` `src/vaultspec_a2a/desktop_tests/test_snapshot_group.py`
+- `S29` `T` `src/vaultspec_a2a/desktop_tests/test_snapshot_recovery.py`
+- `S30` `T` `src/vaultspec_a2a/lifecycle/singleton.py`
+- `S31` `T` `src/vaultspec_a2a/lifecycle/discovery.py`
+- `S32` `T` `src/vaultspec_a2a/authoring/discovery.py`
+- `S33` `T` `src/vaultspec_a2a/cli/main.py`
+- `S34` `T` `src/vaultspec_a2a/desktop_tests/test_runtime_singleton.py`
+- `S35` `T` `src/vaultspec_a2a/desktop_tests/test_discovery_ownership.py`
+- `S36` `T` `src/vaultspec_a2a/desktop/credentials.py`
+- `S37` `T` `src/vaultspec_a2a/control/config.py`
+- `S38` `T` `src/vaultspec_a2a/api/dependencies.py`
+- `S39` `T` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S40` `T` `src/vaultspec_a2a/api/routes/__init__.py`
+- `S41` `T` `src/vaultspec_a2a/api/app.py`
+- `S42` `T` `src/vaultspec_a2a/api/routes/admin.py`
+- `S43` `T` `src/vaultspec_a2a/worker/app.py`
+- `S44` `T` `src/vaultspec_a2a/api/internal.py`
+- `S45` `T` `src/vaultspec_a2a/cli/main.py`
+- `S46` `T` `src/vaultspec_a2a/desktop_tests/test_credential_boundaries.py`
+- `S47` `T` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S48` `T` `src/vaultspec_a2a/control/health.py`
+- `S49` `T` `src/vaultspec_a2a/api/app.py`
+- `S50` `T` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S51` `T` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`
+- `S52` `T` `src/vaultspec_a2a/api/app.py`
+- `S53` `T` `src/vaultspec_a2a/control/worker_management.py`
+- `S54` `T` `src/vaultspec_a2a/control/dispatch.py`
+- `S55` `T` `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py`
+- `S56` `T` `src/vaultspec_a2a/control/drain.py`
+- `S57` `T` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S58` `T` `src/vaultspec_a2a/worker/executor.py`
+- `S59` `T` `src/vaultspec_a2a/control/worker_management.py`
+- `S60` `T` `src/vaultspec_a2a/providers/_subprocess.py`
+- `S61` `T` `src/vaultspec_a2a/utils/process.py`
+- `S62` `T` `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`
+- `S63` `T` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S64` `T` `src/vaultspec_a2a/control/admission.py`
+- `S65` `T` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S66` `T` `src/vaultspec_a2a/control/run_start_policy.py`
+- `S67` `T` `src/vaultspec_a2a/desktop/settlement.py`
+- `S68` `T` `src/vaultspec_a2a/control/event_handlers.py`
+- `S69` `T` `src/vaultspec_a2a/desktop_tests/test_run_admission.py`
+- `S70` `T` `src/vaultspec_a2a/desktop_tests/test_terminal_settlement.py`
+- `S71` `T` `src/vaultspec_a2a/desktop_tests/test_standalone_mcp.py`
+- `S72` `T` `src/vaultspec_a2a/desktop_tests/harness.py`
+- `S73` `T` `src/vaultspec_a2a/desktop_tests/test_artifact_install.py`
+- `S74` `T` `src/vaultspec_a2a/desktop_tests/test_artifact_state_lifecycle.py`
+- `S75` `T` `src/vaultspec_a2a/desktop_tests/test_artifact_ownership_lifecycle.py`
+- `S76` `T` `.github/workflows/desktop-capsule.yml`
+- `S77` `T` `.github/workflows/desktop-capsule.yml`
+- `S78` `T` `.github/workflows/desktop-capsule.yml`
+- `S79` `T` `.github/workflows/desktop-capsule.yml`
+- `S80` `T` `.github/workflows/desktop-capsule.yml`
+- `S81` `T` `service/docker-compose.prod.yml`
+- `S82` `T` `service/docker-compose.dev.yml`
+- `S83` `T` `service/docker-compose.integration.yml`
+- `S84` `T` `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`
+- `S85` `T` `.github/workflows/test.yml`
+- `S86` `T` `.vault/audit/2026-07-18-desktop-product-profile-review-audit.md`
+- `S87` `T` `.vault/audit/2026-07-18-desktop-product-profile-certification-audit.md`
+- `S89` `T` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S90` `T` `src/vaultspec_a2a/providers/_acp_authoring.py`
+- `S91` `T` `src/vaultspec_a2a/providers/_acp_project_mcp.py`
+- `S92` `T` `src/vaultspec_a2a/providers/_acp_mcp.py`
+- `S93` `T` `src/vaultspec_a2a/telemetry`
+- `S94` `T` `src/vaultspec_a2a/desktop/capsule.py`
+- `S95` `T` `src/vaultspec_a2a/desktop/capsule_evidence.py`
+- `S95` `T` `src/vaultspec_a2a/desktop/tests/test_unpublished_generation.py`
+- `S96` `T` `src/vaultspec_a2a/desktop/tests/test_unpublished_generation.py`
+- `S96` `T` `src/vaultspec_a2a/desktop/tests/test_capsule_archives.py`
+- `S96` `T` `src/vaultspec_a2a/desktop/tests/test_capsule_publication_races.py`
+- `S97` `T` `src/vaultspec_a2a/desktop/_filesystem_authority.py`
+- `S97` `T` `src/vaultspec_a2a/desktop/tests/test_unpublished_generation.py`
+- `S98` `T` `src/vaultspec_a2a/desktop/tests/test_credentials.py`
+- `S99` `T` `src/vaultspec_a2a/desktop/closure_inventory.py`
+- `S99` `T` `src/vaultspec_a2a/desktop/installed_inventory.py`
+- `S99` `T` `src/vaultspec_a2a/desktop/lock_reconciliation.py`
+- `S99` `T` `src/vaultspec_a2a/desktop/package_archives.py`
+- `S99` `T` `src/vaultspec_a2a/desktop/wheel_compatibility.py`
+- `S99` `T` `src/vaultspec_a2a/desktop/artifacts.py`
+- `S99` `T` `src/vaultspec_a2a/desktop/tests/test_artifacts.py`
+- `S99` `T` `src/vaultspec_a2a/desktop/tests/test_installed_inventory.py`
+- `S99` `T` `src/vaultspec_a2a/desktop/tests/test_lock_reconciliation.py`
+- `S99` `T` `src/vaultspec_a2a/desktop/tests/test_package_archives.py`
+- `S100` `T` `src/vaultspec_a2a/desktop/_archive_authority.py`
+- `S100` `T` `src/vaultspec_a2a/desktop/_capsule_archive_io.py`
+- `S100` `T` `src/vaultspec_a2a/desktop/package_archives.py`
+- `S100` `T` `src/vaultspec_a2a/desktop/capsule.py`
+- `S100` `T` `src/vaultspec_a2a/desktop/manifest.py`
+- `S100` `T` `src/vaultspec_a2a/desktop/artifacts.py`
+- `S100` `T` `src/vaultspec_a2a/desktop/tests/test_artifacts.py`
+- `S100` `T` `src/vaultspec_a2a/desktop/tests/test_package_archives.py`
+- `S100` `T` `src/vaultspec_a2a/desktop/tests/test_capsule_archives.py`
+- `S100` `T` `src/vaultspec_a2a/desktop/tests/test_manifest.py`
+- `S101` `T` `src/vaultspec_a2a/desktop/artifacts.py`
+- `S101` `T` `src/vaultspec_a2a/desktop/manifest.py`
+- `S101` `T` `src/vaultspec_a2a/desktop/tests/test_artifacts.py`
+- `S101` `T` `src/vaultspec_a2a/desktop/tests/test_manifest.py`
+- `S101` `T` `pyproject.toml`
+- `S101` `T` `uv.lock`
+- `S102` `T` `src/vaultspec_a2a/desktop/capsule_assembly.py`
+- `S102` `T` `src/vaultspec_a2a/desktop/tests/test_capsule_assembly.py`
+- `S103` `T` `src/vaultspec_a2a/desktop/capsule.py`
+- `S103` `T` `src/vaultspec_a2a/desktop/capsule_materializer.py`
+- `S103` `T` `src/vaultspec_a2a/desktop/tests/_materializer_inputs.py`
+- `S103` `T` `src/vaultspec_a2a/desktop/tests/test_capsule_materializer.py`
+- `S104` `T` `src/vaultspec_a2a/control/admission.py`
+- `S104` `T` `src/vaultspec_a2a/api/body_limit.py`
+- `S104` `T` `src/vaultspec_a2a/api/app.py`
+- `S104` `T` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S104` `T` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S104` `T` `src/vaultspec_a2a/api/tests/test_app.py`
+- `S104` `T` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S104` `T` `src/vaultspec_a2a/database/migrations/__init__.py`
+- `S104` `T` `src/vaultspec_a2a/database/tests/test_checkpoint_state_migration.py`
+- `S104` `T` `src/vaultspec_a2a/desktop_tests/test_run_admission.py`
+- `S104` `T` `src/vaultspec_a2a/desktop_tests/test_terminal_settlement.py`
+- `S104` `T` `src/vaultspec_a2a/thread/actor_tokens.py`
+- `S104` `T` `src/vaultspec_a2a/thread/tests/test_actor_tokens.py`
+- `S104` `T` `src/vaultspec_a2a/utils/process.py`
+- `S104` `T` `src/vaultspec_a2a/worker/app.py`
+- `S104` `T` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S104` `T` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S104` `T` `src/vaultspec_a2a/service_tests/_live_desktop_gateway.py`
+- `S104` `T` `src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py`
+- `S105` `T` `src/vaultspec_a2a/desktop/install_layout.py`
+- `S105` `T` `src/vaultspec_a2a/desktop/tests/test_install_layout.py`
+- `S106` `T` `src/vaultspec_a2a/desktop/installed_inventory.py`
+- `S106` `T` `src/vaultspec_a2a/desktop/tests/test_installed_inventory.py`
+- `S107` `T` `src/vaultspec_a2a/desktop/installed_inventory.py`
+- `S107` `T` `src/vaultspec_a2a/desktop/tests/test_installed_inventory_builder.py`
+- `S108` `T` `src/vaultspec_a2a/desktop/capsule_materializer.py`
+- `S108` `T` `scripts/desktop_capsule_inputs.toml`
+- `S108` `T` `src/vaultspec_a2a/desktop/tests/test_capsule_materializer.py`
+- `S109` `T` `src/vaultspec_a2a/desktop/artifacts.py`
+- `S109` `T` `src/vaultspec_a2a/desktop/installed_inventory.py`
+- `S109` `T` `src/vaultspec_a2a/desktop/tests/test_installed_inventory_builder.py`
+- `S110` `T` `src/vaultspec_a2a/desktop/capsule_input_authoring.py`
+- `S110` `T` `src/vaultspec_a2a/desktop/tests/test_capsule_input_authoring.py`
+- `S111` `T` `src/vaultspec_a2a/desktop/capsule_input_authoring.py`
+- `S111` `T` `src/vaultspec_a2a/desktop/tests/test_capsule_input_authoring.py`
+- `S112` `T` `src/vaultspec_a2a/desktop/capsule_assembly.py`
+- `S112` `T` `src/vaultspec_a2a/desktop/capsule_materializer.py`
+- `S112` `T` `src/vaultspec_a2a/desktop/tests/test_capsule_materializer.py`
+- `S113` `T` `src/vaultspec_a2a/desktop/lock_reconciliation.py`
+- `S113` `T` `src/vaultspec_a2a/desktop/tests/test_lock_reconciliation.py`
+- `S114` `T` `src/vaultspec_a2a/desktop/contract.py`
+- `S114` `T` `schemas/desktop-capsule-manifest.json`
+- `S114` `T` `scripts/desktop_capsule_inputs.toml`
+- `S114` `T` `.github/workflows/desktop-capsule.yml`
+- `S115` `T` `src/vaultspec_a2a/desktop/capsule_input_authoring.py`
+- `S115` `T` `src/vaultspec_a2a/desktop/tests/test_capsule_acquisition.py`
+- `S117` `T` `src/vaultspec_a2a/desktop/install_layout.py`
+- `S117` `T` `src/vaultspec_a2a/desktop/tests/test_install_layout.py`
+- `S119` `T` `src/vaultspec_a2a/desktop/capsule_input_authoring.py`
+- `S119` `T` `scripts/prepare_desktop_capsule.py`
+- `S119` `T` `src/vaultspec_a2a/desktop/tests/test_prepare_capsule.py`
+- `S120` `T` `src/vaultspec_a2a/desktop/installed_inventory.py`
+- `S120` `T` `src/vaultspec_a2a/desktop/artifacts.py`
+- `S120` `T` `src/vaultspec_a2a/desktop/capsule_descriptor.py`
+- `S120` `T` `src/vaultspec_a2a/desktop/capsule_preparation.py`
+

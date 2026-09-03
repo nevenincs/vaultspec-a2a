@@ -3,10 +3,10 @@ generated: true
 tags:
   - '#index'
   - '#provider-model-catalog'
-date: '2026-08-02'
-modified: '2026-08-02'
+date: '2026-08-05'
+modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:1145b839dc9bd5fa5666283a445914e8c54ba6e6d95a692fa52943856ee35fb1'
+body_hash: 'sha256:595dd5dc752cc01bd8179f912fa7ff0428649e34a5248ad7dcc8b03830ffd518'
 related:
   - '[[2026-08-02-provider-model-catalog-P01-S01]]'
   - '[[2026-08-02-provider-model-catalog-P01-S02]]'
@@ -16,6 +16,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-P01-S06]]'
   - '[[2026-08-02-provider-model-catalog-P01-S07]]'
   - '[[2026-08-02-provider-model-catalog-P01-S09]]'
+  - '[[2026-08-02-provider-model-catalog-P01-S10]]'
   - '[[2026-08-02-provider-model-catalog-P02-S12]]'
   - '[[2026-08-02-provider-model-catalog-P02-S13]]'
   - '[[2026-08-02-provider-model-catalog-P02-S15]]'
@@ -32,10 +33,13 @@ related:
   - '[[2026-08-02-provider-model-catalog-implementation-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-kimi-catalog-p01s04-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-openai-catalog-p01s05-review-audit]]'
+  - '[[2026-08-02-provider-model-catalog-p03-integration-audit]]'
   - '[[2026-08-02-provider-model-catalog-p03-integration-preflight-audit]]'
   - '[[2026-08-02-provider-model-catalog-plan]]'
+  - '[[2026-08-02-provider-model-catalog-policy-retirement-p01s10-audit]]'
   - '[[2026-08-02-provider-model-catalog-reference]]'
   - '[[2026-08-02-provider-model-catalog-research]]'
+  - '[[2026-08-03-provider-model-catalog-run-start-disclosure-audit]]'
 ---
 
 # `provider-model-catalog` feature index
@@ -60,7 +64,10 @@ Auto-generated index of all documents tagged with `#provider-model-catalog`.
 - `2026-08-02-provider-model-catalog-implementation-review-audit` - `provider-model-catalog` audit: `implementation review`
 - `2026-08-02-provider-model-catalog-kimi-catalog-p01s04-review-audit` - `provider-model-catalog` audit: `Kimi catalog P01.S04 review`
 - `2026-08-02-provider-model-catalog-openai-catalog-p01s05-review-audit` - `provider-model-catalog` audit: `OpenAI catalog P01.S05 review`
+- `2026-08-02-provider-model-catalog-p03-integration-audit` - `provider-model-catalog` audit: `P03 Dashboard to A2A catalog integration review`
 - `2026-08-02-provider-model-catalog-p03-integration-preflight-audit` - `provider-model-catalog` audit: `P03 integration preflight preparation review`
+- `2026-08-02-provider-model-catalog-policy-retirement-p01s10-audit` - `provider-model-catalog` audit: `P01.S10 policy retirement review`
+- `2026-08-03-provider-model-catalog-run-start-disclosure-audit` - `provider-model-catalog` audit: `run-start disclosure decisions and migration findings`
 
 ### exec
 
@@ -72,6 +79,7 @@ Auto-generated index of all documents tagged with `#provider-model-catalog`.
 - `2026-08-02-provider-model-catalog-P01-S06` - Register execution-mode-specific catalog adapters and report unsupported enumeration honestly
 - `2026-08-02-provider-model-catalog-P01-S07` - Serve bounded workspace provider catalogs through v1
 - `2026-08-02-provider-model-catalog-P01-S09` - Freeze catalog provenance, exact model values, controls, fallbacks, execution modes, and schema version through compilation
+- `2026-08-02-provider-model-catalog-P01-S10` - Remove product provider-model policy and retire static external model authority
 - `2026-08-02-provider-model-catalog-P02-S12` - Add the provider-catalog verb and validate bounded catalog, health, selection, control, fallback, and override shapes without hard-coded enums
 - `2026-08-02-provider-model-catalog-P02-S13` - Directly migrate the Dashboard store, composer chooser, and obsolete profile fixtures to opaque provider catalogs, structured health, required selection, controls, and frozen assignments
 - `2026-08-02-provider-model-catalog-P02-S15` - Add bounded per-role model and control overrides and explicit served fallbacks without arbitrary role keys or model values

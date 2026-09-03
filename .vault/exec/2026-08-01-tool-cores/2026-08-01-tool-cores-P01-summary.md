@@ -3,13 +3,27 @@ tags:
   - '#exec'
   - '#tool-cores'
 date: '2026-08-01'
-modified: '2026-08-01'
+modified: '2026-08-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:691bd9d814e44ef8923b6693aca10f325efcc90e0e88d2a3ce3b8f52f6b0cd66'
+body_hash: 'sha256:d318c399197489ce1b8ac5da93c1d6ecb73ff3a17acd6171d0cb5c0f3760f28b'
 related:
   - "[[2026-08-01-tool-cores-plan]]"
 ---
 # `tool-cores` P01 summary
+
+## Description
+
+Phase P01 delivered the three contract seams the web-grounding decision record
+requires before any capability activates: `P01.S01` split the registry
+trust-root marker so network egress is its own declared axis, refused
+fail-loud at construction when an entry omits it; `P01.S02` admitted the
+typed web locator into the research-finding contract, validated on the
+branch-side path and proven to survive into checkpointed state; `P01.S03`
+extended the submit refusal so an undisclosed web-locator URL routes the run
+into the existing revision loop rather than passing silently. All three
+Steps are independently landable and closed with review evidence, and the
+capability itself stays dark throughout - no persona claims online access
+and no tool composes a web capability in this Phase.
 
 ## Scope
 

@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from ..database import ThreadModel, get_pending_permission_requests
+from ..database import (
+    ThreadModel,
+    get_pending_permission_requests,
+    path_safe_run_id_clause,
+)
 from ..graph.enums import AgentLifecycleState
 from ..thread.enums import TERMINAL_STATUS_VALUES, RepairStatus
 from ..thread.snapshots import AgentData, build_agent_descriptor
@@ -66,13 +70,22 @@ async def build_team_status(
     terminal_thread_ids: set[str] = set()
     checkpoint_unavailable_thread_ids: set[str] = set()
     if thread_ids:
+        # A pending permission naming a thread id with no path-safe shape drops
+        # out here, not through a parallel clause on PermissionRequestModel: it
+        # is simply absent from known_thread_ids, so the membership check below
+        # excludes it the same way an unrecognised thread id already does. Such
+        # a permission is unanswerable through the API regardless (the respond
+        # route types its path parameter as the validated identity), and the
+        # alternative - a validated run_id failing at RunPendingPermission
+        # serialization - would 500 the whole team-status response, hiding
+        # every OTHER run's valid pending permission along with it.
         rows = await db.execute(
             select(
                 ThreadModel.id,
                 ThreadModel.status,
                 ThreadModel.repair_status,
                 ThreadModel.execution_readiness,
-            ).where(ThreadModel.id.in_(thread_ids))
+            ).where(ThreadModel.id.in_(thread_ids), path_safe_run_id_clause())
         )
         known_rows = rows.all()
         known_thread_ids = {thread_id for thread_id, *_rest in known_rows}

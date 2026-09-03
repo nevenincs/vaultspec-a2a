@@ -143,6 +143,9 @@ from .thread_repository import (
     normalize_workspace_identity as normalize_workspace_identity,
 )
 from .thread_repository import (
+    path_safe_run_id_clause as path_safe_run_id_clause,
+)
+from .thread_repository import (
     record_thread_execution_state as record_thread_execution_state,
 )
 from .thread_repository import (
@@ -211,6 +214,7 @@ __all__ = [
     "mark_thread_deleting",
     "migration_script_location",
     "normalize_workspace_identity",
+    "path_safe_run_id_clause",
     "record_permission_request",
     "record_permission_response_submission",
     "record_thread_execution_state",

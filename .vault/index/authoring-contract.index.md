@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#authoring-contract'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:5a23a7a29335a9b2b25e2cfef789a327d712cfe0bd099842ff17cae50458d4d0'
 related:
   - '[[2026-07-16-authoring-contract-adr]]'

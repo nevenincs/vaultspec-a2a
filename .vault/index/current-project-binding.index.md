@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#current-project-binding'
 date: '2026-08-03'
-modified: '2026-08-03'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:800d03298c972e792cd8c8a98e0026e1552ba3a245e8eff74c90bef62bbddefe'
 related:
   - '[[2026-08-03-current-project-binding-adr]]'

@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#resource-aware-test-execution'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:12732758abbb7d81224140d68a45c92ce8ae1df99494e2edb10409c6c16b641e'
 related:
   - '[[2026-08-02-resource-aware-test-execution-S01]]'

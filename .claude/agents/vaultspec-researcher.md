@@ -9,6 +9,7 @@ tools:
 - WebFetch
 - WebSearch
 - Bash
+- SendMessage
 model: claude-sonnet-5
 ---
 

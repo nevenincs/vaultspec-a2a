@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#served-capability-contract'
 date: '2026-08-05'
-modified: '2026-08-05'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:ca64d2977bfc877f0cd3f2a4a3ee6b808f7ab92042252aac69a68328fcade511'
 related:
   - '[[2026-08-05-served-capability-contract-W01-P01-S01]]'

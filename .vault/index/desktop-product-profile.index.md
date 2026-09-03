@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#desktop-product-profile'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:f4475a74794f132ecf4ce65451c661eb38fcd6d35191b10e7a43b5ad0565efb8'
 related:
   - '[[2026-07-18-desktop-product-profile-W01-P01-S01]]'

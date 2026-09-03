@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#repository-tooling-hardening'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:94800b1e6d5aeca54faff71ae62756d662b69dc96279b51b5ea1b2da4f6b4c89'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'

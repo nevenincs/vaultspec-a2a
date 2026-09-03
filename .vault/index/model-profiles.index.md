@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#model-profiles'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_schema: 'body-v1'
-body_hash: 'sha256:b909111f63d09bd7dde25d3660d26b5d132e34c8fa9455e56cfd498be91222df'
+modified: '2026-09-03'
+body_schema: 'body-v2'
+body_hash: 'sha256:b6be3f2074d0956fdc888da3cabc6d9bffeefc5ca4163839bfa6d2a97432d051'
 related:
   - '[[2026-07-15-model-profiles-P01-S01]]'
   - '[[2026-07-15-model-profiles-P01-S02]]'
@@ -42,7 +42,7 @@ Auto-generated index of all documents tagged with `#model-profiles`.
 
 ### adr
 
-- `2026-07-15-model-profiles-adr` - `model-profiles` adr: `named model profiles, shared resolution, and backend-served eligibility` | (**status:** `accepted`)
+- `2026-07-15-model-profiles-adr` - `model-profiles` adr: `named model profiles, shared resolution, and backend-served eligibility` | (**status:** `superseded`)
 
 ### audit
 

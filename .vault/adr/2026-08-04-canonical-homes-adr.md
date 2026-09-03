@@ -3,52 +3,14 @@ tags:
   - '#adr'
   - '#canonical-homes'
 date: '2026-08-04'
-modified: '2026-08-04'
+modified: '2026-09-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:78d602e5cd1ce1b98012368af8c46c9bd1c42a3d5728166e2309a156a0676af6'
+body_hash: 'sha256:963e1a4a735e4e207225607d0af6ce5505d903e9da523800b674a10931daadd8'
 related:
   - "[[2026-08-04-canonical-homes-audit]]"
 ---
 
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #adr) and one feature tag.
-     Replace canonical-homes with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar]]'.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     Status convention: the H1 status value is one of proposed, accepted,
-     rejected, superseded, or deprecated. A new ADR starts as proposed; it
-     moves to accepted or rejected when the decision is made; it becomes
-     superseded when a later ADR replaces it (set by vault adr supersede,
-     which also records superseded_by); and deprecated when it is retired
-     without a direct successor.
-
-     Amend vs supersede: refinements and concretization rewrite the accepted
-     record's body in place (modified: carries the revision); a new ADR with
-     supersession is only for a major pivot. One accepted record per
-     decision.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
 # `canonical-homes` adr: `one concept, one home` | (**status:** `accepted`)
-
-<!-- DOCUMENT BOUNDARY:
-     This record owns the decision and only the decision. Grounding evidence
-     lives in the related research/reference documents and is cited by stem
-     (e.g. `2026-02-04-editor-demo-research`), never restated - a restated
-     fact forks and goes stale. A fact this record needs but the grounding
-     lacks is added to the grounding first, then cited. -->
 
 ## Problem Statement
 

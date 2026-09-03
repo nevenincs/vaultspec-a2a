@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#ecosystem-artifact-lifecycle'
 date: '2026-08-05'
-modified: '2026-08-05'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:ed6f0817955006da84d1b339c1a313cc7a0ecf5fad4da1c72d54456d24aab9ef'
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S01]]'

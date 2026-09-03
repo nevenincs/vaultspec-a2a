@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#multi-provider-execution'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:8ffa5d954b12d928ec5433e5ce3f81b0eb92697cf3c968842669f9a98dfb73b8'
 related:
   - '[[2026-07-15-multi-provider-execution-P01-S01]]'

@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#clarification-answers-grounding'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:1b8784a59ac683d17096f4706622341e8cbb668d47d7fc47888b8a6c9769a072'
 related:
   - '[[2026-08-02-clarification-answers-grounding-S01]]'

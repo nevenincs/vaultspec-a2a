@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#graph-agent-framework-harness'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:e732f8d1f1778667f15a2ff7dabf25afe45b15810ae853a6f22ba9e7a6da6798'
 related:
   - '[[2026-07-15-graph-agent-framework-harness-P01-S01]]'

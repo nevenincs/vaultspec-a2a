@@ -7,6 +7,10 @@ tools:
 - Grep
 - Read
 - Bash
+- SendMessage
+- TaskCreate
+- TaskList
+- TaskUpdate
 model: claude-sonnet-5
 ---
 

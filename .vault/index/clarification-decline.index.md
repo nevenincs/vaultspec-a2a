@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#clarification-decline'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:e32faa6328d30f9b0670b9ba47dd9d1445f0fa3cd41948b71f914111fd7d58dd'
 related:
   - '[[2026-08-02-clarification-decline-S01]]'

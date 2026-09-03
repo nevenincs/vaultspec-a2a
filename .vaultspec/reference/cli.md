@@ -202,6 +202,10 @@ hand-edit between the markers.
   retired by its parent plan.
 - `vaultspec-core vault exec detach` - Remove a Step claim only when it resolves to
   neither a live nor retired Step.
+- `vaultspec-core vault exec log` - Append a Step's mechanical rows to its plan's
+  consolidated ledger.
+- `vaultspec-core vault exec fold` - Fold a feature's per-Step execution records into
+  one consolidated ledger.
 
 #### Archive
 
@@ -486,7 +490,8 @@ List vault documents. `DOC_TYPE` filters by type.
 | Option | Short | Default | Description | | --------------- | ----- | ------- |
 ----------------------------- | | `--feature TAG` | `-f` | None | Filter by feature tag.
 | | `--date DATE` | - | None | Filter by date. | | `--json` | - | off | Emit
-machine-readable output. |
+machine-readable output. | | `--limit N` | - | 50 | Maximum documents to return. | |
+`--offset N` | - | 0 | Documents to skip, for paging. |
 
 ### vaultspec-core vault stats
 
@@ -511,9 +516,11 @@ Scope to a single feature. | | `--json` | - | off | Output as networkx node-link
 Render ASCII topology. | | `--body` | - | off | Include document body in JSON output. |
 | `--node STEM` | - | None | Scope JSON to a node's local (ego) neighbourhood. | |
 `--depth N` | - | 1 | Ego-graph radius in hops; only used with --node. | |
-`--derived/--no-derived` | - | on | Include the derived relatedness edge set in JSON. |
-| `--ref REF` | - | None | Read the corpus from this git ref via the object database,
-with no working-tree checkout. |
+`--derived/--no-derived` | - | off | Include the derived relatedness edge set in JSON;
+it is a computed similarity ranking, not vault state. | | `--derived-limit N` | - | None
+| Maximum derived edges to return. | | `--derived-offset N` | - | 0 | Derived edges to
+skip, for paging. | | `--ref REF` | - | None | Read the corpus from this git ref via the
+object database, with no working-tree checkout. |
 
 The `--json` payload (schema `vaultspec.vault.graph.v2`) carries typed weighted explicit
 edges (`kind`, `multiplicity`, `weight`), node-size hints (`pagerank`, `in_degree`), and
@@ -555,7 +562,8 @@ List feature tags in the vault.
 | `--orphaned` | off | Show only features with no incoming links. | | `--type TYPE` |
 None | Filter by document type. | | `--stale-days N` | None | Show only features whose
 latest activity is older than N days. | | `--json` | off | Emit machine-readable output.
-|
+| | `--limit N` | - | 50 | Maximum features to return. | | `--offset N` | - | 0 |
+Features to skip, for paging. |
 
 ### vaultspec-core vault feature index
 
@@ -601,7 +609,13 @@ standard envelope.
 record's mapping to a live Step. `retire` takes `--record PATH` and archives it only
 when its parent plan retired the claimed Step. `detach` takes `--record PATH` and
 removes its Step claim only when the claim resolves to neither a live nor a retired
-Step. Every verb accepts `--dry-run` and `--json`.
+Step. `log` takes `--feature`, `--related`, `--step`, and a repeatable `--row`
+(`A:path`, `M:path`, `D:path`, or `R:old->new`) to append one Step's mechanical rows to
+its plan's append-only consolidated ledger, creating the ledger on first use. `fold`
+takes `--feature` and migrates a `body-v1` corpus by folding a feature's per-Step
+records into one ledger, recovering each record's Scope paths as `T` (touched) rows and
+removing the folded records; it is destructive and refuses to write without `--force`.
+Every verb accepts `--dry-run` and `--json`.
 
 ### vaultspec-core vault feature rename
 

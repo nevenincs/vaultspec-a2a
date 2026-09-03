@@ -3,47 +3,13 @@ tags:
   - '#exec'
   - '#ecosystem-artifact-lifecycle'
 date: '2026-08-04'
-modified: '2026-08-04'
+modified: '2026-09-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:b1c456453ea3364642d3e63f063100cb6ef1f3fa94b5d43e77fbee28c4185433'
+body_hash: 'sha256:ad11a32bb9f8e5f79f634b8785dceddb620e7050e43c7754a5cb64592c9a0547'
 step_id: 'S27'
 related:
   - "[[2026-07-21-ecosystem-artifact-lifecycle-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace ecosystem-artifact-lifecycle with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S27 and 2026-07-21-ecosystem-artifact-lifecycle-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Declare or refuse a retention statement for each lane's persistence, through the existing artifact declaration home and ## Scope
-
-- `src/vaultspec_a2a/artifacts/retention.py`
-- `src/vaultspec_a2a/providers/_config_home_roots.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
 
 # Declare or refuse a retention statement for each lane's persistence, through the existing artifact declaration home
 
@@ -53,8 +19,6 @@ related:
 - `src/vaultspec_a2a/providers/_config_home_roots.py`
 
 ## Description
-
-<!-- Succinct line-by-line list of steps executed. Use imperative language, mirroring git commit summary lines. -->
 
 - Declare the ACP session transcript at the seam that causes it, through the
   existing artifact declaration home rather than a new mechanism.
@@ -102,8 +66,6 @@ in the session module rather than the chat model - which is the drift such a
 guard exists to catch, caught on its first run.
 
 ## Notes
-
-<!-- Incidents. Data loss. Difficulties; persistent failures. Skipped work. Scaffolds left in code. Failures. -->
 
 The config-only precheck that would have shrunk the fan-out is REFUSED, on
 measurement rather than taste. Every lane with a genuine definitely-absent signal

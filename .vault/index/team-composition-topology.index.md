@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#team-composition-topology'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:c21df5c0b4157dd7c4d014e1fe7f96ffe8070cf5eb026f249c106b53bda79aef'
 related:
   - '[[2026-02-27-team-composition-topology-adr]]'

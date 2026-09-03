@@ -4,8 +4,9 @@ tags:
   - '#index'
   - '#capsule-install-layout'
 date: '2026-07-22'
-modified: '2026-07-22'
-body_hash: 'sha256:f5e6e1c126db9a4881ae01b55c632a603605894c22cf886fb5d98885432519c4'
+modified: '2026-09-03'
+body_schema: 'body-v2'
+body_hash: 'sha256:77427a5efb953677bc4238e180be53e647daa0476f7777a6f10d3ba26c6a3855'
 related:
   - '[[2026-07-21-capsule-install-layout-adr]]'
   - '[[2026-07-21-capsule-install-layout-reference]]'
@@ -19,7 +20,7 @@ Auto-generated index of all documents tagged with `#capsule-install-layout`.
 
 ### adr
 
-- `2026-07-21-capsule-install-layout-adr` - `capsule-install-layout` adr: `one wheel-aware install-layout authority with a provenance-bearing installed inventory` | (**status:** `accepted`)
+- `2026-07-21-capsule-install-layout-adr` - `capsule-install-layout` adr: `one wheel-aware install-layout authority with a provenance-bearing installed inventory` | (**status:** `superseded`)
 
 ### reference
 

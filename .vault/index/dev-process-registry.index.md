@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#dev-process-registry'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:9f4135b505e7faf39d44234c6b005781196ae9fb31139534eb7de6cb51e50c82'
 related:
   - '[[2026-07-15-dev-process-registry-P01-S01]]'

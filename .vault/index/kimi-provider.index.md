@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#kimi-provider'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:c0a72094c29f3a400f0ce24692e6533edc1bf8b705791e56c11f76f0079d090a'
 related:
   - '[[2026-07-17-kimi-provider-P01-S01]]'

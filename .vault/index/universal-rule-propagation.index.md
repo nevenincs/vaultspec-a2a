@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#universal-rule-propagation'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:6995147014aa5cc75d7bbe165b791ebf13f87ab5964067fc363f264510dcfdb8'
 related:
   - '[[2026-03-31-universal-rule-propagation-adr]]'

@@ -3,47 +3,13 @@ tags:
   - '#exec'
   - '#ecosystem-artifact-lifecycle'
 date: '2026-08-04'
-modified: '2026-08-04'
+modified: '2026-09-03'
 body_schema: 'body-v1'
-body_hash: 'sha256:80aace8438c736d0ed2ef4a17d86da26d698b239c5208736a742640e77e2bd60'
+body_hash: 'sha256:08c784fbb6dce7a3f11058d84f05dfa5aa0323bc47d057597e3d811c72b05c42'
 step_id: 'S31'
 related:
   - "[[2026-07-21-ecosystem-artifact-lifecycle-plan]]"
 ---
-
-<!-- FRONTMATTER RULES:
-     tags: one directory tag (hardcoded #exec) and one feature tag.
-     Replace ecosystem-artifact-lifecycle with a kebab-case feature tag, e.g. #foo-bar.
-     Additional tags may be appended below the required pair.
-
-     modified: CLI-maintained last-modified stamp; set at scaffold time,
-     refreshed by mutating CLI verbs and vault check fix; never hand-edit.
-
-     step_id is the originating Step's canonical identifier, e.g. S01.
-     The S31 and 2026-07-21-ecosystem-artifact-lifecycle-plan placeholders are machine-filled by
-     `vaultspec-core vault add exec`; do not fill them by hand.
-
-     Related: use wiki-links as '[[yyyy-mm-dd-foo-bar-plan]]' and link the
-     parent plan.
-
-     DO NOT add fields beyond those scaffolded; metadata lives
-     only in the frontmatter. -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
-<!-- STEP RECORD:
-     This file represents one Step from the originating plan. Identified
-     by its canonical leaf identifier (S##) and ancestor display path.
-     The Ratify the ephemeral thread posture as a decision and record its reversal condition and ## Scope
-
-- `.vault/adr/2026-07-21-ecosystem-artifact-lifecycle-adr.md`
-- `src/vaultspec_a2a/providers/codex_chat_model.py` placeholders below are machine-filled
-     by `vaultspec-core vault add exec` from the originating Step row;
-     do not fill them by hand. -->
 
 # Ratify the ephemeral thread posture as a decision and record its reversal condition
 
@@ -53,8 +19,6 @@ related:
 - `src/vaultspec_a2a/providers/codex_chat_model.py`
 
 ## Description
-
-<!-- Succinct line-by-line list of steps executed. Use imperative language, mirroring git commit summary lines. -->
 
 - Establish that the ephemeral thread posture is inherited rather than chosen,
   by tracing it to the lane's first commit.
@@ -89,8 +53,6 @@ demands provider-native records, and then only together with an export into the
 accounted state root and a retention declaration. Never bare.
 
 ## Notes
-
-<!-- Incidents. Data loss. Difficulties; persistent failures. Skipped work. Scaffolds left in code. Failures. -->
 
 Inherited and correct are not the same claim, and the distinction is the point of
 this Step. The flag has been present verbatim since the lane's first commit, so

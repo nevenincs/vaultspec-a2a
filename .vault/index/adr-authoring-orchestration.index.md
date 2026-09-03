@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#adr-authoring-orchestration'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:7dfa72dd962d8fa501a701f41390034bd06e38aa3fd30ffa1893520ae6888cd1'
 related:
   - '[[2026-07-14-adr-authoring-orchestration-P01-S01]]'

@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#provider-error-taxonomy'
 date: '2026-08-05'
-modified: '2026-08-05'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:f8a401ad84009360e8d1e8d41ef3c39dba2576d8e69f84fab108703935f69258'
 related:
   - '[[2026-08-02-provider-error-taxonomy-W01-P01-S01]]'

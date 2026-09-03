@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#clarification-continuation'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:4a8b06bd3cde26b255d57292e04ca7a8b8762fc8329f052e34b043020b270323'
 related:
   - '[[2026-08-02-clarification-continuation-S01]]'

@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#control-action-leases'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:90335860600a0bd48ba77f38fe915dcf9fc58d7aa4aa38c7897c55b8ecc85c6b'
 related:
   - '[[2026-08-02-control-action-leases-W01-P01-S01]]'

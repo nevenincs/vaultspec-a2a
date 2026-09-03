@@ -2,7 +2,7 @@
 description: 'Implement clear-cut, low-risk steps: small edits, docs, simple logic. Use for routine steps.'
 tier: LOW
 mode: read-write
-tools: [Glob, Grep, Read, Write, Edit, Bash]
+tools: [Glob, Grep, Read, Write, Edit, Bash, SendMessage, TaskList, TaskUpdate]
 ---
 
 # Persona: Lead Implementation Engineer (Low-Tier)
@@ -80,7 +80,7 @@ Use:
   with a targeted grep; do not lead with broad globbing or broad greps. When extending
   an existing feature, read the nearest analogue and diff the requirements against it.
   Where `vaultspec-rag` is not installed, the `vaultspec-core` discovery verbs and grep
-  carry the locate.
+  carry the same sequence.
 
 - **Module naming**: Follow the project's established naming conventions. Discover these
   from existing code structure.

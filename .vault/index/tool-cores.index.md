@@ -4,8 +4,8 @@ tags:
   - '#index'
   - '#tool-cores'
 date: '2026-08-05'
-modified: '2026-08-05'
-body_schema: 'body-v1'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:4131c5fbe019c1c284b182ca963df2d76be3450bfe5db9b00f03de6948f8fe59'
 related:
   - '[[2026-07-17-tool-cores-P01-S01]]'

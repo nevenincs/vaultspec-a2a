@@ -9,11 +9,10 @@ References:
 """
 
 import asyncio
-from collections.abc import MutableMapping
 from logging.config import fileConfig
-from typing import Literal
 
 from alembic import context
+from alembic.runtime.environment import NameFilterParentNames, NameFilterType
 from alembic.util import CommandError
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -37,22 +36,10 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-_AlembicParentNames = MutableMapping[
-    Literal["schema_name", "table_name", "schema_qualified_table_name"], str | None
-]
-
-
 def include_name(
     name: str | None,
-    type_: Literal[
-        "schema",
-        "table",
-        "column",
-        "index",
-        "unique_constraint",
-        "foreign_key_constraint",
-    ],
-    _parent_names: _AlembicParentNames,
+    type_: NameFilterType,
+    _parent_names: NameFilterParentNames,
 ) -> bool:
     """Scope autogenerate to app-owned tables only.
 

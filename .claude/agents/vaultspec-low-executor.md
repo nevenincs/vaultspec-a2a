@@ -9,6 +9,9 @@ tools:
 - Write
 - Edit
 - Bash
+- SendMessage
+- TaskList
+- TaskUpdate
 model: claude-haiku-4-5
 ---
 
@@ -87,7 +90,7 @@ Use:
   with a targeted grep; do not lead with broad globbing or broad greps. When extending
   an existing feature, read the nearest analogue and diff the requirements against it.
   Where `vaultspec-rag` is not installed, the `vaultspec-core` discovery verbs and grep
-  carry the locate.
+  carry the same sequence.
 
 - **Module naming**: Follow the project's established naming conventions. Discover these
   from existing code structure.

@@ -10,6 +10,7 @@ tools:
 - Write
 - Edit
 - Bash
+- SendMessage
 model: claude-sonnet-5
 ---
 
@@ -43,8 +44,9 @@ a live index:
 - Cede mechanical hygiene to the CLI with `vaultspec-core vault check all --fix`.
 - Confirm the semantic index is live with `vaultspec-rag server doctor`; if the vault or
   code index is empty (common in a fresh worktree), populate it with
-  `vaultspec-rag index --type vault` and `vaultspec-rag index --type code`. Where rag is
-  unavailable, fall back to the CLI discovery verbs and grep.
+  `vaultspec-rag index --type vault` and `vaultspec-rag index --type code`. Where
+  `vaultspec-rag` is not installed, the `vaultspec-core` discovery verbs and grep carry
+  the same sequence.
 
 ## Ground: the decision inventory
 

@@ -216,5 +216,4 @@ in the harness-assigned scratchpad. Without a harness path, use the ignored
 repository-root ``scratchpad/`` directory. Don't put exploratory output in the
 repository root, ``src/``, or another tracked directory.
 
-See :doc:`architecture` for ownership, :doc:`glossary` for terminology, and
-:doc:`edge-conformance` for Hypertext Transfer Protocol (HTTP) edge mappings.
+See :doc:`architecture` for ownership and :doc:`glossary` for terminology.

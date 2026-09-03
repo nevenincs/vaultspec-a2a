@@ -11,8 +11,8 @@ Build the application with :func:`vaultspec_a2a.api.app.create_app`.
 aggregation.
 
 Request handling delegates orchestration to direct
-:mod:`vaultspec_a2a.control` service modules. See :doc:`/edge-conformance` for
-the edge-to-runtime verb mapping.
+:mod:`vaultspec_a2a.control` service modules. The generated OpenAPI document
+at ``/openapi.json`` is authoritative for the served edge surface.
 """
 
 from .schemas import EventEnvelope as EventEnvelope

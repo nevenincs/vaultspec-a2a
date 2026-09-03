@@ -6,7 +6,7 @@ tags:
 date: '2026-07-22'
 modified: '2026-09-03'
 body_schema: 'body-v2'
-body_hash: 'sha256:4f2ae9bfcbb31230c97181353ff9b43c9bf3e96c338c88d1d7d7d1a5ca883aee'
+body_hash: 'sha256:d3e2a8203830a5fa45a63ad5d2d495699b789492b226c6a741b8e8cff5790e1d'
 related:
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
@@ -34,6 +34,7 @@ related:
   - '[[2026-07-19-a2a-edge-conformance-adr]]'
   - '[[2026-07-19-a2a-edge-conformance-ledger]]'
   - '[[2026-07-19-a2a-edge-conformance-plan]]'
+  - '[[2026-09-03-a2a-edge-conformance-verb-mapping-reference]]'
 ---
 
 # `a2a-edge-conformance` feature index
@@ -80,6 +81,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-deletion-manifest-reference` - `a2a-edge-conformance` reference: `UI and Google-A2A stub deletion manifest`
 - `2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference` - `a2a-edge-conformance` reference: `engine authoring wire shapes`
 - `2026-07-14-a2a-edge-conformance-reference` - `a2a-edge-conformance` reference: `frozen dashboard edge contract, a2a side`
+- `2026-09-03-a2a-edge-conformance-verb-mapping-reference` - `a2a-edge-conformance` reference: `versioned gateway verb mapping and retirement record`
 
 ### research
 

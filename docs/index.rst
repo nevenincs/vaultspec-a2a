@@ -18,7 +18,6 @@ Repository policies live in the `contribution guide
    architecture
    glossary
    api/modules
-   edge-conformance
 
 New contributors should start with :doc:`development`. Operators should use
 :doc:`operations`. Use :doc:`architecture` to locate ownership,

@@ -18,7 +18,7 @@ file.
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 import httpx
 import pytest
@@ -34,6 +34,7 @@ from ....worker.token_store import RunTokenStore
 
 if TYPE_CHECKING:
     from ....authoring.discovery import EngineEndpoint
+    from ....thread.state import TeamState
 
 _SYNTHESIST = "vaultspec-synthesist"
 
@@ -48,9 +49,11 @@ class _RecordingModel(BaseChatModel):
         return self._calls
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "recording-chat-model"
 
+    @override
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -60,6 +63,7 @@ class _RecordingModel(BaseChatModel):
     ) -> ChatResult:
         raise NotImplementedError("async only")
 
+    @override
     async def _agenerate(
         self,
         messages: list[BaseMessage],
@@ -73,7 +77,9 @@ class _RecordingModel(BaseChatModel):
         )
 
 
-def _post(base: str, path: str, bearer: str, actor: str | None, body: dict) -> dict:
+def _post(
+    base: str, path: str, bearer: str, actor: str | None, body: dict[str, Any]
+) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {bearer}", "content-type": "application/json"}
     if actor is not None:
         headers["x-authoring-actor-token"] = actor
@@ -162,7 +168,7 @@ async def test_synthesist_node_grounds_on_a_real_feedback_batch(
         feedback_reader=reader,
     )
 
-    state: Any = {
+    state: TeamState = {
         "messages": [HumanMessage(content="Revise the research document.")],
         "active_agent": _SYNTHESIST,
         "artifacts": [],
@@ -203,7 +209,7 @@ async def test_synthesist_node_ungrounded_without_a_batch(
         role="synthesist",
         feedback_reader=reader,
     )
-    state: Any = {
+    state: TeamState = {
         "messages": [HumanMessage(content="Draft the research document.")],
         "active_agent": _SYNTHESIST,
         "artifacts": [],

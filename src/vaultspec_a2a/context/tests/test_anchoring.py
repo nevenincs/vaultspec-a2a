@@ -1,12 +1,15 @@
 """Tests for build_anchoring_context."""
 
+from typing import cast
+
 from ...context.anchoring import build_anchoring_context
 from ...domain_config import domain_config
+from ...thread.state import TeamState
 
 
-def _make_state(**overrides):
+def _make_state(**overrides: object) -> TeamState:
     """Minimal state dict with only the fields anchoring reads."""
-    base = {
+    base: dict[str, object] = {
         "messages": [],
         "active_agent": "",
         "artifacts": [],
@@ -16,7 +19,7 @@ def _make_state(**overrides):
         "next": "",
     }
     base.update(overrides)
-    return base
+    return cast("TeamState", base)
 
 
 class TestBuildAnchoringContext:

@@ -6,43 +6,19 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-03'
 body_schema: 'body-v2'
-body_hash: 'sha256:94800b1e6d5aeca54faff71ae62756d662b69dc96279b51b5ea1b2da4f6b4c89'
+body_hash: 'sha256:e92735c66ca733c5bb2c5713498acc304d6daaf99a2452092b2cf1e39539a88b'
 related:
-  - '[[2026-07-19-repository-tooling-hardening-W01-P01-S01]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
-  - '[[2026-07-19-repository-tooling-hardening-W01-P02-S02]]'
-  - '[[2026-07-19-repository-tooling-hardening-W01-P02-S03]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P02-summary]]'
-  - '[[2026-07-19-repository-tooling-hardening-W02-P03-S04]]'
-  - '[[2026-07-19-repository-tooling-hardening-W02-P03-S05]]'
   - '[[2026-07-19-repository-tooling-hardening-W02-P03-summary]]'
-  - '[[2026-07-19-repository-tooling-hardening-W02-P04-S06]]'
-  - '[[2026-07-19-repository-tooling-hardening-W02-P04-S07]]'
   - '[[2026-07-19-repository-tooling-hardening-W02-P04-summary]]'
-  - '[[2026-07-19-repository-tooling-hardening-W03-P05-S08]]'
-  - '[[2026-07-19-repository-tooling-hardening-W03-P05-S09]]'
   - '[[2026-07-19-repository-tooling-hardening-W03-P05-summary]]'
-  - '[[2026-07-19-repository-tooling-hardening-W03-P06-S10]]'
   - '[[2026-07-19-repository-tooling-hardening-W03-P06-summary]]'
-  - '[[2026-07-19-repository-tooling-hardening-W04-P07-S11]]'
   - '[[2026-07-19-repository-tooling-hardening-W04-P07-summary]]'
-  - '[[2026-07-19-repository-tooling-hardening-W04-P08-S12]]'
   - '[[2026-07-19-repository-tooling-hardening-W04-P08-summary]]'
-  - '[[2026-07-19-repository-tooling-hardening-W05-P09-S13]]'
-  - '[[2026-07-19-repository-tooling-hardening-W05-P09-S14]]'
-  - '[[2026-07-19-repository-tooling-hardening-W05-P09-S15]]'
-  - '[[2026-07-19-repository-tooling-hardening-W05-P10-S16]]'
-  - '[[2026-07-19-repository-tooling-hardening-W05-P10-S17]]'
-  - '[[2026-07-19-repository-tooling-hardening-W05-P10-S18]]'
-  - '[[2026-07-19-repository-tooling-hardening-W06-P11-S19]]'
-  - '[[2026-07-19-repository-tooling-hardening-W06-P11-S20]]'
-  - '[[2026-07-19-repository-tooling-hardening-W06-P11-S21]]'
-  - '[[2026-07-19-repository-tooling-hardening-W06-P11-S22]]'
-  - '[[2026-07-19-repository-tooling-hardening-W06-P11-S23]]'
-  - '[[2026-07-19-repository-tooling-hardening-W06-P12-S24]]'
-  - '[[2026-07-19-repository-tooling-hardening-W06-P12-S25]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-audit]]'
+  - '[[2026-07-19-repository-tooling-hardening-ledger]]'
   - '[[2026-07-19-repository-tooling-hardening-plan]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
   - '[[2026-07-19-repository-tooling-hardening-research]]'
@@ -127,39 +103,15 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 
 ### exec
 
-- `2026-07-19-repository-tooling-hardening-W01-P01-S01` - Define explicit base, server, RAG, tooling, and all profiles with bounded Core and RAG upgrades
 - `2026-07-19-repository-tooling-hardening-W01-P01-summary` - `repository-tooling-hardening` `W01.P01` summary
-- `2026-07-19-repository-tooling-hardening-W01-P02-S02` - Add locked setup, sync, upgrade, status, and service recipes for Core and RAG
-- `2026-07-19-repository-tooling-hardening-W01-P02-S03` - Route workspace provisioning and agent RAG acquisition through deliberate locked versions with real subprocess tests
 - `2026-07-19-repository-tooling-hardening-W01-P02-summary` - `repository-tooling-hardening` `W01.P02` summary
-- `2026-07-19-repository-tooling-hardening-W02-P03-S04` - Remove obsolete broad framework ignores and prove Core-managed policy convergence
-- `2026-07-19-repository-tooling-hardening-W02-P03-S05` - Reconcile the compact custom rule corpus and regenerate provider projections through owning verbs
 - `2026-07-19-repository-tooling-hardening-W02-P03-summary` - `repository-tooling-hardening` `W02.P03` summary
-- `2026-07-19-repository-tooling-hardening-W02-P04-S06` - Replace dynamic dispatch with a minimum-version-checked native module index and modular developer surface
-- `2026-07-19-repository-tooling-hardening-W02-P04-S07` - Route named services only through the process registry and stacks only through Compose
 - `2026-07-19-repository-tooling-hardening-W02-P04-summary` - `repository-tooling-hardening` `W02.P04` summary
-- `2026-07-19-repository-tooling-hardening-W03-P05-S08` - Convert hooks to locked read-only validation with explicit repair and synchronization commands
-- `2026-07-19-repository-tooling-hardening-W03-P05-S09` - Remediate formatter, typing, dependency, and test-selection debt without suppressive shortcuts
 - `2026-07-19-repository-tooling-hardening-W03-P05-summary` - `repository-tooling-hardening` `W03.P05` summary
-- `2026-07-19-repository-tooling-hardening-W03-P06-S10` - Invoke canonical CI, pin actions, minimize permissions, and authorize self-hosted dispatch before secrets
 - `2026-07-19-repository-tooling-hardening-W03-P06-summary` - `repository-tooling-hardening` `W03.P06` summary
-- `2026-07-19-repository-tooling-hardening-W04-P07-S11` - Rewrite onboarding and add separated setup, command, operating-model, and vocabulary documentation through the documentation pipeline
 - `2026-07-19-repository-tooling-hardening-W04-P07-summary` - `repository-tooling-hardening` `W04.P07` summary
-- `2026-07-19-repository-tooling-hardening-W04-P08-S12` - Run clone-to-CI acceptance, formal review, finding classification, audit queue updates, and execution summaries
 - `2026-07-19-repository-tooling-hardening-W04-P08-summary` - `repository-tooling-hardening` `W04.P08` summary
-- `2026-07-19-repository-tooling-hardening-W05-P09-S13` - Add the cross-platform Ty target over the canonical Python roots.
-- `2026-07-19-repository-tooling-hardening-W05-P09-S14` - Correct the cognitive-complexity command scope so it measures only production sources on every supported host.
-- `2026-07-19-repository-tooling-hardening-W05-P09-S15` - Reconcile the complete canonical CI sequence in the declarative registry before reducing the root recipe to delegation.
-- `2026-07-19-repository-tooling-hardening-W05-P10-S16` - Schedule one named hosted step per deterministic sentinel on every push and pull request, guarded by !cancelled and advisory until promotion.
-- `2026-07-19-repository-tooling-hardening-W05-P10-S17` - Schedule production JSCPD clone detection as a named advisory hosted-CI result.
-- `2026-07-19-repository-tooling-hardening-W05-P10-S18` - Prove exact root, workflow, sentinel, platform, advisory, blocking, and duplication anti-drift invariants from the real registry.
-- `2026-07-19-repository-tooling-hardening-W06-P11-S19` - Repair the Ty portability tranche for Windows-only ctypes and generic-length access.
-- `2026-07-19-repository-tooling-hardening-W06-P11-S20` - Type the health-instrument boundary without suppressions and preserve its measured-result contract.
-- `2026-07-19-repository-tooling-hardening-W06-P11-S21` - Establish typed API test-fixture contracts before repairing dependent API tests.
-- `2026-07-19-repository-tooling-hardening-W06-P11-S22` - Repair the API endpoint test partition against the typed fixture contract.
-- `2026-07-19-repository-tooling-hardening-W06-P11-S23` - Repair the API live-gateway and clarification test partitions without overlapping peer work.
-- `2026-07-19-repository-tooling-hardening-W06-P12-S24` - Repair strict types in the control and repository production domains.
-- `2026-07-19-repository-tooling-hardening-W06-P12-S25` - Repair strict types in the provider and ACP production domains.
+- `2026-07-19-repository-tooling-hardening-ledger` - `repository-tooling-hardening` ledger
 
 ### plan
 

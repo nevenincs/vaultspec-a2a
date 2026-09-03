@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 from fastapi.testclient import TestClient
 
@@ -11,10 +12,15 @@ from ...testing import settings_override as _settings_override
 from ...utils.enums import Environment
 from ..app import create_worker_app
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
-def _make_app_without_lifespan():
+    from fastapi import FastAPI
+
+
+def _make_app_without_lifespan() -> FastAPI:
     @asynccontextmanager
-    async def _noop_lifespan(_app):
+    async def _noop_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         yield
 
     return create_worker_app(lifespan=_noop_lifespan)

@@ -90,7 +90,7 @@ class _HealthServer:
         self._thread.join(timeout=5.0)
 
 
-def test_classifier_covers_absent_fresh_stale_malformed(tmp_path) -> None:
+def test_classifier_covers_absent_fresh_stale_malformed(tmp_path: Path) -> None:
     path = service_json_path(tmp_path)
     assert classify_discovery(path)[0] is DiscoveryState.ABSENT
 
@@ -236,7 +236,7 @@ def test_writer_replaces_preexisting_broad_directory_authority(tmp_path: Path) -
         assert windows_file_is_restricted(home / "service.token")
 
 
-def test_pid_liveness_and_ownership(tmp_path) -> None:
+def test_pid_liveness_and_ownership(tmp_path: Path) -> None:
     assert is_pid_alive(os.getpid()) is True
     assert is_pid_alive(2**31 - 1) is False
     assert is_pid_alive(None) is False
@@ -253,7 +253,7 @@ def test_pid_liveness_and_ownership(tmp_path) -> None:
     assert not path.exists()
 
 
-def test_stale_pid_is_not_a_live_resident(tmp_path) -> None:
+def test_stale_pid_is_not_a_live_resident(tmp_path: Path) -> None:
     """A fresh heartbeat with a dead pid reads as Crashed, not a live resident."""
     path = service_json_path(tmp_path)
     # Fresh heartbeat (now) but a pid that does not exist -> attach-never-own.
@@ -263,7 +263,7 @@ def test_stale_pid_is_not_a_live_resident(tmp_path) -> None:
     assert another_resident_is_live(tmp_path) is False  # ...but the pid is dead.
 
 
-def test_single_resident_true_only_when_fresh_live_and_healthy(tmp_path) -> None:
+def test_single_resident_true_only_when_fresh_live_and_healthy(tmp_path: Path) -> None:
     with _HealthServer() as server:
         path = service_json_path(tmp_path)
         write_service_json(
@@ -280,7 +280,7 @@ def test_single_resident_true_only_when_fresh_live_and_healthy(tmp_path) -> None
     assert another_resident_is_live(tmp_path) is False
 
 
-def test_health_while_degraded_still_counts_as_resident(tmp_path) -> None:
+def test_health_while_degraded_still_counts_as_resident(tmp_path: Path) -> None:
     """A degraded gateway (ready=false) is still a live resident: /health answers."""
     with _HealthServer(ready=False) as server:
         path = service_json_path(tmp_path)
@@ -292,13 +292,13 @@ def test_health_while_degraded_still_counts_as_resident(tmp_path) -> None:
         assert another_resident_is_live(tmp_path) is True
 
 
-def test_absent_file_licenses_a_start(tmp_path) -> None:
+def test_absent_file_licenses_a_start(tmp_path: Path) -> None:
     """Only Absent means no resident — the caller may start and publish."""
     assert another_resident_is_live(tmp_path) is False
     assert read_resident_service(tmp_path)[0] is DiscoveryState.ABSENT
 
 
-def test_tokenless_publication_is_refused_by_default(tmp_path) -> None:
+def test_tokenless_publication_is_refused_by_default(tmp_path: Path) -> None:
     """A tokenless publish must raise rather than silently downgrade the record.
 
     The destructive shape is what matters: without the refusal, this call would
@@ -318,7 +318,7 @@ def test_tokenless_publication_is_refused_by_default(tmp_path) -> None:
     assert "handoff_reference" in json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_deliberate_unpublish_still_clears_the_credential(tmp_path) -> None:
+def test_deliberate_unpublish_still_clears_the_credential(tmp_path: Path) -> None:
     """The opt-in keeps the un-publish case available for callers that mean it."""
     path = service_json_path(tmp_path)
     write_service_json(path, port=8000, pid=os.getpid(), service_token="live-secret")
@@ -331,7 +331,7 @@ def test_deliberate_unpublish_still_clears_the_credential(tmp_path) -> None:
     assert "handoff_reference" not in json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_removing_a_malformed_record_also_clears_its_credential(tmp_path) -> None:
+def test_removing_a_malformed_record_also_clears_its_credential(tmp_path: Path) -> None:
     """A malformed record must not strand the credential beside it.
 
     An unreadable record can never again reference its token, so a token left
@@ -349,7 +349,7 @@ def test_removing_a_malformed_record_also_clears_its_credential(tmp_path) -> Non
     assert not credential.exists()
 
 
-def test_credential_removal_refuses_a_link_like_destination(tmp_path) -> None:
+def test_credential_removal_refuses_a_link_like_destination(tmp_path: Path) -> None:
     """A symlink where the credential belongs must not be followed on removal.
 
     Otherwise anyone able to write the discovery directory could redirect the

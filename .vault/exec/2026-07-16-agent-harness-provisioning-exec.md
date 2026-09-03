@@ -3,13 +3,11 @@ tags:
   - '#exec'
   - '#agent-harness-provisioning'
 date: '2026-07-16'
-modified: '2026-07-16'
+modified: '2026-09-03'
 body_hash: 'sha256:47bd73b703e46e2110337c55ae6127aa85f89ab36970f1657d985af9b0146418'
-step_id: '{S##}'
 related:
-  - "[[2026-07-15-agent-harness-provisioning-adr]]"
-  - "[[2026-07-15-agent-harness-provisioning-P01-S01]]"
-  - "[[2026-07-15-graph-agent-framework-harness-P05-S11]]"
+  - '[[2026-07-15-agent-harness-provisioning-plan]]'
+  - '[[2026-07-15-agent-harness-provisioning-adr]]'
 ---
 
 # verify_harness rules leg made bundled-aware (Path B arbitration)

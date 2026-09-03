@@ -10,9 +10,14 @@ replacement characters.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from ..worker_management import _read_log_tail
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Provider CLIs emit prose, so their stderr carries whatever language the user
 # runs in. Each sample below is chosen for its UTF-8 width - three bytes for CJK,
@@ -30,7 +35,7 @@ _SAMPLES = [
 _TAIL_WIDTHS = list(range(1, 14))
 
 
-def _write_log(tmp_path, name: str, text: str):
+def _write_log(tmp_path: Path, name: str, text: str) -> Path:
     log = tmp_path / name
     log.write_bytes(text.encode("utf-8"))
     return log
@@ -67,7 +72,7 @@ def test_the_samples_really_do_cut_mid_character(message: str) -> None:
 @pytest.mark.parametrize("message", _SAMPLES)
 @pytest.mark.parametrize("width", _TAIL_WIDTHS)
 def test_tail_never_opens_with_a_broken_character(
-    tmp_path, message: str, width: int
+    tmp_path: Path, message: str, width: int
 ) -> None:
     """Every seek alignment must yield clean text, not a stranded fragment.
 
@@ -95,14 +100,14 @@ def test_tail_never_opens_with_a_broken_character(
 
 
 @pytest.mark.parametrize("message", _SAMPLES)
-def test_tail_reads_a_whole_short_log_verbatim(tmp_path, message: str) -> None:
+def test_tail_reads_a_whole_short_log_verbatim(tmp_path: Path, message: str) -> None:
     """A log inside the cap is not truncated, so it round-trips exactly."""
     log = _write_log(tmp_path, "worker-autospawn-2.stderr.log", message)
 
     assert _read_log_tail(log, max_bytes=4096) == message
 
 
-def test_tail_decodes_as_utf8_not_the_host_code_page(tmp_path) -> None:
+def test_tail_decodes_as_utf8_not_the_host_code_page(tmp_path: Path) -> None:
     """The log is UTF-8 because the worker writes UTF-8, whatever the host locale.
 
     Decoding with the ambient code page would return mojibake of a similar
@@ -113,7 +118,7 @@ def test_tail_decodes_as_utf8_not_the_host_code_page(tmp_path) -> None:
     assert _read_log_tail(log, max_bytes=4096) == "日本語"
 
 
-def test_undecodable_bytes_degrade_instead_of_raising(tmp_path) -> None:
+def test_undecodable_bytes_degrade_instead_of_raising(tmp_path: Path) -> None:
     """A truncated or corrupt log must still yield a diagnostic, never an error.
 
     This tail is read while reporting why a worker died; raising here would

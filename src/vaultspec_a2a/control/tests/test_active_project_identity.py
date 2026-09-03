@@ -16,7 +16,7 @@ the worker's own cache-key former and registration seam.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
@@ -402,8 +402,11 @@ class TestOneWorkspaceOneGraphEntry:
 
     @staticmethod
     def _graph() -> RegisteredCompiledGraph:
+        def finish_node(state: dict[str, Any]) -> dict[str, Any]:
+            return {}
+
         builder = new_state_graph()
-        builder.add_node("finish", lambda state: {})
+        builder.add_node("finish", finish_node)
         builder.add_edge("__start__", "finish")
         builder.add_edge("finish", "__end__")
         return builder.compile(checkpointer=InMemorySaver())

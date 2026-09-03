@@ -29,8 +29,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ...context.metadata import ThreadMetadata
 from ...control.worker_status import WorkerConnectionStatus
-from ...graph.enums import SemanticPhase
+from ...graph.enums import Model, SemanticPhase
 from ...providers.conditions import ProviderCondition
+from ...providers.model_profiles import AssignmentSource
 from ...team.preset_origin import PresetOrigin
 from ...team.team_config import AuthoringCapability, DocumentCapability, TopologyType
 from ...thread.actor_tokens import MAX_ROLES_PER_RUN, ActorTokenBundle
@@ -928,11 +929,21 @@ class RoleAssignmentSummary(BaseModel):
     role_id: str
     agent_id: str
     provider_id: str
-    capability: str | None = None
+    # The capability TIER, not a concrete model name - ``model_name`` beside it
+    # carries that. Typed by the owning enumeration: unlike ``provider_id`` above,
+    # this vocabulary is internal, so a frozen record can only ever hold a member
+    # this build still knows.
+    capability: Model | None = None
     model_name: str | None = None
+    # Left a bare string list for the same reason ``provider_id`` is: these are
+    # provider identities replayed from a frozen record, and a past run may have
+    # named a lane this build no longer has.
     fallback_providers: list[str] = Field(default_factory=list)
     provider_ready: bool = False
-    source: str = "team_default"
+    # The precedence layer that supplied the assignment. The default is the
+    # enumeration member rather than a restated literal, so the schema and the
+    # emit site cannot drift to different fallbacks.
+    source: AssignmentSource = AssignmentSource.TEAM_DEFAULT
     resolution_error: str | None = None
 
 

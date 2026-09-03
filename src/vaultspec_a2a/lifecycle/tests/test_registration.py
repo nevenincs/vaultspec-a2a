@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
 from ..registration import deregister_serve, refresh_registration, register_serve
 from ..registry import ProcRecord, read_record, record_path, write_record
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _config() -> ProcsConfig:
@@ -32,7 +36,7 @@ def _config() -> ProcsConfig:
     )
 
 
-def test_register_serve_records_a_band_port_instance(tmp_path) -> None:
+def test_register_serve_records_a_band_port_instance(tmp_path: Path) -> None:
     record = register_serve(
         "gateway-dev", 18100, workspace="ws-a", home=tmp_path, config=_config()
     )
@@ -45,7 +49,9 @@ def test_register_serve_records_a_band_port_instance(tmp_path) -> None:
     assert persisted.workspace == "ws-a"
 
 
-def test_register_serve_preserves_operator_fields_on_convergence(tmp_path) -> None:
+def test_register_serve_preserves_operator_fields_on_convergence(
+    tmp_path: Path,
+) -> None:
     # A record serve_up already committed, carrying operator-owned fields.
     seeded = ProcRecord(
         name="g1",
@@ -99,7 +105,9 @@ def test_register_serve_preserves_operator_fields_on_convergence(tmp_path) -> No
     assert persisted == converged
 
 
-def test_register_serve_convergence_without_command_keeps_existing(tmp_path) -> None:
+def test_register_serve_convergence_without_command_keeps_existing(
+    tmp_path: Path,
+) -> None:
     write_record(
         ProcRecord(
             name="g2",
@@ -121,7 +129,9 @@ def test_register_serve_convergence_without_command_keeps_existing(tmp_path) -> 
     assert converged.log_path == "L:/x.log"
 
 
-def test_refresh_registration_preserves_a_record_that_landed_after_it(tmp_path) -> None:
+def test_refresh_registration_preserves_a_record_that_landed_after_it(
+    tmp_path: Path,
+) -> None:
     # The self-registering process's in-memory record (built during the boot race,
     # before serve_up committed) carries defaults only.
     stale = ProcRecord(
@@ -148,7 +158,9 @@ def test_refresh_registration_preserves_a_record_that_landed_after_it(tmp_path) 
     assert after.last_seen_ms >= full.last_seen_ms
 
 
-def test_register_serve_refuses_convergence_under_foreign_live_owner(tmp_path) -> None:
+def test_register_serve_refuses_convergence_under_foreign_live_owner(
+    tmp_path: Path,
+) -> None:
     # A live foreign-owned record (this test's pid, a different owner) must not be
     # rewritten by a converging registration under a different owner.
     foreign = ProcRecord(
@@ -171,20 +183,20 @@ def test_register_serve_refuses_convergence_under_foreign_live_owner(tmp_path) -
     assert on_disk.log_path == "L:/keep.log"
 
 
-def test_register_serve_ignores_a_resident_out_of_band_port(tmp_path) -> None:
+def test_register_serve_ignores_a_resident_out_of_band_port(tmp_path: Path) -> None:
     # 18000 is the resident gateway port, outside gateway-dev's band -> no record.
     record = register_serve("gateway-dev", 18000, home=tmp_path, config=_config())
     assert record is None
     assert not list(tmp_path.glob("*.json"))
 
 
-def test_register_serve_ignores_an_unknown_role(tmp_path) -> None:
+def test_register_serve_ignores_an_unknown_role(tmp_path: Path) -> None:
     record = register_serve("nonesuch", 18100, home=tmp_path, config=_config())
     assert record is None
     assert not list(tmp_path.glob("*.json"))
 
 
-def test_refresh_and_deregister_round_trip(tmp_path) -> None:
+def test_refresh_and_deregister_round_trip(tmp_path: Path) -> None:
     record = register_serve("gateway-dev", 18101, home=tmp_path, config=_config())
     assert record is not None
 

@@ -3,9 +3,9 @@
 Headless agent-to-agent orchestration with a versioned gateway edge and separate
 worker execution.
 
-[![Tests](https://github.com/nevenincs/vaultspec-a2a/actions/workflows/test.yml/badge.svg)](https://github.com/nevenincs/vaultspec-a2a/actions/workflows/test.yml)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![tests](https://img.shields.io/github/actions/workflow/status/nevenincs/vaultspec-a2a/test.yml?branch=main&style=flat&label=tests&logo=githubactions&logoColor=white&labelColor=24292f&color=57606a)](https://github.com/nevenincs/vaultspec-a2a/actions/workflows/test.yml)
+[![runtime](https://img.shields.io/badge/runtime-Python%203.13%2B-57606a?style=flat&logo=python&logoColor=white&labelColor=24292f)](https://www.python.org/downloads/)
+[![license](https://img.shields.io/github/license/nevenincs/vaultspec-a2a?style=flat&label=license&logo=opensourceinitiative&logoColor=white&labelColor=24292f&color=57606a)](LICENSE)
 
 [Quick start](#quick-start) · [Vaultspec tooling](#enroll-vaultspec-tooling) ·
 [Validation](#validate-the-repository) · [Next tasks](#choose-the-next-task) ·

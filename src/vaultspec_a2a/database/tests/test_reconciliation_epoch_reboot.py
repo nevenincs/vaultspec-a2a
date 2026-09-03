@@ -61,7 +61,9 @@ async def _put_checkpoint(checkpointer: AsyncSqliteSaver, tid: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_paused_resumable_survives_reboot_and_advances_epoch(runtime_dir) -> None:
+async def test_paused_resumable_survives_reboot_and_advances_epoch(
+    runtime_dir: Path,
+) -> None:
     """A paused_resumable thread reconciled twice must not crash on the 2nd boot."""
     tid = "thread-paused-reboot"
     db_file = runtime_dir / "reconciliation-reboot.db"
@@ -112,7 +114,9 @@ async def test_paused_resumable_survives_reboot_and_advances_epoch(runtime_dir) 
 
 
 @pytest.mark.asyncio
-async def test_historical_stuck_row_self_heals_without_crashing(runtime_dir) -> None:
+async def test_historical_stuck_row_self_heals_without_crashing(
+    runtime_dir: Path,
+) -> None:
     """A pre-fix row (epoch 0 with startup-repair:{tid}:1 already journaled) must
     replay as a no-op and advance, not crash the boot."""
     tid = "thread-historical-stuck"
@@ -155,7 +159,7 @@ async def test_historical_stuck_row_self_heals_without_crashing(runtime_dir) -> 
 
 @pytest.mark.asyncio
 async def test_get_or_create_control_action_is_idempotent_across_sessions(
-    runtime_dir,
+    runtime_dir: Path,
 ) -> None:
     """Two separate sessions requesting the same key yield one row, no duplicate.
 

@@ -43,7 +43,7 @@ _THREAD_ID = "test-thread-authoring"
 _ENGINE_URL = "http://127.0.0.1:8767"
 
 
-def _stdio_provider(
+def stdio_provider(
     *,
     engine_base_url: str = _ENGINE_URL,
     thread_id: str = _THREAD_ID,
@@ -65,7 +65,7 @@ def _stdio_provider(
         ),
     )
     catalog_store = RunCatalogStore()
-    catalog_store.register(thread_id, _binding().snapshot)
+    catalog_store.register(thread_id, binding().snapshot)
     return AuthoringBindingProvider(
         engine_base_url=engine_base_url,
         token_store=token_store,
@@ -85,7 +85,7 @@ def _make_state() -> TeamState:
     }
 
 
-def _binding(server_url: str = "http://127.0.0.1:8200/mcp") -> AuthoringToolBinding:
+def binding(server_url: str = "http://127.0.0.1:8200/mcp") -> AuthoringToolBinding:
     snapshot = CatalogSnapshot(
         schema_version="authoring.semantic_tools.v1",
         tools=(
@@ -146,10 +146,11 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
         system_prompt="You are a coder.",
         name="coder",
         autonomous=True,
-        authoring_binding_provider=_stdio_provider(),
+        authoring_binding_provider=stdio_provider(),
     )
 
     result = await node(_make_state())
+    assert isinstance(result, dict)
     assert result["messages"][0].content == "authored"
 
     params = json.loads(record_file.read_text(encoding="utf-8"))
@@ -180,7 +181,7 @@ def _stdio_binding(
     run_id: str = "run:xyz",
 ) -> AuthoringToolBinding:
     return AuthoringToolBinding(
-        snapshot=_binding().snapshot,
+        snapshot=binding().snapshot,
         bearer_token="machine-bearer-xyz",
         actor_token="actor-token-abc",
         engine_base_url=engine_base_url,
@@ -226,7 +227,7 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
         system_prompt="You are a coder.",
         name="coder",
         autonomous=True,
-        authoring_binding_provider=_stdio_provider(),
+        authoring_binding_provider=stdio_provider(),
     )
 
     await node(_make_state())
@@ -295,7 +296,7 @@ async def test_stdio_binding_hoists_secrets_without_touching_the_workspace(
         system_prompt="You are a coder.",
         name="coder",
         autonomous=True,
-        authoring_binding_provider=_stdio_provider(),
+        authoring_binding_provider=stdio_provider(),
     )
 
     await node(_make_state())
@@ -348,6 +349,7 @@ async def test_no_binding_leaves_session_without_mcp_servers(
     )
 
     result = await node(_make_state())
+    assert isinstance(result, dict)
     assert result["messages"][0].content == "plain"
 
     params = json.loads(record_file.read_text(encoding="utf-8"))

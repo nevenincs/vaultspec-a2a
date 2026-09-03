@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from langchain_core.messages import HumanMessage
@@ -22,7 +22,7 @@ from langchain_core.messages import HumanMessage
 from ....providers._acp_authoring import authoring_allowed_tool_names
 from ....providers._acp_mcp import NATIVE_READ_TOOL_NAMES
 from ...nodes.worker import create_worker_node
-from .test_worker_authoring_wiring import _binding, _stdio_provider
+from .test_worker_authoring_wiring import binding, stdio_provider
 
 if TYPE_CHECKING:
     from ....thread.state import TeamState
@@ -63,7 +63,7 @@ def _model(record_file: Path, tmp_path: Path):
     )
 
 
-def _allowed_tools(params: dict) -> list[str]:
+def _allowed_tools(params: dict[str, Any]) -> list[str]:
     meta = params.get("_meta", {})
     return meta.get("claudeCode", {}).get("options", {}).get("allowedTools", [])
 
@@ -83,6 +83,7 @@ async def test_document_role_autonomous_permits_native_read_builtins(
     )
 
     result = await node(_make_state())
+    assert isinstance(result, dict)
     assert result["messages"][0].content == "researched"
 
     params = json.loads(record_file.read_text(encoding="utf-8"))
@@ -103,7 +104,7 @@ async def test_native_read_tools_union_with_authoring_allowlist(
         name="researcher",
         autonomous=True,
         role="researcher",
-        authoring_binding_provider=_stdio_provider(
+        authoring_binding_provider=stdio_provider(
             thread_id="test-thread-native-read", agent_id="researcher"
         ),
     )
@@ -113,7 +114,7 @@ async def test_native_read_tools_union_with_authoring_allowlist(
     params = json.loads(record_file.read_text(encoding="utf-8"))
     allowed = _allowed_tools(params)
     assert allowed == [
-        *authoring_allowed_tool_names(_binding()),
+        *authoring_allowed_tool_names(binding()),
         *NATIVE_READ_TOOL_NAMES,
     ]
 

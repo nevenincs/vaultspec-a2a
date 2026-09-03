@@ -1426,7 +1426,7 @@ def _frozen_disclosure(frozen: Any) -> list[RoleAssignmentSummary]:
     the filesystem to resolve a subprocess provider's launch command.
     """
     from ...graph.enums import Provider
-    from ...providers.model_profiles import probe_provider_readiness
+    from ...providers.model_profiles import AssignmentSource, probe_provider_readiness
 
     readiness: dict[str, bool] = {}
 
@@ -1454,7 +1454,7 @@ def _frozen_disclosure(frozen: Any) -> list[RoleAssignmentSummary]:
                 model_name=role.get("model_name") or None,
                 fallback_providers=list(role.get("fallback", [])),
                 provider_ready=_ready(provider_id),
-                source=str(role.get("source", "team_default")),
+                source=str(role.get("source", AssignmentSource.TEAM_DEFAULT.value)),
             )
         )
     return summaries

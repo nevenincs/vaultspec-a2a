@@ -406,7 +406,9 @@ class TestRealSyncedCorpus:
         assert scoped <= whole
 
 
-def _write_rule(directory: Path, name: str, roles, body: str = "body") -> None:
+def _write_rule(
+    directory: Path, name: str, roles: list[str] | str | None, body: str = "body"
+) -> None:
     """Write a rule file with an optional ``roles:`` frontmatter list.
 
     ``roles=None`` writes a file with frontmatter but NO ``roles:`` key (not

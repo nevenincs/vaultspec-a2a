@@ -33,7 +33,7 @@ def test_unarmed_profile_exposes_no_credential_references() -> None:
 def test_armed_profile_models_three_distinct_planes(tmp_path: Path) -> None:
     """Arming the profile derives distinct attach, ownership, and worker IPC paths."""
     home = _app_home(tmp_path)
-    settings = Settings(VAULTSPEC_DESKTOP_APP_HOME=str(home))
+    settings = Settings(VAULTSPEC_DESKTOP_APP_HOME=home)
 
     references = settings.desktop_credential_paths
     assert references is not None
@@ -62,7 +62,7 @@ def test_armed_profile_models_three_distinct_planes(tmp_path: Path) -> None:
 def test_credential_references_are_app_home_seated(tmp_path: Path) -> None:
     """Every credential path lives beneath the explicit application home."""
     home = _app_home(tmp_path)
-    settings = Settings(VAULTSPEC_DESKTOP_APP_HOME=str(home))
+    settings = Settings(VAULTSPEC_DESKTOP_APP_HOME=home)
 
     references = settings.desktop_credential_paths
     assert references is not None

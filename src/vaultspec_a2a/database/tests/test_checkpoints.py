@@ -8,15 +8,20 @@ busy_timeout.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...testing import settings_override as _settings_override
 from ..checkpoints import open_checkpointer
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 @pytest.mark.asyncio
-async def test_sqlite_checkpointer_enables_wal_and_busy_timeout(tmp_path) -> None:
+async def test_sqlite_checkpointer_enables_wal_and_busy_timeout(tmp_path: Path) -> None:
     db_file = tmp_path / "checkpoints.sqlite"
     with _settings_override(
         checkpoint_backend="sqlite",

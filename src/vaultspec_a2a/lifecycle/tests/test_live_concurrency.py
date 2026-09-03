@@ -18,10 +18,14 @@ from __future__ import annotations
 import socket
 import sys
 import time
+from typing import TYPE_CHECKING
 
 from ..manager import attach, list_verdicts, rerun, serve_up, tree_kill
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
 from ..registry import StalenessState, list_records, read_record, record_path
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # A representative serve command: a real child that binds its port and holds it.
 _BIND_SERVE = (
@@ -78,7 +82,7 @@ def _wait_pid_dead(pid: int, *, timeout: float = 10.0) -> bool:
     return not is_pid_alive(pid)
 
 
-def test_sequential_stacks_no_collision_reap_and_rerun(tmp_path) -> None:
+def test_sequential_stacks_no_collision_reap_and_rerun(tmp_path: Path) -> None:
     config = _stacks_config()
     spawned = []
     try:

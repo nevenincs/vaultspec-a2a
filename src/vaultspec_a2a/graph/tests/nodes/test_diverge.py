@@ -118,7 +118,8 @@ async def test_dispatch_emits_one_send_per_researcher() -> None:
     # list form fans out, and asserting the type is what this test means by
     # "one Send per researcher".
     assert isinstance(goto, list)
-    assert [cast("Send", send).node for send in goto] == ["r00", "r01", "r02"]
+    sends = cast("list[Send]", goto)
+    assert [send.node for send in sends] == ["r00", "r01", "r02"]
 
 
 @pytest.mark.asyncio
@@ -170,7 +171,7 @@ async def test_compiled_researcher_forwards_config_to_config_aware_producer() ->
         "configurable": {"thread_id": "config-aware-run"},
     }
 
-    result = await graph.ainvoke(cast("Any", _base_state()), config=config)
+    result = await graph.ainvoke(_base_state(), config=config)
 
     assert result["research_findings"][0]["source_thread"] == "config-aware"
     assert observed_configs
@@ -274,12 +275,15 @@ def test_researcher_node_name_is_deterministic() -> None:
 
 def _web_urls(findings: list[dict[str, Any]]) -> list[str]:
     """Return every web-locator URL across *findings*, in encounter order."""
-    return [
-        locator["url"]
-        for finding in findings
-        for locator in finding["locators"]
-        if isinstance(locator, dict) and locator.get("kind") == WEB_LOCATOR_KIND
-    ]
+    urls: list[str] = []
+    for finding in findings:
+        locators = cast("list[str | dict[str, Any]]", finding["locators"])
+        urls.extend(
+            locator["url"]
+            for locator in locators
+            if isinstance(locator, dict) and locator.get("kind") == WEB_LOCATOR_KIND
+        )
+    return urls
 
 
 @pytest.mark.asyncio
@@ -298,7 +302,7 @@ async def test_web_locators_reach_synthesis_and_survive_the_checkpoint(
     disk, which is the seam that rejects a shape it cannot serialise.
     """
     checkpoint_path = tmp_path / "diverge-checkpoints.sqlite"
-    config: dict[str, Any] = {"configurable": {"thread_id": "web-locator-run"}}
+    config: RunnableConfig = {"configurable": {"thread_id": "web-locator-run"}}
     seen_at_synthesis: dict[str, list[dict[str, Any]]] = {}
 
     async def synthesis_node(state: TeamState) -> dict[str, Any]:
@@ -323,7 +327,7 @@ async def test_web_locators_reach_synthesis_and_survive_the_checkpoint(
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
         await saver.setup()
         graph = _build().compile(checkpointer=saver)
-        result = await graph.ainvoke(_base_state(), config=cast("Any", config))
+        result = await graph.ainvoke(_base_state(), config=config)
 
     expected_urls = sorted(
         [
@@ -348,18 +352,14 @@ async def test_web_locators_reach_synthesis_and_survive_the_checkpoint(
     # Reopen the persisted checkpoint with a fresh connection and recompiled
     # graph: nothing from the first process-local run is in play here.
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as reopened:
-        replayed = (
-            await _build()
-            .compile(checkpointer=reopened)
-            .aget_state(cast("Any", config))
-        )
+        replayed = await _build().compile(checkpointer=reopened).aget_state(config)
 
-    restored = replayed.values["research_findings"]
+    restored = cast("list[dict[str, Any]]", replayed.values["research_findings"])
     assert sorted(_web_urls(restored)) == expected_urls
     engine_locator = next(
         locator
         for finding in restored
-        for locator in finding["locators"]
+        for locator in cast("list[str | dict[str, Any]]", finding["locators"])
         if isinstance(locator, dict)
         and locator["url"] == "https://example.invalid/engine/events"
     )
@@ -385,7 +385,12 @@ async def _run_with_locators(locators: list[Any]) -> dict[str, Any]:
     """Drive a researcher branch whose producer emits exactly *locators*."""
     spec: dict[str, Any] = {"thread_id": "codebase", "locators": locators}
     node = create_researcher_node(spec, _locator_producer)
-    return await node(_base_state())
+    result = await node(_base_state())
+    # A researcher branch always contributes a state update, never routes via
+    # Command; the assertion documents that invariant rather than widening
+    # the helper's return type to the full WorkerNode union.
+    assert isinstance(result, dict)
+    return result
 
 
 @pytest.mark.asyncio

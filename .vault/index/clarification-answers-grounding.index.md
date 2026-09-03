@@ -6,12 +6,11 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-03'
 body_schema: 'body-v2'
-body_hash: 'sha256:1b8784a59ac683d17096f4706622341e8cbb668d47d7fc47888b8a6c9769a072'
+body_hash: 'sha256:85e5c9aecc448c86272724bd172dac3e73bb73403ede035e7dd56f2d237d7070'
 related:
-  - '[[2026-08-02-clarification-answers-grounding-S01]]'
-  - '[[2026-08-02-clarification-answers-grounding-S02]]'
   - '[[2026-08-02-clarification-answers-grounding-adr]]'
   - '[[2026-08-02-clarification-answers-grounding-implementation-review-audit]]'
+  - '[[2026-08-02-clarification-answers-grounding-ledger]]'
   - '[[2026-08-02-clarification-answers-grounding-plan]]'
   - '[[2026-08-02-clarification-answers-grounding-research]]'
 ---
@@ -32,8 +31,7 @@ Auto-generated index of all documents tagged with `#clarification-answers-ground
 
 ### exec
 
-- `2026-08-02-clarification-answers-grounding-S01` - Render answered questionnaires into one bounded human transcript turn at the gate
-- `2026-08-02-clarification-answers-grounding-S02` - Prove rendering bounds, skip-on-empty, gate append, and the real worker delivery
+- `2026-08-02-clarification-answers-grounding-ledger` - `clarification-answers-grounding` ledger
 
 ### plan
 

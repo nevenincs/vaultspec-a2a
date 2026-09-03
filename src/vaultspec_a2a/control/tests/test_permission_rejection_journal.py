@@ -18,7 +18,12 @@ from pathlib import Path
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -55,7 +60,7 @@ async def engine(tmp_path_factory: pytest.TempPathFactory):
 
 
 @pytest_asyncio.fixture
-async def session_factory(engine):
+async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -92,7 +97,7 @@ async def _respond(
         )
 
 
-async def _seed_thread(session_factory) -> str:
+async def _seed_thread(session_factory: async_sessionmaker[AsyncSession]) -> str:
     """Create a committed, non-terminal thread the guards can reject against."""
     async with session_factory() as session:
         thread = await create_thread(
@@ -105,7 +110,7 @@ async def _seed_thread(session_factory) -> str:
 
 
 async def _assert_journalled(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
     *,
     action_id: str,
     expected_option_id: str,
@@ -129,7 +134,9 @@ async def _assert_journalled(
 
 
 @pytest.mark.asyncio
-async def test_unknown_option_is_journalled_and_committed(session_factory) -> None:
+async def test_unknown_option_is_journalled_and_committed(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """The option-validation guard journals the rejection reason durably."""
     thread_id = await _seed_thread(session_factory)
     request_id = f"{thread_id}:perm-unknown"
@@ -169,7 +176,9 @@ async def test_unknown_option_is_journalled_and_committed(session_factory) -> No
 
 
 @pytest.mark.asyncio
-async def test_superseded_request_is_journalled_and_committed(session_factory) -> None:
+async def test_superseded_request_is_journalled_and_committed(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """The active-interrupt guard journals through the same single path."""
     thread_id = await _seed_thread(session_factory)
     stale_request_id = f"{thread_id}:perm-stale"
@@ -210,7 +219,9 @@ async def test_superseded_request_is_journalled_and_committed(session_factory) -
 
 
 @pytest.mark.asyncio
-async def test_optionless_request_is_journalled_and_committed(session_factory) -> None:
+async def test_optionless_request_is_journalled_and_committed(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """A request offering no usable options fails closed, and says so durably."""
     thread_id = await _seed_thread(session_factory)
     request_id = f"{thread_id}:perm-optionless"
@@ -244,7 +255,9 @@ async def test_optionless_request_is_journalled_and_committed(session_factory) -
 
 
 @pytest.mark.asyncio
-async def test_replay_reads_the_stored_rejection_reason(session_factory) -> None:
+async def test_replay_reads_the_stored_rejection_reason(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """The journal entry is what a replay answers from - not a re-decision.
 
     This is why the commit belongs inside the rejection path: the second call
@@ -280,7 +293,7 @@ async def test_replay_reads_the_stored_rejection_reason(session_factory) -> None
 
 @pytest.mark.asyncio
 async def test_document_approval_pause_is_refused_not_journalled(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The engine alone decides a document-approval pause; this route refuses.
 

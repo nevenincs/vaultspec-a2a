@@ -11,6 +11,8 @@ permitted-field assertion so an empty frame cannot satisfy it.
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from ...graph.enums import ServerEventType
@@ -499,8 +501,9 @@ def test_nested_list_items_are_bounded_by_count_and_by_text() -> None:
         }
     )
 
-    locations = frame["locations"]
-    assert isinstance(locations, list)
+    raw_locations = frame["locations"]
+    assert isinstance(raw_locations, list)
+    locations = cast("list[object]", raw_locations)
     assert len(locations) == 32
     # Expected values derive from the declared caps (32 items, path 512), not
     # from an observed run.
@@ -518,8 +521,9 @@ def test_a_text_list_is_bounded_by_count_and_by_item_length() -> None:
         }
     )
 
-    ids = frame["active_thread_ids"]
-    assert isinstance(ids, list)
+    raw_ids = frame["active_thread_ids"]
+    assert isinstance(raw_ids, list)
+    ids = cast("list[object]", raw_ids)
     assert len(ids) == 64
     first = ids[0]
     assert isinstance(first, str)

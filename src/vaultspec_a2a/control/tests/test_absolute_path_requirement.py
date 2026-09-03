@@ -27,7 +27,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 import pytest
 from pydantic import ValidationError
@@ -37,7 +37,7 @@ from ...desktop.profile import derive_state_paths
 from ...testing import armed_environment as _environment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 _PATH_NAMES = (
     "VAULTSPEC_DATABASE_URL",
@@ -51,8 +51,23 @@ _PATH_NAMES = (
 )
 
 
+class _SettingsEnvFileFactory(Protocol):
+    def __call__(self, *, _env_file: Path | None) -> Settings: ...
+
+
+def _settings() -> Settings:
+    """Construct with dotenv discovery disabled, typed for basedpyright.
+
+    ``BaseSettings.__init__`` accepts ``_env_file``, but pydantic's
+    dataclass-transform ``__init__`` synthesis for subclasses hides it from
+    static analysis; the cast recovers the real constructor signature (the
+    same pattern used in ``test_provider_catalog_settings.py``).
+    """
+    return cast("_SettingsEnvFileFactory", Settings)(_env_file=None)
+
+
 @contextmanager
-def _clean_environment(**values: str | None) -> Iterator[None]:
+def _clean_environment(**values: str | None) -> Generator[None]:
     """Clear every path setting, then apply the ones this test cares about."""
     cleared: dict[str, str | None] = dict.fromkeys(_PATH_NAMES)
     cleared.update(values)
@@ -66,7 +81,7 @@ def test_an_explicitly_relative_database_url_is_refused() -> None:
         _clean_environment(VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:///vaultspec.db"),
         pytest.raises(ValidationError) as raised,
     ):
-        Settings(_env_file=None)
+        _settings()
 
     message = str(raised.value)
     assert "VAULTSPEC_DATABASE_URL must be absolute" in message
@@ -84,7 +99,7 @@ def test_an_explicitly_relative_checkpoint_url_is_refused() -> None:
             ValidationError, match="VAULTSPEC_CHECKPOINT_DATABASE_URL must be absolute"
         ),
     ):
-        Settings(_env_file=None)
+        _settings()
 
 
 def test_an_explicitly_relative_workspace_root_is_refused() -> None:
@@ -93,7 +108,7 @@ def test_an_explicitly_relative_workspace_root_is_refused() -> None:
         _clean_environment(VAULTSPEC_WORKSPACE_ROOT="./workspaces"),
         pytest.raises(ValidationError) as raised,
     ):
-        Settings(_env_file=None)
+        _settings()
 
     message = str(raised.value)
     assert "VAULTSPEC_WORKSPACE_ROOT must be absolute" in message
@@ -104,13 +119,13 @@ def test_a_relative_value_is_rejected_rather_than_relocated() -> None:
     """Rejection, not repair: no absolute value is invented from a relative one."""
     with _clean_environment(VAULTSPEC_WORKSPACE_ROOT="./workspaces"):
         with pytest.raises(ValidationError):
-            Settings(_env_file=None)
+            _settings()
 
         # The same construction with an absolute value succeeds untouched, which is
         # what makes the failure above a refusal rather than a missing feature.
         absolute = Path(os.getcwd()).resolve() / "workspaces"
         with _environment(VAULTSPEC_WORKSPACE_ROOT=str(absolute)):
-            assert Settings(_env_file=None).workspace_root == absolute
+            assert _settings().workspace_root == absolute
 
 
 def test_the_untouched_database_default_is_anchored_to_the_a2a_home() -> None:
@@ -135,7 +150,7 @@ def test_the_untouched_database_default_is_anchored_to_the_a2a_home() -> None:
       discovery ``service.json``, the serve singleton, the runtime and log dirs.
     """
     with _clean_environment():
-        settings = Settings(_env_file=None)
+        settings = _settings()
 
     a2a_home = settings.a2a_home
     assert a2a_home.is_absolute()
@@ -163,9 +178,9 @@ def test_anchored_defaults_do_not_track_the_working_directory(tmp_path: Path) ->
     with _clean_environment():
         try:
             os.chdir(launch_a)
-            from_a = Settings(_env_file=None)
+            from_a = _settings()
             os.chdir(launch_b)
-            from_b = Settings(_env_file=None)
+            from_b = _settings()
         finally:
             os.chdir(prior)
 
@@ -186,7 +201,7 @@ def test_the_anchor_is_the_overridable_a2a_home_field(tmp_path: Path) -> None:
     elsewhere.mkdir()
 
     with _clean_environment(VAULTSPEC_A2A_HOME=str(elsewhere)):
-        settings = Settings(_env_file=None)
+        settings = _settings()
 
     assert settings.a2a_home == elsewhere
     assert settings.database_url == (
@@ -205,7 +220,7 @@ def test_a_relative_a2a_home_is_refused_with_its_own_message() -> None:
         _clean_environment(VAULTSPEC_A2A_HOME="./state"),
         pytest.raises(ValidationError, match="VAULTSPEC_A2A_HOME must be absolute"),
     ):
-        Settings(_env_file=None)
+        _settings()
 
 
 def test_a_relative_project_root_is_refused_with_its_own_message() -> None:
@@ -214,7 +229,7 @@ def test_a_relative_project_root_is_refused_with_its_own_message() -> None:
         _clean_environment(VAULTSPEC_PROJECT_ROOT="./somewhere"),
         pytest.raises(ValidationError, match="VAULTSPEC_PROJECT_ROOT must be absolute"),
     ):
-        Settings(_env_file=None)
+        _settings()
 
 
 def test_an_armed_desktop_profile_still_constructs(tmp_path: Path) -> None:
@@ -229,7 +244,7 @@ def test_an_armed_desktop_profile_still_constructs(tmp_path: Path) -> None:
     state = derive_state_paths(app_home)
 
     with _clean_environment(VAULTSPEC_DESKTOP_APP_HOME=str(app_home)):
-        armed = Settings(_env_file=None)
+        armed = _settings()
 
     assert armed.database_url == f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
     assert armed.workspace_root == state.workspaces_root
@@ -256,7 +271,7 @@ def test_an_armed_profile_overrides_even_a_relative_supplied_value(
         VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:///vaultspec.db",
         VAULTSPEC_WORKSPACE_ROOT="./workspaces",
     ):
-        armed = Settings(_env_file=None)
+        armed = _settings()
 
     assert armed.database_url == f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
     assert armed.workspace_root == state.workspaces_root
@@ -274,7 +289,7 @@ def test_an_absolute_posix_path_is_accepted_on_any_host() -> None:
         VAULTSPEC_WORKSPACE_ROOT="/app/workspaces",
         VAULTSPEC_PROJECT_ROOT="/app",
     ):
-        settings = Settings(_env_file=None)
+        settings = _settings()
 
     assert settings.database_url == "sqlite+aiosqlite:////app/data/vaultspec.db"
 
@@ -293,7 +308,7 @@ def test_postgres_urls_are_exempt_from_the_absolute_requirement() -> None:
             VAULTSPEC_CHECKPOINT_BACKEND="postgres",
         ),
     ):
-        settings = Settings(_env_file=None)
+        settings = _settings()
 
     assert settings.database_url == url
 
@@ -304,7 +319,7 @@ def test_an_in_memory_sqlite_url_is_exempt() -> None:
         VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:///:memory:",
         VAULTSPEC_WORKSPACE_ROOT=str(Path.cwd().resolve() / "workspaces"),
     ):
-        settings = Settings(_env_file=None)
+        settings = _settings()
 
     assert settings.database_path == Path(":memory:")
 
@@ -325,7 +340,7 @@ def test_backend_and_url_disagreement_is_refused_at_construction() -> None:
         _environment(VAULTSPEC_DATABASE_BACKEND="postgres"),
         pytest.raises(ValidationError, match="VAULTSPEC_DATABASE_BACKEND=postgres"),
     ):
-        Settings(_env_file=None)
+        _settings()
 
 
 def test_a_postgres_backend_declared_over_a_sqlite_checkpoint_is_refused() -> None:
@@ -337,7 +352,7 @@ def test_a_postgres_backend_declared_over_a_sqlite_checkpoint_is_refused() -> No
         _environment(VAULTSPEC_CHECKPOINT_BACKEND="postgres"),
         pytest.raises(ValidationError, match="VAULTSPEC_CHECKPOINT_BACKEND=postgres"),
     ):
-        Settings(_env_file=None)
+        _settings()
 
 
 def test_the_anchor_does_not_depend_on_a_discoverable_dotenv(tmp_path: Path) -> None:
@@ -357,7 +372,7 @@ def test_the_anchor_does_not_depend_on_a_discoverable_dotenv(tmp_path: Path) -> 
         try:
             for directory in (prior, tmp_path):
                 os.chdir(directory)
-                resolved.append(Settings(_env_file=None).database_url)
+                resolved.append(_settings().database_url)
                 resolved.append(Settings().database_url)
         finally:
             os.chdir(prior)

@@ -43,6 +43,8 @@ from ..sse_frames import enforce_progress_allowlist
 from ..transformer import emit_interrupt_events
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..types import SequencedEvent, StreamableGraph
 
 # The distinctive strings the questionnaire carries. Every one of them reaches
@@ -51,6 +53,24 @@ _PROMPT = "Which side should the monitor panel dock to?"
 _NOTES_PROMPT = "Anything the panel must respect?"
 _OPTIONS = ["dock-right", "dock-left"]
 _REQUEST_ID = "clarify-relay"
+
+
+def _add_node(builder: StateGraph[Any, None, Any, Any], name: str, node: Any) -> None:
+    """Add a node through a cast seam.
+
+    ``StateGraph.add_node`` resolves against langgraph's own internal node
+    types, which strict checking treats as partially unknown because
+    ``langgraph.graph`` ships no type stubs. This pins the call to a known
+    shape once instead of repeating the cast at every call site below.
+    """
+    typed_add_node = cast("Callable[[str, Any], None]", builder.add_node)
+    typed_add_node(name, node)
+
+
+def _compile(builder: StateGraph[Any, None, Any, Any]) -> Any:
+    """Compile through the same cast seam ``_add_node`` uses."""
+    typed_compile = cast("Callable[..., Any]", builder.compile)
+    return typed_compile(checkpointer=InMemorySaver())
 
 
 def _question_set(request_id: str = _REQUEST_ID) -> ClarificationRequest:
@@ -86,20 +106,23 @@ async def _park_on_clarification(
     async def proceed(state: TeamState) -> dict[str, Any]:
         return {}
 
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
-    builder.add_node(
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    _add_node(
+        builder,
         "clarification_request",
         create_clarification_request_node(
             _producer, gate_target="clarification_gate", proceed_target="proceed"
         ),
     )
-    builder.add_node(
-        "clarification_gate", create_clarification_gate_node(proceed_target="proceed")
+    _add_node(
+        builder,
+        "clarification_gate",
+        create_clarification_gate_node(proceed_target="proceed"),
     )
-    builder.add_node("proceed", proceed)
+    _add_node(builder, "proceed", proceed)
     builder.add_edge(START, "clarification_request")
     builder.add_edge("proceed", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = _compile(builder)
 
     config = RunnableConfig(configurable={"thread_id": thread_id})
     result = await graph.ainvoke(
@@ -214,20 +237,23 @@ async def test_a_run_parked_on_nothing_emits_no_nudge() -> None:
     async def proceed(state: TeamState) -> dict[str, Any]:
         return {}
 
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
-    builder.add_node(
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    _add_node(
+        builder,
         "clarification_request",
         create_clarification_request_node(
             _silent, gate_target="clarification_gate", proceed_target="proceed"
         ),
     )
-    builder.add_node(
-        "clarification_gate", create_clarification_gate_node(proceed_target="proceed")
+    _add_node(
+        builder,
+        "clarification_gate",
+        create_clarification_gate_node(proceed_target="proceed"),
     )
-    builder.add_node("proceed", proceed)
+    _add_node(builder, "proceed", proceed)
     builder.add_edge(START, "clarification_request")
     builder.add_edge("proceed", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = _compile(builder)
 
     aggregator = EventAggregator()
     queue = aggregator.add_subscriber("client-2")

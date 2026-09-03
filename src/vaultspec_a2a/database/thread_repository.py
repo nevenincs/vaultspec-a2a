@@ -54,6 +54,7 @@ __all__ = [
     "list_threads",
     "mark_thread_deleting",
     "normalize_workspace_identity",
+    "path_safe_run_id_clause",
     "record_thread_execution_state",
     "set_thread_approval_state",
     "set_thread_repair_state",
@@ -71,8 +72,13 @@ class ActiveThreadProjection:
     created_at: datetime
 
 
-def _path_safe_run_id_clause() -> ColumnElement[bool]:
-    """Return the cross-dialect persisted run-id grammar predicate."""
+def path_safe_run_id_clause() -> ColumnElement[bool]:
+    """Return the cross-dialect persisted run-id grammar predicate.
+
+    The one canonical predicate for "is this durable id the shape the gateway's
+    ``PathSafeRunId``/``ReservationId``/``LeaseId`` types admit" - public so a
+    query outside this module can apply it rather than re-deriving the regex.
+    """
     return ThreadModel.id.regexp_match(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
 
 
@@ -210,7 +216,7 @@ async def list_threads(
     response serialization fails the whole page for every caller, not just the
     one row - so the exclusion is unconditional rather than opt-in.
     """
-    filters = [_path_safe_run_id_clause()]
+    filters = [path_safe_run_id_clause()]
     if status is not None:
         filters.append(ThreadModel.status == status.value)
     if not include_deleting:
@@ -331,7 +337,7 @@ def _active_thread_page_statement(
             # SQLite (whose dialect installs a Python regexp function) and
             # ``~`` on PostgreSQL. Keep legacy invalid identifiers out of the
             # bounded page in the database, before LIMIT is applied.
-            _path_safe_run_id_clause(),
+            path_safe_run_id_clause(),
         )
         .order_by(ThreadModel.created_at.desc(), ThreadModel.id.desc())
         .limit(limit)

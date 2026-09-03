@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from typing import cast
 
 import pytest
 
@@ -164,7 +165,9 @@ class TestAuthoringBindingProvider:
         assert await provider.binding_for("t1", "some-other-role") is None
 
     @pytest.mark.asyncio
-    async def test_missing_bearer_logs_warning(self, caplog) -> None:
+    async def test_missing_bearer_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         # Verify missing engine bearer logs a warning with thread_id and agent_id.
         token_store = RunTokenStore()
         token_store.register(
@@ -189,7 +192,9 @@ class TestAuthoringBindingProvider:
         ) in caplog.text
 
     @pytest.mark.asyncio
-    async def test_missing_actor_token_logs_warning(self, caplog) -> None:
+    async def test_missing_actor_token_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         # Verify missing actor token logs a warning with thread_id and agent_id.
         token_store = RunTokenStore()
         token_store.register(
@@ -241,7 +246,7 @@ async def test_binding_for_fetches_catalog_once_per_run_live() -> None:
             client, actor_id=f"agent:{run_id}", kind="agent"
         )
         assert isinstance(minted, AuthoringResponse) and isinstance(minted.data, dict)
-        raw_token = minted.data["raw_token"]
+        raw_token = cast("str", minted.data["raw_token"])
 
     token_store = RunTokenStore()
     token_store.register(
@@ -295,7 +300,7 @@ async def test_binding_for_concurrent_fetches_share_one_snapshot_live() -> None:
             client, actor_id=f"agent:{run_id}", kind="agent"
         )
         assert isinstance(minted, AuthoringResponse) and isinstance(minted.data, dict)
-        raw_token = minted.data["raw_token"]
+        raw_token = cast("str", minted.data["raw_token"])
 
     token_store = RunTokenStore()
     token_store.register(

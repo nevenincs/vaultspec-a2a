@@ -25,6 +25,8 @@ from ..transformer import emit_interrupt_events
 from ..types import resolve_acp_option_kind
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..types import StreamableGraph
 
 
@@ -34,7 +36,9 @@ class _GateState(TypedDict):
     acp_options: list[dict[str, Any]]
 
 
-async def _suspend_on_permission(thread_id: str, acp_options: list[dict[str, Any]]):
+async def _suspend_on_permission(
+    thread_id: str, acp_options: list[dict[str, Any]]
+) -> tuple[StreamableGraph, dict[str, Any]]:
     """Run a real graph to a real permission interrupt and return graph + config."""
 
     def gate(state: _GateState) -> _GateState:
@@ -48,11 +52,13 @@ async def _suspend_on_permission(thread_id: str, acp_options: list[dict[str, Any
         )
         return state
 
-    builder = StateGraph(cast("Any", _GateState))
-    builder.add_node("gate", gate)
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _GateState))
+    typed_add_node = cast("Callable[[str, Any], None]", builder.add_node)
+    typed_add_node("gate", gate)
     builder.add_edge(START, "gate")
     builder.add_edge("gate", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    typed_compile = cast("Callable[..., Any]", builder.compile)
+    graph = typed_compile(checkpointer=InMemorySaver())
 
     config = RunnableConfig(configurable={"thread_id": thread_id})
     result = await graph.ainvoke({"acp_options": acp_options}, config)
@@ -61,7 +67,9 @@ async def _suspend_on_permission(thread_id: str, acp_options: list[dict[str, Any
     return cast("StreamableGraph", graph), cast("dict[str, Any]", config)
 
 
-async def _project(thread_id: str, acp_options: list[dict[str, Any]]) -> list[dict]:
+async def _project(
+    thread_id: str, acp_options: list[dict[str, Any]]
+) -> list[dict[str, str]]:
     """Return the option list a client receives for the given ACP options."""
     aggregator = EventAggregator()
     graph, config = await _suspend_on_permission(thread_id, acp_options)

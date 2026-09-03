@@ -1,7 +1,8 @@
 """Tests for graph.nodes.vault_reader -- create_mount_node."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable, Coroutine
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
@@ -15,18 +16,24 @@ from sqlalchemy.ext.asyncio import (
 from ....database import create_thread, seed_task_queue
 from ....database.models import Base
 from ....domain_config import domain_config
+from ....thread.state import TeamState
 from ....worker.task_queue_port import SqlTaskQueuePort
 from ...nodes.vault_reader import build_initial_vault_index, create_mount_node
+
+# create_mount_node's factory return is declared as a bare Callable in
+# production; this alias pins the concrete signature for the test call sites
+# below without widening the production API.
+MountNode = Callable[[TeamState], Coroutine[Any, Any, dict[str, Any]]]
 
 
 def _make_state(
     active_feature: str | None = "my-feature",
-    vault_index: dict | None = None,
+    vault_index: dict[str, list[str]] | None = None,
     pipeline_phase: str | None = None,
     thread_id: str = "t1",
     current_task_id: str | None = None,
-) -> dict:
-    base: dict = {
+) -> TeamState:
+    base: TeamState = {
         "messages": [],
         "thread_id": thread_id,
         "active_agent": "worker",
@@ -47,14 +54,14 @@ def _make_state(
 
 @pytest.mark.asyncio
 async def test_mount_node_returns_none_when_workspace_root_is_none() -> None:
-    mount = create_mount_node(None)
+    mount = cast("MountNode", create_mount_node(None))
     result = await mount(_make_state())
     assert result == {"mounted_context": None}
 
 
 @pytest.mark.asyncio
 async def test_mount_node_returns_none_when_no_active_feature() -> None:
-    mount = create_mount_node(Path("/tmp/ws"))
+    mount = cast("MountNode", create_mount_node(Path("/tmp/ws")))
     result = await mount(_make_state(active_feature=None))
     assert result == {"mounted_context": None}
 
@@ -66,7 +73,7 @@ async def test_mount_node_returns_content_for_adr_files(tmp_path: Path) -> None:
     adr_file = adr_dir / "my-feature-adr.md"
     adr_file.write_text("# ADR\n\nDecision text.", encoding="utf-8")
 
-    mount = create_mount_node(tmp_path)
+    mount = cast("MountNode", create_mount_node(tmp_path))
     state = _make_state(
         vault_index={"adr": [".vault/adr/my-feature-adr.md"]},
     )
@@ -91,7 +98,7 @@ async def test_mount_refreshes_vault_index_for_documents_written_mid_run(
         "# Research\n\nProduced mid-run.", encoding="utf-8"
     )
 
-    mount = create_mount_node(tmp_path)
+    mount = cast("MountNode", create_mount_node(tmp_path))
     state = _make_state(pipeline_phase="research", vault_index={})
     result = await mount(state)
 
@@ -108,7 +115,7 @@ async def test_mount_refresh_preserves_prior_index_entries(tmp_path: Path) -> No
     adr_dir.mkdir(parents=True)
     (adr_dir / "my-feature-adr.md").write_text("# ADR\n\nBinding.", encoding="utf-8")
 
-    mount = create_mount_node(tmp_path)
+    mount = cast("MountNode", create_mount_node(tmp_path))
     # A plan path lives only in state (no matching file on disk to re-glob).
     state = _make_state(
         pipeline_phase="adr",
@@ -173,7 +180,7 @@ async def test_mount_injects_db_queue_view_during_exec(
     queue_thread: str,
 ) -> None:
     port = SqlTaskQueuePort(session_factory)
-    mount = create_mount_node(tmp_path, port)
+    mount = cast("MountNode", create_mount_node(tmp_path, port))
     state = _make_state(
         pipeline_phase="exec",
         thread_id=queue_thread,
@@ -197,7 +204,7 @@ async def test_mount_skips_queue_outside_queue_phases(
     queue_thread: str,
 ) -> None:
     port = SqlTaskQueuePort(session_factory)
-    mount = create_mount_node(tmp_path, port)
+    mount = cast("MountNode", create_mount_node(tmp_path, port))
     state = _make_state(
         pipeline_phase="research",
         thread_id=queue_thread,
@@ -218,7 +225,7 @@ async def test_mount_no_queue_block_when_empty(
         thread_id = thread.id
 
     port = SqlTaskQueuePort(session_factory)
-    mount = create_mount_node(tmp_path, port)
+    mount = cast("MountNode", create_mount_node(tmp_path, port))
     state = _make_state(
         pipeline_phase="exec",
         thread_id=thread_id,

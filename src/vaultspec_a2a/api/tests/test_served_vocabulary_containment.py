@@ -46,6 +46,7 @@ from ...thread.enums import (
 )
 from ..schemas.gateway import (
     PresetSummary,
+    RoleAssignmentSummary,
     RunStatusResponse,
     ServiceStateResponse,
     TopologyPosition,
@@ -526,3 +527,120 @@ def test_the_capability_and_mechanism_keyings_disagree_on_exactly_two_presets() 
         "the capability and mechanism keyings now disagree on a different set of "
         f"presets than recorded: {sorted(disagreeing)}"
     )
+
+
+# --- Role assignment vocabularies ------------------------------------------
+
+LIVE_CAPABILITY = {"mid"}
+LIVE_ASSIGNMENT_SOURCE = {"agent", "undeclared", "worker"}
+
+
+def test_role_assignment_vocabularies_contain_the_live_listing() -> None:
+    """Both narrowed assignment fields accept every value observed live.
+
+    Captured from the twenty-preset listing on 2026-08-05, which resolves each
+    profile through the same resolver launch uses. Values, not expectations.
+    """
+    from ...graph.enums import Model
+    from ...providers.model_profiles import AssignmentSource
+
+    assert {member.value for member in Model} >= LIVE_CAPABILITY
+    assert {member.value for member in AssignmentSource} >= LIVE_ASSIGNMENT_SOURCE
+
+    for capability in sorted(LIVE_CAPABILITY):
+        for source in sorted(LIVE_ASSIGNMENT_SOURCE):
+            summary = RoleAssignmentSummary(
+                role_id="r",
+                agent_id="a",
+                provider_id="deterministic",
+                capability=capability,
+                source=source,
+            )
+            assert summary.capability is Model(capability)
+            assert summary.source is AssignmentSource(source)
+
+
+def test_an_assignment_may_still_replay_a_provider_this_build_forgot() -> None:
+    """The two narrowed fields must not have narrowed their unnarrowable siblings.
+
+    This is the guard on the distinction that decided the whole model:
+    ``capability`` and ``source`` are INTERNAL vocabularies, so a frozen record
+    can only hold members this build still knows. ``provider_id`` and
+    ``fallback_providers`` name EXTERNAL lanes a past run recorded and this build
+    may no longer have - the disclosure path handles exactly that case by
+    reporting the lane not ready rather than raising.
+
+    So this asserts the model still ACCEPTS a provider outside the enumeration.
+    A future tidy-up that "finishes the job" by typing these two would pass every
+    other test here and fault only when reading an old run.
+    """
+    summary = RoleAssignmentSummary(
+        role_id="r",
+        agent_id="a",
+        provider_id="a-lane-this-build-no-longer-ships",
+        fallback_providers=["another-forgotten-lane"],
+    )
+    assert summary.provider_id == "a-lane-this-build-no-longer-ships"
+    assert summary.fallback_providers == ["another-forgotten-lane"]
+
+    # The empty string is the documented "no preset declared a provider" value
+    # and must survive too - it is what the live listing actually serves.
+    undeclared = RoleAssignmentSummary(role_id="r", agent_id="a", provider_id="")
+    assert undeclared.provider_id == ""
+
+
+def test_the_frozen_writer_can_only_emit_declared_members() -> None:
+    """Containment for the replay path, which no live run exercises.
+
+    The frozen-assignment disclosure reads ``capability`` and ``source`` straight
+    out of a stored record, so a CAPTURE cannot prove containment for it - not one
+    of the six live runs uses that path, and the durable store holds no record of
+    that shape at all. The proof is the WRITE side instead: ``freeze_assignment``
+    is the only writer of these keys and it stores ``role.capability.value`` and
+    ``role.source.value``, both enum members by construction.
+
+    ``source`` is a DERIVED property collapsing the per-field provider and
+    capability sources to the higher-precedence of the two, so this drives every
+    ordered pair rather than every member - the derivation is what has to stay
+    inside the vocabulary, not just its inputs.
+    """
+    from ...graph.enums import Model, Provider
+    from ...providers.model_profiles import (
+        AssignmentSource,
+        ProfileAssignment,
+        RoleAssignment,
+        freeze_assignment,
+    )
+
+    declared_capabilities = {member.value for member in Model} | {None}
+    declared_sources = {member.value for member in AssignmentSource}
+    observed_sources: set[str] = set()
+
+    for capability in [*Model, None]:
+        for provider_source in AssignmentSource:
+            for capability_source in AssignmentSource:
+                frozen = freeze_assignment(
+                    ProfileAssignment(
+                        profile_id="p",
+                        roles=[
+                            RoleAssignment(
+                                role_id="r",
+                                agent_id="a",
+                                provider=Provider.DETERMINISTIC,
+                                capability=capability,
+                                model_name="m",
+                                fallback_providers=[],
+                                provider_source=provider_source,
+                                capability_source=capability_source,
+                            )
+                        ],
+                    )
+                )
+                stored = frozen.roles["a"]
+                assert stored["capability"] in declared_capabilities, stored
+                assert stored["source"] in declared_sources, stored
+                observed_sources.add(str(stored["source"]))
+
+    # Every member must be reachable through the derivation, or a member with no
+    # producer is sitting in the served vocabulary.
+    assert observed_sources == declared_sources

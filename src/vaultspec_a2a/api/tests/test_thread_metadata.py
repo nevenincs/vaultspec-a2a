@@ -16,6 +16,24 @@ from .conftest import catalog_run_fields
 from .conftest import make_app as _make_app_4
 
 
+def _run_workspace():
+    """A throwaway workspace whose REMOVAL is not part of any assertion here.
+
+    Resolving a selection for a brand-new workspace is a genuinely cold catalog
+    read, and a cold read spawns a real provider CLI per external lane with this
+    directory as its working directory. Discovery reaps each child before it
+    returns, but Windows releases a dead process's working-directory handle
+    asynchronously, so an immediate ``rmdir`` races that release and raises
+    ``PermissionError`` (WinError 32) - after every assertion in the test has
+    already run and passed.
+
+    Cleanup is therefore best-effort. Nothing under test is relaxed: the tests
+    below assert on stored metadata and discovered context refs, and a leftover
+    temp directory is the OS's business, not theirs.
+    """
+    return tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+
+
 def _make_app(session_factory, checkpointer, aggregator=None):
     """Shim: forwards to shared make_app(), dropping extra returns."""
     app, agg, _worker, _cp = _make_app_4(
@@ -58,7 +76,7 @@ class TestCreateThreadWithMetadata:
         self, session_factory, checkpointer
     ) -> None:
         """Thread created with metadata stores it in the DB."""
-        with tempfile.TemporaryDirectory() as ws:
+        with _run_workspace() as ws:
             app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
@@ -120,7 +138,7 @@ class TestCreateThreadWithMetadata:
         self, session_factory, checkpointer
     ) -> None:
         """When no nickname is provided, one is auto-generated."""
-        with tempfile.TemporaryDirectory() as ws:
+        with _run_workspace() as ws:
             app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
@@ -148,7 +166,7 @@ class TestCreateThreadWithMetadata:
 
     def test_nickname_conflict_409(self, session_factory, checkpointer) -> None:
         """Duplicate nicknames return 409."""
-        with tempfile.TemporaryDirectory() as ws:
+        with _run_workspace() as ws:
             app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
@@ -228,7 +246,7 @@ class TestListThreadsWithMetadata:
         self, session_factory, checkpointer
     ) -> None:
         """Thread list includes nickname, feature_tag, etc. from metadata."""
-        with tempfile.TemporaryDirectory() as ws:
+        with _run_workspace() as ws:
             app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
@@ -298,7 +316,7 @@ class TestGetMetadataEndpoint:
 
     def test_get_metadata_endpoint(self, session_factory, checkpointer) -> None:
         """Returns full ThreadMetadata for a thread with metadata."""
-        with tempfile.TemporaryDirectory() as ws:
+        with _run_workspace() as ws:
             app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
@@ -396,7 +414,7 @@ class TestAutoDiscovery:
         self, session_factory, checkpointer
     ) -> None:
         """Auto-discovery populates context_refs when feature_tag is set."""
-        with tempfile.TemporaryDirectory() as ws:
+        with _run_workspace() as ws:
             # Create matching .vault/ documents
             research_dir = Path(ws) / ".vault" / "research"
             research_dir.mkdir(parents=True)

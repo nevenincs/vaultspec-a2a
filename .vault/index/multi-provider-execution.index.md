@@ -6,29 +6,11 @@ tags:
 date: '2026-07-22'
 modified: '2026-09-03'
 body_schema: 'body-v2'
-body_hash: 'sha256:8ffa5d954b12d928ec5433e5ce3f81b0eb92697cf3c968842669f9a98dfb73b8'
+body_hash: 'sha256:cf517692f51224d1ac4137c188f9c611d8a34fd0dce952ae842bfecc3f7efd3c'
 related:
-  - '[[2026-07-15-multi-provider-execution-P01-S01]]'
-  - '[[2026-07-15-multi-provider-execution-P01-S02]]'
-  - '[[2026-07-15-multi-provider-execution-P01-S03]]'
-  - '[[2026-07-15-multi-provider-execution-P01-S04]]'
-  - '[[2026-07-15-multi-provider-execution-P01-S05]]'
-  - '[[2026-07-15-multi-provider-execution-P01-S06]]'
-  - '[[2026-07-15-multi-provider-execution-P01-S07]]'
-  - '[[2026-07-15-multi-provider-execution-P02-S08]]'
-  - '[[2026-07-15-multi-provider-execution-P02-S09]]'
-  - '[[2026-07-15-multi-provider-execution-P02-S10]]'
-  - '[[2026-07-15-multi-provider-execution-P02-S11]]'
-  - '[[2026-07-15-multi-provider-execution-P02-S12]]'
-  - '[[2026-07-15-multi-provider-execution-P02-S13]]'
-  - '[[2026-07-15-multi-provider-execution-P02-S14]]'
-  - '[[2026-07-15-multi-provider-execution-P03-S15]]'
-  - '[[2026-07-15-multi-provider-execution-P03-S16]]'
-  - '[[2026-07-15-multi-provider-execution-P03-S17]]'
-  - '[[2026-07-15-multi-provider-execution-P04-S18]]'
-  - '[[2026-07-15-multi-provider-execution-P04-S19]]'
   - '[[2026-07-15-multi-provider-execution-adr]]'
   - '[[2026-07-15-multi-provider-execution-audit]]'
+  - '[[2026-07-15-multi-provider-execution-ledger]]'
   - '[[2026-07-15-multi-provider-execution-plan]]'
   - '[[2026-07-15-multi-provider-execution-reference]]'
   - '[[2026-07-15-multi-provider-execution-research]]'
@@ -50,25 +32,7 @@ Auto-generated index of all documents tagged with `#multi-provider-execution`.
 
 ### exec
 
-- `2026-07-15-multi-provider-execution-P01-S01` - Add Provider.ZAI to the Provider enum with MODEL_MAP and PROVIDER_DEFAULT_MODELS entries
-- `2026-07-15-multi-provider-execution-P01-S02` - Add zai_base_url/zai_auth_token settings fields and validate they never leak into logs
-- `2026-07-15-multi-provider-execution-P01-S03` - Add _build_zai_env mirroring _build_gemini_env and a factory dispatch branch mirroring the Claude ACP branch, reusing AcpChatModel unchanged
-- `2026-07-15-multi-provider-execution-P01-S04` - Confirm workspace/environment.py's scrub list does not strip ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN
-- `2026-07-15-multi-provider-execution-P01-S05` - Add a Provider.ZAI branch to probe_provider_readiness and classify_provider_command, never emitting a secret
-- `2026-07-15-multi-provider-execution-P01-S06` - Live-probe the real Z.ai endpoint for Anthropic Messages API fidelity (tool-calling schema, streaming chunk shape) through claude-agent-acp before marking any profile eligible
-- `2026-07-15-multi-provider-execution-P01-S07` - Unit and live-probe tests for the Z.ai env-injection path, readiness branch, and factory dispatch
-- `2026-07-15-multi-provider-execution-P02-S08` - Resolve Codex's non-interactive/headless authentication model against the real Codex CLI (API key vs. ChatGPT-session vs. local device auth)
-- `2026-07-15-multi-provider-execution-P02-S09` - Add Provider.CODEX to the Provider enum with model-map entries
-- `2026-07-15-multi-provider-execution-P02-S10` - Implement CodexChatModel(BaseChatModel) driving codex app-server's JSON-RPC-over-stdio surface directly, following the mock_chat_model.py non-ACP precedent
-- `2026-07-15-multi-provider-execution-P02-S11` - Reuse _subprocess.py's protocol-agnostic process lifecycle helpers (spawn/kill-tree) for Codex subprocess management
-- `2026-07-15-multi-provider-execution-P02-S12` - Add a classify_codex_command-style readiness check and a Provider.CODEX branch in probe_provider_readiness, never emitting a secret
-- `2026-07-15-multi-provider-execution-P02-S13` - Add a factory.py dispatch branch for Provider.CODEX
-- `2026-07-15-multi-provider-execution-P02-S14` - Unit tests for CodexChatModel's JSON-RPC framing and subprocess lifecycle, plus a live probe against the real codex app-server once the auth model is resolved
-- `2026-07-15-multi-provider-execution-P04-S18` - Check whether the dashboard/engine's own schema treats provider as an open string or a closed enum
-- `2026-07-15-multi-provider-execution-P04-S19` - Document the outcome in a phase summary
-- `2026-07-15-multi-provider-execution-P03-S15` - Author or extend a team profile assigning distinct providers per role (researcher=codex, synthesist=claude, adr-author=zai) on the vaultspec-adr-research preset
-- `2026-07-15-multi-provider-execution-P03-S16` - Run a live research_adr run under the mixed-provider profile end to end riding the standing acceptance harness (PW7) once the adr-authoring-orchestration P04.S10 finale harness lands, verifying per-role attribution and document quality hold across providers
-- `2026-07-15-multi-provider-execution-P03-S17` - Verify the a2a-edge discovery/eligibility responses correctly surface the new providers with safe reasons on failure and no secrets
+- `2026-07-15-multi-provider-execution-ledger` - `multi-provider-execution` ledger
 
 ### plan
 

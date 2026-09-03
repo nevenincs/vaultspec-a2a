@@ -38,6 +38,8 @@ from ..nodes.diverge import (
 )
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from ..nodes.diverge import ResearchFindingProducer
 
 SIMULATOR_PATH = Path(__file__).parent / "acp_simulator.py"
@@ -110,7 +112,7 @@ async def _checkpointed_finding(tmp_path: Path, prose: str) -> dict[str, Any]:
     serialisation rather than living in the process that produced it.
     """
     checkpoint_path = tmp_path / "web-locator-checkpoints.sqlite"
-    config: dict[str, Any] = {"configurable": {"thread_id": "web-locator-run"}}
+    config: RunnableConfig = {"configurable": {"thread_id": "web-locator-run"}}
     producer = _researcher_producer(tmp_path, prose)
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
@@ -118,14 +120,14 @@ async def _checkpointed_finding(tmp_path: Path, prose: str) -> dict[str, Any]:
         await (
             _build_graph(producer)
             .compile(checkpointer=saver)
-            .ainvoke(_base_state(), config=cast("Any", config))
+            .ainvoke(_base_state(), config=config)
         )
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as reopened:
         replayed = (
             await _build_graph(producer)
             .compile(checkpointer=reopened)
-            .aget_state(cast("Any", config))
+            .aget_state(config)
         )
 
     findings = replayed.values["research_findings"]
@@ -134,9 +136,10 @@ async def _checkpointed_finding(tmp_path: Path, prose: str) -> dict[str, Any]:
 
 
 def _web_locators(finding: dict[str, Any]) -> list[dict[str, Any]]:
+    locators = cast("list[str | dict[str, Any]]", finding["locators"])
     return [
         locator
-        for locator in finding["locators"]
+        for locator in locators
         if isinstance(locator, dict) and locator.get("kind") == WEB_LOCATOR_KIND
     ]
 
@@ -159,7 +162,12 @@ async def _drive_verbatim(locators: list[Any]) -> dict[str, Any]:
     node = create_researcher_node(
         {"thread_id": _THREAD_ID}, _verbatim_producer(locators)
     )
-    return await node(_base_state())
+    result = await node(_base_state())
+    # A researcher branch always contributes a state update, never routes via
+    # Command; the assertion documents that invariant rather than widening
+    # the helper's return type to the full WorkerNode union.
+    assert isinstance(result, dict)
+    return result
 
 
 # ---------------------------------------------------------------------------

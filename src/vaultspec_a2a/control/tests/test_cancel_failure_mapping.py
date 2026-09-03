@@ -81,7 +81,7 @@ def test_the_two_edges_agree_on_status_for_the_same_failure() -> None:
         FailureType.UNREACHABLE,
         FailureType.TERMINAL,
     ):
-        statuses = []
+        statuses: list[int] = []
         for noun in ("Thread", "Run"):
             try:
                 raise_for_cancel_failure(_result(failure), resource_noun=noun)

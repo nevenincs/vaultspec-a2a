@@ -1896,6 +1896,72 @@ class TestTeamStatus:
         assert agent["display_name"] == "Coder Agent"
         assert agent["state"] == "idle"
 
+    def test_pending_permissions_hide_malformed_run_id_rows(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        """A permission on a non-path-safe thread id must not 500 the whole page.
+
+        ``RunPendingPermission.run_id`` is typed ``PathSafeRunId``: FastAPI
+        validates the response body against it before serializing, so ONE
+        durable row with a malformed thread id would fail construction for the
+        entire ``pending_permissions`` list, hiding every OTHER run's live
+        question along with it. The guard is the same thread-existence join
+        team-status already runs (``known_thread_ids`` in
+        ``build_team_status``, narrowed by ``path_safe_run_id_clause``), so
+        this drives the real route with a real malformed-id thread and a real
+        permission row against it, alongside a well-formed sibling, and
+        asserts the malformed row is silently excluded while the valid one
+        still answers.
+        """
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="team-status/malformed-run-id",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await create_thread(
+                    session,
+                    thread_id="team-status-well-formed-run-id",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="team-status-malformed-run-id:perm-1",
+                    thread_id="team-status/malformed-run-id",
+                    pause_reason_type="permission_request",
+                    description="Approve on a malformed run id",
+                    allowed_options=[{"option_id": "allow_once", "name": "Allow"}],
+                    tool_call="bash",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="team-status-well-formed-run-id:perm-1",
+                    thread_id="team-status-well-formed-run-id",
+                    pause_reason_type="permission_request",
+                    description="Approve on a well-formed run id",
+                    allowed_options=[{"option_id": "allow_once", "name": "Allow"}],
+                    tool_call="bash",
+                )
+                await session.commit()
+
+        asyncio.run(_seed())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/v1/team/status")
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        pending_ids = {p["request_id"] for p in data["pending_permissions"]}
+        assert "team-status-malformed-run-id:perm-1" not in pending_ids
+        assert "team-status-well-formed-run-id:perm-1" in pending_ids
+
 
 # ---------------------------------------------------------------------------
 # POST /v1/runs/{run_id}/permissions/{id}/respond

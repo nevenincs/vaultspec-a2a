@@ -3,25 +3,11 @@ generated: true
 tags:
   - '#index'
   - '#provider-model-catalog'
-date: '2026-08-02'
+date: '2026-08-05'
 modified: '2026-09-03'
 body_schema: 'body-v2'
-body_hash: 'sha256:595dd5dc752cc01bd8179f912fa7ff0428649e34a5248ad7dcc8b03830ffd518'
+body_hash: 'sha256:df67612e25a15918191c5722d0e8326afc51fd661dfe70ab735a0153e0f1a65c'
 related:
-  - '[[2026-08-02-provider-model-catalog-P01-S01]]'
-  - '[[2026-08-02-provider-model-catalog-P01-S02]]'
-  - '[[2026-08-02-provider-model-catalog-P01-S03]]'
-  - '[[2026-08-02-provider-model-catalog-P01-S04]]'
-  - '[[2026-08-02-provider-model-catalog-P01-S05]]'
-  - '[[2026-08-02-provider-model-catalog-P01-S06]]'
-  - '[[2026-08-02-provider-model-catalog-P01-S07]]'
-  - '[[2026-08-02-provider-model-catalog-P01-S09]]'
-  - '[[2026-08-02-provider-model-catalog-P01-S10]]'
-  - '[[2026-08-02-provider-model-catalog-P02-S12]]'
-  - '[[2026-08-02-provider-model-catalog-P02-S13]]'
-  - '[[2026-08-02-provider-model-catalog-P02-S15]]'
-  - '[[2026-08-02-provider-model-catalog-P02-S16]]'
-  - '[[2026-08-02-provider-model-catalog-P02-S17]]'
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-08-02-provider-model-catalog-catalog-registration-p01s06-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-dashboard-health-p02s16-audit]]'
@@ -32,6 +18,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-gateway-p01s08-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-implementation-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-kimi-catalog-p01s04-review-audit]]'
+  - '[[2026-08-02-provider-model-catalog-ledger]]'
   - '[[2026-08-02-provider-model-catalog-openai-catalog-p01s05-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-p03-integration-audit]]'
   - '[[2026-08-02-provider-model-catalog-p03-integration-preflight-audit]]'
@@ -71,20 +58,7 @@ Auto-generated index of all documents tagged with `#provider-model-catalog`.
 
 ### exec
 
-- `2026-08-02-provider-model-catalog-P01-S01` - Define normalized provider catalog, native-control, selection-reference, catalog-state, structured-health, and refresh-cache contracts
-- `2026-08-02-provider-model-catalog-P01-S02` - Implement prompt-free generic ACP catalog discovery with bounded cleanup and authentication evidence
-- `2026-08-02-provider-model-catalog-P01-S03` - Implement Codex model, reasoning-effort, service-tier, capability, and account discovery without a completion
-- `2026-08-02-provider-model-catalog-P01-S04` - Implement Kimi configured-lane model and thinking-control discovery against the installed CLI contract
-- `2026-08-02-provider-model-catalog-P01-S05` - Implement authenticated OpenAI-compatible model discovery with unsupported metadata explicitly absent
-- `2026-08-02-provider-model-catalog-P01-S06` - Register execution-mode-specific catalog adapters and report unsupported enumeration honestly
-- `2026-08-02-provider-model-catalog-P01-S07` - Serve bounded workspace provider catalogs through v1
-- `2026-08-02-provider-model-catalog-P01-S09` - Freeze catalog provenance, exact model values, controls, fallbacks, execution modes, and schema version through compilation
-- `2026-08-02-provider-model-catalog-P01-S10` - Remove product provider-model policy and retire static external model authority
-- `2026-08-02-provider-model-catalog-P02-S12` - Add the provider-catalog verb and validate bounded catalog, health, selection, control, fallback, and override shapes without hard-coded enums
-- `2026-08-02-provider-model-catalog-P02-S13` - Directly migrate the Dashboard store, composer chooser, and obsolete profile fixtures to opaque provider catalogs, structured health, required selection, controls, and frozen assignments
-- `2026-08-02-provider-model-catalog-P02-S15` - Add bounded per-role model and control overrides and explicit served fallbacks without arbitrary role keys or model values
-- `2026-08-02-provider-model-catalog-P02-S16` - Display configured, transport, authentication, catalog freshness, admission, and selectability states truthfully
-- `2026-08-02-provider-model-catalog-P02-S17` - Render exact frozen provider, model, native controls, and provenance returned for active runs
+- `2026-08-02-provider-model-catalog-ledger` - `provider-model-catalog` ledger
 
 ### plan
 

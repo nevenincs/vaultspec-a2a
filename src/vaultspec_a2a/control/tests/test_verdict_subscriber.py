@@ -15,7 +15,7 @@ import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import httpx
@@ -67,7 +67,7 @@ from ...worker.ipc import WorkerBridge
 
 @pytest_asyncio.fixture
 async def session_factory(
-    tmp_path,
+    tmp_path: Path,
 ) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     """A real file-backed aiosqlite session factory with the schema created."""
     db_file = tmp_path / "subscriber.db"
@@ -143,33 +143,6 @@ async def _worker_runtime(
     await bridge.close()
 
 
-async def _wait_for_receipt(
-    bridge: WorkerBridge,
-    dispatch_id: str,
-) -> dict[str, object]:
-    with anyio.fail_after(5.0):
-        while True:
-            buffered = cast(
-                "list[dict[str, object]]",
-                getattr(bridge, "_event_buffer", []),
-            )
-            for item in buffered:
-                candidate = item.get("payload")
-                candidate_mapping = (
-                    cast("dict[str, object]", candidate)
-                    if isinstance(candidate, dict)
-                    else None
-                )
-                if (
-                    candidate_mapping is not None
-                    and candidate_mapping.get("type") == "dispatch_applied"
-                    and candidate_mapping.get("dispatch_id") == dispatch_id
-                ):
-                    return candidate_mapping
-            await anyio.sleep(0.01)
-    raise AssertionError("dispatch application receipt was not emitted")
-
-
 async def _seed_parked_thread(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
@@ -206,7 +179,7 @@ async def _seed_parked_thread(
 
 @pytest.mark.asyncio
 async def test_correlates_parked_thread_by_proposal_id(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     checkpoints = tmp_path / "cp-proposal.db"
     async with (
@@ -227,7 +200,7 @@ async def test_correlates_parked_thread_by_proposal_id(
 
 @pytest.mark.asyncio
 async def test_correlates_parked_thread_by_changeset_id(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     checkpoints = tmp_path / "cp-changeset.db"
     async with (
@@ -248,7 +221,7 @@ async def test_correlates_parked_thread_by_changeset_id(
 
 @pytest.mark.asyncio
 async def test_unknown_ids_correlate_to_nothing(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     checkpoints = tmp_path / "cp-none.db"
     async with (
@@ -268,7 +241,7 @@ async def test_unknown_ids_correlate_to_nothing(
 
 @pytest.mark.asyncio
 async def test_non_parked_thread_is_not_correlated(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """A RUNNING thread is not a gate-parked candidate even with matching ids."""
     checkpoints = tmp_path / "cp-running.db"
@@ -292,7 +265,7 @@ async def test_non_parked_thread_is_not_correlated(
 
 @pytest.mark.asyncio
 async def test_cursor_advances_and_survives_restart(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """The durable cursor a restarted subscriber reads is the last it advanced."""
     checkpoints = tmp_path / "cp-cursor.db"
@@ -319,7 +292,9 @@ async def test_cursor_advances_and_survives_restart(
 # ---------------------------------------------------------------------------
 
 
-def _recovery_snapshot(items: list[dict[str, object]], *, latest: int) -> dict:
+def _recovery_snapshot(
+    items: list[dict[str, object]], *, latest: int
+) -> dict[str, object]:
     """Build a recovery-snapshot ``data`` payload in the engine's shape."""
     return {
         "family": "recovery",
@@ -383,7 +358,7 @@ def test_recovery_high_water_reads_int_or_none() -> None:
 
 @pytest.mark.asyncio
 async def test_process_frame_raises_on_stream_error(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     checkpoints = tmp_path / "cp-frame-err.db"
     async with (
@@ -401,7 +376,7 @@ async def test_process_frame_raises_on_stream_error(
 
 @pytest.mark.asyncio
 async def test_process_frame_advances_cursor_for_non_verdict_event(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """A non-verdict lifecycle frame advances the cursor without dispatching."""
     checkpoints = tmp_path / "cp-frame-adv.db"
@@ -428,7 +403,7 @@ async def test_process_frame_advances_cursor_for_non_verdict_event(
 
 @pytest.mark.asyncio
 async def test_process_event_non_verdict_is_a_noop(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     checkpoints = tmp_path / "cp-ev-noverdict.db"
     async with (
@@ -461,7 +436,7 @@ async def test_process_event_non_verdict_is_a_noop(
 
 @pytest.mark.asyncio
 async def test_process_event_verdict_with_unreachable_worker_does_not_crash(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """A real verdict correlates and dispatches; an unreachable worker is handled.
 
@@ -500,7 +475,7 @@ async def test_process_event_verdict_with_unreachable_worker_does_not_crash(
 
 @pytest.mark.asyncio
 async def test_reconcile_recovery_no_verdict_status_is_a_noop(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     checkpoints = tmp_path / "cp-recon-noop.db"
     async with (
@@ -528,7 +503,7 @@ async def test_reconcile_recovery_no_verdict_status_is_a_noop(
 
 @pytest.mark.asyncio
 async def test_reconcile_recovery_terminal_verdict_dispatches_without_crash(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """A terminal approved proposal correlates and attempts a resume gracefully."""
     checkpoints = tmp_path / "cp-recon-verdict.db"
@@ -670,7 +645,7 @@ def test_proposal_reconcile_verdict_recovers_missed_request_changes() -> None:
 
 @pytest.mark.asyncio
 async def test_pending_gate_proposal_is_the_current_gate_not_a_stale_one(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """The reconcile keys on the CURRENT gate proposal, never a stale earlier one.
 
@@ -701,7 +676,7 @@ async def test_pending_gate_proposal_is_the_current_gate_not_a_stale_one(
 
 @pytest.mark.asyncio
 async def test_reconcile_parked_runs_noops_when_none_parked_and_throttles(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """The steady-state parked-run reconcile is cheap and throttled.
 
@@ -734,7 +709,7 @@ async def test_reconcile_parked_runs_noops_when_none_parked_and_throttles(
 
 @pytest.mark.asyncio
 async def test_resume_skips_a_superseded_gate_verdict(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """Gate-precision: a late verdict for an EARLIER gate is not applied.
 
@@ -773,7 +748,7 @@ async def test_resume_skips_a_superseded_gate_verdict(
 
 @pytest.mark.asyncio
 async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """Real concurrent sessions elect one dispatcher for the same gate verdict.
 
@@ -820,7 +795,7 @@ async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
 
 @pytest.mark.asyncio
 async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """One gate request cannot be rebound to a competing verdict payload."""
     checkpoints = tmp_path / "cp-competing-verdicts.db"
@@ -865,7 +840,7 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
 
 @pytest.mark.asyncio
 async def test_expired_verdict_lease_is_redriven(
-    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """A still-parked run whose dispatch was lost is re-driven, not orphaned.
 

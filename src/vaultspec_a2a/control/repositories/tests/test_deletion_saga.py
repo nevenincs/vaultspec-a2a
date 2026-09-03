@@ -68,7 +68,9 @@ def _count_saga_rows(thread_id: str):
     )
 
 
-async def _seed_terminal_thread(session_factory, thread_id: str = "t-del") -> str:
+async def _seed_terminal_thread(
+    session_factory: async_sessionmaker[AsyncSession], thread_id: str = "t-del"
+) -> str:
     async with session_factory() as session:
         await create_thread(session, thread_id=thread_id, status=ThreadStatus.COMPLETED)
         await session.commit()
@@ -101,7 +103,9 @@ def test_a_ledger_written_before_attempt_counts_restores_at_zero() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_transitions_thread_and_captures_manifest(session_factory) -> None:
+async def test_create_transitions_thread_and_captures_manifest(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """Creating the saga marks the thread deleting and stores the manifest."""
     thread_id = await _seed_terminal_thread(session_factory)
 
@@ -123,7 +127,7 @@ async def test_create_transitions_thread_and_captures_manifest(session_factory) 
 
 @pytest.mark.asyncio
 async def test_create_is_idempotent_and_keeps_the_first_manifest(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A replayed create returns the existing saga without duplicating it."""
     thread_id = await _seed_terminal_thread(session_factory)
@@ -158,7 +162,7 @@ async def test_create_is_idempotent_and_keeps_the_first_manifest(
 
 @pytest.mark.asyncio
 async def test_claim_stamps_ownership_once_and_refuses_a_second_pass(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The first claim owns the saga; a second pass is refused while it is live.
 
@@ -180,6 +184,7 @@ async def test_claim_stamps_ownership_once_and_refuses_a_second_pass(
         assert first.owned is True
         assert first.claimed is True
         row = await session.get(ThreadDeletionSagaModel, thread_id)
+        assert row is not None
         stamped = row.claimed_at
 
     async with session_factory() as session:
@@ -190,11 +195,14 @@ async def test_claim_stamps_ownership_once_and_refuses_a_second_pass(
         assert again.claimed is True
         assert again.owned is False
         row = await session.get(ThreadDeletionSagaModel, thread_id)
+        assert row is not None
         assert row.claimed_at == stamped
 
 
 @pytest.mark.asyncio
-async def test_concurrent_claims_grant_exactly_one_owner(session_factory) -> None:
+async def test_concurrent_claims_grant_exactly_one_owner(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """Two delete requests racing for one saga produce exactly one cleanup pass."""
     thread_id = await _seed_terminal_thread(session_factory)
     async with session_factory() as session:
@@ -215,7 +223,9 @@ async def test_concurrent_claims_grant_exactly_one_owner(session_factory) -> Non
 
 
 @pytest.mark.asyncio
-async def test_a_claim_left_by_a_dead_pass_is_reclaimable(session_factory) -> None:
+async def test_a_claim_left_by_a_dead_pass_is_reclaimable(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """An expired claim is granted again so exclusion is not its own wedge.
 
     A pass killed mid-teardown leaves the ownership marker behind. If that
@@ -251,14 +261,18 @@ async def test_a_claim_left_by_a_dead_pass_is_reclaimable(session_factory) -> No
 
 
 @pytest.mark.asyncio
-async def test_claim_absent_saga_returns_none(session_factory) -> None:
+async def test_claim_absent_saga_returns_none(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """Claiming a saga that does not exist reports absence rather than raising."""
     async with session_factory() as session:
         assert await claim_deletion_saga(session, thread_id="missing") is None
 
 
 @pytest.mark.asyncio
-async def test_advance_records_and_is_idempotent(session_factory) -> None:
+async def test_advance_records_and_is_idempotent(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """Advancing records terminal state once; the same state again is a no-op."""
     thread_id = await _seed_terminal_thread(session_factory)
     async with session_factory() as session:
@@ -282,12 +296,15 @@ async def test_advance_records_and_is_idempotent(session_factory) -> None:
 
     async with session_factory() as session:
         row = await session.get(ThreadDeletionSagaModel, thread_id)
+        assert row is not None
         results = deserialize_results(row.result_json)
         assert results["checkpoint"].state is CleanupItemState.DONE
 
 
 @pytest.mark.asyncio
-async def test_advance_supersedes_a_prior_failure(session_factory) -> None:
+async def test_advance_supersedes_a_prior_failure(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """A later success replaces an earlier recorded failure for the same item."""
     thread_id = await _seed_terminal_thread(session_factory)
     async with session_factory() as session:
@@ -317,13 +334,14 @@ async def test_advance_supersedes_a_prior_failure(session_factory) -> None:
 
     async with session_factory() as session:
         row = await session.get(ThreadDeletionSagaModel, thread_id)
+        assert row is not None
         results = deserialize_results(row.result_json)
         assert results["artifact:a1"].state is CleanupItemState.DONE
 
 
 @pytest.mark.asyncio
 async def test_concurrent_advances_preserve_every_recorded_item(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Results recorded concurrently all survive; none is overwritten.
 
@@ -362,6 +380,7 @@ async def test_concurrent_advances_preserve_every_recorded_item(
 
     async with session_factory() as session:
         row = await session.get(ThreadDeletionSagaModel, thread_id)
+        assert row is not None
         results = deserialize_results(row.result_json)
     assert sorted(results) == sorted(keys)
     assert all(results[key].state is CleanupItemState.DONE for key in keys), results
@@ -375,7 +394,7 @@ async def test_concurrent_advances_preserve_every_recorded_item(
 
 @pytest.mark.asyncio
 async def test_repeated_failures_abandon_the_item_and_release_the_saga(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """An item that keeps failing becomes terminal instead of blocking forever.
 
@@ -408,6 +427,7 @@ async def test_repeated_failures_abandon_the_item_and_release_the_saga(
                 session, thread_id=thread_id, result=failure
             )
             row = await session.get(ThreadDeletionSagaModel, thread_id)
+            assert row is not None
             states.append(deserialize_results(row.result_json)["artifact:a1"].state)
             outcome = await finalize_deletion_saga(session, thread_id=thread_id)
             await session.commit()
@@ -432,7 +452,7 @@ async def test_repeated_failures_abandon_the_item_and_release_the_saga(
 
 @pytest.mark.asyncio
 async def test_abandoned_kinds_are_distinct_and_follow_manifest_order(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Every stranded kind is reported once, in the manifest's own order.
 
@@ -483,7 +503,9 @@ async def test_abandoned_kinds_are_distinct_and_follow_manifest_order(
 
 
 @pytest.mark.asyncio
-async def test_a_success_after_abandonment_still_supersedes(session_factory) -> None:
+async def test_a_success_after_abandonment_still_supersedes(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """A retry that finally cleans an abandoned item records it as done."""
     thread_id = await _seed_terminal_thread(session_factory)
     async with session_factory() as session:
@@ -503,6 +525,7 @@ async def test_a_success_after_abandonment_still_supersedes(session_factory) -> 
             )
         await session.commit()
         row = await session.get(ThreadDeletionSagaModel, thread_id)
+        assert row is not None
         assert (
             deserialize_results(row.result_json)["artifact:a1"].state
             is CleanupItemState.ABANDONED
@@ -529,7 +552,9 @@ async def test_a_success_after_abandonment_still_supersedes(session_factory) -> 
 
 
 @pytest.mark.asyncio
-async def test_finalize_refuses_until_every_item_is_done(session_factory) -> None:
+async def test_finalize_refuses_until_every_item_is_done(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """Finalization leaves all rows in place while any item is unfinished."""
     thread_id = await _seed_terminal_thread(session_factory)
     async with session_factory() as session:
@@ -558,7 +583,9 @@ async def test_finalize_refuses_until_every_item_is_done(session_factory) -> Non
 
 
 @pytest.mark.asyncio
-async def test_finalize_removes_rows_only_when_complete(session_factory) -> None:
+async def test_finalize_removes_rows_only_when_complete(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """Once every item is done finalization removes the saga and the thread."""
     thread_id = await _seed_terminal_thread(session_factory)
     async with session_factory() as session:
@@ -587,7 +614,9 @@ async def test_finalize_removes_rows_only_when_complete(session_factory) -> None
 
 
 @pytest.mark.asyncio
-async def test_finalize_is_idempotent_after_completion(session_factory) -> None:
+async def test_finalize_is_idempotent_after_completion(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """Finalizing an already-finalized saga is a no-op success."""
     thread_id = await _seed_terminal_thread(session_factory)
     async with session_factory() as session:

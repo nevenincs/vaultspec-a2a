@@ -1,17 +1,25 @@
 """Tests for context window management: estimation, compaction, handoff."""
 
 import json
+from typing import Any, Protocol, cast
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from ...context.token_budget import (
-    compact_context,
-    estimate_tokens,
-    prepare_handoff,
-    should_compact,
-)
+from ...context import token_budget as _token_budget
+from ...context.token_budget import compact_context, estimate_tokens, should_compact
 from ...thread.state import TeamState
+
+
+class _PrepareHandoff(Protocol):
+    """Typed call signature for ``prepare_handoff``, whose production return
+    type is an unparameterized ``dict``; re-typed here so call-site results
+    carry a known value type instead of propagating Unknown."""
+
+    def __call__(self, state: TeamState, target_agent: str) -> dict[str, Any]: ...
+
+
+prepare_handoff = cast("_PrepareHandoff", _token_budget.prepare_handoff)
 
 # ---------------------------------------------------------------------------
 # Token estimation
@@ -163,7 +171,7 @@ class TestCompactContext:
 
     def test_preserves_recent_messages(self) -> None:
         """The most recently added message survives compaction."""
-        messages: list = [SystemMessage(content="system")]
+        messages: list[BaseMessage] = [SystemMessage(content="system")]
         for i in range(10):
             messages.append(HumanMessage(content=f"msg-{i} " + "a" * 100))
         last_msg = HumanMessage(content="the-final-question")
@@ -237,7 +245,7 @@ class TestCompactContext:
                 "- **[research]** `.vault/research/auth-research.md`"
             )
         )
-        messages: list = [system_prompt, context_preamble]
+        messages: list[BaseMessage] = [system_prompt, context_preamble]
         # Add many messages to exceed the budget
         for i in range(20):
             messages.append(HumanMessage(content=f"Message {i} " + "x" * 200))
@@ -271,7 +279,7 @@ class TestCompactContext:
         """
         system_msg = SystemMessage(content="You are a coding assistant.")
         task_msg = HumanMessage(content="ORIGINAL TASK: implement feature X")
-        messages: list = [system_msg, task_msg]
+        messages: list[BaseMessage] = [system_msg, task_msg]
         # Flood with large middle messages that will be dropped
         for i in range(30):
             messages.append(AIMessage(content=f"middle-{i} " + "z" * 400))
@@ -323,7 +331,7 @@ class TestCompactContext:
             "loop_count": 0,
         }
         result = compact_context(state, max_tokens=10)
-        assert result["next"] == "coder"
+        assert result.get("next") == "coder"
         assert result["current_plan"] == state["current_plan"]
         assert result["artifacts"] == state["artifacts"]
         assert result["active_agent"] == "planner"

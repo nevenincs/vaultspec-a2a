@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import UTC, datetime
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -314,7 +315,7 @@ def test_classify_permission_pause_reason_none() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _clarify_interrupt(payload: dict) -> ProjectedInterrupt:
+def _clarify_interrupt(payload: dict[str, Any]) -> ProjectedInterrupt:
     return ProjectedInterrupt(
         interrupt_id="interrupt-clarify-1",
         interrupt_type=payload.get("type", ""),

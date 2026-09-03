@@ -3,7 +3,7 @@ tags:
   - '#adr'
   - '#canonical-homes'
 date: '2026-08-04'
-modified: '2026-09-03'
+modified: '2026-08-05'
 body_schema: 'body-v1'
 body_hash: 'sha256:963e1a4a735e4e207225607d0af6ce5505d903e9da523800b674a10931daadd8'
 related:

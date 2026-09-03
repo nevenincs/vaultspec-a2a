@@ -8,9 +8,14 @@ refuses to silently accept a broken band definition.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from ..procs_config import ProcsConfigError, load_procs_config
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_committed_procs_toml_matches_the_adr_bands() -> None:
@@ -62,13 +67,13 @@ def test_role_lookup_names_known_roles_on_miss() -> None:
         config.role("nope")
 
 
-def _write(tmp_path, body: str):
-    path = tmp_path / "procs.toml"
+def _write(tmp_path: Path, body: str) -> Path:
+    path: Path = tmp_path / "procs.toml"
     path.write_text(body, encoding="utf-8")
     return path
 
 
-def test_overlapping_bands_are_rejected(tmp_path) -> None:
+def test_overlapping_bands_are_rejected(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "\n".join(
@@ -84,7 +89,7 @@ def test_overlapping_bands_are_rejected(tmp_path) -> None:
         load_procs_config(path)
 
 
-def test_resident_port_inside_a_band_is_rejected(tmp_path) -> None:
+def test_resident_port_inside_a_band_is_rejected(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "\n".join(
@@ -100,19 +105,19 @@ def test_resident_port_inside_a_band_is_rejected(tmp_path) -> None:
         load_procs_config(path)
 
 
-def test_malformed_band_is_rejected(tmp_path) -> None:
+def test_malformed_band_is_rejected(tmp_path: Path) -> None:
     path = _write(tmp_path, "[roles.a]\nband = [200, 100]\n")
     with pytest.raises(ProcsConfigError, match="ascending range"):
         load_procs_config(path)
 
 
-def test_missing_roles_table_is_rejected(tmp_path) -> None:
+def test_missing_roles_table_is_rejected(tmp_path: Path) -> None:
     path = _write(tmp_path, "[resident]\nengine = 8767\n")
     with pytest.raises(ProcsConfigError, match="at least one role"):
         load_procs_config(path)
 
 
-def test_role_env_table_is_parsed(tmp_path) -> None:
+def test_role_env_table_is_parsed(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "\n".join(
@@ -127,12 +132,12 @@ def test_role_env_table_is_parsed(tmp_path) -> None:
     assert config.roles["a"].env == {"VAULTSPEC_PORT": "{port}", "FOO": "bar"}
 
 
-def test_role_without_env_defaults_to_empty(tmp_path) -> None:
+def test_role_without_env_defaults_to_empty(tmp_path: Path) -> None:
     path = _write(tmp_path, "[roles.a]\nband = [100, 200]\n")
     assert load_procs_config(path).roles["a"].env == {}
 
 
-def test_non_string_env_value_is_rejected(tmp_path) -> None:
+def test_non_string_env_value_is_rejected(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "[roles.a]\nband = [100, 200]\nenv = { VAULTSPEC_PORT = 8000 }\n",
@@ -141,7 +146,7 @@ def test_non_string_env_value_is_rejected(tmp_path) -> None:
         load_procs_config(path)
 
 
-def test_require_repo_is_parsed_and_defaults_false(tmp_path) -> None:
+def test_require_repo_is_parsed_and_defaults_false(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "\n".join(
@@ -159,7 +164,7 @@ def test_require_repo_is_parsed_and_defaults_false(tmp_path) -> None:
     assert config.roles["plain"].require_repo is False
 
 
-def test_non_bool_require_repo_is_rejected(tmp_path) -> None:
+def test_non_bool_require_repo_is_rejected(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
         "[roles.a]\nband = [100, 200]\nrequire_repo = 'yes'\n",

@@ -133,6 +133,34 @@ def _declaring_modules(pattern: str) -> list[str]:
             "reads. A re-derivation that signals first still terminates the "
             "root, which is why it would look like it worked.",
         ),
+        (
+            "strict object-mapping narrower",
+            r"def coerce_object_mapping\(",
+            1,
+            "utils/coercion.py",
+            "Declared independently under seven different private names across "
+            "control/, worker/, and api/ - most via a non-strict pydantic "
+            "TypeAdapter, one via a hand-rolled isinstance TypeGuard - plus two "
+            "more inline TypeAdapter copies beside one of those same "
+            "declarations, and a further pair in authoring/discovery.py the "
+            "original sweep missed. All narrow an already-parsed value to a "
+            "string-keyed dict, returning None rather than raising. Distinct on "
+            "purpose from `_json_object(encoded: str)` in "
+            "control/event_handlers.py, the STRING-decode sibling that calls "
+            "``validate_json`` rather than ``validate_python``.",
+        ),
+        (
+            "strict object-list narrower",
+            r"def coerce_object_list\(",
+            1,
+            "utils/coercion.py",
+            "The list-shaped counterpart to the object-mapping narrower above, "
+            "declared independently under three different names beside it (a "
+            "pydantic TypeAdapter and a hand-rolled isinstance TypeGuard). Kept "
+            "separate from the RAISING `_decode_json_list` in "
+            "control/projection.py, which signals a broken internal invariant "
+            "rather than degrading untrusted input.",
+        ),
     ],
 )
 def test_a_rehomed_concept_still_has_one_declaration(

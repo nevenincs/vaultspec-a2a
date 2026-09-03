@@ -3,12 +3,11 @@ tags:
   - '#reference'
   - '#adr-authoring-orchestration'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-09-03'
 body_hash: 'sha256:eb0b9ddd09cba1a4d88f95ddc4e7895a210c3d6f1589c6205375e31195947237'
 related:
   - "[[2026-07-14-adr-authoring-orchestration-adr]]"
   - "[[2026-07-14-adr-authoring-orchestration-plan]]"
-  - "[[2026-07-14-adr-authoring-orchestration-P04-S10]]"
   - "[[2026-07-15-multi-provider-execution-adr]]"
   - "[[2026-07-15-multi-provider-execution-plan]]"
 ---

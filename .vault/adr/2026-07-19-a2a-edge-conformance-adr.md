@@ -3,12 +3,10 @@ tags:
   - '#adr'
   - '#a2a-edge-conformance'
 date: '2026-07-19'
-modified: '2026-07-19'
+modified: '2026-09-03'
 body_hash: 'sha256:b584e8ab0fe27feeef73809a3d9e77f53b78f2f16f0fa5bd303d4975d70fa0f9'
 related:
   - "[[2026-07-14-a2a-edge-conformance-plan]]"
-  - "[[2026-07-14-a2a-edge-conformance-W03-P07-S18]]"
-  - "[[2026-07-14-a2a-edge-conformance-W03-P08-S20]]"
   - '[[2026-07-14-a2a-edge-conformance-research]]'
 ---
 # `a2a-edge-conformance` adr: `real-project-root mcp projection` | (**status:** `accepted`)

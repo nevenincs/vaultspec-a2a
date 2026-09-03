@@ -22,7 +22,9 @@ _SERVE_CMD_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
 _PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
 
 
-def test_resolve_data_seat_accepts_existing_dir_and_refuses_ambiguous(tmp_path) -> None:
+def test_resolve_data_seat_accepts_existing_dir_and_refuses_ambiguous(
+    tmp_path: Path,
+) -> None:
     assert resolve_data_seat(str(tmp_path)) == str(tmp_path)
     # Whitespace-padded but real still resolves.
     assert resolve_data_seat(f"  {tmp_path}  ") == str(tmp_path)
@@ -40,7 +42,9 @@ def test_engine_command_substitutes_port_and_workspace() -> None:
     assert cmd == ["engine", "--port", "18761", "--data-dir", "/seat/store"]
 
 
-def test_serve_refuses_an_ambiguous_seat_without_launching(capsys, tmp_path) -> None:
+def test_serve_refuses_an_ambiguous_seat_without_launching(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     # An empty seat is refused with exit 2 BEFORE any registry write or launch.
     with _environ(**{_PROCS_HOME_ENV: str(tmp_path / "home")}):
         rc = serve(port=18760, name="probe", workspace="")
@@ -50,7 +54,9 @@ def test_serve_refuses_an_ambiguous_seat_without_launching(capsys, tmp_path) -> 
     assert not (tmp_path / "home").exists()
 
 
-def test_serve_seats_the_engine_in_the_workspace_not_the_wrapper_cwd(tmp_path) -> None:
+def test_serve_seats_the_engine_in_the_workspace_not_the_wrapper_cwd(
+    tmp_path: Path,
+) -> None:
     seat = tmp_path / "engine-workspace"
     seat.mkdir()
     home = tmp_path / "procs-home"

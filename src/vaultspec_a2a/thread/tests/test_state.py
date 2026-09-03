@@ -88,8 +88,12 @@ class TestAppendResearchFindings:
     """Tests for the append-only research-findings reducer."""
 
     def test_appends_findings_in_order(self) -> None:
-        existing = [{"claim": "c1", "locators": ["f.py:1"], "source_thread": "t1"}]
-        new = [{"claim": "c2", "locators": ["g.py:2"], "source_thread": "t2"}]
+        existing: list[dict[str, Any]] = [
+            {"claim": "c1", "locators": ["f.py:1"], "source_thread": "t1"}
+        ]
+        new: list[dict[str, Any]] = [
+            {"claim": "c2", "locators": ["g.py:2"], "source_thread": "t2"}
+        ]
         result = _append_research_findings(existing, new)
         assert result == [existing[0], new[0]]
 
@@ -100,20 +104,28 @@ class TestAppendResearchFindings:
         surface overlapping claims from distinct threads, and synthesis needs the
         full set.
         """
-        existing = [{"claim": "dup", "locators": [], "source_thread": "t1"}]
-        new = [{"claim": "dup", "locators": [], "source_thread": "t2"}]
+        existing: list[dict[str, Any]] = [
+            {"claim": "dup", "locators": [], "source_thread": "t1"}
+        ]
+        new: list[dict[str, Any]] = [
+            {"claim": "dup", "locators": [], "source_thread": "t2"}
+        ]
         result = _append_research_findings(existing, new)
         assert len(result) == 2
         assert result[0]["source_thread"] == "t1"
         assert result[1]["source_thread"] == "t2"
 
     def test_empty_new_keeps_existing(self) -> None:
-        existing = [{"claim": "c1", "locators": [], "source_thread": "t1"}]
+        existing: list[dict[str, Any]] = [
+            {"claim": "c1", "locators": [], "source_thread": "t1"}
+        ]
         result = _append_research_findings(existing, [])
         assert result == existing
 
     def test_does_not_mutate_existing(self) -> None:
-        existing = [{"claim": "c1", "locators": [], "source_thread": "t1"}]
+        existing: list[dict[str, Any]] = [
+            {"claim": "c1", "locators": [], "source_thread": "t1"}
+        ]
         _append_research_findings(
             existing, [{"claim": "c2", "locators": [], "source_thread": "t2"}]
         )
@@ -188,7 +200,7 @@ class TestStateJsonRoundTrip:
     """Verify that the non-message fields of TeamState survive JSON encode/decode."""
 
     @pytest.fixture
-    def sample_state(self) -> dict:
+    def sample_state(self) -> dict[str, Any]:
         """Build a representative state dict with all new fields populated."""
         return {
             "next": "coder",
@@ -212,7 +224,7 @@ class TestStateJsonRoundTrip:
             },
         }
 
-    def test_round_trip_json(self, sample_state: dict) -> None:
+    def test_round_trip_json(self, sample_state: dict[str, Any]) -> None:
         """All non-message fields must survive JSON encode -> decode."""
         encoded = json.dumps(sample_state)
         decoded = json.loads(encoded)
@@ -223,7 +235,7 @@ class TestStateJsonRoundTrip:
 
         This test confirms all non-message fields are JSON-native primitives.
         """
-        state: dict = {
+        state: dict[str, Any] = {
             "messages": [HumanMessage(content="hi")],
             "next": "",
             "active_agent": "",
@@ -372,7 +384,9 @@ class TestUndeclaredCheckpointKeys:
             assert reread.checkpoint["channel_values"]["plan_approved"] is True
 
             seen.clear()
-            await graph.ainvoke({"active_agent": "resumed"}, config)
+            # LangGraph accepts a partial state update at runtime even though the
+            # compiled graph's static input type is the full TeamState.
+            await graph.ainvoke(cast("TeamState", {"active_agent": "resumed"}), config)
             resumed_state = seen[-1]
             assert "plan_approved" not in resumed_state
             assert resumed_state.get("plan_approved") is None

@@ -24,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from ...conftest import materialize_schema
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from langchain_core.runnables import RunnableConfig
 
 from ...control.repositories import (
@@ -35,14 +37,16 @@ from ...control.repositories import (
     create_deletion_saga,
     finalize_deletion_saga,
 )
-from ...control.thread_service import delete_thread_service
+from ...control.thread_service import DeleteResult, delete_thread_service
 from ...database import create_artifact, create_thread, get_thread
 from ...database.models import ThreadDeletionSagaModel
 from ...thread.enums import CleanupKind, ThreadStatus
 
 
 @pytest_asyncio.fixture
-async def session_factory(tmp_path_factory: pytest.TempPathFactory):
+async def session_factory(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     case_dir = tmp_path_factory.mktemp("deletion-saga-control-db")
     materialize_schema(Path(case_dir / "test.db"))
     engine = create_async_engine(f"sqlite+aiosqlite:///{case_dir / 'test.db'}")
@@ -51,7 +55,9 @@ async def session_factory(tmp_path_factory: pytest.TempPathFactory):
 
 
 @pytest_asyncio.fixture
-async def checkpointer(tmp_path_factory: pytest.TempPathFactory):
+async def checkpointer(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[AsyncSqliteSaver]:
     case_dir = tmp_path_factory.mktemp("deletion-saga-checkpoints")
     async with AsyncSqliteSaver.from_conn_string(
         str(case_dir / "checkpoints.db")
@@ -83,7 +89,9 @@ async def _checkpoint_present(checkpointer: AsyncSqliteSaver, thread_id: str) ->
 
 @pytest.mark.asyncio
 async def test_delete_removes_checkpoint_and_artifact_end_to_end(
-    session_factory, checkpointer, tmp_path
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    tmp_path: Path,
 ) -> None:
     """A terminal thread's checkpoint, artifact file, and rows are all removed."""
     workspace = tmp_path / "workspace"
@@ -121,7 +129,9 @@ async def test_delete_removes_checkpoint_and_artifact_end_to_end(
 
 
 @pytest.mark.asyncio
-async def test_delete_is_idempotent_under_retry(session_factory, checkpointer) -> None:
+async def test_delete_is_idempotent_under_retry(
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
+) -> None:
     """A second delete of an already-deleted thread reports it not found."""
     await _write_checkpoint(checkpointer, "t-retry", "cp-retry")
     async with session_factory() as session:
@@ -144,7 +154,7 @@ async def test_delete_is_idempotent_under_retry(session_factory, checkpointer) -
 
 @pytest.mark.asyncio
 async def test_crash_recovery_resumes_a_partial_saga(
-    session_factory, checkpointer
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """A saga left mid-flight by a crash resumes and finishes against real stores."""
     await _write_checkpoint(checkpointer, "t-crash", "cp-crash")
@@ -179,7 +189,7 @@ async def test_crash_recovery_resumes_a_partial_saga(
 
 @pytest.mark.asyncio
 async def test_a_delete_racing_a_live_pass_does_not_run_a_second_teardown(
-    session_factory, checkpointer
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """A request arriving while a pass owns the saga runs no cleanup of its own.
 
@@ -223,7 +233,7 @@ async def test_a_delete_racing_a_live_pass_does_not_run_a_second_teardown(
 
 @pytest.mark.asyncio
 async def test_a_permanently_failing_item_stops_wedging_the_thread(
-    session_factory, checkpointer
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """Retries of an unremovable item end in a finalized delete, not a wedge.
 
@@ -249,7 +259,7 @@ async def test_a_permanently_failing_item_stops_wedging_the_thread(
         )
         await session.commit()
 
-    outcomes = []
+    outcomes: list[DeleteResult] = []
     for _ in range(3):
         async with session_factory() as session:
             outcomes.append(
@@ -274,7 +284,7 @@ async def test_a_permanently_failing_item_stops_wedging_the_thread(
 
 @pytest.mark.asyncio
 async def test_control_rows_survive_until_cleanup_finishes(
-    session_factory, checkpointer
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """Control rows are retained and the thread hidden-state held while pending.
 

@@ -1,7 +1,7 @@
 """Tests for deterministic supervisor routing and gating logic."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -79,7 +79,7 @@ def _make_state_with_vault(
 
 
 def _make_state_for_phase_gate(
-    vault_index: dict,
+    vault_index: dict[str, list[str]],
     active_feature: str | None = "my-feature",
 ) -> TeamState:
     state = _make_state()
@@ -95,17 +95,21 @@ def _build_approval_graph(
     worker_phase_map: dict[str, str] | None,
 ) -> Any:
     """Mirror the star wiring: supervisor marks pending, plan_approval interrupts."""
-    builder = StateGraph(cast("Any", TeamState))
+    builder: StateGraph = StateGraph(cast("Any", TeamState))
     builder.add_node("supervisor", supervisor_node)
     builder.add_node(
         "plan_approval", create_plan_approval_node(workers, worker_phase_map)
     )
     builder.set_entry_point("supervisor")
+
+    def _route_on_approval(state: TeamState) -> str:
+        if state.get("approval_status") == "pending":
+            return "plan_approval"
+        return "__end__"
+
     builder.add_conditional_edges(
         "supervisor",
-        lambda state: (
-            "plan_approval" if state.get("approval_status") == "pending" else "__end__"
-        ),
+        _route_on_approval,
         {"plan_approval": "plan_approval", "__end__": END},
     )
     builder.add_edge("plan_approval", END)
@@ -149,9 +153,11 @@ class _StaticSupervisorModel(BaseChatModel):
         self._content = content
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "static-supervisor-model"
 
+    @override
     def _generate(
         self,
         messages: list[Any],
@@ -161,6 +167,7 @@ class _StaticSupervisorModel(BaseChatModel):
     ) -> ChatResult:
         raise NotImplementedError("_StaticSupervisorModel only supports async")
 
+    @override
     async def _agenerate(
         self,
         messages: list[Any],
@@ -257,6 +264,7 @@ def test_review_gate_blocks_finish_when_exec_done_no_audit() -> None:
     )
     assert result.next_route == "reviewer"
     assert result.inferred_phase == "audit"
+    assert result.routing_error is not None
     assert "FINISH blocked" in result.routing_error
 
 

@@ -226,7 +226,7 @@ def _windows_error(error: int, path: Path) -> OSError:
     own mapping, so both ``isinstance`` and ``exc.winerror`` answer truthfully.
     """
     if sys.platform != "win32":
-        raise OSError(errno.ENOSYS, "Windows error codes are unavailable", path)
+        raise OSError(errno.ENOSYS, "Windows error messages are unavailable", path)
     return OSError(0, ctypes.FormatError(error), str(path), error)
 
 

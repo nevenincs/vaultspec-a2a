@@ -1,4 +1,4 @@
-"""The document-authoring contract: role names and topologies (authoring-contract ADR).
+"""The document-authoring contract: role names and topologies.
 
 A single zero-dependency source of truth for WHICH persona roles author vault
 documents and WHICH topologies are document-authoring, so the harness verifier,

@@ -297,8 +297,8 @@ def _resolve_model_for_worker(
     only way to disclose the second was to stop discarding it here.
 
     When a ``frozen_assignment`` names this worker, its provider/capability/
-    fallback are used verbatim (model-profiles: restart reproduces the exact
-    launched models, never a re-resolution against possibly-drifted config).
+    fallback are used verbatim, so restart reproduces the exact launched models,
+    never a re-resolution against possibly-drifted config.
 
     Returns the model together with the provider that actually produced it and
     the requested capability, so callers can record the assignment without
@@ -461,8 +461,8 @@ def _resolve_worker_model_preferences(
     """Resolve provider + capability following the standard precedence.
 
     A ``frozen_assignment`` entry for this worker wins outright and preserves
-    its concrete model name (model-profiles: the run's frozen effective assignment
-    is reproduced exactly across restarts, never re-resolved). Absent a frozen entry,
+    its concrete model name: the run's frozen effective assignment is reproduced
+    exactly across restarts, never re-resolved. Absent a frozen entry,
     delegates to the shared model-profile resolver (the single source discovery,
     launch, and compilation all consume) with no profile overlay - byte-identical
     to the historical chain: [[team.workers]] override > agent TOML [agent.model]

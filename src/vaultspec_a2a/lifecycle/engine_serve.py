@@ -1,6 +1,6 @@
 """Engine-serve wrapper core: seat the engine data store explicitly, then serve.
 
-The engine binary itself is never modified (dev-process-registry ADR), so its
+The engine binary itself is never modified, so its
 adoption is wrapper-based: this core registers a registry record for the band
 port, launches the ``vaultspec serve --no-seat`` engine on that port, heartbeats
 the record while the engine runs, and deregisters on owned shutdown. ``scripts/

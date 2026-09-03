@@ -1,7 +1,7 @@
 """Bounded, non-authoritative active-run discovery projection.
 
-Also hosts the ``reconciling``-abandonment backstop (state-truthfulness ADR
-T3): a discovery read is the reconciler for a run stuck in ``reconciling``
+Also hosts the ``reconciling``-abandonment backstop: a discovery read is the
+reconciler for a run stuck in ``reconciling``
 past its own derived recovery bound, independent of whether the background
 redispatch sweep (``control.dispatch.redispatch_reconciling_threads`` - the
 obligated writer that normally moves a thread OUT of ``reconciling`` after a
@@ -56,9 +56,9 @@ _MAX_RUN_ID_LENGTH = 128
 # redispatch before the backstop below declares the transition abandoned.
 # Applies only when the preset declares no ``step_timeout_seconds`` of its
 # own; a preset that does declare one gets that value (plus margin) instead,
-# never this flat floor - the state-truthfulness ADR's T3 forbids a flat
-# global bound from ever narrowing a run's own declared budget, and permits
-# one only as the fallback for a run that declares none.
+# never this flat floor: a flat global bound must never narrow a run's own
+# declared budget, and is permitted only as the fallback for a run that
+# declares none.
 _RECONCILING_ABANDONMENT_FLOOR_SECONDS = 300.0
 
 # Margin added atop a preset's own declared step_timeout_seconds, mirroring
@@ -121,8 +121,8 @@ async def reconcile_abandoned_reconciling_thread(
     Moves an abandoned thread to ``FAILED`` - never silently to
     ``COMPLETED``, and never left as-is - with a ``failure_reason`` that
     names the reconciler as the cause, so a reconciled outcome reads as
-    distinct from one the run actually reached (the ADR's "the terminal
-    value records that it was reconciled rather than reached normally").
+    distinct from one the run actually reached: the terminal value records
+    that it was reconciled rather than reached normally.
 
     Returns ``True`` only when this call performed that transition.
     ``False`` covers "not reconciling", "not yet abandoned", and "thread not

@@ -107,7 +107,7 @@ _ACCEPTANCE_GATE_REASON = (
 
 
 class AssignmentSource(StrEnum):
-    """Which precedence layer a resolved value came from (ADR exposure field).
+    """Which precedence layer a resolved value came from (exposure field).
 
     ``UNDECLARED`` is the honest bottom of the chain: no layer supplied the value.
     It exists because the alternative was reporting a repository-authored fallback

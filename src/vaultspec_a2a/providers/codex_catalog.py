@@ -259,7 +259,7 @@ def catalog_from_app_server(
     key: ProviderCatalogKey,
     checked_at: datetime | None = None,
 ) -> ProviderCatalog:
-    """Normalize ordered app-server pages and capabilities into the S01 contract."""
+    """Normalize ordered app-server pages and capabilities into the catalog contract."""
     capabilities = _capabilities(capabilities_result)
     models: list[ModelCatalogEntry] = []
     controls: list[NativeControl] = []

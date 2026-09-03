@@ -129,7 +129,7 @@ class DispatchRequest(BaseModel):
     pipeline_phase: str | None = None
     vault_index: dict[str, list[str]] = Field(default_factory=dict)
     validation_errors: list[str] = Field(default_factory=list)
-    # model-profiles: the selected profile id and the frozen effective per-role
+    # The selected profile id and the frozen effective per-role
     # assignment the run was launched with. Compilation consumes this verbatim
     # (never re-resolves) so restart/recovery reproduces the identical models even
     # if team/agent config drifts. Each value is {"provider", "capability",

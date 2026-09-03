@@ -1,7 +1,7 @@
 """Desktop component launch contract.
 
-A2A is a dashboard-bundled runtime, not an installable product (see the
-dashboard-bundled-runtime decision). The dashboard builds, bundles, launches,
+A2A is a dashboard-bundled runtime, not an installable product. The dashboard
+builds, bundles, launches,
 and manages the service itself; it never imports A2A packages or infers an
 internal layout. The only cross-repository contract it reads is the component
 manifest defined here: the component's identity and its typed launch surfaces.

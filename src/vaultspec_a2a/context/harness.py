@@ -65,7 +65,7 @@ _AGENTS_DIR = Path(".vaultspec") / "agents"
 
 # The canonical authoring templates every placeholder is filled from. A
 # document-authoring harness requires these readable on disk - an early run
-# shipped an ADR carrying the raw ``{accepted|rejected|...}`` enum precisely
+# emitted a document carrying the raw ``{accepted|rejected|...}`` enum precisely
 # because none were reachable.
 DEFAULT_REQUIRED_TEMPLATES: tuple[str, ...] = (
     "adr",

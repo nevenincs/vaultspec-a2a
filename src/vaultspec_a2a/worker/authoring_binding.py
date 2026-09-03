@@ -1,8 +1,8 @@
 """Per-run construction of the authoring-bridge tool binding for a worker.
 
-This is the production construction site the S18/S19 bridge mechanism was missing:
-S19 wired the binding into the worker/session but left no code that BUILDS one, so
-a real run never armed the bridge. The provider closes that gap for CLI-coder
+This is the production construction site the bridge mechanism was missing: the
+binding was wired into the worker/session, but no code BUILT one, so a real run
+never armed the bridge. The provider closes that gap for CLI-coder
 presets that opt in via ``[team.harness] authoring_bridge = true``.
 
 For a given ``(thread_id, agent_id)`` it assembles a stdio-transport

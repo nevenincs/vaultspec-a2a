@@ -795,8 +795,8 @@ async def _run_commit_locked(
     canonical_body = _body_with_frozen_selection(body, frozen)
     commit_digest = request_digest(canonical_body, prepared=False)
     # Evaluate worker and provider eligibility BEFORE consuming the reservation,
-    # accepting the actor tokens, or creating a run (ADR: mint run credentials only
-    # after the runtime and provider are eligible). The worker reachability is
+    # accepting the actor tokens, or creating a run: run credentials are minted
+    # only after the runtime and provider are eligible. The worker reachability is
     # probed live so the verdict never lags behind the watchdog's status ladder; a
     # refusal releases the reservation so a failed commit leaks nothing.
     from ...control.worker_management import probe_worker_health
@@ -1649,7 +1649,7 @@ async def run_status_endpoint(
         next_nodes=snapshot.next_nodes,
         repair_status=snapshot.repair_status,
     )
-    # model-profiles: disclose the run's frozen profile + effective assignment,
+    # Disclose the run's frozen profile + effective assignment,
     # reproduced verbatim from run metadata (never re-resolved).
     frozen = _read_persisted_frozen(capture.thread_metadata)
     modern_frozen = _read_persisted_team_selection(capture.thread_metadata)

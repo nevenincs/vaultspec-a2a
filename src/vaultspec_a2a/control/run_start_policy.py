@@ -51,7 +51,7 @@ class ExecutionEligibility:
     """Whether the runtime and a provider are eligible to execute a run right now.
 
     The commit stage of desktop run-admission binds actor tokens and creates a
-    durable run only when this is ``eligible``: the ADR mints run credentials only
+    durable run only when this is ``eligible``: run credentials are minted only
     after the runtime (a reachable worker) and a provider have become eligible.
     ``reason`` is populated only on a refusal and is safe to return - it names the
     missing runtime or provider precondition without any path or secret.

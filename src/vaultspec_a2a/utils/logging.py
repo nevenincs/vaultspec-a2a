@@ -1,7 +1,7 @@
 """Logging utilities for the VaultSpec A2A project.
 
 One configuration entrypoint, :func:`configure_logging`, selects an output-lane
-contract per process kind (observability-lanes ADR). The contracts are the
+contract per process kind. The contracts are the
 audit surface: each lane is created here, not in the discipline of every caller.
 
 - ``service`` (gateway/worker): structured JSON to ``stderr`` plus a size-capped

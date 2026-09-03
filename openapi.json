@@ -1511,7 +1511,7 @@
           "undeclared"
         ],
         "title": "AssignmentSource",
-        "description": "Which precedence layer a resolved value came from (ADR exposure field).\n\n``UNDECLARED`` is the honest bottom of the chain: no layer supplied the value.\nIt exists because the alternative was reporting a repository-authored fallback\nas ``TEAM_DEFAULT`` - a label asserting a preset declared something it never\ndeclared, which is a worse failure than an absent value because it cannot be\ntold apart from a real declaration."
+        "description": "Which precedence layer a resolved value came from (exposure field).\n\n``UNDECLARED`` is the honest bottom of the chain: no layer supplied the value.\nIt exists because the alternative was reporting a repository-authored fallback\nas ``TEAM_DEFAULT`` - a label asserting a preset declared something it never\ndeclared, which is a worse failure than an absent value because it cannot be\ntold apart from a real declaration."
       },
       "AuthenticationState": {
         "type": "string",

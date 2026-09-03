@@ -9,8 +9,8 @@ tier: L1
 related:
   - '[[2026-07-15-dev-process-registry-adr]]'
   - '[[2026-08-02-resource-aware-test-execution-adr]]'
+  - '[[2026-08-02-resource-aware-test-execution-audit]]'
 ---
-
 # `resource-aware-test-execution` plan
 
 Deliver the two-layer test execution framework decided in

@@ -5,42 +5,15 @@ tags:
 date: '2026-07-19'
 modified: '2026-09-03'
 body_schema: 'body-v2'
-body_hash: 'sha256:ab932934de3c444e37b0f8757b64729f2c35cb52217940d72544219a9c2edb7b'
+body_hash: 'sha256:2f8ab942c8b35a940b05eb2fb82330cbabcaaa2f25fdc9646da8cdcc9ac06487'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
-
-<!-- Machine-owned: filename and frontmatter, scaffolded by
-     `vaultspec-core vault exec log`; never hand-edit. Add no
-     frontmatter fields. Wiki-links belong in `related:` only, never in the body.
-
-     ONE ledger per plan, replacing one document per Step. The Step identity
-     the plan's ids provide moves from the filename into the row's first
-     column, so a Step still maps to a real artifact. -->
 
 # `repository-tooling-hardening` ledger
 
 ## Changes
 
-<!-- MECHANICAL LOG, append-only, one line per path touched per Step:
-       - `S##` `A` `path`   added
-       - `S##` `M` `path`   modified
-       - `S##` `D` `path`   deleted
-       - `S##` `R` `old` -> `new`   renamed
-     Paths are repo-relative, in backticks. No prose, no sentences: the Step
-     row states the intent and the commit carries the diff. Example:
-
-       - `S01` `M` `src/vaultspec_core/cli/exec_cmd.py`
-       - `S01` `A` `src/vaultspec_core/cli/tests/test_exec_cmd.py`
-       - `S02` `D` `src/legacy/shim.py`
-
-     Optional per-Step check line:
-       - `S01` `verify:` `<command>` -> `pass` | `fail`
-
-     Rows are appended in Step order and never rewritten. Only rows in this
-     section register a Step as covered; a `## Notes` section is added ONLY on
-     exception (data loss, skipped work, a scaffold left in code, a persistent
-     failure) and is otherwise omitted. -->
 - `S01` `T` `pyproject.toml`
 - `S01` `T` `uv.lock`
 - `S02` `T` `just/dev/deps.just`
@@ -102,4 +75,3 @@ related:
 - `S25` `T` `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`
 - `S25` `T` `src/vaultspec_a2a/cli/tests/test_desktop_serve.py`
 - `S25` `T` `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`
-

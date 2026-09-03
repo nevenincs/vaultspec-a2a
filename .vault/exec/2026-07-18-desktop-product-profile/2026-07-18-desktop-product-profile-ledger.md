@@ -5,42 +5,15 @@ tags:
 date: '2026-07-18'
 modified: '2026-09-03'
 body_schema: 'body-v2'
-body_hash: 'sha256:78a30a3250b82ef8417fa457aabacbafb4f63b5dac4306cd00741623ae2112ad'
+body_hash: 'sha256:1399789ae61f4463fd4d3856a0cb615570f4552769a912d55ef41ffb8b98656f'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
-
-<!-- Machine-owned: filename and frontmatter, scaffolded by
-     `vaultspec-core vault exec log`; never hand-edit. Add no
-     frontmatter fields. Wiki-links belong in `related:` only, never in the body.
-
-     ONE ledger per plan, replacing one document per Step. The Step identity
-     the plan's ids provide moves from the filename into the row's first
-     column, so a Step still maps to a real artifact. -->
 
 # `desktop-product-profile` ledger
 
 ## Changes
 
-<!-- MECHANICAL LOG, append-only, one line per path touched per Step:
-       - `S##` `A` `path`   added
-       - `S##` `M` `path`   modified
-       - `S##` `D` `path`   deleted
-       - `S##` `R` `old` -> `new`   renamed
-     Paths are repo-relative, in backticks. No prose, no sentences: the Step
-     row states the intent and the commit carries the diff. Example:
-
-       - `S01` `M` `src/vaultspec_core/cli/exec_cmd.py`
-       - `S01` `A` `src/vaultspec_core/cli/tests/test_exec_cmd.py`
-       - `S02` `D` `src/legacy/shim.py`
-
-     Optional per-Step check line:
-       - `S01` `verify:` `<command>` -> `pass` | `fail`
-
-     Rows are appended in Step order and never rewritten. Only rows in this
-     section register a Step as covered; a `## Notes` section is added ONLY on
-     exception (data loss, skipped work, a scaffold left in code, a persistent
-     failure) and is otherwise omitted. -->
 - `S01` `T` `pyproject.toml`
 - `S02` `T` `uv.lock`
 - `S03` `T` `package-lock.json`
@@ -252,4 +225,3 @@ related:
 - `S120` `T` `src/vaultspec_a2a/desktop/artifacts.py`
 - `S120` `T` `src/vaultspec_a2a/desktop/capsule_descriptor.py`
 - `S120` `T` `src/vaultspec_a2a/desktop/capsule_preparation.py`
-

@@ -5,42 +5,15 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-03'
 body_schema: 'body-v2'
-body_hash: 'sha256:acf3e0166e07ebb95a3e2b7a344e406cef4dfd465f8f01d584fd1e5b7abd719d'
+body_hash: 'sha256:366ee76c3541bd9394deb26eadd6a76b4aa02fe44170978b14a6c7d88d38f7ef'
 related:
   - "[[2026-08-02-control-action-leases-plan]]"
 ---
-
-<!-- Machine-owned: filename and frontmatter, scaffolded by
-     `vaultspec-core vault exec log`; never hand-edit. Add no
-     frontmatter fields. Wiki-links belong in `related:` only, never in the body.
-
-     ONE ledger per plan, replacing one document per Step. The Step identity
-     the plan's ids provide moves from the filename into the row's first
-     column, so a Step still maps to a real artifact. -->
 
 # `control-action-leases` ledger
 
 ## Changes
 
-<!-- MECHANICAL LOG, append-only, one line per path touched per Step:
-       - `S##` `A` `path`   added
-       - `S##` `M` `path`   modified
-       - `S##` `D` `path`   deleted
-       - `S##` `R` `old` -> `new`   renamed
-     Paths are repo-relative, in backticks. No prose, no sentences: the Step
-     row states the intent and the commit carries the diff. Example:
-
-       - `S01` `M` `src/vaultspec_core/cli/exec_cmd.py`
-       - `S01` `A` `src/vaultspec_core/cli/tests/test_exec_cmd.py`
-       - `S02` `D` `src/legacy/shim.py`
-
-     Optional per-Step check line:
-       - `S01` `verify:` `<command>` -> `pass` | `fail`
-
-     Rows are appended in Step order and never rewritten. Only rows in this
-     section register a Step as covered; a `## Notes` section is added ONLY on
-     exception (data loss, skipped work, a scaffold left in code, a persistent
-     failure) and is otherwise omitted. -->
 - `S01` `T` `src/vaultspec_a2a/database/models.py`
 - `S01` `T` `src/vaultspec_a2a/database/migrations/versions/0012_control_action_leases.py`
 - `S02` `T` `src/vaultspec_a2a/database/permission_repository.py`
@@ -73,4 +46,3 @@ related:
 - `S21` `T` `src/vaultspec_a2a/service_tests`
 - `S21` `T` `src/vaultspec_a2a`
 - `S22` `T` `.vault/audit`
-

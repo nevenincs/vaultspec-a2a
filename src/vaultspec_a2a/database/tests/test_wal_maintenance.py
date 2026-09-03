@@ -126,7 +126,7 @@ def test_sustained_writes_settle_at_the_ceiling_rather_than_growing(
         # measures the behaviour actually in force on this build.
         pages = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
         page_size = conn.execute("PRAGMA page_size").fetchone()[0]
-        sizes = []
+        sizes: list[int] = []
         for _ in range(5):
             _churn(conn, 1200)
             sizes.append(_wal_bytes(database))

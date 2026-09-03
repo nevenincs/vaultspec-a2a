@@ -8,6 +8,8 @@ route would leave the same bound unenforced for every other producer.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -422,13 +424,17 @@ def test_a_choice_may_not_offer_the_same_option_twice() -> None:
 
 
 def test_unknown_fields_are_refused_on_every_model() -> None:
+    # Passed via dict-unpacking rather than a literal kwarg: "hint" is not a
+    # field on ClarificationQuestion, and the point of this test is that the
+    # model's extra="forbid" config rejects it at construction time anyway.
+    smuggled: dict[str, Any] = {
+        "id": "scope",
+        "prompt": "Which?",
+        "kind": ClarificationKind.TEXT,
+        "hint": "smuggled",
+    }
     with pytest.raises(ValidationError):
-        ClarificationQuestion(
-            id="scope",
-            prompt="Which?",
-            kind=ClarificationKind.TEXT,
-            hint="smuggled",  # ty: ignore[unknown-argument]
-        )
+        ClarificationQuestion(**smuggled)
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 
 import pytest
 
@@ -29,12 +30,14 @@ def _data_payload(frame: bytes) -> dict[str, object]:
 
 def _agents_of(payload: dict[str, object]) -> list[dict[str, object]]:
     """Narrow the ``agents`` list of a decoded ``team_status`` payload."""
-    agents = payload["agents"]
-    assert isinstance(agents, list)
+    raw_agents = payload["agents"]
+    assert isinstance(raw_agents, list)
+    agents = cast("list[object]", raw_agents)
     entries: list[dict[str, object]] = []
     for item in agents:
         assert isinstance(item, dict)
-        entries.append({str(key): value for key, value in item.items()})
+        entry = cast("dict[object, object]", item)
+        entries.append({str(key): value for key, value in entry.items()})
     return entries
 
 

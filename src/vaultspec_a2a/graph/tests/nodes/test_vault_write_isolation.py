@@ -9,8 +9,9 @@ duration and must observe none — not a no-write-path argument.
 
 import threading
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable, Coroutine
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
@@ -24,11 +25,17 @@ from sqlalchemy.ext.asyncio import (
 
 from ....conftest import materialize_schema
 from ....database import create_thread, seed_task_queue
+from ....thread.state import TeamState
 from ....worker.task_queue_port import SqlTaskQueuePort
 from ...nodes.vault_reader import create_mount_node
 from ...tools.task_queue import create_mark_task_complete_tool
 
 _FEATURE = "queue-isolation"
+
+# create_mount_node's factory return is declared as a bare Callable in
+# production; this alias pins the concrete signature for the test call sites
+# below without widening the production API.
+MountNode = Callable[[TeamState], Coroutine[Any, Any, dict[str, Any]]]
 
 
 class _VaultWriteWatcher:
@@ -119,7 +126,7 @@ def _make_workspace(tmp_path: Path) -> Path:
     return workspace
 
 
-def _exec_state(thread_id: str, current_task_id: str | None) -> dict:
+def _exec_state(thread_id: str, current_task_id: str | None) -> TeamState:
     return {
         "messages": [],
         "thread_id": thread_id,
@@ -158,7 +165,7 @@ async def test_db_queue_functions_with_zero_vault_writes(
         thread_id = thread.id
 
     port = SqlTaskQueuePort(session_factory)
-    mount = create_mount_node(workspace, port)
+    mount = cast("MountNode", create_mount_node(workspace, port))
     tool = create_mark_task_complete_tool(port, thread_id)
 
     watcher = _VaultWriteWatcher(vault_dir)
@@ -184,8 +191,11 @@ async def test_db_queue_functions_with_zero_vault_writes(
             }
         )
         assert isinstance(command, Command)
-        assert command.update["current_task_id"] == "Q-2"
-        assert command.update["messages"][0].content == (
+        raw_update = command.update
+        assert isinstance(raw_update, dict)
+        update = cast("dict[str, Any]", raw_update)
+        assert update["current_task_id"] == "Q-2"
+        assert update["messages"][0].content == (
             "Task Q-1 marked complete. Next task: Q-2."
         )
 

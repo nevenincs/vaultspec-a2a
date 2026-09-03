@@ -8,7 +8,12 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
@@ -36,7 +41,7 @@ from ...thread.enums import ControlActionType
 
 @pytest.mark.asyncio
 async def test_dispatch_application_receipt_settles_exact_message_action(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A worker receipt settles its named follow-up, never another action."""
     async with session_factory() as session:
@@ -98,14 +103,14 @@ async def engine(tmp_path_factory: pytest.TempPathFactory):
 
 
 @pytest_asyncio.fixture
-async def session_factory(engine):
+async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """Provide an async session factory bound to the test engine."""
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest.mark.asyncio
 async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A replayed permission_resolved event must not append a second applied action."""
     async with session_factory() as session:
@@ -203,7 +208,7 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
 
 @pytest.mark.asyncio
 async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Supervisor plan approval interrupts must become durable pending rows."""
     async with session_factory() as session:
@@ -245,7 +250,7 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
 
 @pytest.mark.asyncio
 async def test_terminal_event_expires_pending_plan_approval_projection(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Terminal relay settles a parked plan approval without residue."""
     async with session_factory() as session:
@@ -294,7 +299,7 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
 
 @pytest.mark.asyncio
 async def test_document_approval_request_is_persisted_as_durable_pending_permission(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Document phase-gate interrupts must become durable pending rows.
 
@@ -416,7 +421,7 @@ _KIMI_OPTIONS: list[dict[str, object]] = [
 
 @pytest.mark.asyncio
 async def test_plan_rejection_survives_the_resolution_projection(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The resolution handler must not overwrite a denial with an approval.
 
@@ -452,7 +457,7 @@ async def test_plan_rejection_survives_the_resolution_projection(
 
 @pytest.mark.asyncio
 async def test_generic_progress_does_not_settle_an_answered_permission(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Uncorrelated progress must not settle any answered permission."""
     thread_id, request_id, _dispatch_id = await _answered_rejection(
@@ -481,7 +486,7 @@ async def test_generic_progress_does_not_settle_an_answered_permission(
 
 @pytest.mark.asyncio
 async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A provider-defined rejecting id must settle as a denial, not an approval.
 
@@ -536,7 +541,7 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
 
 @pytest.mark.asyncio
 async def test_permission_resolution_for_unknown_request_is_a_clean_noop(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The resolution stage no-ops when no matching request row exists.
 
@@ -604,7 +609,7 @@ async def test_terminal_db_failure_releases_and_clears_public_state() -> None:
 
 @pytest.mark.asyncio
 async def test_persisted_description_matches_what_the_stream_showed(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The durable row holds exactly what the operator was streamed.
 

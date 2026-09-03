@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from langgraph.checkpoint.base import CheckpointTuple
+from langgraph.checkpoint.base import CheckpointTuple, PendingWrite
 from langgraph.types import Interrupt
 
 from ..snapshots import (
@@ -23,7 +23,7 @@ from ..snapshots import (
 )
 
 
-def _tuple(*, pending: list | None = None) -> CheckpointTuple:
+def _tuple(*, pending: list[PendingWrite] | None = None) -> CheckpointTuple:
     return CheckpointTuple(
         config={"configurable": {"thread_id": "t-1", "checkpoint_id": "cp-1"}},
         checkpoint={

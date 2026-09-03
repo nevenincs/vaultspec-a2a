@@ -417,7 +417,7 @@ async def test_plan_phase_runs_after_gate_two_and_parks_on_gate_three(
     parked_at_research = await graph.ainvoke(state, config=config)
     assert parked_at_research["__interrupt__"][0].value["phase"] == "research"
 
-    approve = Command(resume={"verdict": "approved", "notes": None})
+    approve = Command[str](resume={"verdict": "approved", "notes": None})
     parked_at_adr = await graph.ainvoke(approve, config=config)
     assert parked_at_adr["__interrupt__"][0].value["phase"] == "adr"
 
@@ -474,13 +474,13 @@ async def test_plan_gate_request_changes_loops_the_plan_writer(
         "token_usage": {},
     }
 
-    approve = Command(resume={"verdict": "approved", "notes": None})
+    approve = Command[str](resume={"verdict": "approved", "notes": None})
     await graph.ainvoke(state, config=config)
     await graph.ainvoke(approve, config=config)
     await graph.ainvoke(approve, config=config)
     assert submitter.phases == ["research", "adr", "plan"]
 
-    revise = Command(
+    revise = Command[str](
         resume={"verdict": "request_changes", "notes": "Step S02 has no success check."}
     )
     reparked = await graph.ainvoke(revise, config=config)

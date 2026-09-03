@@ -60,6 +60,11 @@ def _make_bridge() -> WorkerBridge:
     async def _heartbeat(request: Request) -> Response:
         return Response(content='{"status":"ok"}', media_type="application/json")
 
+    # Routes are dispatched by the ASGI app at request time via the decorator
+    # registration above, not by direct call — referenced here only so static
+    # analysis sees them as used.
+    _ = (_batch, _heartbeat)
+
     bridge = WorkerBridge(api_url="http://control:8000", worker_id="token-worker")
     bridge._client = httpx.AsyncClient(
         transport=ASGITransport(app=app),
@@ -102,8 +107,8 @@ async def test_tokens_injected_during_run_and_dropped_after() -> None:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
         await cp.setup()
         bridge = _make_bridge()
+        executor = Executor(checkpointer=cp, bridge=bridge)
         try:
-            executor = Executor(checkpointer=cp, bridge=bridge)
             _install_probe_graph(executor, thread_id, observed)
 
             bundle = ActorTokenBundle(
@@ -179,8 +184,8 @@ async def test_tokens_retained_through_interrupt_and_dropped_on_resume() -> None
     async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
         await cp.setup()
         bridge = _make_bridge()
+        executor = Executor(checkpointer=cp, bridge=bridge)
         try:
-            executor = Executor(checkpointer=cp, bridge=bridge)
             _install_interrupting_graph(executor, thread_id)
 
             ingest = DispatchRequest(
@@ -223,8 +228,8 @@ async def test_cancel_of_parked_run_drops_tokens_at_terminal() -> None:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
         await cp.setup()
         bridge = _make_bridge()
+        executor = Executor(checkpointer=cp, bridge=bridge)
         try:
-            executor = Executor(checkpointer=cp, bridge=bridge)
             _install_interrupting_graph(executor, thread_id)
 
             await executor.handle_dispatch(
@@ -263,8 +268,8 @@ async def test_tokens_absent_from_durable_checkpoint() -> None:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
         await cp.setup()
         bridge = _make_bridge()
+        executor = Executor(checkpointer=cp, bridge=bridge)
         try:
-            executor = Executor(checkpointer=cp, bridge=bridge)
             _install_probe_graph(executor, thread_id, observed)
 
             bundle = ActorTokenBundle(
@@ -302,8 +307,8 @@ async def test_tokens_absent_from_logs_during_dispatch(
     async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
         await cp.setup()
         bridge = _make_bridge()
+        executor = Executor(checkpointer=cp, bridge=bridge)
         try:
-            executor = Executor(checkpointer=cp, bridge=bridge)
             _install_probe_graph(executor, thread_id, observed)
 
             bundle = ActorTokenBundle(

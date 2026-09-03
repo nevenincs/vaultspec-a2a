@@ -18,7 +18,12 @@ import pytest
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from ...conftest import materialize_schema
 from ...database import create_thread
@@ -136,7 +141,9 @@ async def _repair_row_count(session: AsyncSession, tid: str) -> int:
     ).scalar_one()
 
 
-def _database(runtime_dir, name: str):
+def _database(
+    runtime_dir: Path, name: str
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     db_file = runtime_dir / f"{name}.db"
     materialize_schema(Path(db_file))
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -146,7 +153,7 @@ def _database(runtime_dir, name: str):
 
 
 @pytest.mark.asyncio
-async def test_repair_journal_stops_growing_once_capped(runtime_dir) -> None:
+async def test_repair_journal_stops_growing_once_capped(runtime_dir: Path) -> None:
     """Twelve boots against a two-boot cap leave four rows, not twenty-four."""
     tid = "thread-repair-capped"
     engine, session_factory = _database(runtime_dir, "repair-retention-capped")
@@ -175,7 +182,7 @@ async def test_repair_journal_stops_growing_once_capped(runtime_dir) -> None:
 
 
 @pytest.mark.asyncio
-async def test_uncapped_repair_journal_grows_with_every_boot(runtime_dir) -> None:
+async def test_uncapped_repair_journal_grows_with_every_boot(runtime_dir: Path) -> None:
     """Zero retention is the prior unbounded behaviour - the defect, pinned.
 
     Without this the cap could silently become a no-op and the first test would
@@ -209,7 +216,9 @@ async def test_uncapped_repair_journal_grows_with_every_boot(runtime_dir) -> Non
 
 
 @pytest.mark.asyncio
-async def test_capped_boots_leave_every_recoverable_row_intact(runtime_dir) -> None:
+async def test_capped_boots_leave_every_recoverable_row_intact(
+    runtime_dir: Path,
+) -> None:
     """The surviving set must still be sufficient to redrive after the prune.
 
     The assertion is deliberately an inventory identity rather than a re-check of
@@ -277,7 +286,9 @@ async def test_capped_boots_leave_every_recoverable_row_intact(runtime_dir) -> N
 
 
 @pytest.mark.asyncio
-async def test_current_pass_pair_survives_a_cap_below_the_pair(runtime_dir) -> None:
+async def test_current_pass_pair_survives_a_cap_below_the_pair(
+    runtime_dir: Path,
+) -> None:
     """A cap of one must not reclaim a row the running pass is still holding.
 
     ``execute_reconciliation`` mutates the started row after writing it and writes

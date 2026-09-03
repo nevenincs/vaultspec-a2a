@@ -531,7 +531,7 @@ class TestThreadCRUD:
     @pytest.mark.asyncio
     async def test_data_survives_commit_in_fresh_session(
         self,
-        session_factory: async_sessionmaker,
+        session_factory: async_sessionmaker[AsyncSession],
     ) -> None:
         """committed data is readable from a new session.
 
@@ -849,9 +849,10 @@ class TestWALMode:
 
         # WAL mode is set via the connect event listener in session.py;
         # replicate it here for a standalone engine.
-        @event.listens_for(eng.sync_engine, "connect")
         def _set_wal(dbapi_conn: Any, _rec: object) -> None:
             dbapi_conn.execute("PRAGMA journal_mode=WAL")
+
+        event.listen(eng.sync_engine, "connect", _set_wal)
 
         async with eng.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

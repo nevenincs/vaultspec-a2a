@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
@@ -38,8 +39,8 @@ class _InProcessGateway:
     """
 
     def __init__(self, *, batch_status: int = 200) -> None:
-        self.batches: list[dict] = []
-        self.heartbeats: list[dict] = []
+        self.batches: list[dict[str, Any]] = []
+        self.heartbeats: list[dict[str, Any]] = []
         self.paths: list[str] = []
 
         _app = FastAPI()
@@ -61,6 +62,11 @@ class _InProcessGateway:
             body = await request.json()
             _self.heartbeats.append(body)
             return Response(content='{"status":"ok"}', media_type="application/json")
+
+        # Routes are dispatched by the ASGI app at request time via the decorator
+        # registration above, not by direct call — referenced here only so static
+        # analysis sees them as used.
+        _ = (_batch, _heartbeat)
 
         self._transport = ASGITransport(app=_app)
 

@@ -89,13 +89,13 @@ from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, AsyncIterator
 
     from fastapi import FastAPI
 
 
 @pytest_asyncio.fixture
-async def client(live_engine: EngineEndpoint):
+async def client(live_engine: EngineEndpoint) -> AsyncIterator[AuthoringClient]:
     async with AuthoringClient(
         live_engine.base_url, live_engine.bearer_token
     ) as authoring_client:
@@ -106,7 +106,8 @@ async def _high_water(client: AuthoringClient) -> int:
     """Read the current outbox high-water so the stream replays only new events."""
     snapshot = await client.recovery_snapshot(last_seq=0)
     assert isinstance(snapshot.data, dict)
-    latest = snapshot.data.get("latest_outbox_seq")
+    data = cast("dict[str, Any]", snapshot.data)
+    latest = data.get("latest_outbox_seq")
     assert isinstance(latest, int)
     return latest
 
@@ -121,7 +122,8 @@ async def test_live_stream_decodes_real_lifecycle_event(
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
     assert isinstance(minted, AuthoringResponse)
     assert isinstance(minted.data, dict)
-    client._actor_token = minted.data["raw_token"]
+    minted_data = cast("dict[str, Any]", minted.data)
+    client._actor_token = minted_data["raw_token"]
 
     baseline = await _high_water(client)
     session = AuthoringSession(client, run_id)
@@ -162,7 +164,8 @@ async def test_live_non_verdict_event_does_not_resume(
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
     assert isinstance(minted, AuthoringResponse)
     assert isinstance(minted.data, dict)
-    client._actor_token = minted.data["raw_token"]
+    minted_data = cast("dict[str, Any]", minted.data)
+    client._actor_token = minted_data["raw_token"]
 
     baseline = await _high_water(client)
     session = AuthoringSession(client, run_id)
@@ -280,7 +283,7 @@ async def _seed_parked(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_verdict_round_trip_parks_and_resumes(
-    client: AuthoringClient, tmp_path
+    client: AuthoringClient, tmp_path: Path
 ) -> None:
     """Approve / reject / request_changes each resume the correct parked run.
 
@@ -517,7 +520,7 @@ async def _wait_for_receipt(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_missed_reject_is_recovered_by_parked_reconcile(
-    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path
+    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path: Path
 ) -> None:
     """A HUMAN reject consumed BEFORE the run parks is recovered by the reconcile.
 
@@ -558,7 +561,8 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
     # non-stale approval decision - the exact recovery signal the reconcile reads.
     snapshot = await client.recovery_snapshot(last_seq=0)
     assert isinstance(snapshot.data, dict)
-    proposals = snapshot.data["snapshot"]["proposals"]["items"]
+    snapshot_data = cast("dict[str, Any]", snapshot.data)
+    proposals = snapshot_data["snapshot"]["proposals"]["items"]
     mine = [p for p in proposals if p.get("changeset_id") == info["changeset_id"]]
     assert mine, "submitted changeset absent from the recovery snapshot"
     rejected = mine[0]
@@ -646,7 +650,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcile(
-    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path
+    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path: Path
 ) -> None:
     """A run parked at a gate but mis-statused RUNNING is still recovered.
 
@@ -685,7 +689,8 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
     # non-stale approval decision - the exact recovery signal the reconcile reads.
     snapshot = await client.recovery_snapshot(last_seq=0)
     assert isinstance(snapshot.data, dict)
-    proposals = snapshot.data["snapshot"]["proposals"]["items"]
+    snapshot_data = cast("dict[str, Any]", snapshot.data)
+    proposals = snapshot_data["snapshot"]["proposals"]["items"]
     mine = [p for p in proposals if p.get("changeset_id") == info["changeset_id"]]
     assert mine, "submitted changeset absent from the recovery snapshot"
     assert mine[0]["status"] == "draft"
@@ -767,7 +772,7 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
-    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path
+    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path: Path
 ) -> None:
     """The broadened RUNNING candidacy does NOT false-re-drive an in-flight resume.
 

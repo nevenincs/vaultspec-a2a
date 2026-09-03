@@ -102,7 +102,9 @@ def _model_indexes(table: Table) -> dict[str, tuple[tuple[str, ...], bool, str |
     indexes: dict[str, tuple[tuple[str, ...], bool, str | None]] = {}
     for index in table.indexes:
         assert index.name is not None, f"{table.name} declares an unnamed Index"
-        predicate = index.dialect_options.get("sqlite", {}).get("where")
+        predicate: object = None
+        if "sqlite" in index.dialect_options:
+            predicate = index.dialect_options["sqlite"].get("where")
         indexes[index.name] = (
             tuple(column.name for column in index.columns),
             bool(index.unique),

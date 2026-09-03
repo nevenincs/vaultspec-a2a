@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -54,9 +54,11 @@ class RecordingMockPermissionModel(BaseChatModel):
         return self._calls
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "mock-chat-model"
 
+    @override
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -66,6 +68,7 @@ class RecordingMockPermissionModel(BaseChatModel):
     ) -> ChatResult:
         raise NotImplementedError("RecordingMockPermissionModel only supports async")
 
+    @override
     async def _agenerate(
         self,
         messages: list[BaseMessage],
@@ -114,6 +117,7 @@ async def test_worker_execution_integration() -> None:
     )
 
     result = await node(_make_state())
+    assert isinstance(result, dict)
     assert "messages" in result
     assert result["messages"][0].content == "HelloWorld"
     assert result["messages"][0].name == "coder"
@@ -140,6 +144,7 @@ async def test_worker_context_compaction_integration() -> None:
     state["messages"] = big_messages
 
     result = await node(state)
+    assert isinstance(result, dict)
     assert result["messages"][0].content == "Compacted"
 
 
@@ -179,7 +184,7 @@ async def test_worker_resume_reinvokes_model_with_tool_result() -> None:
         name="coder",
     )
 
-    builder = StateGraph(cast("Any", TeamState))
+    builder: StateGraph = StateGraph(cast("Any", TeamState))
     builder.add_node("coder", node)
     builder.set_entry_point("coder")
     builder.add_edge("coder", END)
@@ -224,6 +229,7 @@ async def test_worker_turn_clears_consumed_approval_residue() -> None:
 
     result = await node(state)
 
+    assert isinstance(result, dict)
     assert result["messages"][0].content == "approved once"
     assert result["approval_status"] is None
     assert result["approval_request_id"] is None
@@ -240,9 +246,11 @@ class MarkCompleteEmittingModel(BaseChatModel):
     _calls: list[list[BaseMessage]] = PrivateAttr(default_factory=list)
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "mark-complete-model"
 
+    @override
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -252,6 +260,7 @@ class MarkCompleteEmittingModel(BaseChatModel):
     ) -> ChatResult:
         raise NotImplementedError("MarkCompleteEmittingModel only supports async")
 
+    @override
     async def _agenerate(
         self,
         messages: list[BaseMessage],
@@ -326,7 +335,7 @@ async def test_worker_dispatches_mark_complete_command_through_graph(
         task_queue_port=port,
     )
 
-    builder = StateGraph(cast("Any", TeamState))
+    builder: StateGraph = StateGraph(cast("Any", TeamState))
     builder.add_node("coder", node)
     builder.set_entry_point("coder")
     builder.add_edge("coder", END)

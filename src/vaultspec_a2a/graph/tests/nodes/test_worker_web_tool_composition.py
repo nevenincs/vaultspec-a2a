@@ -162,6 +162,7 @@ async def _allowed_tools_at_spawn(
         role=role,
     )
     result = await node(_make_state())
+    assert isinstance(result, dict)
     assert result["messages"][0].content == "grounded"
 
     params = json.loads(record_file.read_text(encoding="utf-8"))

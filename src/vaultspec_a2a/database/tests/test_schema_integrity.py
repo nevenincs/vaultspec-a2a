@@ -40,7 +40,7 @@ from alembic import command
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from pydantic import ValidationError
-from sqlalchemy import Connection, create_engine, inspect, select, text
+from sqlalchemy import Connection, String, create_engine, inspect, select, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -394,7 +394,9 @@ class TestWorkspaceRootBoundIsTheColumn:
     @staticmethod
     def _column_width() -> int:
         """Return the declared width of ``threads.workspace_root``."""
-        width = ThreadModel.__table__.c.workspace_root.type.length  # ty: ignore
+        column_type = ThreadModel.__table__.c.workspace_root.type
+        assert isinstance(column_type, String)
+        width = column_type.length
         assert isinstance(width, int), (
             "threads.workspace_root no longer declares a width; the bound every "
             "upstream check enforces has nothing left to be derived from"
@@ -492,7 +494,9 @@ class TestFeatureTagBoundIsTheColumn:
     @staticmethod
     def _column_width() -> int:
         """Return the declared width of ``threads.feature_tag``."""
-        width = ThreadModel.__table__.c.feature_tag.type.length  # ty: ignore
+        column_type = ThreadModel.__table__.c.feature_tag.type
+        assert isinstance(column_type, String)
+        width = column_type.length
         assert isinstance(width, int), (
             "threads.feature_tag no longer declares a width; the bound every "
             "upstream check enforces has nothing left to be derived from"
@@ -586,7 +590,7 @@ class TestFeatureTagBoundIsTheColumn:
         """
         width = self._column_width()
         tag = "f" * width
-        stamp = datetime.now(UTC).isoformat()
+        stamp = datetime.now(UTC)
 
         active = ActiveRunRecord(
             run_id="r-1", status=ThreadStatus.RUNNING, feature_tag=tag
@@ -613,7 +617,7 @@ class TestFeatureTagBoundIsTheColumn:
         """
         width = self._column_width()
         over = "f" * (width + 1)
-        stamp = datetime.now(UTC).isoformat()
+        stamp = datetime.now(UTC)
 
         with pytest.raises(ValidationError) as active_refusal:
             ActiveRunRecord(run_id="r-1", status=ThreadStatus.RUNNING, feature_tag=over)

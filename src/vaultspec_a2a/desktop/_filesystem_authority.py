@@ -225,6 +225,8 @@ def _windows_error(error: int, path: Path) -> OSError:
     selects the class from the winerror and fills ``errno`` from the platform's
     own mapping, so both ``isinstance`` and ``exc.winerror`` answer truthfully.
     """
+    if sys.platform != "win32":
+        raise OSError(errno.ENOSYS, "Windows error codes are unavailable", path)
     return OSError(0, ctypes.FormatError(error), str(path), error)
 
 
@@ -299,6 +301,8 @@ def _windows_directory_lease(
     *,
     publication: bool,
 ) -> Iterator[DirectoryAuthority]:
+    if sys.platform != "win32":
+        raise OSError(errno.ENOSYS, "Windows directory leases require Windows")
     library = _windows_library()
     create_file = _create_file_w(library)
     invalid_handle = ctypes.c_void_p(-1).value

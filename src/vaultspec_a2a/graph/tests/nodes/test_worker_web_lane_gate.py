@@ -32,7 +32,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from langchain_core.messages import HumanMessage
@@ -104,12 +104,12 @@ def _model(
     )
 
 
-def _allowed_tools(params: dict) -> list[str]:
+def _allowed_tools(params: dict[str, Any]) -> list[str]:
     meta = params.get("_meta", {})
     return meta.get("claudeCode", {}).get("options", {}).get("allowedTools", [])
 
 
-def _prompt_blocks(params: dict) -> list[str]:
+def _prompt_blocks(params: dict[str, Any]) -> list[str]:
     """The text blocks the CLI received, in order and unaltered."""
     return [
         block.get("text", "")
@@ -118,7 +118,7 @@ def _prompt_blocks(params: dict) -> list[str]:
     ]
 
 
-def _prompt_text(params: dict) -> str:
+def _prompt_text(params: dict[str, Any]) -> str:
     """The prompt the CLI received, whitespace-normalised for phrase matching.
 
     The persona text is hard-wrapped in its preset, so a sentence that reads as one
@@ -144,6 +144,7 @@ async def test_an_unproven_lane_surfaces_no_web_tool_name(
     )
 
     result = await node(_make_state())
+    assert isinstance(result, dict)
     assert result["messages"][0].content == "researched"
 
     allowed = _allowed_tools(json.loads(record_file.read_text(encoding="utf-8")))

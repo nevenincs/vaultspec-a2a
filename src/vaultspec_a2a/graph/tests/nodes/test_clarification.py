@@ -764,7 +764,7 @@ class TestBoundClarificationQuestions:
 
     def test_a_choice_left_with_no_usable_option_is_dropped(self) -> None:
         """A choice offering nothing to choose is not a renderable question."""
-        proposed = [
+        proposed: list[dict[str, Any]] = [
             {"id": "empty", "prompt": "Pick", "kind": "choice", "options": []},
             {"id": "blanks", "prompt": "Pick", "kind": "choice", "options": ["", ""]},
             {"id": "wrong_type", "prompt": "Pick", "kind": "choice", "options": "a,b"},

@@ -22,7 +22,7 @@ import sys
 import warnings
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
@@ -626,9 +626,13 @@ class TestCodexUsageCapture:
         )
         usage = message.usage_metadata
         assert usage is not None
-        assert usage["input_token_details"]["cache_read"] == 420
-        assert usage["input_token_details"]["cache_creation"] == 15
-        assert usage["output_token_details"]["reasoning"] == 48
+        input_token_details = usage.get("input_token_details")
+        assert input_token_details is not None
+        assert input_token_details.get("cache_read") == 420
+        assert input_token_details.get("cache_creation") == 15
+        output_token_details = usage.get("output_token_details")
+        assert output_token_details is not None
+        assert output_token_details.get("reasoning") == 48
 
 
 class TestUsageReachesAPersistedRow:
@@ -724,12 +728,14 @@ class TestStateChannelIsFedNotBypassed:
         exactly what ``_merge_token_usage`` and ``TokenUsageEntry`` already
         consume, or feeding them would only look like reuse.
         """
-        channel = self._update(worker, message)["token_usage"]
-        assert isinstance(channel, dict)
+        raw_channel = self._update(worker, message)["token_usage"]
+        assert isinstance(raw_channel, dict)
+        channel = cast("dict[str, object]", raw_channel)
         verified: dict[str, dict[str, int]] = {}
-        for agent_id, counters in channel.items():
+        for agent_id, raw_counters in channel.items():
             assert isinstance(agent_id, str)
-            assert isinstance(counters, dict)
+            assert isinstance(raw_counters, dict)
+            counters = cast("dict[str, object]", raw_counters)
             checked: dict[str, int] = {}
             for key, value in counters.items():
                 assert isinstance(key, str)

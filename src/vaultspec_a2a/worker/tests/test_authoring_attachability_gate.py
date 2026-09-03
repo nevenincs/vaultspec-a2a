@@ -37,6 +37,7 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.language_models.fake_chat_models import FakeChatModel
+from pydantic import Field
 
 from ...providers._acp_authoring import attach_authoring_tools
 from ...providers.tests.test_acp_authoring import _binding, _stdio_binding
@@ -46,6 +47,8 @@ from ...team.team_config import load_agent_config, load_team_config
 class _AcpSurfaceModel(FakeChatModel):
     """A model exposing the ACP lane's ``with_mcp_servers`` surface."""
 
+    responses: list[str] = Field(default_factory=list)
+
     def with_mcp_servers(
         self, mcp_servers: Any, allowed_tools: Any = None
     ) -> _AcpSurfaceModel:
@@ -54,6 +57,8 @@ class _AcpSurfaceModel(FakeChatModel):
 
 class _CodexSurfaceModel(FakeChatModel):
     """A model exposing the Codex lane's ``with_authoring_mcp_server`` surface."""
+
+    responses: list[str] = Field(default_factory=list)
 
     def with_authoring_mcp_server(self, spec: Any) -> _CodexSurfaceModel:
         return self

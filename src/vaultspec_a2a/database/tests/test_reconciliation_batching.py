@@ -33,7 +33,7 @@ from ..reconciliation import reconcile_threads_on_startup
 from ..thread_repository import create_thread, get_thread
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 
 class _StatementLog:
@@ -53,7 +53,7 @@ class _StatementLog:
 
 
 @contextmanager
-def _record(engine: AsyncEngine) -> Iterator[_StatementLog]:
+def _record(engine: AsyncEngine) -> Generator[_StatementLog]:
     """Record the statements issued on ``engine`` for the duration of the block."""
     log = _StatementLog()
 

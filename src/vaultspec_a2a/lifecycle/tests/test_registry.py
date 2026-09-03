@@ -14,9 +14,12 @@ import socket
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from ...testing.ports import free_port
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
@@ -61,7 +64,7 @@ def _record(**overrides: Any) -> ProcRecord:
     return ProcRecord(**base)
 
 
-def test_write_then_read_roundtrips_at_the_named_path(tmp_path) -> None:
+def test_write_then_read_roundtrips_at_the_named_path(tmp_path: Path) -> None:
     record = _record(command=["vaultspec-a2a", "serve", "--port", "18100"])
     path = write_record(record, home=tmp_path)
 
@@ -71,7 +74,7 @@ def test_write_then_read_roundtrips_at_the_named_path(tmp_path) -> None:
     assert back == record
 
 
-def test_build_repo_roundtrips_through_the_record_schema(tmp_path) -> None:
+def test_build_repo_roundtrips_through_the_record_schema(tmp_path: Path) -> None:
     # A distinct build tree captured in the machine-global record (never in the
     # committed procs.toml) must survive write -> read intact.
     record = _record(build_repo="Z:/dashboard/main/engine")
@@ -82,7 +85,9 @@ def test_build_repo_roundtrips_through_the_record_schema(tmp_path) -> None:
     assert back.build_repo == "Z:/dashboard/main/engine"
 
 
-def test_engine_service_json_roundtrips_through_the_record_schema(tmp_path) -> None:
+def test_engine_service_json_roundtrips_through_the_record_schema(
+    tmp_path: Path,
+) -> None:
     # The recorded engine-discovery path (machine-specific, never in procs.toml) must
     # survive write -> read so resume/rerun can re-inject it.
     record = _record(engine_service_json="C:/dashboard/main/engine-service.json")
@@ -93,7 +98,7 @@ def test_engine_service_json_roundtrips_through_the_record_schema(tmp_path) -> N
     assert back.engine_service_json == "C:/dashboard/main/engine-service.json"
 
 
-def test_pairing_fields_roundtrip_through_the_record_schema(tmp_path) -> None:
+def test_pairing_fields_roundtrip_through_the_record_schema(tmp_path: Path) -> None:
     # The token-FILE path (never the token) and the paired gateway URL are
     # non-secret references the record may carry; they must survive write -> read.
     record = _record(
@@ -110,7 +115,7 @@ def test_pairing_fields_roundtrip_through_the_record_schema(tmp_path) -> None:
     assert back.worker_url == "http://127.0.0.1:18110"
 
 
-def test_list_enumerates_valid_and_skips_malformed(tmp_path) -> None:
+def test_list_enumerates_valid_and_skips_malformed(tmp_path: Path) -> None:
     write_record(_record(name="alpha", port=18100), home=tmp_path)
     write_record(_record(name="beta", port=18101), home=tmp_path)
     # A malformed sibling file must not break enumeration.
@@ -120,7 +125,9 @@ def test_list_enumerates_valid_and_skips_malformed(tmp_path) -> None:
     assert names == {"alpha", "beta"}
 
 
-def test_write_refuses_to_clobber_a_live_record_of_another_owner(tmp_path) -> None:
+def test_write_refuses_to_clobber_a_live_record_of_another_owner(
+    tmp_path: Path,
+) -> None:
     # A live record (this process's pid) owned by session-a.
     write_record(_record(owner="session-a", pid=os.getpid()), home=tmp_path)
 
@@ -129,7 +136,7 @@ def test_write_refuses_to_clobber_a_live_record_of_another_owner(tmp_path) -> No
         write_record(_record(owner="session-b", pid=os.getpid()), home=tmp_path)
 
 
-def test_write_reclaims_a_dead_record_of_another_owner(tmp_path) -> None:
+def test_write_reclaims_a_dead_record_of_another_owner(tmp_path: Path) -> None:
     write_record(_record(owner="session-a", pid=_dead_pid()), home=tmp_path)
 
     # The prior owner's process is dead, so the record is freely reclaimable.
@@ -138,7 +145,7 @@ def test_write_reclaims_a_dead_record_of_another_owner(tmp_path) -> None:
     assert read_record(record_path("gateway-dev", "alpha", home=tmp_path)) == reclaimed
 
 
-def test_remove_if_owned_respects_a_live_foreign_owner(tmp_path) -> None:
+def test_remove_if_owned_respects_a_live_foreign_owner(tmp_path: Path) -> None:
     write_record(_record(owner="session-a", pid=os.getpid()), home=tmp_path)
 
     # A different owner cannot remove a live record ...
@@ -165,7 +172,7 @@ def _role(band: PortBand, *, heartbeat: bool, staleness_ms: int = 120000) -> Rol
     )
 
 
-def test_classify_reports_dead_stale_and_live(tmp_path) -> None:
+def test_classify_reports_dead_stale_and_live(tmp_path: Path) -> None:
     role = _role(PortBand(18100, 18109), heartbeat=True, staleness_ms=1000)
 
     dead = _record(pid=_dead_pid())
@@ -184,7 +191,7 @@ def test_classify_reports_dead_stale_and_live(tmp_path) -> None:
     assert classify_record(stale, no_hb, now=now_ms()) is StalenessState.LIVE
 
 
-def test_refresh_last_seen_advances_the_heartbeat(tmp_path) -> None:
+def test_refresh_last_seen_advances_the_heartbeat(tmp_path: Path) -> None:
     record = _record(last_seen_ms=1)
     write_record(record, home=tmp_path)
 
@@ -203,7 +210,9 @@ def _config(band: PortBand) -> ProcsConfig:
     )
 
 
-def test_allocate_returns_a_free_band_port_and_skips_live_claims(tmp_path) -> None:
+def test_allocate_returns_a_free_band_port_and_skips_live_claims(
+    tmp_path: Path,
+) -> None:
     # A small band of real, high, likely-free ports for a deterministic bind test.
     band = PortBand(18900, 18902)
     role = _role(band, heartbeat=False)
@@ -221,7 +230,7 @@ def test_allocate_returns_a_free_band_port_and_skips_live_claims(tmp_path) -> No
     assert second in band and second != first
 
 
-def test_allocate_raises_when_band_exhausted(tmp_path) -> None:
+def test_allocate_raises_when_band_exhausted(tmp_path: Path) -> None:
     band = PortBand(18900, 18901)
     role = _role(band, heartbeat=False)
     config = _config(band)
@@ -235,7 +244,7 @@ def test_allocate_raises_when_band_exhausted(tmp_path) -> None:
         allocate_port("scratch", role, home=tmp_path, config=config)
 
 
-def test_reserve_port_is_exclusive_across_back_to_back_callers(tmp_path) -> None:
+def test_reserve_port_is_exclusive_across_back_to_back_callers(tmp_path: Path) -> None:
     # The allocate-and-claim race closer: a held reservation blocks the SAME port,
     # so two back-to-back reservations (neither yet backed by a record) differ.
     # (The O_EXCL create is the concurrency arbiter; this proves the held-marker
@@ -256,7 +265,7 @@ def test_reserve_port_is_exclusive_across_back_to_back_callers(tmp_path) -> None
     assert allocated not in {first.port, second.port}
 
 
-def test_commit_reservation_writes_record_and_clears_marker(tmp_path) -> None:
+def test_commit_reservation_writes_record_and_clears_marker(tmp_path: Path) -> None:
     band = PortBand(18900, 18902)
     role = _role(band, heartbeat=False)
     config = _config(band)
@@ -271,7 +280,7 @@ def test_commit_reservation_writes_record_and_clears_marker(tmp_path) -> None:
     assert persisted.port == reservation.port
 
 
-def test_release_reservation_frees_the_port(tmp_path) -> None:
+def test_release_reservation_frees_the_port(tmp_path: Path) -> None:
     band = PortBand(18900, 18900)  # single-port band
     role = _role(band, heartbeat=False)
     config = _config(band)
@@ -286,7 +295,7 @@ def test_release_reservation_frees_the_port(tmp_path) -> None:
     assert again.port == first.port
 
 
-def test_stale_reservation_marker_is_reclaimable(tmp_path) -> None:
+def test_stale_reservation_marker_is_reclaimable(tmp_path: Path) -> None:
     band = PortBand(18900, 18900)
     role = _role(band, heartbeat=False)
     config = _config(band)
@@ -301,7 +310,7 @@ def test_stale_reservation_marker_is_reclaimable(tmp_path) -> None:
     assert reclaimed.port == stale.port
 
 
-def test_reserve_reclaims_a_marker_whose_reserver_pid_is_dead(tmp_path) -> None:
+def test_reserve_reclaims_a_marker_whose_reserver_pid_is_dead(tmp_path: Path) -> None:
     band = PortBand(18900, 18900)  # single-port band
     role = _role(band, heartbeat=False)
     config = _config(band)
@@ -316,7 +325,9 @@ def test_reserve_reclaims_a_marker_whose_reserver_pid_is_dead(tmp_path) -> None:
     assert reclaimed.port == 18900
 
 
-def test_port_free_and_reserve_skip_a_foreign_reuseaddr_listener(tmp_path) -> None:
+def test_port_free_and_reserve_skip_a_foreign_reuseaddr_listener(
+    tmp_path: Path,
+) -> None:
     # Regression lock for the Windows collision the live dogfood caught: a real
     # SO_REUSEADDR listener NOT in the registry (a foreign resident gateway). The
     # old bind+SO_REUSEADDR free-check reported such a port FREE on Windows, so
@@ -346,7 +357,9 @@ def test_port_free_and_reserve_skip_a_foreign_reuseaddr_listener(tmp_path) -> No
         foreign.close()
 
 
-def test_concurrent_reservers_in_two_processes_never_share_a_port(tmp_path) -> None:
+def test_concurrent_reservers_in_two_processes_never_share_a_port(
+    tmp_path: Path,
+) -> None:
     """Two real interpreters reserving from one band get disjoint ports.
 
     The regression this pins: liveness judged against a stale clock snapshot

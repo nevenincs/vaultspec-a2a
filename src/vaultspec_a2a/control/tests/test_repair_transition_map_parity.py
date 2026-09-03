@@ -12,6 +12,7 @@ already right; it was the functions that duplicated it.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
@@ -36,9 +37,18 @@ from ...thread.repair_policy import (
     repair_state_for_action,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
+    from ...database.models import ThreadModel
+
+    _TransitionFn = Callable[[AsyncSession, str], Awaitable[ThreadModel | None]]
+
 
 @pytest_asyncio.fixture
-async def session_factory(tmp_path_factory: pytest.TempPathFactory):
+async def session_factory(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     case_dir = tmp_path_factory.mktemp("repair-parity-db")
     materialize_schema(Path(case_dir / "test.db"))
     engine = create_async_engine(f"sqlite+aiosqlite:///{case_dir / 'test.db'}")
@@ -46,7 +56,7 @@ async def session_factory(tmp_path_factory: pytest.TempPathFactory):
     await engine.dispose()
 
 
-_CASES = [
+_CASES: list[tuple[_TransitionFn, ControlActionType, str]] = [
     (mark_ingest_requested, ControlActionType.INGEST, "requested"),
     (mark_ingest_applied, ControlActionType.INGEST, "applied"),
     (
@@ -100,7 +110,7 @@ async def test_each_transition_persists_what_the_map_declares(
 
 @pytest.mark.asyncio
 async def test_dispatch_failed_persists_the_pure_policy_transition(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Dispatch failure writes exactly the pure ``DISPATCH_FAILED_TRANSITION``.
 
@@ -130,7 +140,7 @@ async def test_dispatch_failed_persists_the_pure_policy_transition(
 
 @pytest.mark.asyncio
 async def test_apply_dispatch_failure_moves_status_and_repair_state_together(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The shared helper pairs the thread-status change with the repair transition.
 

@@ -37,7 +37,9 @@ async def session_factory(tmp_path_factory: pytest.TempPathFactory):
     await engine.dispose()
 
 
-async def _seed_deleting_thread(session_factory, thread_id: str) -> None:
+async def _seed_deleting_thread(
+    session_factory: async_sessionmaker[AsyncSession], thread_id: str
+) -> None:
     async with session_factory() as session:
         await create_thread(session, thread_id=thread_id, status=ThreadStatus.COMPLETED)
         await create_deletion_saga(session, thread_id=thread_id, manifest=[])
@@ -46,7 +48,7 @@ async def _seed_deleting_thread(session_factory, thread_id: str) -> None:
 
 @pytest.mark.asyncio
 async def test_deleting_thread_is_absent_from_the_product_list(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A deleting thread is excluded from the list and the total count."""
     async with session_factory() as session:
@@ -64,7 +66,7 @@ async def test_deleting_thread_is_absent_from_the_product_list(
 
 @pytest.mark.asyncio
 async def test_deleting_thread_status_filter_is_still_hidden(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Even an explicit deleting status filter surfaces nothing from the product."""
     await _seed_deleting_thread(session_factory, "gone")
@@ -82,7 +84,7 @@ async def test_deleting_thread_status_filter_is_still_hidden(
 
 @pytest.mark.asyncio
 async def test_run_lookup_reports_a_deleting_thread_as_absent(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The run-status read treats a deleting thread as not found."""
     await _seed_deleting_thread(session_factory, "gone")
@@ -100,7 +102,7 @@ async def test_run_lookup_reports_a_deleting_thread_as_absent(
 
 @pytest.mark.asyncio
 async def test_cleanup_can_still_read_a_deleting_thread_directly(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The deleting thread remains directly readable for the cleanup coordinator."""
     await _seed_deleting_thread(session_factory, "gone")

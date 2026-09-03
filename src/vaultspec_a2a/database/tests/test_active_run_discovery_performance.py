@@ -7,7 +7,7 @@ import statistics
 import time
 import tracemalloc
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import pytest_asyncio
@@ -26,6 +26,8 @@ from ..thread_repository import _active_thread_page_statement, _workspace_key
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from pathlib import Path
+
+    from ...control.run_discovery_service import ActiveRunDiscoveryResult
 
 _HISTORY_ROWS = 100_000
 
@@ -59,7 +61,7 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
     insert_statement = insert(ThreadModel)
 
     for offset in range(0, _HISTORY_ROWS, 5_000):
-        batch = []
+        batch: list[dict[str, Any]] = []
         for index in range(offset, min(offset + 5_000, _HISTORY_ROWS)):
             matching = index >= _HISTORY_ROWS - 10
             created_at = started_at + timedelta(microseconds=index)
@@ -127,7 +129,8 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
         feature_tag="a2a",
         limit=5,
     )
-    samples_ms = []
+    samples_ms: list[float] = []
+    result: ActiveRunDiscoveryResult | None = None
     tracemalloc.start()
     try:
         for _ in range(20):
@@ -143,6 +146,7 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
     finally:
         tracemalloc.stop()
 
+    assert result is not None
     assert [run.run_id for run in result.runs] == [
         "history-099999",
         "history-099998",
@@ -151,7 +155,7 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
         "history-099995",
     ]
     assert result.truncated is True
-    p95_ms = statistics.quantiles(samples_ms, n=20)[-1]
+    p95_ms: float = statistics.quantiles(samples_ms, n=20)[-1]
     assert p95_ms < 250, {"p95_ms": p95_ms, "samples_ms": samples_ms}
     assert peak_bytes < 5 * 1024 * 1024, {
         "peak_bytes": peak_bytes,

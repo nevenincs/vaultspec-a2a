@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from langchain_core.language_models import BaseChatModel
@@ -72,9 +72,11 @@ def test_worker_model_label_falls_back_to_the_class_it_can_name() -> None:
 
     class _Unidentified(BaseChatModel):
         @property
+        @override
         def _llm_type(self) -> str:
             return "unidentified"
 
+        @override
         def _generate(self, *args: object, **kwargs: object) -> ChatResult:
             raise NotImplementedError
 
@@ -92,9 +94,11 @@ def test_worker_model_label_declines_an_unbounded_identity() -> None:
         model_name: str = "m" * 500
 
         @property
+        @override
         def _llm_type(self) -> str:
             return "overlong"
 
+        @override
         def _generate(self, *args: object, **kwargs: object) -> ChatResult:
             raise NotImplementedError
 
@@ -243,7 +247,7 @@ def test_build_worker_messages_has_no_feedback_block_when_absent() -> None:
         )
 
 
-def test_build_worker_messages_scopes_document_role_not_coder(tmp_path) -> None:
+def test_build_worker_messages_scopes_document_role_not_coder(tmp_path: Any) -> None:
     """A document role gets role-scoped rules; a coder role gets the whole corpus.
 
     P04 wiring: ``_build_worker_messages`` routes a research_adr document role to the

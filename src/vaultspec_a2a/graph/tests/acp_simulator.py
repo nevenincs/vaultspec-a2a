@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+from typing import Any
 
 
 def _record_config_home(path: str) -> None:
@@ -132,6 +133,7 @@ def main() -> None:
         if msg_id is None:
             continue
 
+        resp: dict[str, Any] = {}
         if method == "initialize":
             if args.record_initialize:
                 with open(args.record_initialize, "w", encoding="utf-8") as fh:

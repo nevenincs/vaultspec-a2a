@@ -84,7 +84,7 @@ async def test_the_page_is_ordered_newest_first(session_factory) -> None:
 
 @pytest.mark.asyncio
 async def test_a_verified_absent_checkpoint_does_not_degrade_the_thread(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A healthy thread whose checkpoint is genuinely absent stays healthy.
 
@@ -133,7 +133,7 @@ async def test_an_uncertain_checkpoint_degrades_the_thread(session_factory) -> N
 
 @pytest.mark.asyncio
 async def test_the_whole_list_stays_bounded_under_a_slow_store(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A page of slow-reading threads must not cost the per-read sum."""
     await _seed(session_factory, 10)

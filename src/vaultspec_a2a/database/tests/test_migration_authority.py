@@ -23,13 +23,12 @@ from pathlib import Path
 
 from alembic.script import ScriptDirectory
 
-import vaultspec_a2a
-
+from ... import __file__ as _package_file
 from .. import admin as database_admin
 from ..migrate import migration_script_location
 from ..models import Base
 
-_PACKAGE_ROOT = Path(vaultspec_a2a.__file__).resolve().parent
+_PACKAGE_ROOT = Path(_package_file).resolve().parent
 
 
 def _head_revision() -> str:

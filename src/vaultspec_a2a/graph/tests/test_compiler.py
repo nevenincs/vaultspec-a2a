@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 import pytest_asyncio
@@ -1114,7 +1114,7 @@ async def test_every_model_backed_node_carries_the_production_retry_policy(
 
 
 @pytest.mark.asyncio
-async def test_research_producer_injects_scoped_conventions(tmp_path) -> None:
+async def test_research_producer_injects_scoped_conventions(tmp_path: Any) -> None:
     """The researcher's model turn receives the role-scoped bundled conventions.
 
     The researcher is the fourth research_adr document persona but runs through
@@ -1124,13 +1124,20 @@ async def test_research_producer_injects_scoped_conventions(tmp_path) -> None:
     """
     from typing import cast
 
-    from langchain_core.messages import AIMessage
+    from langchain_core.messages import AIMessage, BaseMessage
     from langchain_core.outputs import ChatGeneration, ChatResult
 
-    captured: dict[str, list] = {}
+    captured: dict[str, list[BaseMessage]] = {}
 
     class _RecordingModel(FakeChatModel):
-        async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        @override
+        async def _agenerate(
+            self,
+            messages: Any,
+            stop: Any = None,
+            run_manager: Any = None,
+            **kwargs: Any,
+        ) -> ChatResult:
             captured["messages"] = list(messages)
             return ChatResult(
                 generations=[ChatGeneration(message=AIMessage(content="finding"))]

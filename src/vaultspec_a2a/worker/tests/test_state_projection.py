@@ -125,6 +125,11 @@ def _relayed_terminal_projector(
         relayed.extend(body["events"])
         return Response(content='{"status":"ok"}', media_type="application/json")
 
+    # Dispatched by the ASGI app at request time via the decorator registration
+    # above, not by direct call — referenced here only so static analysis sees
+    # it as used.
+    _ = _batch
+
     bridge = WorkerBridge(api_url="http://control:8000", worker_id="projector-test")
     bridge._client = httpx.AsyncClient(
         transport=ASGITransport(app=app),

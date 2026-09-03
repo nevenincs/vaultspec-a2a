@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import pathlib
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import httpx
 import pytest
@@ -36,6 +36,7 @@ from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ThreadStatus
 from ..executor import _INGEST_GUARDS, _RESUME_GUARDS, Executor
 from ..graph_lifecycle import (
+    GraphCacheKey,
     GraphCompilationError,
     GraphLifecycleManager,
     RegisteredCompiledGraph,
@@ -43,7 +44,30 @@ from ..graph_lifecycle import (
 from ..ipc import WorkerBridge
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from langgraph.types import Command
+
+    from ...streaming.types import StreamableGraph
     from ...thread.state import TeamState
+
+
+class _Ingest(Protocol):
+    """Typed call signature for ``StreamAggregator.ingest``, whose production
+    ``graph_input`` parameter type carries an unparameterized ``Command``; re-typed
+    here so the call below doesn't propagate that Unknown into this test module."""
+
+    async def __call__(
+        self,
+        thread_id: str,
+        agent_id: str,
+        graph: StreamableGraph,
+        graph_input: dict[str, Any] | Command[Any] | None,
+        config: dict[str, Any],
+        *,
+        on_graph_started: Callable[[], Awaitable[None]] | None = None,
+    ) -> str: ...
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -69,6 +93,11 @@ def _make_bridge(
     async def _heartbeat(request: Request) -> Response:
         return Response(content='{"status":"ok"}', media_type="application/json")
 
+    # Routes are dispatched by the ASGI app at request time via the decorator
+    # registration above, not by direct call — referenced here only so static
+    # analysis sees them as used.
+    _ = (_batch, _heartbeat)
+
     bridge = WorkerBridge(api_url=api_url, worker_id=worker_id)
     bridge._client = httpx.AsyncClient(
         transport=ASGITransport(app=_app),
@@ -86,7 +115,7 @@ _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 
 
 def _inject_graph(
-    executor: Executor, thread_id: str, *, cache_key=_TEST_CACHE_KEY
+    executor: Executor, thread_id: str, *, cache_key: GraphCacheKey = _TEST_CACHE_KEY
 ) -> None:
     """Register a real terminal graph through the public executor seam."""
 
@@ -980,6 +1009,11 @@ def _make_observing_bridge(
     async def _heartbeat(request: Request) -> Response:
         return Response(content='{"status":"ok"}', media_type="application/json")
 
+    # Routes are dispatched by the ASGI app at request time via the decorator
+    # registration above, not by direct call — referenced here only so static
+    # analysis sees them as used.
+    _ = (_batch, _heartbeat)
+
     bridge = WorkerBridge(api_url="http://control:8000", worker_id="settle-worker")
     bridge._client = httpx.AsyncClient(
         transport=ASGITransport(app=app),
@@ -1318,6 +1352,11 @@ def _make_recording_bridge(relayed: list[dict[str, Any]]) -> WorkerBridge:
     @app.post("/internal/heartbeat")
     async def _heartbeat(request: Request) -> Response:
         return Response(content='{"status":"ok"}', media_type="application/json")
+
+    # Routes are dispatched by the ASGI app at request time via the decorator
+    # registration above, not by direct call — referenced here only so static
+    # analysis sees them as used.
+    _ = (_batch, _heartbeat)
 
     bridge = WorkerBridge(api_url="http://control:8000", worker_id="blank-worker")
     bridge._client = httpx.AsyncClient(
@@ -1799,7 +1838,8 @@ class TestTheFailureStashCannotOutliveItsRun:
             try:
                 # Run A fails through a real ingest, which classifies it and
                 # stashes both halves exactly as production does.
-                outcome = await executor.aggregator.ingest(
+                ingest = cast("_Ingest", executor.aggregator.ingest)
+                outcome = await ingest(
                     thread_id,
                     "supervisor",
                     self._throttled_graph(executor),

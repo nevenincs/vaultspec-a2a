@@ -21,7 +21,7 @@ from ...database.reconciliation import reconcile_threads_on_startup
 
 @pytest.mark.asyncio
 async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
-    runtime_dir,
+    runtime_dir: Path,
 ) -> None:
     """Missing checkpoint truth must win over a surviving permission row."""
     db_file = runtime_dir / "reconciliation.db"
@@ -73,7 +73,7 @@ async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
 
 @pytest.mark.asyncio
 async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
-    runtime_dir,
+    runtime_dir: Path,
 ) -> None:
     """Missing checkpoint truth must beat a surviving cancelling status."""
     db_file = runtime_dir / "reconciliation-cancelling.db"
@@ -117,7 +117,7 @@ async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
 
 @pytest.mark.asyncio
 async def test_deleting_thread_with_pending_permission_is_never_swept(
-    runtime_dir,
+    runtime_dir: Path,
 ) -> None:
     """A thread mid-teardown must stay invisible to startup reconciliation.
 
@@ -188,7 +188,7 @@ async def test_deleting_thread_with_pending_permission_is_never_swept(
 
 @pytest.mark.asyncio
 async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
-    runtime_dir,
+    runtime_dir: Path,
 ) -> None:
     """Answered-not-applied rows must not be treated as user-paused on restart."""
     db_file = runtime_dir / "reconciliation-answered-pending-apply.db"

@@ -91,6 +91,7 @@ async def test_worker_node_advertises_declared_harness_server(tmp_path: Path) ->
     )
 
     result = await node(_state())
+    assert isinstance(result, dict)
     assert result["messages"][0].content == "done"
     assert "vaultspec-rag" in _server_names(record_file)
 

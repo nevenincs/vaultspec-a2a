@@ -9,7 +9,7 @@ is tested directly.
 """
 
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
@@ -45,21 +45,23 @@ def _tool_call(task_id: str, call_id: str = "call_1") -> dict[str, Any]:
     }
 
 
-async def _mark_complete(tool: Any, task_id: str, call_id: str = "call_1") -> Command:
+async def _mark_complete(
+    tool: Any, task_id: str, call_id: str = "call_1"
+) -> Command[Any]:
     """Invoke the mark-complete tool and assert it returned a Command."""
     command = await tool.ainvoke(_tool_call(task_id, call_id))
     assert isinstance(command, Command)
-    return command
+    return cast("Command[Any]", command)
 
 
-def _update(command: Command) -> dict[str, Any]:
+def _update(command: Command[Any]) -> dict[str, Any]:
     """Return the Command's update mapping, asserting it is a dict."""
     update = command.update
     assert isinstance(update, dict)
-    return update
+    return cast("dict[str, Any]", update)
 
 
-def _tool_message(command: Command) -> ToolMessage:
+def _tool_message(command: Command[Any]) -> ToolMessage:
     """Extract the single ToolMessage from a mark-complete Command update."""
     messages = _update(command)["messages"]
     assert len(messages) == 1

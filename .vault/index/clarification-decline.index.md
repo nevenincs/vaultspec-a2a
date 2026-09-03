@@ -4,15 +4,13 @@ tags:
   - '#index'
   - '#clarification-decline'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_schema: 'body-v1'
-body_hash: 'sha256:e32faa6328d30f9b0670b9ba47dd9d1445f0fa3cd41948b71f914111fd7d58dd'
+modified: '2026-09-03'
+body_schema: 'body-v2'
+body_hash: 'sha256:7760dc23d44083d797431ebb173a0f073fc4a823438b9e0560967ecc78c08724'
 related:
-  - '[[2026-08-02-clarification-decline-S01]]'
-  - '[[2026-08-02-clarification-decline-S02]]'
-  - '[[2026-08-02-clarification-decline-S03]]'
   - '[[2026-08-02-clarification-decline-adr]]'
   - '[[2026-08-02-clarification-decline-implementation-review-audit]]'
+  - '[[2026-08-02-clarification-decline-ledger]]'
   - '[[2026-08-02-clarification-decline-plan]]'
   - '[[2026-08-02-clarification-decline-research]]'
 ---
@@ -33,9 +31,7 @@ Auto-generated index of all documents tagged with `#clarification-decline`.
 
 ### exec
 
-- `2026-08-02-clarification-decline-S01` - Define the typed decline outcome, its fixed marker text, and the graph resume behavior
-- `2026-08-02-clarification-decline-S02` - Map the additive decline response through the existing gateway verb
-- `2026-08-02-clarification-decline-S03` - Prove contract boundaries and the real worker decline loop
+- `2026-08-02-clarification-decline-ledger` - `clarification-decline` ledger
 
 ### plan
 

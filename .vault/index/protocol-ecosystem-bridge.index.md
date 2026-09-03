@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#protocol-ecosystem-bridge'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:32fbe2439a1a803ff36da3f196c46ee06fb85df9e81ab306255d79293b29e6e8'
 related:
   - '[[2026-02-26-protocol-ecosystem-bridge-adr]]'

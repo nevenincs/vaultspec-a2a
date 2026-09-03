@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#docs-vault-migration'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:b9c454843e8467880e714e41ff2b6b96ec0d038951f7951632e531a13defec39'
 related:
   - '[[2026-03-31-docs-vault-authority-retention-adr]]'

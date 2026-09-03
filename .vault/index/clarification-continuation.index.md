@@ -4,15 +4,13 @@ tags:
   - '#index'
   - '#clarification-continuation'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_schema: 'body-v1'
-body_hash: 'sha256:4a8b06bd3cde26b255d57292e04ca7a8b8762fc8329f052e34b043020b270323'
+modified: '2026-09-03'
+body_schema: 'body-v2'
+body_hash: 'sha256:c77b623ce628ab9ec322c5c62f5d84d8f584ec807e9d069e64eb45f83beb96e2'
 related:
-  - '[[2026-08-02-clarification-continuation-S01]]'
-  - '[[2026-08-02-clarification-continuation-S02]]'
-  - '[[2026-08-02-clarification-continuation-S03]]'
   - '[[2026-08-02-clarification-continuation-adr]]'
   - '[[2026-08-02-clarification-continuation-implementation-review-audit]]'
+  - '[[2026-08-02-clarification-continuation-ledger]]'
   - '[[2026-08-02-clarification-continuation-plan]]'
   - '[[2026-08-02-clarification-continuation-reference]]'
   - '[[2026-08-02-clarification-continuation-research]]'
@@ -34,9 +32,7 @@ Auto-generated index of all documents tagged with `#clarification-continuation`.
 
 ### exec
 
-- `2026-08-02-clarification-continuation-S01` - Define the typed continuation outcome and graph resume behavior
-- `2026-08-02-clarification-continuation-S02` - Map the additive prompt response through the existing gateway verb
-- `2026-08-02-clarification-continuation-S03` - Prove contract boundaries and the real worker continuation loop
+- `2026-08-02-clarification-continuation-ledger` - `clarification-continuation` ledger
 
 ### plan
 

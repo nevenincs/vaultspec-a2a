@@ -4,16 +4,15 @@ tags:
   - '#index'
   - '#llm-context-provider-abstraction'
 date: '2026-08-05'
-modified: '2026-08-05'
-body_schema: 'body-v1'
-body_hash: 'sha256:584a3359ec42e3ebe7659cc38257931ecfdee5c779a67bf9e21927721905313a'
+modified: '2026-09-03'
+body_schema: 'body-v2'
+body_hash: 'sha256:1e9d78634bef3db3e9127995d9a857dc6e4f5dd94c212de477ae739ee1339d22'
 related:
   - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
-  - '[[2026-08-02-llm-context-provider-abstraction-P01-S03]]'
-  - '[[2026-08-02-llm-context-provider-abstraction-P02-S04]]'
   - '[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr]]'
   - '[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-reference]]'
   - '[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-research]]'
+  - '[[2026-08-02-llm-context-provider-abstraction-ledger]]'
   - '[[2026-08-02-llm-context-provider-abstraction-plan]]'
 ---
 
@@ -30,8 +29,7 @@ Auto-generated index of all documents tagged with `#llm-context-provider-abstrac
 
 ### exec
 
-- `2026-08-02-llm-context-provider-abstraction-P01-S03` - Return ACP v1 exit-status objects and preserve killed terminal identity until explicit release.
-- `2026-08-02-llm-context-provider-abstraction-P02-S04` - Replace obsolete terminal-containment expectations with exact ACP v1 response and lifetime assertions.
+- `2026-08-02-llm-context-provider-abstraction-ledger` - `llm-context-provider-abstraction` ledger
 
 ### plan
 

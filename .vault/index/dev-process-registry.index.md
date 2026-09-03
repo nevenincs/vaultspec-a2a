@@ -4,14 +4,12 @@ tags:
   - '#index'
   - '#dev-process-registry'
 date: '2026-07-22'
-modified: '2026-07-22'
-body_hash: 'sha256:9f4135b505e7faf39d44234c6b005781196ae9fb31139534eb7de6cb51e50c82'
+modified: '2026-09-03'
+body_schema: 'body-v2'
+body_hash: 'sha256:19594bd1674655f62fa3ee07098fdb77676dd1f09f82d60761674f7638ccb656'
 related:
-  - '[[2026-07-15-dev-process-registry-P01-S01]]'
-  - '[[2026-07-15-dev-process-registry-P01-S02]]'
-  - '[[2026-07-15-dev-process-registry-P02-S03]]'
-  - '[[2026-07-15-dev-process-registry-P02-S04]]'
   - '[[2026-07-15-dev-process-registry-adr]]'
+  - '[[2026-07-15-dev-process-registry-ledger]]'
   - '[[2026-07-15-dev-process-registry-plan]]'
   - '[[2026-07-15-dev-process-registry-research]]'
 ---
@@ -28,10 +26,7 @@ Auto-generated index of all documents tagged with `#dev-process-registry`.
 
 ### exec
 
-- `2026-07-15-dev-process-registry-P01-S01` - Define procs.toml (role port bands, role build/serve commands, staleness windows) and the registry module: file-per-process JSON records under ~/.vaultspec/procs with atomic temp-and-rename writes, owner-checked mutation, pid-liveness and band-constrained port allocation
-- `2026-07-15-dev-process-registry-P01-S02` - Implement the lifecycle verbs on the operator CLI: procs list/attach/kill/rebuild/rerun/resume/reap with Windows tree-kill and staleness verdicts
-- `2026-07-15-dev-process-registry-P02-S03` - Route the gateway/worker serve paths, the engine-serve wrapper script, and the live-test/service-harness fixtures through registry registration and band-allocated ports
-- `2026-07-15-dev-process-registry-P02-S04` - Prove it live: two concurrent registered engine+gateway stacks without collision, a stale orphan detected and reaped, rerun rebuilding and re-registering on the same port, and procs list enumerating truthfully throughout
+- `2026-07-15-dev-process-registry-ledger` - `dev-process-registry` ledger
 
 ### plan
 

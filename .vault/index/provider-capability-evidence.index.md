@@ -4,13 +4,13 @@ tags:
   - '#index'
   - '#provider-capability-evidence'
 date: '2026-08-05'
-modified: '2026-08-05'
-body_schema: 'body-v1'
-body_hash: 'sha256:079735d49e8e4f375aeeec44cbe0c9fc108c92016562b1f1401b63407dd07734'
+modified: '2026-09-03'
+body_schema: 'body-v2'
+body_hash: 'sha256:926fb0d11cbb2a40e452948217abacd55493b4832c15f467cb01a45ce3bc6afe'
 related:
-  - '[[2026-08-02-provider-capability-evidence-P01-S01]]'
   - '[[2026-08-02-provider-capability-evidence-adr]]'
   - '[[2026-08-02-provider-capability-evidence-capability-contract-p01s01-review-audit]]'
+  - '[[2026-08-02-provider-capability-evidence-ledger]]'
   - '[[2026-08-02-provider-capability-evidence-plan]]'
   - '[[2026-08-02-provider-capability-evidence-research]]'
 ---
@@ -31,7 +31,7 @@ Auto-generated index of all documents tagged with `#provider-capability-evidence
 
 ### exec
 
-- `2026-08-02-provider-capability-evidence-P01-S01` - Define immutable capability evidence, blockers, proof citations, and permission modes
+- `2026-08-02-provider-capability-evidence-ledger` - `provider-capability-evidence` ledger
 
 ### plan
 

@@ -4,7 +4,8 @@ tags:
   - '#index'
   - '#tech-stack-deployment'
 date: '2026-07-22'
-modified: '2026-07-22'
+modified: '2026-09-03'
+body_schema: 'body-v2'
 body_hash: 'sha256:4e1722d4781fb4d2e3bbc15d7e1588b29ca8f299950afca5baf8bfc48fe52769'
 related:
   - '[[2026-02-26-tech-stack-deployment-adr]]'

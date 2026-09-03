@@ -4,43 +4,13 @@ tags:
   - '#index'
   - '#ecosystem-artifact-lifecycle'
 date: '2026-08-05'
-modified: '2026-08-05'
-body_schema: 'body-v1'
-body_hash: 'sha256:ed6f0817955006da84d1b339c1a313cc7a0ecf5fad4da1c72d54456d24aab9ef'
+modified: '2026-09-03'
+body_schema: 'body-v2'
+body_hash: 'sha256:9d1d9319c1b88518d89b58d9d378ac7d50024a6ad3f2ab0479a56fa46adcc79a'
 related:
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S01]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S02]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S03]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S04]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S23]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S05]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S06]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S07]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S08]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S09]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S10]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S11]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S12]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S13]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S14]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S15]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S16]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S24]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S17]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S18]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S19]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S20]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S21]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S22]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S25]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S26]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S27]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P09-S28]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P09-S29]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S30]]'
-  - '[[2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S31]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-artifact-delete-residual-risk-audit]]'
+  - '[[2026-07-21-ecosystem-artifact-lifecycle-ledger]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-plan]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-research]]'
 ---
@@ -61,37 +31,7 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 
 ### exec
 
-- `2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S01` - Prove the existing workspace containment guard with a test that executes the escape refusal
-- `2026-07-21-ecosystem-artifact-lifecycle-W01-P01-S02` - Record the residual risk that a confined delete still removes real files inside the user checkout
-- `2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S03` - Run an armed gateway and record whether the published discovery record carries a handoff reference
-- `2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S04` - Make a tokenless discovery publication fail loudly instead of silently unlinking the credential
-- `2026-07-21-ecosystem-artifact-lifecycle-W01-P02-S23` - Remove the discovery record when the gateway that published it exits
-- `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S05` - Define the retention disposition vocabulary and the declaration record type
-- `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S06` - Attach a retention declaration to each artifact-creating seam in the lifecycle package
-- `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S07` - Attach a retention declaration to the worker autospawn stderr log seam
-- `2026-07-21-ecosystem-artifact-lifecycle-W02-P03-S08` - Add a test asserting every declared seam names a disposition and an owner
-- `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S09` - Add one audited atomic write-and-rename helper that unlinks its temporary file on every failure path
-- `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S10` - Route the service discovery writer through the shared helper
-- `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S11` - Route the desktop discovery writer through the shared helper
-- `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S12` - Route the process registry record writer through the shared helper
-- `2026-07-21-ecosystem-artifact-lifecycle-W02-P04-S13` - Add a test that forces a write failure and asserts no temporary file survives
-- `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S14` - Export the child session record out of the isolated config home before teardown
-- `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S15` - Resolve the isolated config home under the declared desktop temporary homes root
-- `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S16` - Add a sweeper for orphaned isolated config homes left by a crash
-- `2026-07-21-ecosystem-artifact-lifecycle-W03-P05-S24` - Call session preservation from the ACP teardown path before the config home is removed
-- `2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S17` - Extend the clear action to cover control actions and permission requests
-- `2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S18` - Extend the clear action to cover task queue entries and thread execution state
-- `2026-07-21-ecosystem-artifact-lifecycle-W03-P06-S19` - Extend the clear action to cover the checkpoint store
-- `2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S20` - Move service test runtime directory creation out of the dataclass constructor into start
-- `2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S21` - Add teardown that removes the service test runtime directory after a run
-- `2026-07-21-ecosystem-artifact-lifecycle-W03-P07-S22` - Add ignore rules for the generated artifacts that currently escape them
-- `2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S25` - Inventory what the ACP family persists in the operator's real config home, and whether a2a can enumerate it
-- `2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S26` - Establish whether the Gemini and Kimi configured homes retain session content nobody has inspected
-- `2026-07-21-ecosystem-artifact-lifecycle-W04-P08-S27` - Declare or refuse a retention statement for each lane's persistence, through the existing artifact declaration home
-- `2026-07-21-ecosystem-artifact-lifecycle-W04-P09-S28` - Inventory which provider action events reach a durable store versus only the live stream, per lane
-- `2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S30` - Amend Layer 3 in place to name the a2a-owned trace and redirect the obligation at the said-versus-did gap
-- `2026-07-21-ecosystem-artifact-lifecycle-W04-P10-S31` - Ratify the ephemeral thread posture as a decision and record its reversal condition
-- `2026-07-21-ecosystem-artifact-lifecycle-W04-P09-S29` - Choose the action-event capture seam and bound it, or record why capture is refused
+- `2026-07-21-ecosystem-artifact-lifecycle-ledger` - `ecosystem-artifact-lifecycle` ledger
 
 ### plan
 

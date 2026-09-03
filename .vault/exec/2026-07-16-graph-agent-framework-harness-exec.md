@@ -3,12 +3,10 @@ tags:
   - '#exec'
   - '#graph-agent-framework-harness'
 date: '2026-07-16'
-modified: '2026-08-05'
+modified: '2026-09-03'
 body_hash: 'sha256:9a47226f6a223f1b0176620b30b587c95fc4f88dfe35bc449a69d2ebaeb1d533'
 related:
   - "[[2026-07-15-graph-agent-framework-harness-plan]]"
-  - "[[2026-07-15-graph-agent-framework-harness-P02-S04]]"
-  - "[[2026-07-15-graph-agent-framework-harness-P02-S13]]"
 ---
 
 # context-graph import cycle fix + LOW-1 invariant

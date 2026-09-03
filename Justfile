@@ -4,7 +4,7 @@ set unstable := true
 set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 set dotenv-load := true
 
-mod dev "just/dev/mod.just"
+mod dev "dev/just/mod.just"
 
 # The development toolchain's single entry point. Every gate, audit, and
 # measurement below is one `python -m dev <verb> <target>` call whose behaviour

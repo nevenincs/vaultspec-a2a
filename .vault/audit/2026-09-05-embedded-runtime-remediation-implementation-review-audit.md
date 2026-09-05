@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:a77e7fac9e97859be46e011f3416d28c9b59f6a2b0e1576bbfeae622c12f7f54'
+body_hash: 'sha256:efa1a5d1b60ca5406e4be77874636e02aeb1522e8186bc8687f0c54fa536ce4f'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -160,6 +160,10 @@ Type: lifecycle traceability. Status: open and non-blocking for S03. `vaultspec-
 ### provider-catalog-route-host-state-leak | medium | Focused route test assumes credentials are unavailable
 
 Type: test isolation. Status: open and non-blocking for the S03 evidence-only record. The exact command `uv run --locked python -m pytest src/vaultspec_a2a/providers/tests/test_lane_admission.py src/vaultspec_a2a/providers/tests/test_provider_capabilities.py src/vaultspec_a2a/providers/tests/test_in_process_catalog.py src/vaultspec_a2a/api/tests/test_provider_catalog_route.py -q` produced 90 passes and one failure: `test_authenticated_route_serves_all_registered_lanes_in_order` expected OpenAI catalog status `unavailable`, while the checkout-local settings resolved it as `available`. The test constructs the real app without isolating its `.env`-backed settings, so its fixed availability assertion changes with host configuration. A rerun excluding only that named test passed 90 tests with one deselection. Ownership: provider-model-catalog validation hardening `P03.S22`; make the test control its settings or assert structurally valid environment-dependent health without exposing credentials. This failure is not positive S19/S20 evidence.
+
+### s03-formal-review | low | PASS - prerequisite evidence and qualification gates are complete
+
+Type: implementation review disposition. Status: resolved at A2A `fefd7540e26ba0d41b08440d653e16a2915b4112`. The S03 reference accurately keeps provider-model-catalog `P03.S19` and `P03.S20` open and defines their required positive path, frozen-selection comparisons, and refresh, stale, unauthenticated, unavailable/unadmitted, admitted, replay/conflict, legacy-restart, and Dashboard-state evidence without treating enumeration, selectability, handshake, skips, historical provider-level proof, or in-process work as a substitute. It correctly gates dependent external-provider and Dashboard qualification at remediation `S57` while allowing independent environment, durability, context, broker, lifecycle, artifact, local-load, deterministic, and capability-matrix work under each owner's prerequisites. Exact-mode identity remains provider plus execution mode: eight external registrations are retained, only `codex/codex-app-server` carries an exact completed-turn admission citation, and provider-level or sibling-mode proof does not transfer. Both canonical replay digests reproduce exactly (`94A91AE6...` and `2525AAD1...`). The full focused test command reproduces 90 passes plus the one audited host-state route failure; excluding only that named isolation defect passes 90 with one deselection. This is adequate for the S03 evidence-definition step because no S19/S20 positive qualification is claimed. Core confirms provider-model-catalog 14/21 with `P01.S10`, `P01.S11`, `P03.S19`, and `P03.S20` open; provider-capability-evidence 0/4; checked catalog `P01.S08` without a Step Record; and remediation S01-S03 closed with S04 next. The four implementation-observed findings are correctly classified HIGH, MEDIUM, LOW, and MEDIUM and retain their stated owners. Core validation and commit mechanics are clean. No critical, high, or medium defect in S03 itself remains, so W01.P01 may complete and execution may advance to S04.
 
 ## Recommendations
 

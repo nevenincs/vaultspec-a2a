@@ -18,6 +18,7 @@ test that watched only the parent would go green against the defect this covers.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import subprocess
 import sys
@@ -25,7 +26,11 @@ import time
 
 import pytest
 
-from ...control.worker_management import _reap_unready_worker
+from ...control.worker_management import (
+    LazyWorkerSpawner,
+    _reap_unready_worker,
+    _shutdown_worker_process,
+)
 from ...lifecycle.discovery import is_pid_alive
 from ...utils import kill_pid_tree_async
 from ...utils.process import ProcessContainment
@@ -134,3 +139,68 @@ async def test_the_reaped_handle_is_waited_so_no_zombie_remains() -> None:
         )
     finally:
         await _force_cleanup([process.pid, *child_pids])
+
+
+@pytest.mark.asyncio
+async def test_shutdown_reaps_descendants_after_worker_root_crashes() -> None:
+    containment = ProcessContainment.create()
+    process, child_pids = _spawn_tree(containment)
+    try:
+        process.kill()
+        process.wait(timeout=5)
+        assert all(is_pid_alive(pid) for pid in child_pids)
+
+        await _shutdown_worker_process(process, containment)
+
+        assert not _await_gone(child_pids)
+    finally:
+        await _force_cleanup([process.pid, *child_pids])
+        containment.close()
+        if process.stdout is not None:
+            process.stdout.close()
+
+
+@pytest.mark.asyncio
+async def test_spawner_shutdown_clears_crashed_tree_before_replacement() -> None:
+    containment = ProcessContainment.create()
+    process, child_pids = _spawn_tree(containment)
+    spawner = LazyWorkerSpawner(
+        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+    )
+    spawner.replace_process(process, containment)
+    try:
+        process.kill()
+        process.wait(timeout=5)
+        await spawner.shutdown()
+
+        assert spawner.process is None
+        assert spawner.containment is None
+        assert not _await_gone(child_pids)
+        await spawner.shutdown()
+    finally:
+        await _force_cleanup([process.pid, *child_pids])
+        containment.close()
+        if process.stdout is not None:
+            process.stdout.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_shutdown_joins_worker_reap() -> None:
+    containment = ProcessContainment.create()
+    process, child_pids = _spawn_tree(containment)
+    try:
+        cleanup = asyncio.create_task(_shutdown_worker_process(process, containment))
+        await asyncio.sleep(0)
+        for _ in range(3):
+            cleanup.cancel()
+            await asyncio.sleep(0)
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(cleanup, timeout=25)
+
+        assert process.poll() is not None
+        assert not _await_gone(child_pids)
+    finally:
+        await _force_cleanup([process.pid, *child_pids])
+        containment.close()
+        if process.stdout is not None:
+            process.stdout.close()

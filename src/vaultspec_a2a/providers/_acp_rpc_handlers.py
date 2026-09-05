@@ -9,8 +9,6 @@ import asyncio
 import logging
 import re
 import signal
-import subprocess
-import sys
 from contextlib import suppress
 from pathlib import Path
 from uuid import uuid4
@@ -20,7 +18,7 @@ from langgraph.errors import GraphBubbleUp
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..graph.acp_options import option_id_of, valid_option_ids
-from ..utils.process import ProcessContainment, ProcessContainmentError
+from ..utils.async_cleanup import complete_cleanup
 from ..workspace.environment import resolve_env_vars
 from ._acp_mcp import NATIVE_READ_TOOL_NAMES
 from ._acp_types import (
@@ -35,8 +33,8 @@ from ._json_contract import (
     lenient_json_object,
     lenient_json_object_list,
 )
-from ._subprocess import attach_process_containment
 from ._subprocess import kill_process_tree as _kill_process_tree
+from ._subprocess import spawn_acp_process
 from .acp_exceptions import AcpErrorCode
 
 __all__: list[str] = [
@@ -670,6 +668,8 @@ async def on_terminal_create(
     environment so the subprocess inherits PATH and other required vars.
     """
     try:
+        if ctx.closing:
+            raise RuntimeError("ACP session is closing")
         command = _required_string(params, "command")
         raw_args = params.get("args")
         if raw_args is None:
@@ -756,57 +756,16 @@ async def on_terminal_create(
                         )
                     validated_env[name] = value
                 terminal_env.update(validated_env)
-        # M12: on Windows, use CREATE_NEW_PROCESS_GROUP so child
-        # processes don't become orphans when the terminal is killed.
-        creation_flags = (
-            subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+        process = await spawn_acp_process(
+            [command, *args], terminal_env, str(resolved_cwd), use_exec=True
         )
-        # Seat the terminal child in its own OS containment before it runs, so the
-        # whole terminal subtree (a shell and anything it spawns) is reaped as one
-        # by `_kill_process_tree` - a POSIX process-group killpg escalation or a
-        # Windows Job Object - not a per-pid kill that would orphan a POSIX shell's
-        # grandchildren. Without this the terminal child carried no containment and
-        # fell back to the single-pid POSIX path.
-        containment = ProcessContainment.create()
-        # The containment is an OS handle on Windows, allocated before the spawn
-        # it contains. Everything from here to the point the terminal is
-        # registered can raise - the spawn itself, an unexpected assignment
-        # failure - and the outer handler converts any of it into an RPC error
-        # the caller sees as a refused terminal. A refused terminal that left a
-        # job handle open leaks one per attempt for the life of the session, so
-        # the handle is released on the way out, along with any process that did
-        # start (which nothing would otherwise reach: it is not yet in
-        # ``ctx.terminals``, so terminal/release could never find it).
         try:
-            process = await asyncio.create_subprocess_exec(
-                command,
-                *args,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(resolved_cwd),
-                env=terminal_env,
-                creationflags=creation_flags,
-                **containment.spawn_kwargs(),
-            )
-        except BaseException:
-            containment.close()
-            raise
-        try:
-            try:
-                containment.assign(process.pid)
-            except ProcessContainmentError:
-                logger.warning(
-                    "Could not seat terminal child PID %d in its OS containment;"
-                    " termination will fall back to a per-pid tree kill",
-                    process.pid,
-                    exc_info=True,
-                )
-            attach_process_containment(process, containment)
+            if ctx.closing:
+                raise RuntimeError("ACP session closed while creating terminal")
             terminal_id = uuid4().hex[:8]
             ctx.terminals[terminal_id] = process
         except BaseException:
-            await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
+            await _kill_process_tree(process)
             raise
         return {
             "jsonrpc": "2.0",
@@ -989,7 +948,14 @@ async def on_terminal_release(
     """Handle terminal/release RPC."""
     terminal_id_value = params.get("terminalId")
     terminal_id = terminal_id_value if isinstance(terminal_id_value, str) else ""
-    process = ctx.terminals.pop(terminal_id, None)
-    if process is not None and process.returncode is None:
-        await _kill_process_tree(process)
+    process = ctx.terminals.get(terminal_id)
+    if process is not None:
+
+        async def _release() -> None:
+            # An exited root can still own live descendants and native handles.
+            await _kill_process_tree(process)
+            if ctx.terminals.get(terminal_id) is process:
+                del ctx.terminals[terminal_id]
+
+        await complete_cleanup(_release())
     return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}

@@ -187,6 +187,7 @@ class AcpSessionContext:
     interrupt_exc: list[BaseException]
     background_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     terminals: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)
+    closing: bool = False
     stderr_event_count: int = 0
     auth_prompt_active: bool = False
     auth_url: str | None = None

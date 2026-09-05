@@ -19,7 +19,6 @@ import logging
 import shutil
 import sys
 from collections.abc import AsyncIterator, Mapping
-from contextlib import suppress
 from pathlib import Path
 from typing import Any, Never, override
 
@@ -75,7 +74,7 @@ from ._acp_types import (
     RpcHandlerMap,
     require_workspace_root,
 )
-from ._cleanup import CleanupStep, run_independent_cleanups
+from ._cleanup import CleanupStep, cancel_owned_tasks, run_independent_cleanups
 from ._json_contract import (
     JsonObject,
     lenient_json_object,
@@ -480,6 +479,7 @@ class AcpChatModel(BaseChatModel):
         # tree. ctx and the reader tasks are created here, so the finally
         # guards on their presence before touching the session.
         ctx: AcpSessionContext | None = None
+        process: asyncio.subprocess.Process | None = None
         stdout_task: asyncio.Task[None] | None = None
         stderr_task: asyncio.Task[None] | None = None
         try:
@@ -564,12 +564,20 @@ class AcpChatModel(BaseChatModel):
             # and what bounds it are recorded in
             # ACP_SESSION_TRANSCRIPT_DECLARATION.
             cleanup_steps: list[CleanupStep] = []
-            if ctx is not None and stdout_task is not None and stderr_task is not None:
+            if ctx is not None:
                 session_ctx, out_task, err_task = ctx, stdout_task, stderr_task
                 cleanup_steps.append(
                     (
                         "acp-session",
                         lambda: self._cleanup_session(session_ctx, out_task, err_task),
+                    )
+                )
+            elif process is not None:
+                orphaned_process = process
+                cleanup_steps.append(
+                    (
+                        "acp-partial-startup",
+                        lambda: _kill_process_tree(orphaned_process),
                     )
                 )
             await run_independent_cleanups(*cleanup_steps)
@@ -666,26 +674,29 @@ class AcpChatModel(BaseChatModel):
     async def _cleanup_session(
         self,
         ctx: AcpSessionContext,
-        stdout_task: asyncio.Task[None],
-        stderr_task: asyncio.Task[None],
+        stdout_task: asyncio.Task[None] | None,
+        stderr_task: asyncio.Task[None] | None,
     ) -> None:
         """Terminate the subprocess and its tasks independently, aggregating errors.
 
-        Each teardown step - reaping spawned terminals, cancelling the session,
-        cancelling the in-flight background RPC tasks, cancelling the reader
-        tasks, and killing the process tree - runs regardless of an earlier step's
-        failure, so one error can never skip a later release (which would leak the
-        subprocess or a terminal). Failures are aggregated rather than discarded.
-        Ordering is preserved: session-cancel runs before the kill so the
-        subprocess can flush its state.
+        Cancel the session while its reader can still acknowledge the request,
+        stop admission and join handlers, then reap every terminal they owned.
+        Every independent release runs even after failure or caller cancellation.
         """
 
         async def _reap_terminals() -> None:
             # Each terminal is independent of the others.
-            for _tid, proc in list(ctx.terminals.items()):
-                with suppress(Exception):
-                    await _kill_process_tree(proc)
-            ctx.terminals.clear()
+            await run_independent_cleanups(
+                *(
+                    (
+                        f"acp-terminal-{terminal_id}",
+                        lambda terminal_id=terminal_id: on_terminal_release(
+                            0, {"terminalId": terminal_id}, ctx, self._config
+                        ),
+                    )
+                    for terminal_id in tuple(ctx.terminals)
+                )
+            )
 
         async def _cancel_session() -> None:
             if not (self._active_session_id and not ctx.prompt_done.is_set()):
@@ -693,26 +704,25 @@ class AcpChatModel(BaseChatModel):
             # session/cancel must be a proper JSON-RPC (with id) and awaited with a
             # 3-second timeout so the subprocess flushes its state before the kill.
             rpc_id = AcpRequestId.SESSION_CANCEL
-            future = await issue_request(
-                ctx.response_futures,
-                stdin=ctx.stdin,
-                stdin_lock=ctx.stdin_lock,
-                rpc_id=rpc_id,
-                method="session/cancel",
-                params={"sessionId": self._active_session_id},
-            )
-            await await_response(future, timeout=3.0)
+            async with asyncio.timeout(3.0):
+                future = await issue_request(
+                    ctx.response_futures,
+                    stdin=ctx.stdin,
+                    stdin_lock=ctx.stdin_lock,
+                    rpc_id=rpc_id,
+                    method="session/cancel",
+                    params={"sessionId": self._active_session_id},
+                )
+                await await_response(future, timeout=3.0)
 
         async def _cancel_background_tasks() -> None:
-            for task in list(ctx.background_tasks):
-                task.cancel()
-            if ctx.background_tasks:
-                await asyncio.gather(*ctx.background_tasks, return_exceptions=True)
+            await cancel_owned_tasks(ctx.background_tasks)
 
         async def _cancel_reader_tasks() -> None:
-            stdout_task.cancel()
-            stderr_task.cancel()
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            ctx.closing = True
+            await cancel_owned_tasks(
+                task for task in (stdout_task, stderr_task) if task is not None
+            )
 
         async def _kill_process() -> None:
             await _kill_process_tree(
@@ -728,20 +738,22 @@ class AcpChatModel(BaseChatModel):
                 ),
             )
 
-        await run_independent_cleanups(
-            ("acp-terminals", _reap_terminals),
-            ("acp-session-cancel", _cancel_session),
-            ("acp-background-tasks", _cancel_background_tasks),
-            ("acp-reader-tasks", _cancel_reader_tasks),
-            ("acp-process-tree", _kill_process),
-        )
-
-        self._process = None
-        self._response_futures = None
-        self._active_session_id = None
-        ctx.tool_calls = {}
-        ctx.agent_modes = {}
-        ctx.last_auth_url = None
+        try:
+            await run_independent_cleanups(
+                ("acp-session-cancel", _cancel_session),
+                ("acp-reader-tasks", _cancel_reader_tasks),
+                ("acp-background-tasks", _cancel_background_tasks),
+                ("acp-terminals", _reap_terminals),
+                ("acp-process-tree", _kill_process),
+            )
+        finally:
+            self._process = None
+            self._stdin = None
+            self._response_futures = None
+            self._active_session_id = None
+            ctx.tool_calls = {}
+            ctx.agent_modes = {}
+            ctx.last_auth_url = None
 
     @override
     async def _agenerate(

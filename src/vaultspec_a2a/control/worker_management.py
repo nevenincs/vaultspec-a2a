@@ -38,6 +38,7 @@ from ..lifecycle.pairing import (
     eviction_is_authorized,
 )
 from ..utils import kill_pid_tree_async
+from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..utils.runtime_exec import module_command
 from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
@@ -994,11 +995,29 @@ async def _reap_unready_worker(
 
     Either way the handle is waited afterwards so no zombie is left on POSIX.
     """
-    if containment is not None:
-        await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
-    else:
-        await kill_pid_tree_async(process.pid, term_timeout=5.0, kill_timeout=5.0)
-    with contextlib.suppress(Exception):
+    await complete_cleanup(_stop_worker_tree(process, containment, term_timeout=5.0))
+
+
+async def _stop_worker_tree(
+    process: subprocess.Popen[bytes],
+    containment: ProcessContainment | None,
+    *,
+    term_timeout: float,
+) -> None:
+    try:
+        if containment is not None:
+            reaped = await containment.terminate(
+                term_timeout=term_timeout, kill_timeout=5.0
+            )
+        else:
+            reaped = await kill_pid_tree_async(
+                process.pid, term_timeout=term_timeout, kill_timeout=5.0
+            )
+        if not reaped:
+            raise ProcessContainmentError(
+                f"Worker process tree {process.pid} did not terminate"
+            )
+    finally:
         await asyncio.to_thread(process.wait, 5.0)
 
 
@@ -1014,22 +1033,13 @@ async def _shutdown_worker_process(
     containment (Compose / development band), the shared per-pid tree kill
     (Windows ``taskkill /T /F``, POSIX SIGTERM->SIGKILL) is used unchanged.
     """
-    if process.poll() is not None:
-        if containment is not None:
-            containment.close()
-        return  # Already exited
+    if process.poll() is not None and containment is None:
+        return
     logger.info(
         "Shutting down worker process (PID %d)",
         process.pid,
     )
-    if containment is not None:
-        await containment.terminate(term_timeout=10.0, kill_timeout=5.0)
-    else:
-        # Shared async tree-kill (Windows taskkill /T /F, POSIX SIGTERM->SIGKILL);
-        # the Popen handle is reaped here since the primitive works by pid.
-        await kill_pid_tree_async(process.pid, term_timeout=10.0, kill_timeout=5.0)
-    with contextlib.suppress(Exception):
-        await asyncio.to_thread(process.wait, 5.0)
+    await complete_cleanup(_stop_worker_tree(process, containment, term_timeout=10.0))
     logger.info("Worker process stopped")
 
 
@@ -1531,7 +1541,7 @@ class WorkerWatchdog:
             # Clean up the old process handle and reap its whole tree through the
             # containment it was spawned in (if any).
             old_proc = self._spawner.process
-            if old_proc is not None and old_proc.returncode is None:
+            if old_proc is not None:
                 await _shutdown_worker_process(old_proc, self._spawner.containment)
 
             # Spawn a new worker inside a fresh containment (armed desktop only),

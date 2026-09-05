@@ -23,10 +23,12 @@ can produce.
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from ._catalog_fields import display_text, local_id, model_list_revision
+from ._subprocess import kill_process_tree, spawn_acp_process
 from .antigravity_cli import resolve_antigravity_command
 from .provider_catalog import (
     MAX_MODELS,
@@ -140,12 +142,11 @@ async def discover_antigravity_catalog(
         )
 
     try:
-        process = await asyncio.create_subprocess_exec(
-            str(executable),
-            "models",
+        process = await spawn_acp_process(
+            [str(executable), "models"],
+            env=os.environ.copy(),
             cwd=str(workspace_root),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            use_exec=True,
         )
     except OSError as exc:
         return _unavailable(
@@ -155,12 +156,8 @@ async def discover_antigravity_catalog(
         )
 
     try:
-        stdout_bytes, _ = await asyncio.wait_for(
-            process.communicate(), timeout=_LISTING_TIMEOUT_SECONDS
-        )
+        stdout_bytes = await _read_listing(process, timeout=_LISTING_TIMEOUT_SECONDS)
     except TimeoutError:
-        process.kill()
-        await process.wait()
         return _unavailable(
             key,
             reason=(
@@ -168,6 +165,8 @@ async def discover_antigravity_catalog(
             ),
             authentication=AuthenticationState.UNKNOWN,
         )
+    finally:
+        await kill_process_tree(process)
 
     if process.returncode != 0:
         # A listing needs the account, so a refusal is most likely a missing
@@ -179,7 +178,7 @@ async def discover_antigravity_catalog(
             authentication=AuthenticationState.UNKNOWN,
         )
 
-    stdout = stdout_bytes[:_OUTPUT_BUDGET_BYTES].decode("utf-8", errors="replace")
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
     namespace = f"{key.provider_id}:{key.execution_mode}"
     models = _models_from_listing(stdout, namespace=namespace)
     if not models:
@@ -208,3 +207,27 @@ async def discover_antigravity_catalog(
         ),
         AuthenticationState.AUTHENTICATED,
     )
+
+
+async def _drain_listing(reader: asyncio.StreamReader, *, retain: int) -> bytes:
+    retained = bytearray()
+    while chunk := await reader.read(65536):
+        remaining = retain - len(retained)
+        if remaining > 0:
+            retained.extend(chunk[:remaining])
+    return bytes(retained)
+
+
+async def _read_listing(
+    process: asyncio.subprocess.Process, *, timeout: float
+) -> bytes:
+    """Drain both pipes continuously while retaining only the catalog budget."""
+    if process.stdout is None or process.stderr is None:
+        raise RuntimeError("Catalog process requires stdout and stderr pipes")
+    async with asyncio.timeout(timeout), asyncio.TaskGroup() as tasks:
+        output = tasks.create_task(
+            _drain_listing(process.stdout, retain=_OUTPUT_BUDGET_BYTES)
+        )
+        tasks.create_task(_drain_listing(process.stderr, retain=0))
+        tasks.create_task(process.wait())
+    return output.result()

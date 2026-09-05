@@ -3,8 +3,6 @@ tags:
   - '#plan'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-08-02'
-body_hash: 'sha256:f521d2114f357f7a543297eecf4d8d6a4caa58f60112cec4f1f491c5aec67826'
 tier: L3
 related:
   - '[[2026-07-19-codebase-health-adr]]'
@@ -20,6 +18,10 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
   - '[[2026-07-19-observability-lanes-plan]]'
   - '[[2026-07-17-tool-cores-adr]]'
+  - '[[2026-09-05-codebase-health-process-resource-lifetimes-research]]'
+  - '[[2026-09-05-codebase-health-process-resource-lifetimes-audit]]'
+modified: '2026-09-05'
+body_hash: 'sha256:fc72ca0b0efb639d9ba780f972b4dc3711203481ad55434a19df07f424afa89c'
 ---
 
 <!-- RETIRED: P19, S30, S31, S32, S83, S84, S85, S86, S88, S100, S111, S112, S113, S145, S146, S147, S148, S158, S162, S164, S165, S166, S167, S168, S169 -->
@@ -205,6 +207,7 @@ Ensure provider output cannot deadlock, background failures cannot hang a turn, 
 - [x] `W03.P10.S122` - Prove RPC handler failure terminates a real provider session; `tests/providers, src/vaultspec_a2a/desktop_tests`.
 - [x] `W03.P10.S123` - Prove provider deadline expiry terminates a real provider session; `tests/providers, src/vaultspec_a2a/desktop_tests`.
 - [x] `W03.P10.S124` - Prove cleanup continuation after one cleanup failure with a real provider subprocess; `tests/providers, src/vaultspec_a2a/desktop_tests`.
+- [x] `W03.P10.S184` - Repair cross-platform owned-process termination cancellation and terminal admission races, prove real descendant and handle cleanup, and record the rolling review findings; `src/vaultspec_a2a/utils, src/vaultspec_a2a/providers, src/vaultspec_a2a/control, src/vaultspec_a2a/lifecycle`.
 
 ### Phase `W03.P11` - review and queue provider findings
 

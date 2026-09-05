@@ -14,8 +14,8 @@ BEFORE it signals anything, then escalates ``SIGTERM`` then ``SIGKILL`` across
 the whole snapshot; signalling only the root would leave the same orphans
 Windows avoids. Liveness on POSIX also has to discount a zombie, which answers
 signal 0 for as long as its parent has not reaped it (see :func:`pid_is_live`).
-This module imports nothing from the rest of the package by design, so any layer
-can depend on it without an import cycle.
+Only the shared cancellation helper is imported from the package, so any layer
+can depend on this module without an import cycle.
 """
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
+
+from .async_cleanup import complete_cleanup
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -130,15 +132,23 @@ def pid_is_live(pid: int) -> bool:
         return False
     if sys.platform == "win32":
         import ctypes
+        from ctypes import wintypes
 
         process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
         still_active = 259  # STILL_ACTIVE
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = _win_kernel32()
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.GetExitCodeProcess.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        )
         handle = kernel32.OpenProcess(process_query, False, pid)
         if not handle:
             return False
         try:
-            code = ctypes.c_ulong()
+            code = wintypes.DWORD()
             if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
                 return False
             return code.value == still_active
@@ -200,8 +210,10 @@ def _proc_stat_state(pid: int) -> str:
 
     Covers the zombie that is NOT our child (a reparented grandchild whose new
     parent has not reaped it yet), which ``waitid`` cannot see. Hosts without
-    ``/proc`` simply report no state and fall back to the signal-0 result.
+    ``/proc`` use a bounded ``ps`` probe for the same state.
     """
+    if sys.platform != "linux":
+        return _ps_pid_state(pid)
     try:
         with open(f"/proc/{pid}/stat", encoding="ascii", errors="replace") as handle:
             line = handle.read()
@@ -212,6 +224,23 @@ def _proc_stat_state(pid: int) -> str:
     _, _, rest = line.rpartition(")")
     fields = rest.split()
     return fields[0] if fields else ""
+
+
+def _ps_pid_state(pid: int) -> str:
+    try:
+        completed = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "stat="],
+            capture_output=True,
+            text=True,
+            encoding=_PROBE_ENCODING,
+            errors=_PROBE_DECODE_ERRORS,
+            timeout=_PS_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    state = completed.stdout.strip()
+    return state[0] if completed.returncode == 0 and state else ""
 
 
 def posix_parent_map() -> dict[int, int]:
@@ -327,7 +356,10 @@ def classify_listener_ownership(port: int, root_pid: int) -> ListenerOwnership:
     listener_pid = port_listener_pid(port)
     if listener_pid is None:
         return ListenerOwnership.UNRESOLVED
-    if _pid_in_tree(root_pid, listener_pid):
+    belongs = _pid_in_tree(root_pid, listener_pid)
+    if belongs is None:
+        return ListenerOwnership.UNRESOLVED
+    if belongs:
         return ListenerOwnership.CONFIRMED
     return ListenerOwnership.OUTSIDE
 
@@ -375,19 +407,17 @@ def port_listener_pid(port: int) -> int | None:
     return _lsof_listener_pid(port)
 
 
-def _pid_in_tree(root_pid: int, candidate_pid: int) -> bool:
-    """``True`` when *candidate_pid* is *root_pid* or descends from it.
+def _pid_in_tree(root_pid: int, candidate_pid: int) -> bool | None:
+    """Whether *candidate_pid* belongs to the tree; ``None`` if ancestry is unknown.
 
-    Degrades to ``True`` on an unresolved parent map (candidate is not the root
-    but ancestry cannot be walked), so a legitimate descendant listener is never
-    falsely rejected; returns ``False`` only on a resolved map that positively
-    fails to reach the root.
+    An unresolved parent map proves neither ownership nor foreign ancestry.
+    Returns ``False`` only on a resolved map that fails to reach the root.
     """
     if candidate_pid == root_pid:
         return True
     parents = _parent_map()
     if not parents:
-        return True
+        return None
     seen: set[int] = set()
     current = candidate_pid
     while current > 1 and current not in seen:
@@ -409,37 +439,66 @@ def _parent_map() -> dict[int, int]:
 
 
 def _win_parent_map() -> dict[int, int]:
-    """Windows ``{pid: parent pid}`` via a single CIM query; empty on any failure.
+    """Windows ``{pid: parent pid}`` from an owned snapshot; empty on failure.
 
     Windows fells trees with ``taskkill /T`` and keeps no parent map for
     termination, but the readiness owner-check needs one to confirm a listener pid
-    descends from the process we spawned.
+    descends from the process we spawned. A native snapshot avoids spawning a
+    shell and timing out its process-table query during a readiness poll.
     """
-    try:
-        completed = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "Get-CimInstance Win32_Process | ForEach-Object "
-                '{ "$($_.ProcessId) $($_.ParentProcessId)" }',
-            ],
-            capture_output=True,
-            text=True,
-            encoding=_PROBE_ENCODING,
-            errors=_PROBE_DECODE_ERRORS,
-            timeout=_PS_TIMEOUT,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+    if sys.platform != "win32":
         return {}
-    mapping: dict[int, int] = {}
-    for line in completed.stdout.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-            mapping[int(parts[0])] = int(parts[1])
-    return mapping
+    try:
+        return _win_snapshot_parent_map()
+    except (AttributeError, OSError) as exc:
+        logger.debug("Windows process snapshot unavailable: %s", exc)
+        return {}
+
+
+def _win_snapshot_parent_map() -> dict[int, int]:
+    if sys.platform != "win32":
+        raise OSError("process snapshots require Windows")
+    import ctypes
+    from ctypes import wintypes
+
+    class _ProcessEntry32W(ctypes.Structure):
+        _fields_ = (
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        )
+
+    kernel32 = _win_kernel32()
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    for read_entry in (kernel32.Process32FirstW, kernel32.Process32NextW):
+        read_entry.restype = wintypes.BOOL
+        read_entry.argtypes = (wintypes.HANDLE, ctypes.POINTER(_ProcessEntry32W))
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)  # TH32CS_SNAPPROCESS
+    if snapshot == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        entry = _ProcessEntry32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        if not kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        mapping: dict[int, int] = {}
+        while True:
+            mapping[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+            if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                    raise ctypes.WinError(ctypes.get_last_error())
+                return mapping
+    finally:
+        if not kernel32.CloseHandle(snapshot):
+            raise ctypes.WinError(ctypes.get_last_error())
 
 
 # Windows TCP-table constants (iphlpapi.h, tcpmib.h, winerror.h). The listener
@@ -751,11 +810,6 @@ def _posix_signal_all(pids: list[int], signal_number: int) -> None:
             os.kill(target, signal_number)
 
 
-async def _await_pid_gone(pid: int, *, timeout: float) -> bool:
-    """Poll until *pid* is gone or *timeout* elapses; return whether it is gone."""
-    return await _await_pids_gone([pid], timeout=timeout)
-
-
 async def _await_pids_gone(pids: list[int], *, timeout: float) -> bool:
     """Poll until every pid is gone or *timeout* elapses; report whether all are."""
     loop = asyncio.get_running_loop()
@@ -780,16 +834,23 @@ async def _win_tree_kill(pid: int, *, timeout: float) -> bool:
         )
     except OSError:
         return False
-    # ``taskkill /F`` is authoritative; bound the wait so a wedged taskkill cannot
-    # hang the caller. The caller's own handle wait confirms the reap.
+    return await complete_cleanup(_wait_for_tree_killer(killer, pid, timeout=timeout))
+
+
+async def _wait_for_tree_killer(
+    killer: asyncio.subprocess.Process, pid: int, *, timeout: float
+) -> bool:
+    """Bound and join the helper, including when its owner is cancelled."""
     try:
         returncode = await asyncio.wait_for(killer.wait(), timeout=timeout)
         return returncode == 0 or not pid_is_live(pid)
     except TimeoutError:
-        killer.kill()
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(killer.wait(), timeout=1.0)
         return False
+    finally:
+        if killer.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                killer.kill()
+            await asyncio.wait_for(killer.wait(), timeout=1.0)
 
 
 async def kill_pid_tree_async(
@@ -804,6 +865,12 @@ async def kill_pid_tree_async(
     already gone (or a non-positive pid) is a success. The caller keeps its own
     handle wait/reap after this returns.
     """
+    return await complete_cleanup(
+        _kill_pid_tree(pid, term_timeout=term_timeout, kill_timeout=kill_timeout)
+    )
+
+
+async def _kill_pid_tree(pid: int, *, term_timeout: float, kill_timeout: float) -> bool:
     if pid <= 0:
         return True
     if not pid_is_live(pid):
@@ -825,6 +892,102 @@ async def kill_pid_tree_async(
 # ---------------------------------------------------------------------------
 # ProcessContainment — OS-owned containment for a spawned root and its tree
 # ---------------------------------------------------------------------------
+
+
+def _win_kernel32() -> Any:
+    """Load native handle release with pointer-sized arguments on every caller."""
+    if sys.platform != "win32":
+        raise OSError("kernel32 requires Windows")
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    return kernel32
+
+
+def _posix_group_is_live(pgid: int) -> bool | None:
+    """Read live membership, including orphans; unknown never means empty."""
+    if sys.platform == "win32":
+        return None
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    if sys.platform != "linux":
+        return _ps_group_is_live(pgid)
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return _ps_group_is_live(pgid)
+    uncertain = False
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        live = _proc_group_member_is_live(int(entry), pgid)
+        if live:
+            return True
+        uncertain = uncertain or live is None
+    return None if uncertain else False
+
+
+def _proc_group_member_is_live(pid: int, pgid: int) -> bool | None:
+    if sys.platform == "win32":
+        return None
+    try:
+        if os.getpgid(pid) != pgid:
+            return False
+        with open(f"/proc/{pid}/stat", encoding="ascii", errors="replace") as fh:
+            fields = fh.read().rpartition(")")[2].split()
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    except OSError:
+        return None
+    if len(fields) < 3 or not fields[2].isdigit():
+        return None
+    return int(fields[2]) == pgid and fields[0] not in {"Z", "X"}
+
+
+def _ps_group_is_live(pgid: int) -> bool | None:
+    """Use the macOS/POSIX process table with a bounded, reaped probe."""
+    try:
+        completed = subprocess.run(
+            ["ps", "-A", "-o", "pgid=,stat="],
+            capture_output=True,
+            text=True,
+            encoding=_PROBE_ENCODING,
+            errors=_PROBE_DECODE_ERRORS,
+            timeout=_PS_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0 or not completed.stdout.strip():
+        return None
+    uncertain = False
+    for line in completed.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or not fields[0].isdigit():
+            uncertain = True
+        elif int(fields[0]) == pgid and fields[1][0] not in {"Z", "X"}:
+            return True
+    return None if uncertain else False
+
+
+async def _await_posix_group_gone(pgid: int, *, timeout: float) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        # ps is bounded, but may still block for seconds on a busy host.
+        if await asyncio.to_thread(_posix_group_is_live, pgid) is False:
+            return True
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(_POLL_INTERVAL, remaining))
 
 
 def _win_job_structures() -> tuple[Any, int]:
@@ -909,6 +1072,7 @@ class ProcessContainment:
         self._pgid: int | None = None
         self._job: Any | None = None  # Windows job HANDLE (ctypes c_void_p)
         self._assigned = False
+        self._termination_task: asyncio.Task[bool] | None = None
 
     @classmethod
     def create(cls) -> ProcessContainment:
@@ -929,29 +1093,31 @@ class ProcessContainment:
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _win_kernel32()
         kernel32.CreateJobObjectW.restype = wintypes.HANDLE
         kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
         job = kernel32.CreateJobObjectW(None, None)
         if not job:
             raise ctypes.WinError(ctypes.get_last_error())
-        info, size = _win_job_structures()
-        kernel32.SetInformationJobObject.restype = wintypes.BOOL
-        kernel32.SetInformationJobObject.argtypes = (
-            wintypes.HANDLE,
-            ctypes.c_int,
-            ctypes.c_void_p,
-            wintypes.DWORD,
-        )
-        if not kernel32.SetInformationJobObject(
-            job,
-            _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
-            ctypes.byref(info),
-            size,
-        ):
-            err = ctypes.get_last_error()
+        try:
+            info, size = _win_job_structures()
+            kernel32.SetInformationJobObject.restype = wintypes.BOOL
+            kernel32.SetInformationJobObject.argtypes = (
+                wintypes.HANDLE,
+                ctypes.c_int,
+                ctypes.c_void_p,
+                wintypes.DWORD,
+            )
+            if not kernel32.SetInformationJobObject(
+                job,
+                _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+                ctypes.byref(info),
+                size,
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+        except BaseException:
             kernel32.CloseHandle(job)
-            raise ctypes.WinError(err)
+            raise
         return job
 
     def spawn_kwargs(self) -> Mapping[str, Any]:
@@ -973,15 +1139,28 @@ class ProcessContainment:
         raises :class:`ProcessContainmentError`; the caller may downgrade to the
         per-pid fallback rather than fail the spawn.
         """
-        self._pid = pid
         if sys.platform != "win32":
+            if pid <= 1 or pid == os.getpid():
+                raise ProcessContainmentError("Refusing to contain the cleanup owner")
+            try:
+                isolated = os.getpgid(pid) == pid and os.getsid(pid) == pid
+            except ProcessLookupError:
+                # A short-lived root can exit before assignment; the spawn still
+                # established its group, which may retain live descendants.
+                isolated = True
+            if not isolated:
+                raise ProcessContainmentError(
+                    "Process was not spawned in a new session"
+                )
             # start_new_session made the child a session/group leader: pgid == pid.
+            self._pid = pid
             self._pgid = pid
             self._assigned = True
             return
         import ctypes
         from ctypes import wintypes
 
+        self._pid = pid
         if self._job is None:
             raise ProcessContainmentError("Windows containment has no job object")
         # Assign-after-spawn window (documented reliance, not silence): the root is
@@ -1002,7 +1181,7 @@ class ProcessContainment:
         # and one that spawns it as a child would need a full stdio proxy for the
         # ACP provider. KILL_ON_JOB_CLOSE still reaps everything that did join the
         # job, and the per-pid fallback backstops a wholly failed assignment.
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _win_kernel32()
         kernel32.OpenProcess.restype = wintypes.HANDLE
         kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
         handle = kernel32.OpenProcess(
@@ -1043,29 +1222,51 @@ class ProcessContainment:
         the job. An unassigned containment (assignment failed or never ran) falls
         back to the per-pid tree kill so the root is never left unreapable, logging
         the downgrade.
+
+        A failed POSIX reap retains its group for a later retry. Windows always
+        closes the kill-on-close handle as the last termination backstop; if job
+        accounting failed, later calls keep reporting failure because descendant
+        quiescence can no longer be verified through that closed handle.
         """
-        if not self._assigned or self._pid is None:
-            if self._pid is not None:
-                logger.warning(
-                    "Process %d has no OS containment; falling back to a per-pid"
-                    " tree kill (containment assignment did not complete)",
-                    self._pid,
-                )
-                result = await kill_pid_tree_async(
-                    self._pid, term_timeout=term_timeout, kill_timeout=kill_timeout
-                )
-                self.close()
-                return result
-            return True
-        if sys.platform == "win32":
-            result = await self._terminate_win_job(kill_timeout=kill_timeout)
+        if self._termination_task is None or self._termination_task.done():
+            self._termination_task = asyncio.create_task(
+                self._terminate(term_timeout=term_timeout, kill_timeout=kill_timeout)
+            )
+        return await complete_cleanup(self._termination_task)
+
+    async def _terminate(self, *, term_timeout: float, kill_timeout: float) -> bool:
+        try:
+            result = await self._terminate_owned(
+                term_timeout=term_timeout, kill_timeout=kill_timeout
+            )
+        finally:
+            # Includes an empty, never-assigned Windows job and failed cleanup.
             self.close()
-            return result
-        result = await self._terminate_posix_group(
+        if result:
+            # A successfully emptied group can later reuse its numeric identity.
+            self._pid = self._pgid = None
+            self._assigned = False
+        return result
+
+    async def _terminate_owned(
+        self, *, term_timeout: float, kill_timeout: float
+    ) -> bool:
+        if self._pid is None:
+            return True
+        if not self._assigned:
+            logger.warning(
+                "Process %d has no OS containment; falling back to a per-pid"
+                " tree kill (containment assignment did not complete)",
+                self._pid,
+            )
+            return await kill_pid_tree_async(
+                self._pid, term_timeout=term_timeout, kill_timeout=kill_timeout
+            )
+        if sys.platform == "win32":
+            return await self._terminate_win_job(kill_timeout=kill_timeout)
+        return await self._terminate_posix_group(
             term_timeout=term_timeout, kill_timeout=kill_timeout
         )
-        self.close()
-        return result
 
     async def _terminate_win_job(self, *, kill_timeout: float) -> bool:
         """Terminate the job and wait, bounded, until it holds no live process.
@@ -1077,7 +1278,7 @@ class ProcessContainment:
         until it reaches zero or *kill_timeout* elapses.
         """
         if sys.platform != "win32" or self._job is None:
-            return True
+            return False
         import ctypes
         from ctypes import wintypes
 
@@ -1091,16 +1292,20 @@ class ProcessContainment:
         deadline = loop.time() + kill_timeout
         while loop.time() < deadline:
             active = self._win_active_processes(kernel32)
+            if active is None:
+                logger.warning(
+                    "Could not verify process cleanup: job accounting failed"
+                )
+                return False
             if active == 0:
                 return True
             await asyncio.sleep(_POLL_INTERVAL)
         return self._win_active_processes(kernel32) == 0
 
-    def _win_active_processes(self, kernel32: Any) -> int:
+    def _win_active_processes(self, kernel32: Any) -> int | None:
         """Return the job's live-process count via its accounting information.
 
-        Returns 0 when the count cannot be read (the job handle is gone), so a
-        query failure resolves as "empty" rather than hanging the bounded wait.
+        An unavailable count is unknown, never proof that the job is empty.
         """
         import ctypes
         from ctypes import wintypes
@@ -1117,6 +1322,8 @@ class ProcessContainment:
                 ("TotalTerminatedProcesses", ctypes.c_uint32),
             )
 
+        if self._job is None:
+            return None
         info = _JobObjectBasicAccountingInformation()
         kernel32.QueryInformationJobObject.restype = wintypes.BOOL
         kernel32.QueryInformationJobObject.argtypes = (
@@ -1133,7 +1340,7 @@ class ProcessContainment:
             ctypes.sizeof(info),
             None,
         ):
-            return 0
+            return None
         return int(info.ActiveProcesses)
 
     async def _terminate_posix_group(
@@ -1147,16 +1354,17 @@ class ProcessContainment:
         import signal
 
         pgid = self._pgid
-        pid = self._pid
-        if pgid is None or pid is None:
+        if pgid is None or pgid != self._pid or pgid <= 1 or pgid == os.getpgrp():
+            raise ProcessContainmentError("Refusing to signal an unowned process group")
+        if await asyncio.to_thread(_posix_group_is_live, pgid) is False:
             return True
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGTERM)
-        if await _await_pid_gone(pid, timeout=term_timeout):
+        if await _await_posix_group_gone(pgid, timeout=term_timeout):
             return True
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGKILL)
-        return await _await_pid_gone(pid, timeout=kill_timeout)
+        return await _await_posix_group_gone(pgid, timeout=kill_timeout)
 
     def close(self) -> None:
         """Release the OS containment handle; idempotent.
@@ -1169,7 +1377,7 @@ class ProcessContainment:
             return
         import ctypes
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        with contextlib.suppress(Exception):
-            kernel32.CloseHandle(self._job)
+        kernel32 = _win_kernel32()
+        if not kernel32.CloseHandle(self._job):
+            raise ctypes.WinError(ctypes.get_last_error())
         self._job = None

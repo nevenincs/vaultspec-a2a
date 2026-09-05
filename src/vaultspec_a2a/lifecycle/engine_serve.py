@@ -22,16 +22,24 @@ on cwd alone.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
+import logging
 import os
 import shlex
 import signal
 import subprocess
 import sys
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..utils.process import (
+    ProcessContainment,
+    ProcessContainmentError,
+    detached_spawn_kwargs,
+)
 from .manager import render_command
 from .procs_config import load_procs_config
 from .registration import (
@@ -41,6 +49,9 @@ from .registration import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from types import FrameType
+
     from .registry import ProcRecord
 
 __all__ = [
@@ -55,6 +66,7 @@ _ROLE = "engine-dev"
 _SERVE_CMD_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
 _DEFAULT_SERVE_CMD = "vaultspec serve --no-seat --port {port}"
 _HEARTBEAT_SECONDS = 15.0
+logger = logging.getLogger(__name__)
 
 
 class EngineSeatError(ValueError):
@@ -139,34 +151,113 @@ def serve(*, port: int, name: str | None, workspace: str) -> int:
         beat.start()
 
     try:
-        process = subprocess.Popen(command, cwd=seat)
+        return _run_engine_child(command, seat)
     except OSError as exc:
-        stop.set()
-        if beat is not None:
-            beat.join(timeout=2.0)
-        deregister_serve(record)
         print(
             f"engine-serve: cannot launch {command[0]!r}: {exc}. "
             "Set VAULTSPEC_ENGINE_SERVE_CMD or ensure the engine binary is on PATH.",
             file=sys.stderr,
         )
         return 127
-    try:
-        return process.wait()
-    except KeyboardInterrupt:
-        with contextlib.suppress(Exception):
-            if sys.platform == "win32":
-                process.send_signal(signal.CTRL_BREAK_EVENT)
-            else:
-                process.terminate()
-        with contextlib.suppress(Exception):
-            process.wait(timeout=10)
-        return process.returncode or 0
     finally:
         stop.set()
         if beat is not None:
             beat.join(timeout=2.0)
         deregister_serve(record)
+
+
+@dataclass
+class _EngineStopRequest:
+    signum: int | None = None
+
+
+@contextlib.contextmanager
+def _engine_shutdown_signals() -> Iterator[_EngineStopRequest]:
+    request = _EngineStopRequest()
+
+    def request_stop(signum: int, _frame: FrameType | None) -> None:
+        # Never unwind Popen before its process handle can reach containment.
+        if request.signum is None:
+            request.signum = signum
+
+    signals = [signal.SIGINT, signal.SIGTERM]
+    if sys.platform == "win32":
+        signals.append(signal.SIGBREAK)
+    if threading.current_thread() is not threading.main_thread():
+        signals = []
+    previous = {signum: signal.getsignal(signum) for signum in signals}
+    try:
+        for signum in signals:
+            signal.signal(signum, request_stop)
+        yield request
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def _run_engine_child(command: list[str], seat: str) -> int:
+    with _engine_shutdown_signals() as request:
+        return _wait_engine_child(command, seat, request)
+
+
+def _wait_engine_child(
+    command: list[str], seat: str, request: _EngineStopRequest
+) -> int:
+    containment = ProcessContainment.create()
+    process: subprocess.Popen[bytes] | None = None
+    flags = detached_spawn_kwargs()
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=seat,
+            creationflags=flags.creationflags,
+            start_new_session=flags.start_new_session,
+        )
+        try:
+            containment.assign(process.pid)
+        except ProcessContainmentError:
+            logger.warning("Engine containment assignment failed", exc_info=True)
+        try:
+            while request.signum is None:
+                try:
+                    return process.wait(timeout=0.1)
+                except subprocess.TimeoutExpired:
+                    continue
+            _request_engine_stop(process)
+            return 128 + request.signum
+        except KeyboardInterrupt:
+            _request_engine_stop(process)
+            return 130
+    finally:
+        try:
+            if process is not None:
+                asyncio.run(_reap_engine_child(process, containment))
+        finally:
+            containment.close()
+
+
+def _request_engine_stop(process: subprocess.Popen[bytes]) -> None:
+    try:
+        if sys.platform == "win32":
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            process.terminate()
+        process.wait(timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        logger.warning("Engine did not stop gracefully; escalating tree cleanup")
+
+
+async def _reap_engine_child(
+    process: subprocess.Popen[bytes], containment: ProcessContainment
+) -> None:
+    try:
+        reaped = await containment.terminate(term_timeout=10.0, kill_timeout=5.0)
+        if not reaped:
+            raise ProcessContainmentError(
+                f"Engine process tree {process.pid} did not terminate"
+            )
+    finally:
+        await asyncio.to_thread(process.wait, 5.0)
 
 
 def main(argv: list[str] | None = None) -> int:

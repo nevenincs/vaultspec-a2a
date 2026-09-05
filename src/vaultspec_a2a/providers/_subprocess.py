@@ -22,6 +22,7 @@ from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from ..utils import kill_pid_tree_async
+from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
 
 if TYPE_CHECKING:
@@ -116,6 +117,34 @@ async def spawn_acp_process(
     use_exec: bool = False,
     metadata: Mapping[str, object] | None = None,
 ) -> asyncio.subprocess.Process:
+    """Acquire a contained subprocess, reaping it if the caller is cancelled."""
+    spawn_task = asyncio.create_task(
+        _spawn_acp_process(command, env, cwd, use_exec=use_exec, metadata=metadata)
+    )
+    try:
+        return await asyncio.shield(spawn_task)
+    except asyncio.CancelledError as cancellation:
+        # Subprocess creation may have acquired an OS process before its await
+        # returns. Join the acquisition so that handle always reaches a reaper.
+        async def _reap_cancelled_spawn() -> None:
+            process = await spawn_task
+            await kill_process_tree(process, metadata)
+
+        try:
+            await complete_cleanup(_reap_cancelled_spawn())
+        except Exception as exc:
+            raise cancellation from exc
+        raise
+
+
+async def _spawn_acp_process(
+    command: list[str],
+    env: dict[str, str],
+    cwd: str,
+    *,
+    use_exec: bool,
+    metadata: Mapping[str, object] | None,
+) -> asyncio.subprocess.Process:
     """Spawn an ACP subprocess with platform-appropriate isolation.
 
     Windows (default): ``create_subprocess_shell`` with ``CREATE_NEW_PROCESS_GROUP``
@@ -195,10 +224,11 @@ async def spawn_acp_process(
         containment.close()
         logger.error("ACP subprocess spawn failed: %s", exc, extra=log_extra)
         raise
-    # Seat the provider root in its containment before it launches any MCP bridge
-    # or grandchild. A Windows assignment failure downgrades to the per-pid tree
-    # kill rather than failing the spawn.
+    # Bind the returned root to its containment. Windows assignment follows
+    # process creation, so children launched before this point may escape the
+    # job. Assignment failure falls back to per-pid discovery at termination.
     try:
+        attach_process_containment(process, containment)
         try:
             containment.assign(process.pid)
         except ProcessContainmentError:
@@ -209,12 +239,11 @@ async def spawn_acp_process(
                 extra=log_extra,
                 exc_info=True,
             )
-        attach_process_containment(process, containment)
     except BaseException:
         # The root is alive but the caller will never receive it, so nothing else
         # can reach it to reap it. Fell the tree rather than return a spawn the
         # caller must clean up after a failure it was told about by exception.
-        await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
+        await kill_process_tree(process, metadata)
         raise
     logger.info(
         "ACP subprocess spawned",
@@ -226,6 +255,14 @@ async def spawn_acp_process(
 async def kill_process_tree(
     process: asyncio.subprocess.Process,
     metadata: Mapping[str, object] | None = None,
+) -> None:
+    """Join complete process, containment and transport release before cancellation."""
+    await complete_cleanup(_kill_process_tree(process, metadata))
+
+
+async def _kill_process_tree(
+    process: asyncio.subprocess.Process,
+    metadata: Mapping[str, object] | None,
 ) -> None:
     """Terminate an ACP subprocess and its entire process tree.
 
@@ -256,16 +293,25 @@ async def kill_process_tree(
     # assignment failed) falls back to the shared per-pid tree kill. The asyncio
     # Process is then waited/reaped here, and its transport closed below to avoid
     # an OS handle leak when the loop finalizer runs (cpython#114177).
-    if containment is not None:
-        await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
-    else:
-        await kill_pid_tree_async(process.pid, term_timeout=5.0, kill_timeout=5.0)
-    with suppress(Exception):
-        await asyncio.wait_for(process.wait(), timeout=5.0)
-
-    transport = getattr(process, "_transport", None)
-    if transport is not None:
-        transport.close()
+    try:
+        if containment is not None:
+            stopped = await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
+        else:
+            stopped = await kill_pid_tree_async(
+                process.pid, term_timeout=5.0, kill_timeout=5.0
+            )
+        if not stopped:
+            raise ProcessContainmentError(
+                f"Provider process tree {process.pid} could not be fully reaped"
+            )
+    finally:
+        try:
+            with suppress(Exception):
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+        finally:
+            transport = getattr(process, "_transport", None)
+            if transport is not None:
+                transport.close()
     logger.info(
         "ACP subprocess terminated",
         extra={

@@ -444,7 +444,7 @@ def build_codex_config_home(
 
 
 def cleanup_codex_config_home(home: Path | None) -> None:
-    """Best-effort removal of a per-run Codex config home; never raises.
+    """Remove a per-run Codex config home, reporting failures to its cleanup owner.
 
     If VAULTSPEC_CODEX_CONFIG_HOME_RETAIN is set, the home is retained for
     inspection and troubleshooting. Default behavior (unset) removes the home.
@@ -457,7 +457,11 @@ def cleanup_codex_config_home(home: Path | None) -> None:
             home,
         )
         return
-    shutil.rmtree(home, ignore_errors=True)
+    try:
+        shutil.rmtree(home)
+    except FileNotFoundError:
+        if home.exists():
+            raise
 
 
 def sweep_orphan_codex_homes(

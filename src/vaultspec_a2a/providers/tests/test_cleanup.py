@@ -96,10 +96,14 @@ async def test_no_failures_returns_empty_and_awaits_async_steps() -> None:
 
 @pytest.mark.asyncio
 async def test_cancellation_is_not_swallowed_by_a_cleanup_step() -> None:
-    """A BaseException such as CancelledError propagates, not aggregated."""
+    """A cancelled release cannot skip later steps; cancellation still propagates."""
+    completed: list[str] = []
 
     def _cancel() -> None:
         raise asyncio.CancelledError
 
     with pytest.raises(asyncio.CancelledError):
-        await run_independent_cleanups(("cancel", _cancel))
+        await run_independent_cleanups(
+            ("cancel", _cancel), ("later", lambda: completed.append("released"))
+        )
+    assert completed == ["released"]

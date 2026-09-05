@@ -9,13 +9,18 @@ resident engine.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import shlex
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from ...testing import armed_environment as _environ
+from ...utils.process import kill_pid_tree_async, pid_is_live
 from ..engine_serve import EngineSeatError, engine_command, resolve_data_seat, serve
 
 _SERVE_CMD_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
@@ -76,3 +81,81 @@ def test_serve_seats_the_engine_in_the_workspace_not_the_wrapper_cwd(
     assert Path(landed.read_text()).resolve() == seat.resolve()
     # The wrapper never seated a store in the repo cwd.
     assert not (Path.cwd() / "engine-store.txt").exists()
+
+
+def test_serve_reaps_descendants_when_engine_root_exits(tmp_path: Path) -> None:
+    child_code = (
+        "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "print('ready',flush=True); time.sleep(120)"
+    )
+    engine_code = (
+        "import pathlib,subprocess,sys; "
+        f"child=subprocess.Popen([sys.executable,'-c',{child_code!r}], "
+        "stdout=subprocess.PIPE,stderr=subprocess.DEVNULL); "
+        "child.stdout.readline(); "
+        "pathlib.Path('descendant.pid').write_text(str(child.pid)); sys.exit(7)"
+    )
+    command = shlex.join([sys.executable, "-c", engine_code])
+    descendant_pid: int | None = None
+    try:
+        with _environ(
+            VAULTSPEC_ENGINE_SERVE_CMD=command,
+            VAULTSPEC_PROCS_HOME=str(tmp_path / "registry"),
+        ):
+            exit_code = serve(port=18760, name="tree-probe", workspace=str(tmp_path))
+        descendant_pid = int((tmp_path / "descendant.pid").read_text())
+        assert exit_code == 7
+        assert not pid_is_live(descendant_pid)
+    finally:
+        marker = tmp_path / "descendant.pid"
+        if descendant_pid is None and marker.exists():
+            descendant_pid = int(marker.read_text())
+        if descendant_pid is not None:
+            asyncio.run(
+                kill_pid_tree_async(descendant_pid, term_timeout=0.1, kill_timeout=2)
+            )
+
+
+def test_wrapper_termination_reaps_engine_and_descendant(tmp_path: Path) -> None:
+    engine_code = (
+        "import os,pathlib,subprocess,sys,time; "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)']); "
+        "pathlib.Path('pids').write_text(str(os.getpid())+' '+str(child.pid)); "
+        "time.sleep(120)"
+    )
+    wrapper_code = (
+        "import sys; "
+        "from vaultspec_a2a.lifecycle.engine_serve import _run_engine_child; "
+        f"sys.exit(_run_engine_child([sys.executable,'-c',{engine_code!r}], "
+        f"{str(tmp_path)!r}))"
+    )
+    wrapper = subprocess.Popen(
+        [sys.executable, "-c", wrapper_code],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    marker = tmp_path / "pids"
+    pids: list[int] = []
+    try:
+        deadline = time.monotonic() + 15
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        pids = [int(value) for value in marker.read_text().split()]
+        wrapper.terminate()
+        wrapper.wait(timeout=30)
+        if sys.platform != "win32":
+            assert wrapper.returncode == 143
+        deadline = time.monotonic() + 5
+        while any(pid_is_live(pid) for pid in pids) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not any(pid_is_live(pid) for pid in pids)
+    finally:
+        if wrapper.poll() is None:
+            wrapper.kill()
+        wrapper.wait(timeout=5)
+        if not pids and marker.exists():
+            pids = [int(value) for value in marker.read_text().split()]
+        for pid in pids:
+            with contextlib.suppress(OSError):
+                asyncio.run(kill_pid_tree_async(pid, term_timeout=0.1, kill_timeout=2))

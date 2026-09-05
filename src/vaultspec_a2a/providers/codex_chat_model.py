@@ -49,11 +49,12 @@ from pydantic import Field, TypeAdapter, ValidationError
 from ..control.config import settings
 from ..team.team_config import AgentConfig
 from ..utils import package_version
+from ..utils.async_cleanup import complete_cleanup
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
 from ._acp_mcp import codex_mcp_server_specs
 from ._acp_types import PermissionCallback, require_workspace_root
-from ._cleanup import CleanupStep, run_independent_cleanups
+from ._cleanup import CleanupStep, cancel_owned_tasks, run_independent_cleanups
 from ._codex_config_home import (
     build_codex_config_home,
     cleanup_codex_config_home,
@@ -101,7 +102,7 @@ async def drain_stderr_into(
 
 
 CLEANUP_TIMEOUT_SECONDS = 5.0
-"""How long close waits for a cancelled background task before abandoning it."""
+"""How long close waits before reporting a cancellation-resistant task."""
 
 STDERR_TAIL_LINES = 200
 """How many redacted stderr lines to retain for crash diagnosis."""
@@ -444,6 +445,7 @@ class _CodexAppServerClient:
         self._pending: dict[int, asyncio.Future[JsonObject]] = {}
         self.notifications: asyncio.Queue[JsonObject] = asyncio.Queue()
         self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
         # An undrained pipe is a hang, not just lost diagnostics: the operating
         # system buffer fills and the child BLOCKS on its next stderr write. The
         # subprocess helper opens stderr as a pipe, so something must read it for
@@ -541,6 +543,8 @@ class _CodexAppServerClient:
             self.notifications.put_nowait(_STREAM_CLOSED)
 
     def _dispatch(self, message: JsonObject) -> None:
+        if self._closed:
+            return
         raw_id = message.get("id")
         msg_id = (
             raw_id if isinstance(raw_id, int) and not isinstance(raw_id, bool) else None
@@ -659,9 +663,12 @@ class _CodexAppServerClient:
 
     async def aclose(self) -> None:
         """Close stdin, reap the process tree, and cancel the reader."""
-        if self._closed:
-            return
-        self._closed = True
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._close())
+        await complete_cleanup(self._close_task)
+
+    async def _close(self) -> None:
         try:
             self._stdin.close()
         except Exception:
@@ -672,19 +679,20 @@ class _CodexAppServerClient:
         # (which would leave the session's readers alive), and vice versa.
         # Cancelling requests cooperation; it does not compel it. A task blocked
         # in a call that does not observe cancellation would hang close, so each
-        # await carries a deadline and a task that misses it is abandoned rather
-        # than allowed to hold the session open.
+        # join reports a missed deadline without blocking independent releases.
         async def _cancel_reader_tasks() -> None:
-            for task in (
-                self._reader_task,
-                self._stderr_task,
-                *tuple(self._decision_tasks),
-            ):
-                if task is None:
-                    continue
-                task.cancel()
-                with suppress(asyncio.CancelledError, TimeoutError, Exception):
-                    await asyncio.wait_for(task, timeout=CLEANUP_TIMEOUT_SECONDS)
+            await cancel_owned_tasks(
+                (
+                    task
+                    for task in (
+                        self._reader_task,
+                        self._stderr_task,
+                        *tuple(self._decision_tasks),
+                    )
+                    if task is not None
+                ),
+                timeout=CLEANUP_TIMEOUT_SECONDS,
+            )
 
         await run_independent_cleanups(
             (
@@ -977,6 +985,7 @@ class CodexChatModel(BaseChatModel):
 
         codex_config_home: Path | None = None
         client: _CodexAppServerClient | None = None
+        process: asyncio.subprocess.Process | None = None
         try:
             codex_config_home = self._build_codex_config_home()
             env["CODEX_HOME"] = str(codex_config_home)
@@ -1056,6 +1065,14 @@ class CodexChatModel(BaseChatModel):
             cleanup_steps: list[CleanupStep] = []
             if client is not None:
                 cleanup_steps.append(("codex-app-server-session", client.aclose))
+            elif process is not None:
+                orphaned_process = process
+                cleanup_steps.append(
+                    (
+                        "codex-partial-startup",
+                        lambda: kill_process_tree(orphaned_process),
+                    )
+                )
             cleanup_steps.append(
                 (
                     "codex-config-home",

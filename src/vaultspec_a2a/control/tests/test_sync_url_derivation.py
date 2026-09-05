@@ -17,9 +17,12 @@ it on a driver this project actually depends on.
 
 from __future__ import annotations
 
+import ast
 import pathlib
+import tomllib
 
 import pytest
+from packaging.requirements import Requirement
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 
@@ -38,11 +41,59 @@ _PG_TAIL = "postgres:postgres@127.0.0.1:5432/vaultspec?sslmode=disable"
 _SQLITE_DIR = pathlib.Path(__file__).resolve().parent.as_posix()
 
 _ENV_EXAMPLE = pathlib.Path(__file__).resolve().parents[3].parent / ".env.example"
+_PROJECT_ROOT = _ENV_EXAMPLE.parent
+_PYPROJECT = _PROJECT_ROOT / "pyproject.toml"
+_FREEZE_SPEC = _PROJECT_ROOT / "packaging/pyinstaller/vaultspec-a2a.spec"
 
 # The example file marks its Postgres deployment as a commented-out block an
 # operator uncomments wholesale. Reading it back is the only way to test what is
 # actually shipped rather than what this module would have written.
 _POSTGRES_BLOCK_HEADING = "# Uncomment for Postgres production"
+
+
+def _literal_list_assignment(path: pathlib.Path, name: str) -> set[str]:
+    """Read one literal module-list assignment without executing a build spec."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign):
+            continue
+        if any(
+            isinstance(target, ast.Name) and target.id == name
+            for target in statement.targets
+        ):
+            value = ast.literal_eval(statement.value)
+            assert isinstance(value, list)
+            return set(value)
+    raise AssertionError(f"{path} has no literal {name} assignment")
+
+
+def test_postgres_server_profile_is_separate_from_the_sqlite_binary_profile() -> None:
+    """Keep Postgres drivers in one profile and out of the freeze closure."""
+    metadata = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    project = metadata["project"]
+    groups = metadata["dependency-groups"]
+    server = {
+        Requirement(requirement).name.lower().replace("_", "-")
+        for requirement in project["optional-dependencies"]["server"]
+    }
+    base = {
+        Requirement(requirement).name.lower().replace("_", "-")
+        for requirement in project["dependencies"]
+    }
+    freeze = {
+        Requirement(requirement).name.lower().replace("_", "-")
+        for requirement in groups["freeze"]
+        if isinstance(requirement, str)
+    }
+
+    assert {"asyncpg", "psycopg", "langgraph-checkpoint-postgres"} <= server
+    assert {"asyncpg", "psycopg", "langgraph-checkpoint-postgres"}.isdisjoint(base)
+    assert {"asyncpg", "psycopg", "langgraph-checkpoint-postgres"}.isdisjoint(freeze)
+    assert {
+        "asyncpg",
+        "psycopg",
+        "langgraph.checkpoint.postgres",
+    } <= _literal_list_assignment(_FREEZE_SPEC, "excludes")
 
 
 def _assert_synchronously_connectable(url: str) -> None:

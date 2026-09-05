@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:7abae6412ce3930243d9285cc0aa0016d0b27ec7770eac3bc4649d15e1345329'
+body_hash: 'sha256:74982485a1444c9abc52fd42e577a4268e64d346c7c41bf16133d328d9df0c0e'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -14,7 +14,6 @@ related:
   - "[[2026-08-05-served-capability-contract-gateway-contract-audit]]"
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
 ---
-
 # `embedded-runtime-robustness` audit: `pass two implementation measurements`
 
 ## Scope
@@ -198,6 +197,8 @@ FAIL means at least one specified requirement is contradicted; it does not imply
 ### ER18-optional-server-test-profile | medium | Eight PostgreSQL checks cannot import the optional server driver
 
 **OPEN; evidence/environment; M02; outside the embedded SQLite runtime claim.** Eight cases in `control/tests/test_sync_url_derivation.py` fail at `:54` while SQLAlchemy imports psycopg. The URL assertions passed before engine construction; no PostgreSQL connection was attempted. `pyproject.toml` declares psycopg in optional `server`, and the frozen desktop spec deliberately excludes it. This is an incomplete server-test prerequisite/profile, not evidence that desktop SQLite or URL derivation is broken. **Owner:** test/profile maintenance. **Close when:** server checks run under the locked server dependency profile and its requirement is explicit; retain this run's eight failures in the evidence history.
+
+**Resolution (W01.P02.S04, 2026-09-05): RESOLVED.** The project now names the exact isolated locked command for PostgreSQL checks at the `server` optional extra, and a discriminator enforces that asyncpg, psycopg, and the LangGraph PostgreSQL saver remain in that profile, outside base and `freeze`, and excluded by the PyInstaller spec. The server-profile run passed all 15 URL/configuration/SQLAlchemy engine-construction checks without opening a PostgreSQL connection. An isolated freeze profile resolved none of the three PostgreSQL modules; a deliberately server-equipped freeze build passed smoke and contained no exact driver modules in its PYZ or named artifact paths. The original eight M02 failures remain historical evidence of running the tests outside their required profile.
 
 ### ER19-catalog-test-stale-assumption | medium | A route test hard-codes provider unavailability despite real enumeration
 

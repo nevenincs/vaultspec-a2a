@@ -41,6 +41,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The locked PostgreSQL/Compose server profile. PostgreSQL-dependent checks run as:
+#   uv run --isolated --locked --no-default-groups --extra server --group tooling \
+#     pytest src/vaultspec_a2a/control/tests/test_sync_url_derivation.py
+# Keep these drivers out of both the base dependencies and the `freeze` group. The
+# dashboard binary is SQLite-only, and its PyInstaller spec separately excludes the
+# same modules so a contaminated build environment cannot pull them into the artifact.
 server = [
   "asyncpg>=0.30.0",
   "langgraph-checkpoint-postgres>=2.0.0",

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:efa1a5d1b60ca5406e4be77874636e02aeb1522e8186bc8687f0c54fa536ce4f'
+body_hash: 'sha256:b127b60dc69bf1a14b2fb7d5350efd0c9db21a441082735604fae78f8a469be5'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -30,6 +30,8 @@ Type: concurrency and durability. Status: open. Current source exposes bounded p
 ### frozen-binary-collects-test-modules | medium | The freeze closure analyzes and archives test packages
 
 Type: packaging and operational risk. Status: open. The S01 freeze log analyzed the repository's acceptance, desktop, service, and unit-test packages because the PyInstaller specification calls `collect_all("vaultspec_a2a")`. The produced `PYZ-00.toc` contained 463 entries matching A2A test-package namespaces. The wheel's denylist does not constrain a PyInstaller build from the source checkout, so the current onedir closure can carry non-runtime test code and its dependency reach despite the declared pruned-runtime intent. The smoke checks still pass; this finding concerns release composition, size, and unnecessary code surface. Ownership: `W04.P10.S50` must correct or explicitly justify the actual frozen closure before `W05.P13.S65` certifies it.
+
+S04 reproduction: an isolated build environment deliberately containing both `server` and `freeze` dependencies again analyzed test namespaces and warned that `vaultspec_a2a.testing` could not import because pytest was absent. The completed artifact still passed smoke and contained no exact PostgreSQL driver modules. This is additional evidence for the existing packaging finding, not an ER18/server-profile failure; severity, status, and S50/S65 ownership are unchanged.
 
 ### qualification-capture-provenance | high | Frozen inputs lack replayable capture commands
 
@@ -164,6 +166,10 @@ Type: test isolation. Status: open and non-blocking for the S03 evidence-only re
 ### s03-formal-review | low | PASS - prerequisite evidence and qualification gates are complete
 
 Type: implementation review disposition. Status: resolved at A2A `fefd7540e26ba0d41b08440d653e16a2915b4112`. The S03 reference accurately keeps provider-model-catalog `P03.S19` and `P03.S20` open and defines their required positive path, frozen-selection comparisons, and refresh, stale, unauthenticated, unavailable/unadmitted, admitted, replay/conflict, legacy-restart, and Dashboard-state evidence without treating enumeration, selectability, handshake, skips, historical provider-level proof, or in-process work as a substitute. It correctly gates dependent external-provider and Dashboard qualification at remediation `S57` while allowing independent environment, durability, context, broker, lifecycle, artifact, local-load, deterministic, and capability-matrix work under each owner's prerequisites. Exact-mode identity remains provider plus execution mode: eight external registrations are retained, only `codex/codex-app-server` carries an exact completed-turn admission citation, and provider-level or sibling-mode proof does not transfer. Both canonical replay digests reproduce exactly (`94A91AE6...` and `2525AAD1...`). The full focused test command reproduces 90 passes plus the one audited host-state route failure; excluding only that named isolation defect passes 90 with one deselection. This is adequate for the S03 evidence-definition step because no S19/S20 positive qualification is claimed. Core confirms provider-model-catalog 14/21 with `P01.S10`, `P01.S11`, `P03.S19`, and `P03.S20` open; provider-capability-evidence 0/4; checked catalog `P01.S08` without a Step Record; and remediation S01-S03 closed with S04 next. The four implementation-observed findings are correctly classified HIGH, MEDIUM, LOW, and MEDIUM and retain their stated owners. Core validation and commit mechanics are clean. No critical, high, or medium defect in S03 itself remains, so W01.P01 may complete and execution may advance to S04.
+
+### postgres-server-profile-prerequisite | medium | RESOLVED - PostgreSQL checks run under their locked optional profile
+
+Type: evidence environment and dependency isolation. Status: resolved by `W01.P02.S04`. The exact command `uv run --isolated --locked --no-default-groups --extra server --group tooling python -m pytest src/vaultspec_a2a/control/tests/test_sync_url_derivation.py -q` installed from the project lock and passed 15 tests, including bare, asyncpg, and psycopg URL derivation; application and checkpoint settings; synchronous SQLAlchemy engine construction; password preservation; invalid URL refusal; shipped example parsing; SQLite conversion; and the new profile-separation discriminator. `uv lock --check` and the locked server sync dry-run passed. An isolated `freeze`-only environment reported asyncpg, psycopg, and `langgraph.checkpoint.postgres` all absent. A second isolated build deliberately combined `server` and `freeze`; the PyInstaller exclusion boundary still produced a smoke-clean artifact with zero exact driver modules in `PYZ-00.toc` and zero driver-named artifact paths. Ownership: S04 is complete; regression ownership remains `pyproject.toml`, `test_sync_url_derivation.py`, and the frozen spec, with final plan review at `W06.P14.S72`.
 
 ## Recommendations
 

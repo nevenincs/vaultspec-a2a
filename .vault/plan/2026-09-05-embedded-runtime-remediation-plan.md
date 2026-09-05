@@ -22,7 +22,7 @@ related:
   - '[[2026-08-02-llm-context-provider-abstraction-plan]]'
 modified: '2026-09-05'
 body_schema: body-v2
-body_hash: 'sha256:da0d395d91ba8cc9860240b68196df8ebc2d66b2db8f1a95bad3d4df14cde140'
+body_hash: 'sha256:3c92cd74d3a3e6e431fc2c5543359f2610dd59ae7fbd87553093ef614bd2dcbd'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -55,7 +55,7 @@ Freeze intended revisions, supported operations, limits and evidence prerequisit
 
 Restore meaningful prerequisite-dependent checks without weakening runtime claims.
 
-- [ ] `W01.P02.S04` - Run PostgreSQL URL checks under the locked server dependency profile and make that profile explicit while preserving the SQLite binary profile; `pyproject.toml`.
+- [x] `W01.P02.S04` - Run PostgreSQL URL checks under the locked server dependency profile and make that profile explicit while preserving the SQLite binary profile; `pyproject.toml`.
 - [ ] `W01.P02.S05` - Verify catalog availability-test correction under owner P01.S11 in 2026-08-02-provider-model-catalog-plan, preserving exact-mode admission assertions; `src/vaultspec_a2a/api/tests/test_provider_catalog_route.py`.
 - [ ] `W01.P02.S06` - Align an isolated RAG client/service test environment and rerun the real project-pinning discriminator without altering an unrelated shared daemon; `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`.
 - [ ] `W01.P02.S07` - Diagnose the intermittent compilation loop-gap measurement on the named representative host/load and correct the owning warmup path if required without relaxing its existing budget; `src/vaultspec_a2a/providers/warmup.py`.

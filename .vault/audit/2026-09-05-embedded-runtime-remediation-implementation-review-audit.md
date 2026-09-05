@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:6141c09fe3802152b24380b309ad5fb4405ace9ea1521018c4f9b61abce76e3e'
+body_hash: 'sha256:cb1af2d10e02bc676a629529d7fc23d9bf759e199661988b5ff6044556f327af'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -79,6 +79,28 @@ Type: evidence completeness. Status: resolved at corrected S01 commit `00fa03470
 
 Type: validation environment. Status: open, narrowed and non-blocking. The default PATH resolves Cargo and rustc through unlaunchable symbolic links in `C:\ci-shared\cargo\bin`, but the user rustup shims are valid. With `C:\Users\hello\.cargo\bin\cargo.exe` and `RUSTC=C:\Users\hello\.cargo\bin\rustc.exe` explicit, `cargo test -p vaultspec-product gateway_drain` passed 16 tests and `cargo test -p vaultspec-api a2a_lifecycle` passed 21 tests. The original low classification remains appropriate because this is a launcher-path defect with an exact working route, not missing consumer certification. Ownership: repair the shared shim or PATH before final qualification; use the recorded explicit shims for S02 meanwhile. No critical, high, or medium S01 correction defect remains.
 
+### embedded-discovery-wire-contract-drift | high | A2A producer and Dashboard consumer cannot interoperate
+
+Type: contract and integration. Status: open. At A2A `97f8dc2478cc75338c6c77e3ba9202fa87c59454`, the armed desktop producer writes `service.json` with integer version, package-derived generation and nested process/endpoint. Dashboard `330b2efe294c8ab134fff2142f9fae98afd14fec` consumes `gateway-discovery.json` with receipt identity, release set, string protocol range, state-schema range and heartbeat. The resolved contract is Dashboard's receipt-bound schema with actual packaged migration range `0001`-`0016`; the legacy record is excluded from the embedded lane. Ownership: `W04.P10.S47-S48`, release closure `S50`, proof `W05.P13.S64-S65`.
+
+### embedded-broker-foreign-substitution | high | Product broker can select a foreign resident for mutation
+
+Type: authorization and lifecycle. Status: open. Live Dashboard source dual-resolves product discovery and legacy resident discovery, classifies a foreign owner as `ForeignReadOnly`, but the seven-operation broker has no attach-mode guard and includes mutations. The resolved embedded contract permits only the receipt-joined product process; foreign resident state is separately observable and read-only. Ownership: broker steps `W04.P09.S43-S45` and lifecycle/discovery steps `W04.P10.S47-S48`; closing proof `W05.P13.S64-S65`.
+
+### embedded-discovery-receipt-compatibility-gap | high | Parsed identity is not joined to the active receipt
+
+Type: state compatibility and evidence. Status: open. Dashboard currently accepts broad state schema `0001`-`9999` and does not prove the discovery generation, install identity and release member against its active receipt before attach. The coordinated contract requires exact lock/member/receipt/executable/discovery agreement and the packaged migration range. Ownership: `W04.P10.S47-S50`; closing proof `W05.P13.S64-S65`.
+
+### embedded-component-authority-drift | medium | Supplier-local manifest claims conflict with Dashboard release authority
+
+Type: architecture and packaging. Status: open. A2A `desktop/contract.py` derives generation from the package and describes a supplier-local component manifest, while accepted Dashboard decisions place selection and release receipt authority in Dashboard. Dashboard commit `dbc15e6f0976d82919f19ecebd991499e25a2b02` now records the single-home coordinated contract and preserves the current lock drift. Ownership: `W04.P10.S47-S50`; qualification `W05.P13.S65`.
+
+### dashboard-rust-toolchain-s02-validation | low | RESOLVED - focused consumer tests run through explicit rustup binaries
+
+Type: validation environment. Status: resolved for S02. From Dashboard `engine`, explicit `C:\Users\hello\.rustup\toolchains\1.96.0-x86_64-pc-windows-msvc\bin\cargo.exe` with matching `RUSTC` ran discovery-focused product tests (19 passing across the selected binaries) and `vaultspec-api a2a_lifecycle` (21 passing). An initial repository-root invocation failed because that directory has no `Cargo.toml`; it was a corrected command-location error. The shared PATH shim finding remains open independently.
+### dashboard-vault-baseline-validation-debt | low | Full Dashboard Core check is not globally clean
+
+Type: documentation hygiene. Status: open; unrelated and non-blocking for S02. `vaultspec-core vault check all` at Dashboard `dbc15e6f0976d82919f19ecebd991499e25a2b02` reports one pre-existing schema error (`runner-fleet-conformance` ADR has no grounding reference) and 80 warnings, chiefly stale feature indexes plus retired exec mappings and missing research sections. Focused `references` is clean; the new contract's body and feature index are valid. Ownership: Dashboard architecture-corpus curation, outside this remediation plan.
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.

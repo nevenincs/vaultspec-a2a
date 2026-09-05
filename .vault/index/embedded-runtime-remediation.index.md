@@ -6,9 +6,10 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:bccdb6ed4231175ca2c83f4f3ccb6759774f3b1c1c5f0d84429b9ae1895f437d'
+body_hash: 'sha256:64de9edde59081a8eaa5d37509f7c86820c71a2854fb04075b22b10d7376be31'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
@@ -33,6 +34,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 ### exec
 
 - `2026-09-05-embedded-runtime-remediation-W01-P01-S01` - Record the intended A2A commit/binary identity, Dashboard generation, A01-A34 applicability, supported-mode inventory and pre-test queue/deadline/host limits without changing the frozen acceptance thresholds
+- `2026-09-05-embedded-runtime-remediation-W01-P01-S02` - Resolve the intended consumer's lifecycle, discovery, broker and schema contract and record the coordinated change boundary before either repository changes wire behavior
 
 ### plan
 

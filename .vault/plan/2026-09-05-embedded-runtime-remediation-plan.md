@@ -22,7 +22,7 @@ related:
   - '[[2026-08-02-llm-context-provider-abstraction-plan]]'
 modified: '2026-09-05'
 body_schema: body-v2
-body_hash: 'sha256:8f8c01cef34d8f6b75be144f05c8c28db998de65340780fc624056250f2cda3e'
+body_hash: 'sha256:01a90bd186311d62b89cc4467d943a42e61430b6d4a0de8f88fa5580ebed034b'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -48,7 +48,7 @@ Establish a reproducible execution baseline and coordinated consumer contract be
 Freeze intended revisions, supported operations, limits and evidence prerequisites.
 
 - [x] `W01.P01.S01` - Record the intended A2A commit/binary identity, Dashboard generation, A01-A34 applicability, supported-mode inventory and pre-test queue/deadline/host limits without changing the frozen acceptance thresholds; `qualification evidence`.
-- [ ] `W01.P01.S02` - Resolve the intended consumer's lifecycle, discovery, broker and schema contract and record the coordinated change boundary before either repository changes wire behavior; `Dashboard engine/crates/vaultspec-product/src`.
+- [x] `W01.P01.S02` - Resolve the intended consumer's lifecycle, discovery, broker and schema contract and record the coordinated change boundary before either repository changes wire behavior; `Dashboard engine/crates/vaultspec-product/src`.
 - [ ] `W01.P01.S03` - Record prerequisite status and exact evidence needed from catalog plan P03.S19 and P03.S20; allow independent local remediation while missing provider or Dashboard qualification blocks only its dependent proof; `provider selection dependency`.
 
 ### Phase `W01.P02` - Repair test prerequisites

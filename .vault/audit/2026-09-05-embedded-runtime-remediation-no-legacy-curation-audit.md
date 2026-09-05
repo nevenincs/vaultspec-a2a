@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:e938a34b2fa21cf5ee343bcea5890a484374225caf4a62f95cbc7f0669352b6b'
+body_hash: 'sha256:b740b4ea6171e8711b31008fdb349e56c62257d8350d81e7a9510b2dc353e9ab'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -99,6 +99,14 @@ They remain unchanged. The 2026-09-05 amendment reverses that active gate:
 successful legacy restart or disclosure is now a defect, while typed refusal is
 the required proof. Current plan state and this curation record carry the new
 owner interpretation without rewriting completed history.
+
+### accepted-kimi-static-authority-conflict | high | open
+
+Type: architecture contradiction and single-home-fact violation. Status: open; blocks this curation review and catalog `P01.S10` closure. The accepted `2026-07-17-kimi-provider-adr` still requires `MODEL_MAP`/`PROVIDER_DEFAULT_MODELS` entries in its lane-shape decision and a `[team.profiles.kimi]` overlay in its settings/provisioning decision. Those are current normative clauses, not historical audit or execution evidence, and they conflict with the amended catalog ADR's sole-authority rule. Amend the Kimi ADR with a dated authoritative pointer that preserves its Kimi transport, authentication, permission and provisioning decisions while explicitly superseding static model maps, profile overlays, retired aliases/fallbacks and any preset-carried provider/model authority.
+
+### no-legacy-curation-formal-review | high | FAIL - one accepted ADR still governs retired authority
+
+Type: formal architecture review disposition. Status: open at `41519f11bd093311cebedc0f34bd575a845eac30`. Review against parent `194f4fa6e469a9d849719f3ff8a2e8adaa604712` confirms the exact eleven-path scope, clean diff mechanics, unchanged historical execution records, aligned unchecked catalog/remediation steps, current-schema restart/replay, typed fail-closed legacy-state refusal, and accurately open runtime drift under catalog `P01.S10`/proof `P01.S11` and `P03.S20`. Core reports zero errors and zero warnings for both provider-model-catalog and embedded-runtime-remediation. The unresolved accepted Kimi ADR contradiction means the single active authority and no-conflicting-accepted-ADR acceptance conditions are not met; S10 must not close until that ADR is reconciled and this review is repeated.
 
 ## Recommendations
 

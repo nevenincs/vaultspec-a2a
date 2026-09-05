@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:5d00e116ce681842523a8cd75b29f620900d2ef0689c4daeaab8e92fffbaca4b'
+body_hash: 'sha256:d8ee5785ddd68f8a4c4dfd85782d40425887308f732a9d6656e2fc21868f35e9'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -207,6 +207,10 @@ that negative proof. Remediation `W01.P02.S05` still depends on completed
 `P01.S10`/`P01.S11`; the passing ER19 host-state correction alone cannot close
 it. Full conflict inventory and live-code drift are recorded in
 `2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit`.
+
+### no-legacy-curation-formal-review | high | FAIL - accepted Kimi ADR retains static map and profile authority
+
+Type: architecture review disposition. Status: open at curation commit `41519f11bd093311cebedc0f34bd575a845eac30`; blocks provider-model-catalog `P01.S10` closure. The curation correctly reopens/aligned `P01.S11`, updates active catalog/remediation requirements, preserves historical execution/audit facts, and keeps runtime removal open. However, accepted `2026-07-17-kimi-provider-adr` still normatively requires `MODEL_MAP`/`PROVIDER_DEFAULT_MODELS` entries and a `[team.profiles.kimi]` overlay, contradicting the catalog ADR's sole current-schema authority. Exact correction and full disposition are recorded in `2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit`; amend the Kimi ADR, then repeat formal review before S10 closure.
 
 ## Recommendations
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:f8305803712736028c338d4656cfcd4b6ae61c4889b3a913019c14343ce25c1f'
+body_hash: 'sha256:582fc5a9995495681c1485e448126f3e27c6e20cb33c067df573810601e103d1'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -169,7 +169,7 @@ tree reaping; configured and unconfigured installed-CLI enumeration remain
 separate prompt-free proofs.
 ### p01-s11-catalog-route-host-state | medium | Resolved: route evidence follows observed catalog state
 
-Type: test contract drift. Status: resolved by `P01.S11`; formal review pending. The authenticated real-ASGI route test no longer assumes OpenAI and Z.AI enumeration are unavailable at fixed array positions. It keys the parsed v1 response by provider identity, accepts only an observed available or unavailable catalog result for those environment-dependent lanes, and validates the corresponding payload: catalog and health status agree; an available catalog has entries, revision, expiry, and authenticated evidence; an unavailable catalog has no entries and carries a bounded reason. Both exact lanes remain `not_admitted` and non-selectable regardless of catalog availability, so discovery cannot become completed-turn evidence. The focused 49-test behavior set passes across cold catalog discovery, stale and invalid selection refusal, independent health, served-entry validation and freeze, same-ID replay/conflict/race, durable modern restart, legacy frozen-profile disclosure, and exact frozen ACP backend reuse. No new finding surfaced.
+Type: test contract drift. Status: the ER19 route defect is corrected at `7d8c04df06299dc58ae8fd1a5f4092291f3042ab`; owning step `P01.S11` is reopened and pending. The authenticated real-ASGI route test no longer assumes OpenAI and Z.AI enumeration are unavailable at fixed array positions. It keys the parsed v1 response by provider identity, accepts only an observed available or unavailable catalog result for those environment-dependent lanes, and validates the corresponding payload: catalog and health status agree; an available catalog has entries, revision, expiry, and authenticated evidence; an unavailable catalog has no entries and carries a bounded reason. Both exact lanes remain `not_admitted` and non-selectable regardless of catalog availability, so discovery cannot become completed-turn evidence. The focused 49-test behavior set passes across cold catalog discovery, stale and invalid selection refusal, independent health, served-entry validation and freeze, same-ID replay/conflict/race, durable modern restart, legacy frozen-profile disclosure, and exact frozen ACP backend reuse. Formal review `16066b83983a90a6a7dc067f98510e3fc5c040fc` correctly found that this battery proves legacy disclosure rather than a real persisted legacy startup redispatch, and that preceding policy-retirement step `P01.S10` remains open. S11 cannot close until S10 completes and a fresh gateway/worker restart proves exact persisted legacy redispatch without catalog re-resolution.
 
 ### p01-s11-legacy-restart-proof-absent | high | The 49-test battery does not exercise a real legacy restart
 

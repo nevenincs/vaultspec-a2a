@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:da8c303a60703a7694e7a6a73d64a8f7d8d5cc3a9d9448f6eb3fa4aa1b7dd6db'
+body_hash: 'sha256:d706da77a48639fa9468c1f99ec60b30e32a846c40a912fdc8a3a0c06c66413c'
 step_id: 'S11'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
@@ -24,7 +24,7 @@ related:
 - `M` `.vault/audit/2026-08-02-provider-model-catalog-implementation-review-audit.md`
 - `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
 - `M` `.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md`
-- `A` `.vault/exec/2026-08-02-provider-model-catalog/2026-08-02-provider-model-catalog-P01-S11.md`
+- `M` `.vault/exec/2026-08-02-provider-model-catalog/2026-08-02-provider-model-catalog-P01-S11.md`
 - `M` `.vault/index/provider-model-catalog.index.md`
 - `M` `.vault/plan/2026-08-02-provider-model-catalog-plan.md`
 - `M` `src/vaultspec_a2a/api/tests/test_provider_catalog_route.py`
@@ -32,3 +32,7 @@ related:
 - `verify:` `uv run --locked ruff format --check src/vaultspec_a2a/api/tests/test_provider_catalog_route.py` -> `pass`
 - `verify:` `uv run --locked ruff check src/vaultspec_a2a/api/tests/test_provider_catalog_route.py` -> `pass`
 - `verify:` `uv run --locked ty check src/vaultspec_a2a/api/tests/test_provider_catalog_route.py` -> `pass`
+
+## Notes
+
+Formal review `16066b83983a90a6a7dc067f98510e3fc5c040fc` rejected closure with two HIGH findings. The 49-test command proves the sound ER19 route correction, catalog discovery and health separation, stale and invalid selection refusal, served freeze, replay/conflict/race, modern durable restart, legacy frozen-profile disclosure, and exact frozen backend reuse. It does not drive a persisted legacy assignment through fresh gateway and worker startup redispatch. `P01.S11` remains open until preceding policy-retirement step `P01.S10` completes and that real legacy redispatch discriminator passes. Remediation `W01.P02.S05` remains open.

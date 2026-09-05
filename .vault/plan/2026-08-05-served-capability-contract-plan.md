@@ -11,7 +11,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-05'
-body_hash: 'sha256:f6896da2f2cd6efd7ae014423c7efe539d1548fec79ef61882e107da46ee63c4'
+body_hash: 'sha256:5bd43562f4f6c5c167e0c4df54f8b77c0739691c42b9800cc290465c7f344270'
 ---
 # `served-capability-contract` plan
 
@@ -245,7 +245,7 @@ Each Step changes what a served field means and requires agreement with the cons
 - [ ] `W05.P10.S31` - F6 BREAKING - rule whether an unreachable authoring backend degrades the service, then define the readiness vocabulary and stop serving a worker check that reports ok beside a disconnected worker; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W05.P10.S32` - F9 BREAKING but ALREADY RULED - remove the empty roles and assignments from run-status per the catalog amendment, which needs no new decision yet still removes fields the dashboard consumes today; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S33` - F12 BREAKING - make workspace_root consistent between the two sibling discovery routes, either by requiring it or by disclosing that no workspace resolved; `src/vaultspec_a2a/api/routes/gateway.py`.
-- [ ] `W05.P10.S44` - F35 BREAKING - wire the acceptance gate to a real signal or remove the term, and make eligible mean the same thing on the preset listing and the run-start response instead of permanently false on one and true on the other; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [ ] `W05.P10.S44` - F35 BREAKING - constrain any retained preset-list eligibility signal to the S28 topology-readiness meaning with zero provider, model, control, fallback, profile, selection, admission or dispatch authority; independently remove the redundant run-start eligibility boolean, or if it is retained define it only as the accepted dispatch outcome after current catalog selection and all live admission gates, never as preset or profile eligibility; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W05.P10.S45` - F33 BREAKING cross-repo - reconcile the engine's run metadata shape with a2a's model and fail loudly rather than reporting it absent, since workspace provenance is currently dropped silently for proxy-started runs; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S46` - F28 cross-repo - publish an engine schema, declare the conditional requirement of feature_tag in a2a, align workspace_root across the two surfaces and return proxy errors with a non-200 status; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S11` - F10 BREAKING not additive - declare the discriminator on the run-start response union, which requires adding a stage const to RunStartResponse since the other three members already carry one and it alone does not, so it touches a payload the dashboard parses. Cheap once sequenced - one const field plus a discriminator block, with three members already establishing the pattern; `src/vaultspec_a2a/api/schemas/gateway.py`.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:d667dbd0aab21d9f3e316ca55a2e66d3fc6685099c94222b106378a74af596e3'
+body_hash: 'sha256:ed32f109f12b33cf78a0af5a0fd60e419b182bcbd1ddecfc32cba79e075c8bdb'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -149,6 +149,13 @@ Type: lifecycle conflict and semantic authority leak. Status: open at correction
 
 Type: formal architecture re-review disposition. Status: open at `d9fd625587fbcb45857741bd8c8de94483f61ca9`. The Kimi amendment fully resolves the accepted-ADR conflict while preserving Kimi ACP transport, current authentication, exact permission handling, per-run isolation and provisioning; it explicitly removes static maps, profiles, preset selection, deprecated aliases and the rejected alternate transport as fallback authority. Corrected S28 unconditionally removes every profile field and bounds any retained eligibility signal to topology readiness with zero provider/model/control/fallback/profile/selection authority. Historical execution records remain unchanged, runtime drift remains open under catalog `P01.S10` with proof in `P01.S11` and `P03.S20`, and no plan row closes. Accepted-ADR rescan finds no remaining conflict, but active S44 contradicts S28 as described above. Core reports zero errors and zero warnings for provider-model-catalog, embedded-runtime-remediation, kimi-provider and served-capability-contract. Formal PASS remains blocked until S44 is corrected and re-reviewed.
 
+### active-served-contract-eligibility-equivalence-resolution | high | resolved in unchecked plan row
+
+Type: lifecycle conflict resolution. Status: corrected on 2026-09-05 after review commit `bdeb379482eabbb26a6af09e79a3d69de18565e4`; formal re-review remains pending. Active unchecked step `W05.P10.S44` now keeps the S28 preset-list signal within topology readiness and gives it zero provider, model, control, fallback, profile, selection, admission or dispatch authority. The step independently requires removal of the redundant run-start eligibility boolean or confines any retained result to the accepted dispatch outcome after current catalog selection and all live admission gates. It can no longer make preset or profile eligibility authoritative for selection or admission. The row remains unchecked and no runtime work is claimed.
+
+### no-legacy-curation-second-correction | high | remaining active-row conflict corrected
+
+Type: architecture lifecycle correction. Status: corrected in the active plan and recorded as resolution evidence. The obsolete requirement that preset-list eligibility equal run-start eligibility has been removed from `W05.P10.S44`. The plan now treats topology readiness and post-selection dispatch acceptance as separate facts with separate authority. Historical FAIL findings remain above as review evidence; provider-model-catalog `P01.S10`, its proof steps and remediation work remain open.
 ## Recommendations
 
 - Complete catalog `P01.S10` by deleting every enumerated legacy authority and

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:44801376d94ecf1eb86fb1a4f7523a3738cdb44af0c2c63aa1a864bd89df984c'
+body_hash: 'sha256:ad951fd0bae896c5e500a3beb3f981e812043ae8715d7cd2f4877016d9f718b8'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -232,6 +232,9 @@ The preceding FAIL findings remain historical review evidence; catalog
 
 Type: architecture and lifecycle review disposition. Status: open at `d9fd625587fbcb45857741bd8c8de94483f61ca9`; blocks provider-model-catalog `P01.S10` closure. The accepted Kimi ADR and served-capability `W05.P10.S28` corrections resolve both previously reported HIGH findings. A full active-row rescan found `W05.P10.S44` still equates preset-list eligibility with run-start dispatch eligibility, contradicting S28's topology-only, zero-selection-authority boundary. Retire that equivalence and handle preset topology readiness separately from the accepted run-start dispatch result. Full evidence and classification are recorded in the no-legacy curation audit.
 
+### no-legacy-curation-second-review-correction | high | S44 eligibility domains separated
+
+Type: architecture and lifecycle resolution. Status: corrected on 2026-09-05 after review commit `bdeb379482eabbb26a6af09e79a3d69de18565e4`; formal re-review remains pending. Unchecked served-capability step `W05.P10.S44` no longer equates preset-list topology readiness with run-start dispatch acceptance. Any retained preset signal has the topology-only, zero-authority boundary established by S28. The independent run-start requirement removes its redundant eligibility boolean or defines a retained result only as the accepted dispatch outcome after catalog selection and live admission gates, never as preset or profile eligibility. No plan row is closed and no runtime implementation is claimed by this correction.
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.

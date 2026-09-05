@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:8430d2cc9a4d54cfa73d1e17fc6dbc2737aa0bcd6bbca633791feae43b226202'
+body_hash: 'sha256:e858c726c4c7eb6c146f665665454986fe5ba8ee911532a29fe942aee17cdd84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-adr]]"
@@ -214,6 +214,18 @@ The inventory comes from `ProviderFactory.catalog_registrations(..., serve_in_pr
 | `openai/openai-api` | blocked | No exact-mode completed-turn proof. |
 | `zai/zai-claude-agent-acp:node` | blocked | Provider-level history does not transfer to this catalog execution mode. |
 | `zhipu/zhipu-openai-compatible-api` | blocked | No exact-mode completed-turn proof. |
+
+### Current no-legacy mode correction (2026-09-06)
+
+The table above is retained as the immutable S01 inventory at its frozen commit;
+its Gemini row is historical evidence. It no longer authorizes a supported,
+blocked, hidden, or provisioned Gemini lane. Current qualification and
+`W05.P12.S59` must use the seven-lane external inventory defined by the catalog
+ADR and must find no `gemini/gemini-cli-acp` provider, execution mode,
+configuration, construction, catalog, admission, or wire value. ACP catalog
+proof consumes only negotiated `configOptions`; `models.availableModels` is not
+an accepted alternate shape. The observed `gemini --version` fact above remains
+host inventory only and supplies no product authority.
 
 The conditional in-process inventory is:
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:6492662dd992a48f2fb511cbe780aefa1d4ca2e97e67c146b56448b3c6e8ed4b'
+body_hash: 'sha256:c6cd3c42588bf809f1cec7f3808f70fd49133bd159b16b9fae31a6d4e6abe714'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -240,6 +240,16 @@ Type: architecture and lifecycle resolution. Status: corrected on 2026-09-05 aft
 
 Type: formal architecture review disposition. Status: resolved through `665a26f94fe3a1f4af84a72bef0c3d8c2bf36d7e`. S44 now separates topology-only preset readiness from post-catalog dispatch acceptance and restores no provider/model/profile/selection authority. All prior Kimi, S28 and S44 review findings are resolved; accepted-ADR, active-plan and current-reference scans find no remaining architecture conflict. Historical records are preserved, no plan row closes, and runtime legacy removal remains explicitly open under catalog `P01.S10` with proof in `P01.S11` and `P03.S20`. All four affected feature Core checks report zero errors and zero warnings. No critical, high or medium curation defect remains; architecture curation review passes.
 
+### acp-gemini-no-legacy-curation-correction | high | active contract corrected; runtime proof open
+
+Type: architecture and rolling lifecycle finding. A live `P01.S10` audit found
+two further compatibility surfaces: the ACP `models.availableModels` catalog
+fallback and `gemini/gemini-cli-acp`, retained solely for existing configs. The
+accepted catalog, provider-abstraction, and harness decisions now make ACP
+catalog discovery configOptions-only and retire Gemini provider support in full.
+Catalog `P01.S10`, `P01.S11`, `P03.S19`, and `P03.S20` carry removal, exact
+seven-mode inventory, and negative proof. Frozen qualification captures remain
+historical. No implementation or plan completion is claimed by this curation.
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.

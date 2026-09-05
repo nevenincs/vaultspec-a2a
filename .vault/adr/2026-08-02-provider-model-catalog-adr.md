@@ -13,7 +13,7 @@ supersedes:
   - '2026-07-15-model-profiles-adr'
 modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:cd5de5f4b361f35ab5aa43ad07499cb14bf7f29ad4d9e91e53afd886da3fd515'
+body_hash: 'sha256:5a357a13a10db1ea9d8fb36498b41b915483c5a73d48f086fa782ed93863ec5b'
 ---
 # `provider-model-catalog` adr: `provider-owned model catalogs, bounded run selection, and truthful provider health` | (**status:** `accepted`)
 
@@ -202,3 +202,33 @@ pre-catalog restart/read path. It is the single active decision for that scope.
 The 2026-08-03 run-status legacy-disclosure clause and the original
 legacy-restart consequences remain historical context only and no longer govern
 implementation or qualification.
+
+## Amendment (2026-09-06): ACP current shape and legacy Gemini lane retired
+
+This amendment resolves two additional compatibility paths found during live
+`P01.S10` source audit and extends the 2026-09-05 no-legacy decision.
+
+- Generic ACP model and native-control discovery consumes only the negotiated
+  session `configOptions` collection. `models.availableModels` is not a current
+  ACP catalog shape and may not be parsed as a fallback, translated into config
+  options, or used to populate health, selection, construction, or wire output.
+  Its presence without usable `configOptions` leaves catalog enumeration absent
+  and the lane unselectable with the current typed reason.
+- `gemini/gemini-cli-acp` is retired in full. It existed only as a compatibility
+  lane for old configurations and has no separately accepted current mechanism.
+  Provider identity, execution-mode registration, settings, auth refresh,
+  provisioning, permission special cases, presets, factory construction,
+  catalog entries, admission declarations, and product wire values dedicated to
+  that lane are removed rather than retained in a blocked or hidden posture.
+- A retired Gemini provider, execution mode, setting, preset value, request, or
+  durable assignment fails closed as unsupported/incompatible before catalog
+  selection, construction, or dispatch. No alias, migration, substitution,
+  dormant registration, or configuration translation is permitted.
+- A Gemini-branded opaque model value advertised by another active provider
+  remains a model value owned by that provider and execution mode. It does not
+  recreate a Gemini provider lane or transfer Gemini-specific behavior.
+
+The earlier provider-adapter sentence granting Gemini a separate advertised
+session-model shape is superseded. Future Gemini support requires a new accepted
+current mechanism and its own exact-mode proof; old configuration is not a
+bootstrap path.

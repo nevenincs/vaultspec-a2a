@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:7a3af7b20418fd056c7b9ccd6efbb1de87a53055b1fd1d197408107625c2939f'
+body_hash: 'sha256:69ff081caebe9a15c13991c04180e3a051646f85ab8c84394d21808b7e1f6a0d'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -163,6 +163,37 @@ Type: formal architecture review disposition. Status: resolved through `665a26f9
 
 Repository-wide accepted-ADR, active unchecked-plan and current-reference scans find no remaining competing provider/model/profile selection authority. The multi-provider and Kimi records use dated supersession pointers; the model-profiles record is superseded; current references classify legacy paths as source drift or refusal evidence; historical execution and audit facts remain unchanged. Provider-model-catalog remains 14/21 with `P01.S10`, `P01.S11` and `P03.S20` open; served-capability `S28` and `S44` remain unchecked. The live runtime CRITICAL remains accurately open under `P01.S10`, with proof owned by `P01.S11` and `P03.S20`; this documentation review claims no runtime correction or plan closure. The correction commit changes exactly the served-capability plan and the two rolling audit documents. Core reports zero errors and zero warnings for provider-model-catalog, embedded-runtime-remediation, kimi-provider and served-capability-contract. No critical, high or medium defect remains in the architecture curation itself.
 
+### acp-available-models-compatibility-fallback | high | active authority resolved; runtime removal remains P01.S10
+
+Type: provider catalog compatibility conflict. Live source audit found generic
+ACP discovery accepting `models.availableModels` when current `configOptions`
+were absent. That path converts an obsolete response into current catalog
+selection authority and violates the no-translation rule. The accepted catalog
+ADR now makes negotiated `configOptions` the only ACP catalog collection; the
+catalog plan requires direct removal and typed negative proof. Runtime and test
+completion remain open under `P01.S10` and `P01.S11`; no row is closed here.
+
+### gemini-old-config-compatibility-lane | high | active authority resolved; runtime removal remains P01.S10
+
+Type: provider inventory and lifecycle conflict. Live source and document audit
+found `gemini/gemini-cli-acp` retained as a registered but unadmitted lane solely
+to keep old configurations working. Accepted provider-abstraction,
+agent-harness, and catalog wording plus current references could therefore be
+read as ongoing provider, auth, provisioning, permission, construction, catalog,
+or wire support. Dated amendments now retire that lane in full, and the active
+catalog plan requires its absence rather than a blocked disposition. Frozen S01
+and S03 mode captures remain historical evidence and are explicitly bounded to
+their captured commits. Runtime removal and proof remain open under `P01.S10`,
+`P01.S11`, `P03.S19`, and `P03.S20`; no plan row is closed.
+
+### acp-gemini-no-legacy-curation | high | active documents reconciled
+
+Type: architecture lifecycle correction. Status: corrected on 2026-09-06;
+formal re-review pending. Provider-model-catalog is the single current authority:
+ACP catalogs are configOptions-only, the external product inventory has seven
+lanes, and Gemini-specific provider support has no dormant compatibility
+posture. Historical research, execution, audit, and frozen inventory output are
+preserved as dated evidence. Live runtime work remains owned by the executor.
 ## Recommendations
 
 - Complete catalog `P01.S10` by deleting every enumerated legacy authority and

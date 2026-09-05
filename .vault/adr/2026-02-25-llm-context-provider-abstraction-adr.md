@@ -4,7 +4,7 @@ tags:
 - '#llm-context-provider-abstraction'
 date: 2026-02-25
 modified: '2026-09-05'
-body_hash: 'sha256:8b99866bd1d4f2948b073319fdc3955ef90fc88b8da25d6809714d49fbcf4f71'
+body_hash: 'sha256:9dcc7c2d35ea043657e95d9dd2a1ac430c34ab64be07cd1e61777dbe2d3a9a29'
 related:
   - '[[2026-03-31-docs-vault-migration-research]]'
   - '[[2026-07-14-orchestration-capabilities-research]]'
@@ -77,3 +77,19 @@ The subscription-first CLI architecture was correct and is reaffirmed; the resea
 - Difficulties: dependency on the SDK's release cadence and on registry availability (mitigated by local cache and settings-declared fallbacks); migration touches every preset TOML and the team-config schema; the probe gate must pass before the SDK swap lands - if it fails, only the descriptor/registry/auth layers proceed and framing stays in-house.
 - Opens: per-session MCP injection gives the orchestrator direct control over each agent's tool surface, the foundation for per-agent security constraints; the descriptor model is the natural home for future per-agent capability policy.
 - Unchanged risks: consumer OAuth volatility persists; upstream gemini-cli auth bugs bound Gemini's headless auth options.
+
+## Amendment (2026-09-06): Gemini compatibility support retired
+
+The accepted provider-model-catalog decision now exclusively governs the active
+provider and execution-mode inventory. Its 2026-09-06 amendment retires
+`gemini/gemini-cli-acp` because the lane existed only to keep old configurations
+working and no current nonlegacy mechanism depends on it.
+
+Every Gemini-specific provider, launch, authentication, credential-refresh,
+settings, provisioning, and construction promise above is historical and no
+longer authorizes implementation. Generic ACP remains an accepted transport
+shape, but catalog discovery consumes only negotiated `configOptions`; it does
+not accept `models.availableModels` or another old response as a fallback. A
+future Gemini lane requires a new current decision, explicit registration, and
+exact-mode evidence. Retired identifiers and configurations fail closed and are
+never translated into another active provider.

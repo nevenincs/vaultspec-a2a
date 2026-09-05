@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#agent-harness-provisioning'
 date: '2026-07-15'
-modified: '2026-08-03'
-body_hash: 'sha256:0b8e01b2bed2ae07a177f8e4bcc57276e79c542749e85302b03cc5a1850b941f'
+modified: '2026-09-05'
+body_hash: 'sha256:6e68a8f5490a374fece2a8560acd250a63d466867f12ba0c287fa9a6f2e55672'
 related:
   - '[[2026-07-14-adr-authoring-orchestration-adr]]'
   - '[[2026-07-15-model-profiles-adr]]'
@@ -150,3 +150,14 @@ its read-only argument must be refused where the contract is verified, not disco
 in an incident - and the burden of proving the surface stays trimmed lives with the
 harness contract check, which must hold served-equals-declared for any entry whose
 safety case is a restricted launch mode.
+
+## Amendment (2026-09-06, Gemini compatibility lane retired)
+
+The provider-model-catalog ADR's 2026-09-06 amendment retires
+`gemini/gemini-cli-acp` in full. Earlier clauses that describe Gemini session
+advertisement, provisioning, authentication, permission parsing, grounding, or
+unservable admission are historical observations and no longer authorize a
+blocked, hidden, dormant, or old-config compatibility lane. Harness verification
+must find no Gemini-specific provider branch or product surface. A future Gemini
+mechanism requires a new accepted provider decision and exact-mode proof; this
+ADR supplies no fallback authority.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:d16a7697d33456e0f9219e4d6259fe0d79ecbeaf3fd05d8f030d659be941b487'
+body_hash: 'sha256:7b15ce82240b1eccc93133fb08295e2af03bc52f4754e18d571289cefb261d49'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -24,11 +24,29 @@ Provider-model-catalog `P03.S19` and `P03.S20` are open prerequisites, not compl
 
 Capture identities are A2A `803dca968945d703092dbe8ecfaee0c6290cbd9f` and Dashboard `89706fb2641bd5482667437ae1e4abf2d8194fd8`. Later remediation Step `W05.P12.S57` must repeat the dependency check against the actual released A2A binary and receipt-matched Dashboard consumer; this record does not substitute the S01 build or either current source checkout for that final pair.
 
-## Current prerequisite status
+## Governing no-legacy update (2026-09-06)
+
+Provider-model-catalog `P01.S10`, `P01.S11`, `P03.S19`, and `P03.S20` now
+apply the catalog ADR's 2026-09-06 correction. Generic ACP discovery uses only
+negotiated `configOptions`; `models.availableModels` must be refused or ignored
+as an unsupported compatibility shape and cannot produce a catalog entry.
+`gemini/gemini-cli-acp` is retired rather than retained as a denied lane.
+
+The required current external-mode inventory after `P01.S10` contains seven
+lanes: Antigravity, Claude ACP node, Codex app-server, Kimi ACP, OpenAI API,
+Z.AI ACP node, and Zhipu OpenAI-compatible API. `P03.S19` must retain that exact
+inventory and its configOptions-only ACP source. `P03.S20` must prove no Gemini
+provider, mode, configuration, construction, catalog, admission, or Dashboard
+wire value remains and must prove typed refusal of retired identifiers. The
+Gemini row and eight-mode JSON below are immutable S03 capture evidence from
+A2A `803dca968945d703092dbe8ecfaee0c6290cbd9f`, not current support or an
+eligible blocked disposition.
+
+## Frozen prerequisite status at the S03 capture
 
 `vaultspec-core vault plan status` reports provider-model-catalog at 14/21 complete and flags checked `S08` as lacking a Step Record. The historical feature ledger lists target paths, including unchecked work, and is not positive execution evidence. Provider-capability-evidence reports 0/4; `provider_capabilities.py` exists, but source presence and its one ledger target entry do not close composition, population, exact-lane proof, invalidation, or served disclosure.
 
-The live exact-mode registry has eight external registrations. Only `codex/codex-app-server` is admitted, by a literal historical completed-turn citation to `test_pw7_research_adr_materializes_two_documents[codex]`. The other seven modes remain denied for lack of an exact-mode completed-turn proof: `antigravity/antigravity-cli`, `claude/claude-agent-acp:node`, `gemini/gemini-cli-acp`, `kimi/kimi-code-acp`, `openai/openai-api`, `zai/zai-claude-agent-acp:node`, and `zhipu/zhipu-openai-compatible-api`. Provider-level turn citations for Claude and Z.AI do not transfer to their catalog execution modes. Web citations for Claude and Codex prove only their exact retrieval capability and do not prove S19/S20. In-process deterministic/mock lanes remain excluded from external-provider and Dashboard product proof.
+The captured exact-mode registry had eight external registrations. Only `codex/codex-app-server` is admitted, by a literal historical completed-turn citation to `test_pw7_research_adr_materializes_two_documents[codex]`. The other seven modes remain denied for lack of an exact-mode completed-turn proof: `antigravity/antigravity-cli`, `claude/claude-agent-acp:node`, `gemini/gemini-cli-acp`, `kimi/kimi-code-acp`, `openai/openai-api`, `zai/zai-claude-agent-acp:node`, and `zhipu/zhipu-openai-compatible-api`. Provider-level turn citations for Claude and Z.AI do not transfer to their catalog execution modes. Web citations for Claude and Codex prove only their exact retrieval capability and do not prove S19/S20. In-process deterministic/mock lanes remain excluded from external-provider and Dashboard product proof.
 
 ## Exact evidence required from `P03.S19`
 

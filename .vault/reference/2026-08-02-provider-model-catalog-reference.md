@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:549efe50d4f76ef948036f74632268e59994035b64888a62764c2ec260144d30'
+body_hash: 'sha256:5be9b58a5832cd5ad745a56685cab28f6f221e6aa5bcfcae6e5485a0287c01e2'
 related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-07-15-model-profiles-adr]]"
@@ -17,6 +17,20 @@ provider discovery surfaces, and health facts that can be reported without
 spending a completion. It reflects the shared worktrees on 2026-08-02,
 including the P01.S08 new-run admission contract.
 
+## Governing correction (2026-09-06)
+
+The catalog ADR now requires generic ACP discovery to consume only negotiated
+session `configOptions`. `models.availableModels` is a retired compatibility
+shape: it supplies no model, health, selection, construction, or wire authority
+and is never translated into the current collection.
+
+`gemini/gemini-cli-acp` is also retired in full because its only remaining
+purpose was old-configuration compatibility. The current external product-mode
+inventory contains seven lanes and no Gemini provider or execution mode. The
+older Gemini inventory and source observations in historical execution and audit
+records remain evidence of what existed at their captured commits, not a
+supported or blocked lane. A Gemini-branded model advertised by another active
+provider remains opaque data owned by that provider.
 ## Summary
 
 ### Current cross-project path
@@ -67,17 +81,19 @@ including the P01.S08 new-run admission contract.
 | Codex CLI | app-server `model/list` and `modelProvider/capabilities/read` | models, ordered reasoning efforts, speed/service tiers, defaults, upgrade metadata | registered prompt-free through `codex-app-server` |
 | Claude API | authenticated `GET /v1/models` | ids, names, limits, capabilities, supported effort values | Claude Code subscription choices should come from its ACP/config picker |
 | Claude Code | ACP/config picker or `/model` | account-appropriate choices, aliases, default, managed restrictions | aliases move; preserve provider-issued values |
-| Gemini API | authenticated `models.list` / `models.get` | supported actions and extended metadata | filter only by explicit `generateContent`; do not infer tiers |
 | Kimi Code 0.28.1 | `kimi provider list --json` on the resolved executable, then exact `-m <alias> acp` selection | configured aliases; provider-defined thinking capability fields when present | current host persisted config is empty; discovery reports unavailable without inventing aliases |
 | OpenAI API | authenticated `GET /v1/models` | `object: list`; model `id`, `created`, `object: model`, `owned_by` | S05 maps only `id`; no capabilities, controls, reasoning tiers, or chat suitability |
 | Z.AI / Zhipu API | no verified official model-list contract in this pass | invocation docs list selected products | report catalog unavailable unless the endpoint or ACP advertises choices |
 
-P01.S06 registers the external execution lanes explicitly: `claude-agent-acp:{node|binary}`,
-`codex-app-server`, `gemini-cli-acp`, `kimi-code-acp`, `openai-api`,
-`zai-claude-agent-acp:{node|binary}`, and `zhipu-openai-compatible-api`.
-Claude, Codex, Gemini, Kimi, and OpenAI use their own prompt-free adapters. Z.AI
-and Zhipu have no independently proven enumeration surface in this pass, so their
-registrations return empty unavailable catalogs with unknown authentication.
+The current external execution inventory is exactly seven lanes:
+`antigravity/antigravity-cli`, `claude/claude-agent-acp:node`,
+`codex/codex-app-server`, `kimi/kimi-code-acp`, `openai/openai-api`,
+`zai/zai-claude-agent-acp:node`, and
+`zhipu/zhipu-openai-compatible-api`. Antigravity, Claude, Codex, Kimi, and
+OpenAI use their own prompt-free adapters. Z.AI and Zhipu have no independently
+proven enumeration surface in this pass, so their registrations return empty
+unavailable catalogs with unknown authentication. No Gemini provider or mode is
+registered, constructible, admitted, or served.
 Internal mock and deterministic providers are not registered. Catalog success is
 never treated as completed-turn admission.
 P01.S07 serves these registrations through authenticated
@@ -179,7 +195,6 @@ expiry before allowing a selection.
 - Codex app-server: https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md
 - Claude API models: https://platform.claude.com/docs/en/api/models/list
 - Claude Code model configuration: https://code.claude.com/docs/en/model-config
-- Gemini API models: https://ai.google.dev/api/models
 - Kimi model selector: https://moonshotai.github.io/kimi-cli/en/reference/slash-commands.html
 - OpenAI API models: https://platform.openai.com/docs/api-reference/models/object?lang=curl
 - LangChain OpenAI: https://reference.langchain.com/python/langchain-openai/langchain_openai

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:b740b4ea6171e8711b31008fdb349e56c62257d8350d81e7a9510b2dc353e9ab'
+body_hash: 'sha256:37379ee0ba6e02a2e66e629b183d76a0239eadbaedbd5b83b2bc15ad3d3acfbe'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -107,6 +107,10 @@ Type: architecture contradiction and single-home-fact violation. Status: open; b
 ### no-legacy-curation-formal-review | high | FAIL - one accepted ADR still governs retired authority
 
 Type: formal architecture review disposition. Status: open at `41519f11bd093311cebedc0f34bd575a845eac30`. Review against parent `194f4fa6e469a9d849719f3ff8a2e8adaa604712` confirms the exact eleven-path scope, clean diff mechanics, unchanged historical execution records, aligned unchecked catalog/remediation steps, current-schema restart/replay, typed fail-closed legacy-state refusal, and accurately open runtime drift under catalog `P01.S10`/proof `P01.S11` and `P03.S20`. Core reports zero errors and zero warnings for both provider-model-catalog and embedded-runtime-remediation. The unresolved accepted Kimi ADR contradiction means the single active authority and no-conflicting-accepted-ADR acceptance conditions are not met; S10 must not close until that ADR is reconciled and this review is repeated.
+
+### active-served-contract-profile-option | high | open
+
+Type: lifecycle conflict and ambiguous execution authority. Status: open; blocks this curation review and catalog `P01.S10` closure. Active unchecked served-capability-contract step `W05.P10.S28` still offers two alternatives: retire the eligible flag and profiles from preset listing, or redefine eligibility. The second branch does not require profile removal and therefore permits an execution path that violates the catalog ADR's unconditional prohibition on profile summaries and preset-carried provider/model authority. Amend the active row so profile disclosure is retired unconditionally; any independent decision to retain or redefine a topology-only eligibility signal must state that it carries no provider, model, control, fallback or profile authority.
 
 ## Recommendations
 

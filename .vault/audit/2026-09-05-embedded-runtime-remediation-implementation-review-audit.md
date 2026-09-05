@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:d8ee5785ddd68f8a4c4dfd85782d40425887308f732a9d6656e2fc21868f35e9'
+body_hash: 'sha256:6b52cd9ffcd2668bbf5260dcaabc266656163d6357240bf334ecbb43fa69ddf4'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -211,6 +211,10 @@ it. Full conflict inventory and live-code drift are recorded in
 ### no-legacy-curation-formal-review | high | FAIL - accepted Kimi ADR retains static map and profile authority
 
 Type: architecture review disposition. Status: open at curation commit `41519f11bd093311cebedc0f34bd575a845eac30`; blocks provider-model-catalog `P01.S10` closure. The curation correctly reopens/aligned `P01.S11`, updates active catalog/remediation requirements, preserves historical execution/audit facts, and keeps runtime removal open. However, accepted `2026-07-17-kimi-provider-adr` still normatively requires `MODEL_MAP`/`PROVIDER_DEFAULT_MODELS` entries and a `[team.profiles.kimi]` overlay, contradicting the catalog ADR's sole current-schema authority. Exact correction and full disposition are recorded in `2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit`; amend the Kimi ADR, then repeat formal review before S10 closure.
+
+### no-legacy-active-plan-profile-option | high | open
+
+Type: lifecycle conflict. Status: open at curation commit `41519f11bd093311cebedc0f34bd575a845eac30`; blocks provider-model-catalog `P01.S10` closure. Active served-capability-contract step `W05.P10.S28` retains an alternative that can redefine eligibility without unconditionally removing profiles from preset disclosure. The catalog ADR now prohibits profile summaries and preset-carried provider/model authority. The row must require profile removal in every branch and may separately retain or redefine only a topology signal with no provider/model/profile meaning. Full classification is in the no-legacy curation audit.
 
 ## Recommendations
 

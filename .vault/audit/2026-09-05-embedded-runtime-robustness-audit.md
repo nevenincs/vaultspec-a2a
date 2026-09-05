@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:74982485a1444c9abc52fd42e577a4268e64d346c7c41bf16133d328d9df0c0e'
+body_hash: 'sha256:5be9d8805df66d000a7efc593ab86528b28a288b9a0d7f8e8623eb0e1334b00a'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -198,7 +198,7 @@ FAIL means at least one specified requirement is contradicted; it does not imply
 
 **OPEN; evidence/environment; M02; outside the embedded SQLite runtime claim.** Eight cases in `control/tests/test_sync_url_derivation.py` fail at `:54` while SQLAlchemy imports psycopg. The URL assertions passed before engine construction; no PostgreSQL connection was attempted. `pyproject.toml` declares psycopg in optional `server`, and the frozen desktop spec deliberately excludes it. This is an incomplete server-test prerequisite/profile, not evidence that desktop SQLite or URL derivation is broken. **Owner:** test/profile maintenance. **Close when:** server checks run under the locked server dependency profile and its requirement is explicit; retain this run's eight failures in the evidence history.
 
-**Resolution (W01.P02.S04, 2026-09-05): RESOLVED.** The project now names the exact isolated locked command for PostgreSQL checks at the `server` optional extra, and a discriminator enforces that asyncpg, psycopg, and the LangGraph PostgreSQL saver remain in that profile, outside base and `freeze`, and excluded by the PyInstaller spec. The server-profile run passed all 15 URL/configuration/SQLAlchemy engine-construction checks without opening a PostgreSQL connection. An isolated freeze profile resolved none of the three PostgreSQL modules; a deliberately server-equipped freeze build passed smoke and contained no exact driver modules in its PYZ or named artifact paths. The original eight M02 failures remain historical evidence of running the tests outside their required profile.
+**Resolution (W01.P02.S04 correction, 2026-09-05): RESOLVED; formal re-review pending.** The project names a supported task-environment flow for the `server` optional extra: set `UV_PROJECT_ENVIRONMENT` to a bounded task path, run exact locked sync, then run tests with `uv run --no-sync`. Separate `server-env`, `freeze-env`, and `build-env` paths preserve the shared `.venv`. The server profile passed all 15 URL/configuration/SQLAlchemy engine-construction checks. The freeze-only record proves all three PostgreSQL distributions and imports absent (digest `F4EAE3C1...`); the server-equipped build record proves the drivers present before PyInstaller (digest `C3378273...`), while the post-build scan proves zero blocked modules among 5,720 PYZ names and zero blocked paths among 2,746 artifact files (digest `A0D70509...`). Exact commands, full canonical JSON, match grammar, roots, hashes, and the source-boundary digest are retained in the corrected S04 Step Record. The original eight M02 failures remain historical evidence of using the wrong dependency posture.
 
 ### ER19-catalog-test-stale-assumption | medium | A route test hard-codes provider unavailability despite real enumeration
 

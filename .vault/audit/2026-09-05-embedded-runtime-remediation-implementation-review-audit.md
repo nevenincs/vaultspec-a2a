@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:a4612a8d496f5e096f0e190f089f055dd8695b6c0328c7856bbf467bce9f56d6'
+body_hash: 'sha256:0d023dc67e0ed614d6e61133f87769cf3cb591e501a2060bf32d12a156847ca2'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -308,3 +308,54 @@ Accepted-ADR, active-plan, and current-reference scans now agree on configOption
 - For `s04-driver-exclusion-evidence-not-replayable`, replace both placeholder verification entries with exact bounded commands or retained probes and canonical results/digests, including the exact sync dry-run command.
 - For `s04-uv-environment-claim-inaccurate`, retain task-specific uv project environments and explicit locked sync plus no-sync execution for every dependency posture.
 - For `no-legacy-provider-model-decision`, remove the remaining runtime and Dashboard legacy paths under catalog `P01.S10`, then prove typed refusal and current-schema restart under `P01.S11` and `P03.S20`.
+
+### s10-retired-nested-authority-crosses-durable-and-ipc-boundaries | high | open
+
+Type: state compatibility and schema validation. Status: blocks provider catalog
+`P01.S10` and therefore remediation `W01.P02.S05`. Formal review of A2A
+`15766f92` reproduced valid-digest schema-v1 records that remain accepted after
+adding root `profile_id`, selection `model_profile`, or control `profile_id`,
+because unknown nested keys are ignored and excluded from the digest.
+`DispatchRequest.model_assignment` also accepts nested retired fields. Ownership:
+provider-model-catalog `P01.S10`; require closed exact-key durable and IPC schemas
+and terminal redispatch proof for every retired nested shape before contact.
+
+### s10-corrupt-mode-falls-through-to-fallback | high | open
+
+Type: safety and fail-closed behavior. Status: blocks catalog `P01.S10` and
+remediation `W01.P02.S05`. A coherent-digest persisted selection with an
+impossible provider/mode pair passes parsing. Compiler construction then catches
+the factory's structural `ValueError` as lane unavailability and substitutes a
+fallback; a committed test uses `unavailable-mode` as the primary and expects
+that result. Ownership: provider-model-catalog `P01.S10`; validate every frozen
+lane structurally before construction, separate corruption from runtime
+unavailability, and fail corrupt state terminally with no provider/worker
+contact.
+
+### s10-lane-admission-test-integrity-loss | medium | open
+
+Type: evidence integrity and regression coverage. Status: open. Deleting the lane
+admission suite also removed still-current all-provider classification,
+deny-by-default, live proof-citation resolution, rotten-citation,
+proof-immutability, and web-implies-turn discriminators. Profile-specific cases
+are retired, but the current catalog admission invariants need adapted
+replacement coverage. Ownership: provider-model-catalog `P01.S10`.
+
+### s10-topology-preset-web-claim-guard-loss | medium | open
+
+Type: product-truth regression coverage. Status: open. The deleted preset
+web-claim suite was the only anti-vacuous scan of shipped team descriptions.
+Persona and graph tests do not protect this topology-only product surface.
+Ownership: provider-model-catalog `P01.S10`; restore a provider-independent scan
+that forbids web/research promises in preset descriptions.
+
+### s10-runtime-formal-review | high | FAIL - retired/corrupt state can be accepted and substituted
+
+Type: formal implementation review disposition. Status: open at A2A
+`15766f92bdb094a78ab783620522547e3223ea5a`. Removal of static model/profile
+policy, Gemini support, ACP/Codex compatibility paths, and public legacy schema
+surfaces is broadly complete; current inventory and production model call sites
+are correct, project confinement remains covered, and focused tests/OpenAPI/Ruff
+checks pass. The two HIGH durable/IPC fail-closed defects above prevent catalog
+`P01.S10` closure and keep remediation `W01.P02.S05` blocked. The uncommitted S10
+Step Record is review evidence only and cannot close the implementation.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:cb1af2d10e02bc676a629529d7fc23d9bf759e199661988b5ff6044556f327af'
+body_hash: 'sha256:a9ed73f521e5f6c3e1707347c9f5483a2c6734c81903f60f5a02b5110cf207da'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -101,6 +101,23 @@ Type: validation environment. Status: resolved for S02. From Dashboard `engine`,
 ### dashboard-vault-baseline-validation-debt | low | Full Dashboard Core check is not globally clean
 
 Type: documentation hygiene. Status: open; unrelated and non-blocking for S02. `vaultspec-core vault check all` at Dashboard `dbc15e6f0976d82919f19ecebd991499e25a2b02` reports one pre-existing schema error (`runner-fleet-conformance` ADR has no grounding reference) and 80 warnings, chiefly stale feature indexes plus retired exec mappings and missing research sections. Focused `references` is clean; the new contract's body and feature index are valid. Ownership: Dashboard architecture-corpus curation, outside this remediation plan.
+
+### s02-broker-decision-outside-adr | high | New broker capabilities conflict with the ADR-fixed seven-verb surface
+
+Type: architecture and decision ownership. Status: open; review-blocking for `W01.P01.S02`. The coordinated reference assigns `S43`-`S45` durable follow-up messaging, permission response, and native command discovery/execution, but the accepted Dashboard orchestration-edge ADR is the authoritative home for the engine-fronted contract and says the whitelist grows to exactly seven verbs. That ADR also requires any edge change to be a reviewed contract event. A reference cannot silently expand or supersede the accepted decision, and the existing seven verbs contain none of the new capabilities. Ownership: correct S02 by amending the accepted Dashboard edge ADR to authorize the exact expanded whitelist and semantics, then make the coordinated reference derive from and mutually reference that decision. Do not advance to S03 while this conflict remains.
+
+### s02-future-broker-wire-underspecified | high | S43-S45 lack an implementable cross-repository wire contract
+
+Type: contract completeness. Status: open; review-blocking for `W01.P01.S02`. The reference gives the current seven verbs exact methods, routes, 15/45/60-second budgets and retry posture, but describes the later message, permission, and native-command capabilities only in prose. It does not freeze exact engine verb names; A2A methods and paths; payload field, count and byte bounds; typed success, durable-receipt and conflict shapes; request/scope identity rules; or per-operation retry and status-reconciliation behavior. Native command discovery and execution are also two distinct exchanges despite being grouped as one capability. This leaves both repositories free to implement incompatible contracts in S43-S45, contrary to S02's purpose. Ownership: correct S02 by recording the complete bounded wire matrix under the authoritative edge decision and deriving the reference from it before runtime changes begin.
+
+### s02-release-provenance-contract-incomplete | high | S50 handoff omits the accepted version-only producer artifact contract
+
+Type: architecture and packaging. Status: open; review-blocking for `W01.P01.S02`. The accepted Dashboard provisioning ADR requires A2A to publish deterministic fixed-name per-target release archives with SHA-256 sidecars before the consumer lands, removes Dashboard source checkout, freeze, and commit pinning, converts the component lock to a released-version reference, and makes Dashboard fetch, verify, then bundle. The coordinated reference records the current commit-pin mismatch but reduces intended S50 behavior to building a released artifact and updating the lock/member/receipt chain. That wording does not preserve producer-first ordering, A2A build ownership, archive/sidecar verification, version-only selection, or deletion of source coupling, and can be read as allowing the rejected Dashboard-build or commit-pin path. Ownership: correct S02 by incorporating the accepted provenance constraints verbatim in meaning and citing their ADR authority; S50 then implements that already-decided contract.
+
+### s02-formal-review | high | FAIL - contract authority and completeness defects block advancement
+
+Type: implementation review. Status: open; S02 review failed at A2A `e9a56ff08edbe248600a21daa583183410ea822e` and Dashboard `dbc15e6f0976d82919f19ecebd991499e25a2b02`. The documentation-only commits are mechanically scoped and the replay evidence is sound: all 17 recorded source hashes and aggregate `D8EA71B...` digest reproduce, the exact current seven verbs and 15/45/60-second budgets match source, focused A2A tests pass 39, Dashboard discovery-focused tests pass 19, lifecycle tests pass 21, and broker tests pass 70 using explicit valid rustup shims. The known discovery, receipt, foreign-process, and component-authority product gaps are correctly assigned to S43-S50 and do not independently defect this evidence step. The three preceding HIGH defects are in S02's contract record itself, so S02 must be reopened and corrected before S03.
+
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.
@@ -113,3 +130,7 @@ Type: documentation hygiene. Status: open; unrelated and non-blocking for S02. `
 - For `in-process-mode-posture-unspecified`, list the deterministic and mock execution keys, current arming state, conditional requirements, and exclusion from external work evidence.
 
 - For `dashboard-rust-toolchain-launcher-rereview`, keep the explicit working user rustup shims in verification commands until the broken shared symlinks or PATH order are repaired; this environment cleanup does not block S02 evidence.
+
+- For `s02-broker-decision-outside-adr`, amend the accepted Dashboard orchestration-edge ADR through its review process so the exact expanded whitelist has one authoritative decision home; keep the coordinated reference factual and derived.
+- For `s02-future-broker-wire-underspecified`, define every S43-S45 exchange end to end, including verb, route, bounds, receipt/conflict schema, identity, timeout, retry and reconciliation behavior, before either repository implements it.
+- For `s02-release-provenance-contract-incomplete`, carry the provisioning ADR's producer-first, version-only, fixed-archive and SHA-256 fetch-verification requirements into the coordinated handoff and make S50's ownership unambiguous.

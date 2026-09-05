@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:4b10c5b684309b737bead3c1a54211ae39767dbe95134ff8b5f1a21dc326d103'
+body_hash: 'sha256:6141c09fe3802152b24380b309ad5fb4405ace9ea1521018c4f9b61abce76e3e'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -59,6 +59,26 @@ Resolution status: resolved in the S01 correction; formal re-review pending. The
 
 Type: validation environment. Status: open; non-blocking for the S01 evidence-only correction. Both `cargo test -p vaultspec-product gateway_drain` and `cargo test -p vaultspec-api a2a_lifecycle` resolve Cargo to `C:\ci-shared\cargo\bin\cargo.exe` and fail before compilation with Windows reporting that no application is associated with the specified file. Exact source-constant assertions and SHA-256 capture remain available and are sufficient to freeze the S01 inputs, but this host cannot supply executable Rust-test confirmation. Ownership: repair or replace the configured Cargo toolchain before `W01.P01.S02` consumer-contract verification, then rerun both commands; retain the failure as environment evidence rather than treating it as a product-test result.
 
+### qualification-capture-provenance-rereview | high | RESOLVED - frozen facts have replayable commands and canonical digests
+
+Type: evidence reproducibility. Status: resolved at corrected S01 commit `00fa034705727903d464ae4d937d9fdf14edce23`. Formal re-review recomputed all seven retained canonical JSON lines and obtained the recorded SHA-256 digests. It also recomputed all 17 source-manifest entries against the named A2A and Dashboard checkouts with zero mismatches, and independently matched the executable hash. The exact commands, raw compact observations, digest convention, clean tracked-status scope and ignored-build-output exclusion are sufficient for this evidence-only Step; later behavioral qualification must still create its own revision-bound observations.
+
+### dashboard-pretest-deadlines-rereview | high | RESOLVED - active consumer bounds are frozen by distinct surface
+
+Type: contract and evidence completeness. Status: resolved at corrected S01 commit `00fa034705727903d464ae4d937d9fdf14edce23`. Formal re-review matched all nine recorded values to the three hashed Dashboard source owners: broker read/control/catalog 15/60/45 seconds, broker freshness/health 120/1.5 seconds, product lifecycle freshness/stop-plan 30/5 seconds, and product drain connect/max 5/600 seconds. The 30-second lifecycle predicate and 120-second broker predicate remain explicitly distinct; S02 retains ownership of contract reconciliation.
+
+### database-pool-backend-rereview | medium | RESOLVED - SQLite and PostgreSQL limits are separated
+
+Type: evidence accuracy. Status: resolved at corrected S01 commit `00fa034705727903d464ae4d937d9fdf14edce23`. The corrected reference assigns the 5,000ms busy timeout to SQLite and the configured QueuePool size 5 plus overflow 10 to PostgreSQL only. Its separate observation that the locked SQLAlchemy version currently chooses `AsyncAdaptedQueuePool` defaults 5/10 for file SQLite is explicitly version-bound and not treated as an A2A SQLite capacity contract.
+
+### in-process-mode-posture-rereview | medium | RESOLVED - exact conditional keys and effective posture are complete
+
+Type: evidence completeness. Status: resolved at corrected S01 commit `00fa034705727903d464ae4d937d9fdf14edce23`. Formal re-review reproduced the empty effective in-process set with arming absent/false, `deterministic/in-process-deterministic` under explicit arming, and the additional `mock/in-process-mock` only with a nonblank mock base. Seventy-three focused provider admission and in-process catalog tests pass, and both lanes remain excluded from external-provider proof.
+
+### dashboard-rust-toolchain-launcher-rereview | low | Default shared shim remains broken but focused Rust validation is available
+
+Type: validation environment. Status: open, narrowed and non-blocking. The default PATH resolves Cargo and rustc through unlaunchable symbolic links in `C:\ci-shared\cargo\bin`, but the user rustup shims are valid. With `C:\Users\hello\.cargo\bin\cargo.exe` and `RUSTC=C:\Users\hello\.cargo\bin\rustc.exe` explicit, `cargo test -p vaultspec-product gateway_drain` passed 16 tests and `cargo test -p vaultspec-api a2a_lifecycle` passed 21 tests. The original low classification remains appropriate because this is a launcher-path defect with an exact working route, not missing consumer certification. Ownership: repair the shared shim or PATH before final qualification; use the recorded explicit shims for S02 meanwhile. No critical, high, or medium S01 correction defect remains.
+
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.
@@ -69,3 +89,5 @@ Type: validation environment. Status: open; non-blocking for the S01 evidence-on
 - For `dashboard-pretest-deadlines-incomplete`, freeze every current broker, lifecycle, discovery, and drain deadline while keeping the 30-second and 120-second freshness predicates tied to their distinct consumers.
 - For `database-pool-backend-conflation`, split SQLite timeout/pooling facts from the PostgreSQL QueuePool 5-plus-10 configuration.
 - For `in-process-mode-posture-unspecified`, list the deterministic and mock execution keys, current arming state, conditional requirements, and exclusion from external work evidence.
+
+- For `dashboard-rust-toolchain-launcher-rereview`, keep the explicit working user rustup shims in verification commands until the broken shared symlinks or PATH order are repaired; this environment cleanup does not block S02 evidence.

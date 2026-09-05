@@ -6,11 +6,12 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:6e7e6b88e8951879e46a0ea8a0af6b6fe275d6a03c6bfa04c8ce2bffe53109ba'
+body_hash: 'sha256:a22802226540227e43fd9e115ef2b9e6da204f96c0ee7a7e9ecf7d09977f322c'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S03]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W01-P01-summary]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
@@ -38,6 +39,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P01-S01` - Record the intended A2A commit/binary identity, Dashboard generation, A01-A34 applicability, supported-mode inventory and pre-test queue/deadline/host limits without changing the frozen acceptance thresholds
 - `2026-09-05-embedded-runtime-remediation-W01-P01-S02` - Resolve the intended consumer's lifecycle, discovery, broker and schema contract and record the coordinated change boundary before either repository changes wire behavior
 - `2026-09-05-embedded-runtime-remediation-W01-P01-S03` - Record prerequisite status and exact evidence needed from catalog plan P03.S19 and P03.S20; allow independent local remediation while missing provider or Dashboard qualification blocks only its dependent proof
+- `2026-09-05-embedded-runtime-remediation-W01-P01-summary` - `embedded-runtime-remediation` `W01.P01` summary
 
 ### plan
 

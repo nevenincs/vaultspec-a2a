@@ -3,12 +3,13 @@ tags:
   - '#adr'
   - '#control-action-leases'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:b8a5fd1d69543d855fd22437cf7deed37e6ac1d0fd0cd4d252cd8f539fb56eed'
+body_hash: 'sha256:d58d2be809cc62e6948c24bf717fd201b2d8c89409801b2c4f183878d582ba81'
 related:
   - "[[2026-08-02-control-action-leases-research]]"
   - "[[2026-08-02-control-action-leases-reference]]"
+  - '[[2026-09-05-embedded-runtime-remediation-research]]'
 ---
 
 # `control-action-leases` adr: `durable leased dispatch claims` | (**status:** `accepted`)
@@ -43,7 +44,7 @@ permission, follow-up, cancel, and verdict paths. The decision is grounded by
 - The winning typed payload and stable dispatch ID are durable.
 - Fresh leases replay without dispatch; expired leases permit one recovery dispatcher.
 - Definite non-delivery releases ownership; ambiguous delivery waits for reconciliation or expiry.
-- Application settles only from a request-scoped checkpoint receipt or authoritative worker progress.
+- Graph-mutating message, clarification, permission and verdict actions settle only from durable request-scoped evidence associating action identity, winning payload fingerprint and dispatch identity with a persisted checkpoint proving incorporation. Cancellation settles from durable action-specific cessation or terminal/no-start no-op evidence; it does not require a checkpoint for work that never started. Worker acceptance, first output, generic progress and provider completion alone do not establish application or cessation. Recovery reconciles the journal with the evidence required for that action kind before redelivery; uncertain external effects are not blindly replayed.
 - Worker dispatch-ID suppression is synchronous, bounded, and cleared on restart.
 - Existing six-verb gateway compatibility remains unchanged.
 
@@ -58,6 +59,16 @@ Clarification adds a request-id and fingerprint receipt to checkpointed graph st
 and restart reconciliation classifies and redrives parked clarification actions from
 journal plus checkpoint truth. The worker suppresses repeated stable dispatch IDs
 before scheduling.
+
+The journal owns pending delivery. One renewable dispatcher per run drains eligible messages in durable acceptance order during ordinary operation and after restart. A busy worker never removes accepted work. Admission atomically enforces configured positive per-run and service queue limits before acknowledgement; overflow has a typed retryable disposition. Duplicate requests retain their original position and payload, while conflicting retries refuse. Typed clarification and permission answers retain their dedicated request-scoped paths.
+
+Cancel and interrupt bypass ordinary execution-capacity admission while remaining authenticated, bounded and idempotent. Cancellation can wake a blocked event/provider await. Acknowledgement, cessation and terminal settlement remain separate observations; unresolved cessation is disclosed for reconciliation.
+
+Worker saturation is admission backpressure, not evidence of transport failure, and does not open the shared failure breaker. Recovery atomically reserves the configured half-open probe allowance; success, failure or abandoned ownership settles it before replacement admission.
+
+Storage admission uses bounded transactions and a typed retryable refusal on exhausted contention. No durable acceptance is reported for an uncommitted run. Transaction diagnosis precedes tuning; increasing the busy timeout alone is not a proven remedy. Network dispatch follows committed acceptance. Atomic run-state election remains owned by the state-truthfulness ADR.
+
+Grounding for the 2026-09-05 refinement: `2026-09-05-embedded-runtime-remediation-research`. Accepted under the owner's explicit ADR auto-approval; implementation awaits plan approval.
 
 ## Rationale
 

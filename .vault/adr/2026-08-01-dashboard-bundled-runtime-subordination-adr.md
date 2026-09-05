@@ -7,12 +7,14 @@ related:
   - "[[2026-07-24-dashboard-bundled-runtime-adr]]"
   - "[[2026-07-21-capsule-install-layout-adr]]"
   - '[[2026-08-01-dashboard-bundled-runtime-consumer-record-correction-reference]]'
+  - '[[2026-09-05-embedded-runtime-remediation-research]]'
 supersedes:
   - '2026-07-24-dashboard-bundled-runtime-adr'
-modified: '2026-08-01'
+modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:04698cc25572a9dbcb557394c0a461f644acd7bff651b6a2fd45a0b39a8d57fd'
+body_hash: 'sha256:0f9cdc3bd2a92975b605106f3931483a06714b0df161e7b94ae922be15977322'
 ---
+
 # `dashboard-bundled-runtime` adr: `the dashboard is the authority; a2a supplies what it requires` | (**status:** `accepted`)
 
 ## Problem Statement
@@ -75,19 +77,15 @@ implementation is nicer.
 
 ## Implementation
 
-The 2026-07-24 record is superseded by this one. The capsule apparatus and its
-manifest are retained as a supplied surface rather than retired, and the
-retirement work in flight against them is stopped.
+A2A is supplied as the binary component embedded by Vaultspec Dashboard, as directed by the owner on 2026-09-05. Dashboard owns release selection, installation, launch, update transactions, snapshot and rollback. A2A owns its executable contract, worker/provider process closure, authoritative runtime state and migrations. Historical capsule or standalone-product assumptions do not authorize additional product surfaces.
 
-Conformance is then established in one direction: read the consuming project's
-accepted records, enumerate what they require this repository to provide, and
-supply exactly that. Where the consumer names an entrypoint this repository does
-not expose, the entrypoint is added here; the consumer is not edited to match
-what this repository happens to have.
+The supplier conforms to one versioned lifecycle/discovery contract pinned to the intended Dashboard generation. The binary writes the required discovery and identity fields and exposes the required readiness, drain, shutdown and ownership-capability semantics. Source and frozen execution share these owners. Incompatible generations refuse before attachment or mutation; fallback discovery cannot silently attach another resident service.
 
-The manifest gains a producer. Its absence is what allowed both sides to drift
-undetected — a declared contract that nothing emits cannot disagree with reality
-loudly enough to be noticed.
+Shutdown closes admission first, initiates cancellation/drain, closes streams within the same total deadline and uses cooperative server shutdown on Windows and other targets. Cleanup verifies child ownership. Forced termination is the final bounded escalation, with unresolved work recorded for restart reconciliation.
+
+Qualification drives the actual consumer and identified binary through seated boot, readiness, worker execution, migration refusal, snapshot/rollback cooperation, drain and restart. The intended generation's contract is authoritative; helper fixtures and unrelated builds cannot replace it.
+
+Grounding for the 2026-09-05 refinement: `2026-09-05-embedded-runtime-remediation-research`. Accepted under the owner's explicit ADR auto-approval; implementation awaits plan approval.
 
 ## Rationale
 
@@ -104,16 +102,4 @@ does not survive the correction to its input.
 
 ## Consequences
 
-The capsule surface stays and acquires an owner, which costs maintenance this
-repository had already decided to stop paying. That cost is now known to be the
-price of a requirement rather than the residue of an abandoned design.
-
-Work already committed against the superseded record must be re-examined,
-specifically the removal of the standalone protocol entrypoint. Some of it may be
-correct on independent grounds; none of it can be justified by the superseded
-record any longer.
-
-The wider pathway this opens is that cross-repository decisions need a
-reconciliation step that actually runs. Both projects had one written down and
-neither performed it, and every consequence here followed from that omission
-rather than from any individual technical judgement.
+Consumer authority is preserved while obsolete capsule-specific implementation requirements are retired under the owner's binary-component direction. A2A carries the cost of conforming to the intended Dashboard generation and proving the full process closure. Cross-repository changes and migration/rollback cooperation remain explicit qualification gates. Historical rationale is retained as the record of why supplier authority was rejected; it does not prescribe a standalone product or recreate capsule machinery.

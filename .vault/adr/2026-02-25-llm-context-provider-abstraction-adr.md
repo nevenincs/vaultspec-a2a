@@ -3,12 +3,13 @@ tags:
 - '#adr'
 - '#llm-context-provider-abstraction'
 date: 2026-02-25
-modified: '2026-07-14'
-body_hash: 'sha256:bc917f867c94431232abaa22f30c6f7ac1416af5e597a7d258daf768bc976705'
+modified: '2026-09-05'
+body_hash: 'sha256:8b99866bd1d4f2948b073319fdc3955ef90fc88b8da25d6809714d49fbcf4f71'
 related:
   - '[[2026-03-31-docs-vault-migration-research]]'
   - '[[2026-07-14-orchestration-capabilities-research]]'
   - '[[2026-07-14-orchestration-capabilities-audit]]'
+  - '[[2026-09-05-embedded-runtime-remediation-research]]'
 ---
 
 # `llm-context-provider-abstraction` adr: `subscription-first provider harness over ACP` | (**status:** `accepted`)
@@ -53,6 +54,18 @@ Five layers, replacing the current factory-branch design:
 - **Auth.** CLI-agent auth moves to ACP `authMethods`/`authenticate` negotiation where the adapter supports it; the 1-year headless Claude token (`claude setup-token`, validated in the original record) remains the Claude method of choice; Gemini uses API-key auth headlessly until upstream OAuth is fixed. API-tier credentials follow stored-credential, then environment, then explicit-option resolution. The environment-scrubbing model is retained as sandbox hygiene, no longer as the auth mechanism.
 - **Session runtime.** The ACP schema/framing layer is replaced by the official Python SDK (probe-gated per Constraints); the session model, streaming translation to LangChain chunks, and cancellation semantics of the current `AcpChatModel` are preserved on top of it. Per-session MCP server injection uses the protocol's first-class `mcpServers` field.
 - **API fallback tier.** Direct-API providers instantiate per-vendor LangChain packages behind the same descriptor registry, replacing the one-`ChatOpenAI`-branch-per-vendor pattern. GLM remains the reference case.
+
+### Complete input, safe prompt views and native controls
+
+Every invocation budgets the assembled provider-visible input immediately before dispatch: persona/rules, workspace mounts, conversation, tool declarations, call arguments/results and reserved output. Units, source and confidence are explicit; approximations and unknown values never masquerade as exact measurements. Input that cannot fit after safe compaction refuses before dispatch.
+
+Compaction creates a replacement prompt view from durable state without overwriting the authoritative transcript. Pinned instructions, workspace identity, pending actions and complete call/result groups survive. Removed conversational meaning has a durable summary with source-range provenance. Commit the view only after budget and structural validation; interruption/failure retains the prior view. New messages remain journalled and follow the committed view in order; cancellation retains priority. Semantic fidelity is proven by continuation tests, not assumed from the existence of a summary. Native compaction claims require independent proof.
+
+Native commands are session-scoped discovered capabilities with supported, blocked or unsupported dispositions. Adapters use the negotiated mechanism, including prompt syntax where appropriate; unknown commands cannot silently become ordinary chat. Identity, arguments, busy disposition, outcome and compaction status are observable through the coordinated control/status contract. No generic shell or arbitrary RPC escape is introduced.
+
+Initialization validates the returned protocol version before sessions or optional operations. Every valid terminal stop outcome settles the stream and preserves refusal, cancellation or budget-exhaustion meaning; partial output and transport success cannot imply completed work. The existing SDK migration remains probe-gated and is not a prerequisite imposed on these corrections.
+
+Grounding for the 2026-09-05 refinement: `2026-09-05-embedded-runtime-remediation-research`. Accepted under the owner's explicit ADR auto-approval; implementation awaits plan approval.
 
 ## Rationale
 

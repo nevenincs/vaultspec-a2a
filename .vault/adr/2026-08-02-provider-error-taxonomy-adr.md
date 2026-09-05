@@ -3,11 +3,12 @@ tags:
   - '#adr'
   - '#provider-error-taxonomy'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:0776fb2bc5e7929d8b6a345d70109cbcd98a01719ce1ea9e50b5492180939e72'
+body_hash: 'sha256:1c00d349c448b26b83b204ed00a324a577821894809274695c819e13b835726b'
 related:
   - "[[2026-08-02-provider-error-taxonomy-research]]"
+  - '[[2026-09-05-embedded-runtime-remediation-research]]'
 ---
 
 # `provider-error-taxonomy` adr: `typed provider conditions on the failure surface` | (**status:** `accepted`)
@@ -139,6 +140,10 @@ the new vocabulary.
 Frontend work follows in the same campaign and consumes only the typed condition:
 the panel maps each member to its distinct user action and never parses the
 reason string.
+
+Classification applies at initialization, authentication, configuration/model selection, prompt execution and streamed termination. Known wire discriminators survive wrapping, persistence and reload; unknown remains the truthful floor. Retry policy uses condition, supplied hints, bounded attempts/time and external-effect uncertainty, not the exception's location. Worker capacity/breaker policy is separately owned by the control-action-leases ADR.
+
+Grounding for the 2026-09-05 refinement: `2026-09-05-embedded-runtime-remediation-research`. Accepted under the owner's explicit ADR auto-approval; implementation awaits plan approval.
 
 ## Rationale
 

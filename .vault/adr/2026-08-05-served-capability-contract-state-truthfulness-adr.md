@@ -3,14 +3,15 @@ tags:
   - '#adr'
   - '#served-capability-contract'
 date: '2026-08-05'
-modified: '2026-08-05'
+modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:ca2a4da9cd6c255a5c3944e1268da122b85d72c417fff02405aeab5ef6f66f71'
+body_hash: 'sha256:57946eeda9ff11e61d31e02849d6284cea7dcb71ac63a083d8a59a3a4707b083'
 related:
   - "[[2026-08-05-served-capability-contract-gateway-contract-audit]]"
+  - '[[2026-09-05-embedded-runtime-remediation-research]]'
 ---
 
-# `served-capability-contract` adr: `terminal states, obligated writers, and fields that must not contradict the run` | (**status:** `proposed`)
+# `served-capability-contract` adr: `terminal states, obligated writers, and fields that must not contradict the run` | (**status:** `accepted`)
 
 ## Problem Statement
 
@@ -150,6 +151,14 @@ misdirected diagnosis for exactly as long as anyone believed it. This clause is
 narrower than truthfulness: the message was accurate about its own signal and
 still wrong about the system.
 
+**T6 - State advancement is an atomic ownership election.** Durable ownership identifies the run revision, writer generation and applicable dispatch/action identity. Conditional writes validate expected state or revision rather than retained ORM state; one competing transition wins. A terminal result cannot be reopened by stale cancel, retry or worker events. Early completion arriving before running is committed is reconciled as completed work, never discarded under an unproven already-terminal assumption.
+
+Normal completion, cancellation, exception and task-group cancellation release active ownership through bounded cleanup and leave a durable disposition or explicit reconciliation obligation. Cleanup cannot rely on an outcome assigned only after a cancelled await. A durable terminal update has an independent retry/reconciliation owner, and notification is not considered delivered before terminal state persists. Reconciliation runs during operation and startup, comparing writer generation and checkpoint receipts while retaining T3's run-derived deadlines.
+
+T4's artifact-presence consistency check applies when the selected operation promises an artifact; legitimate non-artifact operations are judged against their own declared output contract.
+
+Grounding for the 2026-09-05 refinement: `2026-09-05-embedded-runtime-remediation-research`. Accepted under the owner's explicit ADR auto-approval; implementation awaits plan approval.
+
 **Out of scope.** Which values each vocabulary should contain, and where the
 type lives - both ruled by the canonical-vocabulary record. The remediation
 order, which belongs to the plan. And whether any specific run SHOULD have
@@ -206,12 +215,8 @@ argued.
 
 ## Open questions
 
-- **Can an abandoned transition's obliged writer be identified from durable
-  state?** T3 requires reconciliation without the writer's liveness, which
-  presumes enough is persisted to know a transition was abandoned rather than
-  merely slow. The audit records one run whose per-event history was absent
-  entirely. Settled by inspecting what the run store and checkpoint actually
-  retain for a transitional state, before any reconciler is designed.
+- **How are legacy rows without T6 ownership classified?** T6 decides the persisted ownership contract for new transitions. Migration and reconciliation must distinguish legacy unknown ownership from a current live writer, without inventing history or treating missing data as evidence of cessation. The implementation proof must cover both populations.
+
 - **What is the compatibility relation for each health field?** T4 forbids
   contradiction but the specific incompatible combinations are per-field and are
   not enumerated here. Settled field by field as the vocabularies are declared,

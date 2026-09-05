@@ -8,12 +8,13 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-research]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
   - '[[2026-07-17-tool-cores-adr]]'
+  - '[[2026-09-05-embedded-runtime-remediation-research]]'
 supersedes:
   - '2026-02-28-react-tailwind-figma-migration-adr'
   - '2026-02-26-frontend-backend-contract-adr'
   - '2026-04-05-contract-validation-adr'
-modified: '2026-07-19'
-body_hash: 'sha256:0dc4cb3b077004799a105c68ab39dd2377e73131c02bc97ee02e25b3196c65c2'
+modified: '2026-09-05'
+body_hash: 'sha256:30dff3518912a9f23fb1620072d433cf37a8f1980ff3e9ff30f1afec7d6cea8e'
 ---
 
 # `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)
@@ -284,33 +285,15 @@ restated):
   its tiers envelope, degrades to a tier block (never 5xx) when we are
   down, and caps calls at 8 MiB / 120s - so our responses must be bounded,
   self-describing, and safe to wrap verbatim.
+  Stream attachment registers before reading the authoritative snapshot, reconciles buffered notifications with it, and closes promptly for an already-terminal result. Overflow emits a bounded resynchronization indication directing the consumer to run status; droppable progress frames do not become durable history.
+
+  Addressed follow-ups resolve the recipient against the frozen run roster before acceptance and again before application. Durable action identity carries the recipient into graph routing and recipient-local input. Unknown, stopped, foreign-run or non-addressable recipients refuse. A topology unable to provide targeting refuses that request rather than broadcasting it. Broker exposure of messages, permissions and native controls is an explicit coordinated consumer dependency.
+
 - **R7 - Token-bundle threading.** The `run-start` payload's per-role tokens
   are held in worker-scoped runtime state (never checkpointed, never
   logged), injected into the authoring client per worker, and dropped at run
   end. Supervisor holds its own token; roles never share.
-- **R8 - Discovery contract and runtime paths.** A machine-global
-  `~/.vaultspec-a2a/service.json` (rag precedent) written by the resident
-  gateway service, adopting the rag contract's exact field and freshness
-  semantics
-  (`2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference`):
-  `port` required; optional `pid`, `service_token`, and `last_heartbeat`
-  (ms-epoch integer or ISO-8601 string); producer refreshes every 15s,
-  consumers treat >120s as stale; stale or malformed reads as Crashed
-  (attach-never-own), and only Absent licenses a start. Hot-path discovery
-  is filesystem-only; the ungated health endpoint reporting ready + live
-  pid is probed by lifecycle callers only, and `status == "ready"` is the
-  sole liveness predicate. `adr-039` service-lifecycle architecture is
-  amended, not replaced, to add the discovery file. The design is
-  validated by a live specimen: recon found a stale engine discovery file
-  (plausible "ready" state, dead pid, 20-hour-old heartbeat) that would
-  have misdirected any file-trusting client - exactly the Crashed case
-  attach-never-own exists for
-  (`2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference`). All A2A runtime state (graph cache, logs, queues, tmp)
-  relocates out of `.vault/` into the same machine-global home - vaultspec
-  firmware rejects foreign directories inside `.vault/`, and
-  `control/worker_management.py` still points at the old `.vault/runtime`
-  path; the parked `.vault-local-state-moved-20260703/` contents are
-  restored there or discarded.
+- **R8 - Discovery and runtime ownership.** The Dashboard-embedded profile's lifecycle/discovery authority is `2026-08-01-dashboard-bundled-runtime-subordination-adr`, including its 2026-09-05 binary refinement. Runtime state remains outside the vault. A legacy resident discovery format is not substituted for the intended product-generation contract.
 - **R9 - CLI surface re-established, minimally.** The brief's declared
   surface is CLI + engine-facing REST/SSE + health, but no `vaultspec-a2a`
   entrypoint exists. A minimal operator CLI (serve, doctor/service-state,
@@ -340,6 +323,8 @@ restated):
   provisional under the owner's qualifier: every preserved record remains
   suspect until a step has tested its claims, and dispositions may be
   revised on audit evidence without reopening this record.
+
+Grounding for the 2026-09-05 refinement: `2026-09-05-embedded-runtime-remediation-research`. Accepted under the owner's explicit ADR auto-approval; implementation awaits plan approval.
 
 ## Rationale
 

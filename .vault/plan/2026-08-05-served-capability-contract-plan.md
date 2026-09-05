@@ -3,12 +3,13 @@ tags:
   - '#plan'
   - '#served-capability-contract'
 date: '2026-08-05'
-modified: '2026-08-05'
-body_hash: 'sha256:9fe80739bbb7d8432602bad0f1f7cd419bc20222fc52057f54c126cd7d1952a6'
 tier: L3
 related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
   - '[[2026-08-05-served-capability-contract-research]]'
+  - '[[2026-09-05-embedded-runtime-remediation-research]]'
+modified: '2026-09-05'
+body_hash: 'sha256:1a7b2643e97d2053c886e441acb66f4514e1b198c71821a38f228bd70fe78bdb'
 ---
 
 # `served-capability-contract` plan
@@ -208,7 +209,7 @@ Findings where a correctly typed field still carries an untrue value, plus the s
 
 The vocabulary decision governs a value's domain, never whether a written value is true. These findings need a decision on terminal states and the obligation to reach them.
 
-- [ ] `W04.P07.S22` - Transition-contract decision AUTHORED as the state-truthfulness record - execute its five clauses across the state vocabularies. TWO findings have already landed on it since it was written: the terminal-partition question in F45, and F52's semantic_status which has no producer at all and is permanently its default. F52 is T2's obliged-writer problem and is NOT closed by typing it; `src/vaultspec_a2a/thread/enums.py`.
+- [ ] `W04.P07.S22` - Declare and verify the accepted state-truthfulness T1-T6 vocabulary and obligated-writer contracts, including F45 terminal partitions and F52 semantic_status; coordinate ER02 atomic transition and ER25 teardown mechanisms through the embedded-runtime-remediation plan; `src/vaultspec_a2a/thread/enums.py`.
 
 ### Phase `W04.P08` - repair the run projection
 
@@ -227,7 +228,7 @@ Fix the projections that serve untrue values on completed and failed runs.
 
 The audit could not exercise this surface. It must be driven live before it can be documented honestly, and it carries a known defect to fix while there.
 
-- [ ] `W04.P09.S27` - Drive the streaming and interaction surface live and specify it - event taxonomy, frame schema, reconnect protocol and terminal semantics - across the stream, history, messages and both respond routes, and fix F19 where last_sequence is zero on a completed run; `src/vaultspec_a2a/api/routes/gateway.py`.
+- [ ] `W04.P09.S27` - Drive and specify the live stream, history, message and response contract, repair F19 sequence recovery, and close ER06 with subscriber-before-snapshot attachment and explicit overflow resynchronization; `src/vaultspec_a2a/api/routes/gateway.py`.
 
 ## Wave `W05` - breaking semantics requiring dashboard coordination
 

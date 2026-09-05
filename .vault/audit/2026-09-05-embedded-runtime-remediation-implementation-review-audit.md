@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:20f39c128688dae16cb2fbaca57704959ab7fa6bc97449642ba41c6a423afaeb'
+body_hash: 'sha256:44801376d94ecf1eb86fb1a4f7523a3738cdb44af0c2c63aa1a864bd89df984c'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -227,6 +227,10 @@ contract step `W05.P10.S28` now removes profile disclosure unconditionally and
 permits only topology-only eligibility with no execution-selection authority.
 The preceding FAIL findings remain historical review evidence; catalog
 `P01.S10` remains open for runtime removal.
+
+### no-legacy-corrected-curation-rereview | high | FAIL - active eligibility equivalence conflicts with topology-only rule
+
+Type: architecture and lifecycle review disposition. Status: open at `d9fd625587fbcb45857741bd8c8de94483f61ca9`; blocks provider-model-catalog `P01.S10` closure. The accepted Kimi ADR and served-capability `W05.P10.S28` corrections resolve both previously reported HIGH findings. A full active-row rescan found `W05.P10.S44` still equates preset-list eligibility with run-start dispatch eligibility, contradicting S28's topology-only, zero-selection-authority boundary. Retire that equivalence and handle preset topology readiness separately from the accepted run-start dispatch result. Full evidence and classification are recorded in the no-legacy curation audit.
 
 ## Recommendations
 

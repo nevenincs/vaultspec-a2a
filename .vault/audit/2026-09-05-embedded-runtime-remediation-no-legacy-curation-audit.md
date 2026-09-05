@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:d9886863aeaa1c495537efa2403ebe51578446403e55a763f55bc2f907c9925a'
+body_hash: 'sha256:d667dbd0aab21d9f3e316ca55a2e66d3fc6685099c94222b106378a74af596e3'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -140,6 +140,14 @@ Type: formal architecture review correction. Status: implemented; formal
 re-review pending. Both HIGH conflicts reported at `e1996691` and `5b182057`
 now have authoritative corrections. Runtime decision-vs-code drift remains open
 under catalog `P01.S10`; no plan row is closed by this documentation correction.
+
+### active-served-contract-eligibility-equivalence | high | open
+
+Type: lifecycle conflict and semantic authority leak. Status: open at correction commit `d9fd625587fbcb45857741bd8c8de94483f61ca9`; blocks the curation re-review and catalog `P01.S10` closure. Active unchecked served-capability-contract step `W05.P10.S44` still requires preset-list `eligible` and run-start-response `eligible` to mean the same thing. Corrected `W05.P10.S28` permits a retained preset signal only as topology readiness with zero provider, model, control, fallback, profile or execution-selection authority. Run-start eligibility is the accepted dispatch/admission result after catalog selection and other live gates. Equating the two either restores selection authority to preset discovery or makes run admission report only topology readiness. Retire S44's obsolete profile-eligibility equivalence; constrain any preset signal to S28 topology readiness, and independently remove the redundant run-start boolean or define it only as the accepted dispatch result.
+
+### no-legacy-curation-corrected-formal-rereview | high | FAIL - requested corrections pass but one active row remains contradictory
+
+Type: formal architecture re-review disposition. Status: open at `d9fd625587fbcb45857741bd8c8de94483f61ca9`. The Kimi amendment fully resolves the accepted-ADR conflict while preserving Kimi ACP transport, current authentication, exact permission handling, per-run isolation and provisioning; it explicitly removes static maps, profiles, preset selection, deprecated aliases and the rejected alternate transport as fallback authority. Corrected S28 unconditionally removes every profile field and bounds any retained eligibility signal to topology readiness with zero provider/model/control/fallback/profile/selection authority. Historical execution records remain unchanged, runtime drift remains open under catalog `P01.S10` with proof in `P01.S11` and `P03.S20`, and no plan row closes. Accepted-ADR rescan finds no remaining conflict, but active S44 contradicts S28 as described above. Core reports zero errors and zero warnings for provider-model-catalog, embedded-runtime-remediation, kimi-provider and served-capability-contract. Formal PASS remains blocked until S44 is corrected and re-reviewed.
 
 ## Recommendations
 

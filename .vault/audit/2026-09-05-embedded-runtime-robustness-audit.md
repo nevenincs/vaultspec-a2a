@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:5be9d8805df66d000a7efc593ab86528b28a288b9a0d7f8e8623eb0e1334b00a'
+body_hash: 'sha256:b4f6f58cf780d77cd28ce032c50d22f29f3f63ce04fe7bd4a2a76a14a69f5be1'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -203,6 +203,7 @@ FAIL means at least one specified requirement is contradicted; it does not imply
 ### ER19-catalog-test-stale-assumption | medium | A route test hard-codes provider unavailability despite real enumeration
 
 **OPEN; test contract drift; M02.** `api/tests/test_provider_catalog_route.py:150` expects the OpenAI catalog to be unavailable; the actual route returns available after its preceding HTTP/status/order/schema assertions pass. The production OpenAI registration in `providers/factory.py:1180` calls real prompt-free discovery, and `providers/openai_catalog.py` owns GET/models enumeration. An available catalog is not execution admission or completed-work proof. **Owner:** provider catalog tests. **Close when:** the test distinguishes declared catalog behavior from environment-dependent availability without weakening admission assertions or hiding a real discovery failure.
+**Resolution (provider-model-catalog P01.S11, 2026-09-05): RESOLVED; formal review pending.** The route test now parses the v1 response, keys records by provider identity, and validates OpenAI and Z.AI against their observed available or unavailable state. Available results require entries, revision, expiry, and authenticated evidence; unavailable results require no entries and a bounded reason. Health catalog state must equal the catalog state in either case. Exact-mode admission remains independently `not_admitted` and `selectable=false`, so successful prompt-free discovery is not promoted to completed-turn evidence. The former failing test and the assembled 49-test catalog behavior set pass on the credentialed host.
 
 ### ER20-rag-version-mismatch | medium | MCP project-pinning proof is blocked before it reaches the pin assertion
 

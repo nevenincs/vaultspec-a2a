@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#provider-model-catalog'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:c92802c71743a01289662445a5c2ba32eff1e3d0810997921f156711365c4081'
+body_hash: 'sha256:c007c73556d50b3594f3c10724825dc7e640ae415bfa800626b367772576483d'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -167,6 +167,9 @@ shared one-MiB budget across the two streams, and hangs past the discovery
 timeout. Each path proves its static failure where applicable and full process-
 tree reaping; configured and unconfigured installed-CLI enumeration remain
 separate prompt-free proofs.
+### p01-s11-catalog-route-host-state | medium | Resolved: route evidence follows observed catalog state
+
+Type: test contract drift. Status: resolved by `P01.S11`; formal review pending. The authenticated real-ASGI route test no longer assumes OpenAI and Z.AI enumeration are unavailable at fixed array positions. It keys the parsed v1 response by provider identity, accepts only an observed available or unavailable catalog result for those environment-dependent lanes, and validates the corresponding payload: catalog and health status agree; an available catalog has entries, revision, expiry, and authenticated evidence; an unavailable catalog has no entries and carries a bounded reason. Both exact lanes remain `not_admitted` and non-selectable regardless of catalog availability, so discovery cannot become completed-turn evidence. The focused 49-test behavior set passes across cold catalog discovery, stale and invalid selection refusal, independent health, served-entry validation and freeze, same-ID replay/conflict/race, durable modern restart, legacy frozen-profile disclosure, and exact frozen ACP backend reuse. No new finding surfaced.
 ## Recommendations
 
 Keep catalog normalization, redaction, containment, aggregate output ceilings,

@@ -10,7 +10,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-reference]]'
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
 modified: '2026-09-05'
-body_hash: 'sha256:02a9967f5bd7975982e4f9c4e92655f1dad17676cecff3b86dfd63525879865a'
+body_hash: 'sha256:e44727c43b60dbb12bbabce2d78882940e146a895746886f44c00d996531cfe9'
 ---
 
 <!-- RETIRED: S14, S18 -->
@@ -41,7 +41,7 @@ Build the provider-owned catalog, structured health, provider-native controls, f
 - [x] `P01.S08` - Replace new-run profile admission with required served selection, bounded overrides, explicit fallbacks, controls, validation, and replay identity; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [x] `P01.S09` - Freeze catalog provenance, exact model values, controls, fallbacks, execution modes, and schema version through compilation; `src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/graph/compiler.py`.
 - [ ] `P01.S10` - Remove provider and model policy from product presets and retire static external model-map authority while preserving legacy restart; `src/vaultspec_a2a/team/, src/vaultspec_a2a/graph/enums.py`.
-- [ ] `P01.S11` - Prove catalog discovery, stale refusal, health separation, served validation, replay, frozen restart and legacy restart with real behavior; correct ER19 by asserting observed availability rather than a hardcoded unavailable state; `src/vaultspec_a2a/providers/tests/, src/vaultspec_a2a/api/tests/, src/vaultspec_a2a/service_tests/`.
+- [x] `P01.S11` - Prove catalog discovery, stale refusal, health separation, served validation, replay, frozen restart and legacy restart with real behavior; correct ER19 by asserting observed availability rather than a hardcoded unavailable state; `src/vaultspec_a2a/providers/tests/, src/vaultspec_a2a/api/tests/, src/vaultspec_a2a/service_tests/`.
 
 ### Phase `P02` - Implement Dashboard and engine selection surfaces
 

@@ -147,8 +147,26 @@ async def test_authenticated_route_serves_all_registered_lanes_in_order(
     ]
     assert all(record["catalog"]["schema_version"] == 1 for record in body["providers"])
     assert all("provider_value" not in str(record) for record in body["providers"])
-    assert body["providers"][5]["catalog"]["state"]["status"] == "unavailable"
-    assert body["providers"][6]["catalog"]["state"]["status"] == "unavailable"
+    parsed = ProviderCatalogResponse.model_validate(body)
+    by_provider = {record.provider_id: record for record in parsed.providers}
+    for provider_id in ("openai", "zai"):
+        record = by_provider[provider_id]
+        observed_status = record.catalog.state.status
+        assert observed_status in {
+            CatalogStatus.AVAILABLE,
+            CatalogStatus.UNAVAILABLE,
+        }
+        assert record.health.catalog is observed_status
+        assert record.health.admission is AdmissionState.NOT_ADMITTED
+        assert record.health.selectable is False
+        if observed_status is CatalogStatus.AVAILABLE:
+            assert record.catalog.models
+            assert record.catalog.state.revision is not None
+            assert record.catalog.state.expires_at is not None
+            assert record.health.authentication is AuthenticationState.AUTHENTICATED
+        else:
+            assert record.catalog.models == []
+            assert record.catalog.state.reason is not None
 
 
 @pytest.mark.asyncio

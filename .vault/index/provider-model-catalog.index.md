@@ -4,10 +4,11 @@ tags:
   - '#index'
   - '#provider-model-catalog'
 date: '2026-08-05'
-modified: '2026-09-03'
+modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:df67612e25a15918191c5722d0e8326afc51fd661dfe70ab735a0153e0f1a65c'
+body_hash: 'sha256:a263fe3006ddbf2ff65627f514bc2f7da289ee666cb81ad56f698fac2150199a'
 related:
+  - '[[2026-08-02-provider-model-catalog-P01-S11]]'
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-08-02-provider-model-catalog-catalog-registration-p01s06-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-dashboard-health-p02s16-audit]]'
@@ -59,6 +60,7 @@ Auto-generated index of all documents tagged with `#provider-model-catalog`.
 ### exec
 
 - `2026-08-02-provider-model-catalog-ledger` - `provider-model-catalog` ledger
+- `2026-08-02-provider-model-catalog-P01-S11` - Prove catalog discovery, stale refusal, health separation, served validation, replay, frozen restart and legacy restart with real behavior; correct ER19 by asserting observed availability rather than a hardcoded unavailable state
 
 ### plan
 

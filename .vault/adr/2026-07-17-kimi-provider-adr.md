@@ -3,13 +3,15 @@ tags:
   - '#adr'
   - '#kimi-provider'
 date: '2026-07-17'
-modified: '2026-07-17'
-body_hash: 'sha256:5807153da65a9f51ffc88e0b0191ee9ff898747ba93c98d8cbef91ec563d24d9'
+modified: '2026-09-05'
+body_hash: 'sha256:22a277efc44241e859ec74823503d307639ac07a24e32f77a394d008574800c4'
 related:
-  - "[[2026-07-17-kimi-provider-research]]"
-  - "[[2026-07-17-tool-cores-adr]]"
-  - "[[2026-07-15-multi-provider-execution-adr]]"
-  - "[[2026-07-15-agent-harness-provisioning-adr]]"
+  - '[[2026-07-17-kimi-provider-research]]'
+  - '[[2026-07-17-tool-cores-adr]]'
+  - '[[2026-07-15-multi-provider-execution-adr]]'
+  - '[[2026-07-15-agent-harness-provisioning-adr]]'
+  - '[[2026-08-02-provider-model-catalog-adr]]'
+  - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 ---
 # `kimi-provider` adr: `the kimi moonshot provider lane: native ACP reuse with per-backend conditioning and permission-RPC read-only enforcement` | (**status:** `accepted`)
 
@@ -79,3 +81,34 @@ The probe makes (b1) the evidence-favored shape: Kimi is real ACP, honors sessio
 ## Correction (2026-07-17, `P01.S05` grounding correction)
 
 The Considerations and Implementation sections above name the Windows shell-override environment variable as `KIMI_SHELL_PATH`. Installed-source re-grounding during execution (`P01.S05`) found this was an inferred name, falsified by the installed `kimi-cli` 1.49.0 source (`utils/environment.py:100`) and its CHANGELOG, which read `os.environ.get("KIMI_CLI_GIT_BASH_PATH")`. The correct override name is `KIMI_CLI_GIT_BASH_PATH`; the landed code (`factory.py:_KIMI_GIT_BASH_ENV`) uses the corrected name and the resolution order this ADR describes (env override, then `git`/`bash` on PATH, then standard install path) is otherwise accurate and unchanged. `KIMI_SHELL_PATH` does not exist in the `kimi-cli` source and should not be treated as a valid override in any future reference to this record.
+
+## Amendment (2026-09-05): provider catalog is the sole Kimi selection authority
+
+This auto-approved amendment preserves this record's Kimi ACP transport,
+current authentication, exact permission enforcement, per-run isolation, and
+provisioning decisions. It supersedes every provider/model selection clause
+that depends on static `MODEL_MAP`/`PROVIDER_DEFAULT_MODELS`,
+`[team.profiles.kimi]`, profile or eligibility values, a preset-carried Kimi
+assignment, or an implicit provider/model default.
+
+- `Provider.KIMI` remains the execution-lane identity. An exact current
+  provider-catalog selection supplies its model and provider-native controls;
+  the factory receives only that frozen current-schema authority.
+- Product presets carry no Kimi provider, model, control, fallback, profile, or
+  eligibility authority. Kimi is selected only through the same bounded
+  catalog contract as every other product lane.
+- Deprecated Kimi settings names, model aliases, and migration fallbacks are
+  non-governing and must be removed. Only current verified configuration names
+  may be accepted; obsolete input receives a typed unsupported refusal without translation,
+  substitution, or fallback.
+- The rejected Claude-CLI/Moonshot shape is not a retained fallback. A different
+  Kimi transport requires its own execution-mode identity, current live proof,
+  catalog adapter, and superseding decision before it can be served.
+- Stored profile or static-map state is unsupported. It is not read, migrated,
+  restarted, redispatched, or exposed; detection fails closed with a bounded
+  typed unsupported/incompatible outcome before provider construction.
+
+The original lane-shape `MODEL_MAP` entries, additive profile values,
+`[team.profiles.kimi]` overlay, legacy environment names, and documented
+fallback language remain historical context only. Provider/model/control
+authority belongs exclusively to `2026-08-02-provider-model-catalog-adr`.

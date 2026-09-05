@@ -8,10 +8,11 @@ related:
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
   - '[[2026-08-05-served-capability-contract-research]]'
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
+  - '[[2026-08-02-provider-model-catalog-adr]]'
+  - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-05'
-body_hash: 'sha256:1a7b2643e97d2053c886e441acb66f4514e1b198c71821a38f228bd70fe78bdb'
+body_hash: 'sha256:f6896da2f2cd6efd7ae014423c7efe539d1548fec79ef61882e107da46ee63c4'
 ---
-
 # `served-capability-contract` plan
 
 ## Description
@@ -238,7 +239,7 @@ Findings that change what a served field MEANS, or remove it. RECLASSIFIED: an i
 
 Each Step changes what a served field means and requires agreement with the consuming repository before it lands.
 
-- [ ] `W05.P10.S28` - F2 BREAKING - either retire the eligible flag and profiles from the preset listing consistently with the catalog amendment, or redefine eligible as runnable-given-a-valid-selection and scope each reason to the preset it applies to; `src/vaultspec_a2a/api/schemas/gateway.py`.
+- [ ] `W05.P10.S28` - F2 BREAKING - unconditionally retire profile summaries, assignments, default profile identifiers and every profile field from the preset listing consistently with the catalog amendment; if an eligibility signal remains, define it only as topology readiness with reasons scoped to that topology and no provider, model, control, fallback, profile or execution-selection authority; `src/vaultspec_a2a/api/schemas/gateway.py`.
 - [ ] `W05.P10.S29` - F4 BREAKING - separate product presets from certification fixtures on the served surface by a declared classification rather than a name prefix, so a frontend can request product-only; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W05.P10.S30` - F5 BREAKING - reconcile eligible_providers with the catalog admission predicate so the two discovery surfaces cannot disagree about which providers are usable; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [ ] `W05.P10.S31` - F6 BREAKING - rule whether an unreachable authoring backend degrades the service, then define the readiness vocabulary and stop serving a worker check that reports ok beside a disconnected worker; `src/vaultspec_a2a/api/routes/gateway.py`.

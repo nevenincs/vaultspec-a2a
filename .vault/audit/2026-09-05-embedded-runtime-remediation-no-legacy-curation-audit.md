@@ -5,13 +5,15 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:37379ee0ba6e02a2e66e629b183d76a0239eadbaedbd5b83b2bc15ad3d3acfbe'
+body_hash: 'sha256:d9886863aeaa1c495537efa2403ebe51578446403e55a763f55bc2f907c9925a'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-07-15-model-profiles-adr]]'
   - '[[2026-07-15-multi-provider-execution-adr]]'
+  - '[[2026-07-17-kimi-provider-adr]]'
   - '[[2026-08-02-provider-model-catalog-plan]]'
+  - '[[2026-08-05-served-capability-contract-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-08-02-provider-model-catalog-reference]]'
   - '[[2026-09-05-embedded-runtime-remediation-provider-selection-prerequisites-reference]]'
@@ -111,6 +113,33 @@ Type: formal architecture review disposition. Status: open at `41519f11bd093311c
 ### active-served-contract-profile-option | high | open
 
 Type: lifecycle conflict and ambiguous execution authority. Status: open; blocks this curation review and catalog `P01.S10` closure. Active unchecked served-capability-contract step `W05.P10.S28` still offers two alternatives: retire the eligible flag and profiles from preset listing, or redefine eligibility. The second branch does not require profile removal and therefore permits an execution path that violates the catalog ADR's unconditional prohibition on profile summaries and preset-carried provider/model authority. Amend the active row so profile disclosure is retired unconditionally; any independent decision to retain or redefine a topology-only eligibility signal must state that it carries no provider, model, control, fallback or profile authority.
+
+### accepted-kimi-static-authority-conflict-resolution | high | resolved by dated ADR amendment
+
+Type: architecture contradiction and single-home-fact reconciliation. Status:
+resolved in the 2026-09-05 Kimi ADR amendment; formal curation re-review pending.
+The Kimi transport, current authentication, exact permission, isolation, and
+provisioning decisions remain active. Static model maps, profile overlays,
+preset-carried Kimi selection, deprecated settings aliases, and the documented
+alternate-transport fallback are explicitly non-governing. Kimi provider,
+model, and control authority now resolves exclusively through the current
+provider-model-catalog decision.
+
+### active-served-contract-profile-option-resolution | high | resolved in unchecked plan row
+
+Type: lifecycle conflict. Status: resolved in active unchecked
+`W05.P10.S28`; formal curation re-review pending. The row now retires every
+profile field from preset disclosure unconditionally. Its only permitted
+retained eligibility signal is topology readiness, explicitly barred from
+carrying provider, model, control, fallback, profile, or execution-selection
+authority.
+
+### no-legacy-curation-correction | high | two review-blocking conflicts corrected
+
+Type: formal architecture review correction. Status: implemented; formal
+re-review pending. Both HIGH conflicts reported at `e1996691` and `5b182057`
+now have authoritative corrections. Runtime decision-vs-code drift remains open
+under catalog `P01.S10`; no plan row is closed by this documentation correction.
 
 ## Recommendations
 

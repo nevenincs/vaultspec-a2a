@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:6b52cd9ffcd2668bbf5260dcaabc266656163d6357240bf334ecbb43fa69ddf4'
+body_hash: 'sha256:20f39c128688dae16cb2fbaca57704959ab7fa6bc97449642ba41c6a423afaeb'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -215,6 +215,18 @@ Type: architecture review disposition. Status: open at curation commit `41519f11
 ### no-legacy-active-plan-profile-option | high | open
 
 Type: lifecycle conflict. Status: open at curation commit `41519f11bd093311cebedc0f34bd575a845eac30`; blocks provider-model-catalog `P01.S10` closure. Active served-capability-contract step `W05.P10.S28` retains an alternative that can redefine eligibility without unconditionally removing profiles from preset disclosure. The catalog ADR now prohibits profile summaries and preset-carried provider/model authority. The row must require profile removal in every branch and may separately retain or redefine only a topology signal with no provider/model/profile meaning. Full classification is in the no-legacy curation audit.
+
+### no-legacy-curation-review-correction | high | active Kimi and served-plan conflicts resolved
+
+Type: architecture review correction. Status: implemented; formal re-review
+pending. The accepted Kimi ADR now preserves only its transport, current auth,
+permission, isolation, and provisioning decisions while deferring all
+provider/model/control selection to the catalog ADR and retiring static maps,
+profiles, deprecated aliases, and alternate-transport fallback. Active served
+contract step `W05.P10.S28` now removes profile disclosure unconditionally and
+permits only topology-only eligibility with no execution-selection authority.
+The preceding FAIL findings remain historical review evidence; catalog
+`P01.S10` remains open for runtime removal.
 
 ## Recommendations
 

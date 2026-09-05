@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:f51124035785d11649c37416d53991d067b17b8e27e78b835af39376b70713cc'
+body_hash: 'sha256:a77e7fac9e97859be46e011f3416d28c9b59f6a2b0e1576bbfeae622c12f7f54'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -144,6 +144,22 @@ Correction status: implemented at Dashboard `89706fb2641bd5482667437ae1e4abf2d81
 ### s02-final-formal-rereview | low | PASS - no critical, high, or medium S02 defect remains
 
 Type: implementation review disposition. Status: resolved at A2A `54a871a1ca6bfd5c969c7dd86dd64ff7a66a462e` and Dashboard `89706fb2641bd5482667437ae1e4abf2d8194fd8`. Final re-review reproduced exactly eleven broker rows and a retry/reconciliation rule for every operation. `run-start` permits exactly one ambiguous connection/protocol retry with identical run id, reservation id, and complete payload, then authoritative status reconciliation while retaining an inconclusive lease and forbidding a second identity. `run-cancel` has no blind retry and requires authoritative status reconciliation before another explicit action. `clarification-respond` has no blind retry, preserves run/request/resolution identity, and reconciles authoritative run-status/checkpoint truth. Five reads permit only new independently bounded reads, and the three new mutations retain one identity-stable reconciliation replay, authoritative receipts, and typed `outcome_unknown` on a second ambiguity. The amended accepted ADR and derived reference agree on eleven verbs, routes, bounds, envelopes, identity, authentication, scope, idempotency, error behavior and producer-first release provenance; the D2 marker is repaired. Focused assertions covering both the retry matrix and all earlier HIGH corrections pass. Core validation is clean, the S02 Step Record points to the final Dashboard contract and preserves correction validation, only S01 and S02 are closed, S03 has no record and remains open, and both repositories were clean at the reviewed heads. The prior failure entries remain historical evidence; all S02 review-blocking findings are resolved and execution may advance to S03.
+
+### provider-selection-positive-proof-absent | high | Catalog P03.S19 and P03.S20 remain open
+
+Type: integration evidence. Status: open and qualification-blocking only for dependent external-provider and Dashboard claims. Live Core state at A2A `803dca968945d703092dbe8ecfaee0c6290cbd9f` reports provider-model-catalog 14/21 with prerequisite implementation rows `P01.S10` and `P01.S11` open and assembled evidence rows `P03.S19` and `P03.S20` open. The exact-mode registry contains eight external registrations, but only `codex/codex-app-server` has a literal completed-turn admission citation; that historical citation, catalog enumeration, selectability, handshake success, and skips do not prove the required real Dashboard-to-provider positive path or its state matrix. Ownership: provider-model-catalog `P01.S10-P01.S11` and `P03.S19-P03.S20`; remediation `W05.P12.S57` revalidates the released binary/receipt-matched Dashboard pair before `S58-S64` may consume the proof. Independent local remediation remains authorized as recorded in the S03 prerequisite reference.
+
+### provider-capability-plan-state-source-drift | medium | Source presence cannot stand in for the 0/4 owner plan
+
+Type: lifecycle and evidence accuracy. Status: open. Live Core state reports provider-capability-evidence 0/4 although `src/vaultspec_a2a/providers/provider_capabilities.py` exists and the legacy feature ledger names a target. No composition/population completion, exact-lane evidence, invalidation proof, or served disclosure is closed by that source presence. Ownership: provider-capability-evidence `P01.S01-P02.S04`; remediation `W03.P08.S35-S36` may implement under those explicit prerequisites but cannot report the owner plan complete or use it as external qualification evidence.
+
+### provider-catalog-s08-step-record-gap | low | Checked catalog work lacks its Core execution trace
+
+Type: lifecycle traceability. Status: open and non-blocking for S03. `vaultspec-core vault plan status .vault/plan/2026-08-02-provider-model-catalog-plan.md` reports checked `P01.S08` without a Step Record. The checked row remains current plan state, but the missing trace prevents treating its legacy ledger entry as reproducible positive evidence. Ownership: provider-model-catalog lifecycle reconciliation `P03.S23`; do not backfill proof by inference.
+
+### provider-catalog-route-host-state-leak | medium | Focused route test assumes credentials are unavailable
+
+Type: test isolation. Status: open and non-blocking for the S03 evidence-only record. The exact command `uv run --locked python -m pytest src/vaultspec_a2a/providers/tests/test_lane_admission.py src/vaultspec_a2a/providers/tests/test_provider_capabilities.py src/vaultspec_a2a/providers/tests/test_in_process_catalog.py src/vaultspec_a2a/api/tests/test_provider_catalog_route.py -q` produced 90 passes and one failure: `test_authenticated_route_serves_all_registered_lanes_in_order` expected OpenAI catalog status `unavailable`, while the checkout-local settings resolved it as `available`. The test constructs the real app without isolating its `.env`-backed settings, so its fixed availability assertion changes with host configuration. A rerun excluding only that named test passed 90 tests with one deselection. Ownership: provider-model-catalog validation hardening `P03.S22`; make the test control its settings or assert structurally valid environment-dependent health without exposing credentials. This failure is not positive S19/S20 evidence.
 
 ## Recommendations
 

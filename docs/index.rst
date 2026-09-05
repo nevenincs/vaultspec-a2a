@@ -1,13 +1,12 @@
 Vaultspec A2A documentation
 ===========================
 
-Use this documentation to set up the repository, operate its runtime surfaces,
-locate package ownership, and consume its public interfaces.
+Vaultspec A2A runs agent workflows without a user interface. Its gateway accepts
+HTTP and WebSocket requests; a separate worker executes the workflows.
 
-Repository policies live in the `contribution guide
-<https://github.com/nevenincs/vaultspec-a2a/blob/main/CONTRIBUTING.md>`_ and
-`security policy
-<https://github.com/nevenincs/vaultspec-a2a/blob/main/SECURITY.md>`_.
+Start with :doc:`development` to set up a source checkout, or :doc:`operations`
+to run the gateway and worker. For integration details, see :doc:`architecture`
+and the :doc:`Python API <api/modules>`.
 
 .. toctree::
    :maxdepth: 2
@@ -19,7 +18,7 @@ Repository policies live in the `contribution guide
    glossary
    api/modules
 
-New contributors should start with :doc:`development`. Operators should use
-:doc:`operations`. Use :doc:`architecture` to locate ownership,
-:doc:`glossary` for shared terminology, and :doc:`api/modules` for Python
-interfaces.
+Before contributing, read the `contribution guide
+<https://github.com/nevenincs/vaultspec-a2a/blob/main/CONTRIBUTING.md>`_. Report
+vulnerabilities through the `security policy
+<https://github.com/nevenincs/vaultspec-a2a/blob/main/SECURITY.md>`_.

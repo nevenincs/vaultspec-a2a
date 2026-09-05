@@ -1,7 +1,9 @@
 # vaultspec-a2a
 
-Headless agent-to-agent orchestration with a versioned gateway edge and separate
-worker execution.
+Headless agent-to-agent orchestration for Vaultspec.
+
+Run agent workflows without a user interface. A gateway accepts HTTP and WebSocket
+requests from authoring clients; a separate worker executes the workflows.
 
 [![tests](https://img.shields.io/github/actions/workflow/status/nevenincs/vaultspec-a2a/test.yml?branch=main&style=flat&label=tests&logo=githubactions&logoColor=white&labelColor=24292f&color=57606a)](https://github.com/nevenincs/vaultspec-a2a/actions/workflows/test.yml)
 [![runtime](https://img.shields.io/badge/runtime-Python%203.13%2B-57606a?style=flat&logo=python&logoColor=white&labelColor=24292f)](https://www.python.org/downloads/)
@@ -11,20 +13,9 @@ worker execution.
 [Validation](#validate-the-repository) · [Next tasks](#choose-the-next-task) ·
 [Ownership](#ownership-model)
 
-## What vaultspec-a2a is
-
-`vaultspec-a2a` is the headless orchestration layer in the Vaultspec family. Its
-gateway exposes the request-facing Hypertext Transfer Protocol (HTTP) and
-WebSocket edge. A separate worker executes graphs for engines and other
-authoring clients. It doesn't bundle a user interface.
-
-This quick start is for developers who build, test, or review repository
-changes. The continuous integration (CI) gate resolves the locked `server`
-extra plus the documentation and tooling groups. Retrieval-augmented generation
-(RAG) and Torch remain optional.
-
-Just provides a project-locked command facade. Product behavior remains in the
-`vaultspec-a2a` package and command-line interface (CLI).
+The setup below is for a source checkout. To operate the gateway and worker, use
+the [operator reference](docs/operations.rst). Semantic search through Vaultspec RAG
+is optional.
 
 ## Quick start
 
@@ -141,6 +132,6 @@ harness, [Vaultspec RAG](https://github.com/nevenincs/vaultspec-rag) for semanti
 discovery, and [Vaultspec Dashboard](https://github.com/nevenincs/vaultspec-dashboard)
 for a visual interface.
 
-This repository is version `0.1.0` and is licensed under the [MIT License](LICENSE).
+Licensed under the [MIT License](LICENSE).
 Report vulnerabilities through the [security policy](SECURITY.md), and read the
 [contribution guide](CONTRIBUTING.md) before proposing changes.

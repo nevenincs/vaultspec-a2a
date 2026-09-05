@@ -11,7 +11,14 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from ..thread.actor_tokens import ActorTokenBundle
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
@@ -140,6 +147,64 @@ class DispatchRequest(BaseModel):
     # worker holds them in worker-scoped runtime state only and drops them at run
     # end — they are never checkpointed.
     actor_tokens: ActorTokenBundle | None = None
+
+    @field_validator("model_assignment")
+    @classmethod
+    def _closed_model_assignment(
+        cls, value: dict[str, dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        primary = {
+            "provider",
+            "execution_mode",
+            "catalog_revision",
+            "entry_id",
+            "model_name",
+            "controls",
+            "fallbacks",
+            "provenance",
+            "schema_version",
+        }
+        fallback = {
+            "provider_id",
+            "execution_mode",
+            "catalog_revision",
+            "entry_id",
+            "model_name",
+            "controls",
+            "defaulted_control_ids",
+            "schema_version",
+        }
+        control = {"control_id", "option_id", "provider_value"}
+        control_optional = {"display_name", "option_display_name"}
+        lane_optional = {"provider_display_name", "model_display_name"}
+        for lane in value.values():
+            if set(lane) != primary:
+                raise ValueError("model_assignment lane has invalid fields")
+            provenance = lane.get("provenance")
+            if not isinstance(provenance, dict) or set(provenance) != {
+                "selection_source"
+            }:
+                raise ValueError("model_assignment provenance has invalid fields")
+            candidates = [lane, *(lane.get("fallbacks") or [])]
+            for index, candidate in enumerate(candidates):
+                if not isinstance(candidate, dict):
+                    raise ValueError("model_assignment fallback is invalid")
+                if index and (
+                    not fallback.issubset(candidate)
+                    or set(candidate) - fallback - lane_optional
+                ):
+                    raise ValueError("model_assignment fallback has invalid fields")
+                controls = candidate.get("controls")
+                if not isinstance(controls, list):
+                    raise ValueError("model_assignment controls are invalid")
+                for selected in controls:
+                    if (
+                        not isinstance(selected, dict)
+                        or not control.issubset(selected)
+                        or set(selected) - control - control_optional
+                    ):
+                        raise ValueError("model_assignment control has invalid fields")
+        return value
 
     @model_validator(mode="after")
     def _ingest_names_its_project(self) -> DispatchRequest:

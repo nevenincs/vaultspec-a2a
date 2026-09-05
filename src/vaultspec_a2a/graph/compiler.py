@@ -42,6 +42,11 @@ from langgraph.types import Command, RetryPolicy
 
 from ..authoring.contract import RESEARCH_ADR_ROLES, is_document_authoring_role
 from ..providers.conditions import ProviderCondition, condition_is_retryable
+from ..providers.factory import (
+    ProviderRuntimeUnavailableError,
+    validate_current_execution_lane,
+    validate_current_native_controls,
+)
 from ..thread.clarification import (
     CLARIFICATION_TOPOLOGIES,
     MAX_REQUEST_ID_CHARS,
@@ -293,11 +298,14 @@ def _resolve_model_for_worker(
             f"Worker {worker_ref.agent_id!r} has no exact catalog-frozen selection"
         )
     candidates = [frozen, *_catalog_fallbacks(frozen)]
+    parsed_candidates = [
+        _parse_catalog_preferences(candidate) for candidate in candidates
+    ]
+    for provider, _model, execution_mode, _controls in parsed_candidates:
+        validate_current_execution_lane(provider, execution_mode)
+        validate_current_native_controls(provider, _controls)
     catalog_exc: Exception | None = None
-    for candidate in candidates:
-        provider, model_name, execution_mode, native_controls = (
-            _parse_catalog_preferences(candidate)
-        )
+    for provider, model_name, execution_mode, native_controls in parsed_candidates:
         try:
             model = provider_factory.create(
                 provider,
@@ -308,7 +316,7 @@ def _resolve_model_for_worker(
                 native_controls=native_controls,
             )
             return model, provider, model_name
-        except (ConfigError, ValueError) as exc:
+        except ProviderRuntimeUnavailableError as exc:
             logger.warning(
                 "Frozen provider lane %s/%s unavailable for worker %s: %s",
                 provider.value,
@@ -336,9 +344,42 @@ def _parse_catalog_preferences(
     frozen: dict[str, Any],
 ) -> tuple[Provider, str, str, dict[str, str]]:
     """Parse one exact schema-v1 lane without consulting current catalogs."""
+    primary_keys = {
+        "provider",
+        "execution_mode",
+        "catalog_revision",
+        "entry_id",
+        "model_name",
+        "controls",
+        "fallbacks",
+        "provenance",
+        "schema_version",
+    }
+    fallback_keys = {
+        "provider_id",
+        "execution_mode",
+        "catalog_revision",
+        "entry_id",
+        "model_name",
+        "controls",
+        "defaulted_control_ids",
+        "schema_version",
+        "provider_display_name",
+        "model_display_name",
+    }
+    allowed = primary_keys if "provider" in frozen else fallback_keys
+    required = (
+        primary_keys
+        if "provider" in frozen
+        else fallback_keys - {"provider_display_name", "model_display_name"}
+    )
+    if set(frozen) - allowed or not required.issubset(frozen):
+        raise ValueError("Frozen catalog assignment has invalid fields")
     if frozen.get("schema_version") != 1:
         raise ValueError("Frozen catalog assignment has an invalid schema_version")
-    raw_provider = frozen.get("provider") or frozen.get("provider_id")
+    raw_provider = (
+        frozen.get("provider") if "provider" in frozen else frozen.get("provider_id")
+    )
     try:
         provider = Provider(raw_provider)
     except ValueError as exc:
@@ -360,6 +401,14 @@ def _parse_catalog_preferences(
         if not isinstance(raw_control, dict):
             raise ValueError("Frozen catalog assignment has invalid native controls")
         control = cast("dict[str, object]", raw_control)
+        if set(control) - {
+            "control_id",
+            "option_id",
+            "provider_value",
+            "display_name",
+            "option_display_name",
+        } or not {"control_id", "option_id", "provider_value"}.issubset(control):
+            raise ValueError("Frozen catalog assignment has invalid native controls")
         control_id = control.get("control_id")
         provider_value = control.get("provider_value")
         if (
@@ -371,7 +420,25 @@ def _parse_catalog_preferences(
         ):
             raise ValueError("Frozen catalog assignment has invalid native controls")
         controls[control_id] = provider_value
+    if "provenance" in frozen:
+        provenance = frozen["provenance"]
+        if not isinstance(provenance, dict) or set(provenance) != {"selection_source"}:
+            raise ValueError("Frozen catalog assignment has invalid provenance")
     return provider, model_name, execution_mode, controls
+
+
+def _validate_frozen_assignment_inventory(
+    frozen_assignment: dict[str, dict[str, Any]] | None,
+) -> None:
+    """Validate every frozen lane before compilation constructs any provider."""
+    for frozen in (frozen_assignment or {}).values():
+        candidates = [frozen, *_catalog_fallbacks(frozen)]
+        for candidate in candidates:
+            provider, _model, execution_mode, _controls = _parse_catalog_preferences(
+                candidate
+            )
+            validate_current_execution_lane(provider, execution_mode)
+            validate_current_native_controls(provider, _controls)
 
 
 def _resolve_supervisor_model(
@@ -388,6 +455,7 @@ def _resolve_supervisor_model(
     provider, model_name, execution_mode, native_controls = _parse_catalog_preferences(
         frozen
     )
+    validate_current_execution_lane(provider, execution_mode)
     model = provider_factory.create(
         provider,
         model=model_name,
@@ -771,6 +839,8 @@ def compile_team_graph(
         ValueError:  If an unknown topology type is encountered.
     """
     from ..team.team_config import TopologyType
+
+    _validate_frozen_assignment_inventory(model_assignment)
 
     # ``cast`` matches how every other StateGraph in this tree is built. TeamState
     # is a TypedDict and langgraph's state parameter does not accept one directly,

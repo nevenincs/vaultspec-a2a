@@ -42,6 +42,14 @@ def _json_object(value: object) -> JsonObject:
         raise TeamSelectionError("persisted team selection is invalid") from exc
 
 
+def _require_exact_keys(
+    record: JsonObject, *, required: set[str], optional: set[str] | None = None
+) -> None:
+    allowed = required | (optional or set())
+    if not required.issubset(record) or not set(record).issubset(allowed):
+        raise TeamSelectionError("persisted team selection is invalid")
+
+
 class TeamSelectionError(ValueError):
     """A safe-to-surface refusal of an explicit catalog selection."""
 
@@ -270,6 +278,20 @@ def _normalize_replay_lane(
     incoming: SelectionReference, stored: object
 ) -> SelectionReference:
     stored_record = _json_object(stored)
+    _require_exact_keys(
+        stored_record,
+        required={
+            "schema_version",
+            "provider_id",
+            "execution_mode",
+            "catalog_revision",
+            "entry_id",
+            "model_name",
+            "controls",
+            "defaulted_control_ids",
+        },
+        optional={"provider_display_name", "model_display_name"},
+    )
     if (
         stored_record.get("schema_version") != incoming.schema_version
         or stored_record.get("provider_id") != incoming.provider_id
@@ -284,6 +306,11 @@ def _normalize_replay_lane(
     stored_controls: dict[str, str] = {}
     for raw_control in raw_stored_controls:
         control = _json_object(raw_control)
+        _require_exact_keys(
+            control,
+            required={"control_id", "option_id", "provider_value"},
+            optional={"display_name", "option_display_name"},
+        )
         key = control.get("control_id")
         value = control.get("option_id")
         if (
@@ -329,6 +356,17 @@ def normalize_replay_selection(
 ]:
     """Normalize a replay from persisted defaults without consulting live catalogs."""
     stored_record = _json_object(record)
+    _require_exact_keys(
+        stored_record,
+        required={
+            "schema_version",
+            "digest",
+            "selection",
+            "overrides",
+            "fallbacks",
+            "roles",
+        },
+    )
     stored_overrides = _json_object(stored_record.get("overrides"))
     stored_fallbacks = stored_record.get("fallbacks")
     if not isinstance(stored_fallbacks, list):
@@ -392,6 +430,20 @@ def _optional_record_text(record: JsonObject, field: str) -> str | None:
 
 def _lane_from_record(value: object) -> FrozenSelectedLane:
     record = _json_object(value)
+    _require_exact_keys(
+        record,
+        required={
+            "schema_version",
+            "provider_id",
+            "execution_mode",
+            "catalog_revision",
+            "entry_id",
+            "model_name",
+            "controls",
+            "defaulted_control_ids",
+        },
+        optional={"provider_display_name", "model_display_name"},
+    )
     if record.get("schema_version") != 1:
         raise TeamSelectionError("persisted team selection is invalid")
     raw_controls = record.get("controls")
@@ -408,6 +460,11 @@ def _lane_from_record(value: object) -> FrozenSelectedLane:
     seen: set[str] = set()
     for raw_control in raw_controls:
         control = _json_object(raw_control)
+        _require_exact_keys(
+            control,
+            required={"control_id", "option_id", "provider_value"},
+            optional={"display_name", "option_display_name"},
+        )
         control_id = _required_record_text(control, "control_id")
         if control_id in seen:
             raise TeamSelectionError("persisted team selection is invalid")
@@ -437,8 +494,14 @@ def _lane_from_record(value: object) -> FrozenSelectedLane:
         controls=tuple(selections),
     )
     try:
-        Provider(reference.provider_id)
+        provider = Provider(reference.provider_id)
     except ValueError as exc:
+        raise TeamSelectionError("persisted team selection is invalid") from exc
+    from .factory import UnsupportedExecutionLaneError, validate_current_execution_lane
+
+    try:
+        validate_current_execution_lane(provider, reference.execution_mode)
+    except UnsupportedExecutionLaneError as exc:
         raise TeamSelectionError("persisted team selection is invalid") from exc
     return FrozenSelectedLane(
         reference=reference,
@@ -478,6 +541,17 @@ def _digest_record(
 def frozen_team_selection_from_record(record: object) -> FrozenTeamSelection:
     """Validate and reconstruct the persisted modern execution authority."""
     stored = _json_object(record)
+    _require_exact_keys(
+        stored,
+        required={
+            "schema_version",
+            "digest",
+            "selection",
+            "overrides",
+            "fallbacks",
+            "roles",
+        },
+    )
     if stored.get("schema_version") != 1:
         raise TeamSelectionError("persisted team selection is invalid")
     raw_roles = stored.get("roles")

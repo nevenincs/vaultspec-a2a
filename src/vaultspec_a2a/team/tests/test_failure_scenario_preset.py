@@ -66,6 +66,7 @@ def _compiled_graph() -> CompiledTeamGraph:
         "model_name": "deterministic",
         "controls": [],
         "fallbacks": [],
+        "provenance": {"selection_source": "team_selection"},
     }
     return compile_team_graph(
         team_config,

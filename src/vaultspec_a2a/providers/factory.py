@@ -58,9 +58,73 @@ __all__ = [
     "ProviderCatalogDiscovery",
     "ProviderCatalogRegistration",
     "ProviderFactory",
+    "ProviderRuntimeUnavailableError",
+    "UnsupportedExecutionLaneError",
     "classify_provider_command",
     "kimi_temporary_model_configuration_reason",
+    "validate_current_execution_lane",
+    "validate_current_native_controls",
 ]
+
+
+class UnsupportedExecutionLaneError(ValueError):
+    """A frozen provider/mode pair is outside the current execution inventory."""
+
+
+class ProviderRuntimeUnavailableError(ConfigError):
+    """A structurally valid frozen lane cannot be constructed right now."""
+
+
+def validate_current_execution_lane(provider: Provider, execution_mode: str) -> None:
+    """Refuse a structurally impossible provider/mode pair without construction."""
+    expected_modes = {
+        Provider.ANTIGRAVITY: "antigravity-cli",
+        Provider.CODEX: "codex-app-server",
+        Provider.CLAUDE: f"claude-agent-acp:{settings.acp_backend}",
+        Provider.ZAI: f"zai-claude-agent-acp:{settings.acp_backend}",
+        Provider.KIMI: "kimi-code-acp",
+        Provider.OPENAI: "openai-api",
+        Provider.ZHIPU: "zhipu-openai-compatible-api",
+        Provider.DETERMINISTIC: IN_PROCESS_EXECUTION_MODES[Provider.DETERMINISTIC],
+        Provider.MOCK: IN_PROCESS_EXECUTION_MODES[Provider.MOCK],
+    }
+    if expected_modes.get(provider) != execution_mode:
+        raise UnsupportedExecutionLaneError(
+            f"Provider {provider.value!r} cannot execute mode {execution_mode!r}"
+        )
+
+
+def validate_current_native_controls(
+    provider: Provider, controls: dict[str, str]
+) -> None:
+    """Validate provider-specific frozen control structure before construction."""
+    no_control_lanes = {
+        Provider.DETERMINISTIC,
+        Provider.MOCK,
+        Provider.OPENAI,
+        Provider.ZHIPU,
+    }
+    if provider in no_control_lanes and controls:
+        raise ValueError(
+            f"Provider {provider.value!r} has no exact native-control executor"
+        )
+    allowed_fields = {
+        Provider.CODEX: {"reasoning_effort", "service_tier"},
+        Provider.KIMI: {"thinking_effort"},
+    }.get(provider)
+    if allowed_fields is None:
+        return
+    seen: set[str] = set()
+    for control_id in controls:
+        field = control_id.partition(":")[0]
+        if field not in allowed_fields:
+            raise ValueError(
+                f"Unsupported {provider.value} native control {control_id!r}"
+            )
+        if field in seen:
+            raise ValueError(f"Duplicate {provider.value} native control {field!r}")
+        seen.add(field)
+
 
 logger = logging.getLogger(__name__)
 
@@ -959,26 +1023,7 @@ class ProviderFactory:
                 if backend is not None and backend != frozen_backend:
                     raise ValueError("backend conflicts with frozen execution_mode")
                 backend = frozen_backend
-            expected_modes = {
-                # The in-process lanes read their modes from the serving
-                # declaration, so a frozen selection and the catalog that issued
-                # it cannot disagree about what the lane is called.
-                Provider.DETERMINISTIC: IN_PROCESS_EXECUTION_MODES[
-                    Provider.DETERMINISTIC
-                ],
-                Provider.MOCK: IN_PROCESS_EXECUTION_MODES[Provider.MOCK],
-                Provider.CODEX: "codex-app-server",
-                Provider.CLAUDE: f"claude-agent-acp:{backend or settings.acp_backend}",
-                Provider.ZAI: f"zai-claude-agent-acp:{backend or settings.acp_backend}",
-                Provider.KIMI: "kimi-code-acp",
-                Provider.OPENAI: "openai-api",
-                Provider.ZHIPU: "zhipu-openai-compatible-api",
-            }
-            if expected_modes.get(provider) != execution_mode:
-                raise ValueError(
-                    f"Provider {provider.value!r} cannot execute mode "
-                    f"{execution_mode!r}"
-                )
+            validate_current_execution_lane(provider, execution_mode)
         if native_controls is None:
             selected_controls: dict[str, str] = {}
         elif isinstance(native_controls, dict):
@@ -993,6 +1038,7 @@ class ProviderFactory:
             selected_controls = cast("dict[str, str]", dict(raw_controls))
         else:
             raise ValueError("native_controls must map control ids to provider values")
+        validate_current_native_controls(provider, selected_controls)
 
         # Admission: refuse an unsupported provider and resolve its model name
         # before any construction begins, so a bad request fails clearly rather
@@ -1060,7 +1106,10 @@ class ProviderFactory:
                 "[%s] Instantiating ACP Wrapper. backend=%s", provider, backend
             )
 
-            command, command_meta = _classify_acp_command(backend)
+            try:
+                command, command_meta = _classify_acp_command(backend)
+            except ConfigError as exc:
+                raise ProviderRuntimeUnavailableError(str(exc)) from exc
 
             # No authentication is implemented for this lane: the spawned CLI
             # inherits the ambient environment and the operator's real config
@@ -1108,7 +1157,10 @@ class ProviderFactory:
                 backend,
             )
 
-            command, command_meta = _classify_acp_command(backend)
+            try:
+                command, command_meta = _classify_acp_command(backend)
+            except ConfigError as exc:
+                raise ProviderRuntimeUnavailableError(str(exc)) from exc
 
             env_vars = _build_zai_env(
                 zai_base_url=settings.zai_base_url,
@@ -1219,7 +1271,9 @@ class ProviderFactory:
                 logger.error(
                     "Failed to authenticate %s: Missing ZHIPU_API_KEY", provider
                 )
-                raise ValueError(f"Authentication required for {provider}")
+                raise ProviderRuntimeUnavailableError(
+                    f"Authentication required for {provider}"
+                )
 
             logger.debug(
                 "[%s] Resolved authentication via: %s", provider, auth_resolved
@@ -1246,7 +1300,9 @@ class ProviderFactory:
                 logger.error(
                     "Failed to authenticate %s: Missing OPENAI_API_KEY", provider
                 )
-                raise ValueError(f"Authentication required for {provider}")
+                raise ProviderRuntimeUnavailableError(
+                    f"Authentication required for {provider}"
+                )
 
             logger.debug(
                 "[%s] Resolved authentication via: %s", provider, auth_resolved

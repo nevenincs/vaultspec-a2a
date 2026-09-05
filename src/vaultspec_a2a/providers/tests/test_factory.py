@@ -483,7 +483,9 @@ def test_factory_restarts_the_frozen_acp_backend_not_the_current_default() -> No
     assert model.command == ["node", str(_CLAUDE_ACP_JS)]
 
 
-def test_compiler_uses_the_next_exact_frozen_lane_when_primary_is_unavailable() -> None:
+def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable() -> (
+    None
+):
     team = load_team_config("vaultspec-solo-coder")
     worker_ref = team.workers[0]
     agent = load_agent_config(worker_ref.agent_id)
@@ -492,31 +494,34 @@ def test_compiler_uses_the_next_exact_frozen_lane_when_primary_is_unavailable() 
             "schema_version": 1,
             "provider": "codex",
             "execution_mode": "unavailable-mode",
+            "catalog_revision": "rev",
+            "entry_id": "primary",
             "model_name": "primary-model",
             "controls": [],
+            "provenance": {"selection_source": "team_selection"},
             "fallbacks": [
                 {
                     "schema_version": 1,
                     "provider_id": "codex",
                     "execution_mode": "codex-app-server",
+                    "catalog_revision": "rev",
+                    "entry_id": "fallback",
                     "model_name": "fallback-model",
                     "controls": [],
+                    "defaulted_control_ids": [],
                 }
             ],
         }
     }
 
-    model, provider, frozen_model = _resolve_model_for_worker(
-        worker_ref,
-        agent,
-        team,
-        provider_factory=ProviderFactory(),
-        frozen_assignment=assignment,
-    )
-    assert isinstance(model, CodexChatModel)
-    assert model.model_name == "fallback-model"
-    assert provider is Provider.CODEX
-    assert frozen_model == "fallback-model"
+    with pytest.raises(ValueError, match="cannot execute mode"):
+        _resolve_model_for_worker(
+            worker_ref,
+            agent,
+            team,
+            provider_factory=ProviderFactory(),
+            frozen_assignment=assignment,
+        )
 
 
 class TestProviderAdmission:
@@ -527,6 +532,22 @@ class TestProviderAdmission:
     is this provider allowed, and what model does it resolve to - assertable
     without building a model.
     """
+
+    @pytest.mark.parametrize("provider", (Provider.DETERMINISTIC, Provider.MOCK))
+    def test_in_process_fast_path_rejects_native_controls(
+        self, provider: Provider
+    ) -> None:
+        with pytest.raises(ValueError, match="no exact native-control executor"):
+            ProviderFactory().create(
+                provider,
+                model="exact",
+                execution_mode=(
+                    "in-process-deterministic"
+                    if provider is Provider.DETERMINISTIC
+                    else "in-process-mock"
+                ),
+                native_controls={"unsupported": "value"},
+            )
 
     @pytest.mark.parametrize("provider", (Provider.DETERMINISTIC, Provider.MOCK))
     def test_an_in_process_lane_has_no_implicit_default(

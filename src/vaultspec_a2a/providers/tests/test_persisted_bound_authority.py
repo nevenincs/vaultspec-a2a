@@ -93,7 +93,7 @@ def _provider_record(
         for index in range(control_count)
     )
     catalog = ProviderCatalog(
-        key=ProviderCatalogKey(provider_id="codex", execution_mode="app-server"),
+        key=ProviderCatalogKey(provider_id="codex", execution_mode="codex-app-server"),
         state=CatalogState(
             status=CatalogStatus.AVAILABLE,
             checked_at=_AT,
@@ -113,7 +113,7 @@ def _provider_record(
     return ProviderRecord(
         provider_id="codex",
         display_name=provider_display_name,
-        execution_mode="app-server",
+        execution_mode="codex-app-server",
         health=StructuredProviderHealth.derive(
             configured=HealthState.AVAILABLE,
             transport=HealthState.AVAILABLE,
@@ -130,7 +130,7 @@ def _reference(revision: str = "rev-1") -> SelectionReference:
     return SelectionReference(
         schema_version=1,
         provider_id="codex",
-        execution_mode="app-server",
+        execution_mode="codex-app-server",
         catalog_revision=revision,
         entry_id="entry-1",
         controls=(),

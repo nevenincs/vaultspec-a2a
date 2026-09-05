@@ -34,7 +34,7 @@ _CHECKED = datetime(2099, 1, 1, tzinfo=UTC)
 
 
 def _record() -> ProviderRecord:
-    key = ProviderCatalogKey(provider_id="codex", execution_mode="app-server")
+    key = ProviderCatalogKey(provider_id="codex", execution_mode="codex-app-server")
     catalog = ProviderCatalog(
         key=key,
         state=CatalogState(
@@ -83,7 +83,7 @@ def _record() -> ProviderRecord:
     return ProviderRecord(
         provider_id="codex",
         display_name="Codex",
-        execution_mode="app-server",
+        execution_mode="codex-app-server",
         health=health,
         catalog=catalog,
     )
@@ -93,7 +93,7 @@ def _selection(**changes: object) -> SelectionReference:
     values = {
         "schema_version": 1,
         "provider_id": "codex",
-        "execution_mode": "app-server",
+        "execution_mode": "codex-app-server",
         "catalog_revision": "rev-1",
         "entry_id": "entry-1",
         "controls": (),
@@ -127,7 +127,7 @@ def test_freeze_normalizes_authoritative_defaults_and_exact_model_value() -> Non
     assert frozen.disclosure()["assignments"][0] == {
         "provider_id": "codex",
         "provider_display_name": "Codex",
-        "execution_mode": "app-server",
+        "execution_mode": "codex-app-server",
         "catalog_revision": "rev-1",
         "entry_id": "entry-1",
         "model_name": "gpt-exact",
@@ -160,6 +160,36 @@ def test_persisted_selection_refuses_tampered_provider_value() -> None:
     record["selection"]["model_name"] = "tampered"
 
     with pytest.raises(TeamSelectionError, match="digest does not match"):
+        frozen_team_selection_from_record(record)
+
+
+@pytest.mark.parametrize(
+    ("path", "field"),
+    [
+        ((), "profile_id"),
+        (("selection",), "model_profile"),
+        (("selection", "controls", 0), "profile_id"),
+    ],
+)
+def test_persisted_selection_rejects_unknown_fields_without_digest_change(
+    path: tuple[object, ...], field: str
+) -> None:
+    frozen = freeze_team_selection(
+        selection=_selection(),
+        overrides={},
+        fallbacks=(),
+        required_roles=("coder",),
+        records=(_record(),),
+    )
+    record = frozen.to_record()
+    original_digest = record["digest"]
+    target: object = record
+    for key in path:
+        target = target[key]  # type: ignore[index]
+    assert isinstance(target, dict)
+    target[field] = "retired"
+    assert record["digest"] == original_digest
+    with pytest.raises(TeamSelectionError, match="persisted team selection is invalid"):
         frozen_team_selection_from_record(record)
 
 

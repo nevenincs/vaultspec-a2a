@@ -19,10 +19,11 @@ if TYPE_CHECKING:
 
     from ..protocols import ProviderFactoryProtocol
 
+from ...graph.enums import Provider
 from ...providers import AcpPromptError, ProviderCondition
 from ...providers.codex_chat_model import _turn_failure
 from ...providers.conditions import condition_from_acp_error, condition_is_retryable
-from ...providers.factory import ProviderFactory
+from ...providers.factory import ProviderFactory, ProviderRuntimeUnavailableError
 from ...team.team_config import (
     TeamConfig,
     TopologyConfig,
@@ -153,6 +154,104 @@ def test_bundled_preset_workers_require_an_exact_frozen_selection(
             )
 
 
+def test_valid_frozen_fallback_runs_only_after_runtime_unavailability() -> None:
+    team = load_team_config("vaultspec-solo-coder")
+    worker = team.workers[0]
+    agent = load_agent_config(worker.agent_id)
+
+    class RuntimeFailingFactory:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def create(self, provider: Any, *, model: str, **kwargs: Any) -> FakeChatModel:
+            self.calls.append(model)
+            if model == "primary":
+                raise ProviderRuntimeUnavailableError(
+                    "current lane is temporarily unavailable"
+                )
+            return FakeChatModel(responses=["ok"])
+
+    factory = RuntimeFailingFactory()
+    lane = {
+        "schema_version": 1,
+        "provider": "codex",
+        "execution_mode": "codex-app-server",
+        "catalog_revision": "rev",
+        "entry_id": "primary",
+        "model_name": "primary",
+        "controls": [],
+        "provenance": {"selection_source": "team_selection"},
+        "fallbacks": [
+            {
+                "schema_version": 1,
+                "provider_id": "codex",
+                "execution_mode": "codex-app-server",
+                "catalog_revision": "rev",
+                "entry_id": "fallback",
+                "model_name": "fallback",
+                "controls": [],
+                "defaulted_control_ids": [],
+            }
+        ],
+    }
+    _model, provider, model_name = _resolve_model_for_worker(
+        worker,
+        agent,
+        team,
+        provider_factory=factory,  # type: ignore[arg-type]
+        frozen_assignment={worker.agent_id: lane},
+    )
+    assert factory.calls == ["primary", "fallback"]
+    assert provider is Provider.CODEX
+    assert model_name == "fallback"
+
+
+def test_impossible_frozen_fallback_refuses_before_primary_provider_contact() -> None:
+    team = load_team_config("vaultspec-solo-coder")
+    worker = team.workers[0]
+    agent = load_agent_config(worker.agent_id)
+
+    class RecordingFactory:
+        calls = 0
+
+        def create(self, provider: Any, *, model: str, **kwargs: Any) -> FakeChatModel:
+            self.calls += 1
+            return FakeChatModel(responses=["must not run"])
+
+    factory = RecordingFactory()
+    lane = {
+        "schema_version": 1,
+        "provider": "codex",
+        "execution_mode": "codex-app-server",
+        "catalog_revision": "rev",
+        "entry_id": "primary",
+        "model_name": "primary",
+        "controls": [],
+        "provenance": {"selection_source": "team_selection"},
+        "fallbacks": [
+            {
+                "schema_version": 1,
+                "provider_id": "claude",
+                "execution_mode": "codex-app-server",
+                "catalog_revision": "rev",
+                "entry_id": "bad",
+                "model_name": "bad",
+                "controls": [],
+                "defaulted_control_ids": [],
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="cannot execute mode"):
+        _resolve_model_for_worker(
+            worker,
+            agent,
+            team,
+            provider_factory=factory,  # type: ignore[arg-type]
+            frozen_assignment={worker.agent_id: lane},
+        )
+    assert factory.calls == 0
+
+
 # ---------------------------------------------------------------------------
 # workspace_root kwarg
 # ---------------------------------------------------------------------------
@@ -196,6 +295,97 @@ async def test_compile_team_graph_accepts_workspace_root(
         "mount_vaultspec-coder",
         "mount_vaultspec-doc-reviewer",
     } == node_keys
+
+
+@pytest.mark.asyncio
+async def test_compile_prevalidates_all_roles_before_any_provider_contact(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    team = _pipeline_team()
+    agents = {ref.agent_id: load_agent_config(ref.agent_id) for ref in team.workers}
+    assignment = deterministic_model_assignment(team)
+    assignment[team.workers[-1].agent_id]["execution_mode"] = "codex-app-server"
+
+    class RecordingFactory:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def create(self, provider: Any, *, model: str, **kwargs: Any) -> FakeChatModel:
+            self.calls += 1
+            return FakeChatModel(responses=["must not run"])
+
+    factory = RecordingFactory()
+    with pytest.raises(ValueError, match="cannot execute mode"):
+        compile_team_graph(
+            team_config=team,
+            agent_configs=agents,
+            checkpointer=checkpointer,
+            provider_factory=factory,  # type: ignore[arg-type]
+            model_assignment=assignment,
+        )
+    assert factory.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("location", ("primary", "later_role", "fallback_duplicate"))
+async def test_compile_refuses_invalid_controls_before_any_provider_contact(
+    checkpointer: AsyncSqliteSaver, location: str
+) -> None:
+    team = _pipeline_team()
+    agents = {ref.agent_id: load_agent_config(ref.agent_id) for ref in team.workers}
+    assignment = deterministic_model_assignment(team)
+    first = assignment[team.workers[0].agent_id]
+    if location == "primary":
+        first["controls"] = [
+            {"control_id": "unsupported", "option_id": "x", "provider_value": "x"}
+        ]
+    elif location == "later_role":
+        assignment[team.workers[-1].agent_id]["controls"] = [
+            {"control_id": "unsupported", "option_id": "x", "provider_value": "x"}
+        ]
+    else:
+        first["fallbacks"] = [
+            {
+                "schema_version": 1,
+                "provider_id": "codex",
+                "execution_mode": "codex-app-server",
+                "catalog_revision": "rev",
+                "entry_id": "entry",
+                "model_name": "exact",
+                "controls": [
+                    {
+                        "control_id": "reasoning_effort:a",
+                        "option_id": "a",
+                        "provider_value": "low",
+                    },
+                    {
+                        "control_id": "reasoning_effort:b",
+                        "option_id": "b",
+                        "provider_value": "high",
+                    },
+                ],
+                "defaulted_control_ids": [],
+            }
+        ]
+
+    class RecordingFactory:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def create(self, provider: Any, *, model: str, **kwargs: Any) -> FakeChatModel:
+            self.calls += 1
+            return FakeChatModel(responses=["must not run"])
+
+    factory = RecordingFactory()
+    with pytest.raises(ValueError, match=r"native.?control"):
+        compile_team_graph(
+            team_config=team,
+            agent_configs=agents,
+            checkpointer=checkpointer,
+            provider_factory=factory,  # type: ignore[arg-type]
+            model_assignment=assignment,
+        )
+    assert factory.calls == 0
 
 
 # ---------------------------------------------------------------------------
@@ -640,6 +830,8 @@ def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:
             "schema_version": 1,
             "provider": "codex",
             "execution_mode": "codex-app-server",
+            "catalog_revision": "rev",
+            "entry_id": "entry",
             "model_name": "provider-model",
             "controls": [
                 {
@@ -648,6 +840,8 @@ def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:
                     "provider_value": "brief",
                 }
             ],
+            "fallbacks": [],
+            "provenance": {"selection_source": "team_selection"},
         }
     )
     assert provider == Provider.CODEX

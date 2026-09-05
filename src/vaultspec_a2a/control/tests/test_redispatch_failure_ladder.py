@@ -176,6 +176,17 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
     try:
         session_factory = get_session_factory()
         async with session_factory() as session:
+            valid_with_extra = _current_metadata(str(tmp_path))
+            frozen_record = valid_with_extra["provider_catalog_selection"]
+            assert isinstance(frozen_record, dict)
+            frozen_record["profile_id"] = "retired"
+            await create_thread(
+                session,
+                thread_id="unchanged-digest-extra-field",
+                status=ThreadStatus.RECONCILING,
+                team_preset="mock-success-single",
+                metadata=json.dumps(valid_with_extra),
+            )
             # list_threads orders newest first, so create the absent thread before
             # the corrupt one to prove a malformed first item does not abort.
             await create_thread(
@@ -219,12 +230,15 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
                     client,
                     circuit_breaker,
                     spawner,
-                    record_worker_contact=lambda _when: None,
+                    record_worker_contact=lambda _when: pytest.fail(
+                        "invalid frozen state reached worker dispatch"
+                    ),
                 )
 
         async with session_factory() as session:
             corrupt = await get_thread(session, "corrupt-modern-freeze")
             absent = await get_thread(session, "absent-after-corrupt")
+            extra = await get_thread(session, "unchanged-digest-extra-field")
         assert corrupt is not None
         assert corrupt.status == ThreadStatus.FAILED.value
         assert (
@@ -235,6 +249,9 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
         assert absent.failure_reason == (
             "persisted provider catalog selection is invalid"
         )
+        assert extra is not None
+        assert extra.status == ThreadStatus.FAILED.value
+        assert extra.failure_reason == "persisted provider catalog selection is invalid"
         assert any(
             "Refusing invalid frozen assignment" in record.getMessage()
             for record in caplog.records

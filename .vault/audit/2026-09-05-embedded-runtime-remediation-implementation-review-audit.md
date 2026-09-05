@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:ad951fd0bae896c5e500a3beb3f981e812043ae8715d7cd2f4877016d9f718b8'
+body_hash: 'sha256:6492662dd992a48f2fb511cbe780aefa1d4ca2e97e67c146b56448b3c6e8ed4b'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -235,6 +235,11 @@ Type: architecture and lifecycle review disposition. Status: open at `d9fd625587
 ### no-legacy-curation-second-review-correction | high | S44 eligibility domains separated
 
 Type: architecture and lifecycle resolution. Status: corrected on 2026-09-05 after review commit `bdeb379482eabbb26a6af09e79a3d69de18565e4`; formal re-review remains pending. Unchecked served-capability step `W05.P10.S44` no longer equates preset-list topology readiness with run-start dispatch acceptance. Any retained preset signal has the topology-only, zero-authority boundary established by S28. The independent run-start requirement removes its redundant eligibility boolean or defines a retained result only as the accepted dispatch outcome after catalog selection and live admission gates, never as preset or profile eligibility. No plan row is closed and no runtime implementation is claimed by this correction.
+
+### no-legacy-curation-final-rereview | low | PASS - authority and eligibility domains are reconciled
+
+Type: formal architecture review disposition. Status: resolved through `665a26f94fe3a1f4af84a72bef0c3d8c2bf36d7e`. S44 now separates topology-only preset readiness from post-catalog dispatch acceptance and restores no provider/model/profile/selection authority. All prior Kimi, S28 and S44 review findings are resolved; accepted-ADR, active-plan and current-reference scans find no remaining architecture conflict. Historical records are preserved, no plan row closes, and runtime legacy removal remains explicitly open under catalog `P01.S10` with proof in `P01.S11` and `P03.S20`. All four affected feature Core checks report zero errors and zero warnings. No critical, high or medium curation defect remains; architecture curation review passes.
+
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.

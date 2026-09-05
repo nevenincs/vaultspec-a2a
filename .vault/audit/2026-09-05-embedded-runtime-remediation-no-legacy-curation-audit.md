@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:ed32f109f12b33cf78a0af5a0fd60e419b182bcbd1ddecfc32cba79e075c8bdb'
+body_hash: 'sha256:7a3af7b20418fd056c7b9ccd6efbb1de87a53055b1fd1d197408107625c2939f'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -156,6 +156,13 @@ Type: lifecycle conflict resolution. Status: corrected on 2026-09-05 after revie
 ### no-legacy-curation-second-correction | high | remaining active-row conflict corrected
 
 Type: architecture lifecycle correction. Status: corrected in the active plan and recorded as resolution evidence. The obsolete requirement that preset-list eligibility equal run-start eligibility has been removed from `W05.P10.S44`. The plan now treats topology readiness and post-selection dispatch acceptance as separate facts with separate authority. Historical FAIL findings remain above as review evidence; provider-model-catalog `P01.S10`, its proof steps and remediation work remain open.
+
+### no-legacy-curation-final-formal-rereview | low | PASS - one catalog decision owns provider and model selection
+
+Type: formal architecture review disposition. Status: resolved through `665a26f94fe3a1f4af84a72bef0c3d8c2bf36d7e`. Final re-review confirms `W05.P10.S44` treats any retained preset signal only as topology readiness with zero provider, model, control, fallback, profile, selection, admission or dispatch authority, while the independent run-start result is removed or limited to accepted dispatch after current catalog selection and all live gates. The Kimi amendment preserves ACP transport, current authentication, exact permissions, per-run isolation and provisioning while making its former static maps, profile overlay, preset assignment, deprecated aliases and alternate fallback non-governing. S28 still removes profile fields unconditionally.
+
+Repository-wide accepted-ADR, active unchecked-plan and current-reference scans find no remaining competing provider/model/profile selection authority. The multi-provider and Kimi records use dated supersession pointers; the model-profiles record is superseded; current references classify legacy paths as source drift or refusal evidence; historical execution and audit facts remain unchanged. Provider-model-catalog remains 14/21 with `P01.S10`, `P01.S11` and `P03.S20` open; served-capability `S28` and `S44` remain unchecked. The live runtime CRITICAL remains accurately open under `P01.S10`, with proof owned by `P01.S11` and `P03.S20`; this documentation review claims no runtime correction or plan closure. The correction commit changes exactly the served-capability plan and the two rolling audit documents. Core reports zero errors and zero warnings for provider-model-catalog, embedded-runtime-remediation, kimi-provider and served-capability-contract. No critical, high or medium defect remains in the architecture curation itself.
+
 ## Recommendations
 
 - Complete catalog `P01.S10` by deleting every enumerated legacy authority and

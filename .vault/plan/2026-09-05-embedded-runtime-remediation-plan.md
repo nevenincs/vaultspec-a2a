@@ -22,7 +22,7 @@ related:
   - '[[2026-08-02-llm-context-provider-abstraction-plan]]'
 modified: '2026-09-05'
 body_schema: body-v2
-body_hash: 'sha256:01a90bd186311d62b89cc4467d943a42e61430b6d4a0de8f88fa5580ebed034b'
+body_hash: 'sha256:5f056b332d4ce53f4ce93c0a5577dbf1d199f4f7254cb39da1ebdc008167ff1e'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -159,7 +159,7 @@ Make discovery, readiness and shutdown satisfy one identified consumer contract.
 - [ ] `W04.P10.S47` - Conform readiness/drain/shutdown routes and ownership capability handling to the intended consumer generation with fail-closed incompatible attachment; `src/vaultspec_a2a/api/routes/admin.py`.
 - [ ] `W04.P10.S48` - Emit the intended generation's discovery filename, schema, identity and liveness fields and reject stale or foreign-service substitution; `src/vaultspec_a2a/lifecycle/discovery.py`.
 - [ ] `W04.P10.S49` - Use cooperative server shutdown with admission closed first and one total deadline covering active work, streams and bounded forced escalation; `src/vaultspec_a2a/api/app.py`.
-- [ ] `W04.P10.S50` - Upgrade release lifecycle qualification to execute the actual frozen worker and positive module/MCP paths through the intended Dashboard launch; `scripts/prove_artifact_lifecycle.sh`.
+- [ ] `W04.P10.S50` - After A2A publishes fixed per-target versioned archives and SHA-256 sidecars, replace Dashboard source checkout/build/commit pinning with version-only fetch-verify-bundle, then qualify the released worker and positive module/MCP paths through the receipt-matched Dashboard launch; `A2A release workflow, Dashboard component lock and scripts/prove_artifact_lifecycle.sh`.
 
 ## Wave `W05` - Measure the complete qualification matrix
 

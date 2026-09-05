@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:5819030e5c27669122409869adf6415bd3d22ea84d7266ee384c58db196cc353'
+body_hash: 'sha256:186636c22e623c630662c9fffd81de95fa29b03a6362a89f039f6b351376f7c0'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -32,8 +32,29 @@ Type: concurrency and durability. Status: open. Current source exposes bounded p
 
 Type: packaging and operational risk. Status: open. The S01 freeze log analyzed the repository's acceptance, desktop, service, and unit-test packages because the PyInstaller specification calls `collect_all("vaultspec_a2a")`. The produced `PYZ-00.toc` contained 463 entries matching A2A test-package namespaces. The wheel's denylist does not constrain a PyInstaller build from the source checkout, so the current onedir closure can carry non-runtime test code and its dependency reach despite the declared pruned-runtime intent. The smoke checks still pass; this finding concerns release composition, size, and unnecessary code surface. Ownership: `W04.P10.S50` must correct or explicitly justify the actual frozen closure before `W05.P13.S65` certifies it.
 
+### qualification-capture-provenance | high | Frozen inputs lack replayable capture commands
+
+Type: evidence reproducibility. Status: open; review-blocking for `W01.P01.S01`. The reference records exact-looking binary, checkout, host, toolchain, settings and lane facts, but the execution record preserves only the build command, two Python expressions described as running under uv, a test command and Core validation. It does not retain an exact invocation or immutable raw-output digest for the clean pre-build status, executable hash and onedir extent, Dashboard revision and component-lock parse, host identity, provider executable versions, selected settings, or complete lane/disposition output. That does not satisfy A32's exact-command boundary and makes configuration override or transcription drift impossible to distinguish later. Ownership: correct S01 itself by recording replayable locked commands and results or immutable output artifacts for every frozen input, including the two-repository clean state and source revision, before reviewing the Step again.
+
+### dashboard-pretest-deadlines-incomplete | high | The frozen deadline inventory omits active consumer bounds
+
+Type: contract and evidence completeness. Status: open; review-blocking for `W01.P01.S01`. The reference freezes the Dashboard broker's 120-second heartbeat staleness and 1.5-second health probe but omits other active bounds at the same consumer generation: broker read 15 seconds, broker control 60 seconds, broker catalog discovery 45 seconds, lifecycle discovery freshness 30 seconds, gateway stop-plan budget 5 seconds, and product drain connect/max-deadline bounds of 5/600 seconds. The 30-second lifecycle freshness and 120-second broker freshness are different surfaces and must not be collapsed. S02 owns resolving their contract semantics, but S01 explicitly owns freezing pre-test deadlines before results can influence them. Ownership: add the exact current values, source owners, and qualification use to the S01 reference, then let S02 reconcile which bound governs each operation.
+
+### database-pool-backend-conflation | medium | The pool limit is presented as a SQLite admission bound
+
+Type: evidence accuracy. Status: open. The `Database admission` row combines SQLite's 5,000ms busy timeout with a pool of 5 plus 10 overflow. Live source applies `db_pool_size` and `db_pool_max_overflow` only when the URL starts with PostgreSQL; the default SQLite engine does not receive those QueuePool arguments. A28 could therefore measure the wrong connection ceiling if this row is read as one backend's configuration. Ownership: S01 must label 5 plus 10 as PostgreSQL-only and record the effective SQLite pooling behavior separately before connection-peak qualification.
+
+### in-process-mode-posture-unspecified | medium | The supported-mode inventory does not freeze internal lane disposition
+
+Type: evidence completeness. Status: open. The eight-row table is correctly described as the complete external registration set, but the Step requires a supported-mode inventory and the closing paragraph names mock and deterministic lanes without their exact keys or effective current posture. At capture, environment arming is false and no in-process lane is served; explicit test arming adds `deterministic/in-process-deterministic`, while `mock/in-process-mock` additionally requires a configured mock base. Ownership: S01 must record these exact conditional keys and current served disposition while retaining their exclusion from external-provider proof.
+
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.
 - Establish the durable message capacity before running A10; do not reuse an unrelated stream or IPC buffer as `Q`.
 - Make the freeze recipe collect explicit runtime modules and data or exclude every test namespace, then inspect the built archive as part of the release lifecycle discriminator.
+
+- For `qualification-capture-provenance`, add a bounded capture recipe or immutable evidence file that reproduces every frozen value with project-locked tools and names both repository revisions and clean states.
+- For `dashboard-pretest-deadlines-incomplete`, freeze every current broker, lifecycle, discovery, and drain deadline while keeping the 30-second and 120-second freshness predicates tied to their distinct consumers.
+- For `database-pool-backend-conflation`, split SQLite timeout/pooling facts from the PostgreSQL QueuePool 5-plus-10 configuration.
+- For `in-process-mode-posture-unspecified`, list the deterministic and mock execution keys, current arming state, conditional requirements, and exclusion from external work evidence.

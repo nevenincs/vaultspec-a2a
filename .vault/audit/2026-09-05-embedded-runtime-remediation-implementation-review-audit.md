@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:b127b60dc69bf1a14b2fb7d5350efd0c9db21a441082735604fae78f8a469be5'
+body_hash: 'sha256:b1e95e177fc5a4a65c270f65f020a6a3b5aae3c553fdb4bba398e5fe4a9b8ed4'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -171,6 +171,18 @@ Type: implementation review disposition. Status: resolved at A2A `fefd7540e26ba0
 
 Type: evidence environment and dependency isolation. Status: resolved by `W01.P02.S04`. The exact command `uv run --isolated --locked --no-default-groups --extra server --group tooling python -m pytest src/vaultspec_a2a/control/tests/test_sync_url_derivation.py -q` installed from the project lock and passed 15 tests, including bare, asyncpg, and psycopg URL derivation; application and checkpoint settings; synchronous SQLAlchemy engine construction; password preservation; invalid URL refusal; shipped example parsing; SQLite conversion; and the new profile-separation discriminator. `uv lock --check` and the locked server sync dry-run passed. An isolated `freeze`-only environment reported asyncpg, psycopg, and `langgraph.checkpoint.postgres` all absent. A second isolated build deliberately combined `server` and `freeze`; the PyInstaller exclusion boundary still produced a smoke-clean artifact with zero exact driver modules in `PYZ-00.toc` and zero driver-named artifact paths. Ownership: S04 is complete; regression ownership remains `pyproject.toml`, `test_sync_url_derivation.py`, and the frozen spec, with final plan review at `W06.P14.S72`.
 
+### s04-driver-exclusion-evidence-not-replayable | high | Decisive absence checks are recorded as placeholders
+
+Type: evidence reproducibility. Status: open; review-blocking for `W01.P02.S04`. The Step Record claims that the freeze-only profile cannot import asyncpg, psycopg, or `langgraph.checkpoint.postgres` and that a server-equipped frozen build contains none of those exact modules or driver-named paths, but records the first command as `python -c <driver-import discriminator>` and the second only as an unnamed parse of `PYZ-00.toc` plus an artifact scan. Neither entry is executable, and no retained script, canonical raw output, digest, or per-path inventory supplies the missing procedure. Independent review reconstructed both checks and reproduced zero modules and paths, but reviewer inference is not a replay contract and cannot justify marking ER18 resolved under A32. Ownership: correct S04 by retaining exact locked commands or checked-in bounded probes for both absence checks, their source/build roots, match grammar, canonical results and digest; also record the exact locked server-profile sync dry-run invocation.
+
+### s04-uv-isolation-claim-inaccurate | medium | Deprecated isolated flag does not create an isolated environment
+
+Type: validation environment accuracy. Status: open; review-blocking for S04 evidence wording but not the dependency split itself. On the locked host toolchain, `uv run --isolated ...` reports that `--isolated` is deprecated and has no effect, then uses the shared project `.venv`. The requested `--no-default-groups`, extra and group selection still produces the intended locked resolution, and the 15 server-profile tests pass, but the Step Record and audits repeatedly call these runs isolated build environments. That claim is false and shared-environment mutation can race another task. Ownership: use a task-specific `UV_PROJECT_ENVIRONMENT` for the server, freeze-only, and contaminated-build probes, or accurately describe the shared synchronized environment and preserve proof that no extraneous packages remained.
+
+### s04-formal-review | high | FAIL - implementation is sound but evidence mechanics block closure
+
+Type: implementation review disposition. Status: open. Review at `df84b7480603411c1af9e2dc0d3142d7bdf15261` confirms the `server` extra is the explicit locked PostgreSQL profile; base and `freeze` contain none of asyncpg, psycopg, or `langgraph-checkpoint-postgres`; the PyInstaller spec excludes all three import surfaces; 15 URL/settings/engine tests pass under the server profile; lock checking and the server sync dry-run pass; and a reconstructed archive scan finds zero exact driver modules among 5,704 parsed names and zero driver-named paths among 2,743 artifact files. The new test is a meaningful configuration discriminator because it fails when a package leaves `server`, enters base/freeze, or loses its freeze exclusion; runtime resolution and artifact scans remain separate evidence. The known collect-all test-module finding is correctly preserved as MEDIUM under S50/S65. The seven committed S04 paths are scoped correctly, feature Core is clean, only S04 closes, and unrelated codebase-health working changes were not considered or touched. The preceding HIGH reproducibility defect prevents advancement to S05 until S04's record is corrected.
+
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.
@@ -190,3 +202,6 @@ Type: evidence environment and dependency isolation. Status: resolved by `W01.P0
 
 - For `s02-existing-verb-retry-contract-regression`, restore the exact `run-start`, `run-cancel`, and `clarification-respond` retry and reconciliation rules under the authoritative edge decision and reflect them in the derived eleven-verb table.
 - For `s02-edge-adr-d2-marker`, remove the literal plus before the D2 decision marker.
+
+- For `s04-driver-exclusion-evidence-not-replayable`, replace both placeholder verification entries with exact bounded commands or retained probes and canonical results/digests, including the exact sync dry-run command.
+- For `s04-uv-isolation-claim-inaccurate`, allocate task-specific uv project environments for each dependency posture or remove the isolation claim and prove the shared environment's exact synchronized contents.

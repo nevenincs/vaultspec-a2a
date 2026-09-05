@@ -79,7 +79,7 @@ _RELAY_BURST_CHUNK_BYTES = 4096
 # same role content. Kept as individual per-role content-dispatch keys here rather
 # than importing the contract tuple (the leaf provider stays free of a graph/team
 # runtime edge); a contract-sync test asserts these never diverge from
-# RESEARCH_ADR_ROLES (authoring-contract ADR binding (b)).
+# RESEARCH_ADR_ROLES.
 _ROLE_RESEARCHER = "researcher"
 _ROLE_SYNTHESIST = "synthesist"
 _ROLE_ADR_AUTHOR = "adr-author"

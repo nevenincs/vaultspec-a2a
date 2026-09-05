@@ -498,7 +498,7 @@ class ThreadStateData:
     # failed, or the durable record predates the failure_reason column).
     # Sourced straight from the durable threads.failure_reason column — never
     # from a live SSE frame — so a reloaded panel recovers the same reason a
-    # connected client already saw (S37 / failure-reason persistence).
+    # connected client already saw.
     failure_reason: str | None = None
     # The machine-readable counterpart to the reason above: which closed
     # condition the failure resolved to, so a client branches on a value instead

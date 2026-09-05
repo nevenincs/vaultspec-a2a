@@ -174,8 +174,8 @@ _CLAUDE_ACP_JS = (
 )
 
 # Resolve the precompiled Bun binary from the package-local bin/ directory.
-# Node backend is the default; binary mode requires an ADR amendment
-# — experimental.
+# Node backend is the default; binary mode is experimental and requires a
+# deliberate decision to adopt.
 _BIN_DIR = Path(__file__).resolve().parent.parent / "bin"
 _bin_candidates = list(_BIN_DIR.glob("claude-agent-acp*")) if _BIN_DIR.is_dir() else []
 _BIN_PATH: Path | None = _bin_candidates[0] if _bin_candidates else None

@@ -3,7 +3,7 @@
 Spawned by the CLI as ``python -m vaultspec_a2a.protocols.mcp.authoring_stdio``.
 The process reconstructs the run's engine dispatch from its environment and
 serves the bridged propose/read tools over stdio. Neither session-injected
-transport surfaces to the model on the current stack — the S20 registration-scope
+transport surfaces to the model on the current stack — the registration-scope
 matrix found only user-global home-config servers surface, over both stdio and
 the loopback HTTP bridge (``build_authoring_mcp_servers``) — so stdio here is the
 bridge's spawned-subprocess transport, not a surfacing lever. The engine edge is

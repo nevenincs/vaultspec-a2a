@@ -490,10 +490,9 @@ class GraphLifecycleManager:
         # harness MCP servers - must have an attachment surface on every worker.
         # No credential gate runs here: providers authenticate themselves from
         # the ambient environment they inherit, and an unauthenticated lane
-        # reports its own failure at run time. The declared-surface invariant
-        # (agent-harness-provisioning; the S20 leak) is enforced at spawn by the
-        # run-workspace MCP projection and confinement settings, not by refusing
-        # the run for a missing credential.
+        # reports its own failure at run time. The declared-surface invariant is
+        # enforced at spawn by the run-workspace MCP projection and confinement
+        # settings, not by refusing the run for a missing credential.
         armed = harness is not None and (
             harness.authoring_bridge or bool(harness.mcp_servers)
         )
@@ -581,7 +580,7 @@ class GraphLifecycleManager:
         # made async in place: resolve_engine_with_retry is a plain blocking
         # function (time.sleep + a sync httpx probe, by its own design, reused
         # by non-async callers too) and this is the one call site that runs on
-        # a live event loop — a worker's own step_timeout and the S37 ingest
+        # a live event loop — a worker's own step_timeout and the ingest
         # stall watchdog exist precisely because a blocking call here used to
         # freeze the whole worker (heartbeats included) for the full retry
         # window on every first compile of a preset+workspace cache key.

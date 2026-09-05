@@ -339,7 +339,7 @@ async def redispatch_reconciling_threads(
                             thread.id,
                             exc_info=True,
                         )
-                # model-profiles: reuse the frozen effective assignment on
+                # Reuse the frozen effective assignment on
                 # restart so the run recompiles the exact launched models, never
                 # a re-resolution against possibly-drifted config.
                 try:

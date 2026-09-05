@@ -342,7 +342,7 @@ def catalog_from_session_result(
     key: ProviderCatalogKey,
     checked_at: datetime | None = None,
 ) -> ProviderCatalog:
-    """Normalize one successful ``session/new`` result into the S01 contract."""
+    """Normalize one successful ``session/new`` result into the catalog contract."""
     models, controls = _normalized_payload(result, key)
     if controls:
         control_ids = tuple(control.control_id for control in controls)

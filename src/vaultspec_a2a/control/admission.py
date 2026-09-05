@@ -220,8 +220,8 @@ class AdmissionBroker:
             )
 
         # Trigger the single-flight worker start and probe readiness BEFORE any
-        # capacity is assigned (the ADR's "probe readiness before assigning run
-        # capacity"). Concurrent prepares each await the spawner's own single
+        # capacity is assigned: readiness is probed before run capacity is
+        # assigned. Concurrent prepares each await the spawner's own single
         # flight, so exactly one worker is created no matter how many prepare.
         await ensure_worker()
         readiness = await probe_readiness()

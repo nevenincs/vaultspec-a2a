@@ -617,7 +617,7 @@ class RunStatusResponse(BaseModel):
     # failure_reason precisely BECAUSE the run survives. Without this field that
     # account reached no client at all: durable, and readable by nobody.
     repair_reason: str | None = Field(default=None, max_length=500)
-    # model-profiles: the frozen profile the run launched with and its
+    # The frozen profile the run launched with and its
     # effective per-role assignment, reproduced verbatim from run metadata across
     # restarts (additive v1; absent for runs started before profiles landed).
     profile_id: str | None = None
@@ -991,7 +991,7 @@ class PresetSummary(BaseModel):
     authoring_capability: AuthoringCapability | None = None
     # True for bundled mock/test presets so the product layer can exclude them.
     is_mock: bool = False
-    # model-profiles additions (additive v1 fields, absent-safe): the preset's
+    # Additive v1 fields (absent-safe): the preset's
     # origin, the document outputs the topology delivers, the selectable
     # profiles with effective assignments and eligibility, and the default
     # profile id. The origin's legal values were previously stated only in this

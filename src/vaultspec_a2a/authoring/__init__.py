@@ -60,7 +60,7 @@ from .session import request_apply as request_apply
 # time). The per-run stdio authoring bridge (``protocols/mcp/authoring_stdio``)
 # only needs the light client/catalog surface and must NOT pay that cost to serve
 # ``list_tools`` at spawn — the cold-start that kept the bridge's tools from
-# reaching the model in time (a2a-edge-conformance S18). So the submitter exports
+# reaching the model in time. So the submitter exports
 # are resolved lazily via PEP 562: ``from vaultspec_a2a.authoring import
 # DocumentProposalSubmitter`` still works for the worker that authors documents,
 # while a bridge importing the package pays only for the light modules above.

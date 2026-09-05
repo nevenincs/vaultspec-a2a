@@ -453,7 +453,7 @@ class TeamHarnessConfig(BaseModel):
 
     When ``true`` the run builds an :class:`AuthoringToolBinding` per worker and
     surfaces the engine's propose/read tools through the same isolated config
-    home the declared ``mcp_servers`` ride (S18 admission channel). It is the
+    home the declared ``mcp_servers`` ride. It is the
     agent-INITIATED authoring path for CLI-coder presets; document-authoring
     topologies (``research_adr``) author through the in-process graph submitter
     and must NOT set it — that contradiction is rejected in

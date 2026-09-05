@@ -369,7 +369,7 @@ class ThreadCreationRequest:
     # request that names none is not a run this service can site.
     workspace_root: Path
     actor_tokens: ActorTokenBundle | None = None
-    # model-profiles: the selected profile id and its frozen effective
+    # The selected profile id and its frozen effective
     # per-role assignment (agent_id -> {provider, capability, fallback}), threaded
     # to the worker so compilation reproduces the launched models verbatim.
     profile_id: str | None = None

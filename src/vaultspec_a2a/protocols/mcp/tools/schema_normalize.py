@@ -1,8 +1,8 @@
 """Normalize the engine catalog's input schema to valid MCP JSON Schema.
 
 The pinned CLI validates a tool's ``inputSchema`` as JSON Schema and SILENTLY
-DROPS non-conforming tools after connecting - the S20 "connected but not
-exposed" root cause. This module guarantees a valid JSON Schema object at the
+DROPS non-conforming tools after connecting - the "connected but not exposed"
+root cause. This module guarantees a valid JSON Schema object at the
 bridge serving boundary, handling BOTH engine generations without knowing which
 one it is talking to (version skew):
 

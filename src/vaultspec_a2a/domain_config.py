@@ -89,7 +89,7 @@ class DomainConfig(BaseModel):
         default=90.0,
         description=(
             "Ingest: FLOOR on the seconds to wait for the NEXT astream_events "
-            "event before treating the graph run as stalled (S37). Independent "
+            "event before treating the graph run as stalled. Independent "
             "of a team's own step_timeout_seconds (a per-node budget LangGraph "
             "is supposed to enforce internally, but was observed live to not "
             "always fire) in the sense that this backstop never trusts "

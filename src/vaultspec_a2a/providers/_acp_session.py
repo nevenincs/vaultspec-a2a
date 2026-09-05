@@ -438,7 +438,7 @@ async def setup_session(
         # The kimi family OMITS this _meta: Kimi has no claudeCode namespace,
         # so the SAME composed names (still carried in config.allowed_tools)
         # are enforced at our session/request_permission handler as an
-        # exact-name auto-approve set (P03.S10) instead.
+        # exact-name auto-approve set instead.
         session_meta: JsonObject = {
             "claudeCode": {"options": claude_session_options(config)}
         }

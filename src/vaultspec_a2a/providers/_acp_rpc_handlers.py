@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # The largest durable surface in this system, and the one furthest from this
 # project's authority: files an agent writes through ``fs/write_text_file`` land
 # in the operator's own project tree at paths the model chooses. Permanence is
-# not a shrug here - it is the only defensible answer, and the ADR's ordering
+# not a shrug here - it is the only defensible answer, and the ordering
 # constraint (disarm the destructive workspace-delete path before anything
 # persists artifact rows) exists precisely because this seam feeds it.
 AGENT_WORKSPACE_FILE_DECLARATION = ArtifactDeclaration(
@@ -200,9 +200,9 @@ def _vault_write_denial(rpc_id: AcpRpcId, path: str) -> JsonObject:
     }
 
 
-# Kimi's native READ tools that mirror the tool-cores read floor (Claude's
-# Read/Grep/Glob), enumerated from the installed kimi-cli 1.49.0 source and
-# cross-checked against executor-service's P04.S15 verification:
+# Kimi's native READ tools that mirror the read floor (Claude's Read/Grep/Glob),
+# enumerated from the installed kimi-cli 1.49.0 source and cross-checked against
+# the executor service's own verification:
 #   ReadFile (tools/file/read.py:64), Grep (tools/file/grep_local.py:386),
 #   Glob (tools/file/glob.py:56)
 # NOTE the name divergence from Claude: Kimi's read tool is `ReadFile`, not `Read`.

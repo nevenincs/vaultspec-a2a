@@ -13,8 +13,8 @@ now"; this one answers "what does this build contain", which is a different
 question with a different truth condition. Rendering it through a synthetic
 round trip would have made a static fact look like an observation.
 
-**Serving is armed, never ambient.** ``2026-08-02-provider-model-catalog-adr``
-constrains internal deterministic test lanes to stay hidden, and the reason is a
+**Serving is armed, never ambient.** Internal deterministic test lanes are
+constrained to stay hidden, and the reason is a
 product one: a lane that returns fixed content would otherwise appear in the
 composer beside real providers, and a user could select canned output believing
 it was work. So the default posture is hidden, and a deployment that wants these
@@ -61,7 +61,7 @@ __all__ = [
 ]
 
 # The environment declaration that arms in-process serving. Absent or falsey
-# means hidden, which is the ADR's default posture; only a deployment that
+# means hidden, which is the default posture; only a deployment that
 # deliberately sets it sees these lanes.
 SERVE_IN_PROCESS_LANES_ENV: Final = "VAULTSPEC_SERVE_IN_PROCESS_LANES"
 

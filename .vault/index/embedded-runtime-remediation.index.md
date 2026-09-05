@@ -6,10 +6,13 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:0075a45fe4b1461429960dc1560ed483b9d86668fdfb91aec54acff535f9a3dc'
+body_hash: 'sha256:bccdb6ed4231175ca2c83f4f3ccb6759774f3b1c1c5f0d84429b9ae1895f437d'
 related:
+  - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
+  - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
+  - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
 ---
 
@@ -23,9 +26,21 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 
 - `2026-09-05-embedded-runtime-remediation-adr` - `embedded-runtime-remediation` adr: `qualification and single-owner remediation of the embedded runtime` | (**status:** `accepted`)
 
+### audit
+
+- `2026-09-05-embedded-runtime-remediation-implementation-review-audit` - `embedded-runtime-remediation` audit: `rolling implementation review queue`
+
+### exec
+
+- `2026-09-05-embedded-runtime-remediation-W01-P01-S01` - Record the intended A2A commit/binary identity, Dashboard generation, A01-A34 applicability, supported-mode inventory and pre-test queue/deadline/host limits without changing the frozen acceptance thresholds
+
 ### plan
 
 - `2026-09-05-embedded-runtime-remediation-plan` - `embedded-runtime-remediation` plan
+
+### reference
+
+- `2026-09-05-embedded-runtime-remediation-qualification-inputs-reference` - `embedded-runtime-remediation` reference: `qualification-inputs`
 
 ### research
 

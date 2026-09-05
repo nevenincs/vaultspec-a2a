@@ -33,18 +33,21 @@ from ..factory import ProviderFactory
 if TYPE_CHECKING:
     from pathlib import Path
 
-_ZAI_TOKEN_PRESENT = bool((settings.zai_auth_token or "").strip())
+    from ...conftest import ExternalPrerequisiteRule
 
 
 @pytest.mark.service
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _ZAI_TOKEN_PRESENT, reason="no ZAI_AUTH_TOKEN configured")
-async def test_zai_streaming_shape_is_faithful(tmp_path: Path) -> None:
+async def test_zai_streaming_shape_is_faithful(
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """A real Z.ai turn streams assistant deltas through the Claude ACP path.
 
     Proves the streaming-chunk shape the reused AcpChatModel path depends on
     survives Z.ai's gateway: multiple ChatGenerationChunks with real text content.
     """
+    external_prerequisite("zai-credential")
     model = ProviderFactory().create(
         Provider.ZAI, model=Model.LOW, workspace_root=tmp_path
     )
@@ -63,8 +66,10 @@ async def test_zai_streaming_shape_is_faithful(tmp_path: Path) -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _ZAI_TOKEN_PRESENT, reason="no ZAI_AUTH_TOKEN configured")
-async def test_zai_tool_calling_is_faithful(tmp_path: Path) -> None:
+async def test_zai_tool_calling_is_faithful(
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """A real Z.ai turn drives the agent's native tool-calling loop to a side effect.
 
     The ADR's fidelity concern is whether Z.ai reproduces the Anthropic
@@ -74,6 +79,7 @@ async def test_zai_tool_calling_is_faithful(tmp_path: Path) -> None:
     executed. ``allowed_tools`` auto-permits the Write tool so the headless turn
     does not stall on a permission prompt.
     """
+    external_prerequisite("zai-credential")
     model = ProviderFactory().create(
         Provider.ZAI, model=Model.LOW, workspace_root=tmp_path
     )

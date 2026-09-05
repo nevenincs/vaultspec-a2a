@@ -1,6 +1,5 @@
 {
   "experimental": {
-    "plan": true,
     "enableAgents": true
   },
   "ui": {
@@ -14,12 +13,21 @@
     "showCitations": true
   },
   "general": {
-    "enablePromptCompletion": true
+    "enablePromptCompletion": true,
+    "plan": {
+      "enabled": true
+    }
   },
   "mcpServers": {
     "context7": {
       "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp@latest"]
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
     }
+  },
+  "agents": {
+    "overrides": {}
   }
 }

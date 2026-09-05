@@ -27,6 +27,7 @@ from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatal
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ...conftest import ExternalPrerequisiteRule
     from .._json_contract import JsonObject
 
 
@@ -48,13 +49,18 @@ def _selected_model_value(config_options: Sequence[JsonObject]) -> str:
 @pytest.mark.asyncio
 async def test_zai_catalog_selection_is_confirmed_by_one_minimal_turn(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """Prove catalog admission plus exact configured-model selection end to end."""
+    # An ABSENT credential is not a failing lane, it is an unsupplied one, and
+    # this asserted its way to red where its two siblings in test_zai_fidelity
+    # now skip on the same missing token - the same fact reported two different
+    # ways depending on which file you ran. The rule owns that decision, so
+    # `--require-prerequisite=zai-credential` can still turn it into a failure
+    # for a caller that guarantees the token.
+    external_prerequisite("zai-credential")
     key = ProviderCatalogKey(
         Provider.ZAI.value, f"zai-claude-agent-acp:{settings.acp_backend}"
-    )
-    assert settings.zai_auth_token and settings.zai_auth_token.strip(), (
-        "Settings did not resolve a Z.ai auth token for the production catalog path"
     )
     discovery = await ProviderFactory().catalog_registration(key, Path.cwd()).discover()
 

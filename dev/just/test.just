@@ -9,6 +9,13 @@ help:
 unit *ARGS:
     uv run --no-sync --frozen --no-default-groups --group tooling pytest -m "not service" {{ ARGS }}
 
+# Report the lanes, models, and controls this host's provider CLIs serve.
+# `--exports claude=haiku --option effort=low` renders the VAULTSPEC_LIVE_*
+# block the live tier opts in with; the ids are catalog-derived, so read them
+# from here rather than committing a block that goes stale.
+lanes *ARGS:
+    uv run --no-sync --frozen python -m dev.providers {{ ARGS }}
+
 # Run deterministic service tests against real local services.
 service *ARGS:
     uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" -m service {{ ARGS }}

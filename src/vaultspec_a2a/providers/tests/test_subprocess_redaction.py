@@ -78,3 +78,36 @@ def test_a_multi_line_block_is_masked_per_occurrence() -> None:
     assert "resolving requirements" in redacted
     assert "connecting to 127.0.0.1:8766" in redacted
     assert "server exited with code 3" in redacted
+
+
+def test_json_shaped_credentials_are_masked() -> None:
+    """A config dumped as JSON must not carry its credential into a tail.
+
+    The pattern originally expected whitespace between an introducing name and
+    its separator, so ``"apiKey": "sk-..."`` - a quote sitting where the space
+    was expected - passed through untouched. That is not hypothetical: it is
+    exactly what `kimi provider list --json` prints, so any diagnostic that
+    retained that output would have retained a live key. Both spacings are
+    asserted because a compact dump has no space after the colon either.
+    """
+    secret = "sk-live-value-must-not-appear"
+    for line in (
+        f'  "apiKey": "{secret}"',
+        f'{{"apiKey":"{secret}"}}',
+        f"'password': '{secret}'",
+    ):
+        masked = redact_secrets(line)
+        assert secret not in masked, masked
+        assert "<redacted>" in masked, masked
+
+
+def test_masking_preserves_the_quoting_it_found() -> None:
+    """A masked JSON value still reads as JSON, so a tail stays parseable."""
+    masked = redact_secrets('{"apiKey":"sk-secret"}')
+    assert masked == '{"apiKey":"<redacted>"}'
+
+
+def test_text_without_a_credential_name_is_untouched() -> None:
+    """Masking keys on the introducing NAME, so ordinary output is unharmed."""
+    line = "listing 4 models for provider moonshot-ai"
+    assert redact_secrets(line) == line

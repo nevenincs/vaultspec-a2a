@@ -44,6 +44,7 @@ class TestProvider:
     def test_members(self) -> None:
         """All providers are present."""
         expected = {
+            "antigravity",
             "claude",
             "codex",
             "deterministic",

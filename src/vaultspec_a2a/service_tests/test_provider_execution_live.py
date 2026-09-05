@@ -23,25 +23,25 @@ from __future__ import annotations
 import tempfile
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ..control.config import settings
 from ..graph.enums import Provider
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import PROVEN_TURN_LANES
+from ._provider_catalog_live import declared_lane_model_value
+
+if TYPE_CHECKING:
+    from ..conftest import ExternalPrerequisiteRule
 
 pytestmark = [pytest.mark.service, pytest.mark.asyncio]
 
 
-def _claude_credentialed() -> bool:
-    """Whether the claude lane can authenticate at all on this host."""
-    token = settings.claude_code_oauth_token
-    return bool(token and token.strip())
-
-
-async def test_the_claude_lane_completes_a_turn_inside_the_runs_project() -> None:
+async def test_the_claude_lane_completes_a_turn_inside_the_runs_project(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """A real turn reads a project-only fact and reproduces it.
 
     The marker is minted per run, so no cache, no prior transcript, and no
@@ -50,11 +50,7 @@ async def test_the_claude_lane_completes_a_turn_inside_the_runs_project() -> Non
     """
     if Provider.CLAUDE.value not in {str(lane) for lane in PROVEN_TURN_LANES}:
         pytest.skip("the claude lane is not declared turn-proven")
-    if not _claude_credentialed():
-        pytest.skip(
-            "no claude credential on this host; a turn cannot be executed and "
-            "a pass without one would prove nothing"
-        )
+    external_prerequisite("claude-credential")
 
     marker = f"ORBITAL-{uuid.uuid4().hex[:12].upper()}"
     workspace = Path(tempfile.mkdtemp(prefix="live-execution-project-"))
@@ -63,7 +59,12 @@ async def test_the_claude_lane_completes_a_turn_inside_the_runs_project() -> Non
         encoding="utf-8",
     )
 
-    model = ProviderFactory().create(Provider.CLAUDE, workspace_root=workspace)
+    served, reason = await declared_lane_model_value(Provider.CLAUDE.value, workspace)
+    if served is None:
+        external_prerequisite.absent("provider-catalog-live-selection", reason)
+    model = ProviderFactory().create(
+        Provider.CLAUDE, model=served, workspace_root=workspace
+    )
     response = await model.ainvoke(
         [
             HumanMessage(

@@ -39,7 +39,6 @@ from pathlib import Path
 import pytest
 
 from ...control.config import settings
-from ...graph.enums import MODEL_MAP, Model, Provider
 from ...workspace.environment import resolve_env_vars
 from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
@@ -147,7 +146,20 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
         config_id = model_option.get("id")
         assert isinstance(config_id, str) and config_id
 
-        desired_model = MODEL_MAP[Provider.CLAUDE][Model.LOW]
+        # Take the model from what THIS session advertises, never from a table
+        # in source. External lanes carry no hardcoded model values precisely
+        # because provider catalogs move; a literal here would pass until the
+        # next CLI release retired the name and then fail for a reason that
+        # looks nothing like "the constant went stale".
+        advertised = model_option.get("options")
+        assert isinstance(advertised, list) and advertised, model_option
+        desired_model = next(
+            value
+            for choice in advertised
+            if isinstance(choice, dict)
+            for field in ("value", "modelId", "id")
+            if isinstance(value := choice.get(field), str) and value
+        )
         select_model: JsonObject = {
             "jsonrpc": "2.0",
             "id": 2,

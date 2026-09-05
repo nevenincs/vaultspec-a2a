@@ -34,15 +34,20 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...control.config import settings
-from ...graph.enums import Model, Provider
+from ...graph.enums import Provider
+from ...service_tests._provider_catalog_live import declared_lane_model_value
 from .._acp_mcp import harness_allowed_tool_names, resolve_harness_mcp_servers
 from .._subprocess import kill_process_tree
 from ..acp_chat_model import AcpChatModel
+
+if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
 from ..factory import _CLAUDE_ACP_JS, ProviderFactory, _classify_acp_command
 
 _RAG = "vaultspec-rag"
@@ -100,9 +105,20 @@ def _project_scope_server_names(workspace: Path) -> list[str]:
     return sorted(servers) if isinstance(servers, dict) else []
 
 
-def _armed_model(workspace: Path) -> AcpChatModel:
+async def _armed_model(workspace: Path, rule: ExternalPrerequisiteRule) -> AcpChatModel:
+    """Arm the claude lane on the model the OPERATOR declared.
+
+    Both tests below drive a real turn, so this is a billable lane and the
+    entry has to be named rather than chosen - a capability tier used to stand
+    in here, and production stopped accepting one because tiers carry no
+    cross-provider meaning. Absent a declaration the caller SKIPS with the
+    runbook reason instead of spending on a model nobody picked.
+    """
+    served, reason = await declared_lane_model_value(Provider.CLAUDE.value, workspace)
+    if served is None:
+        rule.absent("provider-catalog-live-selection", reason)
     model = ProviderFactory().create(
-        Provider.CLAUDE, model=Model.LOW, workspace_root=workspace
+        Provider.CLAUDE, model=served, workspace_root=workspace
     )
     assert isinstance(model, AcpChatModel)
     armed = model.with_mcp_servers(
@@ -159,13 +175,14 @@ def _seed_workspace_canary(workspace: Path) -> dict[Path, str]:
 @pytest.mark.asyncio
 async def test_strict_session_bounds_the_surface_to_the_injected_set(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     _require_acp_entry()
     seeded = _seed_workspace_canary(tmp_path)
     ambient_names = _ambient_user_server_names()
 
     streamed = await _run_turn(
-        _armed_model(tmp_path),
+        await _armed_model(tmp_path, external_prerequisite),
         "Call WaitForMcpServers, then reply with exactly one line:\n"
         "TOOLS=<comma-separated names of every tool you can call whose name "
         "starts with mcp__, or NONE>",
@@ -200,7 +217,9 @@ async def test_strict_session_bounds_the_surface_to_the_injected_set(
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_injected_rag_tool_completes_real_work_under_strict() -> None:
+async def test_injected_rag_tool_completes_real_work_under_strict(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     _require_acp_entry()
     ambient_names = _ambient_user_server_names()
     project_names = _project_scope_server_names(_REPO_ROOT)
@@ -209,7 +228,7 @@ async def test_injected_rag_tool_completes_real_work_under_strict() -> None:
     assert project_names, "expected the repository to declare project-scope MCP"
 
     streamed = await _run_turn(
-        _armed_model(_REPO_ROOT),
+        await _armed_model(_REPO_ROOT, external_prerequisite),
         "First call WaitForMcpServers. Then call the tool "
         "mcp__vaultspec-rag__search_codebase with query='acp session setup'. "
         "Then reply with exactly two lines:\n"

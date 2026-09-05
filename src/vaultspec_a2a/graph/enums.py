@@ -229,6 +229,12 @@ class PermissionType(StrEnum):
 class Provider(StrEnum):
     """Supported LLM providers."""
 
+    # Antigravity is its own LANE, not a synonym for gemini: it ships a separate
+    # CLI (`agy`) with a separate login, and the models it serves span vendors -
+    # gemini, claude and gpt-oss all appear in one `agy models` listing. Folding
+    # it into the gemini member would make the lane that executes a turn
+    # unrecoverable from the record of which provider ran it.
+    ANTIGRAVITY = "antigravity"
     CLAUDE = "claude"
     CODEX = "codex"
     DETERMINISTIC = "deterministic"

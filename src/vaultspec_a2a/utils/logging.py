@@ -294,8 +294,7 @@ def _numeric_level(level: Any) -> int:
     if hasattr(level, "value"):
         level = level.value
     level_str = str(level).upper()
-    resolved = logging.getLevelName(level_str)
-    return resolved if isinstance(resolved, int) else logging.INFO
+    return logging.getLevelNamesMapping().get(level_str, logging.INFO)
 
 
 def _reset_root() -> logging.Logger:

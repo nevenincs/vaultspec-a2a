@@ -21,4 +21,22 @@ home. A library does not get to reconfigure its consumer's test runner.
 
 from __future__ import annotations
 
+import os
+
+# DECLARE the environment this suite runs in, BEFORE `pytest_plugins` below
+# imports the plugin and with it the settings singleton - a declaration made
+# after that import is read too late to count.
+#
+# The internal-IPC bearer rule disables auth only for a development environment
+# the operator CHOSE, because the setting defaults to development and reading a
+# defaulted value as consent left an unconfigured deployment serving the
+# internal surface unauthenticated. A test session is a development
+# environment, so it says so; setdefault keeps a caller's own choice intact.
+# Undeclared, every app-level test of an internal route gets the guard's 500
+# misconfiguration refusal instead of the behaviour under test. The guard itself
+# is proven directly, undeclared case included, in
+# src/vaultspec_a2a/utils/tests/test_ipc_auth.py - this declares a fact about
+# the session, it does not stand in for that coverage.
+os.environ.setdefault("VAULTSPEC_ENVIRONMENT", "development")
+
 pytest_plugins = ("vaultspec_a2a.testing.plugin",)

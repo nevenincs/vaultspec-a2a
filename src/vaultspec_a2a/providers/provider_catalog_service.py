@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 PROVIDER_CATALOG_CACHE_TTL = timedelta(minutes=5)
 _MAX_WORKSPACE_SCOPES = 16
 _DISPLAY_NAMES = {
+    Provider.ANTIGRAVITY: "Antigravity",
     Provider.CLAUDE: "Claude",
     Provider.CODEX: "Codex",
     Provider.GEMINI: "Gemini",

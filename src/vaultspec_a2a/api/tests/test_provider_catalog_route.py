@@ -136,6 +136,7 @@ async def test_authenticated_route_serves_all_registered_lanes_in_order(
     body = response.json()
     assert body["api_version"] == "v1"
     assert [record["provider_id"] for record in body["providers"]] == [
+        "antigravity",
         "claude",
         "codex",
         "gemini",

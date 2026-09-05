@@ -131,6 +131,10 @@ tooling = [
   # before scanning anything. `dev.health --gate` enforces the same ceiling.
   "radon>=6.0.1",
   "ruff>=0.15.2",
+  # Pinned like actionlint-py because it ships the binary. actionlint
+  # shellchecks workflow `run:` blocks, but not a script a step calls out
+  # to, so the shell gate is what keeps those covered.
+  "shellcheck-py==0.11.0.1",
   "tenacity>=9.0.0",
   "tomlkit>=0.15.0",
   "ty>=0.0.15",

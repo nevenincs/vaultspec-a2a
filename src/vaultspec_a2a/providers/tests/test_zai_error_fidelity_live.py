@@ -47,7 +47,8 @@ from ._installed_vocabulary import MissingInstalledVocabularyError, acp_error_ki
 if TYPE_CHECKING:
     from pathlib import Path
 
-_ZAI_TOKEN_PRESENT = bool((settings.zai_auth_token or "").strip())
+    from ...conftest import ExternalPrerequisiteRule
+
 
 # A syntactically plausible bearer the gateway cannot have issued. Rejected at
 # the gateway's authentication boundary before any model is engaged.
@@ -63,12 +64,9 @@ _PROBE_TIMEOUT_SECONDS = 480.0
 
 @pytest.mark.service
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    not _ZAI_TOKEN_PRESENT,
-    reason="no ZAI_AUTH_TOKEN configured; the Z.ai lane cannot be probed live",
-)
 async def test_zai_rejected_credential_carries_a_typed_error_kind(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """A real Z.ai rejection arrives as a typed ``errorKind``, not as prose alone.
 
@@ -77,6 +75,7 @@ async def test_zai_rejected_credential_carries_a_typed_error_kind(
     survives a non-Anthropic gateway, and prose-only rejection is exactly the
     failure mode the governing decision gates this lane's typing on.
     """
+    external_prerequisite("zai-credential")
     try:
         installed_kinds = acp_error_kinds()
     except MissingInstalledVocabularyError as exc:

@@ -327,6 +327,10 @@ _CODEX_ERROR_INFO_CONDITIONS: Mapping[str, ProviderCondition] = {
     # the budget member means and what separates it from the credits member.
     "sessionBudgetExceeded": ProviderCondition.BUDGET_EXHAUSTED,
     "serverOverloaded": ProviderCondition.PROVIDER_OVERLOADED,
+    # A rate refusal stated categorically. Until the app-server declared this
+    # variant a forwarded 429 was the only way to reach the throttled member on
+    # this lane; it no longer is, and the wire says rate outright.
+    "rateLimitExceeded": ProviderCondition.THROTTLED,
     "badRequest": ProviderCondition.INVALID_REQUEST,
     # The prompt exceeded the model's context. Retrying it unchanged repeats
     # the failure; the request has to get smaller.
@@ -335,6 +339,10 @@ _CODEX_ERROR_INFO_CONDITIONS: Mapping[str, ProviderCondition] = {
     # No member describes a policy decision, and the invalid member is the one
     # whose remedy - change the request - actually applies.
     "cyberPolicy": ProviderCondition.INVALID_REQUEST,
+    # The other policy refusal on this lane, and it takes the same member for
+    # the same reason: the provider understood the request and declined it on
+    # its own terms.
+    "misalignmentPolicyViolation": ProviderCondition.INVALID_REQUEST,
     # A server-side fault that does not claim overload, mapped to the floor for
     # the same reason as the ACP lane's generic server fault.
     "internalServerError": ProviderCondition.UNKNOWN,
@@ -371,9 +379,10 @@ _CODEX_HTTP_STATUS_CONDITIONS: Mapping[int, ProviderCondition] = {
     404: ProviderCondition.INVALID_REQUEST,
     413: ProviderCondition.INVALID_REQUEST,
     422: ProviderCondition.INVALID_REQUEST,
-    # The one status that states a rate refusal outright. This is how the
-    # throttled member is reached on a lane whose categorical vocabulary has no
-    # rate member of its own.
+    # A rate refusal stated by status rather than by discriminator. The lane now
+    # also names one categorically ("rateLimitExceeded" above); both reach the
+    # throttled member, and the status is preferred where a variant carries one
+    # because a status means the provider answered.
     429: ProviderCondition.THROTTLED,
 }
 # Server-side statuses are deliberately absent above. A 5xx says the provider

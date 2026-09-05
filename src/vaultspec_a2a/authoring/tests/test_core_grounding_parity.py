@@ -15,8 +15,9 @@ if core ever exports the vocabulary, this should become an import and this modul
 should shrink to nothing.
 
 The plan rule is deliberately NOT asserted equal. Core requires the ADR and only
-warns about research; the submitter requires both, by owner ruling, because a
-warning raised after a plan exists is a refusal worth making before it lands.
+warns about grounding (research, reference, or audit); the submitter requires
+both, by owner ruling, because a warning raised after a plan exists is a refusal
+worth making before it lands.
 That divergence is a decision, so the test below pins the part that must match
 and leaves the part that must not.
 """
@@ -99,16 +100,21 @@ def test_core_still_requires_an_adr_for_a_plan() -> None:
         "reading of core's rule and needs re-deciding, not re-asserting"
     )
 
-    research_severity = re.search(
-        r"Plan has no references to research documents.*?Severity\.(\w+)",
+    # Core names this half "grounding" and admits research, reference OR audit -
+    # the same three the ADR check accepts. It read "references to research
+    # documents" when this test was written; the rule did not change, the wording
+    # and the breadth did, so the pattern follows core rather than pinning a
+    # sentence core no longer writes.
+    grounding_severity = re.search(
+        r"Plan has no grounding references.*?Severity\.(\w+)",
         plan_check,
         re.DOTALL,
     )
-    assert research_severity is not None, (
-        "core's plan check no longer mentions research"
+    assert grounding_severity is not None, (
+        "core's plan check no longer raises a diagnostic about missing grounding"
     )
-    assert research_severity.group(1) == "WARNING", (
-        "core changed the research diagnostic's severity; the submitter's stricter "
+    assert grounding_severity.group(1) == "WARNING", (
+        "core changed the grounding diagnostic's severity; the submitter's stricter "
         "stance was chosen against a WARNING, so revisit it against "
-        f"{research_severity.group(1)}"
+        f"{grounding_severity.group(1)}"
     )

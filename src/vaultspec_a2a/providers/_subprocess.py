@@ -38,8 +38,10 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 _SECRET_PATTERN = re.compile(
-    r"(?i)((?:[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*)\s*[=:]\s*"
-    r"|bearer\s+)(\S+)"
+    r"(?i)((?:[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*)"
+    r"[\"']?\s*[=:]\s*"
+    r"|bearer\s+)"
+    r"(\"[^\"]*\"|'[^']*'|\S+)"
 )
 
 
@@ -53,12 +55,28 @@ def redact_secrets(text: str) -> str:
     an assignment to something called a token, secret, key, password or
     credential, or a bearer prefix - does.
 
+    JSON is covered as well as ``NAME=value``. A provider that dumps its config
+    as JSON writes ``"apiKey": "sk-..."``, where a quote sits between the name
+    and its separator - and the earlier pattern, which expected only whitespace
+    there, passed the credential through untouched. That is the shape the Kimi
+    provider listing actually emits, so it was a live hole rather than a
+    hypothetical one. A quoted value keeps its quotes so the surrounding
+    structure still reads as JSON after masking.
+
     Accepts a single line or a whole multi-line block. The separator between an
     introducing name and its value spans newlines deliberately, so a value the
-    child wrote on the line after its name is masked too; the value itself is
-    non-whitespace and therefore never runs past its own line.
+    child wrote on the line after its name is masked too; an unquoted value is
+    non-whitespace and therefore never runs past its own line, and a quoted one
+    is bounded by its closing quote.
     """
-    return _SECRET_PATTERN.sub(lambda m: f"{m.group(1)}<redacted>", text)
+
+    def _mask(match: re.Match[str]) -> str:
+        value = match.group(2)
+        quoted = len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]
+        replacement = f"{value[0]}<redacted>{value[0]}" if quoted else "<redacted>"
+        return f"{match.group(1)}{replacement}"
+
+    return _SECRET_PATTERN.sub(_mask, text)
 
 
 # Attribute the run-owned provider's OS containment is stashed on so the shared

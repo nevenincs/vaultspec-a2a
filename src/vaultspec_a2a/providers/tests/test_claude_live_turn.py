@@ -37,7 +37,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ...control.config import settings
-from ...graph.enums import Model, Provider
+from ...graph.enums import Provider
+from ...service_tests._provider_catalog_live import declared_lane_model_value
 from .._subprocess import kill_process_tree
 from ..acp_chat_model import AcpChatModel
 from ..factory import _CLAUDE_ACP_JS, ProviderFactory, _classify_acp_command
@@ -45,10 +46,15 @@ from ..factory import _CLAUDE_ACP_JS, ProviderFactory, _classify_acp_command
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ...conftest import ExternalPrerequisiteRule
+
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_claude_live_turn_completes_and_returns_content(tmp_path: Path) -> None:
+async def test_claude_live_turn_completes_and_returns_content(
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """A real Claude turn streams assistant text and returns a real AIMessage.
 
     Proves the provider tier end to end: the production factory resolves the ACP
@@ -64,8 +70,16 @@ async def test_claude_live_turn_completes_and_returns_content(tmp_path: Path) ->
             "(@agentclientprotocol/claude-agent-acp) per the ACP runbook"
         )
 
+    # The lane's turn PROOF runs on the model the operator declared. A
+    # capability tier stood here until production stopped accepting one for an
+    # external lane, and picking a served entry instead would make the proof
+    # spend on a model nobody chose - the failure `testing/catalog_selection`
+    # exists to make unrepresentable.
+    served, reason = await declared_lane_model_value(Provider.CLAUDE.value, tmp_path)
+    if served is None:
+        external_prerequisite.absent("provider-catalog-live-selection", reason)
     model = ProviderFactory().create(
-        Provider.CLAUDE, model=Model.LOW, workspace_root=tmp_path
+        Provider.CLAUDE, model=served, workspace_root=tmp_path
     )
     assert isinstance(model, AcpChatModel)
     # The production chain injects NO credential of its own: the lane is

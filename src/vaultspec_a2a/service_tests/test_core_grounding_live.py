@@ -16,6 +16,8 @@ rather than recall.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from langchain_core.messages import HumanMessage
 
@@ -28,6 +30,10 @@ from ..providers._acp_mcp import (
 )
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import PROVEN_TURN_LANES
+from ._provider_catalog_live import declared_lane_model_value
+
+if TYPE_CHECKING:
+    from ..conftest import ExternalPrerequisiteRule
 
 pytestmark = [pytest.mark.service, pytest.mark.asyncio]
 
@@ -39,23 +45,24 @@ _EXPECTED_STEM = "2026-08-03-current-project-binding-adr"
 
 async def test_an_agent_completes_a_turn_through_the_core_read_surface(
     tmp_path_factory: pytest.TempPathFactory,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """A real turn calls a declared core tool and reports what it returned."""
     if Provider.CLAUDE.value not in {str(lane) for lane in PROVEN_TURN_LANES}:
         pytest.skip("the claude lane is not declared turn-proven")
-    token = settings.claude_code_oauth_token
-    if not (token and token.strip()):
-        pytest.skip(
-            "no claude credential on this host; a turn cannot be executed and a "
-            "pass without one would prove nothing"
-        )
+    external_prerequisite("claude-credential")
 
     # The run's project is this checkout: it is a real vaultspec workspace, which
     # is what the core server requires, and its records are what the answer must
     # come from. The server is pinned to it through the declared root-pin axis.
     project = settings.project_root
 
-    model = ProviderFactory().create(Provider.CLAUDE, workspace_root=project)
+    served, reason = await declared_lane_model_value(Provider.CLAUDE.value, project)
+    if served is None:
+        external_prerequisite.absent("provider-catalog-live-selection", reason)
+    model = ProviderFactory().create(
+        Provider.CLAUDE, model=served, workspace_root=project
+    )
     grounded = compose_harness_mcp_servers(
         model,
         [_CORE],

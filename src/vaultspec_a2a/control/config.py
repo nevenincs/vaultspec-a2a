@@ -362,6 +362,21 @@ class InfraConfig(BaseSettings):
         default=None,
         validation_alias="GEMINI_CLI_HOME",
     )
+    # Antigravity ships `agy` OUTSIDE PATH - its installer drops the binary in
+    # a per-user application directory and exposes it through a wrapper - so a
+    # bare name lookup finds nothing on a machine where the CLI works. This
+    # override names the executable directly; when it is unset the lane falls
+    # back to a PATH lookup and then to the installer's default location.
+    antigravity_cli_path: str | None = Field(
+        default=None,
+        validation_alias="ANTIGRAVITY_CLI_PATH",
+    )
+    # The CLI keeps its login beside its own state, not under the Antigravity
+    # application directory; the default mirrors where the installer writes it.
+    antigravity_cli_home: str | None = Field(
+        default=None,
+        validation_alias="ANTIGRAVITY_CLI_HOME",
+    )
     openai_api_key: str | None = Field(
         default=None,
         validation_alias="OPENAI_API_KEY",

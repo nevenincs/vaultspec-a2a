@@ -14,10 +14,15 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Final
+from pathlib import Path
+from typing import TYPE_CHECKING, Final
 
 from ..api.schemas.gateway import ProviderCatalogSelection
 from ..api.schemas.provider_catalog import ProviderCatalogResponse
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
 from ..providers.provider_catalog import (
     AdmissionState,
     AuthenticationState,
@@ -30,6 +35,7 @@ __all__ = [
     "LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON",
     "LIVE_PROVIDER_PREREQUISITES",
     "LiveProviderCatalogSelector",
+    "declared_lane_model_value",
     "live_provider_catalog_selector_is_configured",
     "live_provider_override_selector_is_configured",
     "override_selection_from_served_catalog",
@@ -224,3 +230,57 @@ def _validated_selection(
         entry_id=entry.entry_id,
         controls={selector.control_id: selector.option_id},
     )
+
+
+async def declared_lane_model_value(
+    provider_id: str, workspace_root: Path
+) -> tuple[str | None, str]:
+    """Resolve the operator-declared entry to the model value that lane serves.
+
+    Returns ``(value, reason)``. ``value`` is ``None`` when the declaration
+    cannot be honoured and ``reason`` says exactly why, so the CALLER decides
+    whether that is a skip or a failure - which is the prerequisite rule's job,
+    not this module's.
+
+    This exists so a billable direct-factory test can name a model without
+    choosing one. Taking "the first served entry" is the fallback this module is
+    built to make unrepresentable: on any developer machine holding a live
+    provider session it resolves to a real paid lane that nobody selected. The
+    operator names the entry; live discovery supplies its current value, so a
+    declaration that has gone stale fails legibly instead of spending on a model
+    the declaration no longer identifies.
+    """
+    from ..providers.factory import ProviderFactory
+
+    declared = (os.environ.get("VAULTSPEC_LIVE_PROVIDER_ID") or "").strip()
+    if declared != provider_id:
+        return None, (
+            f"the declared lane is {declared!r}, not {provider_id!r}"
+            if declared
+            else "no lane is declared"
+        )
+    entry_id = (os.environ.get("VAULTSPEC_LIVE_ENTRY_ID") or "").strip()
+    if not entry_id:
+        return None, "the declaration names no entry id"
+
+    registration = next(
+        (
+            item
+            for item in ProviderFactory().catalog_registrations(workspace_root)
+            if item.key.provider_id == provider_id
+        ),
+        None,
+    )
+    if registration is None:
+        return None, f"no catalog lane is registered for {provider_id!r}"
+
+    discovery = await registration.discover()
+    served = {
+        model.entry_id: model.provider_value for model in discovery.catalog.models
+    }
+    if entry_id not in served:
+        return None, (
+            f"the declared entry {entry_id!r} is no longer served; {provider_id} "
+            f"now advertises {sorted(served.values())}"
+        )
+    return served[entry_id], ""

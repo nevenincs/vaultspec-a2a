@@ -63,6 +63,7 @@ what is missing; when they are present every assertion is fail-loud.
 from __future__ import annotations
 
 import asyncio
+import os
 import tomllib
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -75,7 +76,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ..graph.compiler import _make_research_producer
-from ..graph.enums import MODEL_MAP, Model, Provider
+from ..graph.enums import Provider
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND, create_researcher_node
 from ..providers._acp_mcp import codex_mcp_server_specs
 from ..providers._codex_config_home import (
@@ -318,7 +319,7 @@ def test_observation_reader_rejects_a_missing_or_falsy_completed_items() -> None
 
 
 async def _observe_turn(
-    prompt: str, mode: CodexWebSearchMode, cwd: Path
+    prompt: str, mode: CodexWebSearchMode, cwd: Path, model: str
 ) -> _TurnObservation:
     """Drive one real Codex turn under *mode* and return everything it emitted.
 
@@ -359,12 +360,13 @@ async def _observe_turn(
             timeout=_RPC_TIMEOUT_SECONDS,
         )
         client.notify("initialized", {})
+        model = await _confirm_codex_serves(client, model)
         thread = await asyncio.wait_for(
             client.request(
                 "thread/start",
                 {
                     "cwd": str(cwd),
-                    "model": MODEL_MAP[Provider.CODEX][Model.LOW],
+                    "model": model,
                     "approvalPolicy": approval_policy,
                     "sandbox": sandbox,
                     "ephemeral": True,
@@ -382,7 +384,7 @@ async def _observe_turn(
                 {
                     "threadId": thread_id,
                     "input": [{"type": "text", "text": prompt, "text_elements": []}],
-                    "model": MODEL_MAP[Provider.CODEX][Model.LOW],
+                    "model": model,
                     "effort": None,
                     "outputSchema": None,
                 },
@@ -399,6 +401,74 @@ async def _observe_turn(
         if client is not None:
             await client.aclose()
         cleanup_codex_config_home(home)
+
+
+async def _resolve_served_codex_model(
+    workspace_root: Path, rule: ExternalPrerequisiteRule
+) -> str:
+    """The model value the OPERATOR declared, resolved against the live catalog.
+
+    Not "the first one Codex serves". This lane is external and every turn below
+    is billable, and ``testing/catalog_selection`` states the rule that covers
+    exactly this: choosing an entry on the caller's behalf is how a tool quietly
+    decides what a provider charges for, so an external lane may never be reached
+    without the entry its operator named. The declaration supplies the entry id;
+    the catalog supplies the value, so a stale declaration fails legibly here
+    instead of spending on a model nobody chose.
+
+    Print a current block with ``just dev test lanes --exports codex=<model>``.
+    """
+    rule("provider-catalog-live-selection")
+    declared_provider = (os.environ.get("VAULTSPEC_LIVE_PROVIDER_ID") or "").strip()
+    if declared_provider != Provider.CODEX.value:
+        rule.absent(
+            "provider-catalog-live-selection",
+            f"the declared lane is {declared_provider!r}, not codex",
+        )
+    entry_id = (os.environ.get("VAULTSPEC_LIVE_ENTRY_ID") or "").strip()
+    registration = next(
+        item
+        for item in ProviderFactory().catalog_registrations(workspace_root)
+        if item.key.provider_id == Provider.CODEX.value
+    )
+    discovery = await registration.discover()
+    served = {
+        model.entry_id: model.provider_value for model in discovery.catalog.models
+    }
+    if entry_id not in served:
+        rule.absent(
+            "provider-catalog-live-selection",
+            f"the declared entry {entry_id!r} is no longer served; codex now "
+            f"advertises {sorted(served.values())}",
+        )
+    return served[entry_id]
+
+
+async def _confirm_codex_serves(client: _CodexAppServerClient, wanted: str) -> str:
+    """Confirm THIS app-server still serves the declared model, over its protocol.
+
+    Never a constant, and never a pick: Codex retires and renames models between
+    releases, so the declared value is checked against what the session actually
+    advertises and a stale declaration fails naming both sides.
+    """
+    page = await asyncio.wait_for(
+        client.request(
+            "model/list", {"cursor": None, "limit": 20, "includeHidden": False}
+        ),
+        timeout=_RPC_TIMEOUT_SECONDS,
+    )
+    served = page.get("data")
+    assert isinstance(served, list) and served, page
+    advertised = {
+        value
+        for entry in served
+        if isinstance(entry, dict) and isinstance(value := entry.get("model"), str)
+    }
+    assert wanted in advertised, (
+        f"the declared model {wanted!r} is not served by this app-server; "
+        f"it advertises {sorted(advertised)}"
+    )
+    return wanted
 
 
 def _require_codex(rule: ExternalPrerequisiteRule) -> None:
@@ -425,7 +495,9 @@ def published_version(external_prerequisite: ExternalPrerequisiteRule) -> str:
 
 @pytest.fixture(scope="module")
 def live_turn(
-    published_version: str, tmp_path_factory: pytest.TempPathFactory
+    published_version: str,
+    tmp_path_factory: pytest.TempPathFactory,
+    declared_codex_model: str,
 ) -> _TurnObservation:
     """A real Codex turn under the served (live) posture, and what it retrieved.
 
@@ -438,7 +510,9 @@ def live_turn(
     observation: _TurnObservation | None = None
     for attempt in range(_LIVE_ATTEMPTS):
         cwd = tmp_path_factory.mktemp(f"codex-live-web-{attempt}")
-        observation = asyncio.run(_observe_turn(_PROMPT, CodexWebSearchMode.LIVE, cwd))
+        observation = asyncio.run(
+            _observe_turn(_PROMPT, CodexWebSearchMode.LIVE, cwd, declared_codex_model)
+        )
         with suppress(httpx.HTTPError, ValueError, KeyError):
             current.add(_published_version())
         observation.current_versions = set(current)
@@ -452,12 +526,26 @@ def live_turn(
 
 
 @pytest.fixture(scope="module")
+def declared_codex_model(
+    external_prerequisite: ExternalPrerequisiteRule,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> str:
+    """The operator-declared Codex model, confirmed against the live catalog."""
+    root = tmp_path_factory.mktemp("codex-declared-model")
+    return asyncio.run(_resolve_served_codex_model(root, external_prerequisite))
+
+
+@pytest.fixture(scope="module")
 def disabled_turn(
-    published_version: str, tmp_path_factory: pytest.TempPathFactory
+    published_version: str,
+    tmp_path_factory: pytest.TempPathFactory,
+    declared_codex_model: str,
 ) -> _TurnObservation:
     """The control: the same prompt with the posture set to disabled."""
     cwd = tmp_path_factory.mktemp("codex-disabled-web")
-    return asyncio.run(_observe_turn(_PROMPT, CodexWebSearchMode.DISABLED, cwd))
+    return asyncio.run(
+        _observe_turn(_PROMPT, CodexWebSearchMode.DISABLED, cwd, declared_codex_model)
+    )
 
 
 @pytest.mark.service
@@ -576,8 +664,9 @@ def test_proven_lane_resolves_the_served_live_posture(
         is SERVED_WEB_SEARCH_MODE
     )
 
+    served = asyncio.run(_resolve_served_codex_model(tmp_path, external_prerequisite))
     model = ProviderFactory().create(
-        Provider.CODEX, model=Model.LOW, workspace_root=tmp_path
+        Provider.CODEX, model=served, workspace_root=tmp_path
     )
     assert isinstance(model, CodexChatModel)
     composed = model.with_harness_mcp_servers(list(_HARNESS_SERVERS))
@@ -611,8 +700,9 @@ async def test_production_research_chain_lands_a_typed_web_locator(
     search disabled and reaches nothing to cite.
     """
     _require_codex(external_prerequisite)
+    served = await _resolve_served_codex_model(tmp_path, external_prerequisite)
     model = ProviderFactory().create(
-        Provider.CODEX, model=Model.LOW, workspace_root=tmp_path
+        Provider.CODEX, model=served, workspace_root=tmp_path
     )
     producer = _make_research_producer(
         model,

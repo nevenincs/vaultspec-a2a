@@ -27,6 +27,7 @@ from langchain_core.messages import (
 )
 
 from ...graph.enums import Provider
+from ...service_tests._provider_catalog_live import declared_lane_model_value
 from .._codex_permission import CodexPermissionRung
 from .._subprocess import spawn_acp_process
 from ..codex_chat_model import (
@@ -46,6 +47,7 @@ from ..factory import (
 from ..model_profiles import probe_provider_readiness
 
 if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
     from .._acp_types import PermissionCallback
     from .._json_contract import JsonObject
 
@@ -577,17 +579,30 @@ def test_codex_sync_generate_unsupported() -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_codex_live_turn_returns_output() -> None:
-    """A real LOW-tier factory model returns one meaningful Codex response.
+async def test_codex_live_turn_returns_output(
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """A real factory model returns one meaningful Codex response.
 
-    Requires a logged-in Codex session (``codex login status``). Uses a trivial
-    prompt to keep spend negligible.
+    Three things this turn needs, and each is reported rather than assumed. The
+    CLI and the login go through the prerequisite rule, so a missing one skips
+    with its runbook line instead of failing as "unavailable". The model is the
+    operator-declared entry - a placeholder string stood here and named nothing
+    the lane serves. And the workspace root is passed, because a Codex turn is
+    sited in the run's project and refuses to derive one from the serving
+    process.
     """
-    if not _codex_present():
-        pytest.fail("codex CLI unavailable; install Codex before service tests")
-    model = ProviderFactory().create(Provider.CODEX, model="catalog-selected-model")
+    external_prerequisite("codex-cli")
+    external_prerequisite("codex-credential")
+    served, reason = await declared_lane_model_value(Provider.CODEX.value, tmp_path)
+    if served is None:
+        external_prerequisite.absent("provider-catalog-live-selection", reason)
+    model = ProviderFactory().create(
+        Provider.CODEX, model=served, workspace_root=tmp_path
+    )
     assert isinstance(model, CodexChatModel)
-    assert model.model_name == "catalog-selected-model"
+    assert model.model_name == served
     messages = [
         SystemMessage(content="You are terse."),
         HumanMessage(content="Reply with exactly this word and no punctuation: pong"),

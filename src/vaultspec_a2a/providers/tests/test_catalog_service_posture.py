@@ -23,7 +23,8 @@ from pathlib import Path
 
 import pytest
 
-from ..provider_catalog_service import ProviderCatalogService
+from ...graph.enums import Provider
+from ..provider_catalog_service import _DISPLAY_NAMES, ProviderCatalogService
 
 _IN_PROCESS = {"deterministic", "mock"}
 _ARMING_ENV = "VAULTSPEC_SERVE_IN_PROCESS_LANES"
@@ -73,4 +74,24 @@ async def test_an_explicit_refusal_hides_them_and_the_default_defers() -> None:
     assert not {record.provider_id for record in deferred} & _IN_PROCESS, (
         "with the environment unarmed, the deferring default must serve no "
         "in-process lane - it consults the deployment, it does not arm"
+    )
+
+
+def test_every_provider_member_has_a_display_name() -> None:
+    """A new Provider member must not reach a route without a readable name.
+
+    The service indexes ``_DISPLAY_NAMES`` directly, so a member added without an
+    entry raises ``KeyError`` from inside catalog assembly - which surfaces to a
+    client as a 500 from the provider-catalog endpoint, several layers from the
+    one-line omission that caused it. Adding the antigravity lane did exactly
+    that. Asserting totality here turns that into a named failure at the point of
+    the omission, which is the difference between a five-second fix and a
+    traceback hunt.
+    """
+    missing = sorted(
+        member.value for member in Provider if member not in _DISPLAY_NAMES
+    )
+    assert not missing, (
+        f"Provider members without a display name: {missing}. Add each to "
+        "_DISPLAY_NAMES in providers/provider_catalog_service.py"
     )

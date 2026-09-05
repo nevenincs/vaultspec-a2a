@@ -330,6 +330,7 @@ def test_the_acp_transcript_declares_an_enforcer_it_does_not_own() -> None:
 # it records WHICH declaration answers for each family, so a new spawning lane
 # cannot be added without either a declaration or a deliberate edit here.
 _CLI_LANE_DECLARATIONS: dict[str, str] = {
+    "antigravity": "antigravity-cli-state",
     "claude": "acp-cli-session-transcript",
     "zai": "acp-cli-session-transcript",
     "codex": "ephemeral-provider-home-root",

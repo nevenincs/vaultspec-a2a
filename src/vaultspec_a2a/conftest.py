@@ -120,6 +120,168 @@ def _env_set(name: str) -> Callable[[], bool]:
     return lambda: bool((os.environ.get(name) or "").strip())
 
 
+# --- Provider credentials ---------------------------------------------------
+#
+# A provider lane authenticates two ways, and a probe that knows only one of
+# them lies. An injected token is the headless path; a CLI logged in against a
+# subscription persists its own credential under its home, and that is the
+# ORDINARY path on a developer machine. Probing only the token reported "no
+# credential" on hosts where the lane works perfectly well, so the live suites
+# skipped and a green run said nothing about lanes that were fully usable.
+#
+# Each probe below therefore mirrors what production itself consults - the
+# settings field, which already resolves the ecosystem aliases, and then the
+# CLI's own store under the home variable production declares for that lane.
+# Nothing here reads a credential's VALUE: presence is the whole question, and
+# a probe that opened one would put a secret in a test's reach for no gain.
+
+
+def _credential_store(home_override: str | None, default_home: str, leaf: str) -> bool:
+    """Whether a CLI persisted its own login under the home production names.
+
+    A FILE, deliberately: several of these homes contain a directory of the same
+    name as the credential beside it, and a bare ``exists()`` reports the folder
+    as a login. Presence of the file is the weakest honest claim available here
+    - it does not prove the credential is unexpired, which is why the lanes that
+    can answer that question authoritatively ask their CLI first.
+    """
+    configured = (home_override or "").strip()
+    root = Path(configured) if configured else Path.home() / default_home
+    return (root / leaf).is_file()
+
+
+def _cli_reports_logged_in(
+    command: list[str], marker: str, *, denial: str = "not logged in"
+) -> bool | None:
+    """Ask a CLI whether it is authenticated; ``None`` when it cannot answer.
+
+    ``None`` separates "the CLI says no" from "the CLI could not be asked", so a
+    missing binary or a timeout falls through to the file evidence instead of
+    being reported as a logged-out lane.
+
+    *denial* is checked FIRST because the affirmative marker is a substring of
+    the refusal for at least one of these CLIs: "not logged in" contains
+    "logged in", so marker-only matching would read a logged-out lane as ready.
+    """
+    executable = shutil.which(command[0])
+    if executable is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [executable, *command[1:]],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    # BOTH streams: these CLIs disagree about where status belongs - Claude
+    # prints its JSON to stdout, Codex reports "Logged in using ChatGPT" on
+    # stderr and still exits zero. Reading stdout alone called an authenticated
+    # Codex logged out.
+    reported = f"{completed.stdout or ''}\n{completed.stderr or ''}".lower()
+    if denial in reported:
+        return False
+    return marker in reported
+
+
+def _claude_credentialed() -> bool:
+    """The injected OAuth token, or the Claude CLI's own subscription login."""
+    from .control.config import settings
+
+    if (settings.claude_code_oauth_token or "").strip():
+        return True
+    # `claude auth status` emits JSON carrying "loggedIn", which answers the
+    # expiry question a file on disk cannot. Only its silence falls back.
+    reported = _cli_reports_logged_in(["claude", "auth", "status"], '"loggedin": true')
+    if reported is not None:
+        return reported
+    # CLAUDE_CONFIG_DIR is the CLI's own knob (see providers/acp_chat_model.py);
+    # it is not a settings field, so it is read where the CLI reads it.
+    return _credential_store(
+        os.environ.get("CLAUDE_CONFIG_DIR"), ".claude", ".credentials.json"
+    )
+
+
+def _antigravity_installed() -> bool:
+    """Antigravity's CLI is not on PATH; ask the lane's own resolver."""
+    from .control.config import settings
+    from .providers.antigravity_cli import resolve_antigravity_command
+
+    return (
+        resolve_antigravity_command(
+            cli_path=settings.antigravity_cli_path, home=settings.antigravity_cli_home
+        )
+        is not None
+    )
+
+
+def _antigravity_credentialed() -> bool:
+    """The CLI's persisted OAuth login, at the path the lane resolves."""
+    from .control.config import settings
+    from .providers.antigravity_cli import antigravity_credential_path
+
+    return antigravity_credential_path(home=settings.antigravity_cli_home).is_file()
+
+
+def _codex_credentialed() -> bool:
+    """Codex authenticates from a persisted session file; no API key exists."""
+    from .control.config import settings
+
+    reported = _cli_reports_logged_in(["codex", "login", "status"], "logged in")
+    if reported is not None:
+        return reported
+    return _credential_store(settings.codex_home, ".codex", "auth.json")
+
+
+def _kimi_credentialed() -> bool:
+    """The current-or-legacy API key, or Kimi Code's persisted credential."""
+    from .control.config import settings
+
+    if settings.kimi_api_key is not None:
+        return True
+    # The login lands in a `credentials/` DIRECTORY, so the file inside it is
+    # what carries the evidence; the folder exists from install alone.
+    return _credential_store(
+        settings.kimi_code_home, ".kimi-code", "credentials/kimi-code.json"
+    )
+
+
+def _gemini_credentialed() -> bool:
+    """An API key under either accepted name, or the CLI's OAuth credential.
+
+    BOTH credential filenames are accepted. The CLI renamed the file it writes -
+    a fresh login now lands in ``gemini-credentials.json`` where it used to be
+    ``oauth_creds.json``, and it deletes the old one - so a probe that knew only
+    the historical name reported "no credential" immediately after a successful
+    sign-in. Checking the current name first and keeping the legacy one is what
+    lets a host that has not re-authenticated since the rename still resolve.
+    """
+    from .control.config import settings
+
+    for key in (settings.gemini_api_key, settings.google_api_key):
+        if (key or "").strip():
+            return True
+    return any(
+        _credential_store(settings.gemini_cli_home, ".gemini", leaf)
+        for leaf in ("gemini-credentials.json", "oauth_creds.json")
+    )
+
+
+def _zai_credentialed() -> bool:
+    """Read through settings, which accepts ZAI_AUTH_TOKEN or ZAI_API_KEY.
+
+    Probing the environment for ZAI_AUTH_TOKEN alone missed a host that had
+    supplied the documented ZAI_API_KEY alias production accepts.
+    """
+    from .control.config import settings
+
+    return bool((settings.zai_auth_token or "").strip())
+
+
 def _docker_compose_present() -> bool:
     """Docker plus its compose plugin are resolvable and answer their version.
 
@@ -220,9 +382,20 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         skip_reason_tokens=("claude cli", "claude acp cli"),
     ),
     ExternalPrerequisite(
+        "gemini-cli",
+        what="the Gemini CLI on PATH",
+        supply="npm install -g @google/gemini-cli",
+        probe=_on_path("gemini", "gemini.cmd", "gemini.exe"),
+        skip_reason_tokens=("gemini cli",),
+    ),
+    ExternalPrerequisite(
         "kimi-cli",
         what="the Kimi CLI on PATH",
-        supply="uv tool install kimi-cli",
+        supply=(
+            "install Kimi Code per https://moonshotai.github.io/kimi-code/ "
+            "(the CLI was renamed from kimi-cli; `kimi migrate` imports a "
+            "legacy installation)"
+        ),
         probe=_on_path("kimi", "kimi.cmd", "kimi.exe"),
         skip_reason_tokens=("kimi cli",),
     ),
@@ -237,8 +410,66 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         "zai-credential",
         what="a configured Z.ai authentication token",
         supply="export ZAI_AUTH_TOKEN with a valid third-party Z.ai credential",
-        probe=_env_set("ZAI_AUTH_TOKEN"),
+        probe=_zai_credentialed,
         skip_reason_tokens=("zai_auth_token",),
+    ),
+    # A lane's CLI being on PATH says it can be launched, not that it can
+    # authenticate, and the two are separately absent: a logged-out CLI is
+    # present and useless. They are separate prerequisites so a skip names
+    # which half is missing instead of blaming the binary for a missing login.
+    ExternalPrerequisite(
+        "claude-credential",
+        what="a Claude credential (an injected token or a logged-in CLI)",
+        supply=(
+            "run `claude login` for a subscription, or export "
+            "CLAUDE_CODE_OAUTH_TOKEN for a headless host"
+        ),
+        probe=_claude_credentialed,
+        skip_reason_tokens=("claude credential",),
+    ),
+    ExternalPrerequisite(
+        "codex-credential",
+        what="a Codex login persisted in the Codex home",
+        supply="run `codex login` (or point CODEX_HOME at a home that has one)",
+        probe=_codex_credentialed,
+        skip_reason_tokens=("codex credential",),
+    ),
+    ExternalPrerequisite(
+        "kimi-credential",
+        what="a Kimi credential (an API key or a logged-in CLI)",
+        supply=(
+            "run `kimi login`, or export KIMI_MODEL_API_KEY as part of a "
+            "complete name/key/base tuple"
+        ),
+        probe=_kimi_credentialed,
+        skip_reason_tokens=("kimi credential",),
+    ),
+    ExternalPrerequisite(
+        "antigravity-cli",
+        what="the Antigravity CLI (`agy`)",
+        supply=(
+            "install Antigravity, or export ANTIGRAVITY_CLI_PATH pointing at the "
+            "`agy` executable if the installer placed it outside PATH"
+        ),
+        probe=_antigravity_installed,
+        skip_reason_tokens=("antigravity cli",),
+    ),
+    ExternalPrerequisite(
+        "antigravity-credential",
+        what="an Antigravity login",
+        supply="run the Antigravity CLI once and complete its sign-in",
+        probe=_antigravity_credentialed,
+        skip_reason_tokens=("antigravity credential",),
+    ),
+    ExternalPrerequisite(
+        "gemini-credential",
+        what="a Gemini credential (an API key or a logged-in CLI)",
+        supply=(
+            "run `gemini` once to complete its OAuth login, or export "
+            "GEMINI_API_KEY (GOOGLE_API_KEY is also accepted)"
+        ),
+        probe=_gemini_credentialed,
+        skip_reason_tokens=("gemini credential",),
     ),
 )
 

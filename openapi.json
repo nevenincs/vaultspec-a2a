@@ -2579,6 +2579,7 @@
       "Provider": {
         "type": "string",
         "enum": [
+          "antigravity",
           "claude",
           "codex",
           "deterministic",

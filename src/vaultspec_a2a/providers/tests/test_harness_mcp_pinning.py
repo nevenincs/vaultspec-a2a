@@ -447,6 +447,11 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
         assert isinstance(name, str) and isinstance(value, str)
         env[name] = value
     assert env[RAG_PIN_VARIABLE] == project
+    # The server renders its traceback with rich, which wraps to a default
+    # width off a pipe and would break the pinned path across lines before the
+    # assertion below could match it. Widening the child's notion of the
+    # terminal keeps the one string this test reads intact.
+    env["COLUMNS"] = "300"
 
     command = spec["command"]
     args = spec["args"]
@@ -474,6 +479,8 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
                 result = await session.call_tool(
                     "search_vault", {"query": "project binding"}
                 )
+        captured_stderr.seek(0)
+        server_stderr = captured_stderr.read()
     reported = "\n".join(
         text
         for block in result.content
@@ -482,8 +489,15 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
     assert result.is_error, (
         f"the pinned server resolved a project it should not have: {reported}"
     )
-    assert project in reported, reported
-    assert str(launch_root) not in reported, reported
+    # The refusal has to name the PIN, because an error alone proves nothing:
+    # a crashed launch, a renamed tool, and a correctly-pinned server all
+    # report is_error. Both channels are read because the server library wraps
+    # an unexpected tool exception in a generic "Error executing tool" and
+    # keeps the cause on ITS stderr, so the naming moved off the client
+    # channel without the server ever changing what it decided.
+    diagnosis = "\n".join((reported, server_stderr))
+    assert project in diagnosis, diagnosis
+    assert str(launch_root) not in diagnosis, diagnosis
 
 
 def _strict_config(specs: list[JsonObject]) -> AcpModelConfig:

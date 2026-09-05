@@ -14,7 +14,7 @@ Install these prerequisites:
 * `Just 1.31 or later <https://just.systems/man/en/packages.html>`_
 * `uv <https://docs.astral.sh/uv/getting-started/installation/>`_
 * Python 3.13 or later; the project selects Python 3.13
-* `Node.js <https://nodejs.org/>`_ 24 with npm; ``.node-version`` selects the hosted version
+* `Node.js <https://nodejs.org/>`_ 26 with npm; ``.node-version`` selects the hosted version
 * Docker, only for container workflows
 
 Clone the repository and prepare its selected Python series:
@@ -31,7 +31,7 @@ Diagnose the host tools before synchronizing dependencies:
 
    just doctor
 
-``just doctor`` enforces Just 1.31 or later and Node.js 24, requires ``uv`` and
+``just doctor`` enforces Just 1.31 or later and Node.js 26, requires ``uv`` and
 ``npm``, and reports Docker as optional. It doesn't validate Git, Python,
 dependencies, framework enrollment, or application health.
 

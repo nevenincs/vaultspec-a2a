@@ -31,6 +31,8 @@ from ..graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from ..thread.errors import ConfigError
 from ..workspace.environment import resolve_env_vars
 from .acp_catalog import discover_acp_catalog
+from .antigravity_catalog import discover_antigravity_catalog
+from .antigravity_cli import resolve_antigravity_command
 from .codex_catalog import discover_codex_catalog
 from .in_process_catalog import (
     IN_PROCESS_EXECUTION_MODES,
@@ -50,6 +52,7 @@ from .provider_catalog import (
 )
 
 __all__ = [
+    "ANTIGRAVITY_CLI_STATE_DECLARATION",
     "ARTIFACT_DECLARATIONS",
     "GEMINI_SESSION_STORE_DECLARATION",
     "KIMI_SESSION_STORE_DECLARATION",
@@ -100,6 +103,35 @@ GEMINI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
     ),
 )
 
+ANTIGRAVITY_CLI_STATE_DECLARATION = ArtifactDeclaration(
+    name="antigravity-cli-state",
+    root="<ANTIGRAVITY_CLI_HOME, else operator ~/.gemini/antigravity-cli>/",
+    owner="providers.factory",
+    disposition=RetentionDisposition.PERMANENT,
+    reason=(
+        "the home belongs to the operator's Antigravity CLI and holds their own "
+        "interactive state - a conversation-summary database, an onboarding "
+        "cache - beside anything a spawn here produced, so nothing in it can be "
+        "reclaimed without deleting work this project never created. What makes "
+        "this lane WORSE than the Gemini and Kimi stores is the key: those mint "
+        "one entry per distinct workspace, so a repeated discovery against the "
+        "same directory reuses an entry, while this CLI writes a fresh "
+        "TIMESTAMPED log per INVOCATION. Catalog discovery is an invocation, so "
+        "growth here tracks how often the catalog is read rather than how many "
+        "projects exist, and nothing in the name identifies the read that "
+        "produced it"
+    ),
+    mechanism=(
+        "NOTHING bounds it. Each run appends `log/cli-<timestamp>.log`, and a "
+        "failed run additionally leaves `crashes/crash_<pid>_<uuid>.log`; a bare "
+        "`agy models` was observed writing both while still exiting zero. "
+        "Measured on one developer host: 80 log files totalling 82 MB. No sweep "
+        "here reaches the home and no age gate applies, so an operator deletes "
+        "it by hand. Suppression is the lever, as on the other CLI lanes: "
+        "spawning fewer discoveries mints fewer entries"
+    ),
+)
+
 KIMI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
     name="kimi-code-session-store",
     root="<KIMI_CODE_HOME, else operator ~/.kimi-code>/<per-workspace partition>/",
@@ -122,6 +154,7 @@ KIMI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
 )
 
 ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
+    ANTIGRAVITY_CLI_STATE_DECLARATION,
     GEMINI_SESSION_STORE_DECLARATION,
     KIMI_SESSION_STORE_DECLARATION,
 )
@@ -770,9 +803,56 @@ async def _discover_codex_catalog(
     return replace(normalized, transport=_transport_evidence(normalized))
 
 
+async def _discover_antigravity_catalog(
+    key: ProviderCatalogKey, workspace_root: Path
+) -> ProviderCatalogDiscovery:
+    """Normalize the Antigravity listing into a registration-boundary result.
+
+    Transport health follows the catalog: this lane's only surface IS the CLI
+    invocation, so a listing that came back is a reachable transport and one
+    that did not is an unreachable one. There is no separate handshake to
+    distinguish the two.
+    """
+    catalog, authentication = await discover_antigravity_catalog(
+        key,
+        workspace_root,
+        cli_path=settings.antigravity_cli_path,
+        home=settings.antigravity_cli_home,
+    )
+    available = catalog.state.status is CatalogStatus.AVAILABLE
+    return ProviderCatalogDiscovery(
+        catalog=catalog,
+        authentication=authentication,
+        configured=(
+            HealthState.AVAILABLE
+            if resolve_antigravity_command(
+                cli_path=settings.antigravity_cli_path,
+                home=settings.antigravity_cli_home,
+            )
+            is not None
+            else HealthState.UNAVAILABLE
+        ),
+        transport=HealthState.AVAILABLE if available else HealthState.UNAVAILABLE,
+    )
+
+
 async def _discover_gemini_catalog(
     key: ProviderCatalogKey, workspace_root: Path
 ) -> ProviderCatalogDiscovery:
+    """Discover the Gemini CLI catalog.
+
+    LEGACY LANE. Still supported and still served - existing configurations keep
+    working and nothing here is being removed - but it is no longer where new
+    work goes: the Antigravity lane is the forward coding-CLI surface, and it is
+    a separate lane rather than a successor because its catalog spans vendors.
+
+    Legacy is a maintenance posture, not a new mechanism: the lane's turn
+    admission is unchanged, which is to say it has none. Gemini is absent from
+    PROVEN_TURN_LANES and so is already deny-by-default for turns, and this
+    module deliberately gains no LEGACY registry to express the status, because
+    a marker with no consumer is dead capability of exactly the kind this tree
+    treats as a defect.
+    """
     try:
         command, metadata = _classify_gemini_command(None)
         if metadata["command_origin"] == "fallback_cli_name":
@@ -1057,6 +1137,7 @@ class ProviderFactory:
             Provider.CLAUDE.value, f"claude-agent-acp:{settings.acp_backend}"
         )
         codex = ProviderCatalogKey(Provider.CODEX.value, "codex-app-server")
+        antigravity = ProviderCatalogKey(Provider.ANTIGRAVITY.value, "antigravity-cli")
         gemini = ProviderCatalogKey(Provider.GEMINI.value, "gemini-cli-acp")
         kimi = ProviderCatalogKey(Provider.KIMI.value, "kimi-code-acp")
         openai = ProviderCatalogKey(Provider.OPENAI.value, "openai-api")
@@ -1076,6 +1157,10 @@ class ProviderFactory:
             )
         )
         return (
+            ProviderCatalogRegistration(
+                antigravity,
+                lambda: _discover_antigravity_catalog(antigravity, discovery_root),
+            ),
             ProviderCatalogRegistration(
                 claude, lambda: _discover_claude_catalog(claude, discovery_root)
             ),

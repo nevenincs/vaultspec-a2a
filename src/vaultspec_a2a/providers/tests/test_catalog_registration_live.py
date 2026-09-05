@@ -8,11 +8,15 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ..factory import ProviderCatalogRegistration, ProviderFactory
 from ..provider_catalog import AuthenticationState, CatalogStatus
+
+if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
 
 
 def _registration(provider_id: str) -> ProviderCatalogRegistration:
@@ -25,12 +29,18 @@ def _registration(provider_id: str) -> ProviderCatalogRegistration:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider_id", ("claude", "codex", "gemini"))
+@pytest.mark.parametrize("provider_id", ("antigravity", "claude", "codex", "gemini"))
 async def test_installed_registered_lane_enumerates_without_a_prompt(
     provider_id: str,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
-    if shutil.which(provider_id) is None and provider_id != "claude":
-        pytest.fail(f"{provider_id} CLI is not installed")
+    # BOTH halves, through the one rule. A lane needs its CLI *and* a login, and
+    # they go missing independently: a logged-out CLI is installed and useless.
+    # Probing only the binary reported "not installed" for a present CLI whose
+    # credential had gone, and a raw `shutil.which` + `pytest.fail` here could
+    # not be escalated by --require-prerequisite the way the rule can.
+    external_prerequisite(f"{provider_id}-cli")
+    external_prerequisite(f"{provider_id}-credential")
 
     discovery = await _registration(provider_id).discover()
 
@@ -45,11 +55,14 @@ async def test_installed_registered_lane_enumerates_without_a_prompt(
 _ISOLATED_KIMI_DRIVER = """
 import asyncio
 import json
+from pathlib import Path
 from vaultspec_a2a.providers.factory import ProviderFactory
 
 async def main():
+    # Discovery is workspace-scoped: it spawns real provider subprocesses, and a
+    # lane discovered against another tree describes a different machine state.
     registration = next(
-        item for item in ProviderFactory().catalog_registrations()
+        item for item in ProviderFactory().catalog_registrations(Path.cwd())
         if item.key.provider_id == "kimi"
     )
     discovery = await registration.discover()

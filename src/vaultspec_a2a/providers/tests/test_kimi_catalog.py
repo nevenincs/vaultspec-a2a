@@ -187,14 +187,42 @@ def _installed_kimi() -> str:
     return executable
 
 
-def _runtime_environment() -> dict[str, str]:
-    """Use the installed CLI's actual configuration without fabricating credentials."""
-    return resolve_env_vars(Path.cwd())
+#: Every name that can configure a Kimi lane from the environment. Scrubbed so a
+#: test states its own configuration instead of inheriting the operator's.
+_KIMI_CONFIGURATION_NAMES = (
+    "KIMI_API_KEY",
+    "KIMI_BASE_URL",
+    "KIMI_MODEL_API_KEY",
+    "KIMI_MODEL_BASE_URL",
+    "KIMI_MODEL_NAME",
+    "KIMI_MODEL_MAX_CONTEXT_SIZE",
+    "KIMI_MODEL_CAPABILITIES",
+)
 
 
-def _configured_runtime_environment() -> tuple[dict[str, str], str, str]:
+def _runtime_environment(home: Path) -> dict[str, str]:
+    """The installed CLI, pointed at an EMPTY home this test owns.
+
+    These probes assert how many aliases the lane serves, so they have to supply
+    that number themselves. Reading the operator's real home instead made the
+    answer a property of the developer's machine: the assertions held only while
+    nobody had configured Kimi, and silently became wrong the moment somebody
+    did - which is what happened here, four persisted aliases turning a "one
+    model" expectation into five and an "unconfigured" expectation into an
+    available lane. The home AND the environment names are both isolated,
+    because a temporary provider declared in the environment survives a home
+    swap and would otherwise leak into the unconfigured case.
+    """
+    environment = resolve_env_vars(Path.cwd())
+    for name in _KIMI_CONFIGURATION_NAMES:
+        environment.pop(name, None)
+    environment["KIMI_CODE_HOME"] = str(home)
+    return environment
+
+
+def _configured_runtime_environment(home: Path) -> tuple[dict[str, str], str, str]:
     """Configure the installed CLI's documented temporary provider lane."""
-    environment = _runtime_environment()
+    environment = _runtime_environment(home)
     secret = "catalog-probe-credential"
     model = "catalog-probe-model"
     environment.update(
@@ -276,9 +304,11 @@ async def test_real_process_timeout_reaps() -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_installed_kimi_configured_lane_enumerates_without_prompt() -> None:
+async def test_installed_kimi_configured_lane_enumerates_without_prompt(
+    tmp_path: Path,
+) -> None:
     executable = _installed_kimi()
-    environment, secret, model = _configured_runtime_environment()
+    environment, secret, model = _configured_runtime_environment(tmp_path)
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}
 
@@ -306,9 +336,11 @@ async def test_installed_kimi_configured_lane_enumerates_without_prompt() -> Non
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_installed_kimi_unconfigured_lane_is_truthfully_unavailable() -> None:
+async def test_installed_kimi_unconfigured_lane_is_truthfully_unavailable(
+    tmp_path: Path,
+) -> None:
     executable = _installed_kimi()
-    environment = _runtime_environment()
+    environment = _runtime_environment(tmp_path)
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}
 
@@ -333,9 +365,9 @@ async def test_installed_kimi_unconfigured_lane_is_truthfully_unavailable() -> N
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_installed_kimi_failure_is_static_and_reaps() -> None:
+async def test_installed_kimi_failure_is_static_and_reaps(tmp_path: Path) -> None:
     executable = _installed_kimi()
-    environment = _runtime_environment()
+    environment = _runtime_environment(tmp_path)
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}
 
@@ -357,9 +389,11 @@ async def test_installed_kimi_failure_is_static_and_reaps() -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_installed_kimi_discovery_reaps_when_cancelled() -> None:
+async def test_installed_kimi_discovery_reaps_when_cancelled(
+    tmp_path: Path,
+) -> None:
     executable = _installed_kimi()
-    environment = _runtime_environment()
+    environment = _runtime_environment(tmp_path)
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}
     task = asyncio.create_task(

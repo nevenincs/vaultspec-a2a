@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:ed5f5ea5a59a4b79a6e3597715e8167e683de74da8d1e4f9209e7adb991baa98'
+body_hash: 'sha256:ee0cd843b0aab8436d9dd6c91d3c6cb9b181599384ee9cd55185d7f6d63656fe'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -122,6 +122,19 @@ Resolution status: resolved in Dashboard architectural correction `02101b52d15e3
 Type: implementation review. Status: open; S02 review failed at A2A `e9a56ff08edbe248600a21daa583183410ea822e` and Dashboard `dbc15e6f0976d82919f19ecebd991499e25a2b02`. The documentation-only commits are mechanically scoped and the replay evidence is sound: all 17 recorded source hashes and aggregate `D8EA71B...` digest reproduce, the exact current seven verbs and 15/45/60-second budgets match source, focused A2A tests pass 39, Dashboard discovery-focused tests pass 19, lifecycle tests pass 21, and broker tests pass 70 using explicit valid rustup shims. The known discovery, receipt, foreign-process, and component-authority product gaps are correctly assigned to S43-S50 and do not independently defect this evidence step. The three preceding HIGH defects are in S02's contract record itself, so S02 must be reopened and corrected before S03.
 
 Correction status: implemented at Dashboard `02101b52d15e31a23b9c5cb181c9f6e648b25261`; formal re-review pending. The correction preserves the review failure as history, changes no runtime wire, and reopens/closes only S02 after Core and contract-consistency validation.
+
+### s02-existing-verb-retry-contract-regression | high | Correction drops the current mutation retry and reconciliation rules
+
+Type: contract completeness and regression. Status: open; review-blocking for corrected `W01.P01.S02` at Dashboard `02101b52d15e31a23b9c5cb181c9f6e648b25261`. The correction resolves the three original HIGH subjects, but replacing the broker table removed its retry-rule column. Neither the amended authoritative edge ADR nor any current Dashboard ADR/reference now preserves the frozen current behavior that `run-start` permits exactly one retry after an ambiguous connection or protocol failure using the same run, reservation, and payload before authoritative status reconciliation; `run-cancel` forbids blind retry and reconciles status; and `clarification-respond` forbids blind retry while preserving request identity and reconciling the result. Live source still contains the specialized run-start replay/reconciliation path. The new three mutating capabilities have complete idempotency and reconciliation rules, but S02 owns the complete eleven-verb contract and cannot regress existing wire facts while adding four operations. Ownership: correct S02 by restoring the three existing mutation rules in the authoritative edge decision and its derived operation table, without weakening the new idempotency contract.
+
+### s02-edge-adr-d2-marker | low | A literal plus sign corrupts the D2 decision marker
+
+Type: documentation quality. Status: open; non-blocking by itself. Dashboard `02101b52...` leaves the line `+**D2 — Actors and tokens are provisioned by the engine at run start.**` after the new amendment. Core markdown validation accepts it as prose, but the literal plus breaks the ADR's established bold decision-marker form and makes D2 harder to scan and parse semantically. Ownership: remove the stray plus in the S02 documentation correction.
+
+### s02-corrected-formal-rereview | high | FAIL - original defects resolved but retry-contract regression remains
+
+Type: implementation review. Status: open. Re-review at A2A `df8645c723d16298252c831ea8982836bbb59aed` and Dashboard `02101b52d15e31a23b9c5cb181c9f6e648b25261` confirms the accepted edge ADR legitimately expands seven verbs to exactly eleven; the four additions have exact names and routes, bounded inputs and outputs, typed receipts/refusals/conflicts/errors, identity, idempotency, authentication, scope, budgets, retry and reconciliation rules; ADR and reference mutually link and agree; producer-first fixed per-target versioned archives and SHA-256 sidecars, version-only Dashboard fetch-verify-bundle, removal of source build/checkout/commit pinning, and final receipt/process/discovery agreement are explicit; and S50 matches. A focused assertion passes the eleven-row matrix, four route bindings, bounds, envelopes, provenance and mutual links. A2A Core validation is clean, only S01/S02 are closed, S03 remains untouched, and both repositories are clean. The preceding HIGH regression prevents a PASS until the existing mutation retry rules are restored.
+
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.
@@ -138,3 +151,6 @@ Correction status: implemented at Dashboard `02101b52d15e31a23b9c5cb181c9f6e648b
 - For `s02-broker-decision-outside-adr`, amend the accepted Dashboard orchestration-edge ADR through its review process so the exact expanded whitelist has one authoritative decision home; keep the coordinated reference factual and derived.
 - For `s02-future-broker-wire-underspecified`, define every S43-S45 exchange end to end, including verb, route, bounds, receipt/conflict schema, identity, timeout, retry and reconciliation behavior, before either repository implements it.
 - For `s02-release-provenance-contract-incomplete`, carry the provisioning ADR's producer-first, version-only, fixed-archive and SHA-256 fetch-verification requirements into the coordinated handoff and make S50's ownership unambiguous.
+
+- For `s02-existing-verb-retry-contract-regression`, restore the exact `run-start`, `run-cancel`, and `clarification-respond` retry and reconciliation rules under the authoritative edge decision and reflect them in the derived eleven-verb table.
+- For `s02-edge-adr-d2-marker`, remove the literal plus before the D2 decision marker.

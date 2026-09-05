@@ -4,14 +4,15 @@ tags:
   - "#model-profiles"
 date: '2026-07-15'
 related:
-  - "[[2026-02-27-team-composition-topology-adr]]"
-  - "[[2026-07-14-adr-authoring-orchestration-adr]]"
-  - "[[2026-07-15-model-profiles-research]]"
-  - "[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr]]"
-  - "[[2026-08-02-model-profiles-acp-model-selection-research]]"
+  - '[[2026-02-27-team-composition-topology-adr]]'
+  - '[[2026-07-14-adr-authoring-orchestration-adr]]'
+  - '[[2026-07-15-model-profiles-research]]'
+  - '[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr]]'
+  - '[[2026-08-02-model-profiles-acp-model-selection-research]]'
+  - '[[2026-08-02-provider-model-catalog-adr]]'
 superseded_by: '2026-08-02-provider-model-catalog-adr'
-modified: '2026-08-02'
-body_hash: 'sha256:d5725d8aa61d2683428066f9bb32f82c5d1247c0e9b59f9d1e35d0fbc2efccfa'
+modified: '2026-09-05'
+body_hash: 'sha256:366660e1ded993b9ec1e26a0d263a3679efbb379650443d570736ed6bf2e986c'
 ---
 # `model-profiles` adr: `named model profiles, shared resolution, and backend-served eligibility` | (**status:** `superseded`)
 
@@ -63,3 +64,14 @@ Named profiles remain the correct configuration-owned selector. Making the froze
 - `fast` changes from partial latency reduction to a product-visible all-low contract; callers wanting higher quality must choose another profile intentionally.
 - Real-provider tests gain a pre-spawn low-tier assertion and a no-prompt ACP handshake proof, but provider billing and quota controls remain outside this ADR.
 - Supersession posture: this amends `2026-07-15-model-profiles-adr` in place and refines its freeze-and-persist and profile semantics. It relies on, but does not supersede, `2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr`.
+
+## Supersession clarification (2026-09-05): no profile authority remains
+
+This record is wholly superseded for provider/model selection by
+`2026-08-02-provider-model-catalog-adr`. Its named profiles, `profile_id`,
+profile disclosure, preset-carried provider/model policy, tier mapping, and
+legacy restart/read clauses are historical only. No implementation may retain
+them as compatibility behavior. The surviving deterministic-execution invariant
+is carried by current schema-v1 catalog selections and exact frozen assignments;
+retired state fails closed as typed unsupported/incompatible without parsing,
+translation, migration, substitution, restart, or redispatch.

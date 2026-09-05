@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:99610bcbaf35a62d8dfda2dae6db03fd1b3956e3c031ecb662fd26452daa4b0a'
+body_hash: 'sha256:d16a7697d33456e0f9219e4d6259fe0d79ecbeaf3fd05d8f030d659be941b487'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -26,7 +26,7 @@ Capture identities are A2A `803dca968945d703092dbe8ecfaee0c6290cbd9f` and Dashbo
 
 ## Current prerequisite status
 
-`vaultspec-core vault plan status` reports provider-model-catalog at 14/21 complete and flags checked `S08` as lacking a Step Record. The legacy feature ledger lists target paths, including unchecked work, and is not positive execution evidence. Provider-capability-evidence reports 0/4; `provider_capabilities.py` exists, but source presence and its one ledger target entry do not close composition, population, exact-lane proof, invalidation, or served disclosure.
+`vaultspec-core vault plan status` reports provider-model-catalog at 14/21 complete and flags checked `S08` as lacking a Step Record. The historical feature ledger lists target paths, including unchecked work, and is not positive execution evidence. Provider-capability-evidence reports 0/4; `provider_capabilities.py` exists, but source presence and its one ledger target entry do not close composition, population, exact-lane proof, invalidation, or served disclosure.
 
 The live exact-mode registry has eight external registrations. Only `codex/codex-app-server` is admitted, by a literal historical completed-turn citation to `test_pw7_research_adr_materializes_two_documents[codex]`. The other seven modes remain denied for lack of an exact-mode completed-turn proof: `antigravity/antigravity-cli`, `claude/claude-agent-acp:node`, `gemini/gemini-cli-acp`, `kimi/kimi-code-acp`, `openai/openai-api`, `zai/zai-claude-agent-acp:node`, and `zhipu/zhipu-openai-compatible-api`. Provider-level turn citations for Claude and Z.AI do not transfer to their catalog execution modes. Web citations for Claude and Codex prove only their exact retrieval capability and do not prove S19/S20. In-process deterministic/mock lanes remain excluded from external-provider and Dashboard product proof.
 
@@ -52,7 +52,7 @@ The owner step closes only when the assembled two-repository path retains positi
 - **Unavailable and unadmitted:** exercise a real registered lane with a controlled missing command, credential/auth failure, unavailable/expired catalog, or exact-mode admission absence. Preserve each independent health axis and safe reason, keep it unselectable, and prove configured, enumerated, or handshake-ready state cannot outvote admission.
 - **Admitted:** use a separately proven exact execution mode and show admission combines with current configuration, transport, authentication, fresh catalog, and membership. Re-run the cited positive proof or retain new equivalent real-work evidence; do not inherit a provider-level or sibling-mode citation.
 - **Replay/conflict:** lose or withhold the first run-start acknowledgement, replay the identical run id, prepare/commit identity and normalized selection, and prove one durable run, one dispatch and the identical frozen receipt without requiring current catalog membership. Reuse the identity with changed selection, controls, overrides, fallback order, or payload and prove a typed conflict with no second dispatch.
-- **Legacy restart:** seed a real pre-migration `model_profile` record directly in durable stores, boot a fresh second gateway and worker on those stores, and prove redispatch uses the exact persisted legacy values without catalog re-resolution. In the same evidence, prove a new run refuses `profile_id` and cannot create legacy policy.
+- **Legacy-state refusal:** submit every retired `profile_id`/assignment request and response shape and seed representative pre-catalog `model_profile` durable state. Prove each boundary returns a bounded typed unsupported/incompatible result before provider construction or dispatch, serves no retired provider/model fields, performs no translation, migration or substitution, and never redispatches the run. Prove current schema-v1 catalog-backed restart independently.
 - **Dashboard state:** across a real local engine transport, prove exact scope fencing, no previous-scope placeholder, expiry-driven refetch, unavailable rendering, stale-choice clearing, current selection submission, and authoritative frozen assignment rendering. Browser-only fixture state or a Rust loopback body authored by the test is preparation, not A2A producer evidence.
 
 Every case records whether a provider credential or external service was absent. Absence leaves that case `BLOCKED`; it does not become pass, unsupported, or non-applicable.

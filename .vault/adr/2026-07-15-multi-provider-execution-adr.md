@@ -3,16 +3,16 @@ tags:
   - '#adr'
   - '#multi-provider-execution'
 date: '2026-07-15'
-modified: '2026-07-15'
-body_hash: 'sha256:a5fecac96fff540b62771bb41e0fc9cd07bed48b25ba73954b4ad34ca0af694c'
+modified: '2026-09-05'
+body_hash: 'sha256:00ae7a336fed5928e04901a822253c03a3ef70a0ea8ac24ad637b11cbeb84357'
 related:
-  - "[[2026-07-15-multi-provider-execution-research]]"
-  - "[[2026-07-15-multi-provider-execution-reference]]"
-  - "[[2026-07-15-model-profiles-adr]]"
-  - "[[2026-07-14-adr-authoring-orchestration-adr]]"
-  - "[[2026-07-14-a2a-edge-conformance-adr]]"
+  - '[[2026-07-15-multi-provider-execution-research]]'
+  - '[[2026-07-15-multi-provider-execution-reference]]'
+  - '[[2026-07-15-model-profiles-adr]]'
+  - '[[2026-07-14-adr-authoring-orchestration-adr]]'
+  - '[[2026-07-14-a2a-edge-conformance-adr]]'
+  - '[[2026-08-02-provider-model-catalog-adr]]'
 ---
-
 # `multi-provider-execution` adr: `provider matrix, per-role assignment, and cross-repo initialization for Codex, Claude, and Z.ai` | (**status:** `accepted`)
 
 **Ratified 2026-07-15** (interactive owner decision): all decisions below are accepted as drafted, including the per-branch-diversity deferral and the mandatory cross-repo check in Constraints. Execution proceeds per `2026-07-15-multi-provider-execution-plan`, approved the same day with Phase 1 (Z.ai) and Phase 2 (Codex) authorized to run in parallel.
@@ -64,3 +64,18 @@ Both new providers ride mechanisms the codebase already has proven working for a
 - Positive: Z.ai lands as a near-zero-new-code config variant; Codex lands without inventing an ACP-compatibility shim; per-role mixed-provider runs (researcher=codex, synthesist=claude, adr-author=zai) become possible with the existing profile schema once both providers exist.
 - Negative / open: per-branch (fan-out) provider diversity remains unsupported until a follow-on schema extension; Z.ai and Codex both carry unverified real-world compatibility risk (API fidelity, auth model) that must be closed by live probes, not assumed from this ADR; the dashboard-side schema openness for new provider values is an unresolved cross-repo question this ADR explicitly does not authorize resolving unilaterally.
 - Future: if per-branch diversity or additional providers (Gemini already exists; others may follow) are needed, the `TeamProfileRoleConfig`/`ResearchThreadSpec` schema is the extension point, not a new resolution mechanism.
+
+## Amendment (2026-09-05): catalog selection replaces static profile authority
+
+The provider-lane decisions in this record remain accepted. Its
+`MODEL_MAP`/`PROVIDER_DEFAULT_MODELS` implementation clause, profile-topped
+precedence rationale, and claim that mixed-provider runs use the legacy profile
+schema are superseded by `2026-08-02-provider-model-catalog-adr`.
+
+Codex, Claude, Z.AI, and every later lane receive exact provider/model/control
+values only from a validated current provider-catalog selection frozen for the
+run. Product presets and static mappings carry no provider/model authority.
+Retired profile or model-map input and stored state are refused as typed
+unsupported/incompatible before construction or dispatch; no alias,
+translation, migration, fallback, restart, or redispatch path is retained for
+that state.

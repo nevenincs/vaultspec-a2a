@@ -5,11 +5,12 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:fe69fe2213bb47134900ab527ff59908a4e87f787ada5288e46503fdf215bbeb'
+body_hash: 'sha256:5d00e116ce681842523a8cd75b29f620900d2ef0689c4daeaab8e92fffbaca4b'
 related:
-  - "[[2026-09-05-embedded-runtime-remediation-plan]]"
-  - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
-  - "[[2026-09-05-embedded-runtime-robustness-audit]]"
+  - '[[2026-09-05-embedded-runtime-remediation-plan]]'
+  - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
+  - '[[2026-09-05-embedded-runtime-robustness-audit]]'
+  - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 ---
 # `embedded-runtime-remediation` audit: `rolling implementation review queue`
 
@@ -190,6 +191,23 @@ Type: implementation review disposition. Status: historical fail; correction imp
 
 Type: implementation review disposition. Status: resolved at `dba2b7eebb61301679f515661f175154fedd12bd`. Final re-review executed the supported task-specific `UV_PROJECT_ENVIRONMENT` flows for distinct `server-env`, `freeze-env`, and `build-env` roots, with explicit `uv sync --locked` followed by `uv run --no-sync`; the shared project `.venv` is not selected and the removed deprecated option has zero occurrences across S04 durable surfaces. The server capture reproduces digest `72A2469C...` and 15 passing PostgreSQL URL/settings/engine tests. The freeze-only capture reproduces `F4EAE3C1...` with all three PostgreSQL distributions and import roots absent. The server-plus-freeze capture reproduces `C3378273...` with the drivers present before packaging, while the exact retained TOC/tree scan reproduces `A0D70509...`: 5,720 PYZ module names, 2,746 artifact files, zero blocked module or path matches, TOC hash `06AA128F...`, artifact manifest `1AE311B5...`, and binary hash `474B0E68...`. Source hashes and removed-option digest `8735358C...` also match. The explicit lock sync/check commands succeed. The server extra remains the sole declared home of asyncpg, psycopg, and `langgraph-checkpoint-postgres`; base and freeze stay SQLite-only, and the PyInstaller exclusion boundary is independently enforced. The new test remains a discriminating metadata boundary while environment and artifact probes verify realized behavior. ER18 resolution is justified; the collect-all test-module finding remains MEDIUM/open under S50/S65. Core validates the feature, only S04 closes, S05 remains next with no record, and concurrent codebase-health/runtime working changes were excluded from scope and preserved. No critical, high, or medium S04 defect remains; S05 may proceed.
 
+### no-legacy-provider-model-decision | high | active legacy-success gates are superseded
+
+Type: architecture and lifecycle reconciliation. Status: resolved at the
+2026-09-05 no-legacy curation amendment; runtime removal remains open under
+provider-model-catalog `P01.S10`. Earlier entries that treated successful legacy
+profile disclosure, restart, or redispatch as a prerequisite remain historical
+review evidence only. The accepted catalog decision now requires current
+schema-v1 catalog selection as the sole provider/model authority and a typed
+unsupported/incompatible outcome for every retired request, response, settings
+alias, and durable-state shape before construction or dispatch, with no
+translation, migration, substitution, or redispatch. The unchecked catalog
+`P01.S11` and `P03.S20` rows and remediation prerequisite reference now carry
+that negative proof. Remediation `W01.P02.S05` still depends on completed
+`P01.S10`/`P01.S11`; the passing ER19 host-state correction alone cannot close
+it. Full conflict inventory and live-code drift are recorded in
+`2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit`.
+
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.
@@ -212,3 +230,4 @@ Type: implementation review disposition. Status: resolved at `dba2b7eebb61301679
 
 - For `s04-driver-exclusion-evidence-not-replayable`, replace both placeholder verification entries with exact bounded commands or retained probes and canonical results/digests, including the exact sync dry-run command.
 - For `s04-uv-environment-claim-inaccurate`, retain task-specific uv project environments and explicit locked sync plus no-sync execution for every dependency posture.
+- For `no-legacy-provider-model-decision`, remove the remaining runtime and Dashboard legacy paths under catalog `P01.S10`, then prove typed refusal and current-schema restart under `P01.S11` and `P03.S20`.

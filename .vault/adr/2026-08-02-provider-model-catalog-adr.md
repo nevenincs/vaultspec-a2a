@@ -11,9 +11,9 @@ related:
   - "[[2026-07-15-multi-provider-execution-adr]]"
 supersedes:
   - '2026-07-15-model-profiles-adr'
-modified: '2026-08-03'
+modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:482ca2aa625a5e87873cfa2df1b57c7456e25bbc4d6de68678a93149405f4835'
+body_hash: 'sha256:cd5de5f4b361f35ab5aa43ad07499cb14bf7f29ad4d9e91e53afd886da3fd515'
 ---
 # `provider-model-catalog` adr: `provider-owned model catalogs, bounded run selection, and truthful provider health` | (**status:** `accepted`)
 
@@ -167,3 +167,38 @@ above.
   anything durable exists. The gateway therefore names every run - the
   caller's nickname when supplied, a minted one otherwise. Null metadata and
   null nicknames are legacy-row states, not producible ones.
+
+## Amendment (2026-09-05): legacy provider and model state is unsupported
+
+This amendment supersedes every earlier clause in this record that preserved a
+legacy profile, provider map, model map, preset-carried provider policy, or
+pre-catalog restart/read path. It is the single active decision for that scope.
+
+- Schema-v1 provider-catalog selection and its exact frozen assignment are the
+  only provider/model execution authority. Product presets may describe
+  topology, personas, tools, and bounded role requirements; they may not carry
+  provider, model, control, fallback, profile, or implicit-default authority.
+- `profile_id`, profile summaries, profile assignments, static external
+  `MODEL_MAP`/`PROVIDER_DEFAULT_MODELS` values, and equivalent aliases are
+  absent from product requests, responses, stored execution authority, and
+  served preset or run-status contracts.
+- A stored run without a complete current catalog-selection record is
+  unsupported. Detection fails closed with a bounded typed
+  unsupported/incompatible outcome before dispatch. The runtime does not parse,
+  translate, migrate, restart, redispatch, substitute, or disclose its retired
+  provider/model state.
+- Current catalog-backed restart and same-id replay remain required and consume
+  only the exact frozen current-schema values. Catalog drift does not authorize
+  re-resolution, but it also does not create a compatibility path for retired
+  schemas.
+- Owned storage migrations remove retired provider/model/profile fields and
+  indexes. If safe removal or current-schema validation cannot be established,
+  startup refuses the store as incompatible; no backfill or best-effort
+  conversion is permitted.
+- Deprecated provider configuration aliases and centrally maintained external
+  model constants are removed directly. Unknown or obsolete input is rejected;
+  it never falls through to a current value.
+
+The 2026-08-03 run-status legacy-disclosure clause and the original
+legacy-restart consequences remain historical context only and no longer govern
+implementation or qualification.

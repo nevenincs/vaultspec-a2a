@@ -5,20 +5,21 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:ae0961d8e37cc95c27dde4b4972cfce834a56262c49ba365c4bb704d0031e826'
+body_hash: 'sha256:d53f5b17413dcd9ea18ae348d5ee33abdc614b7466ac4e8cdc3cfca35fcefcfc'
 related:
-  - "[[2026-09-05-embedded-runtime-remediation-research]]"
-  - "[[2026-09-05-embedded-runtime-robustness-audit]]"
-  - "[[2026-09-05-embedded-runtime-robustness-research]]"
-  - "[[2026-08-02-control-action-leases-adr]]"
-  - "[[2026-08-05-served-capability-contract-state-truthfulness-adr]]"
-  - "[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]"
-  - "[[2026-07-14-a2a-edge-conformance-adr]]"
-  - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
-  - "[[2026-08-02-provider-error-taxonomy-adr]]"
-  - "[[2026-08-02-provider-capability-evidence-adr]]"
+  - '[[2026-09-05-embedded-runtime-remediation-research]]'
+  - '[[2026-09-05-embedded-runtime-robustness-audit]]'
+  - '[[2026-09-05-embedded-runtime-robustness-research]]'
+  - '[[2026-08-02-control-action-leases-adr]]'
+  - '[[2026-08-05-served-capability-contract-state-truthfulness-adr]]'
+  - '[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]'
+  - '[[2026-07-14-a2a-edge-conformance-adr]]'
+  - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
+  - '[[2026-08-02-provider-error-taxonomy-adr]]'
+  - '[[2026-08-02-provider-capability-evidence-adr]]'
+  - '[[2026-08-02-provider-model-catalog-adr]]'
+  - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 ---
-
 # `embedded-runtime-remediation` adr: `qualification and single-owner remediation of the embedded runtime` | (**status:** `accepted`)
 
 ## Problem Statement
@@ -68,3 +69,20 @@ Scenario qualification prevents a narrow code change from becoming a broader rea
 ## Consequences
 
 The campaign gains an auditable completion contract and one tracking plan. Cross-repository integration, profile maintenance and real-provider prerequisites remain explicit work. Qualification can remain blocked after implementation when external evidence is unavailable. The plan's approval is a separate user decision; this ADR does not start execution.
+
+## Amendment (2026-09-05): qualification excludes legacy support
+
+The accepted no-legacy amendment in
+`2026-08-02-provider-model-catalog-adr` governs this campaign's provider and
+model lifecycle. Remediation must remove retired profile, preset-carried
+provider/model, static model-map, compatibility-translation, restart,
+redispatch, and product-wire paths. Historical audit and execution records stay
+unchanged as evidence of what previously existed; they do not require the
+runtime to preserve that behavior.
+
+Qualification now requires a negative discriminator: legacy provider/model
+input and durable state receive a bounded typed unsupported/incompatible
+outcome before provider construction or dispatch, no legacy fields are served,
+and no migration or substitution occurs. A test that successfully restarts,
+reads, translates, or redispatches legacy provider/model state is evidence of a
+defect, not compatibility success.

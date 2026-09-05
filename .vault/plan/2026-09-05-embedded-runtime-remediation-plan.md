@@ -17,14 +17,15 @@ related:
   - '[[2026-08-02-provider-error-taxonomy-adr]]'
   - '[[2026-08-02-provider-capability-evidence-adr]]'
   - '[[2026-08-02-provider-capability-evidence-plan]]'
+  - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-08-02-provider-model-catalog-plan]]'
   - '[[2026-08-05-served-capability-contract-plan]]'
   - '[[2026-08-02-llm-context-provider-abstraction-plan]]'
+  - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-05'
 body_schema: body-v2
-body_hash: 'sha256:3c92cd74d3a3e6e431fc2c5543359f2610dd59ae7fbd87553093ef614bd2dcbd'
+body_hash: 'sha256:de3e9e102844fa4958045c6cc59530cc2d0c61ffebf9abe28535bc123f4f3590'
 ---
-
 # `embedded-runtime-remediation` plan
 
 ## Description
@@ -33,7 +34,7 @@ Remediate ER01-ER28 as the Dashboard-embedded binary, using the related remediat
 
 For every Step, re-ground its named source and decision through rag-first semantic discovery before exact-symbol inspection; if the recorded RAG prerequisite is unavailable, use Core discovery plus narrow source inspection and record the limitation. The audit owns observed failures; the research owns the ownership map; these rows own execution. Existing active-plan rows are dependency-verification gates, not duplicate implementation assignments. Preserve their canonical identifiers and historical completed records. Coordinate shared-file work with repository-tooling-hardening. Dashboard paths are relative to the separate vaultspec-dashboard checkout; all other source paths are relative to this checkout.
 
-Each implementation Step includes discriminating tests at its real production boundary, formal code review, severity/type/status classification of every finding, an audit-queue update and an execution record before closure. A Wave cannot land until these obligations are met. All rows begin unchecked. ADR acceptance authorizes these design decisions only; execution waits for separate plan approval.
+Each implementation Step includes discriminating tests at its real production boundary, formal code review, severity/type/status classification of every finding, an audit-queue update and an execution record before closure. Provider/model remediation follows the no-legacy amendment in `2026-08-02-provider-model-catalog-adr`: retired profile, preset-policy, static-map, compatibility, restart, redispatch and product-wire behavior must be removed and typed-refused, never retained or migrated. A Wave cannot land until these obligations are met. All rows begin unchecked. ADR acceptance authorizes these design decisions only; execution waits for separate plan approval.
 
 The first Wave inventories external prerequisites; their absence does not block independent local correction. Final provider/consumer verification gates stay in the qualification Wave. No release, merge or implementation action is authorized by this saved plan.
 
@@ -70,7 +71,7 @@ Implement uncovered persistence, queue, cancellation and worker-capacity correct
 Remove stale-write and early-completion races while retaining existing state obligation owners.
 
 - [ ] `W02.P03.S76` - Declare durable run revision and writer generation plus action-specific receipt identity without storing credentials or duplicating transcript authority; `src/vaultspec_a2a/database/models.py`.
-- [ ] `W02.P03.S77` - Add the next schema migration for ownership and receipt state with explicit legacy unknown-ownership handling, upgrade validation and incompatible-schema refusal; `src/vaultspec_a2a/database/migrations`.
+- [ ] `W02.P03.S77` - Add the current ownership and receipt schema with upgrade validation; refuse pre-current or unknown-ownership rows as incompatible without backfill, translation, migration-time substitution or execution; `src/vaultspec_a2a/database/migrations`.
 - [ ] `W02.P03.S09` - Add atomic expected-state/revision election with durable writer/action identity and test completed-versus-cancelled stale sessions; `src/vaultspec_a2a/database/thread_repository.py`.
 - [ ] `W02.P03.S10` - Verify transitional-writer and projection obligations under 2026-08-05-served-capability-contract-plan W04.P07.S22 and W04.P08.S26 against the new election primitive; `state obligation dependency`.
 - [ ] `W02.P03.S11` - Verify abandoned-run reconciliation under owner W04.P08.S56 and integrate the new atomic election without duplicating its existing generic reconciliation assignment; `abandoned transition dependency`.

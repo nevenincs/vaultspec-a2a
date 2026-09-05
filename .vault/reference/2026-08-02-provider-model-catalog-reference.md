@@ -3,14 +3,13 @@ tags:
   - '#reference'
   - '#provider-model-catalog'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:253b88f297b2b264030546042e961bea7f5cfcde4551d556a37f7267e1a6e370'
+body_hash: 'sha256:549efe50d4f76ef948036f74632268e59994035b64888a62764c2ec260144d30'
 related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-07-15-model-profiles-adr]]"
 ---
-
 # `provider-model-catalog` reference: `provider model catalog and health integration reference`
 
 This reference maps the current A2A and Dashboard catalog-selection path,
@@ -107,8 +106,10 @@ unsupported controls and options are never inferred. Required worker IDs must
 be unique and number between one and sixty-four before overrides or capacity are
 accepted. The complete normalized selection is persisted under
 `provider_catalog_selection` and included in prepare, commit, and same-ID replay
-identity. Legacy `model_profile` records remain readable for old-run restart but
-are not accepted as new-run policy.
+identity. Current source still contains a retired `model_profile` read/restart branch. Under
+the 2026-09-05 governing amendment this is implementation drift: the branch and
+its product disclosure must be removed, and encountering that state must return a
+typed unsupported/incompatible outcome before provider construction or dispatch.
 
 P01.S09 freezes each role's provider ID, provider display name, execution mode,
 catalog revision, entry ID, exact provider model value, model display name,
@@ -128,11 +129,12 @@ normal Kimi home, optionally relocated by `KIMI_CODE_HOME`. A temporary in-memor
 provider requires the complete current tuple `KIMI_MODEL_NAME`,
 `KIMI_MODEL_API_KEY`, and `KIMI_MODEL_BASE_URL`; optional
 `KIMI_MODEL_MAX_CONTEXT_SIZE` and `KIMI_MODEL_CAPABILITIES` remain provider-owned but are explicitly bounded: context size is a positive 32-bit integer serialized canonically, while capabilities are normalized as at most sixteen unique bounded provider tokens in first-seen order and serialized as the comma-separated form the CLI expects.
-Legacy KIMI_API_KEY and KIMI_BASE_URL are accepted only as settings migration
-inputs. A nonblank current value wins; blank or whitespace current input falls
-through to a nonblank legacy value. Legacy and current ambient values are
-scrubbed before the factory re-injects only the normalized Settings-owned current
-names. Discovery invokes the executable prefix only, never
+Current source still accepts `KIMI_API_KEY` and `KIMI_BASE_URL` as deprecated
+settings aliases. Under the 2026-09-05 governing amendment these aliases are
+implementation drift: only the current `KIMI_MODEL_*` contract may be read, and
+obsolete names must be rejected or ignored without translation or fallback.
+Ambient current names are scrubbed before the factory reinjects only normalized
+Settings-owned current names. Discovery invokes the executable prefix only, never
 `kimi acp provider ...`, and exact execution selects the discovered alias with
 `-m`. No external model identifier is hard-coded.
 
@@ -153,8 +155,10 @@ in provider descriptors beside LangChain, not a hard-coded LangChain mapping.
 
 ### Health currently served and required separation
 
-`ProviderReadiness` remains a legacy profile-readiness aggregate, but P01.S07 does
-not use it to populate catalog health. Each factory discovery result carries typed
+`ProviderReadiness` is a retired profile-readiness aggregate still present in
+current source. P01.S07 does not use it to populate catalog health, and P01.S10
+must remove its product profile consumers rather than preserve it as a
+compatibility surface. Each factory discovery result carries typed
 configuration and transport evidence independently beside authentication and
 catalog state. Missing commands affect transport only; explicit credentials or a
 complete temporary provider definition affect configuration only; absent evidence

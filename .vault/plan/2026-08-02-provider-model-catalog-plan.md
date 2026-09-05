@@ -10,9 +10,8 @@ related:
   - '[[2026-08-02-provider-model-catalog-reference]]'
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
 modified: '2026-09-05'
-body_hash: 'sha256:02a9967f5bd7975982e4f9c4e92655f1dad17676cecff3b86dfd63525879865a'
+body_hash: 'sha256:451e684c53d3175821b4ceda753981de47c587a9ab8844aa15eb56ed717f658b'
 ---
-
 <!-- RETIRED: S14, S18 -->
 
 # `provider-model-catalog` plan
@@ -40,8 +39,8 @@ Build the provider-owned catalog, structured health, provider-native controls, f
 - [x] `P01.S07` - Serve provider catalogs, refresh state, structured health, selectability, and safe reasons through bounded gateway contracts; `src/vaultspec_a2a/api/`.
 - [x] `P01.S08` - Replace new-run profile admission with required served selection, bounded overrides, explicit fallbacks, controls, validation, and replay identity; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [x] `P01.S09` - Freeze catalog provenance, exact model values, controls, fallbacks, execution modes, and schema version through compilation; `src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/graph/compiler.py`.
-- [ ] `P01.S10` - Remove provider and model policy from product presets and retire static external model-map authority while preserving legacy restart; `src/vaultspec_a2a/team/, src/vaultspec_a2a/graph/enums.py`.
-- [ ] `P01.S11` - Prove catalog discovery, stale refusal, health separation, served validation, replay, frozen restart and legacy restart with real behavior; correct ER19 by asserting observed availability rather than a hardcoded unavailable state; `src/vaultspec_a2a/providers/tests/, src/vaultspec_a2a/api/tests/, src/vaultspec_a2a/service_tests/`.
+- [ ] `P01.S10` - Remove every product provider/model/profile authority, static external model map, deprecated provider alias, legacy reader/writer/DTO and legacy restart or redispatch branch; reject retired input and stored state with a typed unsupported/incompatible outcome before construction or dispatch, without translation, migration or substitution; `src/vaultspec_a2a/team/, src/vaultspec_a2a/graph/enums.py, src/vaultspec_a2a/providers/, src/vaultspec_a2a/control/, src/vaultspec_a2a/api/`.
+- [ ] `P01.S11` - Prove catalog discovery, stale refusal, health separation, served validation, same-id replay and current-schema frozen restart with real behavior; prove legacy provider/model/profile input and durable state are typed refused before construction or dispatch with no disclosure, translation, migration, substitution or redispatch; retain the ER19 observed-availability correction and exact-mode admission assertions; `src/vaultspec_a2a/providers/tests/, src/vaultspec_a2a/api/tests/, src/vaultspec_a2a/service_tests/`.
 
 ### Phase `P02` - Implement Dashboard and engine selection surfaces
 
@@ -58,7 +57,7 @@ Add the bounded Rust edge, live catalog store, provider/model/control chooser, a
 Prove the selected provider, model, and controls across the live edge, review both implementations, classify findings, and update the audit trail.
 
 - [ ] `P03.S19` - Drive a real catalog query and run start through Dashboard, Rust, and A2A and prove the frozen selection reaches prompt setup unchanged; `src/vaultspec_a2a/service_tests/, Y:/code/vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/`.
-- [ ] `P03.S20` - Prove refresh, stale selection, unauthenticated, unavailable, admitted, replay, and legacy restart behavior across both repositories; `src/vaultspec_a2a/service_tests/, Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent/`.
+- [ ] `P03.S20` - Prove refresh, stale selection, unauthenticated, unavailable, admitted, replay, current-schema restart, and typed refusal of every legacy provider/model/profile request, response and persisted-state shape across both repositories, with no translation, migration, substitution or redispatch; `src/vaultspec_a2a/service_tests/, Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/stores/server/agent/`.
 - [ ] `P03.S21` - Run the formal A2A implementation review and record every classified finding in the audit queue; `src/vaultspec_a2a/, .vault/audit/`.
 - [ ] `P03.S22` - Run the formal Dashboard and Rust implementation review and record every classified finding in the audit queue; `Y:/code/vaultspec-dashboard-worktrees/main/engine/crates/vaultspec-api/, frontend/src/, .vault/audit/`.
 - [ ] `P03.S23` - Reconcile ADRs, plans, execution records, audits, and follow-up work and close only evidence-proven steps; `.vault/adr/, .vault/plan/, .vault/exec/, .vault/audit/`.
@@ -78,8 +77,9 @@ developed concurrently inside the owning A2A agent turn.
   without issuing a completion.
 - Dashboard selects only current, selectable A2A-served entries and forwards the
   opaque selection through the Rust boundary.
-- Run start revalidates and freezes exact provider values; status and restart
-  reproduce them unchanged; stale and conflicting selections fail closed.
+- Run start revalidates and freezes exact current-schema provider values; status,
+  same-id replay and current-schema restart reproduce them unchanged; stale,
+  conflicting and legacy selections fail closed before construction or dispatch.
 - Structured health distinguishes configuration, transport, authentication,
   catalog, admission, and selectability.
 - Gemini and Kimi installed-lane drift is either repaired with real-behavior

@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:51ddda68abb99ded35c6b910cfe3d335137b8644024c9b69a54e21c373578281'
+body_hash: 'sha256:e3c0d8fa8060bf5063f113d6e0566995c17059f30ef1d302459d2941f0514eb6'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -15,6 +15,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S04]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
+  - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-provider-selection-prerequisites-reference]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -34,6 +35,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 ### audit
 
 - `2026-09-05-embedded-runtime-remediation-implementation-review-audit` - `embedded-runtime-remediation` audit: `rolling implementation review queue`
+- `2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit` - `embedded-runtime-remediation` audit: `no-legacy architecture reconciliation`
 
 ### exec
 

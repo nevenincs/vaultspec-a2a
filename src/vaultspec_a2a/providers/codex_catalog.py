@@ -190,37 +190,23 @@ def _service_tier_values(
     model: JsonObject,
 ) -> tuple[tuple[str, str, str | None], ...]:
     service_tiers = model.get("serviceTiers")
-    if isinstance(service_tiers, list) and service_tiers:
-        values: list[tuple[str, str, str | None]] = []
-        for index, option in enumerate(
-            _objects(service_tiers, field="serviceTiers", limit=MAX_OPTIONS)
-        ):
-            value = _FIELDS.required_text(
-                option.get("id"), field=f"serviceTiers[{index}].id"
-            )
-            values.append(
-                (
-                    value,
-                    display_text(option.get("name"), value),
-                    optional_description(option.get("description")),
-                )
-            )
-        return tuple(values)
-    speed_tiers = model.get("additionalSpeedTiers")
-    if speed_tiers is None:
+    if service_tiers is None:
         return ()
-    if not isinstance(speed_tiers, list) or len(speed_tiers) > MAX_OPTIONS:
-        raise CodexCatalogProtocolError(
-            "Codex catalog field 'additionalSpeedTiers' must be a bounded list"
+    values: list[tuple[str, str, str | None]] = []
+    for index, option in enumerate(
+        _objects(service_tiers, field="serviceTiers", limit=MAX_OPTIONS)
+    ):
+        value = _FIELDS.required_text(
+            option.get("id"), field=f"serviceTiers[{index}].id"
         )
-    return tuple(
-        (
-            _FIELDS.required_text(value, field=f"additionalSpeedTiers[{index}]"),
-            _FIELDS.required_text(value, field=f"additionalSpeedTiers[{index}]"),
-            None,
+        values.append(
+            (
+                value,
+                display_text(option.get("name"), value),
+                optional_description(option.get("description")),
+            )
         )
-        for index, value in enumerate(speed_tiers)
-    )
+    return tuple(values)
 
 
 def _revision(

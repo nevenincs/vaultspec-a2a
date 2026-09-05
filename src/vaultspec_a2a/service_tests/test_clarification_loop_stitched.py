@@ -78,7 +78,6 @@ from ..team.team_config import load_team_config
 from ..testing.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
-    preset_in_process_provider,
 )
 from ..testing.payloads import (
     json_object,
@@ -420,7 +419,7 @@ def _served_in_process_selection(gateway: CertifiedGateway) -> JsonObject:
     try:
         return in_process_selection(
             _served_catalog(gateway),
-            prefer_provider_id=preset_in_process_provider(_CLARIFY_PRESET),
+            prefer_provider_id="deterministic",
         )
     except NoSelectableLaneError as exc:
         pytest.skip(

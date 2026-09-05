@@ -50,7 +50,7 @@ def test_discovery_advertises_exactly_the_roles_policy_requires(preset_id: str) 
     """Red if the served list and the enforced list are computed separately."""
     tc = load_team_config(preset_id)
 
-    summary = _summarize_preset(preset_id, None, False)
+    summary = _summarize_preset(preset_id, None)
 
     assert list(summary.required_roles) == required_role_ids(tc), (
         f"preset {preset_id!r} advertises required_roles that differ from the "
@@ -71,7 +71,7 @@ def test_a_bundle_minted_from_discovery_is_never_refused_for_missing_roles(
     harness) and never a role the caller could not have known to mint.
     """
     tc = load_team_config(preset_id)
-    summary = _summarize_preset(preset_id, None, False)
+    summary = _summarize_preset(preset_id, None)
 
     bundle = ActorTokenBundle(
         tokens={role: f"tok-{role}" for role in summary.required_roles},

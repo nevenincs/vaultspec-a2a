@@ -85,7 +85,7 @@ class TestResolveEnvVars:
 # and emits the resolved environment as JSON. The child reads only the process
 # environment its parent hands it, so the scrub is exercised across a real
 # process boundary rather than by monkeypatching the running interpreter (mirrors
-# the readiness-probe pattern in ``api/tests/test_model_profiles_evidence.py``).
+# the readiness-probe pattern in the provider-readiness tests).
 _SCRUB_PROBE_SCRIPT = textwrap.dedent(
     """
     import json

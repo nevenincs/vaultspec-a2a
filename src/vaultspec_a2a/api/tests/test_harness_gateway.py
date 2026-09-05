@@ -117,10 +117,10 @@ async def test_unprovisioned_workspace_refused_at_run_start(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_unprovisioned_preset_serves_harness_reason_at_discovery(
+async def test_unprovisioned_preset_discovery_exposes_no_runtime_policy(
     session_factory, checkpointer, tmp_path: Path
 ) -> None:
-    """Discovery marks the authoring preset unavailable with the harness reason."""
+    """Preset discovery stays descriptive; run admission owns harness readiness."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
@@ -129,13 +129,10 @@ async def test_unprovisioned_preset_serves_harness_reason_at_discovery(
         resp = await client.get("/v1/presets", params={"workspace_root": str(tmp_path)})
         assert resp.status_code == 200
         by_id = {p["id"]: p for p in resp.json()["presets"]}
-        profiles = by_id[_AUTHORING]["profiles"]
-        # Every profile of the unprovisioned authoring preset carries the harness
-        # reason among its unavailable reasons; none leaks the workspace path.
-        for profile in profiles:
-            reasons = " ".join(profile["unavailable_reasons"])
-            assert "harness" in reasons.lower()
-            assert str(tmp_path) not in reasons
+        summary = by_id[_AUTHORING]
+        assert summary["loadable"] is True
+        assert "profiles" not in summary
+        assert "default_profile_id" not in summary
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -165,10 +162,10 @@ async def test_provisioned_workspace_clears_the_harness_gate_at_run_start(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_provisioned_preset_has_no_harness_reason_at_discovery(
+async def test_provisioned_preset_discovery_exposes_no_runtime_policy(
     session_factory, checkpointer, tmp_path: Path
 ) -> None:
-    """Discovery over a provisioned workspace serves no harness reason."""
+    """Provisioning does not add provider or model policy to preset discovery."""
     ws = tmp_path / "ws"
     result = provision_workspace(ws)
     assert result.ok, result.harness.reasons
@@ -181,9 +178,10 @@ async def test_provisioned_preset_has_no_harness_reason_at_discovery(
         resp = await client.get("/v1/presets", params={"workspace_root": str(ws)})
         assert resp.status_code == 200
         by_id = {p["id"]: p for p in resp.json()["presets"]}
-        for profile in by_id[_AUTHORING]["profiles"]:
-            reasons = " ".join(profile["unavailable_reasons"])
-            assert "harness" not in reasons.lower()
+        summary = by_id[_AUTHORING]
+        assert summary["loadable"] is True
+        assert "profiles" not in summary
+        assert "default_profile_id" not in summary
 
 
 def test_probe_harness_refuses_authoring_preset_without_workspace() -> None:

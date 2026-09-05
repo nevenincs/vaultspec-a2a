@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ..graph.enums import AgentLifecycleState, Model, PermissionType, Provider
+from ..graph.enums import AgentLifecycleState, PermissionType, Provider
 from .enums import (
     TERMINAL_STATUSES,
     DegradedReason,
@@ -54,7 +54,6 @@ __all__ = [
     "classify_message_role",
     "classify_permission_pause_reason",
     "classify_transcript_availability",
-    "coerce_model",
     "coerce_provider",
     "derive_message_id",
     "extract_message_timestamp",
@@ -425,19 +424,14 @@ class AgentData:
     ``provider``, and ``model`` carry the real enums so an unknown value cannot
     survive as an arbitrary string all the way to the wire.
 
-    ``model_name`` is deliberately a plain string, and is the one field here
-    that cannot be an enum: it holds the provider-issued catalog identifier a
-    frozen run actually executed (``mock-high``, and so on), whereas ``model``
-    holds a four-value capability tier. They are not two spellings of one fact.
-    A frozen run resolves no capability at all, so ``model`` is ``None`` on
-    those runs and this field is the only disclosure of what ran.
+    ``model_name`` holds the exact provider-issued catalog identifier the run
+    executed.
     """
 
     agent_id: str
     node_name: str
     state: AgentLifecycleState
     provider: Provider | None = None
-    model: Model | None = None
     model_name: str | None = None
     role: str = ""
     display_name: str = ""
@@ -535,16 +529,6 @@ def coerce_provider(value: object) -> Provider | None:
         return None
 
 
-def coerce_model(value: object) -> Model | None:
-    """Coerce a node-metadata value to a :class:`Model` capability, else ``None``."""
-    if isinstance(value, Model):
-        return value
-    try:
-        return Model(value)
-    except ValueError:
-        return None
-
-
 def build_agent_descriptor(
     summary: Mapping[str, str],
     state: AgentLifecycleState,
@@ -560,7 +544,6 @@ def build_agent_descriptor(
         node_name=summary.get("node_name", ""),
         state=state,
         provider=coerce_provider(summary.get("provider")),
-        model=coerce_model(summary.get("model")),
         model_name=summary.get("model_name") or None,
         role=summary.get("role", ""),
         display_name=summary.get("display_name", ""),

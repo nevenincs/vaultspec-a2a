@@ -22,7 +22,6 @@ from ..lifecycle.manager import tree_kill
 from ..testing.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
-    preset_in_process_provider,
 )
 from ..testing.ports import free_port
 from ..tests.gateway_boot import GatewayBootError
@@ -782,9 +781,7 @@ class ServiceStack:
         # file's: it will not hand back a billable lane even if one is the only
         # selectable thing this stack serves.
         try:
-            selection = in_process_selection(
-                payload, prefer_provider_id=preset_in_process_provider(team_preset)
-            )
+            selection = in_process_selection(payload, prefer_provider_id="mock")
         except NoSelectableLaneError as exc:
             raise GatewayBootError(
                 f"a {team_preset!r} run cannot present a valid selection: {exc}"

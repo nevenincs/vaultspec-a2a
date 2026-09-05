@@ -13,10 +13,6 @@ collaboration is proven by running the same harness against the vaultspec-adr-re
 preset (or a mixed-provider profile).
 """
 
-[team.defaults]
-provider   = "deterministic"
-capability = "mid"
-
 [team.topology]
 type  = "research_adr"
 order = []
@@ -50,20 +46,15 @@ recursion_limit      = 50
 
 [[team.workers]]
 agent_id = "vaultspec-researcher"
-model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-synthesist"
-model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-adr-author"
-model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-plan-author"
-model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-doc-reviewer"
-model    = { provider = "deterministic" }

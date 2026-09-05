@@ -295,17 +295,6 @@ def _normalized_payload(
                         code=AcpErrorCode.INTERNAL_ERROR,
                     )
 
-    legacy = result.get("models")
-    legacy_models = lenient_json_object(legacy)
-    if not models and legacy_models:
-        models = _models_from_options(
-            _objects(
-                legacy_models.get("availableModels"),
-                field="models.availableModels",
-                limit=MAX_MODELS,
-            ),
-            namespace=f"{key.provider_id}:{key.execution_mode}:model",
-        )
     return models, tuple(controls)
 
 

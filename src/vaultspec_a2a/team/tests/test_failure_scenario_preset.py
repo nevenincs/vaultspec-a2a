@@ -57,11 +57,22 @@ def _compiled_graph() -> CompiledTeamGraph:
     agent_configs = {
         ref.agent_id: load_agent_config(ref.agent_id) for ref in team_config.workers
     }
+    lane: dict[str, object] = {
+        "schema_version": 1,
+        "provider": "deterministic",
+        "execution_mode": "in-process-deterministic",
+        "catalog_revision": "test-revision",
+        "entry_id": "test-entry",
+        "model_name": "deterministic",
+        "controls": [],
+        "fallbacks": [],
+    }
     return compile_team_graph(
         team_config,
         agent_configs,
         provider_factory=ProviderFactory(),
         workspace_root=Path.cwd(),
+        model_assignment={ref.agent_id: dict(lane) for ref in team_config.workers},
     )
 
 
@@ -70,30 +81,10 @@ def test_the_preset_is_discoverable() -> None:
     assert _PRESET in discover_team_preset_ids()
 
 
-def test_every_worker_runs_on_the_serverless_in_process_lane() -> None:
-    """The scenario must fail identically on an unarmed host.
-
-    Admission as an in-process lane is deliberately NOT the assertion here, and
-    would be too weak to make the claim: the mock lane is admitted in-process
-    yet proxies the in-repo tape server, so a scenario on that lane needs a
-    service running and behaves differently when it is not. Only the
-    deterministic lane runs with no server at all, so the assertion names it.
-
-    Read from the shipped preset rather than hardcoded, so a later edit that
-    points a stage at another lane fails here instead of quietly turning the
-    scenario into something only a provisioned machine can run.
-    """
-    from ...graph.enums import Provider
-    from ...providers.lane_admission import IN_PROCESS_LANES
-
+def test_preset_contains_no_provider_or_model_policy() -> None:
     team_config = load_team_config(_PRESET)
-    lanes = {
-        ref.model.provider or team_config.defaults.provider
-        for ref in team_config.workers
-    }
-
-    assert lanes == {Provider.DETERMINISTIC}
-    assert lanes <= IN_PROCESS_LANES
+    assert "defaults" not in type(team_config).model_fields
+    assert all("model" not in type(ref).model_fields for ref in team_config.workers)
 
 
 @pytest.mark.asyncio

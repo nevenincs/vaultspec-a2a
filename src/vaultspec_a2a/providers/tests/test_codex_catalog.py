@@ -150,7 +150,7 @@ def test_pages_preserve_models_reasoning_efforts_and_service_tiers() -> None:
     )
 
 
-def test_deprecated_speed_tiers_are_retained_when_service_tiers_are_absent() -> None:
+def test_retired_speed_tiers_are_not_catalog_authority() -> None:
     model = _model("provider-model-a", service_tiers=())
     model["additionalSpeedTiers"] = ["accelerated", "maximum"]
     catalog = catalog_from_app_server(
@@ -158,11 +158,8 @@ def test_deprecated_speed_tiers_are_retained_when_service_tiers_are_absent() -> 
         {"webSearch": False, "imageGeneration": False, "namespaceTools": False},
         key=_KEY,
     )
-    service = catalog.native_controls[1]
-    assert service.kind is ControlKind.SERVICE_TIER
-    assert [option.provider_value for option in service.options] == [
-        "accelerated",
-        "maximum",
+    assert [control.kind for control in catalog.native_controls] == [
+        ControlKind.THOUGHT_LEVEL
     ]
 
 

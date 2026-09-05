@@ -11,8 +11,6 @@ import pytest
 from pydantic import ValidationError
 
 from ...authoring.contract import DOCUMENT_AUTHORING_ROLES, RESEARCH_ADR_ROLES
-from ...graph.enums import Model, Provider
-from ...providers.lane_admission import is_lane_admissible, lane_admission_reason
 from ...thread.errors import (
     AgentConfigNotFoundError,
     ConfigError,
@@ -21,16 +19,13 @@ from ...thread.errors import (
 from ..team_config import (
     DEFAULT_AUTHORING_SURFACES,
     AgentConfig,
-    AgentModelConfig,
     TeamConfig,
     TeamGraphConfig,
     TeamPermissionsConfig,
     TeamPersonaConfig,
     TopologyConfig,
     TopologyType,
-    WorkerOverrideConfig,
     WorkerRef,
-    discover_team_preset_ids,
     load_agent_config,
     load_team_config,
 )
@@ -134,75 +129,6 @@ def _product_persona_ids() -> list[str]:
         for path in _AGENTS_DIR.glob("*.toml")
         if not path.stem.startswith(("mock-", "deterministic-"))
     )
-
-
-class TestAgentModelConfig:
-    """Verify provider/capability fields on preset agents."""
-
-    @pytest.mark.parametrize("agent_id", _product_persona_ids())
-    def test_no_product_persona_declares_provider_or_capability(
-        self, agent_id: str
-    ) -> None:
-        """A product persona carries topology and prompt, never model policy.
-
-        This inverts what these tests used to assert. They pinned each persona to
-        a provider and a capability tier, which is precisely the policy the
-        catalog contract removes from presets: a run's provider and model are
-        chosen at run start from the catalog its lane serves, so a persona that
-        named one would be competing with the user's actual selection.
-
-        Asserted per persona rather than in aggregate so a failure names the file
-        to fix, and derived from a glob so re-adding an ``[agent.model]`` block to
-        any bundled persona fails here rather than silently reintroducing the
-        policy.
-        """
-        cfg = load_agent_config(agent_id)
-        assert cfg.model.provider is None, (
-            f"{agent_id} declares provider {cfg.model.provider}; product presets "
-            "carry no provider policy under the catalog contract"
-        )
-        assert cfg.model.capability is None, (
-            f"{agent_id} declares capability {cfg.model.capability}; a capability "
-            "tier is model policy and is chosen at run start, not in the preset"
-        )
-        assert cfg.model.provider_fallback == [], (
-            f"{agent_id} declares a provider fallback; an execution fallback is an "
-            "explicit served selection at run start, never a preset default"
-        )
-
-    def test_the_persona_sweep_is_not_vacuous(self) -> None:
-        """The glob above finds the real product personas.
-
-        A parametrization that collected nothing would report green over every
-        persona in the tree, which is the failure mode this whole guard exists to
-        prevent one layer down.
-        """
-        ids = _product_persona_ids()
-        assert len(ids) >= 8, ids
-        assert "vaultspec-supervisor" in ids
-        assert "vaultspec-coder" in ids
-        assert not [i for i in ids if i.startswith(("mock-", "deterministic-"))]
-
-    def test_internal_lanes_stay_fixture_pinned(self) -> None:
-        """The in-process lanes keep their pinning, which the contract permits.
-
-        Without this the guard above could be "satisfied" by stripping every
-        persona in the tree, which would break the deterministic certification
-        lanes that have no catalog to select from.
-        """
-        cfg = load_agent_config("deterministic-tool-call")
-        assert cfg.model.provider == Provider.DETERMINISTIC
-
-    def test_agent_model_config_all_optional(self) -> None:
-        """AgentModelConfig fields are all optional (None by default)."""
-        model_cfg = AgentModelConfig()
-        assert model_cfg.provider is None
-        assert model_cfg.capability is None
-
-
-# ---------------------------------------------------------------------------
-# AgentConfig: id validation
-# ---------------------------------------------------------------------------
 
 
 class TestAgentIdValidation:
@@ -438,111 +364,22 @@ class TestTeamConfigFromToml:
         assert cfg.harness.authoring_bridge is True
         assert cfg.is_document_authoring is False
 
-    def test_doc_editor_names_no_lane_at_all(self) -> None:
-        """agent-flow D3, in its strengthened form: the preset names no lane.
-
-        `no-unproven-providers-in-served-profiles` admits a lane into a served
-        profile only after a live test completed a real turn on it. This used to
-        resolve the doc-editor down the precedence chain and check the resulting
-        lane against the admission registry.
-
-        Under the catalog contract there is no resulting lane to check: the preset
-        carries no provider policy, so the question "which lane does this preset
-        name?" has the answer "none". That is a STRICTLY stronger position than
-        the old one - a preset that names nothing cannot name something unproven -
-        so the rule is enforced by asserting the absence rather than vetting a
-        value. The admission gate still runs, at run start, against the lane the
-        user actually selected from the served catalog.
-        """
-        cfg = load_team_config("vaultspec-doc-editor")
-        agent_cfg = load_agent_config("vaultspec-doc-editor")
-        worker_ref = cfg.workers[0]
-
-        assert cfg.defaults.provider is None
-        assert cfg.defaults.capability is None
-        assert agent_cfg.model.provider is None
-        assert worker_ref.model.provider is None
-        assert cfg.profiles == {}, (
-            "the doc-editor declares a model profile again; a product preset "
-            "carries topology, personas, tools, and role requirements only"
-        )
-
-    def test_no_bundled_product_preset_names_an_execution_lane(self) -> None:
-        """The invariant behind the case above, swept over every shipped preset.
-
-        Checked by sweep rather than by roster so a preset added later is covered
-        on arrival, and so re-introducing provider policy anywhere in the bundled
-        product set fails here. The in-process lanes are excluded by the same
-        carve-out that lets them stay fixture-pinned: they have no catalog to be
-        selected from.
-
-        The admission registry is still consulted, for the one case that would
-        otherwise slip through: a preset that DOES name a lane must at minimum
-        name an admissible one, so a deliberate future exception cannot smuggle in
-        an unproven lane while this guard is being loosened.
-        """
-        swept: list[str] = []
-        for team_id in sorted(discover_team_preset_ids()):
-            if team_id.startswith(("mock-", "deterministic-")):
-                continue
-            try:
-                cfg = load_team_config(team_id)
-            except (ConfigError, ValidationError):
-                continue
-            if any(
-                worker.model.provider in (Provider.MOCK, Provider.DETERMINISTIC)
-                for worker in cfg.workers
-            ) or cfg.defaults.provider in (Provider.MOCK, Provider.DETERMINISTIC):
-                # A certification preset pinned to an in-process lane, named
-                # without the id prefix. Same carve-out, detected by what it
-                # declares rather than by how it is spelled.
-                continue
-            swept.append(team_id)
-            assert cfg.defaults.provider is None, (
-                f"{team_id} declares a team-default provider; product presets "
-                "carry no provider policy under the catalog contract"
+    def test_product_presets_expose_no_provider_policy_fields(self) -> None:
+        for team_id in (
+            "vaultspec-adr-research",
+            "vaultspec-doc-editor",
+            "vaultspec-solo-coder",
+        ):
+            cfg = load_team_config(team_id)
+            assert "defaults" not in type(cfg).model_fields
+            assert "profiles" not in type(cfg).model_fields
+            assert all(
+                "model" not in type(worker).model_fields for worker in cfg.workers
             )
-            assert cfg.profiles == {}, (
-                f"{team_id} declares model profile(s) {sorted(cfg.profiles)}; "
-                "product model profiles are retired by the catalog contract"
-            )
-            for worker in cfg.workers:
-                assert worker.model.provider is None, (
-                    f"{team_id} pins worker {worker.agent_id} to "
-                    f"{worker.model.provider}"
-                )
-                agent_cfg = load_agent_config(worker.agent_id)
-                assert agent_cfg.model.provider is None or is_lane_admissible(
-                    agent_cfg.model.provider
-                ), (
-                    f"{team_id}/{worker.agent_id} names "
-                    f"{agent_cfg.model.provider}: "
-                    f"{lane_admission_reason(agent_cfg.model.provider)}"
-                )
-
-        assert "vaultspec-adr-research" in swept, swept
-        assert "vaultspec-doc-editor" in swept, swept
-        assert "vaultspec-solo-coder" in swept, swept
 
 
 # ---------------------------------------------------------------------------
 # TeamConfig: worker model override
-# ---------------------------------------------------------------------------
-
-
-class TestWorkerModelOverride:
-    """Verify per-worker model overrides are loaded correctly."""
-
-    def test_worker_without_override_has_none_fields(self) -> None:
-        """Workers with no override have None provider and capability."""
-        cfg = load_team_config("vaultspec-solo-coder")
-        coder_ref = next(w for w in cfg.workers if w.agent_id == "vaultspec-coder")
-        assert coder_ref.model.provider is None
-        assert coder_ref.model.capability is None
-
-
-# ---------------------------------------------------------------------------
-# TeamConfig: topology order subset validation
 # ---------------------------------------------------------------------------
 
 
@@ -625,35 +462,6 @@ agent_id = "coder"
 
 # ---------------------------------------------------------------------------
 # WorkerRef model
-# ---------------------------------------------------------------------------
-
-
-class TestWorkerRef:
-    """Verify WorkerRef default and explicit model overrides."""
-
-    def test_default_has_none_model(self) -> None:
-        """WorkerRef with only agent_id has None provider/capability by default."""
-        ref = WorkerRef(agent_id="coder")
-        assert ref.model.provider is None
-        assert ref.model.capability is None
-
-    def test_explicit_capability_override(self) -> None:
-        """WorkerRef accepts explicit capability override."""
-        ref = WorkerRef(
-            agent_id="coder", model=WorkerOverrideConfig(capability=Model.HIGH)
-        )
-        assert ref.model.capability == Model.HIGH
-
-    def test_explicit_provider_override(self) -> None:
-        """WorkerRef accepts explicit provider override."""
-        ref = WorkerRef(
-            agent_id="coder", model=WorkerOverrideConfig(provider=Provider.CLAUDE)
-        )
-        assert ref.model.provider == Provider.CLAUDE
-
-
-# ---------------------------------------------------------------------------
-# TOML syntax error handling
 # ---------------------------------------------------------------------------
 
 
@@ -870,35 +678,6 @@ recursion_limit = 50
         assert cfg.graph.step_timeout_seconds == 120
         assert cfg.graph.recursion_limit == 50
 
-    def test_provider_fallback_parses_on_defaults(self, tmp_path: Path) -> None:
-        """team.defaults.provider_fallback list parses correctly."""
-        toml_content = b"""
-[team]
-id           = "test-fallback"
-display_name = "Test Fallback"
-
-[team.defaults]
-provider          = "claude"
-provider_fallback = ["openai", "gemini"]
-
-[team.topology]
-type = "pipeline"
-order = ["coder"]
-
-[[team.workers]]
-agent_id = "coder"
-"""
-        override_dir = tmp_path / ".vaultspec" / "teams"
-        override_dir.mkdir(parents=True)
-        (override_dir / "test-fallback.toml").write_bytes(toml_content)
-        cfg = load_team_config("test-fallback", workspace_root=tmp_path)
-        assert len(cfg.defaults.provider_fallback) == 2
-
-
-# ---------------------------------------------------------------------------
-# Document-authoring persona TOMLs
-# ---------------------------------------------------------------------------
-
 
 class TestDocumentAuthoringPersonas:
     """Verify the document-authoring persona TOMLs load and have correct fields."""
@@ -1078,126 +857,44 @@ class TestAdrResearchTeamPreset:
         assert tuple(harness.required_surfaces) == DEFAULT_AUTHORING_SURFACES
 
 
-class TestModelProfiles:
-    """team.profiles schema, validation, and the implicit team-defaults profile.
-
-    Real TOML only: bundled preset plus in-memory ``model_validate`` over dicts
-    (config, not a mock).
-    """
-
-    def test_no_bundled_preset_declares_a_model_profile(self) -> None:
-        """The bundled product set ships no model profile at all.
-
-        Three tests used to live here pinning the shape of the `fast`, `kimi`, and
-        `kimi-all` profiles of the adr-research preset. They are gone with the
-        profiles themselves: a model profile IS provider/capability policy, and it
-        is the named retirement of the catalog contract.
-
-        The schema below is deliberately kept and still tested, because a
-        workspace may still declare its own team TOML; what the product no longer
-        does is ship one.
-        """
-        declaring = {
-            team_id: sorted(cfg.profiles)
-            for team_id in sorted(discover_team_preset_ids())
-            for cfg in [_loadable(team_id)]
-            if cfg is not None and cfg.profiles
+class TestRetiredModelPolicy:
+    @pytest.mark.parametrize(
+        "payload",
+        (
+            {"defaults": {"provider": "codex"}},
+            {"supervisor": {"provider": "codex"}},
+            {"profiles": {"fast": {"roles": {}}}},
+        ),
+    )
+    def test_team_schema_refuses_retired_policy(
+        self, payload: dict[str, object]
+    ) -> None:
+        base = {
+            "id": "retired-policy",
+            "display_name": "Retired policy",
+            "topology": {"type": "pipeline", "order": ["coder"]},
+            "workers": [{"agent_id": "coder"}],
         }
-        assert declaring == {}, declaring
+        with pytest.raises(ValidationError):
+            TeamConfig.model_validate({**base, **payload})
 
-    def test_effective_profiles_injects_implicit_team_defaults(self) -> None:
-        cfg = load_team_config("vaultspec-adr-research")
-        effective = cfg.effective_profiles()
-        assert "team-defaults" in effective
-        assert cfg.default_profile_id == "team-defaults"
-        assert effective["team-defaults"].display_name == "Team defaults"
-        assert effective["team-defaults"].roles == {}
-        # The implicit default is now the ONLY profile a bundled preset serves.
-        assert set(effective) == {"team-defaults"}
-
-    def _team_dict(self, profiles: dict[str, object]) -> dict[str, object]:
-        return {
-            "id": "sample-team",
-            "display_name": "Sample",
-            "topology": {"type": "star"},
-            "workers": [{"agent_id": "role_a"}, {"agent_id": "role_b"}],
-            "profiles": profiles,
-        }
-
-    def test_unknown_role_in_profile_raises_config_error(self) -> None:
-        with pytest.raises(ConfigError, match="overlays unknown role 'ghost'"):
-            TeamConfig.model_validate(
-                self._team_dict({"p": {"roles": {"ghost": {"capability": "low"}}}})
+    def test_worker_schema_refuses_retired_model_override(self) -> None:
+        with pytest.raises(ValidationError):
+            WorkerRef.model_validate(
+                {"agent_id": "coder", "model": {"provider": "codex"}}
             )
 
-    def test_reserved_team_defaults_with_roles_raises_config_error(self) -> None:
-        with pytest.raises(ConfigError, match="reserved 'team-defaults'"):
-            TeamConfig.model_validate(
-                self._team_dict(
-                    {"team-defaults": {"roles": {"role_a": {"capability": "low"}}}}
-                )
-            )
-
-    def test_declared_team_defaults_display_override_wins(self) -> None:
-        """A team may relabel team-defaults (empty overlay) in effective_profiles."""
-        cfg = TeamConfig.model_validate(
-            self._team_dict({"team-defaults": {"display_name": "House defaults"}})
-        )
-        assert cfg.effective_profiles()["team-defaults"].display_name == (
-            "House defaults"
-        )
-
-    def test_profile_can_set_provider_and_fallback(self) -> None:
-        cfg = TeamConfig.model_validate(
-            self._team_dict(
+    def test_agent_schema_refuses_retired_model_policy(self) -> None:
+        with pytest.raises(ValidationError):
+            AgentConfig.model_validate(
                 {
-                    "balanced": {
-                        "roles": {
-                            "role_a": {
-                                "provider": "gemini",
-                                "capability": "high",
-                                "provider_fallback": ["claude"],
-                            }
-                        }
-                    }
+                    "id": "coder",
+                    "display_name": "Coder",
+                    "role": "coder",
+                    "persona": {"system_prompt": "code"},
+                    "model": {"provider": "codex"},
                 }
             )
-        )
-        overlay = cfg.profiles["balanced"].roles["role_a"]
-        assert overlay.provider == Provider.GEMINI
-        assert overlay.capability == Model.HIGH
-        assert overlay.provider_fallback == [Provider.CLAUDE]
-
-    def test_no_profiles_still_has_implicit_default(self) -> None:
-        cfg = TeamConfig.model_validate(self._team_dict({}))
-        assert cfg.profiles == {}
-        assert list(cfg.effective_profiles()) == ["team-defaults"]
-
-    def test_workspace_team_toml_profile_loads(self, tmp_path: Path) -> None:
-        """A workspace-local team TOML with a profile loads via the config order."""
-        teams_dir = tmp_path / ".vaultspec" / "teams"
-        teams_dir.mkdir(parents=True)
-        (teams_dir / "ws-team.toml").write_text(
-            "\n".join(
-                [
-                    "[team]",
-                    'id = "ws-team"',
-                    'display_name = "WS Team"',
-                    "[team.topology]",
-                    'type = "star"',
-                    "[[team.workers]]",
-                    'agent_id = "role_a"',
-                    "[team.profiles.fast]",
-                    'display_name = "Fast"',
-                    "[team.profiles.fast.roles.role_a]",
-                    'capability = "low"',
-                ]
-            ),
-            encoding="utf-8",
-        )
-        cfg = load_team_config("ws-team", workspace_root=tmp_path)
-        assert cfg.profiles["fast"].roles["role_a"].capability == Model.LOW
-        assert "team-defaults" in cfg.effective_profiles()
 
 
 class TestTeamHarness:

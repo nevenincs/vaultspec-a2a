@@ -40,7 +40,6 @@ import pytest
 from ..testing.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
-    preset_in_process_provider,
 )
 from ..tests.gateway_boot import (
     GatewayBootError,
@@ -155,7 +154,7 @@ class CertifiedGateway:
             # verb's own default team_preset argument, which no caller overrides.
             selection = in_process_selection(
                 response.json(),
-                prefer_provider_id=preset_in_process_provider(DEFAULT_TEAM_PRESET),
+                prefer_provider_id="mock",
             )
         except NoSelectableLaneError as exc:
             pytest.skip(f"this certification stack cannot present a selection: {exc}")

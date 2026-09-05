@@ -122,7 +122,19 @@ class FrozenTeamSelection:
 
     def compiler_map(self) -> dict[str, dict[str, Any]]:
         """Render exact, catalog-independent execution inputs for compilation."""
-        result: dict[str, dict[str, Any]] = {}
+        result: dict[str, dict[str, Any]] = {
+            "__supervisor__": {
+                "provider": self.selection.reference.provider_id,
+                "execution_mode": self.selection.reference.execution_mode,
+                "catalog_revision": self.selection.reference.catalog_revision,
+                "entry_id": self.selection.reference.entry_id,
+                "model_name": self.selection.provider_value,
+                "controls": [item.to_record() for item in self.selection.controls],
+                "fallbacks": [item.to_record() for item in self.fallbacks],
+                "provenance": {"selection_source": "team_selection"},
+                "schema_version": self.schema_version,
+            }
+        }
         for role in self.roles:
             selected = self.overrides.get(role, self.selection)
             result[role] = {

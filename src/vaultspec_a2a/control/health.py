@@ -452,9 +452,9 @@ def _eligible_provider_names() -> list[str]:
     backend.
     """
     from ..graph.enums import Provider
-    from ..providers.model_profiles import probe_provider_readiness
+    from ..providers.provider_readiness import probe_provider_readiness
 
-    candidates = (Provider.CLAUDE, Provider.GEMINI, Provider.CODEX, Provider.KIMI)
+    candidates = (Provider.CLAUDE, Provider.CODEX, Provider.KIMI)
     return [
         provider.value
         for provider in candidates

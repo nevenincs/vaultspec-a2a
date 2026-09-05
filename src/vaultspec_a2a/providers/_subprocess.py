@@ -148,7 +148,7 @@ async def _spawn_acp_process(
     """Spawn an ACP subprocess with platform-appropriate isolation.
 
     Windows (default): ``create_subprocess_shell`` with ``CREATE_NEW_PROCESS_GROUP``
-    so that ``.cmd`` shims (e.g. ``gemini.cmd``) work; the whole tree (cmd.exe +
+    so that ``.cmd`` shims (for example ``kimi.cmd``) work; the whole tree (cmd.exe +
     node.exe + any grandchildren) is reaped as one via the Job Object the process
     is assigned to below, terminated in ``kill_process_tree``.
 

@@ -3,10 +3,6 @@ id           = "mock-success-single"
 display_name = "Mock Success Single"
 description  = "A single coder team that concludes work successfully."
 
-[team.defaults]
-provider   = "mock"
-capability = "mid"
-
 [team.topology]
 type  = "pipeline"
 order = ["mock-coder-success"]

@@ -41,7 +41,6 @@ _DISPLAY_NAMES = {
     Provider.ANTIGRAVITY: "Antigravity",
     Provider.CLAUDE: "Claude",
     Provider.CODEX: "Codex",
-    Provider.GEMINI: "Gemini",
     Provider.KIMI: "Kimi Code",
     Provider.OPENAI: "OpenAI",
     Provider.ZAI: "Z.ai",

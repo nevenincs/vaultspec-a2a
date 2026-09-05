@@ -67,7 +67,7 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     Five removal families:
 
     - Known provider secrets by name. The provider layer re-injects only the auth
-      a lane intentionally supports (``_build_gemini_env``, ``_build_zai_env``),
+      a lane intentionally supports (for example ``_build_zai_env``),
       so removing them here costs nothing a supported lane depends on. Two
       concrete hazards this closes: the Z.ai lane retargets
       ``ANTHROPIC_BASE_URL`` at a third-party gateway, and an inherited
@@ -107,8 +107,8 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
             "LANGCHAIN_TRACING_V2",
             "ANTHROPIC_LOG",
             # Kimi Code's temporary-provider definition is an all-or-none unit.
-            # Scrub its current family and retained legacy spellings so only the
-            # Settings-owned definition can be re-injected by the factory.
+            # Scrub its current family and retired spellings so only the
+            # Settings-owned current definition can be re-injected by the factory.
             "KIMI_API_KEY",
             "KIMI_BASE_URL",
             "KIMI_MODEL_API_KEY",

@@ -35,7 +35,7 @@ from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
-from ..graph.enums import MODEL_MAP, Provider
+from ..graph.enums import Provider
 from ._catalog_fields import local_id, model_list_revision
 from .provider_catalog import (
     AuthenticationState,
@@ -81,6 +81,15 @@ IN_PROCESS_EXECUTION_MODES: Mapping[Provider, str] = MappingProxyType(
     {
         Provider.DETERMINISTIC: "in-process-deterministic",
         Provider.MOCK: "in-process-mock",
+    }
+)
+
+# Exact selectors implemented by the in-process executors. This is executable
+# lane vocabulary, not a capability-to-model policy table.
+IN_PROCESS_MODEL_VALUES: Mapping[Provider, tuple[str, ...]] = MappingProxyType(
+    {
+        Provider.DETERMINISTIC: ("deterministic",),
+        Provider.MOCK: ("mock-high", "mock-low", "mock-max", "mock-mid"),
     }
 )
 
@@ -161,13 +170,10 @@ def _entry_id(key: ProviderCatalogKey, provider_value: str) -> str:
 def _provider_values(provider: Provider) -> tuple[str, ...]:
     """Return the lane's distinct selectors, sorted.
 
-    Read from the shared capability map rather than restated here: the model
-    names an in-process provider answers to are already declared there, and a
-    second copy would be a registry that can disagree with the executor. The
-    deterministic lane maps every capability level to one inert selector, so it
-    collapses to a single entry; the mock lane keeps its four distinct tape keys.
+    These values are the exact selectors implemented and served by the lane.
+    They intentionally carry no capability mapping and no default.
     """
-    return tuple(sorted(set(MODEL_MAP[provider].values())))
+    return IN_PROCESS_MODEL_VALUES[provider]
 
 
 def build_in_process_catalog(

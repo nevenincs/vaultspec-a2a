@@ -24,7 +24,7 @@ completed a turn", and so a handshake-proven lane was served to the composer as 
 selectable profile the backend had never done work with.
 
 **Credential readiness is necessary but NOT sufficient.** Readiness
-(:func:`..model_profiles.probe_provider_readiness`) and admission (this module)
+(:func:`..provider_readiness.probe_provider_readiness`) and admission (this module)
 are separate verdicts, deliberately kept apart so a refusal names which one
 failed. A lane with a perfectly valid credential and a perfectly resolvable
 command is still refused here until a human records its completed-turn proof.
@@ -164,7 +164,6 @@ class WebLaneProof:
 # Deliberately absent, with the coverage they actually have:
 #   - kimi    handshake only (test_kimi_handshake_live.py proves the installed
 #             `kimi acp` speaks our handshake - that is spawn, not work)
-#   - gemini  auth/construction coverage only; no completed turn
 #   - openai  no live turn coverage
 #   - zhipu   no live coverage of any kind
 # ---------------------------------------------------------------------------
@@ -197,12 +196,9 @@ PROVEN_TURN_LANES: Mapping[Provider, LaneProof] = MappingProxyType(
     }
 )
 
-# Catalog serving is execution-mode specific.  The older profile admission API is
-# provider-shaped, so it cannot safely answer this question: a future transport
-# for an already-proven provider must not inherit another transport's evidence.
-# Keep this declaration literal and deny-by-default for the same reason as the
-# provider-level proof map above.  A later migration can move every legacy
-# consumer onto this exact identity once profiles carry an execution mode.
+# Catalog serving is execution-mode specific. A future transport for an
+# already-proven provider must not inherit another transport's evidence. Keep
+# this declaration literal and deny-by-default.
 PROVEN_CATALOG_TURN_LANES: Mapping[ProviderCatalogKey, LaneProof] = MappingProxyType(
     {
         ProviderCatalogKey("codex", "codex-app-server"): PROVEN_TURN_LANES[

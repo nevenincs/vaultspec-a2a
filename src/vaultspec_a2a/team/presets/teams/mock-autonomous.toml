@@ -3,10 +3,6 @@ id           = "mock-autonomous"
 display_name = "Mock Autonomous Team"
 description  = "Fully autonomous team working in tandem solving a problem. No user input required."
 
-[team.defaults]
-provider   = "mock"
-capability = "mid"
-
 [team.topology]
 type  = "pipeline_loop"
 order = ["mock-planner", "mock-coder-success", "mock-reviewer"]

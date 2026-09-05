@@ -6,8 +6,3 @@ description  = "In-process ProviderFactory scenario that pauses through the gene
 
 [agent.persona]
 system_prompt = "Request the programmed deterministic permission decision."
-
-[agent.model]
-provider   = "deterministic"
-capability = "mid"
-

@@ -163,8 +163,11 @@ def test_persisted_selection_refuses_tampered_provider_value() -> None:
         frozen_team_selection_from_record(record)
 
 
-def test_restart_prefers_modern_selection_over_legacy_profile() -> None:
-    from ...control.dispatch import _frozen_model_assignment
+def test_restart_refuses_any_retired_model_profile_state() -> None:
+    from ...control.dispatch import (
+        RetiredModelProfileStateError,
+        _frozen_model_assignment,
+    )
 
     frozen = freeze_team_selection(
         selection=_selection(),
@@ -173,14 +176,13 @@ def test_restart_prefers_modern_selection_over_legacy_profile() -> None:
         required_roles=("coder",),
         records=(_record(),),
     )
-    profile_id, assignment = _frozen_model_assignment(
-        {
-            "provider_catalog_selection": frozen.to_record(),
-            "model_profile": {"profile_id": "must-not-win", "roles": {}},
-        }
-    )
-    assert profile_id is None
-    assert assignment == frozen.compiler_map()
+    with pytest.raises(RetiredModelProfileStateError, match="cannot be restarted"):
+        _frozen_model_assignment(
+            {
+                "provider_catalog_selection": frozen.to_record(),
+                "model_profile": {"profile_id": "must-not-win", "roles": {}},
+            }
+        )
 
 
 @pytest.mark.parametrize(

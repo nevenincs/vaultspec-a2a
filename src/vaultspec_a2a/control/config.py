@@ -346,22 +346,6 @@ class InfraConfig(BaseSettings):
     # The scrub is the single removal site: the ACP layer re-injects only the
     # auth a lane intentionally supports and strips nothing itself. Declaring
     # the key here would advertise a credential the code exists to remove.
-    gemini_api_key: str | None = Field(
-        default=None,
-        validation_alias="GEMINI_API_KEY",
-    )
-    google_api_key: str | None = Field(
-        default=None,
-        validation_alias="GOOGLE_API_KEY",
-    )
-    google_application_credentials: str | None = Field(
-        default=None,
-        validation_alias="GOOGLE_APPLICATION_CREDENTIALS",
-    )
-    gemini_cli_home: str | None = Field(
-        default=None,
-        validation_alias="GEMINI_CLI_HOME",
-    )
     # Antigravity ships `agy` OUTSIDE PATH - its installer drops the binary in
     # a per-user application directory and exposes it through a wrapper - so a
     # bare name lookup finds nothing on a machine where the CLI works. This
@@ -409,7 +393,7 @@ class InfraConfig(BaseSettings):
     # Codex `app-server` authenticates from a persisted local session in its Codex
     # home (~/.codex by default). This non-secret override points the subprocess at
     # an alternate home for headless/container use; no API key is involved (the
-    # ChatGPT-session auth mode is file-based). Mirrors gemini_cli_home.
+    # ChatGPT-session auth mode is file-based).
     codex_home: str | None = Field(
         default=None,
         validation_alias="CODEX_HOME",
@@ -444,7 +428,7 @@ class InfraConfig(BaseSettings):
     )
     # Kimi Code reads persisted aliases from KIMI_CODE_HOME (default ~/.kimi-code).
     # KIMI_MODEL_* defines a temporary provider and is valid only as a complete
-    # name/key/base tuple. Current names precede retained legacy key/base aliases.
+    # name/key/base tuple.
     # Runtime alias selection is not a setting; the factory uses `-m`.
     kimi_code_home: str | None = Field(
         default=None,
@@ -456,22 +440,10 @@ class InfraConfig(BaseSettings):
         exclude=True,
         repr=False,
     )
-    kimi_legacy_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias="KIMI_API_KEY",
-        exclude=True,
-        repr=False,
-    )
     kimi_model_base_url: str | None = Field(
         default=None,
         validation_alias="KIMI_MODEL_BASE_URL",
         description="Base URL in a complete temporary Kimi model definition.",
-    )
-    kimi_legacy_base_url: str | None = Field(
-        default=None,
-        validation_alias="KIMI_BASE_URL",
-        exclude=True,
-        repr=False,
     )
     kimi_temporary_model_name: str | None = Field(
         default=None,
@@ -494,19 +466,19 @@ class InfraConfig(BaseSettings):
 
     @property
     def kimi_api_key(self) -> SecretStr | None:
-        """Return the nonblank current key, then the nonblank migration key."""
-        for candidate in (self.kimi_model_api_key, self.kimi_legacy_api_key):
-            if candidate is not None and candidate.get_secret_value().strip():
-                return candidate
+        """Return the configured nonblank temporary-provider key."""
+        candidate = self.kimi_model_api_key
+        if candidate is not None and candidate.get_secret_value().strip():
+            return candidate
         return None
 
     @property
     def kimi_base_url(self) -> str | None:
-        """Return the normalized current base URL, then its migration fallback."""
-        for candidate in (self.kimi_model_base_url, self.kimi_legacy_base_url):
-            if candidate is not None and candidate.strip():
-                return candidate.strip()
-        return None
+        """Return the normalized temporary-provider base URL."""
+        candidate = self.kimi_model_base_url
+        return (
+            candidate.strip() if candidate is not None and candidate.strip() else None
+        )
 
     host: str = Field(
         default="127.0.0.1",
@@ -854,13 +826,6 @@ class InfraConfig(BaseSettings):
             "Bound on the per-session chunk queue used to buffer ACP streaming"
             " output before it is consumed by the model invocation loop."
         ),
-    )
-
-    # Gemini OAuth
-    oauth_expiry_buffer_seconds: int = Field(
-        default=120,
-        alias="VAULTSPEC_OAUTH_EXPIRY_BUFFER_SECONDS",
-        description="Seconds before OAuth token expiry to trigger a proactive refresh.",
     )
 
     # MCP server

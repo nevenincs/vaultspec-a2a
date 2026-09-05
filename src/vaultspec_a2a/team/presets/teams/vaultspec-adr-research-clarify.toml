@@ -22,10 +22,6 @@ prompt to decide what to ask, so a reader can tell from this file alone whether
 a run can stop for a question and exactly which one it will ask.
 """
 
-[team.defaults]
-provider   = "deterministic"
-capability = "mid"
-
 [team.topology]
 type  = "research_adr"
 order = []
@@ -70,20 +66,15 @@ recursion_limit      = 50
 
 [[team.workers]]
 agent_id = "vaultspec-researcher"
-model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-synthesist"
-model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-adr-author"
-model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-plan-author"
-model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-doc-reviewer"
-model    = { provider = "deterministic" }

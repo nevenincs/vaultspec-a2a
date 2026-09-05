@@ -44,7 +44,7 @@ from ..factory import (
     _classify_codex_command,
     classify_provider_command,
 )
-from ..model_profiles import probe_provider_readiness
+from ..provider_readiness import probe_provider_readiness
 
 if TYPE_CHECKING:
     from ...conftest import ExternalPrerequisiteRule
@@ -550,7 +550,7 @@ def test_factory_creates_codex_chat_model() -> None:
 
 def test_factory_codex_requires_an_exact_catalog_model() -> None:
     """The repository does not invent a Codex default model id."""
-    with pytest.raises(ValueError, match="exact model value frozen"):
+    with pytest.raises(TypeError, match="model"):
         ProviderFactory().create(Provider.CODEX)
 
 

@@ -369,10 +369,7 @@ class ThreadCreationRequest:
     # request that names none is not a run this service can site.
     workspace_root: Path
     actor_tokens: ActorTokenBundle | None = None
-    # The selected profile id and its frozen effective
-    # per-role assignment (agent_id -> {provider, capability, fallback}), threaded
-    # to the worker so compilation reproduces the launched models verbatim.
-    profile_id: str | None = None
+    # The exact served selection frozen at admission and threaded to the worker.
     model_assignment: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
@@ -579,7 +576,6 @@ async def create_and_dispatch_thread(
         vault_index=vault_index,
         validation_errors=[],
         actor_tokens=req.actor_tokens,
-        profile_id=req.profile_id,
         model_assignment=req.model_assignment,
     )
 

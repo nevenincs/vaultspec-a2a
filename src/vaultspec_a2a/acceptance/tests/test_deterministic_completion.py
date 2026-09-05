@@ -280,7 +280,6 @@ async def test_deterministic_completion_emits_a_run_bound_review_bundle(
                     "message": _required_text(
                         scenario.get("message"), at="scenario.message"
                     ),
-                    "profile_id": "team-defaults",
                     "feature_tag": feature_tag,
                     "metadata": {
                         "workspace_root": str(vault_root.parent),

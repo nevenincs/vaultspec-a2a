@@ -7,10 +7,6 @@ description  = "Mock coder agent that emits a tool call requiring human approval
 [agent.persona]
 system_prompt = "You are a mock coder. Emit your programmed human-in-the-loop sequence."
 
-[agent.model]
-provider   = "mock"
-capability = "mid"
-
 [agent.capabilities]
 filesystem_read  = true
 filesystem_write = true

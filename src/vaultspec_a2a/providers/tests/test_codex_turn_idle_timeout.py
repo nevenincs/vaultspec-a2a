@@ -8,7 +8,7 @@ bound with ``acp_turn_idle_timeout_seconds`` (default 600s). It used
 LLM provider API call) and which also governs this model's startup RPCs. A
 Codex turn that was alive but quiet for over 120s - a long tool call, a
 thinking gap - was therefore aborted as hung, while the identical workload
-completed on Claude, Gemini, Kimi and Z.ai.
+completed on Claude, Kimi and Z.ai.
 
 Both scenarios drive the real ``_consume_turn`` against a real, deliberately
 mute subprocess wrapped in a real ``_CodexAppServerClient``, so the empty

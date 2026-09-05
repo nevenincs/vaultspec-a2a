@@ -7,7 +7,6 @@ session lifecycle RPCs and data carriers.
 import asyncio
 import json
 import logging
-from collections.abc import Mapping
 from contextlib import suppress
 from typing import Never
 
@@ -86,16 +85,8 @@ def runtime_log_extra(
 # ---------------------------------------------------------------------------
 
 
-def auth_hint(config: AcpModelConfig) -> str:
-    """Return a provider-specific authentication hint for error messages."""
-    exe = config.command[0] if config.command else ""
-    if "gemini" in exe:
-        return (
-            "To authenticate: set GEMINI_API_KEY or GOOGLE_API_KEY, provide "
-            "GOOGLE_APPLICATION_CREDENTIALS for Vertex AI, or run `gemini` "
-            "interactively and complete the OAuth flow."
-        )
-    # Default: Claude / node-based ACP
+def auth_hint() -> str:
+    """Return the authentication hint for supported ACP agents."""
     return (
         "To authenticate: run `claude login` in your terminal, or set "
         "CLAUDE_CODE_OAUTH_TOKEN in your environment."
@@ -112,10 +103,8 @@ def auth_url_hint(auth_url: str | None, last_auth_url: str | None) -> str:
 
 def select_auth_method_id(
     auth_methods: list[JsonObject],
-    env: Mapping[str, str],
-    auth_mode: str | None,
 ) -> str:
-    """Select the best advertised ACP auth method for the current env."""
+    """Select the first authentication method advertised by the ACP agent."""
     method_ids: list[str] = [
         mid
         for method in auth_methods
@@ -124,20 +113,6 @@ def select_auth_method_id(
     ]
     if not method_ids:
         return "oauth"
-    if env.get("GEMINI_API_KEY") and "gemini-api-key" in method_ids:
-        return "gemini-api-key"
-    if (
-        env.get("GOOGLE_GENAI_USE_VERTEXAI") == "true"
-        or env.get("GOOGLE_APPLICATION_CREDENTIALS")
-        or env.get("GOOGLE_API_KEY")
-    ) and "vertex-ai" in method_ids:
-        return "vertex-ai"
-    if (
-        env.get("GOOGLE_GENAI_USE_GCA") == "true"
-        or env.get("GEMINI_CLI_HOME")
-        or auth_mode in {"local_oauth_mount", "local_oauth_refresh"}
-    ) and "oauth-personal" in method_ids:
-        return "oauth-personal"
     return method_ids[0]
 
 
@@ -210,7 +185,6 @@ async def authenticate_rpc(
     *,
     ctx: AcpSessionContext | None,
     config: AcpModelConfig,
-    env: Mapping[str, str],
     auth_methods: list[JsonObject],
     stdin: asyncio.StreamWriter,
     stdin_lock: asyncio.Lock,
@@ -223,7 +197,7 @@ async def authenticate_rpc(
     last_auth_url = ctx.last_auth_url if ctx is not None else None
     if ctx is not None:
         ctx.last_auth_url = auth_url
-    method_id = select_auth_method_id(auth_methods, env, config.auth_mode)
+    method_id = select_auth_method_id(auth_methods)
     rpc_id = AcpRequestId.AUTHENTICATE
     response_futures[rpc_id] = asyncio.get_running_loop().create_future()
     req: JsonObject = {
@@ -232,9 +206,6 @@ async def authenticate_rpc(
         "method": "authenticate",
         "params": {"methodId": method_id},
     }
-    api_key = env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY")
-    if api_key and method_id in {"gemini-api-key", "vertex-ai"}:
-        req["_meta"] = {"api-key": api_key}
     logger.info(
         "Attempting ACP authenticate handshake",
         extra=runtime_log_extra(config, handshake_step="authenticate"),
@@ -264,7 +235,7 @@ async def authenticate_rpc(
                 "Authentication did not complete before the interactive auth "
                 f"watchdog expired after "
                 f"{settings.acp_interactive_auth_timeout_seconds:.0f}s. "
-                f"{auth_hint(config)}"
+                f"{auth_hint()}"
             ),
             code=AcpErrorCode.INTERNAL_ERROR,
             auth_outcome="watchdog_expired",
@@ -301,9 +272,7 @@ async def authenticate_rpc(
             ),
         )
         raise_auth_outcome_error(
-            message=(
-                f"Authentication ended before completion: {exc}. {auth_hint(config)}"
-            ),
+            message=(f"Authentication ended before completion: {exc}. {auth_hint()}"),
             code=AcpErrorCode.INTERNAL_ERROR,
             auth_outcome="subprocess_exited_before_auth",
             auth_url=auth_url,

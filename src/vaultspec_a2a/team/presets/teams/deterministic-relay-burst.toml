@@ -3,10 +3,6 @@ id           = "deterministic-relay-burst"
 display_name = "Deterministic Relay Burst"
 description  = "ProviderFactory scenario for overflowing a bounded relay replay window."
 
-[team.defaults]
-provider   = "deterministic"
-capability = "mid"
-
 [team.topology]
 type  = "pipeline"
 order = ["deterministic-relay-burst"]

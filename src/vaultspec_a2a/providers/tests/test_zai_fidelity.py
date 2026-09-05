@@ -26,7 +26,7 @@ import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...control.config import settings
-from ...graph.enums import Model, Provider
+from ...graph.enums import Provider
 from ..acp_chat_model import AcpChatModel
 from ..factory import ProviderFactory
 
@@ -49,7 +49,7 @@ async def test_zai_streaming_shape_is_faithful(
     """
     external_prerequisite("zai-credential")
     model = ProviderFactory().create(
-        Provider.ZAI, model=Model.LOW, workspace_root=tmp_path
+        Provider.ZAI, model="zai-test-model", workspace_root=tmp_path
     )
     assert isinstance(model, AcpChatModel)
     # The gateway vars are injected; the token itself is never surfaced here.
@@ -81,7 +81,7 @@ async def test_zai_tool_calling_is_faithful(
     """
     external_prerequisite("zai-credential")
     model = ProviderFactory().create(
-        Provider.ZAI, model=Model.LOW, workspace_root=tmp_path
+        Provider.ZAI, model="zai-test-model", workspace_root=tmp_path
     )
     assert isinstance(model, AcpChatModel)
     model.allowed_tools = ["Write"]

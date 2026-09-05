@@ -3,10 +3,6 @@ id           = "mock-failure-tool"
 display_name = "Mock Tool Failure"
 description  = "A team that finished running with a failure involving tool calling errors."
 
-[team.defaults]
-provider   = "mock"
-capability = "mid"
-
 [team.topology]
 type  = "pipeline"
 order = ["mock-coder-fail-tool"]

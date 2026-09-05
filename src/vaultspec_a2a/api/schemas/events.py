@@ -12,7 +12,6 @@ from pydantic import BaseModel, BeforeValidator, Field
 
 from ...graph.enums import (
     AgentLifecycleState,
-    Model,
     PermissionOptionKind,
     Provider,
     ServerEventType,
@@ -160,7 +159,6 @@ class AgentSummary(BaseModel):
     node_name: str
     state: AgentLifecycleState
     provider: Provider | None = None
-    model: Model | None = None
     model_name: str | None = None
     role: str = ""
     display_name: str = ""

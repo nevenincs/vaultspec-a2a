@@ -14,11 +14,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...graph.enums import MODEL_MAP, Provider
+from ...graph.enums import Provider
 from ..deterministic_chat_model import DeterministicResearchAdrChatModel
 from ..factory import ProviderFactory, _discover_in_process_catalog
 from ..in_process_catalog import (
     IN_PROCESS_EXECUTION_MODES,
+    IN_PROCESS_MODEL_VALUES,
     build_in_process_catalog,
     in_process_catalog_key,
     in_process_lane_serving_armed,
@@ -110,12 +111,12 @@ def test_the_static_catalog_carries_everything_a_selection_revalidates(
 def test_entries_advertise_only_selectors_the_executor_answers_to(
     key: ProviderCatalogKey,
 ) -> None:
-    """The served values come from the shared map, never a second declaration."""
+    """The catalog serves the exact selectors its in-process executor implements."""
     catalog = build_in_process_catalog(key)
     provider = Provider(key.provider_id)
 
     served = {model.provider_value for model in catalog.models}
-    assert served == set(MODEL_MAP[provider].values())
+    assert served == set(IN_PROCESS_MODEL_VALUES[provider])
     assert len({model.entry_id for model in catalog.models}) == len(catalog.models)
 
 
@@ -295,7 +296,11 @@ def test_construction_refuses_an_in_process_lane_under_a_foreign_mode(
 ) -> None:
     """The frozen mode is checked, so a mode the catalog never served cannot run."""
     with pytest.raises(ValueError, match="cannot execute mode"):
-        ProviderFactory().create(provider, execution_mode="codex-app-server")
+        ProviderFactory().create(
+            provider,
+            model=IN_PROCESS_MODEL_VALUES[provider][0],
+            execution_mode="codex-app-server",
+        )
 
 
 def test_unarmed_registrations_offer_no_in_process_lane(tmp_path: Path) -> None:

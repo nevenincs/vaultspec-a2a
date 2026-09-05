@@ -19,9 +19,6 @@ from .team_config import (
     AgentConfig as AgentConfig,
 )
 from .team_config import (
-    AgentModelConfig as AgentModelConfig,
-)
-from .team_config import (
     AgentPermissionsConfig as AgentPermissionsConfig,
 )
 from .team_config import (
@@ -34,13 +31,7 @@ from .team_config import (
     DocumentCapability as DocumentCapability,
 )
 from .team_config import (
-    SupervisorConfig as SupervisorConfig,
-)
-from .team_config import (
     TeamConfig as TeamConfig,
-)
-from .team_config import (
-    TeamDefaultsConfig as TeamDefaultsConfig,
 )
 from .team_config import (
     TeamGraphConfig as TeamGraphConfig,
@@ -58,9 +49,6 @@ from .team_config import (
     TopologyType as TopologyType,
 )
 from .team_config import (
-    WorkerOverrideConfig as WorkerOverrideConfig,
-)
-from .team_config import (
     WorkerRef as WorkerRef,
 )
 from .team_config import (
@@ -76,21 +64,17 @@ from .team_config import (
 __all__ = [
     "AgentCapabilitiesConfig",
     "AgentConfig",
-    "AgentModelConfig",
     "AgentPermissionsConfig",
     "AgentPersonaConfig",
     "AuthoringCapability",
     "DocumentCapability",
     "PresetOrigin",
-    "SupervisorConfig",
     "TeamConfig",
-    "TeamDefaultsConfig",
     "TeamGraphConfig",
     "TeamPermissionsConfig",
     "TeamPersonaConfig",
     "TopologyConfig",
     "TopologyType",
-    "WorkerOverrideConfig",
     "WorkerRef",
     "discover_team_preset_ids",
     "load_agent_config",

@@ -38,7 +38,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ...control.config import settings
-from ...graph.enums import Model, Provider
+from ...graph.enums import Provider
 from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpError, AcpErrorCode, AcpPromptError
 from ..factory import ProviderFactory
@@ -82,7 +82,7 @@ async def test_zai_rejected_credential_carries_a_typed_error_kind(
         pytest.skip(str(exc))
 
     model = ProviderFactory().create(
-        Provider.ZAI, model=Model.LOW, workspace_root=tmp_path
+        Provider.ZAI, model="zai-test-model", workspace_root=tmp_path
     )
     assert isinstance(model, AcpChatModel)
     assert model.env_vars.get("ANTHROPIC_BASE_URL") == settings.zai_base_url

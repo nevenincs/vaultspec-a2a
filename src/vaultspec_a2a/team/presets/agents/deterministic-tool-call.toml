@@ -6,8 +6,3 @@ description  = "In-process ProviderFactory scenario that marks one real queued t
 
 [agent.persona]
 system_prompt = "Emit the programmed deterministic task-queue tool call."
-
-[agent.model]
-provider   = "deterministic"
-capability = "mid"
-

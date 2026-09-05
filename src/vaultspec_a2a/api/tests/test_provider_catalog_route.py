@@ -139,7 +139,6 @@ async def test_authenticated_route_serves_all_registered_lanes_in_order(
         "antigravity",
         "claude",
         "codex",
-        "gemini",
         "kimi",
         "openai",
         "zai",

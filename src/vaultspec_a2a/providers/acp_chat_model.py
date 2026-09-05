@@ -19,7 +19,6 @@ import logging
 import shutil
 import sys
 from collections.abc import AsyncIterator, Mapping
-from pathlib import Path
 from typing import Any, Never, override
 
 from langchain_core.callbacks import (
@@ -46,7 +45,7 @@ from ..control.config import settings
 from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
-from ._acp_auth import authenticate_rpc, runtime_log_extra
+from ._acp_auth import runtime_log_extra
 from ._acp_authoring import (
     AUTHORING_MCP_SERVER_NAME,
     config_home_authoring_entry,
@@ -89,7 +88,6 @@ from .acp_exceptions import (
     AcpPromptError,
 )
 from .conditions import condition_from_acp_error
-from .gemini_auth import refresh_gemini_token
 
 __all__ = [
     "ACP_SESSION_TRANSCRIPT_DECLARATION",
@@ -262,7 +260,7 @@ class AcpChatModel(BaseChatModel):
     )
     acp_backend: str | None = Field(
         default=None,
-        description="ACP backend classification such as node, binary, or gemini-cli.",
+        description="ACP backend classification such as node, binary, or kimi-code.",
     )
     acp_family: str = Field(
         default="claude",
@@ -402,14 +400,9 @@ class AcpChatModel(BaseChatModel):
         # Bypass the adapter's bundled cli.js — drive the same installed claude
         # binary an interactive invocation runs, so the lane's behaviour (and
         # credential resolution) matches the operator's own CLI exactly. Only
-        # for the claude-family adapter; Gemini/Kimi run their own CLIs.
+        # for the claude-family adapter; Kimi runs its own CLI.
         _system_claude = shutil.which("claude")
-        if (
-            _system_claude
-            and self._config.acp_family == "claude"
-            and self.command
-            and Path(self.command[0]).stem.lower() != "gemini"
-        ):
+        if _system_claude and self._config.acp_family == "claude" and self.command:
             env.setdefault("CLAUDE_CODE_EXECUTABLE", _system_claude)
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
         # Suppress interactive prompts that
@@ -469,9 +462,6 @@ class AcpChatModel(BaseChatModel):
                     self._config.mcp_servers, exclude=AUTHORING_MCP_SERVER_NAME
                 )
             )
-
-        if self.command and Path(self.command[0]).stem.lower() == "gemini":
-            await refresh_gemini_token(env=env)
 
         # The spawn and session setup run INSIDE the try so the finally below
         # is the single cleanup path: a spawn-time raise (missing binary,
@@ -905,34 +895,3 @@ class AcpChatModel(BaseChatModel):
         )
         resp = await await_response(future, timeout=settings.acp_rpc_timeout_seconds)
         return lenient_json_object(resp.get("result"))
-
-    async def authenticate(self, token: str) -> JsonObject:
-        """Authenticate session.
-
-        Sends the ACP ``authenticate`` RPC per spec (§3.4). The ``methodId``
-        is selected from the auth methods advertised by the agent during
-        ``initialize``. ``token`` is retained for API compatibility; Gemini's
-        ACP implementation expects ``api-key`` in ``_meta`` for key-based auth
-        and no raw token in params.
-        """
-        logger.debug(
-            "Sending authenticate RPC (token redacted, length=%d)",
-            len(token),
-        )
-        env = resolve_env_vars(
-            require_workspace_root(
-                self.workspace_root, surface="ACP authentication environment"
-            )
-        )
-        env.update(self.env_vars)
-        return await authenticate_rpc(
-            ctx=None,
-            config=self._config,
-            env=env,
-            auth_methods=self._auth_methods,
-            stdin=self._require_stdin(),
-            stdin_lock=self._stdin_lock,
-            response_futures=self._require_response_futures(),
-            process=self._process,
-            auth_url=None,
-        )

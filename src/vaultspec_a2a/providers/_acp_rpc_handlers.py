@@ -216,31 +216,6 @@ _KIMI_NATIVE_READ_TOOLS: frozenset[str] = frozenset({"ReadFile", "Grep", "Glob"}
 # and the tools it auto-approves at the permission rung cannot drift.
 _CLAUDE_NATIVE_READ_TOOLS: frozenset[str] = frozenset(NATIVE_READ_TOOL_NAMES)
 
-# The gemini backend declares an EMPTY native read floor, and the emptiness is
-# the declaration, not an oversight. gemini-cli 0.46.0 fills the ACP permission
-# request's ``title`` from the invocation's display title, which for its built-in
-# tools is a human description (a shortened path, a shell command line) carrying
-# no tool name at all; only its MCP tools carry a recoverable identity, through
-# the ``"<tool> (<server> MCP Server)"` display name. An exact-name allowlist can
-# admit only what it can name, so the lane's own file tools are refused under
-# autonomy until the payload can carry an identity to allowlist. That is the
-# fail-closed direction: the alternative is approving by tool KIND, which is a
-# category rather than a name and is the blanket approval this replaces.
-_GEMINI_NATIVE_READ_TOOLS: frozenset[str] = frozenset()
-
-# gemini-cli's MCP display name, the one identity its permission payload carries.
-_GEMINI_MCP_TITLE_RE = re.compile(r"^(?P<tool>\S+) \(.+ MCP Server\)$")
-
-# ACP backend discriminator for the gemini lane. It rides ``acp_backend`` rather
-# than ``acp_family`` because gemini reuses the claude family for everything
-# except the CLI-side allowlist transport, which it does not have.
-_GEMINI_ACP_BACKEND = "gemini-cli"
-
-
-def _is_gemini_backend(config: AcpModelConfig) -> bool:
-    """Return whether this lane is served by the gemini command-line backend."""
-    return config.acp_backend == _GEMINI_ACP_BACKEND
-
 
 def _native_read_tools(config: AcpModelConfig) -> frozenset[str]:
     """Return the lane's native read floor - the CLI's own read-only tools.
@@ -249,8 +224,6 @@ def _native_read_tools(config: AcpModelConfig) -> frozenset[str]:
     native tools declares an empty floor rather than being omitted, so the
     absence is a reviewed answer instead of a gap between ``if`` branches.
     """
-    if _is_gemini_backend(config):
-        return _GEMINI_NATIVE_READ_TOOLS
     if config.acp_family == "kimi":
         return _KIMI_NATIVE_READ_TOOLS
     return _CLAUDE_NATIVE_READ_TOOLS
@@ -272,12 +245,7 @@ def _canonical_tool_identity(title: str, config: AcpModelConfig) -> str:
       ``"Read <path>"`` is prose, and matching its leading word would let a
       sub-agent task whose description merely BEGINS with an allowlisted word
       canonicalise into an approval.
-    - gemini-cli 0.46.0 carries a tool name only for MCP tools, in its display
-      name; anything else reduces to itself and matches no declared name.
     """
-    if _is_gemini_backend(config):
-        match = _GEMINI_MCP_TITLE_RE.match(title)
-        return match.group("tool") if match else title
     if config.acp_family == "kimi":
         return title.split(": ", 1)[0]
     return title
@@ -345,12 +313,9 @@ def _approval_option_id(options: list[JsonObject]) -> str:
     """Return the id of the NARROWEST offered approval.
 
     ``allow_once`` is preferred over ``allow_always`` strictly, never by list
-    order. The backends do not agree on ordering - gemini-cli 0.46.0 offers
-    ``proceed_always_server`` ("allow all server tools for this session") ahead
-    of ``proceed_once`` for an MCP call - so taking the first approval-kind
-    option would grant a whole server for a session on the strength of one
-    allowlisted tool, re-opening by approval exactly the undeclared verbs the
-    allowlist exists to keep unreachable.
+    order. Taking the first approval-kind option could grant a whole server for
+    a session on the strength of one allowlisted tool, making undeclared verbs
+    reachable through an overly broad approval.
     """
     for kind in ("allow_once", "allow_always"):
         for option in options:
@@ -381,7 +346,7 @@ def _autonomous_option_id(
     An autonomous run has no human rung, so this IS the permission decision.
     Every lane gets the same rule: auto-approve EXACTLY the composed tools
     (``config.allowed_tools``, in both the qualified ``mcp__<server>__<tool>``
-    spelling a claude title carries and the raw spelling kimi and gemini carry)
+    spelling a Claude title carries and the raw spelling Kimi carries)
     plus the lane's native read floor; reject everything else.
 
     Rejecting the uncovered case is the point. A permission request only reaches

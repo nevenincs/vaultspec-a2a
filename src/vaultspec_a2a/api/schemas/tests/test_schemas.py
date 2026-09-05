@@ -15,7 +15,6 @@ from pydantic import TypeAdapter
 
 from ....graph.enums import (
     AgentLifecycleState,
-    Model,
     PermissionOptionKind,
     Provider,
     ToolCallStatus,
@@ -186,7 +185,7 @@ def _team_status() -> TeamStatusEvent:
                 node_name="coder",
                 state=AgentLifecycleState.WORKING,
                 provider=Provider.CLAUDE,
-                model=Model.MID,
+                model_name="catalog-model",
             ),
         ],
         active_thread_ids=["thread-1"],

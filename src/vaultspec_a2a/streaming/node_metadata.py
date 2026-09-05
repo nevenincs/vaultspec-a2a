@@ -32,7 +32,6 @@ NODE_METADATA_FIELDS = (
     "display_name",
     "description",
     "provider",
-    "model",
     "model_name",
 )
 """The team-status fields carried per graph node, in wire order.

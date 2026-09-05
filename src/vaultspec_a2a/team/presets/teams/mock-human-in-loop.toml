@@ -3,10 +3,6 @@ id           = "mock-human-in-loop"
 display_name = "Mock Human in Loop"
 description  = "Team that is running but requires user input to approve a tool."
 
-[team.defaults]
-provider   = "mock"
-capability = "mid"
-
 [team.topology]
 type  = "pipeline"
 order = ["mock-coder-human"]

@@ -20,7 +20,7 @@ from vaultspec_a2a.control.config import settings
 from vaultspec_a2a.control.health import _eligible_provider_names
 from vaultspec_a2a.graph.enums import Provider
 from vaultspec_a2a.providers.factory import classify_provider_command
-from vaultspec_a2a.providers.model_profiles import probe_provider_readiness
+from vaultspec_a2a.providers.provider_readiness import probe_provider_readiness
 
 try:
     origin = classify_provider_command(Provider.KIMI)["command_origin"]

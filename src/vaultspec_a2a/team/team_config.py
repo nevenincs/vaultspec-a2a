@@ -22,13 +22,12 @@ from enum import StrEnum
 from importlib import resources
 from pathlib import Path
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ..authoring.contract import (
     is_document_authoring_role,
     is_document_authoring_topology,
 )
-from ..graph.enums import Model, Provider
 from ..thread.clarification import (
     CLARIFICATION_TOPOLOGIES,
     MAX_QUESTIONS_PER_REQUEST,
@@ -52,29 +51,20 @@ _SAFE_AGENT_ID_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_\-]{0,62}$")
 
 __all__ = [
     "DEFAULT_AUTHORING_SURFACES",
-    "DEFAULT_PROFILE_DESCRIPTION",
-    "DEFAULT_PROFILE_DISPLAY_NAME",
-    "DEFAULT_PROFILE_ID",
     "AgentCapabilitiesConfig",
     "AgentConfig",
-    "AgentModelConfig",
     "AgentPermissionsConfig",
     "AgentPersonaConfig",
     "AuthoringCapability",
     "DocumentCapability",
     "ResearchThreadSpec",
-    "SupervisorConfig",
     "TeamConfig",
-    "TeamDefaultsConfig",
     "TeamGraphConfig",
     "TeamHarnessConfig",
     "TeamPermissionsConfig",
     "TeamPersonaConfig",
-    "TeamProfileConfig",
-    "TeamProfileRoleConfig",
     "TopologyConfig",
     "TopologyType",
-    "WorkerOverrideConfig",
     "WorkerRef",
     "authoring_capability",
     "discover_team_preset_ids",
@@ -83,15 +73,6 @@ __all__ = [
     "load_team_config",
     "supported_capabilities",
 ]
-
-# The implicit, always-present profile: the empty overlay that runs the team's
-# normal resolution chain with no profile layer. It is every team's
-# default profile.
-DEFAULT_PROFILE_ID = "team-defaults"
-DEFAULT_PROFILE_DISPLAY_NAME = "Team defaults"
-DEFAULT_PROFILE_DESCRIPTION = (
-    "Use the team's normal model resolution chain with no profile overlays."
-)
 
 # The five agent-harness surfaces a document-authoring run's workspace must
 # carry: personas (runtime + workspace depth),
@@ -311,14 +292,6 @@ class AgentPermissionsConfig(BaseModel):
     require_approval_for: list[str] = Field(default_factory=list)
 
 
-class AgentModelConfig(BaseModel):
-    """Optional per-agent provider/capability override."""
-
-    provider: Provider | None = None
-    capability: Model | None = None
-    provider_fallback: list[Provider] = Field(default_factory=list)
-
-
 class AgentPersonaConfig(BaseModel):
     """System prompt definition for an agent."""
 
@@ -333,12 +306,13 @@ class AgentConfig(BaseModel):
     node name).
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     display_name: str
     role: str
     description: str
     persona: AgentPersonaConfig
-    model: AgentModelConfig = Field(default_factory=AgentModelConfig)
     capabilities: AgentCapabilitiesConfig = Field(
         default_factory=AgentCapabilitiesConfig
     )
@@ -385,48 +359,12 @@ class AgentConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class WorkerOverrideConfig(BaseModel):
-    """Per-worker model override in a team TOML."""
-
-    provider: Provider | None = None
-    capability: Model | None = None
-    provider_fallback: list[Provider] = Field(default_factory=list)
-
-
 class WorkerRef(BaseModel):
-    """Reference to an agent within a team, with optional model override."""
+    """Reference to an agent role within a team."""
+
+    model_config = ConfigDict(extra="forbid")
 
     agent_id: str
-    model: WorkerOverrideConfig = Field(default_factory=WorkerOverrideConfig)
-
-
-class TeamProfileRoleConfig(BaseModel):
-    """Per-role assignment overlay inside a model profile.
-
-    Keyed by worker ``agent_id`` in the profile's ``roles`` map; carries the same
-    provider/capability/fallback overlay shape as a ``[[team.workers]]`` override.
-    A field left unset falls through the normal precedence chain unchanged,
-    so a partial overlay only redirects the fields it names.
-    """
-
-    provider: Provider | None = None
-    capability: Model | None = None
-    provider_fallback: list[Provider] = Field(default_factory=list)
-
-
-class TeamProfileConfig(BaseModel):
-    """A named whole-team model profile.
-
-    Declared as ``[team.profiles.<id>]`` in team TOML. ``roles`` maps a worker
-    ``agent_id`` to its overlay; roles absent from the profile fall through the
-    normal precedence chain unchanged, so an empty ``roles`` map is exactly the
-    implicit ``team-defaults`` profile. A selected profile is the topmost
-    precedence layer (profile > worker override > agent TOML > team defaults).
-    """
-
-    display_name: str = ""
-    description: str = ""
-    roles: dict[str, TeamProfileRoleConfig] = Field(default_factory=dict)
 
 
 class TeamHarnessConfig(BaseModel):
@@ -545,21 +483,6 @@ class TopologyConfig(BaseModel):
         return self
 
 
-class SupervisorConfig(BaseModel):
-    """Supervisor model binding for star/pipeline_loop topologies."""
-
-    provider: Provider | None = None
-    capability: Model | None = None
-
-
-class TeamDefaultsConfig(BaseModel):
-    """Team-wide fallback model binding (model resolution)."""
-
-    provider: Provider | None = None
-    capability: Model | None = None
-    provider_fallback: list[Provider] = Field(default_factory=list)
-
-
 class TeamPermissionsConfig(BaseModel):
     """Team-level permission defaults."""
 
@@ -612,17 +535,16 @@ class TeamConfig(BaseModel):
     ``team.id`` must match the filename stem.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     display_name: str
     description: str = ""
-    defaults: TeamDefaultsConfig = Field(default_factory=TeamDefaultsConfig)
-    supervisor: SupervisorConfig = Field(default_factory=SupervisorConfig)
     topology: TopologyConfig
     workers: list[WorkerRef]
     permissions: TeamPermissionsConfig = Field(default_factory=TeamPermissionsConfig)
     persona: TeamPersonaConfig = Field(default_factory=TeamPersonaConfig)
     graph: TeamGraphConfig = Field(default_factory=TeamGraphConfig)
-    profiles: dict[str, TeamProfileConfig] = Field(default_factory=dict)
     harness: TeamHarnessConfig | None = None
     clarification: TeamClarificationConfig | None = None
 
@@ -697,38 +619,6 @@ class TeamConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_profiles(self) -> "TeamConfig":
-        """Eagerly validate profile ids and per-role overlay keys.
-
-        Raises ``ConfigError`` (not a plain ``ValueError``) so an unknown role
-        in a profile is a first-class configuration failure at load time: every
-        overlay key must name a declared ``[[team.workers]]`` agent id, profile
-        ids must be safe slugs, and the reserved ``team-defaults`` id may not
-        carry role overlays (it is the implicit empty overlay).
-        """
-        worker_ids = {w.agent_id for w in self.workers}
-        for profile_id, profile in self.profiles.items():
-            if not _SAFE_AGENT_ID_RE.match(profile_id):
-                raise ConfigError(
-                    f"Invalid profile id {profile_id!r} in team {self.id!r}: must "
-                    f"match pattern {_SAFE_AGENT_ID_RE.pattern!r}."
-                )
-            if profile_id == DEFAULT_PROFILE_ID and profile.roles:
-                raise ConfigError(
-                    f"The reserved {DEFAULT_PROFILE_ID!r} profile in team "
-                    f"{self.id!r} must not declare role overlays; it is the "
-                    "implicit empty overlay."
-                )
-            for role_key in profile.roles:
-                if role_key not in worker_ids:
-                    raise ConfigError(
-                        f"Profile {profile_id!r} in team {self.id!r} overlays "
-                        f"unknown role {role_key!r}; declared team workers are "
-                        f"{sorted(worker_ids)!r}."
-                    )
-        return self
-
-    @model_validator(mode="after")
     def validate_harness(self) -> "TeamConfig":
         """Every ``[team.harness].role_skills`` key must be a declared worker.
 
@@ -758,11 +648,6 @@ class TeamConfig(BaseModel):
         return self
 
     @property
-    def default_profile_id(self) -> str:
-        """The default model profile id (always the implicit team-defaults)."""
-        return DEFAULT_PROFILE_ID
-
-    @property
     def is_document_authoring(self) -> bool:
         """Whether this preset authors vault documents through engine proposals.
 
@@ -785,22 +670,6 @@ class TeamConfig(BaseModel):
         if self.is_document_authoring:
             return TeamHarnessConfig()
         return None
-
-    def effective_profiles(self) -> dict[str, TeamProfileConfig]:
-        """Return declared profiles plus the implicit ``team-defaults`` profile.
-
-        The implicit team-defaults profile is always present as the empty
-        overlay; a team that declares its own ``team-defaults`` block (for a
-        custom display name or description) overrides the injected default.
-        """
-        profiles: dict[str, TeamProfileConfig] = {
-            DEFAULT_PROFILE_ID: TeamProfileConfig(
-                display_name=DEFAULT_PROFILE_DISPLAY_NAME,
-                description=DEFAULT_PROFILE_DESCRIPTION,
-            )
-        }
-        profiles.update(self.profiles)
-        return profiles
 
     @classmethod
     def from_toml(cls, path: Path) -> "TeamConfig":

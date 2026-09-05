@@ -6,8 +6,3 @@ description  = "In-process ProviderFactory scenario that raises one fixed provid
 
 [agent.persona]
 system_prompt = "Run the programmed deterministic provider failure scenario."
-
-[agent.model]
-provider   = "deterministic"
-capability = "mid"
-

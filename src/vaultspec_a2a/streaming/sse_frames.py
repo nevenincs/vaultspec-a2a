@@ -328,7 +328,7 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
                 "state": _ENUM,
                 "node_name": _Text(128),
                 "provider": _Text(64),
-                "model": _Text(128),
+                "model_name": _Text(128),
                 "role": _Text(64),
                 "display_name": _Text(128),
                 "description": _Text(256),

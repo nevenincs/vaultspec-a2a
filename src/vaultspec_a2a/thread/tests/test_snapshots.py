@@ -8,7 +8,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ...graph.enums import AgentLifecycleState, Model, Provider
+from ...graph.enums import AgentLifecycleState, Provider
 from ..enums import TERMINAL_STATUSES, RepairStatus
 from ..models import PlanEntry
 from ..snapshots import (
@@ -517,7 +517,7 @@ def test_agent_data_round_trip() -> None:
         node_name="supervisor",
         state=AgentLifecycleState.IDLE,
         provider=Provider.CLAUDE,
-        model=Model.HIGH,
+        model_name="catalog-model",
         role="manager",
     )
     pydantic_obj = AgentSnapshot.model_validate(asdict(data))
@@ -525,7 +525,7 @@ def test_agent_data_round_trip() -> None:
     # The descriptor is the wire model's only source, so an added field must
     # survive the asdict projection rather than falling back to its default.
     assert pydantic_obj.provider is Provider.CLAUDE
-    assert pydantic_obj.model is Model.HIGH
+    assert pydantic_obj.model_name == "catalog-model"
 
 
 def test_build_agent_descriptor_reads_provider_and_model_from_node_metadata() -> None:
@@ -535,7 +535,7 @@ def test_build_agent_descriptor_reads_provider_and_model_from_node_metadata() ->
             "agent_id": "coder",
             "node_name": "coder",
             "provider": "zai",
-            "model": "high",
+            "model_name": "catalog-model",
             "role": "implementer",
             "display_name": "Coder",
             "description": "Writes code.",
@@ -543,18 +543,18 @@ def test_build_agent_descriptor_reads_provider_and_model_from_node_metadata() ->
         AgentLifecycleState.WORKING,
     )
     assert descriptor.provider is Provider.ZAI
-    assert descriptor.model is Model.HIGH
+    assert descriptor.model_name == "catalog-model"
     assert descriptor.state is AgentLifecycleState.WORKING
 
 
 def test_build_agent_descriptor_leaves_unresolved_assignment_unknown() -> None:
     """An agent observed before its model resolves reports None, not a guess."""
     descriptor = build_agent_descriptor(
-        {"agent_id": "planner", "node_name": "planner", "provider": "", "model": ""},
+        {"agent_id": "planner", "node_name": "planner", "provider": ""},
         AgentLifecycleState.SUBMITTED,
     )
     assert descriptor.provider is None
-    assert descriptor.model is None
+    assert descriptor.model_name is None
 
 
 def test_build_agent_descriptor_rejects_an_unrecognised_provider() -> None:

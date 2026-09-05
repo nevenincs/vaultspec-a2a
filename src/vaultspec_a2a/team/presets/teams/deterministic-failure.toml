@@ -22,10 +22,6 @@ The small recursion limit below is the scenario, not a misconfiguration. Raising
 it turns this preset into a slower duplicate of the success presets.
 """
 
-[team.defaults]
-provider   = "deterministic"
-capability = "mid"
-
 [team.topology]
 type  = "pipeline"
 order = ["vaultspec-researcher", "vaultspec-synthesist"]
@@ -47,8 +43,6 @@ recursion_limit      = 3
 
 [[team.workers]]
 agent_id = "vaultspec-researcher"
-model    = { provider = "deterministic" }
 
 [[team.workers]]
 agent_id = "vaultspec-synthesist"
-model    = { provider = "deterministic" }

@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 
 from ...graph.enums import (
     AgentLifecycleState,
-    Model,
     PermissionOptionKind,
     Provider,
     ToolCallStatus,
@@ -115,7 +114,6 @@ class AgentSnapshot(BaseModel):
     node_name: str
     state: AgentLifecycleState
     provider: Provider | None = None
-    model: Model | None = None
     model_name: str | None = None
     role: str = ""
     display_name: str = ""

@@ -29,9 +29,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ...context.metadata import ThreadMetadata
 from ...control.worker_status import WorkerConnectionStatus
-from ...graph.enums import Model, SemanticPhase
+from ...graph.enums import SemanticPhase
 from ...providers.conditions import ProviderCondition
-from ...providers.model_profiles import AssignmentSource
 from ...team.preset_origin import PresetOrigin
 from ...team.team_config import AuthoringCapability, DocumentCapability, TopologyType
 from ...thread.actor_tokens import MAX_ROLES_PER_RUN, ActorTokenBundle
@@ -67,11 +66,9 @@ __all__ = [
     "PathSafeRunId",
     "PresetSummary",
     "PresetsListResponse",
-    "ProfileSummary",
     "ProviderCatalogSelection",
     "ProviderEligibility",
     "ReservationId",
-    "RoleAssignmentSummary",
     "RoleState",
     "RunAdmission",
     "RunCancelResponse",
@@ -372,13 +369,8 @@ class RunStartResponse(BaseModel):
     # Whether the run was accepted as eligible to dispatch (always True on a 201;
     # ineligible requests are refused with a 4xx before reaching this response).
     eligible: bool = True
-    # The complete execution authority the run was frozen with - the single
-    # disclosure of what will produce this run's work. The retired profile pair
-    # (`profile_id`, `assignments`) is deliberately absent here: a request that
-    # could start a profile-driven run no longer parses, so on this response
-    # those fields could only ever disclose a confident emptiness. Runs frozen
-    # under the legacy profiles remain readable through run-status, which keeps
-    # both shapes.
+    # The complete execution authority the run was frozen with: the exact served
+    # catalog selection that will produce this run's work.
     frozen_assignment: FrozenTeamAssignmentSummary | None = None
 
 
@@ -427,8 +419,7 @@ class RunCommitResponse(BaseModel):
     lease_id: LeaseId
     semantic_status: SemanticPhase = SemanticPhase.STARTING
     nickname: str | None = None
-    # As on RunStartResponse: the freeze is the one start-surface disclosure;
-    # the legacy profile pair is unreachable through the commit schema.
+    # As on RunStartResponse, this is the exact execution authority disclosure.
     frozen_assignment: FrozenTeamAssignmentSummary | None = None
 
 
@@ -617,11 +608,6 @@ class RunStatusResponse(BaseModel):
     # failure_reason precisely BECAUSE the run survives. Without this field that
     # account reached no client at all: durable, and readable by nobody.
     repair_reason: str | None = Field(default=None, max_length=500)
-    # The frozen profile the run launched with and its
-    # effective per-role assignment, reproduced verbatim from run metadata across
-    # restarts (additive v1; absent for runs started before profiles landed).
-    profile_id: str | None = None
-    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
     frozen_assignment: FrozenTeamAssignmentSummary | None = None
     # Non-secret staged-admission lease identity. It lets the dashboard repair
     # a locally reserved hash bundle after a process crash that followed remote
@@ -898,73 +884,6 @@ class RunClarificationRespondResponse(BaseModel):
     idempotency_key: str | None = None
 
 
-class RoleAssignmentSummary(BaseModel):
-    """Effective per-role model assignment under a profile.
-
-    Only safe operational metadata: role id, agent id, provider id, capability,
-    the stable concrete model name, ordered fallbacks, current provider readiness,
-    and which precedence layer the assignment came from. Never a credential, env
-    value, token, or private path.
-
-    ``provider_id`` is EMPTY when no preset layer declares a provider for the
-    role, which is the ordinary state now that product presets carry no
-    provider policy: a run chooses its lane at run start from the served catalog.
-    Empty rather than absent so the field keeps one type, and never a substituted
-    provider name - naming a lane no preset asked for would be indistinguishable
-    from a real declaration. ``resolution_error`` carries the reason and ``source``
-    reads ``undeclared``; the role is reported ineligible.
-
-    ``provider_id`` is deliberately NOT typed by the ``Provider`` enumeration
-    served beside it on the agent snapshot, even though the two carry the same
-    concept. This surface replays FROZEN historical assignments, and two of its
-    values are provably outside that enumeration: the empty string documented
-    above, and a provider a past run froze that this build no longer knows -
-    a case the disclosure path already handles explicitly by reporting it not
-    ready rather than raising. Narrowing here would turn both into a validation
-    failure on a read path. The reconciliation is therefore that these are two
-    concepts: ``Provider`` is the closed set of lanes this build can RUN, and
-    this is an identifier a past run RECORDED.
-    """
-
-    role_id: str
-    agent_id: str
-    provider_id: str
-    # The capability TIER, not a concrete model name - ``model_name`` beside it
-    # carries that. Typed by the owning enumeration: unlike ``provider_id`` above,
-    # this vocabulary is internal, so a frozen record can only ever hold a member
-    # this build still knows.
-    capability: Model | None = None
-    model_name: str | None = None
-    # Left a bare string list for the same reason ``provider_id`` is: these are
-    # provider identities replayed from a frozen record, and a past run may have
-    # named a lane this build no longer has.
-    fallback_providers: list[str] = Field(default_factory=list)
-    provider_ready: bool = False
-    # The precedence layer that supplied the assignment. The default is the
-    # enumeration member rather than a restated literal, so the schema and the
-    # emit site cannot drift to different fallbacks.
-    source: AssignmentSource = AssignmentSource.TEAM_DEFAULT
-    resolution_error: str | None = None
-
-
-class ProfileSummary(BaseModel):
-    """One selectable model profile for a preset.
-
-    Carries the profile's identity, whether it is the default, its per-role
-    effective assignments (resolved by the same shared resolver launch uses, so
-    picker truth cannot drift from execution truth), and backend-computed
-    eligibility with safe reasons.
-    """
-
-    id: str
-    display_name: str = ""
-    description: str = ""
-    is_default: bool = False
-    eligible: bool = False
-    unavailable_reasons: list[str] = Field(default_factory=list)
-    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
-
-
 class PresetSummary(BaseModel):
     """One discovered team preset and whether it is actually runnable.
 
@@ -991,16 +910,9 @@ class PresetSummary(BaseModel):
     authoring_capability: AuthoringCapability | None = None
     # True for bundled mock/test presets so the product layer can exclude them.
     is_mock: bool = False
-    # Additive v1 fields (absent-safe): the preset's
-    # origin, the document outputs the topology delivers, the selectable
-    # profiles with effective assignments and eligibility, and the default
-    # profile id. The origin's legal values were previously stated only in this
-    # comment, which is a declaration no client can read and no compiler can
-    # check; they are now the enumeration the field is typed by.
+    # The origin and document outputs are descriptive preset facts.
     origin: PresetOrigin | None = None
     supported_capabilities: list[DocumentCapability] = Field(default_factory=list)
-    profiles: list[ProfileSummary] = Field(default_factory=list)
-    default_profile_id: str | None = None
 
 
 class PresetsListResponse(BaseModel):

@@ -39,11 +39,9 @@ def is_strict_claude_session(config: AcpModelConfig) -> bool:
     """Whether this session speaks to the Claude CLI's own session option surface.
 
     True for the claude family (Claude/Z.ai share the claude adapter and CLI)
-    and false for the kimi family and for the gemini backend, which reuses the
-    claude family default while running a different agent that has no
-    ``claudeCode`` option namespace and no strict-MCP flag.
+    and false for the Kimi family.
     """
-    return config.acp_family == "claude" and config.acp_backend != "gemini-cli"
+    return config.acp_family == "claude"
 
 
 # System-prompt addendum for an armed strict session. The CLI connects MCP
@@ -497,7 +495,6 @@ async def setup_session(
             await authenticate_rpc(
                 ctx=ctx,
                 config=config,
-                env=env,
                 auth_methods=auth_methods,
                 stdin=ctx.stdin,
                 stdin_lock=ctx.stdin_lock,
@@ -518,7 +515,7 @@ async def setup_session(
                     stderr_event_count=ctx.stderr_event_count,
                 ),
             )
-            hint = auth_hint(config)
+            hint = auth_hint()
             raise AcpSessionError(
                 f"ACP {method} failed — authentication required. {hint}",
                 code=err_code,

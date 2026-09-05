@@ -6,7 +6,3 @@ description  = "In-process ProviderFactory scenario that crosses the bounded rel
 
 [agent.persona]
 system_prompt = "Emit the programmed deterministic relay burst."
-
-[agent.model]
-provider   = "deterministic"
-capability = "mid"

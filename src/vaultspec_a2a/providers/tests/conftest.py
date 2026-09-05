@@ -49,7 +49,6 @@ _IMPURE_FILES = frozenset(
         "test_codex_config_home.py",
         "test_codex_stderr_drain.py",
         "test_codex_turn_idle_timeout.py",
-        "test_gemini_auth.py",
         "test_model_stack_warmup.py",
         "test_resource_lifetimes.py",
         # Real async engine and session maker.

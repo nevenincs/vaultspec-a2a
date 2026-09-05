@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
-from ..graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
+from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from ..workspace.environment import resolve_env_vars
 from .acp_catalog import discover_acp_catalog
@@ -54,7 +54,6 @@ from .provider_catalog import (
 __all__ = [
     "ANTIGRAVITY_CLI_STATE_DECLARATION",
     "ARTIFACT_DECLARATIONS",
-    "GEMINI_SESSION_STORE_DECLARATION",
     "KIMI_SESSION_STORE_DECLARATION",
     "ProviderCatalogDiscovery",
     "ProviderCatalogRegistration",
@@ -66,43 +65,6 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-# Gemini and Kimi keep their own project-partitioned session stores, in homes
-# THIS module decides (``_build_gemini_env`` seats GEMINI_CLI_HOME,
-# ``_build_kimi_env`` seats KIMI_CODE_HOME) and reached by CLIs THIS module
-# spawns. Neither store sits under the sweep root in ``_config_home_roots`` nor
-# matches its prefixes, so no reaper here has ever seen them.
-#
-# The dominant producer is not a run - it is ``catalog_registrations`` below.
-# Every external lane gets a registration whose discovery spawns the real CLI
-# rooted at the caller's workspace, so ONE catalog read spawns Gemini and Kimi
-# against that directory even when the caller wants neither. Each family's store
-# then keys the directory its own way, which is why one declaration cannot cover
-# them and why reclamation is unavailable on both (see each mechanism).
-GEMINI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
-    name="gemini-cli-session-store",
-    root="<GEMINI_CLI_HOME, else operator ~/.gemini>/<project-partitioned tree>/",
-    owner="providers.factory",
-    disposition=RetentionDisposition.PERMANENT,
-    reason=(
-        "permanence is what this project can honestly promise rather than what "
-        "it would choose: the store belongs to the operator's Gemini CLI and "
-        "holds their own interactive sessions alongside anything a spawn here "
-        "produced. The key is the workspace directory's BASENAME with "
-        "underscores sanitized, which is far more collision-prone than a full "
-        "path - an operator's own directory sharing a basename with a discarded "
-        "temporary one is not merely hard to tell apart, it is the SAME entry. "
-        "No reclaim predicate can be built on a key that ambiguous"
-    ),
-    mechanism=(
-        "NOTHING bounds it. No sweep here reaches the home, no age gate applies, "
-        "and no equivalent of the Claude CLI's cleanupPeriodDays has been "
-        "verified for this lane, so growth is one entry per distinct workspace "
-        "basename ever discovered against, retained until an operator deletes it "
-        "by hand. Suppression, not reclamation, is the lever: spawning fewer "
-        "lanes at discovery would stop most entries being minted at all"
-    ),
-)
-
 ANTIGRAVITY_CLI_STATE_DECLARATION = ArtifactDeclaration(
     name="antigravity-cli-state",
     root="<ANTIGRAVITY_CLI_HOME, else operator ~/.gemini/antigravity-cli>/",
@@ -113,7 +75,7 @@ ANTIGRAVITY_CLI_STATE_DECLARATION = ArtifactDeclaration(
         "interactive state - a conversation-summary database, an onboarding "
         "cache - beside anything a spawn here produced, so nothing in it can be "
         "reclaimed without deleting work this project never created. What makes "
-        "this lane WORSE than the Gemini and Kimi stores is the key: those mint "
+        "this lane especially costly is the key: other stores mint "
         "one entry per distinct workspace, so a repeated discovery against the "
         "same directory reuses an entry, while this CLI writes a fresh "
         "TIMESTAMPED log per INVOCATION. Catalog discovery is an invocation, so "
@@ -155,7 +117,6 @@ KIMI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
 
 ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
     ANTIGRAVITY_CLI_STATE_DECLARATION,
-    GEMINI_SESSION_STORE_DECLARATION,
     KIMI_SESSION_STORE_DECLARATION,
 )
 
@@ -198,34 +159,6 @@ _CAPSULE_ACP_RELATIVE_PATH = (
     / "dist"
     / "index.js"
 )
-
-
-def _build_gemini_env(
-    gemini_api_key: str | None = None,
-    google_api_key: str | None = None,
-    google_application_credentials: str | None = None,
-    gemini_cli_home: str | None = None,
-) -> dict[str, str]:
-    """Return explicit Gemini auth env vars for the subprocess."""
-    env_vars: dict[str, str] = {}
-    has_noninteractive_auth = False
-    if gemini_api_key and gemini_api_key.strip():
-        env_vars["GEMINI_API_KEY"] = gemini_api_key
-        has_noninteractive_auth = True
-    if google_api_key and google_api_key.strip():
-        env_vars["GOOGLE_API_KEY"] = google_api_key
-        has_noninteractive_auth = True
-    if google_application_credentials and google_application_credentials.strip():
-        env_vars["GOOGLE_APPLICATION_CREDENTIALS"] = google_application_credentials
-        has_noninteractive_auth = True
-    if gemini_cli_home and gemini_cli_home.strip():
-        env_vars["GEMINI_CLI_HOME"] = gemini_cli_home
-        env_vars["HOME"] = gemini_cli_home
-        if not has_noninteractive_auth:
-            # Gemini CLI's ACP path selects personal OAuth non-interactively via
-            # GOOGLE_GENAI_USE_GCA=true while reading credentials from the CLI home.
-            env_vars["GOOGLE_GENAI_USE_GCA"] = "true"
-    return env_vars
 
 
 def _build_zai_env(
@@ -311,103 +244,6 @@ def kimi_temporary_model_configuration_reason(
         "incomplete Kimi temporary model definition; set KIMI_MODEL_NAME, "
         "KIMI_MODEL_API_KEY, and KIMI_MODEL_BASE_URL together"
     )
-
-
-def _classify_gemini_command(
-    model_name: str | None,
-    *,
-    executable: str | None = None,
-) -> tuple[list[str], dict[str, str]]:
-    """Return the Gemini CLI command plus bounded runtime metadata."""
-    if executable is not None:
-        command = [executable]
-        if model_name is not None:
-            command.extend(("--model", model_name))
-        command.append("--acp")
-        return command, {
-            "runtime_authority": "explicit_executable",
-            "command_origin": "explicit_executable",
-            "command_kind": "gemini_cli",
-            "command_executable": Path(executable).name,
-            "command_target": executable,
-        }
-
-    docker_entry = Path("/usr/local/lib/node_modules/@google/gemini-cli/dist/index.js")
-    if docker_entry.exists():
-        command = ["node", str(docker_entry)]
-        if model_name is not None:
-            command.extend(("--model", model_name))
-        command.append("--acp")
-        return command, {
-            "runtime_authority": "docker_bundled",
-            "command_origin": "docker_node_modules_entry",
-            "command_kind": "node_entry",
-            "command_executable": "node",
-            "command_target": str(docker_entry),
-        }
-
-    local_entry = (
-        settings.project_root  # storage-anchor-ok
-        / "node_modules"
-        / "@google"
-        / "gemini-cli"
-        / "dist"
-        / "index.js"
-    )
-    if local_entry.exists():
-        command = ["node", str(local_entry)]
-        if model_name is not None:
-            command.extend(("--model", model_name))
-        command.append("--acp")
-        return command, {
-            "runtime_authority": "project_local",
-            "command_origin": "project_node_modules_entry",
-            "command_kind": "node_entry",
-            "command_executable": "node",
-            "command_target": str(local_entry),
-        }
-
-    system_gemini = shutil.which("gemini")
-    if system_gemini:
-        command = [system_gemini]
-        if model_name is not None:
-            command.extend(("--model", model_name))
-        command.append("--acp")
-        return command, {
-            "runtime_authority": "system_cli",
-            "command_origin": "system_path_executable",
-            "command_kind": "gemini_cli",
-            "command_executable": Path(system_gemini).name,
-            "command_target": system_gemini,
-        }
-
-    local_bin = settings.project_root / "node_modules" / ".bin"  # storage-anchor-ok
-    candidate_name = "gemini.cmd" if os.name == "nt" else "gemini"
-    local_gemini = local_bin / candidate_name
-    if local_gemini.exists():
-        command = [str(local_gemini)]
-        if model_name is not None:
-            command.extend(("--model", model_name))
-        command.append("--acp")
-        return command, {
-            "runtime_authority": "project_local",
-            "command_origin": "project_local_bin",
-            "command_kind": "gemini_cli",
-            "command_executable": local_gemini.name,
-            "command_target": str(local_gemini),
-        }
-
-    command = ["gemini"]
-    if model_name is not None:
-        command.extend(("--model", model_name))
-    command.append("--acp")
-    return command, {
-        "runtime_authority": "system_cli",
-        "command_origin": "fallback_cli_name",
-        "command_kind": "gemini_cli",
-        "command_executable": "gemini",
-        "command_target": "gemini",
-    }
 
 
 def capsule_node_executable(capsule_assets_root: Path) -> Path:
@@ -588,8 +424,7 @@ def _classify_codex_command() -> tuple[list[str], dict[str, str]]:
 
     Codex is a non-ACP JSON-RPC subprocess. Resolution prefers the codex
     executable on PATH; the bare-name ``fallback_cli_name`` origin (no resolved
-    path) is what ``classify_provider_command`` treats as unresolvable, matching
-    the Gemini classifier's convention.
+    path) is what ``classify_provider_command`` treats as unresolvable.
     """
     system_codex = shutil.which("codex")
     if system_codex:
@@ -641,15 +476,12 @@ def classify_provider_command(
     """Resolve a subprocess provider's launch command without instantiating it.
 
     Returns the command metadata for a genuinely resolvable command and raises
-    when it cannot be resolved. This is the no-instantiation seam the model-profile
-    readiness probe consumes: ``_classify_acp_command`` raises when the Claude ACP
-    entry point is missing, and the Gemini classifier's ``fallback_cli_name``
-    origin (the only origin that does not correspond to a real resolved path) is
-    treated here as unresolvable rather than a silent bare-name fallback.
+    when it cannot be resolved. ``_classify_acp_command`` raises when the Claude
+    ACP entry point is missing, and bare-name command fallbacks are treated as
+    unresolvable rather than silently accepted.
 
     Raises:
-        ValueError: The provider has no subprocess command, or the Gemini CLI is
-            not resolvable on this host.
+        ValueError: The provider has no resolvable subprocess command.
         ConfigError: The Claude ACP entry point/binary does not exist.
     """
     if provider in (Provider.CLAUDE, Provider.ZAI):
@@ -657,15 +489,6 @@ def classify_provider_command(
         # injected auth env differs.
         resolved_backend = backend if backend is not None else settings.acp_backend
         _, meta = _classify_acp_command(resolved_backend)
-        return meta
-    if provider == Provider.GEMINI:
-        # Catalog/readiness classification must not preselect a static model.
-        _, meta = _classify_gemini_command(None)
-        if meta.get("command_origin") == "fallback_cli_name":
-            raise ValueError(
-                "Gemini CLI not resolvable: not found in node_modules, the docker "
-                "entry, or on PATH."
-            )
         return meta
     if provider == Provider.CODEX:
         _, meta = _classify_codex_command()
@@ -685,7 +508,6 @@ _SUPPORTED_PROVIDERS: frozenset[Provider] = frozenset(
         Provider.CLAUDE,
         Provider.CODEX,
         Provider.DETERMINISTIC,
-        Provider.GEMINI,
         Provider.KIMI,
         Provider.MOCK,
         Provider.ZAI,
@@ -836,80 +658,6 @@ async def _discover_antigravity_catalog(
     )
 
 
-async def _discover_gemini_catalog(
-    key: ProviderCatalogKey, workspace_root: Path
-) -> ProviderCatalogDiscovery:
-    """Discover the Gemini CLI catalog.
-
-    LEGACY LANE. Still supported and still served - existing configurations keep
-    working and nothing here is being removed - but it is no longer where new
-    work goes: the Antigravity lane is the forward coding-CLI surface, and it is
-    a separate lane rather than a successor because its catalog spans vendors.
-
-    Legacy is a maintenance posture, not a new mechanism: the lane's turn
-    admission is unchanged, which is to say it has none. Gemini is absent from
-    PROVEN_TURN_LANES and so is already deny-by-default for turns, and this
-    module deliberately gains no LEGACY registry to express the status, because
-    a marker with no consumer is dead capability of exactly the kind this tree
-    treats as a defect.
-    """
-    try:
-        command, metadata = _classify_gemini_command(None)
-        if metadata["command_origin"] == "fallback_cli_name":
-            raise ValueError("Gemini CLI is not resolvable")
-    except ValueError:
-        return _unavailable_catalog_discovery(
-            key,
-            reason="provider catalog command is unavailable",
-            configured=(
-                HealthState.AVAILABLE
-                if any(
-                    (
-                        settings.gemini_api_key,
-                        settings.google_api_key,
-                        settings.google_application_credentials,
-                        settings.gemini_cli_home,
-                    )
-                )
-                else HealthState.UNKNOWN
-            ),
-            transport=HealthState.UNAVAILABLE,
-        )
-    env = resolve_env_vars(workspace_root)
-    env.update(
-        _build_gemini_env(
-            settings.gemini_api_key,
-            settings.google_api_key,
-            settings.google_application_credentials,
-            settings.gemini_cli_home,
-        )
-    )
-    discovered = await discover_acp_catalog(
-        tuple(command),
-        env=env,
-        cwd=str(workspace_root),
-        key=key,
-        metadata={"provider": Provider.GEMINI.value, **metadata},
-    )
-    normalized = ProviderCatalogDiscovery(
-        discovered.catalog,
-        discovered.authentication,
-        configured=(
-            HealthState.AVAILABLE
-            if any(
-                (
-                    settings.gemini_api_key,
-                    settings.google_api_key,
-                    settings.google_application_credentials,
-                    settings.gemini_cli_home,
-                )
-            )
-            else HealthState.UNKNOWN
-        ),
-    )
-    return replace(normalized, transport=_transport_evidence(normalized))
-
-
 async def _discover_kimi_catalog(
     key: ProviderCatalogKey, workspace_root: Path
 ) -> ProviderCatalogDiscovery:
@@ -1038,67 +786,27 @@ async def _discover_unverified_catalog(
     )
 
 
-def _admit_and_resolve_model_name(provider: Provider, model: Model | str | None) -> str:
+def _admit_and_resolve_model_name(provider: Provider, model: object) -> str:
     """Admit the provider and resolve its model name, or raise.
 
     The admission path, separated from construction: it refuses an unsupported
-    provider and turns the optional model selector into a concrete model name.
+    provider and requires the exact catalog-frozen model value.
 
-    Only the internal in-process lanes carry a repository-authored default and
-    capability map. An external lane is selected from its own served catalog and
-    frozen into the run's role assignment, so it admits the exact frozen value
-    alone: asked for a default or a capability tier, this refuses rather than
-    inventing a model identifier the provider never advertised. Being supported
-    and having a repo-authored default are separate facts, so the refusal names
-    the missing selection rather than reporting an unsupported provider.
+    Every lane is selected from its served catalog and frozen into the run's
+    role assignment. The factory therefore admits an exact value only; it never
+    translates a capability tier or supplies an implicit default.
 
     Raises:
-        ValueError: If the provider is unsupported, if an external lane is asked
-            for an implicit default or a capability tier, or if the model level
-            is not mapped for an internal lane.
+        ValueError: If the provider is unsupported or no exact value is supplied.
     """
     if provider not in _SUPPORTED_PROVIDERS:
         logger.error("Failed to instantiate: Unsupported provider %s", provider)
         raise ValueError(f"Unsupported provider: {provider}")
 
-    if model is None:
-        if provider not in PROVIDER_DEFAULT_MODELS:
-            raise ValueError(
-                f"Provider {provider.value!r} has no implicit default model. An "
-                "external lane is chosen from the catalog that lane serves, so "
-                "the exact model value frozen into the run's role assignment is "
-                "the only admissible selection."
-            )
-        model_level = PROVIDER_DEFAULT_MODELS[provider]
-        try:
-            return MODEL_MAP[provider][model_level]
-        except KeyError:
-            raise ValueError(
-                f"Unsupported model level {model_level!r} for provider {provider!r}"
-            ) from None
-    if isinstance(model, Model):
-        if provider not in MODEL_MAP:
-            raise ValueError(
-                f"Provider {provider.value!r} does not map capability level "
-                f"{model.value!r}. Capability tiers carry no equivalent meaning "
-                "across providers, so an external lane admits only the exact "
-                "model value frozen from its served catalog."
-            )
-        try:
-            return MODEL_MAP[provider][model]
-        except KeyError:
-            raise ValueError(
-                f"Unsupported model level {model!r} for provider {provider!r}"
-            ) from None
-    # For an external lane the raw string IS the frozen catalog value, which is
-    # the admissible selection. Only an internal lane, which has a map to
-    # validate against, is worth warning about here.
-    if provider in MODEL_MAP:
-        logger.warning(
-            "ProviderFactory received a raw model string %r for provider=%s. "
-            "Prefer passing a Model enum value to ensure the name is valid.",
-            model,
-            provider,
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError(
+            f"Provider {provider.value!r} requires the exact model value frozen "
+            "from its served catalog"
         )
     return model
 
@@ -1138,7 +846,6 @@ class ProviderFactory:
         )
         codex = ProviderCatalogKey(Provider.CODEX.value, "codex-app-server")
         antigravity = ProviderCatalogKey(Provider.ANTIGRAVITY.value, "antigravity-cli")
-        gemini = ProviderCatalogKey(Provider.GEMINI.value, "gemini-cli-acp")
         kimi = ProviderCatalogKey(Provider.KIMI.value, "kimi-code-acp")
         openai = ProviderCatalogKey(Provider.OPENAI.value, "openai-api")
         zai = ProviderCatalogKey(
@@ -1166,9 +873,6 @@ class ProviderFactory:
             ),
             ProviderCatalogRegistration(
                 codex, lambda: _discover_codex_catalog(codex, discovery_root)
-            ),
-            ProviderCatalogRegistration(
-                gemini, lambda: _discover_gemini_catalog(gemini, discovery_root)
             ),
             ProviderCatalogRegistration(
                 kimi, lambda: _discover_kimi_catalog(kimi, discovery_root)
@@ -1203,7 +907,7 @@ class ProviderFactory:
     def create(
         self,
         provider: Provider,
-        model: Model | str | None = None,
+        model: str,
         agent_config: AgentConfig | None = None,
         workspace_root: Path | None = None,
         backend: str | None = None,
@@ -1212,8 +916,8 @@ class ProviderFactory:
         """Create a configured BaseChatModel for the given provider.
 
         Args:
-            provider: The LLM provider (e.g., Provider.CLAUDE, Provider.GEMINI).
-            model: Optional explicit model string or Model enum.
+            provider: The exact supported LLM provider selected by the caller.
+            model: Exact model string frozen from a served catalog.
             agent_config: Optional agent configuration for provider initialization.
             workspace_root: Optional workspace root for ACP sandbox scoping.
             backend: ACP backend override (``"node"`` or ``"binary"``). When
@@ -1267,7 +971,6 @@ class ProviderFactory:
                 Provider.CLAUDE: f"claude-agent-acp:{backend or settings.acp_backend}",
                 Provider.ZAI: f"zai-claude-agent-acp:{backend or settings.acp_backend}",
                 Provider.KIMI: "kimi-code-acp",
-                Provider.GEMINI: "gemini-cli-acp",
                 Provider.OPENAI: "openai-api",
                 Provider.ZHIPU: "zhipu-openai-compatible-api",
             }
@@ -1324,8 +1027,8 @@ class ProviderFactory:
 
             command, command_meta = _classify_codex_command()
             # Codex auth is file-based (persisted local session in the Codex home);
-            # no secret env is injected. A raw model string bypasses MODEL_MAP, so
-            # pass the resolved name through; None falls back to the account default.
+            # no secret env is injected. Pass the required exact frozen model
+            # value through unchanged.
             codex_controls: dict[str, str] = {}
             for control_id, value in selected_controls.items():
                 field = control_id.partition(":")[0]
@@ -1494,52 +1197,6 @@ class ProviderFactory:
                     "temporary_model"
                     if "KIMI_MODEL_API_KEY" in env_vars
                     else "persisted_config"
-                ),
-            )
-
-        if provider == Provider.GEMINI:
-            logger.debug(
-                "[%s] Instantiating ACP Wrapper with model=%s.", provider, model_name
-            )
-            # Official Gemini CLI docs support non-interactive env auth
-            # (`GEMINI_API_KEY`, `GOOGLE_API_KEY`) in addition to local OAuth.
-            # The workspace env scrub removes secret keys by design, so the
-            # provider layer must re-inject only the auth vars it intentionally
-            # supports for the child subprocess.
-            command, command_meta = _classify_gemini_command(model_name)
-            env_vars = _build_gemini_env(
-                gemini_api_key=settings.gemini_api_key,
-                google_api_key=settings.google_api_key,
-                google_application_credentials=settings.google_application_credentials,
-                gemini_cli_home=settings.gemini_cli_home,
-            )
-            has_env_credentials = any(
-                key in env_vars
-                for key in (
-                    "GEMINI_API_KEY",
-                    "GOOGLE_API_KEY",
-                    "GOOGLE_APPLICATION_CREDENTIALS",
-                )
-            )
-            return AcpChatModel(
-                command=command,
-                env_vars=env_vars,
-                desired_config_options=selected_controls,
-                agent_config=agent_config,
-                workspace_root=str(workspace_root) if workspace_root else None,
-                provider=str(provider.value),
-                runtime_authority=command_meta["runtime_authority"],
-                command_origin=command_meta["command_origin"],
-                command_kind=command_meta["command_kind"],
-                command_executable=command_meta["command_executable"],
-                command_target=command_meta["command_target"],
-                acp_backend="gemini-cli",
-                auth_mode=(
-                    "env_credentials"
-                    if has_env_credentials
-                    else "local_oauth_mount"
-                    if "GEMINI_CLI_HOME" in env_vars
-                    else "local_oauth_refresh"
                 ),
             )
 

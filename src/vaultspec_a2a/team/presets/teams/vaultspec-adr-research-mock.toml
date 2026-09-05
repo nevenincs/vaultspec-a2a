@@ -12,10 +12,6 @@ the loop reproducibly. Real-provider collaboration is proven by running the same
 harness against the vaultspec-adr-research preset.
 """
 
-[team.defaults]
-provider   = "mock"
-capability = "mid"
-
 [team.topology]
 type  = "research_adr"
 order = []
@@ -46,20 +42,15 @@ recursion_limit      = 50
 
 [[team.workers]]
 agent_id = "vaultspec-researcher"
-model    = { provider = "mock" }
 
 [[team.workers]]
 agent_id = "vaultspec-synthesist"
-model    = { provider = "mock" }
 
 [[team.workers]]
 agent_id = "vaultspec-adr-author"
-model    = { provider = "mock" }
 
 [[team.workers]]
 agent_id = "vaultspec-plan-author"
-model    = { provider = "mock" }
 
 [[team.workers]]
 agent_id = "vaultspec-doc-reviewer"
-model    = { provider = "mock" }

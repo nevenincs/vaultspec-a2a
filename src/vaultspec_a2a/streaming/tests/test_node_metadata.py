@@ -58,7 +58,7 @@ def _graph() -> _Graph:
                 display_name="Code Reviewer",
                 description="Reviews code for correctness",
                 provider="claude",
-                model="opus",
+                model_name="provider-model",
             ),
             "__start__": _BareNode(),
         }
@@ -75,13 +75,13 @@ class TestNodeMetadataFields:
                 "display_name": "Code Reviewer",
                 "description": "Reviews code",
                 "provider": "claude",
-                "model": "opus",
+                "model_name": "provider-model",
                 "unrelated": "ignored",
             }
         )
         assert set(fields) == set(NODE_METADATA_FIELDS)
         assert fields["role"] == "reviewer"
-        assert fields["model"] == "opus"
+        assert fields["model_name"] == "provider-model"
         assert "unrelated" not in fields
 
     def test_missing_keys_become_empty_strings_not_omissions(self) -> None:
@@ -91,9 +91,9 @@ class TestNodeMetadataFields:
 
     def test_non_string_values_are_coerced(self) -> None:
         # Node metadata is author-supplied; the wire contract is str-valued.
-        fields = node_metadata_fields({"role": 7, "model": None})
+        fields = node_metadata_fields({"role": 7, "model_name": None})
         assert fields["role"] == "7"
-        assert fields["model"] == "None"
+        assert fields["model_name"] == "None"
 
     def test_graph_walk_skips_nodes_without_metadata(self) -> None:
         extracted = node_metadata_from_graph(_graph())
@@ -137,11 +137,7 @@ def test_direct_and_relayed_registration_agree_field_for_field() -> None:
             "display_name": "Code Reviewer",
             "description": "Reviews code for correctness",
             "provider": "claude",
-            "model": "opus",
-            # Empty, not absent: this fixture's node carries no frozen catalog
-            # entry, and every summary keeps the same shape so no consumer has
-            # to guard a key.
-            "model_name": "",
+            "model_name": "provider-model",
         }
     ]
     assert set(direct_summaries[0]) == {
@@ -153,7 +149,7 @@ def test_direct_and_relayed_registration_agree_field_for_field() -> None:
 
 @pytest.mark.asyncio
 async def test_team_status_defaults_every_field_but_keeps_caller_values() -> None:
-    """emit_team_status fills all six fields, without clobbering supplied ones."""
+    """emit_team_status fills every field without clobbering supplied ones."""
     aggregator = EventAggregator()
     queue = aggregator.add_subscriber("client-1")
     aggregator.subscribe("client-1", ["thread-1"])
@@ -167,7 +163,7 @@ async def test_team_status_defaults_every_field_but_keeps_caller_values() -> Non
                 "node_name": "reviewer",
                 "state": AgentLifecycleState.WORKING,
                 # Caller-supplied: must survive the metadata defaulting.
-                "model": "caller-pinned",
+                "model_name": "caller-pinned",
             }
         ],
     )
@@ -180,4 +176,4 @@ async def test_team_status_defaults_every_field_but_keeps_caller_values() -> Non
     assert summary["role"] == "reviewer"
     assert summary["display_name"] == "Code Reviewer"
     assert summary["provider"] == "claude"
-    assert summary["model"] == "caller-pinned"
+    assert summary["model_name"] == "caller-pinned"

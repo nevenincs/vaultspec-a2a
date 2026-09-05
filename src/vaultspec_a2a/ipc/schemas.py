@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from pydantic import AfterValidator, BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from ..thread.actor_tokens import ActorTokenBundle
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
@@ -97,6 +97,8 @@ ActiveProjectRoot = Annotated[str, AfterValidator(canonical_project_root)]
 class DispatchRequest(BaseModel):
     """Work dispatch command from gateway to worker."""
 
+    model_config = ConfigDict(extra="forbid")
+
     dispatch_id: str = Field(default_factory=lambda: uuid4().hex)
     action: Literal["ingest", "resume", "cancel"] = Field(
         description="'ingest' | 'resume' | 'cancel'"
@@ -129,12 +131,8 @@ class DispatchRequest(BaseModel):
     pipeline_phase: str | None = None
     vault_index: dict[str, list[str]] = Field(default_factory=dict)
     validation_errors: list[str] = Field(default_factory=list)
-    # The selected profile id and the frozen effective per-role
-    # assignment the run was launched with. Compilation consumes this verbatim
-    # (never re-resolves) so restart/recovery reproduces the identical models even
-    # if team/agent config drifts. Each value is {"provider", "capability",
-    # "fallback"} keyed by worker agent_id. Never carries a credential.
-    profile_id: str | None = None
+    # The exact catalog selection frozen at admission. Compilation consumes this
+    # verbatim and never re-resolves provider or model policy from presets.
     model_assignment: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # Engine-provisioned per-role actor tokens forwarded from run-start.
     # The bundle's redacting repr keeps raw tokens out of any dispatch log line;

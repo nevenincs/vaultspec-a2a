@@ -3,8 +3,8 @@
 These enums define domain-level discriminators and status types used by the
 graph compiler, event aggregator, and domain event dataclasses.
 
-``Model``, ``Provider``, ``MODEL_MAP``, and ``PROVIDER_DEFAULT_MODELS`` are
-canonical Layer 1 definitions. All consumers import directly from here.
+``Provider`` is the canonical Layer 1 lane discriminator. Concrete model
+values come only from served provider catalogs.
 """
 
 from enum import StrEnum
@@ -12,13 +12,10 @@ from enum import StrEnum
 from .acp_options import option_id_of
 
 __all__ = [
-    "MODEL_MAP",
-    "PROVIDER_DEFAULT_MODELS",
     "REJECT_OPTION_IDS",
     "REJECT_OPTION_KINDS",
     "RESEARCH_ADR_NODE_PHASE",
     "AgentLifecycleState",
-    "Model",
     "PermissionOptionKind",
     "PermissionType",
     "PipelinePhase",
@@ -229,74 +226,17 @@ class PermissionType(StrEnum):
 class Provider(StrEnum):
     """Supported LLM providers."""
 
-    # Antigravity is its own LANE, not a synonym for gemini: it ships a separate
-    # CLI (`agy`) with a separate login, and the models it serves span vendors -
-    # gemini, claude and gpt-oss all appear in one `agy models` listing. Folding
-    # it into the gemini member would make the lane that executes a turn
-    # unrecoverable from the record of which provider ran it.
+    # Antigravity is its own lane: `agy` has a separate login and serves models
+    # from multiple vendors, so the selected lane must remain explicit.
     ANTIGRAVITY = "antigravity"
     CLAUDE = "claude"
     CODEX = "codex"
     DETERMINISTIC = "deterministic"
-    GEMINI = "gemini"
     KIMI = "kimi"
     MOCK = "mock"
     OPENAI = "openai"
     ZAI = "zai"
     ZHIPU = "zhipu"
-
-
-class Model(StrEnum):
-    """LLM capability levels.
-
-    Abstracts specific version strings to reduce maintenance burden.
-    """
-
-    LOW = "low"
-    MID = "mid"
-    HIGH = "high"
-    MAX = "max"
-
-
-# Concrete model names for the INTERNAL in-process lanes only.
-#
-# An external provider's models are its own to name: they are enumerated from
-# that provider's live catalog, revalidated at run start, and frozen per role
-# into the run's durable assignment. A repository-authored name for an external
-# lane could only ever be a stale guess at an account-specific, region-specific,
-# CLI-version-specific fact, so no such entry exists here and the factory
-# refuses to invent one.
-#
-# The two lanes below are exempt because they are not external: they execute
-# in-process, no catalog exists to enumerate them, and their content is
-# role-keyed rather than model-keyed, which makes these names inert selectors
-# rather than model policy. ``providers/in_process_catalog.py`` serves them from
-# this map.
-MODEL_MAP: dict[Provider, dict[Model, str]] = {
-    Provider.DETERMINISTIC: {
-        Model.LOW: "deterministic",
-        Model.MID: "deterministic",
-        Model.HIGH: "deterministic",
-        Model.MAX: "deterministic",
-    },
-    Provider.MOCK: {
-        Model.LOW: "mock-low",
-        Model.MID: "mock-mid",
-        Model.HIGH: "mock-high",
-        Model.MAX: "mock-max",
-    },
-}
-
-
-# Default capability level for the internal in-process lanes only.
-#
-# An external provider has no implicit default: omitting a model may not
-# silently choose what produces an artifact, so a run must carry an explicit
-# served selection instead.
-PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
-    Provider.DETERMINISTIC: Model.MID,
-    Provider.MOCK: Model.MID,
-}
 
 
 # ---------------------------------------------------------------------------

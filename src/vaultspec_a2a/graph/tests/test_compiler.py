@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 import pytest_asyncio
-from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeChatModel
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -24,8 +23,6 @@ from ...providers import AcpPromptError, ProviderCondition
 from ...providers.codex_chat_model import _turn_failure
 from ...providers.conditions import condition_from_acp_error, condition_is_retryable
 from ...providers.factory import ProviderFactory
-from ...providers.lane_admission import IN_PROCESS_LANES
-from ...providers.model_profiles import resolve_role_assignment
 from ...team.team_config import (
     TeamConfig,
     TopologyConfig,
@@ -44,7 +41,6 @@ from ..compiler import (
     _make_research_producer,
     _parse_catalog_preferences,
     _resolve_model_for_worker,
-    _resolve_worker_model_preferences,
     _route_from_supervisor,
     _worker_retry_on,
     compile_team_graph,
@@ -145,41 +141,15 @@ async def test_compile_graph_structure(
 
 
 @pytest.mark.parametrize("preset_id", sorted(discover_team_preset_ids()))
-def test_bundled_preset_workers_resolve_only_on_an_in_process_lane(
+def test_bundled_preset_workers_require_an_exact_frozen_selection(
     preset_id: str,
 ) -> None:
-    """A shipped worker resolves WITHOUT a frozen selection only in process.
-
-    Both branches are asserted rather than just the resolving one, because the
-    refusal is the part that regressed silently before. An external lane's models
-    are named by the catalog that provider serves and frozen per role at run
-    start, so resolving one from configuration alone would mean inventing a model
-    identifier the provider never advertised. The in-process lanes are exempt
-    because no catalog exists to enumerate them.
-    """
     team = load_team_config(preset_id)
-    factory = ProviderFactory()
-
     for worker_ref in team.workers:
         agent_config = load_agent_config(worker_ref.agent_id)
-        assignment = resolve_role_assignment(worker_ref, agent_config, team, None)
-
-        if assignment.provider in IN_PROCESS_LANES:
-            model, _provider, _capability, _frozen_model = _resolve_model_for_worker(
-                worker_ref, agent_config, team, provider_factory=factory
-            )
-            assert isinstance(model, BaseChatModel), (
-                f"{preset_id}:{worker_ref.agent_id} resolved "
-                f"{type(model).__name__}, not a BaseChatModel"
-            )
-            continue
-
-        # The compiler now names the cause directly rather than surfacing it as
-        # fallback exhaustion: the role declares no provider, and a run picks its
-        # provider and model at start from the catalog its lane serves.
-        with pytest.raises(ValueError, match="has no provider"):
+        with pytest.raises(ValueError, match="exact catalog-frozen selection"):
             _resolve_model_for_worker(
-                worker_ref, agent_config, team, provider_factory=factory
+                worker_ref, agent_config, team, provider_factory=ProviderFactory()
             )
 
 
@@ -660,99 +630,6 @@ async def test_compile_team_graph_does_not_set_recursion_limit(
         )
     # recursion_limit is passed at runtime via config, not set on graph.
     assert not hasattr(graph, "recursion_limit")
-
-
-# ---------------------------------------------------------------------------
-# provider_fallback chain
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_worker_model_preferences_honors_worker_override_precedence() -> None:
-    """Worker-level provider/capability/fallback overrides win over defaults."""
-    from ...graph.enums import Model, Provider
-
-    team = load_team_config("vaultspec-solo-coder")
-    agent_cfg = load_agent_config("vaultspec-coder")
-    worker_ref = team.workers[0]
-
-    worker_ref = worker_ref.model_copy(
-        update={
-            "model": worker_ref.model.model_copy(
-                update={
-                    "provider": Provider.GEMINI,
-                    "capability": Model.MID,
-                    "provider_fallback": [Provider.OPENAI, Provider.ZHIPU],
-                }
-            )
-        }
-    )
-
-    provider, capability, fallback_chain, model_name = (
-        _resolve_worker_model_preferences(
-            worker_ref,
-            agent_cfg,
-            team,
-        )
-    )
-    assert provider == Provider.GEMINI
-    assert capability == Model.MID
-    assert fallback_chain == [Provider.OPENAI, Provider.ZHIPU]
-    # Unfrozen resolution carries no concrete model name; the launch-time mapping
-    # picks it. Only a frozen assignment pins one.
-    assert model_name is None
-
-
-def test_resolve_worker_model_preferences_consumes_frozen_assignment() -> None:
-    """A frozen assignment wins outright and is applied verbatim (restart reuse)."""
-    from ...graph.enums import Model, Provider
-
-    team = load_team_config("vaultspec-solo-coder")
-    agent_cfg = load_agent_config("vaultspec-coder")
-    worker_ref = team.workers[0]
-
-    # The frozen record forces mock/low with an openai fallback, overriding both
-    # the worker override and the agent config that would otherwise resolve.
-    frozen = {
-        worker_ref.agent_id: {
-            "provider": "mock",
-            "capability": "low",
-            "fallback": ["openai"],
-            "model_name": "mock-frozen-1",
-        }
-    }
-    provider, capability, fallback_chain, model_name = (
-        _resolve_worker_model_preferences(
-            worker_ref, agent_cfg, team, frozen_assignment=frozen
-        )
-    )
-    assert provider == Provider.MOCK
-    assert capability == Model.LOW
-    assert fallback_chain == [Provider.OPENAI]
-    # The whole point of freezing: the concrete model name is reproduced verbatim
-    # across a restart rather than re-resolved from a possibly-newer mapping.
-    assert model_name == "mock-frozen-1"
-
-
-def test_frozen_assignment_absent_worker_falls_through_to_resolution() -> None:
-    """A frozen map that does not name this worker leaves resolution unchanged.
-
-    Unchanged now means "refuses identically". The preset declares no provider,
-    so configuration alone cannot resolve one and the resolver says so; what this
-    pins is that a frozen map naming SOMEONE ELSE neither supplies the missing
-    lane nor changes the refusal. Comparing the two outcomes is still the point -
-    only the outcome being compared moved from a resolved pair to a refusal.
-    """
-    team = load_team_config("vaultspec-solo-coder")
-    agent_cfg = load_agent_config("vaultspec-coder")
-    worker_ref = team.workers[0]
-
-    with pytest.raises(ValueError, match="has no provider") as with_frozen:
-        _resolve_worker_model_preferences(
-            worker_ref, agent_cfg, team, frozen_assignment={"someone-else": {}}
-        )
-    with pytest.raises(ValueError, match="has no provider") as without_frozen:
-        _resolve_worker_model_preferences(worker_ref, agent_cfg, team)
-    assert str(with_frozen.value) == str(without_frozen.value)
 
 
 def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:

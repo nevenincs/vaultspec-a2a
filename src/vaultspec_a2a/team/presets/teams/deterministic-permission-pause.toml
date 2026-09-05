@@ -3,10 +3,6 @@ id           = "deterministic-permission-pause"
 display_name = "Deterministic Permission Pause"
 description  = "ProviderFactory scenario for the generic supervised permission pause."
 
-[team.defaults]
-provider   = "deterministic"
-capability = "mid"
-
 [team.topology]
 type  = "pipeline"
 order = ["deterministic-permission-pause"]
@@ -23,4 +19,3 @@ recursion_limit      = 10
 
 [[team.workers]]
 agent_id = "deterministic-permission-pause"
-

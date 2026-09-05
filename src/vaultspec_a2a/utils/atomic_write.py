@@ -16,7 +16,7 @@ publication does not complete - including when the interruption is a
 ``KeyboardInterrupt`` or a ``SystemExit`` rather than an error.  And it never
 opens a temporary that is a link, on either of its two write paths, so the
 predictable temporary name cannot be used to redirect a write elsewhere.
-Service discovery, the process registry, the runtime singleton, and the Gemini
+Service discovery, the process registry, and the runtime singleton
 OAuth refresh all publish through it.
 
 It lives under ``utils`` rather than beside its first callers in ``lifecycle``
@@ -24,7 +24,7 @@ for a reason worth stating, because it used to live there and the move removed a
 documented exception.  Python has no way to import a leaf without executing its
 package, so importing this from ``lifecycle`` executed the whole lifecycle
 package - the process registry, service discovery, and the configuration they
-pull - and the Gemini OAuth refresh, whose import latency sits on a coding
+pull, whose import latency can sit on a coding
 agent's tool-discovery window, kept its own copy of the loop rather than pay
 that.  Measured, the cost was +27 modules and ~62ms; from ``utils``, which that
 provider leaf already loads in full, it is +1 module and unmeasurable.  A home

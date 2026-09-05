@@ -125,7 +125,7 @@ class ProviderFactoryProtocol(Protocol):
         self,
         provider: Any,
         *,
-        model: Any | None = None,
+        model: Any,
         agent_config: Any | None = None,
         workspace_root: Path | None = None,
         **kwargs: Any,

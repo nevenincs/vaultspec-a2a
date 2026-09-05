@@ -39,10 +39,11 @@ def _scenario_model(
 ) -> tuple[DeterministicResearchAdrChatModel, AgentConfig]:
     """Resolve one bundled scenario through the production factory."""
     team = load_team_config(team_id)
-    assert team.defaults.provider is Provider.DETERMINISTIC
     assert len(team.workers) == 1
     agent = load_agent_config(team.workers[0].agent_id)
-    model = ProviderFactory().create(Provider.DETERMINISTIC, agent_config=agent)
+    model = ProviderFactory().create(
+        Provider.DETERMINISTIC, model="deterministic", agent_config=agent
+    )
     assert isinstance(model, DeterministicResearchAdrChatModel)
     return model, agent
 

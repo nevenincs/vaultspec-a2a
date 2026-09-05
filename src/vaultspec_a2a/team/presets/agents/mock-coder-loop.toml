@@ -7,10 +7,6 @@ description  = "Mock coder agent that generates an infinite text stream."
 [agent.persona]
 system_prompt = "You are a mock coder. Loop forever."
 
-[agent.model]
-provider   = "mock"
-capability = "mid"
-
 [agent.capabilities]
 filesystem_read  = true
 filesystem_write = true

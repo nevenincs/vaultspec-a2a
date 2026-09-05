@@ -766,7 +766,7 @@ class TestCostTrackingCRUD:
         r2 = self._make_cost_record(
             thread_id=thread.id,
             agent_id="coder-2",
-            provider="gemini",
+            provider="codex",
             model="high",
             input_tokens=2000,
             output_tokens=800,

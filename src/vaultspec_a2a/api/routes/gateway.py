@@ -144,9 +144,7 @@ from ..schemas.gateway import (
     PathSafeRunId,
     PresetsListResponse,
     PresetSummary,
-    ProfileSummary,
     ProviderCatalogSelection,
-    RoleAssignmentSummary,
     RoleState,
     RunAgentSummary,
     RunArchiveResponse,
@@ -527,7 +525,6 @@ async def _create_run_core(
                     metadata_json=metadata_json,
                     workspace_root=ws_root,
                     actor_tokens=body.actor_tokens,
-                    profile_id=None,
                     model_assignment=frozen.compiler_map(),
                 ),
                 circuit_breaker=circuit_breaker,
@@ -1159,7 +1156,7 @@ async def _validate_and_freeze_selection_or_refuse(
 
 # The metadata key binding a run to its non-secret admission lease identity. The
 # gateway writes it at commit and the terminal handler reads it back; both restate
-# this key inline, matching the metadata convention used for the frozen profile.
+# this key inline, matching the metadata convention used for frozen selection.
 _RUN_LEASE_METADATA_KEY = "run_lease"
 
 # The canonical digest of the request that created a run. Persisted on every
@@ -1189,7 +1186,7 @@ def _persisted_request_digest(metadata_json: str | None) -> str | None:
 
     The second case has a consequence worth naming. A caller can read a
     server-minted id off the response and later present it as its own, and that
-    request is then compared on the frozen profile alone rather than on the whole
+    request is then compared on the frozen selection alone rather than on the whole
     body. Closing it is not merely a matter of persisting the digest anyway: the
     run id is itself a digested field, so the original request - which carried
     none - and the later one that carries it would never match, and every such
@@ -1349,7 +1346,7 @@ def _probe_harness(team_config: Any, ws_root: Path | None) -> Any:
     discovery-serves / run-start-refuses binding uniformly. Read-only.
     """
     from ...context.harness import HarnessReadiness
-    from ...providers.model_profiles import probe_harness_ready
+    from ...providers.provider_readiness import probe_harness_ready
 
     harness_decl = team_config.effective_harness()
     if harness_decl is None:
@@ -1370,20 +1367,10 @@ _TEAM_SELECTION_METADATA_KEY = "provider_catalog_selection"
 def _persist_team_selection(
     metadata_json: str | None, frozen: FrozenTeamSelection
 ) -> str:
-    """Persist the normalized schema-v1 selection without a legacy profile id."""
+    """Persist the normalized schema-v1 catalog selection."""
     data = _metadata_object(metadata_json) or {}
     data[_TEAM_SELECTION_METADATA_KEY] = frozen.to_record()
     return json.dumps(data)
-
-
-def _read_persisted_frozen(metadata_json: str | None) -> Any:
-    """Rebuild the persisted :class:`FrozenAssignment` from thread metadata, or None."""
-    from ...providers.model_profiles import frozen_from_record
-
-    data = _metadata_object(metadata_json)
-    if data is None:
-        return None
-    return frozen_from_record(data.get("model_profile"))
 
 
 def _read_persisted_team_selection(
@@ -1405,72 +1392,6 @@ def _modern_frozen_disclosure(
     if not isinstance(frozen, FrozenTeamSelection):
         return None
     return FrozenTeamAssignmentSummary.model_validate(frozen.disclosure())
-
-
-def _frozen_disclosure(frozen: Any) -> list[RoleAssignmentSummary]:
-    """Build the safe per-role disclosure from a frozen assignment record.
-
-    Every field but one is reproduced verbatim from the frozen record - what the
-    run DECIDED at start, deliberately immune to later config drift.
-    ``provider_ready`` is the exception: readiness is a live host fact that no
-    frozen record carries (``freeze_assignment`` does not persist it, and could
-    not without making the run's digest depend on the host). It is therefore
-    probed here, through the same production probe the preset listing uses, so
-    the two disclosures of one question cannot disagree. Leaving it to the
-    model's default instead published a confident ``False`` - asserting "not
-    ready" where the truth was "not evaluated".
-
-    The probe is memoized per call, so a run pays it once per distinct provider
-    rather than once per role. Callers are on the event loop and must offload
-    this (``asyncio.to_thread``), matching the preset listing: the probe reaches
-    the filesystem to resolve a subprocess provider's launch command.
-    """
-    from ...graph.enums import Provider
-    from ...providers.model_profiles import AssignmentSource, probe_provider_readiness
-
-    readiness: dict[str, bool] = {}
-
-    def _ready(provider_id: str) -> bool:
-        if provider_id not in readiness:
-            try:
-                provider = Provider(provider_id)
-            except ValueError:
-                # A run frozen under a provider this build no longer knows: the
-                # truthful verdict is "not ready", not a crash on a read path.
-                readiness[provider_id] = False
-            else:
-                readiness[provider_id] = probe_provider_readiness(provider).ready
-        return readiness[provider_id]
-
-    summaries: list[RoleAssignmentSummary] = []
-    for agent_id, role in frozen.roles.items():
-        provider_id = str(role.get("provider", ""))
-        summaries.append(
-            RoleAssignmentSummary(
-                role_id=str(role.get("role_id", "")),
-                agent_id=agent_id,
-                provider_id=provider_id,
-                capability=role.get("capability"),
-                model_name=role.get("model_name") or None,
-                fallback_providers=list(role.get("fallback", [])),
-                provider_ready=_ready(provider_id),
-                source=str(role.get("source", AssignmentSource.TEAM_DEFAULT.value)),
-            )
-        )
-    return summaries
-
-
-async def _disclose_frozen(frozen: Any) -> list[RoleAssignmentSummary]:
-    """Disclose a frozen assignment (or nothing) without blocking the event loop.
-
-    The single entry point every run-envelope path uses, so the absent-frozen
-    case and the readiness offload are decided once rather than at four call
-    sites. The offload matches ``presets_list_endpoint``: readiness reaches the
-    filesystem, and ``/v1/runs/{run_id}`` is polled.
-    """
-    if frozen is None or isinstance(frozen, FrozenTeamSelection):
-        return []
-    return await asyncio.to_thread(_frozen_disclosure, frozen)
 
 
 def _raise_for_dispatch_failure(
@@ -1649,9 +1570,6 @@ async def run_status_endpoint(
         next_nodes=snapshot.next_nodes,
         repair_status=snapshot.repair_status,
     )
-    # Disclose the run's frozen profile + effective assignment,
-    # reproduced verbatim from run metadata (never re-resolved).
-    frozen = _read_persisted_frozen(capture.thread_metadata)
     modern_frozen = _read_persisted_team_selection(capture.thread_metadata)
 
     return RunStatusResponse(
@@ -1694,8 +1612,6 @@ async def run_status_endpoint(
         # the run survives, so without this line their account is durable and
         # unreadable - recorded for nobody.
         repair_reason=snapshot.repair_reason,
-        profile_id=frozen.profile_id if frozen is not None else None,
-        assignments=await _disclose_frozen(frozen),
         frozen_assignment=_modern_frozen_disclosure(modern_frozen),
         lease_id=_persisted_lease_id(capture.thread_metadata),
         reservation_id=(
@@ -1880,8 +1796,7 @@ async def run_history_endpoint(
     # the model rejects as incomplete - and this is the WIDE read, whose job is
     # to report the record, not to enforce a schema on it. Failing here would
     # cost a caller the whole transcript over one unrelated field. The
-    # disagreement is queued as its own finding; the legacy metadata route
-    # shares it and answers a server error for exactly these runs.
+    # disagreement is queued as its own finding.
     metadata_json = await get_thread_metadata(db, run_id)
     metadata: ThreadMetadata | None = None
     if metadata_json:
@@ -2342,11 +2257,8 @@ async def presets_list_endpoint(
     Resolution uses the requested workspace context so workspace-local presets
     are listed alongside the bundled set. A single preset that fails to load or
     validate is reported with ``loadable=False`` and a reason rather than
-    omitted or allowed to crash the whole listing. Each loadable preset carries
-    its model profiles with per-role effective assignments (resolved by the same
-    shared resolver launch uses) and backend-computed eligibility. The whole
-    build - file I/O, provider readiness, and the engine reachability probe -
-    runs off the event loop.
+    omitted or allowed to crash the whole listing. File I/O runs off the event
+    loop.
     """
     ws_root = Path(workspace_root) if workspace_root else None
     presets = await asyncio.to_thread(_build_preset_summaries, ws_root)
@@ -2354,13 +2266,11 @@ async def presets_list_endpoint(
 
 
 def _build_preset_summaries(ws_root: Path | None) -> list[PresetSummary]:
-    """Summarize every discoverable preset, probing engine reachability once."""
-    from ...providers.model_profiles import probe_engine_reachable
+    """Summarize every discoverable preset."""
     from ...team.team_config import discover_team_preset_ids
 
-    engine_reachable = probe_engine_reachable()
     return [
-        _summarize_preset(preset_id, ws_root, engine_reachable)
+        _summarize_preset(preset_id, ws_root)
         for preset_id in sorted(discover_team_preset_ids(ws_root))
     ]
 
@@ -2396,9 +2306,7 @@ def _preset_origin(preset_id: str, ws_root: Path | None, *, is_mock: bool) -> st
     return "bundled"
 
 
-def _summarize_preset(
-    preset_id: str, ws_root: Path | None, engine_reachable: bool
-) -> PresetSummary:
+def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
     """Load one preset and summarize it, capturing any load failure truthfully.
 
     Any load or validation error is caught and reported as an unloadable preset
@@ -2443,84 +2351,7 @@ def _summarize_preset(
         is_mock=is_mock,
         origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
         supported_capabilities=supported_capabilities(tc.topology.type),
-        default_profile_id=tc.default_profile_id,
-        profiles=_summarize_profiles(tc, ws_root, engine_reachable),
     )
-
-
-def _summarize_profiles(
-    tc: Any, ws_root: Path | None, engine_reachable: bool
-) -> list[ProfileSummary]:
-    """Resolve and rate every profile of a loadable preset.
-
-    Uses the shared model-profile resolver + eligibility service so the served
-    assignments are the exact ones launch would freeze. Provider readiness is
-    probed once and shared across profiles; the acceptance gate stays open
-    (reported honestly as an unavailable reason).
-    """
-    from ...graph.enums import Provider
-    from ...providers.model_profiles import (
-        ProviderReadiness,
-        evaluate_profile_eligibility,
-        probe_provider_readiness,
-        resolve_effective_assignment,
-    )
-
-    readiness: dict[Provider, ProviderReadiness] = {}
-
-    def _ready(provider: Provider) -> ProviderReadiness:
-        if provider not in readiness:
-            readiness[provider] = probe_provider_readiness(provider)
-        return readiness[provider]
-
-    # Probe the harness once per preset (workspace-level, profile-independent) so
-    # discovery SERVES the harness reason on an unprovisioned authoring preset -
-    # the discovery half of the agent-harness contract.
-    harness = _probe_harness(tc, ws_root)
-
-    summaries: list[ProfileSummary] = []
-    profiles = tc.effective_profiles()
-    for profile_id, profile in profiles.items():
-        assignment = resolve_effective_assignment(tc, profile_id, ws_root)
-        eligibility = evaluate_profile_eligibility(
-            assignment,
-            readiness=readiness,
-            engine_reachable=engine_reachable,
-            acceptance_gate_passed=False,
-            harness=harness,
-        )
-        # A role with no declared provider serves an EMPTY provider_id and is not
-        # probed for readiness: there is no lane to probe, and substituting one
-        # would advertise a provider no preset declared. The reason travels in
-        # resolution_error, which the eligibility verdict above already reflects.
-        assignments = [
-            RoleAssignmentSummary(
-                role_id=role.role_id,
-                agent_id=role.agent_id,
-                provider_id=role.provider.value if role.provider is not None else "",
-                capability=role.capability.value if role.capability else None,
-                model_name=role.model_name or None,
-                fallback_providers=[p.value for p in role.fallback_providers],
-                provider_ready=(
-                    _ready(role.provider).ready if role.provider is not None else False
-                ),
-                source=role.source.value,
-                resolution_error=role.resolution_error,
-            )
-            for role in assignment.roles
-        ]
-        summaries.append(
-            ProfileSummary(
-                id=profile_id,
-                display_name=profile.display_name,
-                description=profile.description,
-                is_default=profile_id == tc.default_profile_id,
-                eligible=eligibility.eligible,
-                unavailable_reasons=eligibility.reasons,
-                assignments=assignments,
-            )
-        )
-    return summaries
 
 
 # ---------------------------------------------------------------------------

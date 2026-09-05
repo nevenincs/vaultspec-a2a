@@ -29,7 +29,7 @@ def _registration(provider_id: str) -> ProviderCatalogRegistration:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider_id", ("antigravity", "claude", "codex", "gemini"))
+@pytest.mark.parametrize("provider_id", ("antigravity", "claude", "codex"))
 async def test_installed_registered_lane_enumerates_without_a_prompt(
     provider_id: str,
     external_prerequisite: ExternalPrerequisiteRule,

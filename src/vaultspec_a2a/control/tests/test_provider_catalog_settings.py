@@ -34,7 +34,7 @@ def test_kimi_temporary_provider_uses_only_current_names() -> None:
     assert configured.kimi_code_home == "C:/isolated-kimi-home"
 
 
-def test_legacy_kimi_key_and_base_names_remain_migration_fallbacks() -> None:
+def test_retired_kimi_key_and_base_names_are_ignored() -> None:
     configured = Settings.model_validate(
         {
             "KIMI_API_KEY": "obsolete-key",
@@ -42,12 +42,11 @@ def test_legacy_kimi_key_and_base_names_remain_migration_fallbacks() -> None:
         }
     )
 
-    assert configured.kimi_api_key is not None
-    assert configured.kimi_api_key.get_secret_value() == "obsolete-key"
-    assert configured.kimi_base_url == "https://obsolete.example.invalid/v1"
+    assert configured.kimi_api_key is None
+    assert configured.kimi_base_url is None
 
 
-def test_current_kimi_names_take_precedence_over_legacy_fallbacks() -> None:
+def test_retired_kimi_names_cannot_override_current_names() -> None:
     configured = Settings.model_validate(
         {
             "KIMI_MODEL_API_KEY": "current-key",
@@ -63,7 +62,7 @@ def test_current_kimi_names_take_precedence_over_legacy_fallbacks() -> None:
 
 
 @pytest.mark.parametrize("current", ("", "   "))
-def test_blank_current_kimi_names_fall_through_to_legacy(
+def test_blank_current_kimi_names_do_not_fall_through_to_retired_names(
     current: str,
 ) -> None:
     configured = Settings.model_validate(
@@ -75,12 +74,11 @@ def test_blank_current_kimi_names_fall_through_to_legacy(
         }
     )
 
-    assert configured.kimi_api_key is not None
-    assert configured.kimi_api_key.get_secret_value() == "legacy-key"
-    assert configured.kimi_base_url == "https://legacy.example.invalid/v1"
+    assert configured.kimi_api_key is None
+    assert configured.kimi_base_url is None
 
 
-def test_kimi_migration_precedence_reads_a_real_env_file(tmp_path: Path) -> None:
+def test_retired_kimi_names_in_a_real_env_file_are_ignored(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
         "KIMI_MODEL_API_KEY=\n"
@@ -92,12 +90,11 @@ def test_kimi_migration_precedence_reads_a_real_env_file(tmp_path: Path) -> None
 
     configured = cast("_SettingsEnvFileFactory", Settings)(_env_file=env_file)
 
-    assert configured.kimi_api_key is not None
-    assert configured.kimi_api_key.get_secret_value() == "legacy-file-key"
-    assert configured.kimi_base_url == "https://legacy-file.example.invalid/v1"
+    assert configured.kimi_api_key is None
+    assert configured.kimi_base_url is None
 
 
-def test_absent_kimi_current_and_legacy_values_remain_absent() -> None:
+def test_absent_kimi_current_values_remain_absent() -> None:
     configured = Settings.model_validate({})
 
     assert configured.kimi_api_key is None
@@ -106,19 +103,19 @@ def test_absent_kimi_current_and_legacy_values_remain_absent() -> None:
 
 def test_kimi_secret_inputs_are_excluded_from_repr_and_model_dump() -> None:
     current_secret = "current-key-that-must-not-leak"
-    legacy_secret = "legacy-key-that-must-not-leak"
+    retired_secret = "retired-key-that-must-not-leak"
     configured = Settings.model_validate(
         {
             "KIMI_MODEL_API_KEY": current_secret,
-            "KIMI_API_KEY": legacy_secret,
+            "KIMI_API_KEY": retired_secret,
         }
     )
 
     rendered = f"{configured!r}\n{configured.model_dump()!r}"
     assert current_secret not in rendered
-    assert legacy_secret not in rendered
+    assert retired_secret not in rendered
     assert "kimi_model_api_key" not in configured.model_dump()
-    assert "kimi_legacy_api_key" not in configured.model_dump()
+    assert "kimi_legacy_api_key" not in Settings.model_fields
 
 
 @pytest.mark.parametrize(

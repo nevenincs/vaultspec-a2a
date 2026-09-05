@@ -8,7 +8,7 @@ Domain enums (``ToolKind``, ``PermissionType``, ``PermissionOptionKind``,
 ``ToolCallStatus``, ``AgentLifecycleState``) are defined in
 ``vaultspec_a2a.graph.enums``; import them from there directly.
 
-Note: ``Provider`` and ``Model`` live in ``vaultspec_a2a.utils.enums`` and are
+Note: ``Provider`` lives in ``vaultspec_a2a.graph.enums`` and is
 imported (not duplicated) where needed.
 """
 

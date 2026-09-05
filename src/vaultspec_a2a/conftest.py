@@ -238,7 +238,7 @@ def _codex_credentialed() -> bool:
 
 
 def _kimi_credentialed() -> bool:
-    """The current-or-legacy API key, or Kimi Code's persisted credential."""
+    """The current API key or Kimi Code's persisted credential."""
     from .control.config import settings
 
     if settings.kimi_api_key is not None:
@@ -247,27 +247,6 @@ def _kimi_credentialed() -> bool:
     # what carries the evidence; the folder exists from install alone.
     return _credential_store(
         settings.kimi_code_home, ".kimi-code", "credentials/kimi-code.json"
-    )
-
-
-def _gemini_credentialed() -> bool:
-    """An API key under either accepted name, or the CLI's OAuth credential.
-
-    BOTH credential filenames are accepted. The CLI renamed the file it writes -
-    a fresh login now lands in ``gemini-credentials.json`` where it used to be
-    ``oauth_creds.json``, and it deletes the old one - so a probe that knew only
-    the historical name reported "no credential" immediately after a successful
-    sign-in. Checking the current name first and keeping the legacy one is what
-    lets a host that has not re-authenticated since the rename still resolve.
-    """
-    from .control.config import settings
-
-    for key in (settings.gemini_api_key, settings.google_api_key):
-        if (key or "").strip():
-            return True
-    return any(
-        _credential_store(settings.gemini_cli_home, ".gemini", leaf)
-        for leaf in ("gemini-credentials.json", "oauth_creds.json")
     )
 
 
@@ -382,20 +361,9 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         skip_reason_tokens=("claude cli", "claude acp cli"),
     ),
     ExternalPrerequisite(
-        "gemini-cli",
-        what="the Gemini CLI on PATH",
-        supply="npm install -g @google/gemini-cli",
-        probe=_on_path("gemini", "gemini.cmd", "gemini.exe"),
-        skip_reason_tokens=("gemini cli",),
-    ),
-    ExternalPrerequisite(
         "kimi-cli",
         what="the Kimi CLI on PATH",
-        supply=(
-            "install Kimi Code per https://moonshotai.github.io/kimi-code/ "
-            "(the CLI was renamed from kimi-cli; `kimi migrate` imports a "
-            "legacy installation)"
-        ),
+        supply=("install Kimi Code per https://moonshotai.github.io/kimi-code/"),
         probe=_on_path("kimi", "kimi.cmd", "kimi.exe"),
         skip_reason_tokens=("kimi cli",),
     ),
@@ -460,16 +428,6 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         supply="run the Antigravity CLI once and complete its sign-in",
         probe=_antigravity_credentialed,
         skip_reason_tokens=("antigravity credential",),
-    ),
-    ExternalPrerequisite(
-        "gemini-credential",
-        what="a Gemini credential (an API key or a logged-in CLI)",
-        supply=(
-            "run `gemini` once to complete its OAuth login, or export "
-            "GEMINI_API_KEY (GOOGLE_API_KEY is also accepted)"
-        ),
-        probe=_gemini_credentialed,
-        skip_reason_tokens=("gemini credential",),
     ),
 )
 

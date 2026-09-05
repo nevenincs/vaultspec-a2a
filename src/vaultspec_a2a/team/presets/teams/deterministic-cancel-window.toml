@@ -3,10 +3,6 @@ id           = "deterministic-cancel-window"
 display_name = "Deterministic Cancellation Window"
 description  = "ProviderFactory scenario for cancellation while model generation is in flight."
 
-[team.defaults]
-provider   = "deterministic"
-capability = "mid"
-
 [team.topology]
 type  = "pipeline"
 order = ["deterministic-cancel-window"]
@@ -23,4 +19,3 @@ recursion_limit      = 10
 
 [[team.workers]]
 agent_id = "deterministic-cancel-window"
-

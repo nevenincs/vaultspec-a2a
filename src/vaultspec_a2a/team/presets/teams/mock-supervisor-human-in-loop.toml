@@ -3,14 +3,6 @@ id           = "mock-supervisor-human-in-loop"
 display_name = "Mock Supervisor Human in Loop"
 description  = "Supervisor-driven mock team that requires plan approval before routing to a human-loop worker."
 
-[team.defaults]
-provider   = "mock"
-capability = "mid"
-
-[team.supervisor]
-provider   = "mock"
-capability = "mid"
-
 [team.topology]
 type = "star"
 

@@ -9,7 +9,7 @@ from langchain_openai import ChatOpenAI
 
 from ...control.config import settings
 from ...graph.compiler import _resolve_model_for_worker
-from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
+from ...graph.enums import Provider
 from ...team.team_config import load_agent_config, load_team_config
 from ...thread.errors import ConfigError
 from ..acp_chat_model import AcpChatModel
@@ -18,11 +18,9 @@ from ..factory import (
     _BIN_PATH,
     _CLAUDE_ACP_JS,
     ProviderFactory,
-    _build_gemini_env,
     _build_kimi_env,
     _build_zai_env,
     _classify_acp_command,
-    _classify_gemini_command,
     classify_provider_command,
     kimi_temporary_model_configuration_reason,
 )
@@ -35,7 +33,6 @@ from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatal
 # tests pin is that the value SURVIVES construction unaltered, which is a
 # property of the plumbing and not of the particular string.
 _FROZEN_CLAUDE_MODEL = "claude-frozen-entry"
-_FROZEN_GEMINI_MODEL = "gemini-frozen-entry"
 _FROZEN_KIMI_MODEL = "kimi-frozen-entry"
 _FROZEN_ZAI_MODEL = "zai-frozen-entry"
 _FROZEN_ZHIPU_MODEL = "zhipu-frozen-entry"
@@ -52,7 +49,6 @@ def test_catalog_registrations_are_execution_mode_specific() -> None:
         ProviderCatalogKey("antigravity", "antigravity-cli"),
         ProviderCatalogKey("claude", f"claude-agent-acp:{settings.acp_backend}"),
         ProviderCatalogKey("codex", "codex-app-server"),
-        ProviderCatalogKey("gemini", "gemini-cli-acp"),
         ProviderCatalogKey("kimi", "kimi-code-acp"),
         ProviderCatalogKey("openai", "openai-api"),
         ProviderCatalogKey("zai", f"zai-claude-agent-acp:{settings.acp_backend}"),
@@ -195,74 +191,6 @@ def test_provider_factory_claude_retains_requested_model_for_acp_selection() -> 
     assert isinstance(model, AcpChatModel)
     assert model.desired_model == _FROZEN_CLAUDE_MODEL
     assert model._config.desired_model == _FROZEN_CLAUDE_MODEL
-
-
-def test_provider_factory_gemini_creates_acp() -> None:
-    """Verify Gemini provider creates AcpChatModel with the correct ACP command."""
-    model = ProviderFactory().create(Provider.GEMINI, model=_FROZEN_GEMINI_MODEL)
-    assert isinstance(model, AcpChatModel)
-    assert model.command[1:] == ["--model", _FROZEN_GEMINI_MODEL, "--acp"]
-
-
-def test_classify_gemini_command_uses_explicit_executable_metadata() -> None:
-    """Explicit Gemini executable is recorded as explicit runtime authority."""
-    command, meta = _classify_gemini_command(
-        "gemini-test-model",
-        executable="/usr/local/bin/gemini",
-    )
-    assert command == [
-        "/usr/local/bin/gemini",
-        "--model",
-        "gemini-test-model",
-        "--acp",
-    ]
-    assert meta["runtime_authority"] == "explicit_executable"
-    assert meta["command_origin"] == "explicit_executable"
-    assert meta["command_kind"] == "gemini_cli"
-
-
-def test_gemini_catalog_command_does_not_preselect_a_model() -> None:
-    command, _ = _classify_gemini_command(
-        None,
-        executable="/usr/local/bin/gemini",
-    )
-
-    assert command == ["/usr/local/bin/gemini", "--acp"]
-
-
-def test_build_gemini_env_injects_supported_noninteractive_auth() -> None:
-    """Gemini env builder re-injects only documented subprocess auth vars."""
-    env = _build_gemini_env(
-        "gem-key",
-        "google-key",
-        "/run/secrets/google-application-credentials.json",
-        "/gemini-cli-home",
-    )
-    assert env == {
-        "GEMINI_API_KEY": "gem-key",
-        "GOOGLE_API_KEY": "google-key",
-        "GOOGLE_APPLICATION_CREDENTIALS": (
-            "/run/secrets/google-application-credentials.json"
-        ),
-        "GEMINI_CLI_HOME": "/gemini-cli-home",
-        "HOME": "/gemini-cli-home",
-    }
-
-
-def test_build_gemini_env_marks_local_oauth_mount_for_noninteractive_cli() -> None:
-    """Mounted Gemini CLI OAuth state should force the official OAuth auth selector."""
-    env = _build_gemini_env(None, None, None, "/gemini-cli-home")
-    assert env == {
-        "GEMINI_CLI_HOME": "/gemini-cli-home",
-        "HOME": "/gemini-cli-home",
-        "GOOGLE_GENAI_USE_GCA": "true",
-    }
-
-
-def test_build_gemini_env_ignores_blank_values() -> None:
-    """Blank Gemini auth settings must not produce empty subprocess env vars."""
-    env = _build_gemini_env(" ", "", " ", "")
-    assert env == {}
 
 
 # ---------------------------------------------------------------------------
@@ -487,14 +415,13 @@ def test_provider_factory_zhipu_mapping() -> None:
     assert "bigmodel.cn" in str(model.openai_api_base)
 
 
-def test_provider_factory_gemini_with_workspace_root() -> None:
-    """Verify that workspace_root kwarg is forwarded to AcpChatModel for Gemini."""
-    ws = Path("Y:/code/test")
-    model = ProviderFactory().create(
-        Provider.GEMINI, model=_FROZEN_GEMINI_MODEL, workspace_root=ws
+def test_retired_gemini_lane_is_not_a_provider_or_catalog_registration() -> None:
+    with pytest.raises(ValueError):
+        Provider("gemini")
+    assert all(
+        registration.key.provider_id != "gemini"
+        for registration in ProviderFactory().catalog_registrations(Path.cwd())
     )
-    assert isinstance(model, AcpChatModel)
-    assert model.workspace_root == str(ws)
 
 
 def test_factory_applies_exact_codex_model_scoped_controls() -> None:
@@ -579,7 +506,7 @@ def test_compiler_uses_the_next_exact_frozen_lane_when_primary_is_unavailable() 
         }
     }
 
-    model, provider, capability, _frozen_model = _resolve_model_for_worker(
+    model, provider, frozen_model = _resolve_model_for_worker(
         worker_ref,
         agent,
         team,
@@ -589,7 +516,7 @@ def test_compiler_uses_the_next_exact_frozen_lane_when_primary_is_unavailable() 
     assert isinstance(model, CodexChatModel)
     assert model.model_name == "fallback-model"
     assert provider is Provider.CODEX
-    assert capability is None
+    assert frozen_model == "fallback-model"
 
 
 class TestProviderAdmission:
@@ -601,26 +528,14 @@ class TestProviderAdmission:
     without building a model.
     """
 
-    def test_an_internal_default_resolves_to_the_mapped_model(self) -> None:
-        """The in-process lanes keep a default: no catalog enumerates them."""
+    @pytest.mark.parametrize("provider", (Provider.DETERMINISTIC, Provider.MOCK))
+    def test_an_in_process_lane_has_no_implicit_default(
+        self, provider: Provider
+    ) -> None:
         from ..factory import _admit_and_resolve_model_name
 
-        resolved = _admit_and_resolve_model_name(Provider.DETERMINISTIC, None)
-
-        assert (
-            resolved
-            == MODEL_MAP[Provider.DETERMINISTIC][
-                PROVIDER_DEFAULT_MODELS[Provider.DETERMINISTIC]
-            ]
-        )
-
-    def test_an_internal_model_enum_resolves_through_the_map(self) -> None:
-        from ..factory import _admit_and_resolve_model_name
-
-        level = PROVIDER_DEFAULT_MODELS[Provider.DETERMINISTIC]
-        resolved = _admit_and_resolve_model_name(Provider.DETERMINISTIC, level)
-
-        assert resolved == MODEL_MAP[Provider.DETERMINISTIC][level]
+        with pytest.raises(ValueError, match="exact model value frozen"):
+            _admit_and_resolve_model_name(provider, None)
 
     def test_an_external_lane_has_no_implicit_default(self) -> None:
         """Omitting a model may not silently choose the artifact producer.
@@ -632,13 +547,6 @@ class TestProviderAdmission:
 
         with pytest.raises(ValueError, match="exact model value frozen"):
             _admit_and_resolve_model_name(Provider.CLAUDE, None)
-
-    def test_an_external_lane_refuses_a_capability_tier(self) -> None:
-        """Capability tiers are not a shared vocabulary across providers."""
-        from ..factory import _admit_and_resolve_model_name
-
-        with pytest.raises(ValueError, match="exact model value frozen"):
-            _admit_and_resolve_model_name(Provider.CLAUDE, Model.MID)
 
     def test_the_refusal_is_not_reported_as_an_unsupported_provider(self) -> None:
         """Supported-ness and having a repo-authored default are separate facts.

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import httpx
@@ -29,27 +30,157 @@ from ...control.dispatch import (
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import create_thread, get_thread
 from ...database.session import close_db, get_session_factory, init_db
+from ...providers.provider_catalog import (
+    AdmissionState,
+    AuthenticationState,
+    CatalogState,
+    CatalogStatus,
+    HealthState,
+    ModelCatalogEntry,
+    ProviderCatalog,
+    ProviderCatalogKey,
+    ProviderRecord,
+    SelectionReference,
+    StructuredProviderHealth,
+)
+from ...providers.team_selection import freeze_team_selection
 from ...thread.enums import ThreadStatus
 
 _LOGGER_NAME = "vaultspec_a2a.control.dispatch"
 
 
+def _current_metadata(workspace_root: str | None) -> dict[str, object]:
+    """Build a valid current selection record for redispatch-path tests."""
+    now = datetime.now(UTC)
+    key = ProviderCatalogKey("deterministic", "in-process-deterministic")
+    catalog = ProviderCatalog(
+        key=key,
+        state=CatalogState(
+            status=CatalogStatus.AVAILABLE,
+            checked_at=now,
+            revision="test-revision",
+            expires_at=now + timedelta(minutes=5),
+        ),
+        models=(
+            ModelCatalogEntry(
+                entry_id="deterministic",
+                provider_value="deterministic",
+                display_name="Deterministic",
+            ),
+        ),
+    )
+    health = StructuredProviderHealth.derive(
+        configured=HealthState.AVAILABLE,
+        transport=HealthState.AVAILABLE,
+        authentication=AuthenticationState.NOT_APPLICABLE,
+        catalog=CatalogStatus.AVAILABLE,
+        admission=AdmissionState.ADMITTED,
+        checked_at=now,
+    )
+    record = ProviderRecord(
+        provider_id="deterministic",
+        display_name="Deterministic",
+        execution_mode="in-process-deterministic",
+        health=health,
+        catalog=catalog,
+    )
+    frozen = freeze_team_selection(
+        selection=SelectionReference(
+            provider_id="deterministic",
+            execution_mode="in-process-deterministic",
+            catalog_revision="test-revision",
+            entry_id="deterministic",
+        ),
+        overrides={},
+        fallbacks=(),
+        required_roles=("mock-coder-success",),
+        records=(record,),
+    )
+    metadata: dict[str, object] = {"provider_catalog_selection": frozen.to_record()}
+    if workspace_root is not None:
+        metadata["workspace_root"] = workspace_root
+    return metadata
+
+
 @pytest.mark.asyncio
-async def test_invalid_frozen_selection_fails_only_its_thread_and_sweep_continues(
+async def test_retired_stored_authority_fails_closed_without_redispatch(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A corrupt modern authority cannot prevent later restart work from running."""
+    """Stored retired policy is detected by key and refused without interpretation."""
+    db_file = tmp_path / "redispatch-retired-authority.db"
+    await close_db()
+    await init_db(str(db_file))
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id="retired-authority",
+                status=ThreadStatus.RECONCILING,
+                team_preset="mock-success-single",
+                metadata=json.dumps(
+                    {
+                        "workspace_root": str(tmp_path),
+                        # Deliberately malformed: the refusal recognizes only
+                        # the retired key and must never interpret its value.
+                        "model_profile": ["must", "not", "be", "read"],
+                    }
+                ),
+            )
+            await session.commit()
+
+        spawner = LazyWorkerSpawner(
+            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+        )
+        spawner.replace_process(None)
+        circuit_breaker = WorkerCircuitBreaker(
+            failure_threshold=1, recovery_timeout=999.0
+        )
+
+        async with httpx.AsyncClient(
+            base_url="http://127.0.0.1:9", timeout=0.2
+        ) as client:
+            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+                await redispatch_reconciling_threads(
+                    client,
+                    circuit_breaker,
+                    spawner,
+                    record_worker_contact=lambda _when: pytest.fail(
+                        "retired state reached worker dispatch"
+                    ),
+                )
+
+        async with session_factory() as session:
+            thread = await get_thread(session, "retired-authority")
+        assert thread is not None
+        assert thread.status == ThreadStatus.FAILED.value
+        assert thread.failure_reason == (
+            "retired model-profile state is unsupported; start a new run"
+        )
+        assert any(
+            "Refusing retired model-profile state" in record.getMessage()
+            for record in caplog.records
+        )
+    finally:
+        await close_db()
+
+
+@pytest.mark.asyncio
+async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continues(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Neither corrupt nor absent current authority reaches a dispatch request."""
     db_file = tmp_path / "redispatch-invalid-frozen.db"
     await close_db()
     await init_db(str(db_file))
     try:
         session_factory = get_session_factory()
         async with session_factory() as session:
-            # list_threads orders newest first, so create the valid thread before
+            # list_threads orders newest first, so create the absent thread before
             # the corrupt one to prove a malformed first item does not abort.
             await create_thread(
                 session,
-                thread_id="valid-after-corrupt",
+                thread_id="absent-after-corrupt",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
                 metadata=json.dumps({"workspace_root": str(tmp_path)}),
@@ -93,21 +224,24 @@ async def test_invalid_frozen_selection_fails_only_its_thread_and_sweep_continue
 
         async with session_factory() as session:
             corrupt = await get_thread(session, "corrupt-modern-freeze")
-            valid = await get_thread(session, "valid-after-corrupt")
+            absent = await get_thread(session, "absent-after-corrupt")
         assert corrupt is not None
         assert corrupt.status == ThreadStatus.FAILED.value
         assert (
             corrupt.failure_reason == "persisted provider catalog selection is invalid"
         )
-        assert valid is not None
-        assert valid.status == ThreadStatus.RECONCILING.value
+        assert absent is not None
+        assert absent.status == ThreadStatus.FAILED.value
+        assert absent.failure_reason == (
+            "persisted provider catalog selection is invalid"
+        )
         assert any(
             "Refusing invalid frozen assignment" in record.getMessage()
             for record in caplog.records
         )
         assert any(
-            "Circuit breaker open" in record.getMessage()
-            and "valid-after-corrupt" in record.getMessage()
+            "absent-after-corrupt" in record.getMessage()
+            and "invalid_frozen_assignment" in record.getMessage()
             for record in caplog.records
         )
     finally:
@@ -139,14 +273,16 @@ async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continu
                 thread_id="healthy-after-projectless",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
-                metadata=json.dumps({"workspace_root": str(tmp_path)}),
+                metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
             await create_thread(
                 session,
                 thread_id="projectless",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
-                metadata=json.dumps({"feature_tag": "no-project-here"}),
+                metadata=json.dumps(
+                    {**_current_metadata(None), "feature_tag": "no-project-here"}
+                ),
             )
             await session.commit()
 
@@ -218,14 +354,14 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
                 thread_id="healthy-after-relative",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
-                metadata=json.dumps({"workspace_root": str(tmp_path)}),
+                metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
             await create_thread(
                 session,
                 thread_id="relative-project",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
-                metadata=json.dumps({"workspace_root": "workspaces/project"}),
+                metadata=json.dumps(_current_metadata("workspaces/project")),
             )
             await session.commit()
 
@@ -279,7 +415,7 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
                     thread_id=thread_id,
                     status=ThreadStatus.RECONCILING,
                     team_preset="mock-success-single",
-                    metadata=json.dumps({"workspace_root": str(tmp_path)}),
+                    metadata=json.dumps(_current_metadata(str(tmp_path))),
                 )
             await session.commit()
 
@@ -350,7 +486,7 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
                 session,
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
-                metadata=json.dumps({"workspace_root": str(tmp_path)}),
+                metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
             await session.commit()
 

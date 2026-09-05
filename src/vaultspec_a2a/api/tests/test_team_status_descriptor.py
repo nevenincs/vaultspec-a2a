@@ -26,16 +26,14 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from ...control.team_service import build_team_status
 from ...database import create_thread
 from ...graph.compiler import compile_team_graph
-from ...graph.enums import AgentLifecycleState, Model, Provider
+from ...graph.enums import AgentLifecycleState, Provider
 from ...providers.factory import ProviderFactory
 from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import enforce_progress_allowlist
 from ...team.team_config import (
     TeamConfig,
-    TeamDefaultsConfig,
     TopologyConfig,
     TopologyType,
-    WorkerOverrideConfig,
     WorkerRef,
     load_agent_config,
 )
@@ -59,34 +57,27 @@ async def graph_checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
         yield saver
 
 
-def _deterministic_team(capability: Model = Model.LOW) -> TeamConfig:
-    """A single-worker team pinned to the in-process deterministic provider.
-
-    ``Provider.DETERMINISTIC`` is a real, always-ready provider that runs
-    in-process with no credential and no network, so the graph compiles through
-    the production ``ProviderFactory`` rather than a substitute.
-
-    The assignment rides the ``[[team.workers]]`` override, which outranks the
-    agent TOML.  That matters: ``vaultspec-coder.toml`` declares
-    ``provider = "claude"``, so a response reporting ``deterministic`` can only
-    have come from the real precedence chain — it cannot be the agent's own
-    default leaking through, and it cannot be a constant.
-    """
+def _deterministic_team() -> TeamConfig:
     return TeamConfig(
         id="team-status-descriptor",
         display_name="team-status-descriptor",
         topology=TopologyConfig(type=TopologyType.PIPELINE, order=[_WORKER_ID]),
-        workers=[
-            WorkerRef(
-                agent_id=_WORKER_ID,
-                model=WorkerOverrideConfig(
-                    provider=Provider.DETERMINISTIC,
-                    capability=capability,
-                ),
-            )
-        ],
-        defaults=TeamDefaultsConfig(provider=Provider.DETERMINISTIC),
+        workers=[WorkerRef(agent_id=_WORKER_ID)],
     )
+
+
+def _exact_assignment() -> dict[str, dict[str, object]]:
+    lane: dict[str, object] = {
+        "schema_version": 1,
+        "provider": "deterministic",
+        "execution_mode": "in-process-deterministic",
+        "catalog_revision": "test-revision",
+        "entry_id": "test-entry",
+        "model_name": "deterministic",
+        "controls": [],
+        "fallbacks": [],
+    }
+    return {_WORKER_ID: lane}
 
 
 @pytest.mark.asyncio
@@ -107,6 +98,7 @@ async def test_team_status_reports_the_resolved_provider_and_model(
         agent_configs={_WORKER_ID: load_agent_config(_WORKER_ID)},
         checkpointer=graph_checkpointer,
         provider_factory=ProviderFactory(),
+        model_assignment=_exact_assignment(),
     )
 
     aggregator = EventAggregator()
@@ -120,45 +112,7 @@ async def test_team_status_reports_the_resolved_provider_and_model(
     assert _WORKER_ID in agents, f"compiled worker missing from {list(agents)}"
     worker = agents[_WORKER_ID]
     assert worker.provider == Provider.DETERMINISTIC.value
-    assert worker.model == Model.LOW.value
-    # The discriminator: the persona's own TOML declares NO provider, so the
-    # value above cannot have been copied from it and can only have come from
-    # resolving the team's declaration. (It used to declare "claude", and this
-    # asserted the route did not report that instead; the persona carries no
-    # model policy now, so the same claim is made from the other direction.)
-    assert load_agent_config(_WORKER_ID).model.provider is None
-
-
-@pytest.mark.asyncio
-async def test_team_status_honours_a_per_worker_model_override(
-    session_factory,
-    checkpointer,
-    graph_checkpointer: AsyncSqliteSaver,
-) -> None:
-    """The reported capability tracks the override, so it cannot be a constant.
-
-    The sibling test pins the same worker to ``LOW``; only the override differs,
-    so a fix that hardcoded a capability or echoed the agent TOML would pass one
-    of these two and fail the other.
-    """
-    team = _deterministic_team(capability=Model.MAX)
-
-    graph = compile_team_graph(
-        team_config=team,
-        agent_configs={_WORKER_ID: load_agent_config(_WORKER_ID)},
-        checkpointer=graph_checkpointer,
-        provider_factory=ProviderFactory(),
-    )
-
-    aggregator = EventAggregator()
-    aggregator.register_graph(cast("StreamableGraph", graph))
-
-    async with session_factory() as db:
-        status = await build_team_status(
-            db=db, aggregator=aggregator, heartbeat_threads=[]
-        )
-    agents = {agent.agent_id: agent for agent in status.agents}
-    assert agents[_WORKER_ID].model == Model.MAX.value
+    assert worker.model_name == "deterministic"
 
 
 @pytest.mark.asyncio
@@ -181,6 +135,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
         agent_configs={_WORKER_ID: load_agent_config(_WORKER_ID)},
         checkpointer=graph_checkpointer,
         provider_factory=ProviderFactory(),
+        model_assignment=_exact_assignment(),
     )
     aggregator = EventAggregator()
     aggregator.register_graph(cast("StreamableGraph", graph))
@@ -214,7 +169,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
     assert resp.status_code == 200
     agents = {a["agent_id"]: a for a in resp.json()["state"]["agents"]}
     assert agents[_WORKER_ID]["provider"] == Provider.DETERMINISTIC.value
-    assert agents[_WORKER_ID]["model"] == Model.LOW.value
+    assert agents[_WORKER_ID]["model_name"] == "deterministic"
 
 
 @pytest.mark.asyncio
@@ -233,6 +188,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
         agent_configs={_WORKER_ID: load_agent_config(_WORKER_ID)},
         checkpointer=graph_checkpointer,
         provider_factory=ProviderFactory(),
+        model_assignment=_exact_assignment(),
     )
     aggregator = EventAggregator()
     aggregator.register_graph(cast("StreamableGraph", graph))
@@ -259,7 +215,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
     assert isinstance(wire, TeamStatusEvent)
     summary = next(a for a in wire.agents if a.agent_id == _WORKER_ID)
     assert summary.provider is Provider.DETERMINISTIC
-    assert summary.model is Model.LOW
+    assert summary.model_name == "deterministic"
 
     # The SSE catalog is a closed allowlist that drops anything it does not
     # name, so the fields must survive that projection to reach a client.
@@ -268,7 +224,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
     )
     projected = cast("list[dict[str, str]]", payload["agents"])
     assert projected[0]["provider"] == Provider.DETERMINISTIC.value
-    assert projected[0]["model"] == Model.LOW.value
+    assert projected[0]["model_name"] == "deterministic"
 
 
 @pytest.mark.asyncio
@@ -322,4 +278,4 @@ async def test_team_status_reports_unknown_assignment_as_null(
 
     agent = status.agents[0]
     assert agent.provider is None
-    assert agent.model is None
+    assert agent.model_name is None

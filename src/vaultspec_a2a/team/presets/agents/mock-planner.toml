@@ -7,10 +7,6 @@ description  = "Mock planner agent for multi-agent teams."
 [agent.persona]
 system_prompt = "You are a mock planner. Emit your programmed sequence."
 
-[agent.model]
-provider   = "mock"
-capability = "mid"
-
 [agent.capabilities]
 filesystem_read  = true
 filesystem_write = true

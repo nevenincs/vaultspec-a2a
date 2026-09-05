@@ -3,10 +3,6 @@ id           = "mock-invalid"
 display_name = "Mock Invalid State"
 description  = "A team that is invalid due to an internal LangGraph issue (e.g. InvalidUpdateError)."
 
-[team.defaults]
-provider   = "mock"
-capability = "mid"
-
 [team.topology]
 type  = "pipeline"
 order = ["mock-coder-invalid"]

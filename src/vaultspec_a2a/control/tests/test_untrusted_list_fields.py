@@ -1,25 +1,11 @@
-"""What the control layer does with a stored list-of-strings it did not write.
-
-Two control readers pull a list of strings out of a record another process
-persisted - a legacy frozen model assignment's per-role fallback chain, and a
-run's authoring proposal and changeset ids off a checkpoint channel. Each had
-grown its own validator, and the two disagreed on both axes that matter: what a
-malformed value becomes, and whether the empty string is a name.
-
-These tests drive the real readers, not the shared validator, so they answer a
-question the validator's own tests cannot: that each reader still asks it. They
-also pin the disagreement in the direction each reader actually needs - the
-assignment reader keeps whatever strings were stored and refuses a mixed list
-outright, the authoring reader drops blanks and degrades to an empty list -
-because a single validator serving both is only correct if both settings stay
-reachable through it.
-"""
+"""Control readers fail safely on untrusted persisted collection fields."""
 
 from __future__ import annotations
 
+import pytest
 from langgraph.checkpoint.base import CheckpointTuple
 
-from ..dispatch import _frozen_model_assignment
+from ..dispatch import RetiredModelProfileStateError, _frozen_model_assignment
 from ..thread_state_service import (
     CHANGESET_ID_FIELD,
     PROPOSAL_ID_FIELD,
@@ -61,54 +47,11 @@ def _snapshot(values: dict[str, object]) -> CheckpointTuple:
     )
 
 
-class TestALegacyRoleFallbackChain:
-    """The assignment reader keeps stored strings verbatim, or drops the role."""
-
-    def test_a_stored_chain_survives_into_the_recompiled_assignment(self) -> None:
-        """The admitted case: a well-formed chain reaches the compiler map."""
-        profile_id, assignment = _frozen_model_assignment(
-            _legacy_metadata(["openai", "google"])
-        )
-
-        assert profile_id == "profile-1"
-        assert assignment["coder"]["fallback"] == ["openai", "google"]
-
-    def test_an_empty_chain_is_admitted_and_is_not_a_refusal(self) -> None:
-        """A role legitimately naming no fallback still recompiles."""
-        _, assignment = _frozen_model_assignment(_legacy_metadata([]))
-
-        assert assignment["coder"]["fallback"] == []
-
-    def test_a_blank_entry_is_kept_because_this_reader_never_asked_to_filter(
-        self,
-    ) -> None:
-        """Filtering is the OTHER reader's need, and must not leak into this one.
-
-        Silently dropping it here would change which chain a restarted run
-        recompiles against what was frozen at launch.
-        """
-        _, assignment = _frozen_model_assignment(_legacy_metadata(["openai", ""]))
-
-        assert assignment["coder"]["fallback"] == ["openai", ""]
-
-    def test_a_mixed_chain_drops_the_whole_role_rather_than_its_bad_entry(
-        self,
-    ) -> None:
-        """Refusal, and specifically refusal of the value rather than the member.
-
-        A reader that kept the string members would yield ``["openai"]`` and
-        recompile the run against a chain nobody froze; the role is dropped
-        instead, so the run falls back to no stored assignment for it.
-        """
-        _, assignment = _frozen_model_assignment(_legacy_metadata(["openai", 7]))
-
-        assert assignment == {}
-
-    def test_a_chain_that_is_not_a_list_drops_the_role(self) -> None:
-        """A scalar where a chain was stored is malformed, not a one-item chain."""
-        _, assignment = _frozen_model_assignment(_legacy_metadata("openai"))
-
-        assert assignment == {}
+class TestRetiredRoleFallbackChain:
+    @pytest.mark.parametrize("fallback", (["openai"], [], ["openai", 7], "openai"))
+    def test_every_retired_assignment_shape_is_refused(self, fallback: object) -> None:
+        with pytest.raises(RetiredModelProfileStateError):
+            _frozen_model_assignment(_legacy_metadata(fallback))
 
 
 class TestRunAuthoringIds:

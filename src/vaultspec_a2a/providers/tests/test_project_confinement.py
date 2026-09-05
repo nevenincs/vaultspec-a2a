@@ -49,23 +49,6 @@ _CLAUDE_OPTIONS: list[JsonObject] = [
     {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
 ]
 
-# Options as gemini-cli 0.46.0 offers them for an MCP call: the server-wide and
-# tool-wide session grants precede the once-only grant in the list.
-_GEMINI_MCP_OPTIONS: list[JsonObject] = [
-    {
-        "optionId": "proceed_always_server",
-        "name": "Allow all server tools for this session",
-        "kind": "allow_always",
-    },
-    {
-        "optionId": "proceed_always_tool",
-        "name": "Allow tool for this session",
-        "kind": "allow_always",
-    },
-    {"optionId": "proceed_once", "name": "Allow", "kind": "allow_once"},
-    {"optionId": "cancel", "name": "Reject", "kind": "reject_once"},
-]
-
 
 def _config(
     *,
@@ -406,80 +389,6 @@ async def test_the_claude_native_read_floor_stays_reachable(
     config = _config(workspace_root=str(bound))
 
     assert await _decide(tool, {}, config, acp_session_context) == "allow"
-
-
-@pytest.mark.asyncio
-async def test_the_gemini_backend_refuses_an_undeclared_verb(
-    two_projects: tuple[Path, Path], acp_session_context: AcpSessionContext
-) -> None:
-    """The gemini lane gets the same allowlist, in its own title spelling."""
-    bound, _ = two_projects
-    config = _config(workspace_root=str(bound), acp_backend="gemini-cli")
-
-    assert (
-        await _decide(
-            "reindex_codebase (vaultspec-rag MCP Server)",
-            {"project_root": str(bound)},
-            config,
-            acp_session_context,
-            _GEMINI_MCP_OPTIONS,
-        )
-        == "cancel"
-    )
-    assert (
-        await _decide(
-            "rm -rf /",
-            {},
-            config,
-            acp_session_context,
-            _GEMINI_MCP_OPTIONS,
-        )
-        == "cancel"
-    )
-
-
-@pytest.mark.asyncio
-async def test_the_gemini_backend_grants_once_never_the_whole_server(
-    two_projects: tuple[Path, Path], acp_session_context: AcpSessionContext
-) -> None:
-    """An approved declared read takes the narrowest grant on offer.
-
-    gemini-cli lists ``proceed_always_server`` - allow every tool on that server
-    for the session - ahead of the once-only grant, so selecting by list order
-    would hand back the whole server, including the verbs the same server mounts
-    and the registry never declared.
-    """
-    bound, _ = two_projects
-    config = _config(workspace_root=str(bound), acp_backend="gemini-cli")
-
-    decision = await _decide(
-        "search_codebase (vaultspec-rag MCP Server)",
-        {"query": "x"},
-        config,
-        acp_session_context,
-        _GEMINI_MCP_OPTIONS,
-    )
-
-    assert decision == "proceed_once"
-
-
-@pytest.mark.asyncio
-async def test_the_gemini_backend_refuses_a_cross_project_search(
-    two_projects: tuple[Path, Path], acp_session_context: AcpSessionContext
-) -> None:
-    """Confinement is not conditional on the lane."""
-    bound, other = two_projects
-    config = _config(workspace_root=str(bound), acp_backend="gemini-cli")
-
-    decision = await _decide(
-        "search_codebase (vaultspec-rag MCP Server)",
-        {"query": "x", "project_root": str(other)},
-        config,
-        acp_session_context,
-        _GEMINI_MCP_OPTIONS,
-    )
-
-    assert decision == "cancel"
 
 
 @pytest.mark.asyncio

@@ -28,8 +28,6 @@ import pytest
 import uvicorn
 
 from ...database import list_threads
-from ...graph.enums import Provider
-from ...providers.model_profiles import probe_provider_readiness
 from ...streaming.aggregator import EventAggregator
 from ...testing.catalog_selection import in_process_selection
 from ..routes.gateway import admission_gate
@@ -805,39 +803,14 @@ async def test_presets_list_is_truthful_and_resilient(
         assert authoring["authoring_capability"] == "document_authoring"
         assert "vaultspec-researcher" in authoring["required_roles"]
 
-        # model-profiles: origin, supported outputs, and the profile set.
         assert authoring["origin"] == "bundled"
         assert authoring["supported_capabilities"] == [
             "research_document",
             "architecture_decision",
             "plan_document",
         ]
-        assert authoring["default_profile_id"] == "team-defaults"
-        profiles = {p["id"]: p for p in authoring["profiles"]}
-        # Only the implicit team-defaults profile survives. Product model
-        # profiles were retired from new-run policy: a profile named a provider
-        # and a capability tier per role, which is exactly the repository-side
-        # model policy the served catalog replaced. What used to be asserted here
-        # - fast/codex/zai/kimi overlays and their per-role assignments - was
-        # describing a picker that no longer decides anything.
-        assert set(profiles) == {"team-defaults"}
-        assert profiles["team-defaults"]["is_default"] is True
-
-        # team-defaults still resolves a role set, and still names no model: the
-        # concrete model is chosen from the served catalog at run start and
-        # disclosed as the run's frozen assignment.
-        td_by_agent = {
-            a["agent_id"]: a for a in profiles["team-defaults"]["assignments"]
-        }
-        assert set(td_by_agent) == set(authoring["required_roles"])
-        for assignment in td_by_agent.values():
-            assert not assignment["model_name"]
-
-        # Eligibility is reported honestly: the production acceptance gate is open,
-        # so every profile is unavailable with a safe reason (no secrets anywhere).
-        for profile in profiles.values():
-            assert profile["eligible"] is False
-            assert any("acceptance gate" in r for r in profile["unavailable_reasons"])
+        assert "profiles" not in authoring
+        assert "default_profile_id" not in authoring
 
         # No credential VALUE appears anywhere in the served discovery record.
         # Safe readiness reasons and profile descriptions legitimately name a
@@ -863,144 +836,26 @@ async def test_presets_list_is_truthful_and_resilient(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_presets_list_discloses_workspace_profile_origin(
-    session_factory: SessionFactory,
-    checkpointer: AsyncSqliteSaver,
-    tmp_path: Path,
+async def test_presets_list_refuses_workspace_model_policy(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver, tmp_path: Path
 ) -> None:
-    """A workspace-local preset with a profile is served with origin=workspace."""
     teams_dir = tmp_path / ".vaultspec" / "teams"
     teams_dir.mkdir(parents=True)
     (teams_dir / "ws-team.toml").write_text(
-        "\n".join(
-            [
-                "[team]",
-                'id = "ws-team"',
-                'display_name = "WS Team"',
-                "[team.defaults]",
-                'provider = "mock"',
-                "[team.topology]",
-                'type = "star"',
-                "[[team.workers]]",
-                'agent_id = "vaultspec-researcher"',
-                "[team.profiles.fast]",
-                'display_name = "Fast"',
-                "[team.profiles.fast.roles.vaultspec-researcher]",
-                'provider = "mock"',
-                'capability = "low"',
-            ]
-        ),
+        '[team]\nid = "ws-team"\ndisplay_name = "WS Team"\n'
+        '[team.topology]\ntype = "pipeline"\norder = ["vaultspec-researcher"]\n'
+        '[[team.workers]]\nagent_id = "vaultspec-researcher"\n'
+        '[team.profiles.fast]\ndisplay_name = "Fast"\n',
         encoding="utf-8",
     )
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-    async with (
-        _live_server(app) as base,
-        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
-    ):
-        resp = await client.get("/v1/presets", params={"workspace_root": str(tmp_path)})
-        assert resp.status_code == 200
-        by_id = {p["id"]: p for p in resp.json()["presets"]}
-        ws_team = by_id["ws-team"]
-        assert ws_team["origin"] == "workspace"
-        profiles = {p["id"]: p for p in ws_team["profiles"]}
-        assert set(profiles) == {"team-defaults", "fast"}
-        # The mock-provider role is ready, so eligibility fails only on the open
-        # acceptance gate / engine reachability, never on a mock credential.
-        fast = {a["agent_id"]: a for a in profiles["fast"]["assignments"]}
-        assert fast["vaultspec-researcher"]["provider_id"] == "mock"
-        assert fast["vaultspec-researcher"]["provider_ready"] is True
-        assert fast["vaultspec-researcher"]["capability"] == "low"
-
-
-@pytest.mark.asyncio(loop_scope="function")
-async def test_run_envelope_and_presets_list_agree_on_provider_readiness(
-    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
-) -> None:
-    """One question, one answer: readiness cannot differ by which verb is asked.
-
-    ``RoleAssignmentSummary`` is constructed in exactly two places - the preset
-    listing, which probes readiness live, and the run-status envelope of a run
-    frozen under the retired profiles, which is rebuilt from persisted metadata.
-    The envelope once set every field but ``provider_ready`` and so inherited
-    the model's ``False`` default: a run started on a provider the listing had
-    just advertised as ready came back reporting it unready. A Pydantic default
-    cannot fail, which is exactly why nothing caught it.
-
-    A start can no longer produce that envelope - a new run's authority is its
-    frozen selection, and its legacy disclosure is empty by construction - but
-    runs frozen before the catalog contract remain readable through run-status,
-    so the profile-frozen run here is seeded durably, the way such runs actually
-    exist: as rows this service must keep answering for. The assertion is
-    agreement between the two disclosures, with each side independently anchored
-    to the production probe so they cannot pass by being wrong in the same way.
-    """
-    from ...database.thread_repository import create_thread
-    from ...thread.enums import ThreadStatus
-
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-    async with (
-        _live_server(app) as base,
-        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
-    ):
-        presets = await client.get("/v1/presets")
-        assert presets.status_code == 200
-        preset = next(p for p in presets.json()["presets"] if p["id"] == _PRESET)
-        profile = next(
-            pr for pr in preset["profiles"] if pr["id"] == preset["default_profile_id"]
+    async with _live_server(app) as base, httpx.AsyncClient(base_url=base) as client:
+        response = await client.get(
+            "/v1/presets", params={"workspace_root": str(tmp_path)}
         )
-        listed = {a["agent_id"]: a for a in profile["assignments"]}
-        assert listed, "the listing must disclose the default profile's assignments"
-
-        # Anchor the listing to the real probe first, so "the two agree" below
-        # cannot be satisfied by both sides sharing a single wrong answer.
-        for assignment in listed.values():
-            probed = probe_provider_readiness(Provider(assignment["provider_id"]))
-            assert assignment["provider_ready"] is probed.ready
-
-        # A run frozen under the profile the listing just disclosed. Only the
-        # frozen identity facts are persisted - readiness never is, which is the
-        # whole point: the envelope must probe it at read time, not replay a
-        # stored verdict or a model default.
-        run_id = "gwlive-07-legacy"
-        frozen_roles: JsonObject = {
-            str(agent_id): {
-                "role_id": entry["role_id"],
-                "provider": entry["provider_id"],
-                "capability": entry.get("capability"),
-                "model_name": entry.get("model_name"),
-                "fallback": entry.get("fallback_providers", []),
-                "source": entry.get("source", "team_default"),
-            }
-            for agent_id, entry in listed.items()
-        }
-        legacy_metadata: JsonObject = {
-            "model_profile": {
-                "profile_id": preset["default_profile_id"],
-                "digest": "0" * 64,
-                "roles": frozen_roles,
-            }
-        }
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                thread_id=run_id,
-                status=ThreadStatus.RUNNING,
-                title="profile-frozen run",
-                team_preset=_PRESET,
-                metadata=json.dumps(legacy_metadata),
-            )
-            await session.commit()
-
-        status = await client.get(f"/v1/runs/{run_id}")
-        assert status.status_code == 200
-
-        envelope = status.json()
-        assert envelope["profile_id"] == preset["default_profile_id"]
-        disclosed = {a["agent_id"]: a for a in envelope["assignments"]}
-        assert set(disclosed) == set(listed)
-        for agent_id, assignment in disclosed.items():
-            assert assignment["provider_id"] == listed[agent_id]["provider_id"]
-            assert assignment["provider_ready"] is listed[agent_id]["provider_ready"]
+    ws_team = next(p for p in response.json()["presets"] if p["id"] == "ws-team")
+    assert ws_team["loadable"] is False
+    assert "profiles" not in ws_team
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -1533,10 +1388,10 @@ async def _read_event(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_run_start_freezes_and_discloses_profile(
+async def test_run_start_freezes_and_discloses_catalog_selection(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """run-start freezes the default profile, threads it to dispatch, discloses it."""
+    """Run start freezes the served selection and threads it to dispatch."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
@@ -1571,17 +1426,15 @@ async def test_run_start_freezes_and_discloses_profile(
         dispatched = worker.dispatches[-1]
         assert dispatched["model_assignment"], "frozen assignment must reach dispatch"
 
-        # run-status reproduces the freeze from run metadata, byte-for-byte the
-        # authority run-start disclosed. The legacy pair it still carries for
-        # profile-frozen runs stays empty here: this run never had a profile.
+        # Run status reproduces the exact frozen selection from durable metadata.
         status = await client.get(f"/v1/runs/{body['run_id']}")
         assert status.status_code == 200
         sbody = status.json()
         assert sbody["frozen_assignment"] == frozen, (
             "run-status must reproduce the freeze run-start disclosed"
         )
-        assert sbody["profile_id"] is None
-        assert sbody["assignments"] == []
+        assert "profile_id" not in sbody
+        assert "assignments" not in sbody
 
 
 @pytest.mark.asyncio(loop_scope="function")

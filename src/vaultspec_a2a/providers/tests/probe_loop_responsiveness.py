@@ -92,6 +92,19 @@ async def _run_compile(workspace: Path, heartbeat: _Heartbeat) -> float:
                     team_preset="mock-success-single",
                     workspace_root=str(workspace),
                     recursion_limit=10,
+                    model_assignment={
+                        "mock-coder-success": {
+                            "schema_version": 1,
+                            "provider": "mock",
+                            "execution_mode": "in-process-mock",
+                            "catalog_revision": "test-revision",
+                            "entry_id": "mock-high",
+                            "model_name": "mock-high",
+                            "controls": [],
+                            "fallbacks": [],
+                            "provenance": {"selection_source": "team_selection"},
+                        }
+                    },
                 )
             )
             compile_seconds = time.monotonic() - started

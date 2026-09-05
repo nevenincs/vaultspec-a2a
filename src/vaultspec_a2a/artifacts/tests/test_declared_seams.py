@@ -334,7 +334,6 @@ _CLI_LANE_DECLARATIONS: dict[str, str] = {
     "claude": "acp-cli-session-transcript",
     "zai": "acp-cli-session-transcript",
     "codex": "ephemeral-provider-home-root",
-    "gemini": "gemini-cli-session-store",
     "kimi": "kimi-code-session-store",
 }
 """Provider families that spawn a CLI, and the declaration answering for each."""

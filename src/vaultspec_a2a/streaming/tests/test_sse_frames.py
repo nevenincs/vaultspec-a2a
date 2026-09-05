@@ -127,7 +127,7 @@ def test_team_status_within_character_caps_survives_non_ascii(
                     "state": text[:64],
                     "node_name": text[:128],
                     "provider": text[:64],
-                    "model": text[:128],
+                    "model_name": text[:128],
                     "role": text[:64],
                     "display_name": text[:128],
                     "description": text[:256],

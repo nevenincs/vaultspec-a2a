@@ -954,7 +954,7 @@
     "/v1/presets": {
       "get": {
         "summary": "Presets List Endpoint",
-        "description": "List team presets truthfully, marking each loadable or unloadable.\n\nResolution uses the requested workspace context so workspace-local presets\nare listed alongside the bundled set. A single preset that fails to load or\nvalidate is reported with ``loadable=False`` and a reason rather than\nomitted or allowed to crash the whole listing. Each loadable preset carries\nits model profiles with per-role effective assignments (resolved by the same\nshared resolver launch uses) and backend-computed eligibility. The whole\nbuild - file I/O, provider readiness, and the engine reachability probe -\nruns off the event loop.",
+        "description": "List team presets truthfully, marking each loadable or unloadable.\n\nResolution uses the requested workspace context so workspace-local presets\nare listed alongside the bundled set. A single preset that fails to load or\nvalidate is reported with ``loadable=False`` and a reason rather than\nomitted or allowed to crash the whole listing. File I/O runs off the event\nloop.",
         "operationId": "presets_list_endpoint_v1_presets_get",
         "security": [
           {
@@ -1415,16 +1415,6 @@
               }
             ]
           },
-          "model": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Model"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "model_name": {
             "anyOf": [
               {
@@ -1500,18 +1490,6 @@
         ],
         "title": "ArtifactSnapshot",
         "description": "Fully materialized file artifact."
-      },
-      "AssignmentSource": {
-        "type": "string",
-        "enum": [
-          "profile",
-          "worker",
-          "agent",
-          "team_default",
-          "undeclared"
-        ],
-        "title": "AssignmentSource",
-        "description": "Which precedence layer a resolved value came from (exposure field).\n\n``UNDECLARED`` is the honest bottom of the chain: no layer supplied the value.\nIt exists because the alternative was reporting a repository-authored fallback\nas ``TEAM_DEFAULT`` - a label asserting a preset declared something it never\ndeclared, which is a worse failure than an absent value because it cannot be\ntold apart from a real declaration."
       },
       "AuthenticationState": {
         "type": "string",
@@ -2251,17 +2229,6 @@
         "title": "MessageSnapshot",
         "description": "Fully materialized message in a thread replay."
       },
-      "Model": {
-        "type": "string",
-        "enum": [
-          "low",
-          "mid",
-          "high",
-          "max"
-        ],
-        "title": "Model",
-        "description": "LLM capability levels.\n\nAbstracts specific version strings to reduce maintenance burden."
-      },
       "PermissionOptionKind": {
         "type": "string",
         "enum": [
@@ -2480,24 +2447,6 @@
             },
             "type": "array",
             "title": "Supported Capabilities"
-          },
-          "profiles": {
-            "items": {
-              "$ref": "#/components/schemas/ProfileSummary"
-            },
-            "type": "array",
-            "title": "Profiles"
-          },
-          "default_profile_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Profile Id"
           }
         },
         "type": "object",
@@ -2528,54 +2477,6 @@
         "title": "PresetsListResponse",
         "description": "List of available team presets."
       },
-      "ProfileSummary": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "display_name": {
-            "type": "string",
-            "title": "Display Name",
-            "default": ""
-          },
-          "description": {
-            "type": "string",
-            "title": "Description",
-            "default": ""
-          },
-          "is_default": {
-            "type": "boolean",
-            "title": "Is Default",
-            "default": false
-          },
-          "eligible": {
-            "type": "boolean",
-            "title": "Eligible",
-            "default": false
-          },
-          "unavailable_reasons": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Unavailable Reasons"
-          },
-          "assignments": {
-            "items": {
-              "$ref": "#/components/schemas/RoleAssignmentSummary"
-            },
-            "type": "array",
-            "title": "Assignments"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id"
-        ],
-        "title": "ProfileSummary",
-        "description": "One selectable model profile for a preset.\n\nCarries the profile's identity, whether it is the default, its per-role\neffective assignments (resolved by the same shared resolver launch uses, so\npicker truth cannot drift from execution truth), and backend-computed\neligibility with safe reasons."
-      },
       "Provider": {
         "type": "string",
         "enum": [
@@ -2583,7 +2484,6 @@
           "claude",
           "codex",
           "deterministic",
-          "gemini",
           "kimi",
           "mock",
           "openai",
@@ -3065,78 +2965,6 @@
         ],
         "title": "RepairStatus",
         "description": "Repair and readiness classification distinct from lifecycle.\n\nTypes BOTH durable columns that carry this classification:\n``threads.repair_status`` and ``threads.execution_readiness``. The two ask\ndifferent questions — what is wrong with this run, and is it fit to resume —\nbut they answer from this one closed set, so a new member becomes available\nto both at once and neither can drift into a private vocabulary."
-      },
-      "RoleAssignmentSummary": {
-        "properties": {
-          "role_id": {
-            "type": "string",
-            "title": "Role Id"
-          },
-          "agent_id": {
-            "type": "string",
-            "title": "Agent Id"
-          },
-          "provider_id": {
-            "type": "string",
-            "title": "Provider Id"
-          },
-          "capability": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Model"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "model_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Name"
-          },
-          "fallback_providers": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Fallback Providers"
-          },
-          "provider_ready": {
-            "type": "boolean",
-            "title": "Provider Ready",
-            "default": false
-          },
-          "source": {
-            "$ref": "#/components/schemas/AssignmentSource",
-            "default": "team_default"
-          },
-          "resolution_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolution Error"
-          }
-        },
-        "type": "object",
-        "required": [
-          "role_id",
-          "agent_id",
-          "provider_id"
-        ],
-        "title": "RoleAssignmentSummary",
-        "description": "Effective per-role model assignment under a profile.\n\nOnly safe operational metadata: role id, agent id, provider id, capability,\nthe stable concrete model name, ordered fallbacks, current provider readiness,\nand which precedence layer the assignment came from. Never a credential, env\nvalue, token, or private path.\n\n``provider_id`` is EMPTY when no preset layer declares a provider for the\nrole, which is the ordinary state now that product presets carry no\nprovider policy: a run chooses its lane at run start from the served catalog.\nEmpty rather than absent so the field keeps one type, and never a substituted\nprovider name - naming a lane no preset asked for would be indistinguishable\nfrom a real declaration. ``resolution_error`` carries the reason and ``source``\nreads ``undeclared``; the role is reported ineligible.\n\n``provider_id`` is deliberately NOT typed by the ``Provider`` enumeration\nserved beside it on the agent snapshot, even though the two carry the same\nconcept. This surface replays FROZEN historical assignments, and two of its\nvalues are provably outside that enumeration: the empty string documented\nabove, and a provider a past run froze that this build no longer knows -\na case the disclosure path already handles explicitly by reporting it not\nready rather than raising. Narrowing here would turn both into a validation\nfailure on a read path. The reconciliation is therefore that these are two\nconcepts: ``Provider`` is the closed set of lanes this build can RUN, and\nthis is an identifier a past run RECORDED."
       },
       "RoleState": {
         "properties": {
@@ -4311,24 +4139,6 @@
               }
             ],
             "title": "Repair Reason"
-          },
-          "profile_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Id"
-          },
-          "assignments": {
-            "items": {
-              "$ref": "#/components/schemas/RoleAssignmentSummary"
-            },
-            "type": "array",
-            "title": "Assignments"
           },
           "frozen_assignment": {
             "anyOf": [

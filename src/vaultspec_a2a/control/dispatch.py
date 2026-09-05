@@ -31,7 +31,7 @@ from ..providers.team_selection import (
     frozen_team_selection_from_record,
 )
 from ..thread.enums import ControlActionType, ThreadStatus
-from ..utils.coercion import coerce_object_mapping, coerce_string_list
+from ..utils.coercion import coerce_object_mapping
 from ._thread_metadata import workspace_root_from_metadata
 
 if TYPE_CHECKING:
@@ -60,46 +60,23 @@ logger = logging.getLogger(__name__)
 _REDISPATCH_LOG_EVERY_N = 5
 
 
+class RetiredModelProfileStateError(TeamSelectionError):
+    """A stored run uses the retired model-profile execution authority."""
+
+
 def _frozen_model_assignment(
     metadata: dict[str, object],
-) -> tuple[str | None, dict[str, dict[str, object]]]:
-    """Extract the compiler-safe subset of a persisted frozen model assignment."""
+) -> dict[str, dict[str, object]]:
+    """Extract a modern frozen selection or refuse retired stored authority."""
+    if "model_profile" in metadata:
+        raise RetiredModelProfileStateError(
+            "retired model-profile state cannot be restarted; start a new run"
+        )
     modern_record = metadata.get("provider_catalog_selection")
     if modern_record is not None:
         frozen = frozen_team_selection_from_record(modern_record)
-        return None, frozen.compiler_map()
-
-    frozen_record = metadata.get("model_profile")
-    frozen_record_mapping = coerce_object_mapping(frozen_record)
-    if frozen_record_mapping is None:
-        return None, {}
-
-    profile_value = frozen_record_mapping.get("profile_id")
-    profile_id = profile_value if isinstance(profile_value, str) else None
-    roles_value = coerce_object_mapping(frozen_record_mapping.get("roles"))
-    if roles_value is None:
-        return profile_id, {}
-
-    assignment: dict[str, dict[str, object]] = {}
-    for agent_id, role_value in roles_value.items():
-        role_mapping = coerce_object_mapping(role_value)
-        if role_mapping is None:
-            continue
-        provider = role_mapping.get("provider")
-        capability = role_mapping.get("capability")
-        fallback = coerce_string_list(role_mapping.get("fallback", []))
-        if (
-            not isinstance(provider, str)
-            or not (isinstance(capability, str) or capability is None)
-            or fallback is None
-        ):
-            continue
-        assignment[agent_id] = {
-            "provider": provider,
-            "capability": capability,
-            "fallback": fallback,
-        }
-    return profile_id, assignment
+        return frozen.compiler_map()
+    raise TeamSelectionError("persisted provider catalog selection is absent")
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,7 +320,27 @@ async def redispatch_reconciling_threads(
                 # restart so the run recompiles the exact launched models, never
                 # a re-resolution against possibly-drifted config.
                 try:
-                    frozen_profile_id, frozen_map = _frozen_model_assignment(meta)
+                    frozen_map = _frozen_model_assignment(meta)
+                except RetiredModelProfileStateError:
+                    await update_thread_status(
+                        db,
+                        thread.id,
+                        ThreadStatus.FAILED,
+                        failure_reason=(
+                            "retired model-profile state is unsupported; "
+                            "start a new run"
+                        ),
+                    )
+                    await db.commit()
+                    _log_redispatch_failure_ladder(
+                        failure_counts,
+                        failure_thread_ids,
+                        "unsupported_stored_authority",
+                        thread.id,
+                        "Refusing retired model-profile state for thread %s",
+                        thread.id,
+                    )
+                    continue
                 except TeamSelectionError:
                     await update_thread_status(
                         db,
@@ -396,7 +393,6 @@ async def redispatch_reconciling_threads(
                     team_preset=thread.team_preset,
                     workspace_root=workspace_root,
                     recursion_limit=domain_config.graph_recursion_limit,
-                    profile_id=frozen_profile_id,
                     model_assignment=frozen_map,
                 )
                 headers = trace_headers_fn() if trace_headers_fn else {}

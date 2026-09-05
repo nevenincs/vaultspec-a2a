@@ -114,23 +114,21 @@ def test_grouped_model_options_preserve_provider_order() -> None:
     assert [model.provider_value for model in catalog.models] == ["first", "second"]
 
 
-def test_gemini_models_shape_normalizes_without_invented_options() -> None:
+def test_retired_models_payload_is_not_accepted_as_catalog_authority() -> None:
     catalog = catalog_from_session_result(
         {
             "models": {
-                "currentModelId": "gemini-current",
+                "currentModelId": "retired-current",
                 "availableModels": [
-                    {"modelId": "gemini-current", "name": "Current"},
-                    {"modelId": "gemini-other", "name": "Other"},
+                    {"modelId": "retired-current", "name": "Current"},
+                    {"modelId": "retired-other", "name": "Other"},
                 ],
             }
         },
         key=_KEY,
     )
-    assert [model.provider_value for model in catalog.models] == [
-        "gemini-current",
-        "gemini-other",
-    ]
+    assert catalog.state.status is CatalogStatus.UNAVAILABLE
+    assert catalog.models == ()
     assert catalog.native_controls == ()
 
 
@@ -164,16 +162,27 @@ def test_malformed_or_duplicate_provider_values_fail_closed() -> None:
 
 
 def test_catalog_revision_is_stable_and_provider_value_sensitive() -> None:
+    def payload(value: str) -> JsonObject:
+        return {
+            "configOptions": [
+                {
+                    "id": "model",
+                    "category": "model",
+                    "options": [{"value": value, "name": value}],
+                }
+            ]
+        }
+
     first = catalog_from_session_result(
-        {"models": {"availableModels": [{"value": "provider-value-a", "name": "A"}]}},
+        payload("provider-value-a"),
         key=_KEY,
     )
     same = catalog_from_session_result(
-        {"models": {"availableModels": [{"value": "provider-value-a", "name": "A"}]}},
+        payload("provider-value-a"),
         key=_KEY,
     )
     changed = catalog_from_session_result(
-        {"models": {"availableModels": [{"value": "provider-value-b", "name": "B"}]}},
+        payload("provider-value-b"),
         key=_KEY,
     )
     assert first.state.revision == same.state.revision

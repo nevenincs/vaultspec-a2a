@@ -54,7 +54,7 @@ from ..thread.errors import (
     WorkerExecutionError,
 )
 from ..thread.state import TeamState
-from .enums import Model, PipelinePhase, Provider
+from .enums import PipelinePhase, Provider
 from .nodes._config_contract import accepting_runnable_config
 from .nodes.clarification import (
     ClarificationQuestionProducer,
@@ -284,120 +284,42 @@ def _resolve_model_for_worker(
     *,
     provider_factory: ProviderFactoryProtocol,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> tuple[BaseChatModel, Provider, Model | None, str | None]:
-    """Resolve provider + capability + concrete model following the precedence.
-
-    The fourth value is the CONCRETE catalog model identifier when a frozen
-    assignment supplied one, and ``None`` on the unfrozen path where no catalog
-    entry was named. It is returned separately from the capability rather than
-    folded into it because the two speak different vocabularies: capability is a
-    four-value tier, while a catalog identifier is a provider-issued string such
-    as ``mock-high``. Both are needed downstream - the tier is what an unfrozen
-    run requests, the identifier is what a frozen run actually ran - and the
-    only way to disclose the second was to stop discarding it here.
-
-    When a ``frozen_assignment`` names this worker, its provider/capability/
-    fallback are used verbatim, so restart reproduces the exact launched models,
-    never a re-resolution against possibly-drifted config.
-
-    Returns the model together with the provider that actually produced it and
-    the requested capability, so callers can record the assignment without
-    re-deriving it.
-    """
-    factory = provider_factory
-    if frozen_assignment:
-        frozen = frozen_assignment.get(worker_ref.agent_id)
-        if frozen is not None and frozen.get("schema_version") == 1:
-            candidates = [frozen, *_catalog_fallbacks(frozen)]
-            catalog_exc: Exception | None = None
-            for candidate in candidates:
-                provider, model_name, execution_mode, native_controls = (
-                    _parse_catalog_preferences(candidate)
-                )
-                try:
-                    model = factory.create(
-                        provider,
-                        model=model_name,
-                        agent_config=agent_config,
-                        workspace_root=workspace_root,
-                        execution_mode=execution_mode,
-                        native_controls=native_controls,
-                    )
-                    logger.info(
-                        "worker=%r resolved frozen catalog provider=%s mode=%s",
-                        agent_config.id,
-                        provider.value,
-                        execution_mode,
-                    )
-                    return model, provider, None, model_name
-                except (ConfigError, ValueError) as exc:
-                    logger.warning(
-                        "Frozen provider lane %s/%s unavailable for worker %s: %s",
-                        provider.value,
-                        execution_mode,
-                        agent_config.id,
-                        exc,
-                    )
-                    catalog_exc = exc
-            raise ValueError(
-                f"All frozen provider lanes exhausted for worker {agent_config.id!r}"
-            ) from catalog_exc
-    primary_provider, capability, fallback_chain, frozen_model_name = (
-        _resolve_worker_model_preferences(
-            worker_ref,
-            agent_config,
-            team_config,
-            frozen_assignment=frozen_assignment,
+) -> tuple[BaseChatModel, Provider, str]:
+    """Construct a worker only from an exact catalog-frozen assignment."""
+    del team_config
+    frozen = (frozen_assignment or {}).get(worker_ref.agent_id)
+    if frozen is None or frozen.get("schema_version") != 1:
+        raise ValueError(
+            f"Worker {worker_ref.agent_id!r} has no exact catalog-frozen selection"
         )
-    )
-    providers_to_try = [primary_provider, *fallback_chain]
-    last_exc: Exception | None = None
-    for p in providers_to_try:
+    candidates = [frozen, *_catalog_fallbacks(frozen)]
+    catalog_exc: Exception | None = None
+    for candidate in candidates:
+        provider, model_name, execution_mode, native_controls = (
+            _parse_catalog_preferences(candidate)
+        )
         try:
-            model = factory.create(
-                p,
-                model=(frozen_model_name if p == primary_provider else capability),
+            model = provider_factory.create(
+                provider,
+                model=model_name,
                 agent_config=agent_config,
                 workspace_root=workspace_root,
+                execution_mode=execution_mode,
+                native_controls=native_controls,
             )
-            logger.info(
-                "worker=%r resolved model_type=%s provider=%s capability=%s",
-                agent_config.id,
-                type(model).__name__,
-                p.value,
-                capability.value if capability else "default",
-            )
-            # ``p``, not ``primary_provider``: when the primary is unavailable
-            # this loop falls through to a fallback, and everything downstream
-            # (node metadata, /team/status, the dashboard) must name the
-            # provider the run is actually using.  Reporting the configured
-            # primary would be worse than reporting nothing — a null reads as
-            # unknown, a confidently wrong provider reads as fact.
-            #
-            # The model name obeys the same rule, which is why it mirrors the
-            # ``model=`` expression above rather than being returned outright:
-            # only the PRIMARY provider was built from the frozen catalog name,
-            # so only it may disclose one.  A fallback was built from the
-            # capability tier and has no catalog identity to report, and naming
-            # the frozen one there would assert a model that never ran.
-            return (
-                model,
-                p,
-                capability,
-                frozen_model_name if p == primary_provider else None,
-            )
-        except ValueError as exc:
+            return model, provider, model_name
+        except (ConfigError, ValueError) as exc:
             logger.warning(
-                "Provider %s unavailable for worker %s: %s",
-                p.value,
+                "Frozen provider lane %s/%s unavailable for worker %s: %s",
+                provider.value,
+                execution_mode,
                 agent_config.id,
                 exc,
             )
-            last_exc = exc
+            catalog_exc = exc
     raise ValueError(
-        f"All providers exhausted for worker {agent_config.id!r}: "
-        f"tried {[p.value for p in providers_to_try]}"
-    ) from last_exc
+        f"All frozen provider lanes exhausted for worker {agent_config.id!r}"
+    ) from catalog_exc
 
 
 def _catalog_fallbacks(frozen: dict[str, Any]) -> list[dict[str, Any]]:
@@ -452,163 +374,41 @@ def _parse_catalog_preferences(
     return provider, model_name, execution_mode, controls
 
 
-def _resolve_worker_model_preferences(
-    worker_ref: Any,
-    agent_config: Any,
-    team_config: Any,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> tuple[Provider, Model | None, list[Provider], str | None]:
-    """Resolve provider + capability following the standard precedence.
-
-    A ``frozen_assignment`` entry for this worker wins outright and preserves
-    its concrete model name: the run's frozen effective assignment is reproduced
-    exactly across restarts, never re-resolved. Absent a frozen entry,
-    delegates to the shared model-profile resolver (the single source discovery,
-    launch, and compilation all consume) with no profile overlay - byte-identical
-    to the historical chain: [[team.workers]] override > agent TOML [agent.model]
-    > [team.defaults], with provider_fallback resolved at the same priority.
-    """
-    if frozen_assignment:
-        frozen = frozen_assignment.get(worker_ref.agent_id)
-        if frozen is not None:
-            return _parse_frozen_preferences(frozen)
-
-    from ..providers.model_profiles import resolve_role_assignment
-
-    assignment = resolve_role_assignment(
-        worker_ref, agent_config, team_config, profile_overlay=None
-    )
-    if assignment.provider is None:
-        # Nothing declared a provider and nothing froze one. Refusing is the whole
-        # point: omission may not silently choose what produces the artifact, so
-        # this fails the compile loudly instead of falling back to a
-        # repository-authored lane the caller never selected. A product preset
-        # reaches this only when its run started without freezing a selection,
-        # which is itself the defect to surface.
-        raise ValueError(
-            f"Worker {worker_ref.agent_id!r} has no provider: "
-            f"{assignment.resolution_error}"
-        )
-    return (
-        assignment.provider,
-        assignment.capability,
-        assignment.fallback_providers,
-        None,
-    )
-
-
-def _parse_frozen_preferences(
-    frozen: dict[str, Any],
-) -> tuple[Provider, Model | None, list[Provider], str]:
-    """Parse a persisted frozen assignment entry into resolved model preferences.
-
-    A missing concrete model is invalid. Restart must refuse it rather than
-    silently selecting a newer mapping or provider default.
-    """
-    raw_provider = frozen.get("provider")
-    try:
-        provider = Provider(raw_provider)
-    except ValueError as exc:
-        raise ValueError(
-            f"Frozen assignment has an invalid provider {raw_provider!r}"
-        ) from exc
-    capability: Model | None = None
-    raw_capability = frozen.get("capability")
-    if raw_capability:
-        try:
-            capability = Model(raw_capability)
-        except ValueError as exc:
-            raise ValueError(
-                f"Frozen assignment has an invalid capability {raw_capability!r}"
-            ) from exc
-    fallback: list[Provider] = []
-    for raw in frozen.get("fallback", []):
-        try:
-            fallback.append(Provider(raw))
-        except ValueError as exc:
-            raise ValueError(
-                f"Frozen assignment has an invalid fallback provider {raw!r}"
-            ) from exc
-    model_name = frozen.get("model_name")
-    if not isinstance(model_name, str) or not model_name.strip():
-        raise ValueError("Frozen assignment is missing its concrete model_name")
-    return provider, capability, fallback, model_name
-
-
 def _resolve_supervisor_model(
-    team_config: Any,
     workspace_root: Path | None = None,
     *,
     provider_factory: ProviderFactoryProtocol,
     supervisor_agent_config: Any | None = None,
-) -> tuple[BaseChatModel, Provider, Model]:
-    """Resolve the supervisor model from team config.
-
-    Returns the model with its provider and capability, matching
-    :func:`_resolve_model_for_worker` so both feed :func:`_agent_node_metadata`.
-    """
-    factory = provider_factory
-    provider: Provider = (
-        team_config.supervisor.provider
-        or team_config.defaults.provider
-        or Provider.CLAUDE
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
+) -> tuple[BaseChatModel, Provider, str]:
+    """Construct a supervisor from the run's exact team catalog selection."""
+    frozen = (frozen_assignment or {}).get("__supervisor__")
+    if frozen is None:
+        raise ValueError("Supervisor has no exact catalog-frozen selection")
+    provider, model_name, execution_mode, native_controls = _parse_catalog_preferences(
+        frozen
     )
-    capability: Model = team_config.supervisor.capability or Model.MAX
-    model = factory.create(
+    model = provider_factory.create(
         provider,
-        model=capability,
+        model=model_name,
         agent_config=supervisor_agent_config,
         workspace_root=workspace_root,
+        execution_mode=execution_mode,
+        native_controls=native_controls,
     )
-    return model, provider, capability
-
-
-def _model_assignment_metadata(
-    provider: Provider,
-    capability: Model | None,
-    model_name: str | None = None,
-) -> dict[str, str]:
-    """Render a resolved model assignment as node metadata.
-
-    The control surface reads node metadata to answer ``/team/status`` and the
-    ``team_status`` broadcast, so this is where a compiled agent's assignment
-    becomes observable.  An unset capability is rendered as the empty string —
-    the metadata map is flat strings, and consumers read empty as "unknown"
-    rather than inventing a default.
-
-    ``model_name`` is the CONCRETE catalog identifier a frozen run executed, and
-    it is carried beside the capability rather than in place of it because the
-    two are different vocabularies: ``model`` holds a four-value tier, so a
-    provider-issued string like ``mock-high`` cannot be expressed there at all.
-    Without this key the frozen path disclosed nothing about which model ran —
-    it resolves the capability to ``None`` by design, so ``model`` is empty on
-    every frozen run, and a run could promise a catalog entry, execute it, and
-    leave no observable evidence that it had.
-    """
-    assignment = {
-        "provider": provider.value,
-        "model": capability.value if capability is not None else "",
-    }
-    # Absent rather than empty: an empty string here would be indistinguishable
-    # from a frozen run that named no model, and the unfrozen path genuinely has
-    # no catalog identifier to report.
-    if model_name is not None:
-        assignment["model_name"] = model_name
-    return assignment
+    return model, provider, model_name
 
 
 def _agent_node_metadata(
-    agent_config: Any,
-    provider: Provider,
-    capability: Model | None,
-    model_name: str | None = None,
+    agent_config: Any, provider: Provider, model_name: str
 ) -> dict[str, str]:
-    """Build the full node metadata for a compiled worker node."""
+    """Build node metadata from the exact catalog-frozen model identity."""
     return {
         "display_name": agent_config.display_name,
         "role": agent_config.role,
         "description": agent_config.description.strip(),
-        **_model_assignment_metadata(provider, capability, model_name),
+        "provider": provider.value,
+        "model_name": model_name,
     }
 
 
@@ -654,7 +454,7 @@ def _compile_worker_node(
     rather than after) that they stay topology-owned rather than folded in here
     - that wiring is each topology's actual subject, not shared duplication.
     """
-    model, used_provider, capability, model_name = _resolve_model_for_worker(
+    model, used_provider, model_name = _resolve_model_for_worker(
         worker_ref,
         agent_cfg,
         team_config,
@@ -680,7 +480,7 @@ def _compile_worker_node(
         role=agent_cfg.role,
         harness_mcp_servers=list(harness.mcp_servers) if harness is not None else [],
     )
-    metadata = _agent_node_metadata(agent_cfg, used_provider, capability, model_name)
+    metadata = _agent_node_metadata(agent_cfg, used_provider, model_name)
     return worker_node, metadata
 
 
@@ -1118,13 +918,13 @@ def _compile_star(
     worker_ids: list[str] = [w.agent_id for w in team_config.workers]
     resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
 
-    supervisor_model, sv_provider, sv_capability = _resolve_supervisor_model(
-        team_config,
+    supervisor_model, sv_provider, sv_model_name = _resolve_supervisor_model(
         workspace_root,
         provider_factory=provider_factory,
         supervisor_agent_config=supervisor_agent_config,
+        frozen_assignment=frozen_assignment,
     )
-    sv_assignment = _model_assignment_metadata(sv_provider, sv_capability)
+    sv_assignment = {"provider": sv_provider.value, "model_name": sv_model_name}
 
     if supervisor_agent_config is not None:
         # Routed through the same composition as a worker so a supervisor persona
@@ -1676,7 +1476,7 @@ def _resolve_research_adr_models(
 
     resolved: dict[str, tuple[BaseChatModel, dict[str, str]]] = {}
     for role in RESEARCH_ADR_ROLES:
-        model, provider, capability, model_name = _resolve_model_for_worker(
+        model, provider, model_name = _resolve_model_for_worker(
             ref_by_role[role],
             cfg_by_role[role],
             team_config,
@@ -1684,9 +1484,7 @@ def _resolve_research_adr_models(
             provider_factory=provider_factory,
             frozen_assignment=frozen_assignment,
         )
-        metadata = _agent_node_metadata(
-            cfg_by_role[role], provider, capability, model_name
-        )
+        metadata = _agent_node_metadata(cfg_by_role[role], provider, model_name)
         resolved[role] = (model, metadata)
     return resolved
 

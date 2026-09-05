@@ -7,7 +7,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
 from ...authoring.contract import RESEARCH_ADR_ROLES
-from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
+from ...graph.enums import Provider
 from ...team.team_config import AgentConfig, AgentPersonaConfig
 from ..deterministic_chat_model import (
     _ROLE_DISPATCH_KEYS,
@@ -32,17 +32,18 @@ def _agent(agent_id: str) -> AgentConfig:
 
 def _model(agent_id: str, **kwargs: Any) -> DeterministicResearchAdrChatModel:
     model = ProviderFactory().create(
-        Provider.DETERMINISTIC, agent_config=_agent(agent_id), **kwargs
+        Provider.DETERMINISTIC,
+        model="deterministic",
+        execution_mode="in-process-deterministic",
+        agent_config=_agent(agent_id),
+        **kwargs,
     )
     assert isinstance(model, DeterministicResearchAdrChatModel)
     return model
 
 
-def test_enum_and_maps_wired() -> None:
-    """Provider.DETERMINISTIC resolves a default model through MODEL_MAP."""
+def test_exact_provider_identity_is_wired() -> None:
     assert Provider.DETERMINISTIC.value == "deterministic"
-    level = PROVIDER_DEFAULT_MODELS[Provider.DETERMINISTIC]
-    assert MODEL_MAP[Provider.DETERMINISTIC][level] == "deterministic"
 
 
 def test_factory_returns_first_class_base_chat_model() -> None:

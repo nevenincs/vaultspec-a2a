@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:8a5e54e157a17fe3e5f61f3a4f0732dab34736f832a2359472619478931a7fcd'
+body_hash: 'sha256:6b53d58613ef1d6c3d7ea5aa479b6860e33cdfbb6880e58ce958c247e4878d5f'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -184,6 +184,10 @@ Type: validation environment accuracy. Status: resolved in the S04 correction; f
 ### s04-formal-review | high | FAIL - implementation is sound but evidence mechanics block closure
 
 Type: implementation review disposition. Status: historical fail; correction implemented and formal re-review pending. Review at `df84b7480603411c1af9e2dc0d3142d7bdf15261` confirms the `server` extra is the explicit locked PostgreSQL profile; base and `freeze` contain none of asyncpg, psycopg, or `langgraph-checkpoint-postgres`; the PyInstaller spec excludes all three import surfaces; 15 URL/settings/engine tests pass under the server profile; lock checking and the server sync dry-run pass; and a reconstructed archive scan finds zero exact driver modules among 5,704 parsed names and zero driver-named paths among 2,743 artifact files. The new test is a meaningful configuration discriminator because it fails when a package leaves `server`, enters base/freeze, or loses its freeze exclusion; runtime resolution and artifact scans remain separate evidence. The known collect-all test-module finding is correctly preserved as MEDIUM under S50/S65. The seven committed S04 paths are scoped correctly, feature Core is clean, only S04 closes, and unrelated codebase-health working changes were not considered or touched. The preceding HIGH reproducibility defect prevents advancement to S05 until S04's record is corrected.
+
+### s04-corrected-formal-rereview | low | PASS - dependency-profile evidence is replayable and isolated by task environment
+
+Type: implementation review disposition. Status: resolved at `dba2b7eebb61301679f515661f175154fedd12bd`. Final re-review executed the supported task-specific `UV_PROJECT_ENVIRONMENT` flows for distinct `server-env`, `freeze-env`, and `build-env` roots, with explicit `uv sync --locked` followed by `uv run --no-sync`; the shared project `.venv` is not selected and the removed deprecated option has zero occurrences across S04 durable surfaces. The server capture reproduces digest `72A2469C...` and 15 passing PostgreSQL URL/settings/engine tests. The freeze-only capture reproduces `F4EAE3C1...` with all three PostgreSQL distributions and import roots absent. The server-plus-freeze capture reproduces `C3378273...` with the drivers present before packaging, while the exact retained TOC/tree scan reproduces `A0D70509...`: 5,720 PYZ module names, 2,746 artifact files, zero blocked module or path matches, TOC hash `06AA128F...`, artifact manifest `1AE311B5...`, and binary hash `474B0E68...`. Source hashes and removed-option digest `8735358C...` also match. The explicit lock sync/check commands succeed. The server extra remains the sole declared home of asyncpg, psycopg, and `langgraph-checkpoint-postgres`; base and freeze stay SQLite-only, and the PyInstaller exclusion boundary is independently enforced. The new test remains a discriminating metadata boundary while environment and artifact probes verify realized behavior. ER18 resolution is justified; the collect-all test-module finding remains MEDIUM/open under S50/S65. Core validates the feature, only S04 closes, S05 remains next with no record, and concurrent codebase-health/runtime working changes were excluded from scope and preserved. No critical, high, or medium S04 defect remains; S05 may proceed.
 
 ## Recommendations
 

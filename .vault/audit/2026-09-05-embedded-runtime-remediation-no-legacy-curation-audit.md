@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:4ec7418a844c07f5fcff8f5df2214981d19b4fc0e6b074066be4c370c55160a8'
+body_hash: 'sha256:2572243aa5f2c059f958ac340c866ff54b3acd5b80141e3786bbb56958ebf734'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -214,6 +214,52 @@ Type: review disposition. The dependency-hygiene ADR's Gemini sentence records w
 ### expanded-gemini-retirement-curation-formal-review | high | FAIL - two accepted obligations remain
 
 Type: formal architecture review disposition. Status: open through A2A `e76aff0dd5550d5fb041150760eb70ce0725f327` and Dashboard `5cae73928c8ffb4b47dcb322971a002ef208a258`. The expanded catalog, provider-abstraction, harness, current references, and active catalog steps correctly establish configOptions-only ACP discovery, exact seven-mode current inventory, complete Gemini retirement, typed fail-closed old-state handling, and historical-only interpretation for frozen eight-mode records. Dashboard's edge, flow, shell, and unchecked agent-panel rows correctly require topology-only presets, schema-v1 catalog selection, no profile/legacy restart/Gemini compatibility, and close no row; its generic provisioning ADRs promise only generic runtime/provider-asset lifecycle and need no amendment. Exact scopes are nine A2A paths and six Dashboard paths; historical records are preserved, and runtime removal remains open. Feature Core reports zero errors and zero warnings for all six reviewed A2A features and Dashboard agent-panel. The tool-cores and integration-testing accepted obligations above prevent PASS; the rule-propagation example is additional MEDIUM drift.
+
+### accepted-tool-cores-gemini-proof-obligation-resolution | high | resolved by dated ADR amendment and active-row correction
+
+Type: accepted-ADR and lifecycle conflict resolution. Status: corrected on
+2026-09-06; formal curation re-review pending. The accepted web-grounding ADR
+now makes the current provider-model catalog authoritative for every universal,
+command-line and remaining-lane quantifier. It classifies all earlier Gemini
+lane clauses as historical, retires `gemini/gemini-cli-acp` in full, and
+assigns it no registration, activation, persona, retrieval, compatibility or
+future-proof debt. Active unchecked tool-cores `P03.S16` now requires proof
+only from remaining current command-line catalog members and explicitly
+excludes the retired lane. The row remains unchecked and no runtime completion
+is claimed.
+
+### accepted-integration-smoke-gemini-compatibility-resolution | high | resolved by dated ADR amendment
+
+Type: accepted-ADR compatibility resolution. Status: corrected on 2026-09-06;
+formal curation re-review pending. The real-stack certification decision remains
+provider-deterministic. Its opt-in compatibility track now ranges only over
+current catalog members. Original Gemini availability and smoke statements are
+historical inventory text and create no current route, credential, smoke,
+availability, compatibility or future proof obligation. Completed historical
+plan and test records remain unchanged.
+
+### accepted-rule-propagation-gemini-example-resolution | medium | resolved by current-inventory interpretation
+
+Type: single-home documentation resolution. Status: corrected on 2026-09-06;
+formal curation re-review pending. The accepted RuleManager decision remains
+provider independent for every current catalog lane. A dated interpretation
+makes the migrated Gemini provider list, Gemini equivalence example,
+duplicate-read concern and `.gemini/rules` target historical only. Gemini is
+not supported and `.gemini/rules` is not a current projection target.
+Antigravity's `.gemini/antigravity-cli` credential storage and
+Gemini-branded opaque catalog labels remain vendor data under the current
+Antigravity lane, not a Gemini provider or rule-projection surface.
+
+### expanded-gemini-retirement-curation-correction | high | all reported active-document conflicts corrected
+
+Type: architecture curation correction. Status: implemented after review commit
+`df1b05a6f70911928e6561dbeeb3a5dd305eeae3`; formal re-review pending. The
+three findings above resolve the two HIGH accepted obligations and the MEDIUM
+inventory drift without changing historical captures, completed records, or
+the generic provider-independent mechanisms they document. Dashboard curation
+remains passed at `f93c2fb4`. No plan row closes. Runtime removal and exact
+seven-mode proof remain owned by provider-model-catalog `P01.S10`,
+`P01.S11`, `P03.S19`, and `P03.S20`.
 
 ## Recommendations
 

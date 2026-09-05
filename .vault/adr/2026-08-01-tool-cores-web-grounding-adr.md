@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#tool-cores'
 date: '2026-08-01'
-modified: '2026-08-05'
+modified: '2026-09-05'
 body_schema: 'body-v1'
-body_hash: 'sha256:4204699b283838c7ddf90b55fda25eb067e6bdc476cfae2c57843e1ee0136d97'
+body_hash: 'sha256:678b518f0716b057966e150ec1b9f9a5bc9a509076243353deb6514857c21eaa'
 related:
   - '[[2026-08-01-tool-cores-web-grounding-research]]'
   - '[[2026-07-17-tool-cores-adr]]'
@@ -725,3 +725,30 @@ kimi, gemini, openai, or zhipu; evidence inheritance of any kind; editing
 the tripwire ahead of the entry's own proof; test-only registry members.
 Nothing is admitted by this amendment, and nothing remains open under it
 until a candidate entry exists.
+
+## Amendment - current catalog bounds universal web obligations; Gemini is retired (2026-09-06, owner no-legacy directive)
+
+The universal language in this record ranges over provider lanes that belong to
+the current provider-model catalog. It does not preserve a removed provider,
+turn a historical inventory into a compatibility promise, or create work for a
+lane after that lane is retired. The catalog is the authority for membership;
+this record decides web delivery only for members of that catalog.
+
+Accordingly, every earlier reference to Gemini as a command-line lane records
+the inventory understood when that passage was written. The
+`gemini/gemini-cli-acp` lane is now retired in full. It has no registration,
+provisioning, authentication, construction, dispatch, persona activation, web
+tool, completed-retrieval proof, compatibility smoke, or future activation
+obligation. It is excluded from every use of "every provider lane", "all
+lanes", "command-line lanes", "remaining lanes", and
+`PROVEN_WEB_LANES` in this record. Historical construction-only or
+unproven classifications remain evidence about their captured revisions and
+do not establish a dormant lane.
+
+For command-line delivery, the remaining-lane obligation therefore means each
+current command-line member of the provider-model catalog. A current member
+still needs the same completed-retrieval proof before tools or persona claims
+activate. Removing a member eliminates that member's future proof debt; it does
+not weaken the proof standard for members that remain. The generic citation,
+structural refusal, egress, bounds, and provider-native delivery decisions
+continue unchanged for current lanes.

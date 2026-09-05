@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#universal-rule-propagation'
 date: 2026-03-31
-modified: '2026-07-15'
-body_hash: 'sha256:c4ac0aecfe34227819235f367dda5640a27ace07b56451077e1b0817c0e666b6'
+modified: '2026-09-05'
+body_hash: 'sha256:2bfd97daca8e80c7231ebd1aa64756cb53dac617a1f4cc2fd1f4eedbe0cfb034'
 related:
   - '[[2026-03-31-docs-vault-migration-research]]'
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
@@ -88,3 +88,27 @@ This ensures that every agent, regardless of whether it is powered by an ACP wra
 - Initial Audit: `legacy-research/2026-03-04-rule-propagation-research.md` (Empirical finding of the gap).
 - ADR-014 - Establishes the existence of the Context Preamble SystemMessage.
 - ADR-022 - Governs the `build_anchoring_context` hook where these rules will be injected.
+
+## Current inventory interpretation (2026-09-06, owner no-legacy directive)
+
+The accepted decision in this record is the provider-independent
+`RuleManager` discovery, compilation, and LangGraph context-injection
+mechanism identified by the 2026-07-15 reconciliation note. It applies
+uniformly to agents on lanes present in the current provider-model catalog. It
+does not define or preserve provider membership.
+
+The original lists that call Gemini supported, compare an OpenAI API agent with
+a Gemini CLI agent, discuss Gemini CLI duplicate reads, or name
+`.gemini/rules` are historical examples from the migrated source. Gemini is
+not a current supported provider, `.gemini/rules` is not a current rule
+projection target, and none of those examples creates a provider,
+configuration, projection, compatibility, activation, or future proof
+obligation. The generic equivalence requirement remains: every current lane
+that executes an agent receives the same applicable project mandates through
+the shared RuleManager path.
+
+Antigravity's vendor-owned `.gemini/antigravity-cli` credential storage and
+Gemini-branded opaque model labels are vendor data for the current
+`antigravity/antigravity-cli` lane. They are neither a Vaultspec rule
+projection nor evidence of a Gemini provider lane, and this decision does not
+reinterpret or remove that vendor storage.

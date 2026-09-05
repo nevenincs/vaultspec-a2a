@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:f0aec7917801a3c9a0e81eb5ec221b420daa37e7755a12af6a17d3edd4f8f4ea'
+body_hash: 'sha256:2e09b2b712e49ee8f63ec179c5067879718bb86818beceffa27a4681f0e4c709'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -254,6 +254,30 @@ historical. No implementation or plan completion is claimed by this curation.
 ### expanded-gemini-retirement-curation-review | high | FAIL - accepted obligations remain outside corrected corpus
 
 Type: formal architecture review disposition. Status: open through A2A `e76aff0dd5550d5fb041150760eb70ce0725f327` and Dashboard `5cae73928c8ffb4b47dcb322971a002ef208a258`. The nine-path A2A and six-path Dashboard changes correctly establish configOptions-only ACP discovery, exact seven-mode current inventory, complete Gemini retirement, topology-only presets, current schema-v1 catalog selection, typed refusal of retired state, and historical-only treatment of frozen eight-mode evidence. No plan row closes and live runtime removal remains owned by catalog `P01.S10` with proof under `P01.S11`, `P03.S19`, and `P03.S20`. Dashboard generic provisioning decisions remain generic and need no amendment; Antigravity's `.gemini` vendor path and Gemini-branded opaque labels create no Gemini lane authority. However, accepted tool-cores still defines Gemini as a command-line web lane and active P03.S16 owes proof for all remaining command-line lanes; accepted integration-testing still says a real Gemini path remains available for opt-in compatibility smoke. Accepted universal-rule-propagation also carries MEDIUM stale supported-provider examples. The formal review therefore fails until the two HIGH accepted obligations are amended and reviewed. Core checks are mechanically clean.
+
+### expanded-gemini-retirement-curation-correction | high | reported A2A document conflicts corrected
+
+Type: architecture and lifecycle review correction. Status: implemented on
+2026-09-06 after review commit
+`df1b05a6f70911928e6561dbeeb3a5dd305eeae3`; formal curation re-review
+pending. The accepted web-grounding decision and unchecked tool-cores
+`P03.S16` now quantify only over current provider-model catalog members and
+give retired `gemini/gemini-cli-acp` no activation, persona, retrieval,
+compatibility, or future proof obligation. The accepted real-stack
+certification decision preserves deterministic service certification and
+allows opt-in compatibility smoke only for current catalog lanes, with no
+Gemini route or smoke debt. The accepted universal-rule-propagation decision
+preserves provider-independent RuleManager delivery for current lanes while
+marking Gemini examples and `.gemini/rules` as historical and
+non-authoritative.
+
+Historical dependency rationale, frozen captures, completed records, and the
+original text of each amended ADR remain intact. Antigravity's vendor-owned
+`.gemini/antigravity-cli` storage and Gemini-branded opaque model labels
+remain nonconflicting vendor data for `antigravity/antigravity-cli`.
+Dashboard curation remains passed at `f93c2fb4`. No runtime edit or plan-row
+closure is claimed; provider-model-catalog `P01.S10` and its proof rows
+continue to own live removal and qualification.
 
 ## Recommendations
 

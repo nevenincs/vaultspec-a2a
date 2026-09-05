@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#integration-testing-smoke-tests-api-verification'
 date: '2026-03-31'
-modified: '2026-07-15'
-body_hash: 'sha256:eede496af6501fdabdf2c5e749ec766dcab79bd9c04ff3c87548915a0400caad'
+modified: '2026-09-05'
+body_hash: 'sha256:11b51d42c764965e12fcd0e2ab14cbb070fcac3746fe3c8c0bb09e032c33130c'
 related:
   - '[[2026-03-31-integration-testing-smoke-tests-api-verification-research]]'
   - '[[2026-03-31-integration-testing-service-certification-research]]'
@@ -51,3 +51,24 @@ This decision preserves the meaning of `service` tests as proof of actual stack 
 ## Consequences
 
 The first pass on issue `#17` will be narrower, but much more trustworthy: developers get a repeatable certification gate for real work, not a brittle live-provider matrix. The downside is that live Claude/Gemini/OpenAI/Zhipu compatibility is not proven by the main suite and must be covered by a separate opt-in smoke track if the project wants that guarantee.
+
+## Amendment - provider smoke follows current catalog membership; Gemini is retired (2026-09-06, owner no-legacy directive)
+
+The deterministic real-stack certification decision remains unchanged. Any
+separate opt-in provider compatibility smoke ranges only over lanes present in
+the current provider-model catalog and must use each current lane's own failure
+semantics and runtime prerequisites.
+
+The original references to a real Gemini path, available real-provider paths,
+and a possible Gemini compatibility smoke describe the inventory understood
+when this record was written. They create no present availability claim. The
+`gemini/gemini-cli-acp` lane is retired in full and has no retained
+compatibility route, opt-in smoke, credential gate, availability promise, or
+future test/proof obligation. Completed historical plans and test results
+remain records of their captured revisions; they do not reactivate a removed
+provider.
+
+A current catalog member may receive explicit opt-in compatibility coverage
+when its own active contract requires it. Such coverage remains separate from
+the deterministic service certification gate and cannot be used to justify
+support for a lane absent from the current catalog.

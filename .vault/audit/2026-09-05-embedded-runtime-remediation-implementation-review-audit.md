@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:c6cd3c42588bf809f1cec7f3808f70fd49133bd159b16b9fae31a6d4e6abe714'
+body_hash: 'sha256:f0aec7917801a3c9a0e81eb5ec221b420daa37e7755a12af6a17d3edd4f8f4ea'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -250,6 +250,11 @@ catalog discovery configOptions-only and retire Gemini provider support in full.
 Catalog `P01.S10`, `P01.S11`, `P03.S19`, and `P03.S20` carry removal, exact
 seven-mode inventory, and negative proof. Frozen qualification captures remain
 historical. No implementation or plan completion is claimed by this curation.
+
+### expanded-gemini-retirement-curation-review | high | FAIL - accepted obligations remain outside corrected corpus
+
+Type: formal architecture review disposition. Status: open through A2A `e76aff0dd5550d5fb041150760eb70ce0725f327` and Dashboard `5cae73928c8ffb4b47dcb322971a002ef208a258`. The nine-path A2A and six-path Dashboard changes correctly establish configOptions-only ACP discovery, exact seven-mode current inventory, complete Gemini retirement, topology-only presets, current schema-v1 catalog selection, typed refusal of retired state, and historical-only treatment of frozen eight-mode evidence. No plan row closes and live runtime removal remains owned by catalog `P01.S10` with proof under `P01.S11`, `P03.S19`, and `P03.S20`. Dashboard generic provisioning decisions remain generic and need no amendment; Antigravity's `.gemini` vendor path and Gemini-branded opaque labels create no Gemini lane authority. However, accepted tool-cores still defines Gemini as a command-line web lane and active P03.S16 owes proof for all remaining command-line lanes; accepted integration-testing still says a real Gemini path remains available for opt-in compatibility smoke. Accepted universal-rule-propagation also carries MEDIUM stale supported-provider examples. The formal review therefore fails until the two HIGH accepted obligations are amended and reviewed. Core checks are mechanically clean.
+
 ## Recommendations
 
 - Keep the captured A2A and Dashboard identities distinct until the Dashboard component lock, release manifest, discovery generation, and running process agree.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:69ff081caebe9a15c13991c04180e3a051646f85ab8c84394d21808b7e1f6a0d'
+body_hash: 'sha256:4ec7418a844c07f5fcff8f5df2214981d19b4fc0e6b074066be4c370c55160a8'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -194,6 +194,27 @@ ACP catalogs are configOptions-only, the external product inventory has seven
 lanes, and Gemini-specific provider support has no dormant compatibility
 posture. Historical research, execution, audit, and frozen inventory output are
 preserved as dated evidence. Live runtime work remains owned by the executor.
+
+### accepted-tool-cores-gemini-proof-obligation | high | open
+
+Type: accepted-ADR and active-plan conflict. Status: open at expanded curation commit `e76aff0dd5550d5fb041150760eb70ce0725f327`; blocks the no-legacy curation review and catalog `P01.S10` closure. Accepted `2026-08-01-tool-cores-web-grounding-adr` still defines Gemini as one of five command-line lanes, says every provider lane must receive web search, and treats a lane left unproven as unfinished delivery. Active unchecked `2026-08-01-tool-cores-plan` `P03.S16` requires completed-retrieval proof for every remaining command-line lane. Read together, they retain a future Gemini activation and proof obligation after the catalog ADR retired `gemini/gemini-cli-acp` completely. Amend the tool-cores ADR so universal web delivery ranges only over current catalog lanes, makes its Gemini lane clauses historical, and creates no proof or activation debt for the retired lane; align P03.S16 without closing it.
+
+### accepted-integration-smoke-gemini-compatibility | high | open
+
+Type: accepted-ADR compatibility conflict. Status: open at `e76aff0dd5550d5fb041150760eb70ce0725f327`; blocks the no-legacy curation review and catalog `P01.S10` closure. Accepted `2026-03-31-integration-testing-smoke-tests-api-verification-adr` states that the repository supports a real Gemini path, that real provider paths remain available, and that a retained opt-in compatibility track may exercise Gemini. Those are current availability and testing obligations, not immutable execution evidence, and they contradict total retirement. Add a dated amendment retaining deterministic service certification and opt-in compatibility testing for current catalog lanes while explicitly removing Gemini availability, smoke, and future-proof obligations. Its completed historical plan and test facts need no rewrite.
+
+### accepted-rule-propagation-gemini-example | medium | open
+
+Type: single-home documentation drift. Status: open, non-blocking by itself. The accepted `2026-03-31-universal-rule-propagation-adr` was accepted for its provider-agnostic RuleManager mechanism, and its 2026-07-15 reconciliation note identifies that mechanism as the live decision. Its original body still calls Gemini supported, uses a Gemini CLI equivalence example, and mentions `.gemini/rules`. Those examples do not register, provision, select, construct, or dispatch a lane, but they can be misread as current provider inventory. Add a short dated interpretation that the examples are historical and current applicability follows the catalog inventory. Preserve the generic rule-injection decision.
+
+### non-authoritative-gemini-history-and-antigravity-vendor-data | low | verified
+
+Type: review disposition. The dependency-hygiene ADR's Gemini sentence records why a package was removed; the multi-provider ADR has a dated catalog-authority amendment; completed plans, frozen eight-mode captures, executable-version capture, and old source references remain historical facts. None creates current selection authority. Current Antigravity code's `.gemini/antigravity-cli` credential path and Gemini-branded model labels are vendor storage and opaque catalog data under `antigravity/antigravity-cli`; they do not recreate a Gemini provider, execution mode, auth path, factory branch, or wire value.
+
+### expanded-gemini-retirement-curation-formal-review | high | FAIL - two accepted obligations remain
+
+Type: formal architecture review disposition. Status: open through A2A `e76aff0dd5550d5fb041150760eb70ce0725f327` and Dashboard `5cae73928c8ffb4b47dcb322971a002ef208a258`. The expanded catalog, provider-abstraction, harness, current references, and active catalog steps correctly establish configOptions-only ACP discovery, exact seven-mode current inventory, complete Gemini retirement, typed fail-closed old-state handling, and historical-only interpretation for frozen eight-mode records. Dashboard's edge, flow, shell, and unchecked agent-panel rows correctly require topology-only presets, schema-v1 catalog selection, no profile/legacy restart/Gemini compatibility, and close no row; its generic provisioning ADRs promise only generic runtime/provider-asset lifecycle and need no amendment. Exact scopes are nine A2A paths and six Dashboard paths; historical records are preserved, and runtime removal remains open. Feature Core reports zero errors and zero warnings for all six reviewed A2A features and Dashboard agent-panel. The tool-cores and integration-testing accepted obligations above prevent PASS; the rule-propagation example is additional MEDIUM drift.
+
 ## Recommendations
 
 - Complete catalog `P01.S10` by deleting every enumerated legacy authority and

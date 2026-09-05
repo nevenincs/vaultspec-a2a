@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:ee0cd843b0aab8436d9dd6c91d3c6cb9b181599384ee9cd55185d7f6d63656fe'
+body_hash: 'sha256:2c23223558d42ffaf9b7193f7c9ec88de9f23548b1d98e5f661e2d3ec7e79ca6'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]"
@@ -125,15 +125,21 @@ Correction status: implemented at Dashboard `02101b52d15e31a23b9c5cb181c9f6e648b
 
 ### s02-existing-verb-retry-contract-regression | high | Correction drops the current mutation retry and reconciliation rules
 
-Type: contract completeness and regression. Status: open; review-blocking for corrected `W01.P01.S02` at Dashboard `02101b52d15e31a23b9c5cb181c9f6e648b25261`. The correction resolves the three original HIGH subjects, but replacing the broker table removed its retry-rule column. Neither the amended authoritative edge ADR nor any current Dashboard ADR/reference now preserves the frozen current behavior that `run-start` permits exactly one retry after an ambiguous connection or protocol failure using the same run, reservation, and payload before authoritative status reconciliation; `run-cancel` forbids blind retry and reconciles status; and `clarification-respond` forbids blind retry while preserving request identity and reconciling the result. Live source still contains the specialized run-start replay/reconciliation path. The new three mutating capabilities have complete idempotency and reconciliation rules, but S02 owns the complete eleven-verb contract and cannot regress existing wire facts while adding four operations. Ownership: correct S02 by restoring the three existing mutation rules in the authoritative edge decision and its derived operation table, without weakening the new idempotency contract.
+Type: contract completeness and regression. Status: resolved by S02 correction; originally review-blocking for corrected `W01.P01.S02` at Dashboard `02101b52d15e31a23b9c5cb181c9f6e648b25261`. The correction resolves the three original HIGH subjects, but replacing the broker table removed its retry-rule column. Neither the amended authoritative edge ADR nor any current Dashboard ADR/reference now preserves the frozen current behavior that `run-start` permits exactly one retry after an ambiguous connection or protocol failure using the same run, reservation, and payload before authoritative status reconciliation; `run-cancel` forbids blind retry and reconciles status; and `clarification-respond` forbids blind retry while preserving request identity and reconciling the result. Live source still contains the specialized run-start replay/reconciliation path. The new three mutating capabilities have complete idempotency and reconciliation rules, but S02 owns the complete eleven-verb contract and cannot regress existing wire facts while adding four operations. Ownership: correct S02 by restoring the three existing mutation rules in the authoritative edge decision and its derived operation table, without weakening the new idempotency contract.
+
+Resolution status: resolved in Dashboard correction `89706fb2641bd5482667437ae1e4abf2d8194fd8`. The authoritative ADR now states retry and reconciliation for all eleven verbs, and the derived eleven-row table carries a dedicated rule column. It restores run-start's single ambiguous connection/protocol retry with identical run/reservation/payload and authoritative status reconciliation, run-cancel's no-blind-retry/status rule, and clarification response's request-preserving no-blind-retry/result rule without weakening the new mutation receipts.
 
 ### s02-edge-adr-d2-marker | low | A literal plus sign corrupts the D2 decision marker
 
-Type: documentation quality. Status: open; non-blocking by itself. Dashboard `02101b52...` leaves the line `+**D2 — Actors and tokens are provisioned by the engine at run start.**` after the new amendment. Core markdown validation accepts it as prose, but the literal plus breaks the ADR's established bold decision-marker form and makes D2 harder to scan and parse semantically. Ownership: remove the stray plus in the S02 documentation correction.
+Type: documentation quality. Status: resolved by S02 correction; originally non-blocking by itself. Dashboard `02101b52...` leaves the line `+**D2 — Actors and tokens are provisioned by the engine at run start.**` after the new amendment. Core markdown validation accepts it as prose, but the literal plus breaks the ADR's established bold decision-marker form and makes D2 harder to scan and parse semantically. Ownership: remove the stray plus in the S02 documentation correction.
+
+Resolution status: resolved in Dashboard correction `89706fb2641bd5482667437ae1e4abf2d8194fd8`. The literal plus was removed and D2 is again a standalone bold decision marker.
 
 ### s02-corrected-formal-rereview | high | FAIL - original defects resolved but retry-contract regression remains
 
 Type: implementation review. Status: open. Re-review at A2A `df8645c723d16298252c831ea8982836bbb59aed` and Dashboard `02101b52d15e31a23b9c5cb181c9f6e648b25261` confirms the accepted edge ADR legitimately expands seven verbs to exactly eleven; the four additions have exact names and routes, bounded inputs and outputs, typed receipts/refusals/conflicts/errors, identity, idempotency, authentication, scope, budgets, retry and reconciliation rules; ADR and reference mutually link and agree; producer-first fixed per-target versioned archives and SHA-256 sidecars, version-only Dashboard fetch-verify-bundle, removal of source build/checkout/commit pinning, and final receipt/process/discovery agreement are explicit; and S50 matches. A focused assertion passes the eleven-row matrix, four route bindings, bounds, envelopes, provenance and mutual links. A2A Core validation is clean, only S01/S02 are closed, S03 remains untouched, and both repositories are clean. The preceding HIGH regression prevents a PASS until the existing mutation retry rules are restored.
+
+Correction status: implemented at Dashboard `89706fb2641bd5482667437ae1e4abf2d8194fd8`; formal re-review pending. A deterministic assertion counted exactly eleven table rows, checked every read and mutation retry/reconciliation rule, and rejected either malformed D2 marker.
 
 ## Recommendations
 

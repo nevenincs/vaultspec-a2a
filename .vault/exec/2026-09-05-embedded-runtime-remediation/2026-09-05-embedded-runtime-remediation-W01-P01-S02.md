@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:f7db65aafb674f82fc90ac473699e92de7e1864866a0404d32325b769d7ce619'
+body_hash: 'sha256:ec88d4e8f2cbd6bc55e22b32c1a703a2cff49737977e8b4055128cd836eb4c5f'
 step_id: 'S02'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -28,7 +28,8 @@ related:
 - `verify:` `cargo test -p vaultspec-api a2a_lifecycle` -> `pass`
 - `verify:` `cargo test -p vaultspec-api ops::a2a` -> `pass` (70 tests)
 - `verify:` `uv run --locked python -` contract assertion over Dashboard ADR/reference -> `pass` (4 operations, routes, bounds, envelopes, mutual link, producer-first provenance)
+- `verify:` `python -` retry-table assertion over Dashboard ADR/reference -> `pass` (11 rows, all read/mutation rules, clean D2 marker)
 
 ## Notes
 
-The authoritative coordinated contract is Dashboard reference `2026-09-05-a2a-integration-verification-embedded-runtime-coordinated-contract-reference` at Dashboard commit `02101b52d15e31a23b9c5cb181c9f6e648b25261`. Runtime wire behavior remains assigned to `S43`-`S50`.
+The authoritative coordinated contract is Dashboard reference `2026-09-05-a2a-integration-verification-embedded-runtime-coordinated-contract-reference` at Dashboard commit `89706fb2641bd5482667437ae1e4abf2d8194fd8`. Runtime wire behavior remains assigned to `S43`-`S50`.

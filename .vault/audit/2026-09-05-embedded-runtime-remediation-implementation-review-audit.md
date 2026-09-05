@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:2e09b2b712e49ee8f63ec179c5067879718bb86818beceffa27a4681f0e4c709'
+body_hash: 'sha256:a4612a8d496f5e096f0e190f089f055dd8695b6c0328c7856bbf467bce9f56d6'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -278,6 +278,12 @@ remain nonconflicting vendor data for `antigravity/antigravity-cli`.
 Dashboard curation remains passed at `f93c2fb4`. No runtime edit or plan-row
 closure is claimed; provider-model-catalog `P01.S10` and its proof rows
 continue to own live removal and qualification.
+
+### expanded-gemini-retirement-curation-final-rereview | low | PASS - prior accepted-document conflicts resolved
+
+Type: formal architecture review disposition. Status: resolved at `869ef969175223d065730a81d1a684a3d96b605c`. Tool-cores now limits every universal and remaining-lane obligation to current catalog members and gives retired Gemini zero activation, web, compatibility, or proof debt; unchecked P03.S16 states that boundary without closing. Integration testing limits optional compatibility smoke to current catalog members and makes prior Gemini availability/smoke prose historical. Universal rule propagation identifies only the provider-independent RuleManager mechanism as active, makes Gemini and `.gemini/rules` examples historical, and preserves Antigravity vendor storage and opaque labels without inventing a Gemini lane.
+
+Accepted-ADR, active-plan, and current-reference scans now agree on configOptions-only ACP discovery, the exact seven-mode current inventory, schema-v1 catalog authority, and no provider/model/profile legacy support. Frozen eight-mode captures and completed historical facts remain intact. The correction has exactly six documentation paths, changes no source, preserves all checklist states, and leaves runtime retirement open under catalog P01.S10 and proof steps. All affected A2A and Dashboard feature Core checks report zero errors and zero warnings. No critical, high, or medium architecture-curation finding remains; the expanded curation review passes.
 
 ## Recommendations
 

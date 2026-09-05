@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:2572243aa5f2c059f958ac340c866ff54b3acd5b80141e3786bbb56958ebf734'
+body_hash: 'sha256:167f54856f8d6306881eb5a5abb20e86f97fa3be0184525ebf6a3033c53fb0f6'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -260,6 +260,24 @@ the generic provider-independent mechanisms they document. Dashboard curation
 remains passed at `f93c2fb4`. No plan row closes. Runtime removal and exact
 seven-mode proof remain owned by provider-model-catalog `P01.S10`,
 `P01.S11`, `P03.S19`, and `P03.S20`.
+
+### accepted-tool-cores-gemini-proof-obligation-resolution | high | resolved
+
+Type: accepted-ADR and active-plan conflict resolution. Status: resolved at `869ef969175223d065730a81d1a684a3d96b605c`. The tool-cores amendment makes current provider-model-catalog membership the boundary for every universal and remaining-lane quantifier. All earlier Gemini lane language is historical, and the retired `gemini/gemini-cli-acp` lane has no registration, activation, persona, web-tool, retrieval, compatibility, or future-proof debt. Unchecked `P03.S16` now applies only to command-line lanes that are current when executed and remains unchecked.
+
+### accepted-integration-smoke-gemini-compatibility-resolution | high | resolved
+
+Type: accepted-ADR compatibility resolution. Status: resolved at `869ef969175223d065730a81d1a684a3d96b605c`. The integration-testing amendment preserves deterministic real-stack certification and permits opt-in compatibility smoke only for current catalog members. Its original Gemini supported/available/smoke statements are explicitly historical and create no availability, credential, route, compatibility, test, or proof obligation.
+
+### accepted-rule-propagation-gemini-example-resolution | medium | resolved
+
+Type: single-home documentation reconciliation. Status: resolved at `869ef969175223d065730a81d1a684a3d96b605c`. The accepted RuleManager decision is expressly provider-independent and follows current catalog membership. Original Gemini, Gemini CLI, and `.gemini/rules` examples are historical and create no provider or projection authority. Antigravity's vendor-owned `.gemini/antigravity-cli` storage and opaque Gemini-branded model labels remain valid data for the current Antigravity lane.
+
+### expanded-gemini-retirement-curation-final-rereview | low | PASS - no legacy support authority remains
+
+Type: formal architecture re-review disposition. Status: resolved through A2A `869ef969175223d065730a81d1a684a3d96b605c`, prior A2A `e76aff0dd5550d5fb041150760eb70ce0725f327`, and Dashboard `5cae73928c8ffb4b47dcb322971a002ef208a258`/`f93c2fb422f9f8e8d4c2688354ab60ba41ba8c38`. Repository-wide accepted-ADR, active unchecked-plan, and current-reference rescans find one catalog authority, configOptions-only ACP discovery, exact seven-mode current inventory, no Gemini lane, and no legacy provider/model/profile selection, translation, restart, redispatch, compatibility, or future-proof obligation. Frozen eight-mode JSON, completed plans, older source references, executable-version captures, and other historical facts remain visible with current interpretations that grant no authority.
+
+The correction changes exactly three accepted ADRs, the tool-cores plan, and two rolling audits. It changes no source. Tool-cores has the same 12 checked rows before and after; no plan row closes and historical records are not rewritten. The original expanded scopes remain exactly nine A2A paths and six Dashboard paths. Feature Core reports zero errors and zero warnings for provider-model-catalog, embedded-runtime-remediation, tool-cores, integration-testing-smoke-tests-api-verification, universal-rule-propagation, llm-context-provider-abstraction, and Dashboard agent-panel. The live runtime retirement work remains open under catalog `P01.S10` and its proof steps. No critical, high, or medium curation defect remains.
 
 ## Recommendations
 

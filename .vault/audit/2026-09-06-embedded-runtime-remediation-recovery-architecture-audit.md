@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:cd801d108335cb4d37f98a7b8895d3f3a96e486ef96f97121d82e519fd88d03b'
+body_hash: 'sha256:6b8372f728656894feb5333e50f38c210039d8ddaac0bfc31b59ce32afd88d27'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -67,3 +67,25 @@ Formal self-review of `control/thread_service.py` and `control/tests/test_thread
 The initial admission part of incomplete-durable-dispatch is corrected. Recovery decoding and refusal, other action admission, frozen deadline authority and production incorporation remain open under S11/S12/S83; none is inferred from this result.
 
 Verification: the first five-case battery exited naturally with five passes in 19.12 seconds and zero survivors. After adding the invalid-input discriminator, one six-case command printed six dots but exceeded its 60-second owner deadline before producing a summary; it was terminated with zero survivors and is classified FAIL. The same six-case battery then completed through the resource-aware runner with run timeout 60 seconds and exit timeout 5 seconds: six passed in 3.54 seconds, process exit 0. Ruff and Ty passed on both changed paths. The earlier timeout is retained as verification-lifecycle evidence for S85, not relabelled as a pass.
+
+### graph-action-producer | high | partially corrected in S12; recovery remains open
+
+Formal self-review confirms immutable journal receipts are persisted before graph dispatch, under the exact durable thread writer. A status-only revision preserves the original receipt; recovery cannot install an older action. New message, permission, clarification and verdict actions install ownership only from the witness observed before acquiring their lease. Initial accepted input excludes the derived receipt as well as transport secrets, avoiding a circular payload fingerprint. Worker admission refuses missing or mismatched current evidence before compilation. Graph input carries the receipt, and application notification reads the matching committed loop checkpoint instead of treating entry into execution as incorporation.
+
+Verification: the initial admission and checkpoint declaration battery passed eight tests in 8.85 seconds; two real-SQLite ownership tests passed in 8.90 seconds; the real worker and StateGraph incorporation test passed in 0.67 seconds. All commands used the bounded runner and exited 0. The ownership test first failed at setup because its fixture belonged to another package, then failed validation because its request omitted required recursion_limit; both test construction defects were corrected before the reported passing run. Ruff passed changed production paths and receipt tests; focused Ty passed. Whole-project Ty reported eight diagnostics outside the receipt implementation, including concurrent provider work, so no whole-project type-check pass is claimed.
+
+### cancellation-proof | high | open; S12 remaining work
+
+Cancellation still emits terminal state from in-memory absence of an active ingest and has no durable cessation or no-op receipt. Graph incorporation deliberately excludes cancellation. S12 remains unchecked until the separate cessation evidence exists and is consumed.
+
+### receipt-consumer-boundary | high | open; S13 dependency
+
+The worker now emits checkpoint identity and its exact journal receipt, but generic progress-event settlement still trusts dispatch_id without validating those durable fields. S13 must precede recovery completion claims. Existing worker tests that construct pre-current graph requests require current authority; they have not been mass-adapted or counted as evidence of runtime completion.
+
+### admission-transaction-gap | high | open; accepted-action atomicity
+
+Follow-up and resume producers still commit their lease and requested projection before installing thread ownership. The binder fences network dispatch and prevents stale installation, but a crash between those transactions leaves an accepted action that recovery cannot promote. The single durable admission/recovery authority must commit accepted payload, writer and receipt together. Complete effective input storage currently covers initial admission only; other actions still require equivalent recoverable inputs.
+
+### schema-refusal-verification | medium | open; migration evidence
+
+Migration 0018 refuses populated pre-current stores instead of inventing historical graph receipts. Fresh-schema admission was exercised through the production migration-backed test fixture. A dedicated populated-store refusal and cancellation/no-op migration discriminator remains required. This partial S12 pass does not close the recovery conditions.

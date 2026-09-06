@@ -46,6 +46,7 @@ from ..database import (
     mark_control_action_applied,
     mark_permission_request_applied,
     set_authoring_cursor,
+    thread_write_expectation,
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
@@ -60,6 +61,7 @@ from ..utils.coercion import coerce_object_list, coerce_object_mapping
 from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
+from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 
 if TYPE_CHECKING:
@@ -616,6 +618,7 @@ class VerdictSubscriber:
                 return
             team_preset = thread.team_preset
             thread_metadata = thread.thread_metadata
+            write_expectation = thread_write_expectation(thread)
             workspace_root = dispatchable_workspace_root(thread_metadata)
             try:
                 execution_authority = resolve_execution_authority(thread_metadata)
@@ -683,6 +686,10 @@ class VerdictSubscriber:
             verdict,
             dispatch.dispatch_id,
         )
+        async with self._session_factory() as db:
+            dispatch = await bind_graph_action_receipt(
+                db, dispatch, install_from=write_expectation
+            )
         outcome = await safe_dispatch(
             self._worker_client,
             dispatch,

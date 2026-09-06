@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 def _receipt(dispatch_id: str, *, content: str) -> GraphActionReceipt:
     return GraphActionReceipt(
         schema_version="graph-action-v1",
+        thread_id="receipt-run",
         action_id=f"action-{dispatch_id}",
         action_type=ControlActionType.INGEST,
         payload_fingerprint=control_action_payload_fingerprint({"content": content}),

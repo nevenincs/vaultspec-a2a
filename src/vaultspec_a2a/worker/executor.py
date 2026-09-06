@@ -266,15 +266,32 @@ class Executor:
         )
 
     async def _emit_dispatch_application_receipt(self, req: DispatchRequest) -> None:
-        """Queue private proof that an ingest or resume entered graph execution."""
+        """Report incorporation only after reading its committed checkpoint proof."""
         if req.action not in {"ingest", "resume"}:
             return
         try:
+            receipt = req.require_graph_action_receipt()
+            checkpoint = await asyncio.wait_for(
+                self._checkpointer.aget_tuple(
+                    {"configurable": {"thread_id": req.thread_id}}
+                ),
+                timeout=self._checkpoint_read_timeout_seconds,
+            )
+            if checkpoint is None or checkpoint.metadata.get("source") != "loop":
+                return
+            values = checkpoint.checkpoint.get("channel_values", {})
+            receipts = values.get("graph_action_receipts")
+            if not isinstance(receipts, dict):
+                return
+            if receipts.get(req.dispatch_id) != receipt.model_dump(mode="json"):
+                return
             await self._bridge.send_event(
                 req.thread_id,
                 DispatchApplicationReceiptPayload(
                     dispatch_id=req.dispatch_id,
                     action=req.action,
+                    graph_action_receipt=receipt,
+                    checkpoint_id=checkpoint.checkpoint["id"],
                 ).model_dump(mode="json"),
             )
         except Exception:
@@ -557,6 +574,7 @@ class Executor:
         research_adr run completes on its FINAL gate resume, so the close must
         cover the resume path too.
         """
+        await self._emit_dispatch_application_receipt(req)
         await self._state_projector.emit_execution_state_projection(
             req.thread_id, graph, config
         )
@@ -805,6 +823,11 @@ class Executor:
     async def _handle_ingest(self, req: DispatchRequest) -> None:
         """Compile graph on first use and execute a new user turn."""
         async with ws_span("executor.ingest", thread_id=req.thread_id) as span:
+            try:
+                receipt = req.require_graph_action_receipt()
+            except ValueError as exc:
+                await self._reject_with_condition(req, str(exc))
+                return
             checkpoint_deadline = (
                 asyncio.get_running_loop().time()
                 + self._checkpoint_read_timeout_seconds
@@ -904,6 +927,9 @@ class Executor:
                 req, is_first_ingest=is_first_ingest
             )
             graph_input["agent_descriptors"] = node_metadata_from_graph(graph)
+            graph_input["graph_action_receipts"] = {
+                req.dispatch_id: receipt.model_dump(mode="json")
+            }
 
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
@@ -945,6 +971,11 @@ class Executor:
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
         async with ws_span("executor.resume", thread_id=req.thread_id) as span:
+            try:
+                receipt = req.require_graph_action_receipt()
+            except ValueError as exc:
+                await self._reject_with_condition(req, str(exc))
+                return
             checkpoint_deadline = (
                 asyncio.get_running_loop().time()
                 + self._checkpoint_read_timeout_seconds
@@ -1017,6 +1048,9 @@ class Executor:
                     Command(
                         resume=req.option_id,
                         update={
+                            "graph_action_receipts": {
+                                req.dispatch_id: receipt.model_dump(mode="json")
+                            },
                             "agent_descriptors": node_metadata_from_graph(graph),
                             "model_assignment_digest": model_assignment_digest(
                                 req.model_assignment

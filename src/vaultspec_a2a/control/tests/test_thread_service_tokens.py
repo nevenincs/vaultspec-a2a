@@ -84,9 +84,13 @@ def _capturing_worker(
             stored = json.loads(action.payload_json)
             assert stored["schema"] == "initial-dispatch-v1"
             assert stored["dispatch"] == {
-                key: value for key, value in body.items() if key != "actor_tokens"
+                key: value
+                for key, value in body.items()
+                if key not in {"actor_tokens", "graph_action_receipt"}
             }
             assert stored["actor_tokens_required"] is (body["actor_tokens"] is not None)
+            assert action.graph_receipt_json is not None
+            assert json.loads(action.graph_receipt_json) == body["graph_action_receipt"]
             captured["accepted_before_dispatch"] = stored
         return JSONResponse({"status": "dispatched", "thread_id": "x"})
 
@@ -133,11 +137,14 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
         await session.commit()
     async with session_factory() as session:
         assert await get_thread(session, thread_id) is None
-        assert await session.scalar(
-            select(ControlActionModel.id).where(
-                ControlActionModel.thread_id == thread_id
+        assert (
+            await session.scalar(
+                select(ControlActionModel.id).where(
+                    ControlActionModel.thread_id == thread_id
+                )
             )
-        ) is None
+            is None
+        )
     assert captured == {}
 
 

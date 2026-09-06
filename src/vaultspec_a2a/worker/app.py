@@ -312,6 +312,14 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         The actual graph execution is scheduled as a background task inside
         the lifespan task group so that this endpoint returns immediately.
         """
+        if req.action != "cancel":
+            try:
+                req.require_graph_action_receipt()
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"condition": "incompatible_state"},
+                ) from exc
         executor: Executor = app.state.executor
         tg = app.state.task_group
 

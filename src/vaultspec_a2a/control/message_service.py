@@ -19,12 +19,14 @@ from ..control.action_lease import (
     release_definite_non_delivery,
 )
 from ..control.dispatch import safe_dispatch
+from ..control.dispatch_receipts import bind_graph_action_receipt
 from ..control.repair_transitions import (
     mark_message_followup_requested,
     record_undelivered_dispatch,
 )
 from ..database import (
     get_thread,
+    thread_write_expectation,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
@@ -116,6 +118,7 @@ async def send_followup_message(
     # Snapshot every value needed after election before entering the shared lease
     # primitive so a concurrent replay/conflict never triggers implicit async I/O.
     thread_status = thread.status
+    write_expectation = thread_write_expectation(thread)
     team_preset = thread.team_preset
     thread_metadata = thread.thread_metadata
     try:
@@ -215,6 +218,9 @@ async def send_followup_message(
         },
     )
 
+    dispatch = await bind_graph_action_receipt(
+        db, dispatch, install_from=write_expectation
+    )
     outcome = await safe_dispatch(
         worker_client,
         dispatch,

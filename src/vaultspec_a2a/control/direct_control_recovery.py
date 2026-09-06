@@ -22,6 +22,7 @@ from ..thread.enums import ControlActionType, ThreadStatus
 from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
+from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .permission_dispatch import permission_resume_value
 
@@ -318,6 +319,7 @@ async def redrive_direct_control_actions(
                 )
                 conflicted += 1
                 continue
+            dispatch = await bind_graph_action_receipt(db, dispatch)
             await db.commit()
             outcome = await safe_dispatch(
                 worker_client,

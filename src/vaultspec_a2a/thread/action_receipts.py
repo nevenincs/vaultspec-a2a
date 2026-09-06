@@ -30,6 +30,7 @@ class GraphActionReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: Literal["graph-action-v1"]
+    thread_id: Annotated[str, Field(min_length=1, max_length=128, pattern=r"^\S+$")]
     action_id: _Identity
     action_type: Literal[
         ControlActionType.INGEST,

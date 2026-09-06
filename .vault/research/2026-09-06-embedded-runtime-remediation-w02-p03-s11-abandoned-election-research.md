@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:fac383b067e78a09b56bd09d3c1bdd8274d90595f49a90d7b4faebe7a673b7b1'
+body_hash: 'sha256:446a1e592b0cc5508abbca3c0e7acc8f8de36e9dd25c1311e320d8a0155959e9'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-audit]]"
@@ -64,3 +64,9 @@ A test result and process completion are separate obligations. The resource-awar
 The production review in `2026-09-06-embedded-runtime-remediation-recovery-architecture-audit` identifies missing prerequisites beneath the proposed coordinator. General immutable checkpoint action receipts were absent; startup still used unconditional lifecycle writes; and worker preflight equated empty pending writes with completion. The initial action journal retained title, preset and autonomous input but omitted initial message content and effective dispatch arguments. The graph-action receipt declaration is now implemented; production evidence still depends on durable admission retaining the input it is supposed to certify.
 
 The initial dispatch can be constructed before the database write transaction because `ThreadCreationRequest` already carries the allocated run id. Persisting its non-secret serialized input together with the run removes the crash window without holding the SQLite write lock during project/configuration reads. Actor-token values remain transport-only; recovery needs an explicit fact stating whether such credentials are required. The audit retains the remaining coordinator, checkpoint, integrity-quarantine, deadline and demand-gate findings.
+
+## Immutable receipt production follow-up
+
+Graph receipt creation cannot recompute identity from every current thread revision: normal status transitions advance the revision while the accepted action remains unchanged. Persist the original receipt once on the action journal, and return that exact receipt on retries under the current matching writer generation. A new action may install ownership only from its pre-lease thread witness; recovery cannot promote a stale action. Real independent-session tests distinguish these cases.
+
+The partial producer also exposes an earlier atomicity gap: follow-up and resume acceptance commits before writer installation. Fencing delivery prevents stale execution but does not make that acceptance recoverable after a crash. Consolidation must move acceptance, complete effective input, writer and receipt into one durable transaction. Cancellation remains a separate cessation/no-op evidence problem, and event consumers must verify checkpoint receipts before settling leases. These findings remain queued in the recovery architecture audit.

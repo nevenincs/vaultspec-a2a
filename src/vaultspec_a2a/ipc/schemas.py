@@ -20,6 +20,7 @@ from pydantic import (
     model_validator,
 )
 
+from ..thread.action_receipts import GraphActionReceipt
 from ..thread.actor_tokens import ActorTokenBundle
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import ControlActionType
@@ -111,6 +112,7 @@ class DispatchRequest(BaseModel):
         description="'ingest' | 'resume' | 'cancel'"
     )
     thread_id: str
+    graph_action_receipt: GraphActionReceipt | None = None
     agent_id: str = DEFAULT_SUPERVISOR_ID
     # For ingest: user message content
     content: str | None = None
@@ -147,6 +149,32 @@ class DispatchRequest(BaseModel):
     # worker holds them in worker-scoped runtime state only and drops them at run
     # end — they are never checkpointed.
     actor_tokens: ActorTokenBundle | None = None
+
+    def require_graph_action_receipt(self) -> GraphActionReceipt:
+        """Require a matching current receipt before graph execution admission."""
+        receipt = self.graph_action_receipt
+        if (
+            receipt is None
+            or receipt.thread_id != self.thread_id
+            or receipt.dispatch_id != self.dispatch_id
+            or (
+                self.action == "ingest"
+                and receipt.action_type not in {
+                    ControlActionType.INGEST,
+                    ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+                }
+            )
+            or (
+                self.action == "resume"
+                and receipt.action_type not in {
+                    ControlActionType.RESUME,
+                    ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+                }
+            )
+            or self.action == "cancel"
+        ):
+            raise ValueError("incompatible graph dispatch authority")
+        return receipt
 
     @field_validator("model_assignment")
     @classmethod
@@ -244,6 +272,8 @@ class DispatchApplicationReceiptPayload(BaseModel):
     type: Literal["dispatch_applied"] = "dispatch_applied"
     dispatch_id: str
     action: Literal["ingest", "resume"]
+    graph_action_receipt: GraphActionReceipt
+    checkpoint_id: str = Field(min_length=1, max_length=128)
 
 
 class ExecutionTaskProjectionPayload(BaseModel):

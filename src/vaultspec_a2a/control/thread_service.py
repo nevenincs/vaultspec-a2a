@@ -19,6 +19,7 @@ from uuid import uuid4
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
 from ..control.dispatch import safe_dispatch
+from ..control.dispatch_receipts import bind_graph_action_receipt
 from ..control.repair_transitions import (
     mark_dispatch_failed,
     mark_ingest_applied,
@@ -595,7 +596,9 @@ async def create_and_dispatch_thread(
         idempotency_key=f"thread-create:{thread.id}",
         payload={
             "schema": "initial-dispatch-v1",
-            "dispatch": dispatch.model_dump(mode="json", exclude={"actor_tokens"}),
+            "dispatch": dispatch.model_dump(
+                mode="json", exclude={"actor_tokens", "graph_action_receipt"}
+            ),
             "actor_tokens_required": req.actor_tokens is not None,
         },
     )
@@ -615,6 +618,7 @@ async def create_and_dispatch_thread(
         },
     )
 
+    dispatch = await bind_graph_action_receipt(db, dispatch)
     # -- Dispatch via safe_dispatch (non-raising) ------------------------------
     outcome = await safe_dispatch(
         worker_client,

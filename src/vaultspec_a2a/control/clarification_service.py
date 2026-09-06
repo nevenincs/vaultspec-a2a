@@ -21,6 +21,7 @@ from ..database import (
     get_thread,
     mark_control_action_applied,
     settle_control_action_lease,
+    thread_write_expectation,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.clarification import (
@@ -40,6 +41,7 @@ from ..thread.enums import (
 from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
+from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .repair_transitions import record_undelivered_dispatch
 from .thread_state_service import read_run_snapshot
@@ -298,6 +300,7 @@ async def respond_to_clarification(
     # copied first; reading an expired attribute here would attempt implicit
     # async I/O and raise MissingGreenlet.
     thread_status = thread.status
+    write_expectation = thread_write_expectation(thread)
     worker_generation = thread.repair_generation
     team_preset = thread.team_preset
     workspace_root = dispatchable_workspace_root(thread.thread_metadata)
@@ -365,6 +368,9 @@ async def respond_to_clarification(
         workspace_root=workspace_root,
         recursion_limit=recursion_limit,
         model_assignment=execution_authority.model_assignment,
+    )
+    dispatch = await bind_graph_action_receipt(
+        db, dispatch, install_from=write_expectation
     )
     outcome = await safe_dispatch(
         worker_client,

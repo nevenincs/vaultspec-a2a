@@ -597,6 +597,7 @@ class ControlActionModel(Base):
     )
     payload_json: Mapped[str | None] = mapped_column(Text, default=None)
     worker_generation: Mapped[int] = mapped_column(default=0)
+    graph_receipt_json: Mapped[str | None] = mapped_column(Text, default=None)
     # Stable identity reused for every redelivery of this accepted intention.
     # Existing pre-0012 journal rows legitimately carry NULL until reconciled.
     dispatch_id: Mapped[str | None] = mapped_column(default=None)

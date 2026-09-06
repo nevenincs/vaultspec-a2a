@@ -78,6 +78,10 @@ class DispatchError(Exception):
     """Base class for dispatch failures."""
 
 
+class IncompatibleDispatchAuthorityError(DispatchError):
+    """Current durable graph-action evidence is absent or inconsistent."""
+
+
 class WorkerCircuitOpenError(DispatchError):
     """Raised when the circuit breaker is open and rejects the dispatch."""
 
@@ -161,6 +165,11 @@ async def dispatch_to_worker(
         WorkerDispatchRejectedError: Worker returned non-2xx (e.g. 500/503).
         WorkerUnreachableError: httpx transport error (caller decides policy).
     """
+    if dispatch.action != "cancel":
+        try:
+            dispatch.require_graph_action_receipt()
+        except ValueError as exc:
+            raise IncompatibleDispatchAuthorityError(str(exc)) from exc
     await spawner.ensure_worker()
 
     # Desktop deferred reconciliation: the first authenticated execution demand to
@@ -318,9 +327,7 @@ async def redispatch_reconciling_threads(
                         successor=successor_thread_write_authority(
                             expectation,
                             action_type=expectation.authority.action_type,
-                            action_receipt_id=(
-                                expectation.authority.action_receipt_id
-                            ),
+                            action_receipt_id=(expectation.authority.action_receipt_id),
                         ),
                         failure_reason=(
                             "stored execution authority is incompatible "
@@ -363,9 +370,7 @@ async def redispatch_reconciling_threads(
                         successor=successor_thread_write_authority(
                             expectation,
                             action_type=expectation.authority.action_type,
-                            action_receipt_id=(
-                                expectation.authority.action_receipt_id
-                            ),
+                            action_receipt_id=(expectation.authority.action_receipt_id),
                         ),
                         failure_reason=(
                             "run carries no active project: its stored metadata "
@@ -476,6 +481,13 @@ async def safe_dispatch(
             trace_headers=trace_headers,
         )
         return DispatchOutcome(success=True)
+    except IncompatibleDispatchAuthorityError as exc:
+        return DispatchOutcome(
+            success=False,
+            failure_type="incompatible_state",
+            exception=exc,
+            detail=str(exc),
+        )
     except WorkerCircuitOpenError as exc:
         logger.warning(
             "Circuit breaker open for dispatch_id=%s thread %s: %s",

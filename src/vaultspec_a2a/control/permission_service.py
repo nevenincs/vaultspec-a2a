@@ -22,6 +22,7 @@ from ..database import (
     record_permission_response_submission,
     reset_permission_response_submission,
     set_thread_approval_state,
+    thread_write_expectation,
 )
 from ..graph.enums import PermissionType
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
@@ -46,6 +47,7 @@ from .action_lease import (
     release_definite_non_delivery,
 )
 from .dispatch import safe_dispatch
+from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .permission_dispatch import permission_resume_value
 from .permission_options import extract_allowed_option_ids
@@ -62,6 +64,7 @@ if TYPE_CHECKING:
         PermissionRequestModel,
         ThreadModel,
     )
+    from ..database.thread_repository import ThreadWriteExpectation
     from ..streaming.aggregator import EventAggregator
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
@@ -233,6 +236,7 @@ class _PermissionTransition:
     """
 
     claim: ControlActionClaim
+    write_expectation: ThreadWriteExpectation
     resume_value: str | dict[str, str | None]
     team_preset: str | None
     workspace_root: str | None
@@ -733,6 +737,7 @@ async def _record_permission_transition(
     """
     permission = authorized.permission
     thread_record = authorized.thread_record
+    write_expectation = thread_write_expectation(thread_record)
     thread_id = authorized.thread_id
     resolved_idempotency_key = authorized.resolved_idempotency_key
     is_locally_respondable = (
@@ -861,6 +866,7 @@ async def _record_permission_transition(
 
     return _PermissionTransition(
         claim=claim,
+        write_expectation=write_expectation,
         resume_value=resume_value,
         team_preset=team_preset,
         workspace_root=workspace_root,
@@ -920,6 +926,9 @@ async def _dispatch_permission_resume(
         },
     )
 
+    dispatch = await bind_graph_action_receipt(
+        db, dispatch, install_from=transition.write_expectation
+    )
     outcome = await safe_dispatch(
         worker_client,
         dispatch,

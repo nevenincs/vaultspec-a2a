@@ -37,8 +37,12 @@ from ...providers import ProviderCondition
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
 from ...providers.team_selection import model_assignment_digest
+from ...thread.action_receipts import (
+    GraphActionReceipt,
+    control_action_payload_fingerprint,
+)
 from ...thread.actor_tokens import ActorTokenBundle
-from ...thread.enums import ThreadStatus
+from ...thread.enums import ControlActionType, ThreadStatus
 from ..executor import _INGEST_GUARDS, _RESUME_GUARDS, Executor
 from ..graph_lifecycle import (
     GraphCacheKey,
@@ -1315,6 +1319,18 @@ class TestSettleOrdering:
         self,
     ) -> None:
         thread_id = "message-application-receipt"
+        receipt = GraphActionReceipt(
+            schema_version="graph-action-v1",
+            thread_id=thread_id,
+            action_id="accepted-message",
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            payload_fingerprint=control_action_payload_fingerprint(
+                {"content": "continue"}
+            ),
+            dispatch_id="stable-message-dispatch",
+            run_revision=1,
+            writer_generation=2,
+        )
         observations: list[dict[str, Any]] = []
         holder: dict[str, Any] = {"thread_id": thread_id, "executor": None}
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
@@ -1327,6 +1343,7 @@ class TestSettleOrdering:
                 await executor.handle_dispatch(
                     DispatchRequest(
                         dispatch_id="stable-message-dispatch",
+                        graph_action_receipt=receipt,
                         workspace_root=_WORKSPACE,
                         action="ingest",
                         thread_id=thread_id,
@@ -1337,6 +1354,13 @@ class TestSettleOrdering:
                     )
                 )
 
+                checkpoint = await cp.aget_tuple(
+                    {"configurable": {"thread_id": thread_id}}
+                )
+                assert checkpoint is not None
+                assert checkpoint.checkpoint["channel_values"][
+                    "graph_action_receipts"
+                ] == {receipt.dispatch_id: receipt.model_dump(mode="json")}
                 receipts = [
                     observation
                     for observation in observations

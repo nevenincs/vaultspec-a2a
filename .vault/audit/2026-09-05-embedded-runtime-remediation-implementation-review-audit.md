@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:dc0904073bdba94a3158d0d9ba6485026a535d3a8cb73205ee5313564bb3f281'
+body_hash: 'sha256:17b19f0b42249a1fd0e1ef32d6b967d5c245f93d34521a2146ac39d54e380766'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -842,3 +842,17 @@ implementation finding surfaced. The distinct cold provider-catalog/Uvicorn
 shutdown observation was not exercised by this RAG test and remains open under
 W01.P02.S07 diagnosis and W04.P10.S49 runtime ownership. W01.P02.S06 remains
 open for formal implementation review.
+
+### w01-p02-s06-shared-rag-token-disclosure | high | open
+
+Type: security and evidence handling. Commit `9d56e23e40e46e9cb754cfb3512365d96d524948` persists the live shared RAG service token verbatim in `.vault/audit/2026-08-02-provider-model-catalog-implementation-review-audit.md:220` and `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md:463,839`. The token is credential material, not a safe durable fingerprint. This blocks S06 closure even though the test did not stop or otherwise mutate the shared daemon. Remove the raw value from all current documents, retain only a one-way digest/equality result, and rotate the exposed token through the operator-owned RAG lifecycle before re-review. Do not rewrite historical commits or make the S06 test control the shared daemon.
+
+### w01-p02-s06-private-service-cleanup-incomplete | medium | open
+
+Type: test resource lifecycle and degraded cleanup. `_run_rag_cli` at `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py:96-122` bounds a control subprocess and kills that subprocess on timeout. During context cleanup at lines 182-198, however, a timed-out or cancelled `server stop` can leave the already detached private service alive because no terminal owned-process fallback or post-stop absence check runs. The normal-path stop passed, but S06 explicitly owns bounded isolated cleanup and must remain review-blocked until cancellation/stop degradation cannot leak its daemon. Use the private service record's exact ownership identity for a bounded fallback, shield cleanup from caller cancellation within a total deadline, verify the owned process/port is gone, and add a discriminator that exercises cancellation or failed stop without touching any shared service.
+
+### w01-p02-s06-isolated-rag-pinning-formal-review | high | FAIL
+
+Type: formal implementation review disposition. The four-path commit has the intended test/audit scope and `git diff --check` passes. `uv.lock` selects exactly one RAG version and the helper applies that exact `vaultspec-rag[mcp]` requirement to both a private local-only service and the production-registry `vaultspec-search-mcp` stdio entry point. Status, data and Qdrant roots are test-owned; the published version and loopback port are checked before the MCP call. The real non-vacuous discriminator names the pinned non-workspace and excludes the valid launch workspace. Independent review reran it once (`1 passed` in 55.66 seconds), the entire module (`33 passed` in 62.88 seconds), Ruff format/check and Ty; all pass. Full remediation Core reports 19 clean checks. No legacy/deprecated product surface was added, ER20 alone is marked resolved pending review, and the separate cold catalog/Uvicorn finding remains open under S07/S49.
+
+The plaintext shared credential is a HIGH security defect, and degraded cleanup is a MEDIUM resource-lifecycle defect in S06 itself. S06 does not pass formal review and must remain open pending both corrections and re-review.

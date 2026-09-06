@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:b4157f1ec85d7a2aa5cf0f5031a0a85e3fac6d3df0544e2e025419e2eb0e54c3'
+body_hash: 'sha256:60548c0267e6d8ff0ef58bb95c0ec30a8bdf132aa5d45d2e275d0e133790fcfb'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1372,3 +1372,8 @@ Type: typed API race handling. The fresh-lease cancellation replay now performs 
 Type: formal implementation review disposition. Final rereview accepts implementation `6c5f5384`, first correction `0c47b4db` and exact-current correction `a24bfccc`. Recovery no longer uses wall time or elects a different stored receipt: worker dispatch requires current status, action type and receipt to exactly match the action. Fresh CANCEL lease replay re-reads by identity and returns typed conflict or NOT_FOUND without dispatch. Initial 429 remains a definite failure when a different CANCEL action wins. Archive and deletion loser paths return typed not-found after concurrent removal.
 
 The final exact-current/race group passed four tests in 13.68 seconds; prior focused archive/deletion, permission, initial dispatch and concurrency gates remain recorded; Ruff, Ty and all 19 Core checks pass. Remaining unconditional writers are HIGH/open under S11, S78, S12, S13, S14 and S82. Live PostgreSQL contention proof and the resource-aware test-process shutdown leak remain MEDIUM/open. No legacy, deprecated, compatibility, fallback, default authority, wall-clock authority or invented receipt was added. No critical, high or medium S10 implementation defect remains.
+### w02-p03-s10-lifecycle-closure | low | closed pending closure-record review
+
+Type: lifecycle traceability. Formal PASS `1b4e6aae` accepts implementation `6c5f5384`, first correction `0c47b4db` and exact-current correction `a24bfccc` after formal FAILs exposed fresh-lease false success, stale recovery, erased 429 classification, removed-row races and wall-clock authority. Vaultspec Core closes only `W02.P03.S10`; plan status is 14 of 82 Steps complete with `W02.P03.S11` next and zero missing execution records.
+
+Remaining unconditional writers stay HIGH/open under S11, S78, S12, S13, S14 and S82. Live PostgreSQL contention proof remains MEDIUM/open. Test-process shutdown hangs remain MEDIUM/open under resource-aware test execution. Closure adds no runtime path, legacy, deprecated, compatibility, fallback, default authority, timestamp authority or invented receipt.

@@ -5,11 +5,10 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:9f5776cd0435c61e8a2c00ce7c7bd524f4fbd7eebb6b69d5bf3d4daad58d4594'
+body_hash: 'sha256:f580448f568a5e4b1d79f9cdabe224e1ce4838b28f860dd2a6f3bf2d1f10ea8a'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
 ---
-
 
 # `embedded-runtime-remediation` ledger
 
@@ -61,3 +60,5 @@ related:
 - `S83` `M` `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml`
 - `S83` `M` `src/vaultspec_a2a/team/presets/teams/vaultspec-doc-editor.toml`
 - `S83` `M` `src/vaultspec_a2a/team/presets/teams/vaultspec-solo-coder.toml`
+- `S83` `M` `src/vaultspec_a2a/control/health.py`
+- `S83` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`

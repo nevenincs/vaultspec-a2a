@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:8e9fc724e26672aa331d30d4586866fef0e45ff14686a829ce07ff56f8e46f8c'
+body_hash: 'sha256:f4355403c2952040e8ec518cfca53daa8be624691568ad7662c00f4451e29e28'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-adr]]"
@@ -45,6 +45,7 @@ The increment establishes a durable retry owner and closes the crash window betw
 | PASS | live producer typed-condition repository proof | 5 passed in 28.20s |
 | PASS | exact-lease typed settlement repository proof | 5 passed in 36.12s |
 | PASS | selected typed message and cancel settlement proofs | 3 passed, 5 deselected in 68.93s |
+| PASS | applied-action versus deadline quarantine proofs | 2 passed, 6 deselected in 4.13s |
 | PASS | live message definite/ambiguous classification proof | 1 passed in 25.65s |
 | PASS | full direct-control lease suite | 8 passed in 71.82s |
 | FAIL | dispatch-failure transition suite | 3 non-current fixtures refused for missing initial action/receipt authority; 3 passed in 43.98s |
@@ -64,7 +65,7 @@ The increment establishes a durable retry owner and closes the crash window betw
 | Severity | Type | Status | Finding | Ownership |
 | --- | --- | --- | --- | --- |
 | RESOLVED HIGH | Architecture | Closed | Message, permission, clarification, cancel, and verdict producers now use one exact-authority failure boundary that persists the observed typed condition immediately and releases the action lease only for proven non-delivery. The old release-only helper was removed. | this increment |
-| HIGH | Correctness | Open | Deadline expiry can race a worker application receipt. The coordinator can quarantine at the deadline before reading or incorporating concurrent exact checkpoint evidence. Establish one transactional precedence rule between application evidence and deadline settlement. | S83/S84 |
+| HIGH | Correctness | Open | Deadline quarantine now locks and rechecks the exact action, so an already-durable `applied_at` wins. A checkpoint application receipt can still arrive concurrently without a persisted incorporation timestamp proving whether it preceded the deadline. Establish one transactional precedence rule using S12 incorporation evidence before closing this condition. | S12/S83/S84 |
 | HIGH | Invariant | Open | The nullable action deadline is enforced by service code rather than a schema-local discriminator. A recoverable accepted action can still be inserted without a deadline through lower-level repository APIs. Add a current-only dispatch-required invariant or narrow the repository surface. | S83 |
 | RESOLVED HIGH | Correctness | Closed | Corrupt payloads and inconsistent deadlines now atomically reject the exact action, move its thread to reconciling, block execution readiness, and settle the retry as incompatible. A missing or type-corrupt action receipt preserves the last proven lifecycle state while atomically blocking readiness and settling the exact retry; no replacement authority is fabricated. | this increment |
 | MEDIUM | Architecture | Open | Clarification has a separate startup redriver while the direct recovery coordinator also admits RESUME, producing fragmented ownership even though action leases prevent duplicate dispatch. Consolidate recovery ownership. | S11/S14 |
@@ -76,6 +77,7 @@ The increment establishes a durable retry owner and closes the crash window betw
 | MEDIUM | Test infrastructure | Open | Broad combined pytest lanes can pass many tests but exceed their bounded session deadline on this host; retain smaller authoritative lanes and investigate teardown/startup latency separately. | audit harness queue |
 | RESOLVED HIGH | Correctness | Closed | Initial dispatch failure attempted to record stale recovery after an exact terminal or cancel action won in flight. A typed authority-loss result now preserves the winner and creates no stale ledger row. | this increment |
 | RESOLVED MEDIUM | Correctness | Closed | Slow successful dispatch could schedule eligibility before observation. The schedule now clamps to delivery time and the lease boundary. | this increment |
+| RESOLVED HIGH | Concurrency | Closed | Deadline classification is now written only after locking and rechecking the exact thread and action; an action already marked applied cannot acquire a contradictory deadline ledger row. | this increment |
 
 ## Recommendations
 

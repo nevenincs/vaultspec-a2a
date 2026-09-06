@@ -389,6 +389,47 @@ async def test_expired_run_is_quarantined_without_dispatch(
 
 
 @pytest.mark.asyncio
+async def test_applied_action_wins_over_deadline_quarantine(
+    tmp_path: Path,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    case = _accepted_cases(tmp_path)[0]
+    async with sessions() as db:
+        await _persist_case(
+            db,
+            case,
+            deadline_at=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
+        )
+        assert action is not None
+        await mark_control_action_applied(
+            db,
+            action.id,
+            applied_at=datetime(2019, 1, 1, tzinfo=UTC),
+        )
+        await db.commit()
+
+    summary, received = await _run_recovery(sessions)
+
+    assert not received
+    assert summary.examined == 0
+    assert summary.refused == 0
+    async with sessions() as db:
+        thread = await get_thread(db, case.thread_id)
+        attempt = await db.scalar(
+            select(RecoveryAttemptModel).where(
+                RecoveryAttemptModel.thread_id == case.thread_id
+            )
+        )
+    assert thread is not None
+    assert thread.status == ThreadStatus.RUNNING.value
+    assert thread.repair_status == RepairStatus.HEALTHY.value
+    assert attempt is None
+
+
+@pytest.mark.asyncio
 async def test_corrupt_accepted_input_is_atomically_quarantined(
     tmp_path: Path,
     sessions: async_sessionmaker[AsyncSession],

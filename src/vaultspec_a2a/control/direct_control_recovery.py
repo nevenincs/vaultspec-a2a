@@ -24,7 +24,6 @@ from ..database import (
     successor_thread_write_authority,
     thread_write_expectation,
 )
-from ..database.models import RunWriteAuthority
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
     NON_ACTIVE_STATUSES,
@@ -59,6 +58,7 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from ..database.models import RunWriteAuthority
     from ..ipc.schemas import DispatchRequest
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
@@ -107,7 +107,7 @@ async def _expire_overdue_actions(
         )
     ).all()
     expired = 0
-    for row, thread in rows:
+    for row, _thread in rows:
         if row.dispatch_id is None or row.recovery_deadline_at is None:
             continue
         stored = _StoredAction(
@@ -124,19 +124,12 @@ async def _expire_overdue_actions(
             FailureType.DEADLINE_EXCEEDED,
             "accepted run deadline expired before application",
         )
-        await record_recovery_deadline(
+        if not await _settle_permanent_refusal(
             db,
-            thread_id=thread.id,
-            authority=RunWriteAuthority(
-                thread.run_revision,
-                thread.writer_generation,
-                ControlActionType(thread.writer_action_type),
-                thread.writer_action_receipt_id,
-            ),
-            observed_at=observed_at,
-            deadline_at=row.recovery_deadline_at,
-        )
-        if not await _settle_permanent_refusal(db, stored, refusal):
+            stored,
+            refusal,
+            deadline_observed_at=observed_at,
+        ):
             await db.rollback()
             continue
         expired += 1
@@ -258,6 +251,8 @@ async def _settle_permanent_refusal(
     db: AsyncSession,
     action: _StoredAction,
     refusal: _Refusal,
+    *,
+    deadline_observed_at: datetime | None = None,
 ) -> bool:
     """Quarantine one impossible accepted action under exact current authority."""
     thread = await db.scalar(
@@ -266,12 +261,19 @@ async def _settle_permanent_refusal(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    row = await get_control_action_by_dispatch_id(
-        db, thread_id=action.thread_id, dispatch_id=action.dispatch_id
+    row = await db.scalar(
+        select(ControlActionModel)
+        .where(
+            ControlActionModel.thread_id == action.thread_id,
+            ControlActionModel.dispatch_id == action.dispatch_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if (
         thread is None
         or row is None
+        or row.applied_at is not None
         or ThreadStatus(thread.status) in NON_ACTIVE_STATUSES
     ):
         return False
@@ -282,6 +284,14 @@ async def _settle_permanent_refusal(
         or expectation.authority.action_receipt_id != action.dispatch_id
     ):
         return False
+    if deadline_observed_at is not None:
+        await record_recovery_deadline(
+            db,
+            thread_id=action.thread_id,
+            authority=expectation.authority,
+            observed_at=deadline_observed_at,
+            deadline_at=action.recovery_deadline_at,
+        )
     if expectation.status is not ThreadStatus.RECONCILING:
         election = await elect_thread_status(
             db,

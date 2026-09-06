@@ -89,19 +89,40 @@ def test_authority_constructor_has_no_missing_value_defaults() -> None:
 
 
 @pytest.mark.asyncio
-async def test_declaration_does_not_mutate_the_pre_migration_thread_schema(
+async def test_current_authority_is_required_and_round_trips(
     session: AsyncSession,
 ) -> None:
-    """S76 remains runnable while S77 owns the atomic schema installation."""
-    future_columns = {
+    """S77 maps every authority field without a missing-value default."""
+    authority = RunWriteAuthority(
+        run_revision=0,
+        writer_generation=1,
+        action_type=ControlActionType.INGEST,
+        action_receipt_id="receipt-schema-0017-current",
+    )
+    created = await create_thread(
+        session,
+        write_authority=authority,
+        thread_id="schema-0017-current",
+    )
+    session.expunge_all()
+
+    stored = await session.get(ThreadModel, created.id)
+    assert stored is not None
+    assert stored.run_revision == authority.run_revision
+    assert stored.writer_generation == authority.writer_generation
+    assert stored.writer_action_type == authority.action_type.value
+    assert stored.writer_action_receipt_id == authority.action_receipt_id
+
+
+def test_thread_authority_columns_have_no_defaults() -> None:
+    """Neither Python nor the database can fabricate missing authority."""
+    for name in (
         "run_revision",
         "writer_generation",
         "writer_action_type",
         "writer_action_receipt_id",
-    }
-    assert future_columns.isdisjoint(ThreadModel.__table__.c.keys())
-
-    created = await create_thread(session, thread_id="schema-0016-current")
-    session.expunge_all()
-
-    assert await session.get(ThreadModel, created.id) is not None
+    ):
+        column = ThreadModel.__table__.c[name]
+        assert column.nullable is False
+        assert column.default is None
+        assert column.server_default is None

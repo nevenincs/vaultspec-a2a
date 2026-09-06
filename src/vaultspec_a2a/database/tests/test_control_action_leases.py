@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -53,7 +55,12 @@ async def test_concurrent_sessions_elect_exactly_one_fresh_lease(
 ) -> None:
     engine, sessions = await _store(runtime_dir, "lease-election.db")
     async with sessions() as session:
-        await create_thread(session, thread_id="lease-thread", status="running")
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="lease-thread",
+            status="running",
+        )
         reservation = await reserve_control_action(
             session,
             thread_id="lease-thread",
@@ -104,7 +111,12 @@ async def test_lease_release_expiry_and_settlement_are_token_conditional(
     engine, sessions = await _store(runtime_dir, "lease-lifecycle.db")
     now = datetime.now(UTC)
     async with sessions() as session:
-        await create_thread(session, thread_id="lifecycle-thread", status="running")
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="lifecycle-thread",
+            status="running",
+        )
         reserved = await reserve_control_action(
             session,
             thread_id="lifecycle-thread",
@@ -169,7 +181,12 @@ async def test_competing_replay_and_thread_deletion_preserve_lifecycle(
 ) -> None:
     engine, sessions = await _store(runtime_dir, "lease-deletion.db")
     async with sessions() as session:
-        await create_thread(session, thread_id="delete-thread", status="running")
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="delete-thread",
+            status="running",
+        )
         winner = await reserve_control_action(
             session,
             thread_id="delete-thread",
@@ -206,8 +223,18 @@ async def test_dispatch_id_is_globally_unique_and_exactly_lookupable(
     engine, sessions = await _store(runtime_dir, "dispatch-identity.db")
     dispatch_id = "global-receipt-identity"
     async with sessions() as session:
-        await create_thread(session, thread_id="receipt-thread-a", status="running")
-        await create_thread(session, thread_id="receipt-thread-b", status="running")
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="receipt-thread-a",
+            status="running",
+        )
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="receipt-thread-b",
+            status="running",
+        )
         first = await create_control_action(
             session,
             thread_id="receipt-thread-a",

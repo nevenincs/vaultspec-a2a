@@ -21,6 +21,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -55,7 +57,12 @@ async def test_lease_commit_refuses_to_publish_a_callers_staged_write(
     """A future caller cannot have unrelated writes committed as a side effect."""
     engine, sessions = await _store(runtime_dir, "lease-composability.db")
     async with sessions() as session:
-        await create_thread(session, thread_id="compose-thread", status="running")
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="compose-thread",
+            status="running",
+        )
         await session.commit()
 
     async with sessions() as session:
@@ -111,7 +118,12 @@ async def test_uncontaminated_claim_still_commits_its_lease(
     """The guard does not disturb the real claim flow it protects."""
     engine, sessions = await _store(runtime_dir, "lease-clean-claim.db")
     async with sessions() as session:
-        await create_thread(session, thread_id="clean-thread", status="running")
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="clean-thread",
+            status="running",
+        )
         await session.commit()
 
     async with sessions() as session:

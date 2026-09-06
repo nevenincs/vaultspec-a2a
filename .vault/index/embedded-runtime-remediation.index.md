@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:b831762d10867e63d4b87467ee335b766a0d002ccef907ad01a71edc2c87017e'
+body_hash: 'sha256:1509c084f223b7fb5b6bd60b23086c5ea875273f03a19550b559603909de6ffa'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -18,6 +18,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S07]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S08]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S76]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S77]]'
   - '[[2026-09-05-embedded-runtime-remediation-W04-P10-S47]]'
   - '[[2026-09-05-embedded-runtime-remediation-W04-P10-S49]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -75,6 +76,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S07` - Diagnose the intermittent compilation loop-gap measurement on the named representative host/load and correct the owning warmup path if required without relaxing its existing budget
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S08` - Apply a reviewed locked dependency correction for the Starlette BlockingPortal deprecation and verify the warning disappears without suppression
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S76` - Declare durable run revision and writer generation plus action-specific receipt identity without storing credentials or duplicating transcript authority
+- `2026-09-05-embedded-runtime-remediation-W02-P03-S77` - Add the current ownership and receipt schema with upgrade validation; refuse pre-current or unknown-ownership rows as incompatible without backfill, translation, migration-time substitution or execution
 - `2026-09-05-embedded-runtime-remediation-W04-P10-S47` - Conform readiness/drain/shutdown routes and ownership capability handling to the intended consumer generation with fail-closed incompatible attachment
 - `2026-09-05-embedded-runtime-remediation-W04-P10-S49` - Use cooperative server shutdown with admission closed first and one total deadline covering active work, streams and bounded forced escalation
 

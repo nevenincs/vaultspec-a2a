@@ -20,6 +20,8 @@ import pytest_asyncio
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ....conftest import materialize_schema
 from ....control.repositories import (
     CleanupItem,
@@ -72,7 +74,12 @@ async def _seed_terminal_thread(
     session_factory: async_sessionmaker[AsyncSession], thread_id: str = "t-del"
 ) -> str:
     async with session_factory() as session:
-        await create_thread(session, thread_id=thread_id, status=ThreadStatus.COMPLETED)
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status=ThreadStatus.COMPLETED,
+        )
         await session.commit()
     return thread_id
 

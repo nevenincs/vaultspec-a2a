@@ -18,6 +18,8 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...database import (
     create_thread,
@@ -34,7 +36,12 @@ from ...thread.enums import ControlActionType
 
 
 async def _seed_paused_thread(session: AsyncSession, tid: str) -> None:
-    thread = await create_thread(session, thread_id=tid, status="running")
+    thread = await create_thread(
+        session,
+        write_authority=make_test_write_authority(),
+        thread_id=tid,
+        status="running",
+    )
     await record_permission_request(
         session,
         request_id=f"{thread.id}:perm-1",
@@ -177,7 +184,12 @@ async def test_get_or_create_control_action_is_idempotent_across_sessions(
     )
 
     async with session_factory() as session:
-        await create_thread(session, thread_id=tid, status="running")
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=tid,
+            status="running",
+        )
         await session.commit()
 
     async with session_factory() as session_a:

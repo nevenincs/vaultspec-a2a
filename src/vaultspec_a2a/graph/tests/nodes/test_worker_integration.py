@@ -15,6 +15,8 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from pydantic import PrivateAttr
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ....conftest import materialize_schema
 from ....thread.state import TeamState
 from ...nodes.worker import create_worker_node
@@ -313,7 +315,9 @@ async def test_worker_dispatches_mark_complete_command_through_graph(
         engine, class_=AsyncSession, expire_on_commit=False
     )
     async with session_factory() as session:
-        thread = await create_thread(session, title="worker-queue")
+        thread = await create_thread(
+            session, write_authority=make_test_write_authority(), title="worker-queue"
+        )
         await seed_task_queue(
             session,
             thread_id=thread.id,

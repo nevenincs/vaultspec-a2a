@@ -18,6 +18,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from starlette.testclient import TestClient
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control.worker_management import WorkerLiveness
 from ...database import (
     create_thread,
@@ -116,7 +118,12 @@ async def test_dispatch_application_receipt_is_not_broadcast_to_progress(
     aggregator.subscribe("receipt-observer", ["receipt-thread"])
 
     async with session_factory() as session:
-        await create_thread(session, thread_id="receipt-thread", status="running")
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="receipt-thread",
+            status="running",
+        )
         await session.commit()
 
     async with AsyncClient(
@@ -348,7 +355,9 @@ class TestInternalEvents:
         )
 
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-84")
+            await create_thread(
+                session, write_authority=make_test_write_authority(), thread_id="t-84"
+            )
             await session.commit()
 
         async with AsyncClient(
@@ -414,7 +423,11 @@ class TestInternalEvents:
         app.state.aggregator = aggregator
 
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-invalid-projection-clock")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-invalid-projection-clock",
+            )
             await session.commit()
 
         async with AsyncClient(
@@ -468,7 +481,11 @@ class TestInternalEvents:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         async with session_factory() as session:
-            thread = await create_thread(session, title="Relay plan approval")
+            thread = await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                title="Relay plan approval",
+            )
             await session.commit()
 
         request_id = f"{thread.id}:plan-approval"
@@ -535,7 +552,11 @@ class TestInternalEvents:
         )
 
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-84-degraded")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-84-degraded",
+            )
             await session.commit()
 
         async with AsyncClient(
@@ -899,7 +920,11 @@ class TestAggregatorGCOnTerminal:
         aggregator._emitters._sequences["t-pruned"] = 5
         aggregator._emitters._sequences["t-active"] = 3
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-pruned")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-pruned",
+            )
             await session.commit()
 
         await _handle_terminal_event(
@@ -925,7 +950,11 @@ class TestAggregatorGCOnTerminal:
 
         aggregator = EventAggregator()
         async with session_factory() as session:
-            thread = await create_thread(session, thread_id="t-logged")
+            thread = await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-logged",
+            )
             await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
             await session.commit()
 
@@ -958,7 +987,11 @@ class TestAggregatorGCOnTerminal:
 
         aggregator = EventAggregator()
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-terminal-skip")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-terminal-skip",
+            )
             await session.commit()
 
         await _handle_terminal_event(
@@ -1002,7 +1035,11 @@ class TestTerminalEventFailureReasonPersistence:
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
-            thread = await create_thread(session, thread_id="t-failed-with-reason")
+            thread = await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-failed-with-reason",
+            )
             await session.commit()
             assert thread.failure_reason is None
 
@@ -1037,7 +1074,11 @@ class TestTerminalEventFailureReasonPersistence:
         from ...thread.enums import ThreadStatus
 
         async with session_factory() as session:
-            thread = await create_thread(session, thread_id="t-completed-no-reason")
+            thread = await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-completed-no-reason",
+            )
             # submitted -> completed directly is not a valid transition (mirrors
             # test_terminal_event_log_includes_runtime_fields above); route
             # through running first, matching a real dispatched run.
@@ -1068,7 +1109,11 @@ class TestTerminalEventFailureReasonPersistence:
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-malformed-detail")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-malformed-detail",
+            )
             await session.commit()
 
         await _handle_terminal_event(
@@ -1103,7 +1148,11 @@ class TestTerminalEventProviderConditionPersistence:
         from ...providers import ProviderCondition
 
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-failed-throttled")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-failed-throttled",
+            )
             await session.commit()
 
         await _handle_terminal_event(
@@ -1140,7 +1189,11 @@ class TestTerminalEventProviderConditionPersistence:
         from ...providers import ProviderCondition
 
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-failed-unclassified")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-failed-unclassified",
+            )
             await session.commit()
 
         await _handle_terminal_event(
@@ -1171,7 +1224,11 @@ class TestTerminalEventProviderConditionPersistence:
         from ...providers import ProviderCondition
 
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-failed-bogus-condition")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-failed-bogus-condition",
+            )
             await session.commit()
 
         await _handle_terminal_event(
@@ -1201,7 +1258,11 @@ class TestTerminalEventProviderConditionPersistence:
         from ...thread.enums import ThreadStatus
 
         async with session_factory() as session:
-            thread = await create_thread(session, thread_id="t-completed-condition")
+            thread = await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-completed-condition",
+            )
             await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
             await session.commit()
 
@@ -1246,7 +1307,11 @@ class TestConditionSurvivesAReload:
             session_factory, checkpointer
         )
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-reload-condition")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-reload-condition",
+            )
             await session.commit()
 
         transport = ASGITransport(app=app)
@@ -1296,7 +1361,11 @@ class TestConditionSurvivesAReload:
             session_factory, checkpointer
         )
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-reload-no-condition")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-reload-no-condition",
+            )
             await session.commit()
 
         transport = ASGITransport(app=app)
@@ -1326,7 +1395,11 @@ class TestConditionSurvivesAReload:
             session_factory, checkpointer
         )
         async with session_factory() as session:
-            thread = await create_thread(session, thread_id="t-live-run-repair")
+            thread = await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-live-run-repair",
+            )
             await set_thread_repair_state(
                 session,
                 thread.id,
@@ -1401,7 +1474,11 @@ class TestNoFailedRunPersistsWithoutACondition:
             session_factory, checkpointer
         )
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-worker-rejection")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-worker-rejection",
+            )
             await session.commit()
 
         bridge = _worker_bridge_into(app)
@@ -1443,7 +1520,11 @@ class TestNoFailedRunPersistsWithoutACondition:
         from ...thread.enums import ThreadStatus
 
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-dispatch-failure")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-dispatch-failure",
+            )
             await session.commit()
 
         async with session_factory() as session:
@@ -1481,7 +1562,11 @@ class TestNoFailedRunPersistsWithoutACondition:
         from ...thread.enums import ThreadStatus
 
         async with session_factory() as session:
-            await create_thread(session, thread_id="t-undelivered-resume")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="t-undelivered-resume",
+            )
             await session.commit()
 
         async with session_factory() as session:

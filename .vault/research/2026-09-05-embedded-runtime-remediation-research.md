@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6df8183935adf2760cac4105e4d2aaa917916450391bc327587478f36c4a02c9'
+body_hash: 'sha256:cc4e5b955163993cee2b46c4aace1e71a96b0f309b76e91177065263b04630e4'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -149,3 +149,11 @@ A real Windows discriminator closes the Job assignment capability, starts an act
 T6 requires one complete ownership identity: durable run revision, writer generation, action type and action-specific receipt identity. Schema 0016 has none of those columns. Mapping required columns before S77 would make every current `ThreadModel` read and insert fail against the installed schema; nullable columns or implicit defaults would instead manufacture authority for rows that never carried it. S76 therefore declares `RunWriteAuthority` as a strict frozen value separate from the ORM mapping. It has no missing-value defaults, rejects negative revision, non-positive generation, non-enum actions and empty or oversized receipt identity, and contains no credential, checkpoint state or transcript content.
 
 S77 owns one atomic current-only installation of the physical columns and ORM mapping. It must refuse a populated pre-current or unknown store rather than backfill, translate, default or accept missing authority. Until that migration lands, the strict declaration is available to S77/S09 and schema 0016 remains readable and writable. This boundary is required for each plan Step to remain buildable without weakening the current-only contract.
+
+## W02.P03.S77 current ownership persistence
+
+Schema 0017 installs the four required authority fields only when `threads` is empty. The runtime migration configuration also performs a read-only preflight before Alembic executes any revision: a populated store without the complete required columns, named checks and unique receipt index is refused, as is a populated store whose authority is invalid or has no same-thread, same-action control receipt. This prevents a populated 0001-0016 store from being partly advanced before 0017 refuses it. The 0017 revision repeats the empty-store guard as defense in depth and permits downgrade only while no thread exists.
+
+Fresh run creation mints one receipt before either row exists. Revision zero, writer generation one, INGEST and that receipt are written to the thread; the identical receipt is written as the INGEST control action dispatch identity and sent in `DispatchRequest`. The thread and action are committed together before worker HTTP. No nullable field, database or ORM default, backfill, alias, translation, inferred value or migration-time execution supplies authority.
+
+The Dashboard migration owner already runs the packaged migration entrypoint under quiescence and snapshot rollback. The packaged head advances dynamically to 0017. A populated pre-current installation receives the typed migration failure and rollback; later release assembly must pin the S77-bearing A2A commit and must not retry with invented authority. No Dashboard runtime source change or component-manifest migration-range field belongs to S77.

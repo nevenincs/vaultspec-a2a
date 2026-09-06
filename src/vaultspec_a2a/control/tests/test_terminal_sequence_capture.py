@@ -33,6 +33,8 @@ import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...database import create_thread
 from ...database.models import ThreadModel
@@ -85,7 +87,10 @@ async def test_the_sequence_is_captured_before_the_prune_discards_it(
     """
     async with session_factory() as session:
         thread = await create_thread(
-            session, status=ThreadStatus.RUNNING, title="terminal sequence capture"
+            session,
+            write_authority=make_test_write_authority(),
+            status=ThreadStatus.RUNNING,
+            title="terminal sequence capture",
         )
         await session.commit()
         thread_id = thread.id
@@ -126,7 +131,10 @@ async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
     """
     async with session_factory() as session:
         thread = await create_thread(
-            session, status=ThreadStatus.RUNNING, title="reconnect after settle"
+            session,
+            write_authority=make_test_write_authority(),
+            status=ThreadStatus.RUNNING,
+            title="reconnect after settle",
         )
         await session.commit()
         thread_id = thread.id
@@ -171,7 +179,10 @@ async def test_a_live_run_still_reads_the_aggregators_own_counter(
     """
     async with session_factory() as session:
         thread = await create_thread(
-            session, status=ThreadStatus.RUNNING, title="still running"
+            session,
+            write_authority=make_test_write_authority(),
+            status=ThreadStatus.RUNNING,
+            title="still running",
         )
         await session.commit()
         thread_id = thread.id

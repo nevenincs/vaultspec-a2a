@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -126,6 +128,7 @@ async def test_retired_stored_authority_fails_closed_without_redispatch(
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="retired-authority",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
@@ -197,6 +200,7 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             frozen_record["profile_id"] = "retired"
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="unchanged-digest-extra-field",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
@@ -206,6 +210,7 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             # the corrupt one to prove a malformed first item does not abort.
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="absent-after-corrupt",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
@@ -213,6 +218,7 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             )
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="corrupt-modern-freeze",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
@@ -304,6 +310,7 @@ async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continu
             # projectless one is reached before it.
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="healthy-after-projectless",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
@@ -311,6 +318,7 @@ async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continu
             )
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="projectless",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
@@ -385,6 +393,7 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="healthy-after-relative",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
@@ -392,6 +401,7 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
             )
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="relative-project",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
@@ -446,6 +456,7 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
             for thread_id in thread_ids:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id=thread_id,
                     status=ThreadStatus.RECONCILING,
                     team_preset="mock-success-single",
@@ -518,6 +529,7 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
                 metadata=json.dumps(_current_metadata(str(tmp_path))),

@@ -40,7 +40,7 @@ from ._helpers import (
     _UnsetType,
     save_model,
 )
-from .models import ThreadExecutionStateModel, ThreadModel, _utcnow
+from .models import RunWriteAuthority, ThreadExecutionStateModel, ThreadModel, _utcnow
 
 __all__ = [
     "ActiveThreadProjection",
@@ -133,6 +133,7 @@ def _workspace_key(workspace_root: str | None) -> str | None:
 async def create_thread(
     session: AsyncSession,
     *,
+    write_authority: RunWriteAuthority,
     title: str | None = None,
     status: ThreadStatus | str = ThreadStatus.SUBMITTED,
     metadata: str | None = None,
@@ -159,6 +160,10 @@ async def create_thread(
     workspace_root, feature_tag = _discovery_selectors(metadata)
     thread = ThreadModel(
         id=thread_id or uuid4().hex,
+        run_revision=write_authority.run_revision,
+        writer_generation=write_authority.writer_generation,
+        writer_action_type=write_authority.action_type.value,
+        writer_action_receipt_id=write_authority.action_receipt_id,
         title=title,
         status=coerced_status.value,
         is_active=coerced_status in ACTIVE_STATUSES,

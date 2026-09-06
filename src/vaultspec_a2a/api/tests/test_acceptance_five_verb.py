@@ -30,6 +30,8 @@ from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...database.thread_repository import create_thread
 from ...ipc.schemas import DispatchRequest
 from ...thread.actor_tokens import ActorTokenBundle
@@ -160,6 +162,7 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
     async with session_factory() as session:
         await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             status=ThreadStatus.RUNNING,
             title="acceptance",

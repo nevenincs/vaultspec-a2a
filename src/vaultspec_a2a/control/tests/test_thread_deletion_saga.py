@@ -21,6 +21,8 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 
 if TYPE_CHECKING:
@@ -103,6 +105,7 @@ async def test_delete_removes_checkpoint_and_artifact_end_to_end(
     async with session_factory() as session:
         await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id="t-e2e",
             status=ThreadStatus.COMPLETED,
             metadata=json.dumps({"workspace_root": workspace.as_posix()}),
@@ -135,7 +138,12 @@ async def test_delete_is_idempotent_under_retry(
     """A second delete of an already-deleted thread reports it not found."""
     await _write_checkpoint(checkpointer, "t-retry", "cp-retry")
     async with session_factory() as session:
-        await create_thread(session, thread_id="t-retry", status=ThreadStatus.COMPLETED)
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="t-retry",
+            status=ThreadStatus.COMPLETED,
+        )
         await session.commit()
 
     async with session_factory() as session:
@@ -161,7 +169,12 @@ async def test_crash_recovery_resumes_a_partial_saga(
     # A crashed first pass: the thread is deleting and the saga exists with its
     # checkpoint item still outstanding.
     async with session_factory() as session:
-        await create_thread(session, thread_id="t-crash", status=ThreadStatus.COMPLETED)
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="t-crash",
+            status=ThreadStatus.COMPLETED,
+        )
         await create_deletion_saga(
             session,
             thread_id="t-crash",
@@ -199,7 +212,12 @@ async def test_a_delete_racing_a_live_pass_does_not_run_a_second_teardown(
     """
     await _write_checkpoint(checkpointer, "t-race", "cp-race")
     async with session_factory() as session:
-        await create_thread(session, thread_id="t-race", status=ThreadStatus.COMPLETED)
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="t-race",
+            status=ThreadStatus.COMPLETED,
+        )
         await create_deletion_saga(
             session,
             thread_id="t-race",
@@ -244,7 +262,12 @@ async def test_a_permanently_failing_item_stops_wedging_the_thread(
     service against the real stores.
     """
     async with session_factory() as session:
-        await create_thread(session, thread_id="t-wedge", status=ThreadStatus.COMPLETED)
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="t-wedge",
+            status=ThreadStatus.COMPLETED,
+        )
         await create_deletion_saga(
             session,
             thread_id="t-wedge",
@@ -295,7 +318,10 @@ async def test_control_rows_survive_until_cleanup_finishes(
     await _write_checkpoint(checkpointer, "t-pending", "cp-pending")
     async with session_factory() as session:
         await create_thread(
-            session, thread_id="t-pending", status=ThreadStatus.COMPLETED
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="t-pending",
+            status=ThreadStatus.COMPLETED,
         )
         await create_deletion_saga(
             session,

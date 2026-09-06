@@ -34,6 +34,8 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
+from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
+
 from ..models import Base, ThreadModel
 from ..session import (
     CheckpointMode,
@@ -434,7 +436,13 @@ def _write_threads(database: Path, count: int) -> None:
     try:
         with Session(engine) as session:
             for index in range(count):
-                session.add(ThreadModel(id=f"t{index}", status="running"))
+                session.add(
+                    ThreadModel(
+                        **make_test_thread_authority_columns(),
+                        id=f"t{index}",
+                        status="running",
+                    )
+                )
                 session.commit()
     finally:
         engine.dispose()

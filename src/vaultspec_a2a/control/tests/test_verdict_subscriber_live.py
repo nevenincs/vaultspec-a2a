@@ -55,6 +55,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import (
     AuthoringClient,
@@ -275,7 +277,9 @@ async def _seed_parked(
         {},
     )
     async with session_factory() as session:
-        await create_thread(session, thread_id=thread_id)
+        await create_thread(
+            session, write_authority=make_test_write_authority(), thread_id=thread_id
+        )
         await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
         await session.commit()
 
@@ -433,6 +437,7 @@ async def _seed_parked_gate(
     async with session_factory() as session:
         await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             team_preset=team_preset,
         )

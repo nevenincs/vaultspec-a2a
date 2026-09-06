@@ -8,6 +8,8 @@ from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...control.projection import (
     apply_checkpoint_projection,
@@ -427,7 +429,11 @@ async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_sibl
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        thread = await create_thread(session, thread_id="thread-permission-siblings")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-permission-siblings",
+        )
         permission = await record_permission_request(
             session,
             request_id="permission-siblings",
@@ -515,7 +521,9 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        thread = await create_thread(session, thread_id="thread-1")
+        thread = await create_thread(
+            session, write_authority=make_test_write_authority(), thread_id="thread-1"
+        )
         await record_thread_execution_state(
             session,
             thread_id="thread-1",
@@ -563,7 +571,11 @@ async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        thread = await create_thread(session, thread_id="thread-epoch")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-epoch",
+        )
         await record_thread_execution_state(
             session,
             thread_id="thread-epoch",
@@ -638,6 +650,7 @@ async def test_unreadable_execution_state_requires_operator_intervention(
     async with factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id="thread-corrupt-execution-state",
             repair_status="healthy",
             execution_readiness="healthy",

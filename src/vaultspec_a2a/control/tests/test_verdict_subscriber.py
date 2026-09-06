@@ -30,6 +30,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 
 if TYPE_CHECKING:
@@ -179,6 +181,7 @@ async def _seed_parked_thread(
     async with session_factory() as session:
         await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             team_preset=team_preset,
             metadata=current_execution_metadata(Path.cwd()),

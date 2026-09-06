@@ -37,6 +37,8 @@ import pytest
 from httpx import ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control.action_lease import (
     CONTROL_ACTION_LEASE_TTL,
     claim_control_action,
@@ -417,6 +419,7 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
     async with session_factory() as db:
         thread = await create_thread(
             db,
+            write_authority=make_test_write_authority(),
             status=ThreadStatus.RUNNING,
             team_preset=_BUNDLE_FREE_PRESET,
             metadata=current_execution_metadata(Path.cwd()),

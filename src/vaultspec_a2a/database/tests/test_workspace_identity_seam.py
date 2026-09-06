@@ -22,6 +22,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control import run_discovery_service
 from ...control.run_discovery_service import discover_active_runs
 from ...thread.enums import ThreadStatus
@@ -84,6 +86,7 @@ async def test_write_and_read_hashes_agree_for_an_uncanonical_spelling(
 
     await create_thread(
         session,
+        write_authority=make_test_write_authority(),
         thread_id="run-workspace-identity",
         status=ThreadStatus.RUNNING,
         metadata=json.dumps({"workspace_root": written_as, "feature_tag": "a2a"}),
@@ -111,6 +114,7 @@ async def test_durable_key_matches_the_read_side_key(
 
     thread = await create_thread(
         session,
+        write_authority=make_test_write_authority(),
         thread_id="run-workspace-key",
         status=ThreadStatus.RUNNING,
         metadata=json.dumps({"workspace_root": written_as, "feature_tag": "a2a"}),

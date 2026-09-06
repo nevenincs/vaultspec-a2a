@@ -13,6 +13,7 @@ from typing import Any, override
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -242,6 +243,9 @@ class Base(DeclarativeBase):
 
 
 _MAX_ACTION_RECEIPT_ID_LENGTH = 64
+_CURRENT_CONTROL_ACTION_SQL_VALUES = ", ".join(
+    repr(action.value) for action in ControlActionType
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +300,27 @@ class ThreadModel(Base):
     __tablename__ = "threads"
 
     __table_args__ = (
+        CheckConstraint(
+            "run_revision >= 0", name="ck_threads_run_revision_nonnegative"
+        ),
+        CheckConstraint(
+            "writer_generation >= 1",
+            name="ck_threads_writer_generation_positive",
+        ),
+        CheckConstraint(
+            f"writer_action_type IN ({_CURRENT_CONTROL_ACTION_SQL_VALUES})",
+            name="ck_threads_writer_action_type_current",
+        ),
+        CheckConstraint(
+            "length(trim(writer_action_receipt_id)) >= 1 "
+            "AND length(writer_action_receipt_id) <= 64",
+            name="ck_threads_writer_action_receipt_id_bounded",
+        ),
+        Index(
+            "ux_threads_writer_action_receipt_id",
+            "writer_action_receipt_id",
+            unique=True,
+        ),
         Index("ix_threads_nickname", "nickname", unique=True),
         Index(
             "ix_threads_active_order",
@@ -332,6 +357,10 @@ class ThreadModel(Base):
     )
 
     id: Mapped[str] = mapped_column(primary_key=True)
+    run_revision: Mapped[int] = mapped_column()
+    writer_generation: Mapped[int] = mapped_column()
+    writer_action_type: Mapped[str] = mapped_column(String(32))
+    writer_action_receipt_id: Mapped[str] = mapped_column(String(64))
     title: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(

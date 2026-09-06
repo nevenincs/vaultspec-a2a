@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ....database import create_thread, seed_task_queue
 from ....database.models import Base
 from ....domain_config import domain_config
@@ -157,7 +159,9 @@ async def session_factory(
 async def queue_thread(session_factory: async_sessionmaker[AsyncSession]) -> str:
     """Create a thread with a seeded exec queue; return the thread id."""
     async with session_factory() as session:
-        thread = await create_thread(session, title="queue")
+        thread = await create_thread(
+            session, write_authority=make_test_write_authority(), title="queue"
+        )
         await seed_task_queue(
             session,
             thread_id=thread.id,
@@ -220,7 +224,9 @@ async def test_mount_no_queue_block_when_empty(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     async with session_factory() as session:
-        thread = await create_thread(session, title="empty-queue")
+        thread = await create_thread(
+            session, write_authority=make_test_write_authority(), title="empty-queue"
+        )
         await session.commit()
         thread_id = thread.id
 

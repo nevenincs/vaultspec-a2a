@@ -23,6 +23,8 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...control.thread_state_service import build_thread_state
 from ...database import create_thread
@@ -62,6 +64,7 @@ async def _seed_completed_thread(
     async with session_factory() as session:
         await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             team_preset=team_preset,
             status=status,

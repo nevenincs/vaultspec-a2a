@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...api.tests.clarification_harness import park_clarification
 from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -79,6 +81,7 @@ async def test_ambiguous_followup_failure_preserves_redrive_eligibility(
     async with session_factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             title="Dispatch failure",
             repair_status="healthy",
             execution_readiness="healthy",
@@ -142,6 +145,7 @@ async def test_a_definitely_undelivered_followup_records_why_it_did_not_arrive(
     async with session_factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             title="Definite non-delivery",
             repair_status="healthy",
             execution_readiness="healthy",
@@ -207,6 +211,7 @@ async def test_a_failed_dispatch_records_its_reason_and_condition(
     async with session_factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             title="Failed dispatch",
             repair_status="healthy",
             execution_readiness="healthy",
@@ -247,6 +252,7 @@ async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
     async with session_factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             title="Undelivered resume",
             repair_status="healthy",
             execution_readiness="healthy",
@@ -295,6 +301,7 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id=thread_id,
                 status=ThreadStatus.INPUT_REQUIRED,
                 title="Undelivered clarification resume",
@@ -370,6 +377,7 @@ async def test_a_reasonless_failure_still_carries_a_condition(
     async with session_factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             title="Reasonless failure",
             repair_status="healthy",
             execution_readiness="healthy",

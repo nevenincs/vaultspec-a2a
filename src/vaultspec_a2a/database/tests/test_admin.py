@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, inspect, text
 
+from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
+
 from ..admin import _CHECKPOINT_TABLES, _CLEAR_ORDER, _administrative_engine
 from ..models import (
     ArtifactModel,
@@ -63,7 +65,11 @@ def test_every_table_is_emptied_against_a_real_database(tmp_path: Path) -> None:
     Base.metadata.create_all(engine)
 
     with Session(engine) as session:
-        session.add(ThreadModel(id="t1", status="running"))
+        session.add(
+            ThreadModel(
+                **make_test_thread_authority_columns(), id="t1", status="running"
+            )
+        )
         session.flush()
         session.add(ArtifactModel(id="a1", thread_id="t1", type="file", path="x.txt"))
         session.add(
@@ -141,7 +147,11 @@ def test_foreign_keys_are_enforced_against_a_real_violation(tmp_path: Path) -> N
     setup = create_engine(f"sqlite:///{database}")
     Base.metadata.create_all(setup)
     with Session(setup) as session:
-        session.add(ThreadModel(id="t1", status="running"))
+        session.add(
+            ThreadModel(
+                **make_test_thread_authority_columns(), id="t1", status="running"
+            )
+        )
         session.flush()
         session.add(ArtifactModel(id="a1", thread_id="t1", type="file", path="x.txt"))
         session.commit()

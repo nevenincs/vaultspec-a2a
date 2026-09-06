@@ -15,6 +15,11 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import (
+    make_test_thread_authority_columns,
+    make_test_write_authority,
+)
+
 from ...database.models import ThreadModel
 from ...database.thread_repository import create_thread
 from ...testing.ports import free_port
@@ -205,6 +210,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
             rows = [
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="active-old",
                     status=ThreadStatus.INPUT_REQUIRED,
                     metadata=json.dumps(
@@ -213,6 +219,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="active-new",
                     status=ThreadStatus.RUNNING,
                     metadata=json.dumps(
@@ -221,6 +228,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="other-feature",
                     status=ThreadStatus.RUNNING,
                     metadata=json.dumps(
@@ -229,6 +237,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="foreign-workspace",
                     status=ThreadStatus.RUNNING,
                     metadata=json.dumps(
@@ -240,6 +249,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="terminal",
                     status=ThreadStatus.COMPLETED,
                     metadata=json.dumps(
@@ -248,24 +258,28 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="malformed-metadata",
                     status=ThreadStatus.RUNNING,
                     metadata="{not-json",
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="recursive-metadata",
                     status=ThreadStatus.RUNNING,
                     metadata="[" * 1200 + "]" * 1200,
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="oversized-metadata",
                     status=ThreadStatus.RUNNING,
                     metadata=json.dumps({"padding": "x" * 250_000}),
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="invalid-status",
                     status=ThreadStatus.RUNNING,
                     metadata=json.dumps(
@@ -274,6 +288,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="r" * 129,
                     status=ThreadStatus.RUNNING,
                     metadata=json.dumps(
@@ -282,6 +297,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="legacy/broken",
                     status=ThreadStatus.RUNNING,
                     metadata=json.dumps(
@@ -290,6 +306,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
                 ),
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="-legacy-leading",
                     status=ThreadStatus.RUNNING,
                     metadata=json.dumps(
@@ -360,6 +377,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
             session.add_all(
                 [
                     ThreadModel(
+                        **make_test_thread_authority_columns(),
                         id=f"newer-foreign-{index:04d}",
                         status=ThreadStatus.RUNNING.value,
                         is_active=True,
@@ -466,6 +484,7 @@ async def test_the_two_readings_answer_with_different_records(tmp_path) -> None:
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="two-readings",
                 status=ThreadStatus.INPUT_REQUIRED,
                 repair_status="checkpoint_unavailable",

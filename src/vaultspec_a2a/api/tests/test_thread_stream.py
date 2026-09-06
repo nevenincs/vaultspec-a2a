@@ -20,6 +20,8 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...database.thread_repository import create_thread, update_thread_status
 from ...providers.conditions import ProviderCondition
 from ...thread.enums import ThreadStatus
@@ -68,7 +70,10 @@ class TestStreamThreadEvents:
         async def _seed() -> str:
             async with session_factory() as session:
                 thread = await create_thread(
-                    session, status=ThreadStatus.COMPLETED, title="done"
+                    session,
+                    write_authority=make_test_write_authority(),
+                    status=ThreadStatus.COMPLETED,
+                    title="done",
                 )
                 await session.commit()
                 return thread.id
@@ -101,7 +106,11 @@ class TestStreamThreadEvents:
 
         async def _seed() -> str:
             async with session_factory() as session:
-                thread = await create_thread(session, title="throttled run")
+                thread = await create_thread(
+                    session,
+                    write_authority=make_test_write_authority(),
+                    title="throttled run",
+                )
                 await update_thread_status(
                     session,
                     thread.id,
@@ -148,7 +157,11 @@ class TestStreamThreadEvents:
 
         async def _seed() -> str:
             async with session_factory() as session:
-                thread = await create_thread(session, title="legacy failure")
+                thread = await create_thread(
+                    session,
+                    write_authority=make_test_write_authority(),
+                    title="legacy failure",
+                )
                 await update_thread_status(
                     session,
                     thread.id,
@@ -183,7 +196,10 @@ class TestStreamThreadEvents:
         async def _seed() -> str:
             async with session_factory() as session:
                 thread = await create_thread(
-                    session, status=ThreadStatus.COMPLETED, title="done"
+                    session,
+                    write_authority=make_test_write_authority(),
+                    status=ThreadStatus.COMPLETED,
+                    title="done",
                 )
                 await session.commit()
                 return thread.id

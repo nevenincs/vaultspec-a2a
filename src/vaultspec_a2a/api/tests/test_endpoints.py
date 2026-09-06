@@ -27,6 +27,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control.config import settings
 from ...control.permission_service import permission_response_action_key
 from ...database import (
@@ -261,6 +263,7 @@ class TestListThreads:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-corrupt-plan",
                     status="input_required",
                     repair_status="healthy",
@@ -301,6 +304,7 @@ class TestListThreads:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-optionless-plan",
                     status="input_required",
                     repair_status="healthy",
@@ -335,6 +339,7 @@ class TestListThreads:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-missing-plan",
                     status="input_required",
                     repair_status="healthy",
@@ -360,6 +365,7 @@ class TestListThreads:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-live-plan",
                     status="input_required",
                     repair_status="healthy",
@@ -394,6 +400,7 @@ class TestListThreads:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-rejected-live-plan",
                     status="input_required",
                     repair_status="healthy",
@@ -428,6 +435,7 @@ class TestListThreads:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-rejected-residue",
                     status="running",
                     repair_status="healthy",
@@ -453,6 +461,7 @@ class TestListThreads:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-terminal-plan",
                     status="completed",
                     repair_status="healthy",
@@ -487,6 +496,7 @@ class TestListThreads:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-answered-pending-apply",
                     status="input_required",
                     repair_status="healthy",
@@ -527,6 +537,7 @@ class TestListThreads:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-stale-state",
                     status="running",
                     repair_status="healthy",
@@ -576,6 +587,7 @@ class TestListThreads:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-checkpoint-drift",
                     status="running",
                     repair_status="healthy",
@@ -621,6 +633,7 @@ class TestListThreads:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-checkpoint-unverified",
                     status="running",
                     repair_status="healthy",
@@ -652,6 +665,7 @@ class TestListThreads:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-list-checkpoint-unverified-plan",
                     status="input_required",
                     repair_status="healthy",
@@ -840,6 +854,7 @@ class TestThreadState:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-corrupt-permission-state",
                     status="input_required",
                     repair_status="healthy",
@@ -896,6 +911,7 @@ class TestThreadState:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-stale-state-endpoint",
                     status="running",
                     repair_status="healthy",
@@ -957,6 +973,7 @@ class TestThreadState:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-plan-no-tool-call-endpoint",
                     status="input_required",
                     repair_status="healthy",
@@ -1023,6 +1040,7 @@ class TestThreadState:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-state-aggregator-only",
                     status="input_required",
                     repair_status="healthy",
@@ -1063,6 +1081,7 @@ class TestThreadState:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-state-missing-checkpoint-permission",
                     status="input_required",
                     repair_status="healthy",
@@ -1114,6 +1133,7 @@ class TestThreadState:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-state-submitted-stale-approval",
                     status="submitted",
                     repair_status="healthy",
@@ -1171,6 +1191,7 @@ class TestThreadState:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-state-terminal-permission-residue",
                     status="completed",
                     repair_status="healthy",
@@ -1228,6 +1249,7 @@ class TestThreadState:
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-state-answered-pending-apply",
                     status="input_required",
                     repair_status="healthy",
@@ -1309,6 +1331,7 @@ class TestThreadState:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-state-checkpoint-only",
                     status="input_required",
                     repair_status="healthy",
@@ -1530,6 +1553,7 @@ class TestSendMessage:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-message-repair-needed",
                     status="repair_needed",
                     repair_status="checkpoint_unavailable",
@@ -1561,6 +1585,7 @@ class TestSendMessage:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-message-reconciling",
                     status="reconciling",
                     repair_status="needs_reconciliation",
@@ -1676,6 +1701,7 @@ class TestTeamStatus:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="team-status-answered-pending-apply",
                     status="input_required",
                     repair_status="healthy",
@@ -1761,6 +1787,7 @@ class TestTeamStatus:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="team-status-malformed-durable",
                     status="input_required",
                     repair_status="healthy",
@@ -1832,6 +1859,7 @@ class TestTeamStatus:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="team-status-checkpoint-unavailable",
                     status="input_required",
                     repair_status="checkpoint_unavailable",
@@ -1919,6 +1947,7 @@ class TestTeamStatus:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="team-status/malformed-run-id",
                     status="input_required",
                     repair_status="healthy",
@@ -1926,6 +1955,7 @@ class TestTeamStatus:
                 )
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="team-status-well-formed-run-id",
                     status="input_required",
                     repair_status="healthy",
@@ -2679,6 +2709,7 @@ class TestDeleteThread:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-delete-input-required",
                     status="input_required",
                     repair_status="paused_resumable",
@@ -2732,6 +2763,7 @@ class TestDeleteThread:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-delete-terminal",
                     status="completed",
                 )
@@ -2780,6 +2812,7 @@ class TestDeleteThread:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="thread-delete-artifacts",
                     status="completed",
                     metadata=(

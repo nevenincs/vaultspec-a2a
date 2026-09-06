@@ -10,6 +10,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...control.thread_state_service import build_thread_state
 from ...database import (
@@ -49,6 +51,7 @@ async def test_checkpoint_failure_updates_execution_readiness_with_repair_status
     async with session_factory() as session:
         await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id="thread-closed-checkpointer",
             repair_status="healthy",
             execution_readiness="healthy",
@@ -92,6 +95,7 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(tmp_path: Path) ->
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-missing-checkpoint",
                 status="running",
                 repair_status="healthy",
@@ -142,6 +146,7 @@ async def test_missing_checkpoint_hides_durable_pending_permission_state(
         async with session_factory() as session:
             thread = await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-missing-checkpoint-permission",
                 status="input_required",
                 repair_status="healthy",
@@ -207,6 +212,7 @@ async def test_submitted_thread_missing_checkpoint_clears_stale_pending_approval
         async with session_factory() as session:
             thread = await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-submitted-stale-approval",
                 status="submitted",
                 repair_status="healthy",
@@ -282,6 +288,7 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-corrupt-state",
                 status="running",
                 repair_status="healthy",
@@ -357,6 +364,7 @@ async def test_stale_execution_state_degrades_snapshot_readiness(
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-stale-state",
                 status="running",
                 repair_status="healthy",
@@ -438,6 +446,7 @@ async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-corrupt-permission",
                 status="input_required",
                 repair_status="healthy",
@@ -511,6 +520,7 @@ async def test_unreadable_plan_approval_row_does_not_seed_pending_approval(
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-corrupt-plan-approval",
                 status="input_required",
                 repair_status="healthy",
@@ -583,6 +593,7 @@ async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state(
         async with session_factory() as session:
             thread = await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-stale-plan-approval",
                 status="input_required",
                 repair_status="healthy",
@@ -656,6 +667,7 @@ async def test_missing_plan_approval_request_clears_stale_thread_pending_approva
         async with session_factory() as session:
             thread = await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-stale-pending-approval",
                 status="input_required",
                 repair_status="healthy",
@@ -716,6 +728,7 @@ async def test_plan_approval_without_tool_call_preserves_pending_approval(
         async with session_factory() as session:
             thread = await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-plan-no-tool-call",
                 status="input_required",
                 repair_status="healthy",
@@ -786,6 +799,7 @@ async def test_rejected_thread_approval_is_replaced_by_live_pending_plan_approva
         async with session_factory() as session:
             thread = await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-rejected-stale-live-plan",
                 status="input_required",
                 repair_status="healthy",
@@ -856,6 +870,7 @@ async def test_rejected_thread_approval_residue_does_not_surface_without_live_pl
         async with session_factory() as session:
             thread = await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-rejected-residue",
                 status="running",
                 repair_status="healthy",
@@ -916,6 +931,7 @@ async def test_terminal_thread_excludes_durable_pending_permission_from_thread_s
         async with session_factory() as session:
             thread = await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-terminal-permission-residue",
                 status="completed",
                 repair_status="healthy",
@@ -990,6 +1006,7 @@ async def test_answered_pending_apply_permission_does_not_surface_in_thread_stat
         async with session_factory() as session:
             thread = await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-answered-pending-apply",
                 status="input_required",
                 repair_status="healthy",
@@ -1068,6 +1085,7 @@ async def test_aggregator_only_pending_permission_does_not_surface_in_thread_sta
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-aggregator-only-permission",
                 status="input_required",
                 repair_status="healthy",
@@ -1166,6 +1184,7 @@ async def test_checkpoint_only_pending_permission_does_not_surface_in_thread_sta
         async with session_factory() as session:
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="thread-checkpoint-only-permission",
                 status="input_required",
                 repair_status="healthy",

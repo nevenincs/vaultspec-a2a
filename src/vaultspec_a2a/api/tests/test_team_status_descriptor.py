@@ -23,6 +23,8 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control.team_service import build_team_status
 from ...database import create_thread
 from ...graph.compiler import compile_team_graph
@@ -157,6 +159,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
     async with session_factory() as session:
         await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             status="input_required",
             repair_status="healthy",

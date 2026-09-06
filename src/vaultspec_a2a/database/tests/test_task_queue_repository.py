@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...thread.enums import TaskQueueStatus
 from .. import (
     create_thread,
@@ -61,7 +63,9 @@ async def _seed_thread(
     session: AsyncSession, entries: list[dict[str, object]] = _ENTRIES
 ) -> str:
     """Create a thread and seed its task queue; return the thread id."""
-    thread = await create_thread(session, title="Queue thread")
+    thread = await create_thread(
+        session, write_authority=make_test_write_authority(), title="Queue thread"
+    )
     await seed_task_queue(
         session, thread_id=thread.id, feature_tag=_FEATURE, entries=entries
     )
@@ -95,7 +99,9 @@ class TestSeed:
     async def test_seed_rejects_traversal_feature_tag(
         self, session: AsyncSession
     ) -> None:
-        thread = await create_thread(session, title="bad-feature")
+        thread = await create_thread(
+            session, write_authority=make_test_write_authority(), title="bad-feature"
+        )
         for bad in ("", "a/b", "a\\b", "..", "x..y"):
             with pytest.raises(ValueError, match="Invalid feature_tag"):
                 await seed_task_queue(
@@ -109,7 +115,9 @@ class TestSeed:
     async def test_seed_requires_task_key_and_description(
         self, session: AsyncSession
     ) -> None:
-        thread = await create_thread(session, title="missing-fields")
+        thread = await create_thread(
+            session, write_authority=make_test_write_authority(), title="missing-fields"
+        )
         with pytest.raises(ValueError, match="task_key"):
             await seed_task_queue(
                 session,
@@ -127,7 +135,9 @@ class TestSeed:
 
     @pytest.mark.asyncio
     async def test_seed_stores_plan_references(self, session: AsyncSession) -> None:
-        thread = await create_thread(session, title="refs")
+        thread = await create_thread(
+            session, write_authority=make_test_write_authority(), title="refs"
+        )
         created = await seed_task_queue(
             session,
             thread_id=thread.id,
@@ -217,7 +227,9 @@ class TestMarkComplete:
     async def test_no_further_pending_when_queue_drained(
         self, session: AsyncSession
     ) -> None:
-        thread = await create_thread(session, title="single")
+        thread = await create_thread(
+            session, write_authority=make_test_write_authority(), title="single"
+        )
         await seed_task_queue(
             session,
             thread_id=thread.id,

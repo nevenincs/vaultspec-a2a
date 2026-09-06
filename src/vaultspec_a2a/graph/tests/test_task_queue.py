@@ -22,6 +22,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...database import create_thread, seed_task_queue
 from ...database.models import Base
 from ...worker.task_queue_port import SqlTaskQueuePort
@@ -135,7 +137,9 @@ async def session_factory(
 async def seeded_thread(session_factory: async_sessionmaker[AsyncSession]) -> str:
     """Create a thread with a seeded queue; return the thread id."""
     async with session_factory() as session:
-        thread = await create_thread(session, title="Queue thread")
+        thread = await create_thread(
+            session, write_authority=make_test_write_authority(), title="Queue thread"
+        )
         await seed_task_queue(
             session, thread_id=thread.id, feature_tag=_FEATURE, entries=_ENTRIES
         )
@@ -162,7 +166,9 @@ async def test_tool_reports_no_further_tasks_when_drained(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     async with session_factory() as session:
-        thread = await create_thread(session, title="single")
+        thread = await create_thread(
+            session, write_authority=make_test_write_authority(), title="single"
+        )
         await seed_task_queue(
             session,
             thread_id=thread.id,

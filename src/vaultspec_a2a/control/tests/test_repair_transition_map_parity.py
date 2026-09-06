@@ -18,6 +18,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...control.repair_transitions import (
     apply_dispatch_failure,
@@ -94,6 +96,7 @@ async def test_each_transition_persists_what_the_map_declares(
     async with session_factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             title="parity",
             repair_status="healthy",
             execution_readiness="healthy",
@@ -123,6 +126,7 @@ async def test_dispatch_failed_persists_the_pure_policy_transition(
     async with session_factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             title="parity",
             repair_status="healthy",
             execution_readiness="healthy",
@@ -153,6 +157,7 @@ async def test_apply_dispatch_failure_moves_status_and_repair_state_together(
     async with session_factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             title="apply",
             repair_status="healthy",
             execution_readiness="healthy",

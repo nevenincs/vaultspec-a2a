@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import respond_to_permission
@@ -102,6 +104,7 @@ async def _seed_thread(session_factory: async_sessionmaker[AsyncSession]) -> str
     async with session_factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             title="Permission rejection",
             status=ThreadStatus.INPUT_REQUIRED.value,
         )

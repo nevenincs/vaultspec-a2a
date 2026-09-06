@@ -21,6 +21,8 @@ import asyncio
 import httpx
 import pytest
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control.config import settings
 from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
@@ -47,7 +49,12 @@ async def _seed_running_run(session_factory) -> str:
     from ...database.thread_repository import create_thread
 
     async with session_factory() as session:
-        thread = await create_thread(session, status=ThreadStatus.RUNNING, title="run")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            status=ThreadStatus.RUNNING,
+            title="run",
+        )
         await session.commit()
         return thread.id
 

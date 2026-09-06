@@ -27,6 +27,8 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control.repositories import (
     CleanupItem,
     create_deletion_saga,
@@ -98,7 +100,12 @@ class TestVersionedDeletionVerb:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await create_thread(session, thread_id="r-clean", status="completed")
+                await create_thread(
+                    session,
+                    write_authority=make_test_write_authority(),
+                    thread_id="r-clean",
+                    status="completed",
+                )
                 await session.commit()
 
         asyncio.run(_seed())
@@ -121,7 +128,12 @@ class TestVersionedDeletionVerb:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await create_thread(session, thread_id="r-running", status="running")
+                await create_thread(
+                    session,
+                    write_authority=make_test_write_authority(),
+                    thread_id="r-running",
+                    status="running",
+                )
                 await session.commit()
 
         async def _survives() -> tuple[bool, bool]:
@@ -157,6 +169,7 @@ class TestVersionedDeletionVerb:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="r-strand",
                     status="completed",
                     metadata=json.dumps({"workspace_root": workspace.as_posix()}),
@@ -205,7 +218,12 @@ class TestDeletionSagaEndpoint:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await create_thread(session, thread_id="t-replay", status="completed")
+                await create_thread(
+                    session,
+                    write_authority=make_test_write_authority(),
+                    thread_id="t-replay",
+                    status="completed",
+                )
                 await session.commit()
 
         asyncio.run(_seed())
@@ -239,7 +257,12 @@ class TestDeletionSagaEndpoint:
                 {},
             )
             async with session_factory() as session:
-                await create_thread(session, thread_id="t-resume", status="completed")
+                await create_thread(
+                    session,
+                    write_authority=make_test_write_authority(),
+                    thread_id="t-resume",
+                    status="completed",
+                )
                 await create_deletion_saga(
                     session,
                     thread_id="t-resume",
@@ -289,7 +312,12 @@ class TestDeletionSagaEndpoint:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await create_thread(session, thread_id="t-running", status="running")
+                await create_thread(
+                    session,
+                    write_authority=make_test_write_authority(),
+                    thread_id="t-running",
+                    status="running",
+                )
                 await session.commit()
 
         async def _survives() -> tuple[bool, bool]:
@@ -334,6 +362,7 @@ class TestDeletionSagaEndpoint:
             async with session_factory() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="t-strand",
                     status="completed",
                     metadata=json.dumps({"workspace_root": workspace.as_posix()}),
@@ -381,7 +410,12 @@ class TestDeletionSagaEndpoint:
 
         async def _seed() -> None:
             async with session_factory() as session:
-                await create_thread(session, thread_id="t-both", status="completed")
+                await create_thread(
+                    session,
+                    write_authority=make_test_write_authority(),
+                    thread_id="t-both",
+                    status="completed",
+                )
                 await create_deletion_saga(
                     session,
                     thread_id="t-both",

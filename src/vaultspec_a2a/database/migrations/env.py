@@ -14,7 +14,7 @@ from logging.config import fileConfig
 from alembic import context
 from alembic.runtime.environment import NameFilterParentNames, NameFilterType
 from alembic.util import CommandError
-from sqlalchemy import pool
+from sqlalchemy import inspect, pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from vaultspec_a2a.database.models import (  # absolute-import-ok
     Base,
 )
+from vaultspec_a2a.thread.enums import ControlActionType  # absolute-import-ok
 
 # -- Alembic config object ---------------------------------------------------
 config = context.config
@@ -121,6 +122,94 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Sync migration runner called inside ``run_sync``."""
+    if config.attributes.get("vaultspec_current_only_head"):
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
+        populated = (
+            "threads" in tables
+            and connection.exec_driver_sql("SELECT 1 FROM threads LIMIT 1").first()
+            is not None
+        )
+        if populated:
+            expected = {
+                "run_revision": ("INTEGER", False, None),
+                "writer_generation": ("INTEGER", False, None),
+                "writer_action_type": ("VARCHAR(32)", False, None),
+                "writer_action_receipt_id": ("VARCHAR(64)", False, None),
+            }
+            actual = {
+                str(column["name"]): (
+                    str(column["type"]).upper(),
+                    bool(column["nullable"]),
+                    column["default"],
+                )
+                for column in inspector.get_columns("threads")
+            }
+            indexes = {
+                str(index["name"]): bool(index["unique"])
+                for index in inspector.get_indexes("threads")
+            }
+            has_structure = all(
+                actual.get(name) == shape for name, shape in expected.items()
+            )
+            has_unique_receipt = (
+                indexes.get("ux_threads_writer_action_receipt_id") is True
+            )
+            required_checks = {
+                "ck_threads_run_revision_nonnegative",
+                "ck_threads_writer_generation_positive",
+                "ck_threads_writer_action_type_current",
+                "ck_threads_writer_action_receipt_id_bounded",
+            }
+            checks = {
+                str(check["name"])
+                for check in inspector.get_check_constraints("threads")
+            }
+            if (
+                not has_structure
+                or not has_unique_receipt
+                or not required_checks.issubset(checks)
+            ):
+                connection.rollback()
+                raise CommandError(
+                    "cannot migrate a populated store without complete current "
+                    "write authority; create a fresh current application home"
+                )
+            action_values = ", ".join(
+                repr(action.value) for action in ControlActionType
+            )
+            invalid = connection.execute(
+                text(
+                    f"""SELECT id FROM threads
+                         WHERE run_revision < 0
+                            OR writer_generation < 1
+                            OR writer_action_type NOT IN ({action_values})
+                            OR length(trim(writer_action_receipt_id)) < 1
+                            OR length(writer_action_receipt_id) > 64
+                         LIMIT 1"""
+                )
+            ).first()
+            has_actions = "control_actions" in tables
+            incoherent = None
+            if has_actions:
+                incoherent = connection.execute(
+                    text(
+                        """SELECT t.id FROM threads AS t
+                           LEFT JOIN control_actions AS a
+                             ON a.thread_id = t.id
+                            AND a.dispatch_id = t.writer_action_receipt_id
+                            AND a.action_type = t.writer_action_type
+                           WHERE a.id IS NULL
+                           LIMIT 1"""
+                    )
+                ).first()
+            if invalid is not None or not has_actions or incoherent is not None:
+                connection.rollback()
+                raise CommandError(
+                    "cannot migrate a populated store with invalid or unknown "
+                    "write authority; create a fresh current application home"
+                )
+        connection.rollback()
     context.configure(
         connection=connection,
         target_metadata=target_metadata,

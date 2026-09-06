@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:7154fd90b79ec4dca158eed4f8f42d15bed2d473f86a62f7b2aa183a547c97ea'
+body_hash: 'sha256:22e617d5b495576e97bc9f03f30b3d3b30b531066ed66eb6cd054d10603eea9b'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1208,3 +1208,19 @@ Type: migration ordering and current-schema integrity. Required ownership column
 Type: lifecycle traceability. Formal PASS `821409d1` accepts implementation `8551069913f393a55cf9e5fe3c1bd33e9e6ff907`. Vaultspec Core closes only `W02.P03.S76`; plan status is 11 of 81 Steps complete and `W02.P03.S77` is next. The Step Record retains the completed 131-pass implementation gate, independent 14-pass focused review, Ruff, Ty and diff evidence. Remediation and served-capability-contract feature checks each pass all 19 Core checks with zero diagnostics.
 
 The physical persistence dependency remains HIGH/open under `W02.P03.S77`, including atomic installation and mapping of all four required fields and refusal of populated pre-current or unknown stores without nullable fields, defaults, backfill, translation, substitution or execution. The independent database command's post-`[100%]` pytest teardown hang remains MEDIUM/open under `resource-aware-test-execution` with its exact command, more-than-90-second wall, session `71187` interrupt and process-absence evidence preserved in the formal review. Closure adds no runtime, legacy, deprecated, compatibility, backfill, translation or default behavior.
+
+### w02-p03-s77-current-authority-persistence | high | implemented pending formal review
+
+Type: durable ownership and migration safety. S77 installs required revision, writer generation, action type and action receipt columns with no nullable representation or defaults, closed checks and a unique receipt index. The runtime migration preflight refuses populated pre-current, structurally incomplete, invalid or receipt-incoherent stores before Alembic executes any revision; 0017 independently refuses populated upgrade and downgrade. Fresh creation writes one pre-minted INGEST receipt identically to thread authority, the durable action and worker dispatch. All 258 direct repository test seeds and 13 direct ORM seeds now supply explicit test-only authority. Formal review remains required and the Step stays open.
+
+### w02-p03-s77-preflight-implicit-transaction | high | resolved in implementation
+
+Type: migration atomicity. The first preflight implementation inspected the database on Alembic's connection and left SQLAlchemy's implicit read transaction open. Alembic then ran inside that external transaction, and connection close rolled back its version row and transactional SQLite DDL. The 93-case diagnostic reached 100% with 82 passes and 11 compatibility failures in 106.99 seconds. Ending the read transaction before configuring Alembic restores migration ownership. A four-case discriminator passed in 15.95 seconds, including the production runner's byte/shape-preserving refusal of populated 0007, fresh head validation, orphan-receipt refusal and initial receipt equality. The optimized migration module passes six tests in 6.66 seconds. The compatibility module then emitted all 15 passing dots before its known teardown stall; session `62322` was interrupted and its exact command-line process was absent.
+
+### w02-p03-s77-explicit-test-seed-surface | medium | resolved in implementation
+
+Type: test contract and plan decomposition. The S77 row names migrations, but a migration-only commit would leave model/schema parity broken and every fresh `create_thread` insert unable to satisfy required authority. The buildable Step therefore also maps the model, makes repository authority mandatory, corrects creation receipt identity, validates seated stores read-only and changes every current test seed explicitly. A test-only factory reduces repetition without entering production or accepting missing authority.
+
+### w02-p03-s77-dashboard-release-pin | medium | open under Dashboard release coordination
+
+Type: consumer packaging. The A2A package derives head 0017 from its installed graph, while the Dashboard package lock still selects an earlier A2A commit. Dashboard already owns quiescence, bounded candidate migration, snapshot rollback and typed failure. Its later release assembly must pin the reviewed S77 generation and preserve populated pre-current refusal; it must not retry, backfill or invent authority. S77 requires no Dashboard source change.

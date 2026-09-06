@@ -27,6 +27,8 @@ import httpx
 import pytest
 import uvicorn
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...database import list_threads
 from ...streaming.aggregator import EventAggregator
 from ...testing.catalog_selection import in_process_selection
@@ -426,12 +428,14 @@ async def test_legacy_lease_only_metadata_remains_status_visible(
     async with session_factory() as session:
         valid = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             status=ThreadStatus.RUNNING,
             title="legacy valid lease",
             metadata=json.dumps(valid_metadata),
         )
         invalid = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             status=ThreadStatus.RUNNING,
             title="legacy invalid lease",
             metadata=json.dumps(invalid_metadata),
@@ -467,6 +471,7 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
     async with session_factory() as session:
         await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             status=ThreadStatus.RUNNING,
             title="coherent tuple",
@@ -689,7 +694,10 @@ async def test_run_status_carries_reconnect_cursor(
 
     async with session_factory() as session:
         thread = await create_thread(
-            session, status=ThreadStatus.RUNNING, title="cursor"
+            session,
+            write_authority=make_test_write_authority(),
+            status=ThreadStatus.RUNNING,
+            title="cursor",
         )
         await session.commit()
         run_id = thread.id
@@ -1124,7 +1132,12 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
 
     async with session_factory() as session:
-        thread = await create_thread(session, status=ThreadStatus.RUNNING, title="live")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            status=ThreadStatus.RUNNING,
+            title="live",
+        )
         await session.commit()
         run_id = thread.id
 
@@ -1198,7 +1211,12 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
 
     async with session_factory() as session:
-        thread = await create_thread(session, status=ThreadStatus.RUNNING, title="live")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            status=ThreadStatus.RUNNING,
+            title="live",
+        )
         await session.commit()
         run_id = thread.id
 
@@ -1297,7 +1315,12 @@ async def test_run_stream_verb_reserves_versioned_frames(
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
 
     async with session_factory() as session:
-        thread = await create_thread(session, status=ThreadStatus.RUNNING, title="run")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            status=ThreadStatus.RUNNING,
+            title="run",
+        )
         await session.commit()
         run_id = thread.id
 

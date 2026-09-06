@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
+
 from ....control.cleanup import (
     build_cleanup_manifest,
     execute_cleanup_manifest,
@@ -38,7 +40,11 @@ def _thread(workspace_root: pathlib.Path | None) -> ThreadModel:
     metadata: dict[str, object] = {}
     if workspace_root is not None:
         metadata["workspace_root"] = str(workspace_root)
-    return ThreadModel(id="t-cleanup", thread_metadata=json.dumps(metadata))
+    return ThreadModel(
+        **make_test_thread_authority_columns(),
+        id="t-cleanup",
+        thread_metadata=json.dumps(metadata),
+    )
 
 
 def _artifact(path: str) -> ArtifactModel:
@@ -112,7 +118,9 @@ async def test_a_relative_workspace_root_is_refused_rather_than_resolved(
     target = workspace / "generated.txt"
     target.write_text("precious", encoding="utf-8")
     thread = ThreadModel(
-        id="t-cleanup", thread_metadata=json.dumps({"workspace_root": "workspace"})
+        **make_test_thread_authority_columns(),
+        id="t-cleanup",
+        thread_metadata=json.dumps({"workspace_root": "workspace"}),
     )
 
     with chdir(tmp_path):

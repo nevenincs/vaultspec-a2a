@@ -58,6 +58,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import (
     AuthoringClient,
@@ -298,7 +300,10 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
             # AFTER a genuine interrupt (not a hand-typed checkpoint).
             async with session_factory() as db:
                 await create_thread(
-                    db, thread_id=thread_id, team_preset="verdict-loop-live"
+                    db,
+                    write_authority=make_test_write_authority(),
+                    thread_id=thread_id,
+                    team_preset="verdict-loop-live",
                 )
                 await update_thread_status(db, thread_id, ThreadStatus.INPUT_REQUIRED)
                 await record_permission_request(

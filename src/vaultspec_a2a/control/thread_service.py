@@ -34,6 +34,7 @@ from ..database import (
     list_threads,
     update_thread_status,
 )
+from ..database.models import RunWriteAuthority
 from ..domain_config import domain_config
 from ..graph.nodes.vault_reader import build_initial_vault_index
 from ..ipc.schemas import DispatchRequest, canonical_project_root, to_dispatch_action
@@ -473,8 +474,15 @@ async def create_and_dispatch_thread(
     Raises:
         NicknameConflictError: If the requested nickname is already taken.
     """
+    action_receipt_id = uuid4().hex
     thread = await create_thread(
         db,
+        write_authority=RunWriteAuthority(
+            run_revision=0,
+            writer_generation=1,
+            action_type=ControlActionType.INGEST,
+            action_receipt_id=action_receipt_id,
+        ),
         title=req.title,
         status=ThreadStatus.SUBMITTED,
         metadata=req.metadata_json,
@@ -502,6 +510,7 @@ async def create_and_dispatch_thread(
         db,
         thread_id=thread.id,
         action_type=ControlActionType.INGEST,
+        dispatch_id=action_receipt_id,
         idempotency_key=f"thread-create:{thread.id}",
         payload={
             "title": req.title,
@@ -561,6 +570,7 @@ async def create_and_dispatch_thread(
 
     # -- Construct dispatch request --------------------------------------------
     dispatch = DispatchRequest(
+        dispatch_id=action_receipt_id,
         action=to_dispatch_action(ControlActionType.INGEST),
         thread_id=thread.id,
         team_preset=req.team_preset,

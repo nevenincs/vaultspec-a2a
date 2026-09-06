@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
+
 from ...control._thread_metadata import (
     dispatchable_workspace_root,
     workspace_root_from_metadata,
@@ -96,7 +98,11 @@ def test_the_cleanup_pass_refuses_every_root_the_others_refuse(
     label: str, stored: object
 ) -> None:
     """Cleanup deletes files, so it must never admit a root a resume would not."""
-    thread = ThreadModel(id="t-agree", thread_metadata=_stored(stored))
+    thread = ThreadModel(
+        **make_test_thread_authority_columns(),
+        id="t-agree",
+        thread_metadata=_stored(stored),
+    )
 
     assert _workspace_root_from_thread(thread) is None, label
 
@@ -105,7 +111,11 @@ def test_the_cleanup_pass_admits_a_real_root_and_agrees_on_its_spelling(
     workspace: Path,
 ) -> None:
     """Its extra return type is a wrapper, not a second answer."""
-    thread = ThreadModel(id="t-agree", thread_metadata=_stored(str(workspace)))
+    thread = ThreadModel(
+        **make_test_thread_authority_columns(),
+        id="t-agree",
+        thread_metadata=_stored(str(workspace)),
+    )
 
     resolved = _workspace_root_from_thread(thread)
 
@@ -125,7 +135,9 @@ def test_the_cleanup_pass_alone_also_refuses_a_root_that_no_longer_exists(
     """
     gone = tmp_path / "deleted-checkout"
     encoded = _stored(str(gone))
-    thread = ThreadModel(id="t-agree", thread_metadata=encoded)
+    thread = ThreadModel(
+        **make_test_thread_authority_columns(), id="t-agree", thread_metadata=encoded
+    )
 
     assert _workspace_root_from_thread(thread) is None
     assert dispatchable_workspace_root(encoded) == str(gone)

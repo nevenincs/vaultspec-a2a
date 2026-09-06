@@ -31,7 +31,7 @@ from ...control.thread_service import (
     generate_thread_id,
 )
 from ...control.worker_management import LazyWorkerSpawner
-from ...database.models import ControlActionModel
+from ...database.models import ControlActionModel, ThreadModel
 from ...domain_config import domain_config
 from ...thread.actor_tokens import ActorTokenBundle
 
@@ -129,6 +129,13 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
             .all()
         )
         assert rows, "run-start must have journaled at least the ingest action"
+        thread = await session.get(ThreadModel, thread_id)
+        assert thread is not None
+        assert thread.run_revision == 0
+        assert thread.writer_generation == 1
+        assert thread.writer_action_type == "ingest"
+        assert thread.writer_action_receipt_id == rows[0].dispatch_id
+        assert thread.writer_action_receipt_id == body["dispatch_id"]
         journal_blob = json.dumps([row.payload_json for row in rows])
         for secret in (_CODER_TOKEN, _REVIEWER_TOKEN, _BEARER):
             assert secret not in journal_blob, "token leaked into control journal"

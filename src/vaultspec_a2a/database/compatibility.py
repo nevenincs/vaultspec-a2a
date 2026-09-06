@@ -20,6 +20,7 @@ import asyncio
 import sqlite3
 from pathlib import Path
 
+from ..thread.enums import ControlActionType
 from .checkpoint_schema import (
     CHECKPOINT_SCHEMA_VERSION,
     CheckpointSchemaError,
@@ -44,6 +45,20 @@ _REMEDY = (
     "one-time transaction descriptor to bring this application home to the "
     "current schema; ordinary desktop boot never migrates."
 )
+
+_WRITE_AUTHORITY_COLUMNS = {
+    "run_revision": "INTEGER",
+    "writer_generation": "INTEGER",
+    "writer_action_type": "VARCHAR(32)",
+    "writer_action_receipt_id": "VARCHAR(64)",
+}
+_WRITE_AUTHORITY_CHECKS = {
+    "ck_threads_run_revision_nonnegative",
+    "ck_threads_writer_generation_positive",
+    "ck_threads_writer_action_type_current",
+    "ck_threads_writer_action_receipt_id_bounded",
+}
+_WRITE_ACTION_TYPES = tuple(action.value for action in ControlActionType)
 
 
 class SchemaCompatibilityError(RuntimeError):
@@ -124,6 +139,74 @@ def _read_alembic_version(db_path: Path) -> str | None:
     return str(rows[0][0])
 
 
+def _validate_write_authority(db_path: Path) -> None:
+    """Reject stamped, malformed, or receipt-incoherent current thread stores."""
+    conn = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        columns = {
+            str(row[1]): (str(row[2]).upper(), bool(row[3]), row[4])
+            for row in conn.execute("PRAGMA table_info(threads)")
+        }
+        for name, expected_type in _WRITE_AUTHORITY_COLUMNS.items():
+            actual = columns.get(name)
+            if actual != (expected_type, True, None):
+                raise SchemaCompatibilityError(
+                    f"desktop primary database at {db_path} has invalid current "
+                    f"write-authority column {name!r}; expected required "
+                    f"{expected_type} with no default. {_REMEDY}"
+                )
+        indexes = {
+            str(row[1]): bool(row[2])
+            for row in conn.execute("PRAGMA index_list(threads)")
+        }
+        if indexes.get("ux_threads_writer_action_receipt_id") is not True:
+            raise SchemaCompatibilityError(
+                f"desktop primary database at {db_path} lacks the unique current "
+                f"write-authority receipt index. {_REMEDY}"
+            )
+        table_sql_row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'"
+        ).fetchone()
+        table_sql = "" if table_sql_row is None else str(table_sql_row[0]).lower()
+        if not all(check in table_sql for check in _WRITE_AUTHORITY_CHECKS):
+            raise SchemaCompatibilityError(
+                f"desktop primary database at {db_path} lacks required current "
+                f"write-authority checks. {_REMEDY}"
+            )
+        placeholders = ", ".join("?" for _ in _WRITE_ACTION_TYPES)
+        invalid = conn.execute(
+            f"""SELECT id FROM threads
+                 WHERE run_revision < 0
+                    OR writer_generation < 1
+                    OR writer_action_type NOT IN ({placeholders})
+                    OR length(trim(writer_action_receipt_id)) < 1
+                    OR length(writer_action_receipt_id) > 64
+                 LIMIT 1""",
+            _WRITE_ACTION_TYPES,
+        ).fetchone()
+        if invalid is not None:
+            raise SchemaCompatibilityError(
+                f"desktop primary database at {db_path} contains invalid current "
+                f"write authority for thread {invalid[0]!r}. {_REMEDY}"
+            )
+        incoherent = conn.execute(
+            """SELECT t.id FROM threads AS t
+               LEFT JOIN control_actions AS a
+                 ON a.thread_id = t.id
+                AND a.dispatch_id = t.writer_action_receipt_id
+                AND a.action_type = t.writer_action_type
+               WHERE a.id IS NULL
+               LIMIT 1"""
+        ).fetchone()
+        if incoherent is not None:
+            raise SchemaCompatibilityError(
+                f"desktop primary database at {db_path} has no matching action "
+                f"receipt for thread {incoherent[0]!r}. {_REMEDY}"
+            )
+    finally:
+        conn.close()
+
+
 def _validate_primary_schema(database_url: str) -> None:
     """Validate the primary database sits exactly at the package migration head."""
     db_path = _sqlite_path_from_url(database_url)
@@ -143,6 +226,13 @@ def _validate_primary_schema(database_url: str) -> None:
             f"migrated. {_REMEDY}"
         )
     if current == head:
+        try:
+            _validate_write_authority(db_path)
+        except sqlite3.Error as exc:
+            raise SchemaCompatibilityError(
+                f"desktop primary database at {db_path} has unreadable current "
+                f"write-authority state. {_REMEDY}"
+            ) from exc
         return
     if current in _known_revisions(database_url):
         raise SchemaCompatibilityError(

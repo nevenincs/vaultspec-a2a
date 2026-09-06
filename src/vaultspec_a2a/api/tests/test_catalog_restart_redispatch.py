@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 import pytest
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.dispatch import redispatch_reconciling_threads
 from ...control.worker_management import LazyWorkerSpawner
@@ -238,6 +240,7 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
             async with get_session_factory()() as session:
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="current-schema-restart",
                     status=ThreadStatus.RECONCILING,
                     team_preset="mock-success-single",
@@ -245,6 +248,7 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
                 )
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="same-assignment-restart",
                     status=ThreadStatus.RECONCILING,
                     team_preset="mock-success-single",
@@ -252,6 +256,7 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
                 )
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id="other-assignment-restart",
                     status=ThreadStatus.RECONCILING,
                     team_preset="mock-success-single",
@@ -429,6 +434,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                 assert record["digest"] == original_digest
                 await create_thread(
                     session,
+                    write_authority=make_test_write_authority(),
                     thread_id=f"retired-durable-{label}",
                     status=ThreadStatus.RECONCILING,
                     team_preset="mock-success-single",
@@ -441,6 +447,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                 )
             await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 thread_id="retired-durable-model-profile-sentinel",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",

@@ -279,41 +279,6 @@ class TestAlembicUpgradeDowngrade:
         assert row is not None
         assert row[0] == _HEAD_REVISION
 
-    def test_upgrade_head_rewrites_legacy_created_status(
-        self, runtime_dir: Path
-    ) -> None:
-        """Upgrading head should normalize legacy created rows to submitted."""
-        db = runtime_dir / "test.db"
-        cfg = _make_config(db)
-        command.upgrade(cfg, "0002")
-
-        conn = sqlite3.connect(str(db))
-        conn.execute(
-            """
-            INSERT INTO threads (id, created_at, updated_at, status)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                "legacy-created-thread",
-                "2026-03-09 00:00:00",
-                "2026-03-09 00:00:00",
-                "created",
-            ),
-        )
-        conn.commit()
-        conn.close()
-
-        command.upgrade(cfg, "head")
-
-        conn = sqlite3.connect(str(db))
-        row = conn.execute(
-            "SELECT status FROM threads WHERE id = ?",
-            ("legacy-created-thread",),
-        ).fetchone()
-        conn.close()
-        assert row is not None
-        assert row[0] == "submitted"
-
     def test_upgrade_head_adds_plan_approval_columns(self, runtime_dir: Path) -> None:
         """Upgrading head should add durable plan-approval columns to threads."""
         db = runtime_dir / "test.db"
@@ -410,7 +375,7 @@ class TestAlembicUpgradeDowngrade:
         assert "thread_deletion_saga" not in tables
         assert "threads" in tables
 
-    def test_upgrade_head_backfills_active_run_selectors(
+    def test_revision_0009_projects_active_run_selectors(
         self, runtime_dir: Path
     ) -> None:
         """The selector migration projects metadata and terminal lifecycle state."""
@@ -447,7 +412,7 @@ class TestAlembicUpgradeDowngrade:
         conn.commit()
         conn.close()
 
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "0009")
 
         conn = sqlite3.connect(str(db))
         rows = conn.execute(

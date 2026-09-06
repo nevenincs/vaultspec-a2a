@@ -21,6 +21,8 @@ import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control.action_lease import claim_control_action
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.direct_control_recovery import redrive_direct_control_actions
@@ -125,6 +127,7 @@ async def _seed_unapplied_actions(
         ):
             await create_thread(
                 db,
+                write_authority=make_test_write_authority(),
                 thread_id=thread_id,
                 status=status,
                 metadata=metadata,

@@ -19,6 +19,8 @@ import pytest_asyncio
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...control.repositories import create_deletion_saga
 from ...control.thread_service import list_threads_service
@@ -41,7 +43,12 @@ async def _seed_deleting_thread(
     session_factory: async_sessionmaker[AsyncSession], thread_id: str
 ) -> None:
     async with session_factory() as session:
-        await create_thread(session, thread_id=thread_id, status=ThreadStatus.COMPLETED)
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status=ThreadStatus.COMPLETED,
+        )
         await create_deletion_saga(session, thread_id=thread_id, manifest=[])
         await session.commit()
 
@@ -52,7 +59,12 @@ async def test_deleting_thread_is_absent_from_the_product_list(
 ) -> None:
     """A deleting thread is excluded from the list and the total count."""
     async with session_factory() as session:
-        await create_thread(session, thread_id="live", status=ThreadStatus.COMPLETED)
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="live",
+            status=ThreadStatus.COMPLETED,
+        )
         await session.commit()
     await _seed_deleting_thread(session_factory, "gone")
 

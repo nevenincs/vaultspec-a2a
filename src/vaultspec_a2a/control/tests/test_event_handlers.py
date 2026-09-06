@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
 from ...control.action_lease import claim_control_action
@@ -47,6 +49,7 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
     async with session_factory() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id="message-receipt-thread",
             status="running",
         )
@@ -115,7 +118,10 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
     """A replayed permission_resolved event must not append a second applied action."""
     async with session_factory() as session:
         thread = await create_thread(
-            session, title="Replay Guard", status="input_required"
+            session,
+            write_authority=make_test_write_authority(),
+            title="Replay Guard",
+            status="input_required",
         )
         request_id = f"{thread.id}:perm-1"
         await record_permission_request(
@@ -212,7 +218,11 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
 ) -> None:
     """Supervisor plan approval interrupts must become durable pending rows."""
     async with session_factory() as session:
-        thread = await create_thread(session, title="Plan approval relay")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            title="Plan approval relay",
+        )
         await session.commit()
         thread_id = thread.id
 
@@ -254,7 +264,11 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
 ) -> None:
     """Terminal relay settles a parked plan approval without residue."""
     async with session_factory() as session:
-        thread = await create_thread(session, title="Terminal plan approval")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            title="Terminal plan approval",
+        )
         await session.commit()
         thread_id = thread.id
 
@@ -309,7 +323,11 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
     engine verdict to the parked run.
     """
     async with session_factory() as session:
-        thread = await create_thread(session, title="Document approval relay")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            title="Document approval relay",
+        )
         await session.commit()
         thread_id = thread.id
 
@@ -361,7 +379,12 @@ async def _answered_rejection(
     ``(thread_id, request_id)``.
     """
     async with session_factory() as session:
-        thread = await create_thread(session, title=title, status="input_required")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            title=title,
+            status="input_required",
+        )
         request_id = f"{thread.id}:perm-reject"
         await record_permission_request(
             session,
@@ -551,7 +574,11 @@ async def test_permission_resolution_for_unknown_request_is_a_clean_noop(
     settle nothing and append no control action.
     """
     async with session_factory() as session:
-        thread = await create_thread(session, title="Unknown Resolution")
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            title="Unknown Resolution",
+        )
         await session.commit()
         thread_id = thread.id
 
@@ -625,7 +652,10 @@ async def test_persisted_description_matches_what_the_stream_showed(
     """
     async with session_factory() as session:
         thread = await create_thread(
-            session, title="Bounded Description", status="running"
+            session,
+            write_authority=make_test_write_authority(),
+            title="Bounded Description",
+            status="running",
         )
         await session.commit()
 

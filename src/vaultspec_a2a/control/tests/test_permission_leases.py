@@ -9,6 +9,8 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import (
     permission_response_action_key,
@@ -46,6 +48,7 @@ async def _run_case(runtime_dir: Path, bodies: list[tuple[str, str | None]]):
     async with sessions() as session:
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             status=ThreadStatus.INPUT_REQUIRED.value,
             metadata=current_execution_metadata(runtime_dir),
         )

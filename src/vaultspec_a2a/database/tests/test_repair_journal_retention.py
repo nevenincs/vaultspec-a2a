@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...database import create_thread
 from ...database.models import ControlActionModel
@@ -163,7 +165,12 @@ async def test_repair_journal_stops_growing_once_capped(runtime_dir: Path) -> No
     ) as checkpointer:
         await _put_checkpoint(checkpointer, tid)
         async with session_factory() as session:
-            await create_thread(session, thread_id=tid, status="running")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id=tid,
+                status="running",
+            )
             await session.commit()
 
         for _ in range(12):
@@ -196,7 +203,12 @@ async def test_uncapped_repair_journal_grows_with_every_boot(runtime_dir: Path) 
     ) as checkpointer:
         await _put_checkpoint(checkpointer, tid)
         async with session_factory() as session:
-            await create_thread(session, thread_id=tid, status="running")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id=tid,
+                status="running",
+            )
             await session.commit()
 
         for _ in range(12):
@@ -235,7 +247,12 @@ async def test_capped_boots_leave_every_recoverable_row_intact(
     ) as checkpointer:
         await _put_checkpoint(checkpointer, tid)
         async with session_factory() as session:
-            await create_thread(session, thread_id=tid, status="running")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id=tid,
+                status="running",
+            )
             await _seed_recoverable_actions(session, tid)
             await session.commit()
 
@@ -306,7 +323,12 @@ async def test_current_pass_pair_survives_a_cap_below_the_pair(
     ) as checkpointer:
         await _put_checkpoint(checkpointer, tid)
         async with session_factory() as session:
-            await create_thread(session, thread_id=tid, status="running")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id=tid,
+                status="running",
+            )
             await session.commit()
 
         for _ in range(3):

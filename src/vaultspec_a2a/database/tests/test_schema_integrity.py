@@ -48,6 +48,11 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import (
+    make_test_thread_authority_columns,
+    make_test_write_authority,
+)
+
 from ...api.schemas.events import (
     MAX_TOOL_CALL_CHARS,
     PermissionRequestEvent,
@@ -247,7 +252,9 @@ class TestStatusDefaultsComeFromEnums:
         member's value moves both sides together, which is the property the
         enum-backed default exists to give.
         """
-        session.add(ThreadModel(id="thread-defaults"))
+        session.add(
+            ThreadModel(**make_test_thread_authority_columns(), id="thread-defaults")
+        )
         await session.flush()
         session.expunge_all()
 
@@ -275,7 +282,11 @@ class TestStatusDefaultsComeFromEnums:
         """
         for index, member in enumerate(RepairStatus):
             session.add(
-                ThreadModel(id=f"thread-readiness-{index}", execution_readiness=member)
+                ThreadModel(
+                    **make_test_thread_authority_columns(),
+                    id=f"thread-readiness-{index}",
+                    execution_readiness=member,
+                )
             )
         await session.flush()
         session.expunge_all()
@@ -295,7 +306,9 @@ class TestStatusDefaultsComeFromEnums:
         self, session: AsyncSession
     ) -> None:
         """A journaled action defaults to ``ACCEPTED_NOT_APPLIED`` by member."""
-        session.add(ThreadModel(id="thread-control"))
+        session.add(
+            ThreadModel(**make_test_thread_authority_columns(), id="thread-control")
+        )
         session.add(
             ControlActionModel(
                 id="action-1",
@@ -426,7 +439,9 @@ class TestWorkspaceRootBoundIsTheColumn:
         root = self._root_of_length(width)
 
         thread = await create_thread(
-            session, metadata=json.dumps({"workspace_root": root})
+            session,
+            write_authority=make_test_write_authority(),
+            metadata=json.dumps({"workspace_root": root}),
         )
         await session.commit()
         session.expunge_all()
@@ -513,6 +528,7 @@ class TestFeatureTagBoundIsTheColumn:
 
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             metadata=json.dumps(
                 {"workspace_root": f"C:{os.sep}workspace", "feature_tag": tag}
             ),
@@ -538,6 +554,7 @@ class TestFeatureTagBoundIsTheColumn:
 
         thread = await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             metadata=json.dumps(
                 {
                     "workspace_root": f"C:{os.sep}workspace",

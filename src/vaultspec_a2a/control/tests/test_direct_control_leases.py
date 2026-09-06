@@ -23,6 +23,8 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...api.tests.clarification_harness import new_state_graph
 from ...control.action_lease import claim_control_action
 from ...control.cancel_service import CancelResult, cancel_thread
@@ -166,6 +168,7 @@ async def _running_thread(
     async with sessions() as db:
         await create_thread(
             db,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             status=ThreadStatus.RUNNING,
             team_preset=team_preset,
@@ -185,6 +188,7 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
     async with session_factory() as db:
         await create_thread(
             db,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             status=ThreadStatus.INPUT_REQUIRED,
             metadata=current_execution_metadata(tmp_path),
@@ -552,6 +556,7 @@ async def test_restart_redrives_expired_permission_message_and_cancel_actions(
         ):
             await create_thread(
                 db,
+                write_authority=make_test_write_authority(),
                 thread_id=thread_id,
                 status=status,
                 metadata=_active_project_metadata(),

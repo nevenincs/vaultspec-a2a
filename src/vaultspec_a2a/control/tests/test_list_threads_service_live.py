@@ -18,6 +18,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...control.thread_service import list_threads_service
 from ...database import create_thread
@@ -57,6 +59,7 @@ async def _seed(session_factory, count: int) -> list[str]:
         for index in range(count):
             thread = await create_thread(
                 session,
+                write_authority=make_test_write_authority(),
                 title=f"thread-{index}",
                 thread_id=f"t{index:02d}",
                 repair_status=RepairStatus.HEALTHY,

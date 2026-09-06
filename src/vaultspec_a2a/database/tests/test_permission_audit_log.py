@@ -24,6 +24,8 @@ import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
@@ -111,7 +113,12 @@ async def _pause_run(
     """Park a real run on a real durable permission request."""
     request_id = f"{thread_id}:permission"
     async with sessions() as db:
-        await create_thread(db, thread_id=thread_id, status=ThreadStatus.INPUT_REQUIRED)
+        await create_thread(
+            db,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status=ThreadStatus.INPUT_REQUIRED,
+        )
         await record_permission_request(
             db,
             request_id=request_id,

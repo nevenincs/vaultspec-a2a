@@ -106,6 +106,55 @@ class TestCompatibleStoresValidateWithoutMutation:
 
 class TestIncompatibleStoresFailLoud:
     @pytest.mark.asyncio
+    async def test_stamped_head_without_receipt_index_is_refused_read_only(
+        self, runtime_dir: Path
+    ) -> None:
+        primary, checkpoint = await _make_compatible_stores(runtime_dir)
+        conn = sqlite3.connect(str(primary))
+        try:
+            conn.execute("DROP INDEX ux_threads_writer_action_receipt_id")
+            conn.commit()
+        finally:
+            conn.close()
+        before = _schema_dump(primary)
+
+        with pytest.raises(SchemaCompatibilityError, match="unique current"):
+            await validate_desktop_schema(
+                database_url=_url(primary), checkpoint_path=checkpoint
+            )
+
+        assert _schema_dump(primary) == before
+
+    @pytest.mark.asyncio
+    async def test_thread_without_matching_action_receipt_is_refused_read_only(
+        self, runtime_dir: Path
+    ) -> None:
+        primary, checkpoint = await _make_compatible_stores(runtime_dir)
+        conn = sqlite3.connect(str(primary))
+        try:
+            conn.execute(
+                """INSERT INTO threads (
+                       id, created_at, updated_at, status, run_revision,
+                       writer_generation, writer_action_type,
+                       writer_action_receipt_id
+                   ) VALUES (
+                       'orphan-authority', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                       'running', 0, 1, 'ingest', 'receipt-orphan'
+                   )"""
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        before = _schema_dump(primary)
+
+        with pytest.raises(SchemaCompatibilityError, match="matching action receipt"):
+            await validate_desktop_schema(
+                database_url=_url(primary), checkpoint_path=checkpoint
+            )
+
+        assert _schema_dump(primary) == before
+
+    @pytest.mark.asyncio
     async def test_corrupt_primary_store_has_actionable_error(
         self, runtime_dir: Path
     ) -> None:

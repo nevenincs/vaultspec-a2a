@@ -17,6 +17,8 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...database import create_thread, seed_task_queue
 from ...database.models import Base
 from ...graph.enums import Provider
@@ -74,7 +76,11 @@ async def test_deterministic_tool_call_advances_real_task_queue(tmp_path: Path) 
             engine, class_=AsyncSession, expire_on_commit=False
         )
         async with session_factory() as session:
-            thread = await create_thread(session, title="deterministic tool call")
+            thread = await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                title="deterministic tool call",
+            )
             await seed_task_queue(
                 session,
                 thread_id=thread.id,

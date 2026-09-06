@@ -78,6 +78,7 @@ def build_migration_config(database_url: str) -> Config:
     cfg = Config()
     cfg.set_main_option("script_location", _alembic_option(str(script_location)))
     cfg.set_main_option("sqlalchemy.url", _alembic_option(database_url))
+    cfg.attributes["vaultspec_current_only_head"] = True
     return cfg
 
 

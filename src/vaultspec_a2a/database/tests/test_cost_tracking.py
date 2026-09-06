@@ -42,6 +42,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.schema import CreateTable
 
+from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
+
 from ...graph.compiler import compile_team_graph
 from ...graph.nodes.worker import (
     _describe_worker_model,
@@ -264,7 +266,11 @@ async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
 
 
 async def _seed_thread(session: AsyncSession, thread_id: str) -> ThreadModel:
-    thread = ThreadModel(id=thread_id, title=f"thread {thread_id}")
+    thread = ThreadModel(
+        **make_test_thread_authority_columns(),
+        id=thread_id,
+        title=f"thread {thread_id}",
+    )
     session.add(thread)
     await session.flush()
     return thread

@@ -24,6 +24,8 @@ import pytest_asyncio
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ...control.run_discovery_service import discover_active_runs
 from ...control.thread_state_service import build_thread_state
@@ -58,6 +60,7 @@ async def _seed_reconciling_thread(
     async with session_factory() as session:
         await create_thread(
             session,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             status=ThreadStatus.RECONCILING,
             team_preset=team_preset,

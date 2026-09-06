@@ -24,6 +24,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from vaultspec_a2a.tests._write_authority import make_test_write_authority
+
 from ...conftest import materialize_schema
 from ..permission_repository import (
     get_threads_with_pending_permission_requests,
@@ -110,7 +112,12 @@ async def test_pending_permission_lookup_is_one_statement_for_the_backlog(
 
     async with sessions() as session:
         for thread_id in thread_ids:
-            await create_thread(session, thread_id=thread_id, status="running")
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id=thread_id,
+                status="running",
+            )
             if thread_id in with_pending:
                 await _seed_permission(session, thread_id)
         await session.commit()
@@ -137,7 +144,12 @@ async def test_pending_permission_lookup_chunks_past_the_parameter_cap(
     thread_ids = [f"thread-{index:05d}" for index in range(1200)]
 
     async with sessions() as session:
-        await create_thread(session, thread_id=thread_ids[700], status="running")
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_ids[700],
+            status="running",
+        )
         await _seed_permission(session, thread_ids[700])
         await session.commit()
 
@@ -175,7 +187,12 @@ async def _reconcile_backlog(
 
         async with sessions() as session:
             for thread_id in thread_ids:
-                await create_thread(session, thread_id=thread_id, status="running")
+                await create_thread(
+                    session,
+                    write_authority=make_test_write_authority(),
+                    thread_id=thread_id,
+                    status="running",
+                )
                 await _seed_permission(session, thread_id)
             await session.commit()
 

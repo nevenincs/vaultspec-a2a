@@ -19,7 +19,10 @@ from ...database.models import Base, RunWriteAuthority
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...thread.enums import ControlActionType, ThreadStatus
-from ..action_lease import claim_control_action
+from ..action_lease import (
+    finalize_control_action_acceptance,
+    prepare_control_action_claim,
+)
 from ..dispatch_receipts import bind_graph_action_receipt
 
 
@@ -57,10 +60,37 @@ async def _seed(sessions):
 
 
 @pytest.mark.asyncio
+async def test_delivery_cannot_create_missing_acceptance_evidence(sessions, tmp_path):
+    await _seed(sessions)
+    async with sessions() as db:
+        bound = await bind_graph_action_receipt(
+            db,
+            DispatchRequest(
+                dispatch_id="initial",
+                action="ingest",
+                thread_id="run",
+                content="first",
+                workspace_root=str(tmp_path),
+                recursion_limit=25,
+            ),
+        )
+        assert bound.graph_action_receipt is None
+        await db.commit()
+    async with sessions() as observer:
+        action = await get_control_action_by_dispatch_id(
+            observer,
+            thread_id="run",
+            dispatch_id="initial",
+        )
+        assert action is not None
+        assert action.graph_receipt_json is None
+
+
+@pytest.mark.asyncio
 async def test_retry_preserves_original_receipt_after_state_revision(sessions):
     witness = await _seed(sessions)
     async with sessions() as db:
-        claim = await claim_control_action(
+        claim = await prepare_control_action_claim(
             db,
             thread_id="run",
             action_type=ControlActionType.RESUME,
@@ -69,6 +99,7 @@ async def test_retry_preserves_original_receipt_after_state_revision(sessions):
             write_expectation=witness,
         )
         assert claim.acquired
+        await finalize_control_action_acceptance(db, claim)
     async with sessions() as observer:
         durable = await get_control_action_by_dispatch_id(
             observer, thread_id="run", dispatch_id=claim.dispatch_id
@@ -137,7 +168,7 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(sessio
         )
         await db.commit()
     async with sessions() as db:
-        claim = await claim_control_action(
+        claim = await prepare_control_action_claim(
             db,
             thread_id="run",
             action_type=ControlActionType.RESUME,
@@ -159,3 +190,56 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(sessio
         assert thread is not None
         assert thread.status == ThreadStatus.CANCELLED
         assert thread.writer_action_receipt_id == "initial"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finalize", [False, True])
+async def test_requested_projection_and_receipt_share_acceptance_commit(
+    sessions, finalize
+):
+    witness = await _seed(sessions)
+    async with sessions() as db:
+        claim = await prepare_control_action_claim(
+            db,
+            thread_id="run",
+            action_type=ControlActionType.RESUME,
+            idempotency_key="resume",
+            payload={"option_id": "yes"},
+            write_expectation=witness,
+        )
+        assert claim.acquired
+        row = await get_thread(db, "run")
+        assert row is not None
+        row.approval_response_action_id = claim.action_id
+        before_commit = await bind_graph_action_receipt(
+            db,
+            DispatchRequest(
+                dispatch_id=claim.dispatch_id,
+                action="resume",
+                thread_id="run",
+                option_id="yes",
+                recursion_limit=25,
+            ),
+        )
+        assert before_commit.graph_action_receipt is None
+        if finalize:
+            await finalize_control_action_acceptance(db, claim)
+        # Closing without finalization simulates failure before acceptance.
+    async with sessions() as observer:
+        action = await get_control_action_by_dispatch_id(
+            observer,
+            thread_id="run",
+            dispatch_id=claim.dispatch_id,
+        )
+        row = await get_thread(observer, "run")
+        assert row is not None
+        if finalize:
+            assert action is not None
+            assert action.graph_receipt_json is not None
+            assert action.claim_token == claim.claim_token
+            assert row.writer_action_receipt_id == claim.dispatch_id
+            assert row.approval_response_action_id == claim.action_id
+        else:
+            assert action is None
+            assert row.writer_action_receipt_id == "initial"
+            assert row.approval_response_action_id is None

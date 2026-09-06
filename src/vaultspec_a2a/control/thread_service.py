@@ -19,7 +19,10 @@ from uuid import uuid4
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
 from ..control.dispatch import safe_dispatch
-from ..control.dispatch_receipts import bind_graph_action_receipt
+from ..control.dispatch_receipts import (
+    bind_graph_action_receipt,
+    prepare_graph_action_receipt,
+)
 from ..control.repair_transitions import (
     mark_dispatch_failed,
     mark_ingest_applied,
@@ -603,6 +606,14 @@ async def create_and_dispatch_thread(
         },
     )
     await mark_ingest_requested(db, thread.id)
+    receipt = await prepare_graph_action_receipt(
+        db,
+        thread_id=thread.id,
+        dispatch_id=action_receipt_id,
+    )
+    if receipt is None:
+        await db.rollback()
+        raise ValueError("initial action could not establish graph receipt authority")
     await db.commit()
 
     logger.info(
@@ -922,8 +933,7 @@ async def archive_thread(db: AsyncSession, thread_id: str) -> ArchiveResult:
         return ArchiveResult(
             archived=False,
             error_detail=(
-                refreshed.reason
-                or "Thread authority changed during archive election"
+                refreshed.reason or "Thread authority changed during archive election"
             ),
         )
     await db.commit()

@@ -59,7 +59,11 @@ from ..thread.enums import (
 )
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
 from ._thread_metadata import dispatchable_workspace_root
-from .action_lease import claim_control_action, release_definite_non_delivery
+from .action_lease import (
+    finalize_control_action_acceptance,
+    prepare_control_action_claim,
+    release_definite_non_delivery,
+)
 from .dispatch import safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
@@ -643,7 +647,7 @@ class VerdictSubscriber:
 
         resume_value = _verdict_resume_payload(verdict, notes)
         async with self._session_factory() as db:
-            claim = await claim_control_action(
+            claim = await prepare_control_action_claim(
                 db,
                 write_expectation=write_expectation,
                 thread_id=thread_id,
@@ -672,6 +676,7 @@ class VerdictSubscriber:
                     claim.applied,
                 )
                 return
+            await finalize_control_action_acceptance(db, claim)
         if claim.claim_token is None:
             raise RuntimeError("acquired verdict lease has no claim token")
 

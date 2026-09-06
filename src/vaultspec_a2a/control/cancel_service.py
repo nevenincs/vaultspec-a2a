@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..control.action_lease import (
-    claim_control_action,
+    finalize_control_action_acceptance,
+    prepare_control_action_claim,
     release_definite_non_delivery,
 )
 from ..control.dispatch import safe_dispatch
@@ -183,7 +184,7 @@ async def cancel_thread(
     # it must not create a second dispatchable intention.
     resolved_idempotency_key = default_cancel_key(thread_id)
     response_idempotency_key = idempotency_key or resolved_idempotency_key
-    claim = await claim_control_action(
+    claim = await prepare_control_action_claim(
         db,
         thread_id=thread_id,
         action_type=ControlActionType.CANCEL,
@@ -266,8 +267,7 @@ async def cancel_thread(
         )
     )
     if election is not None and election.outcome is not ThreadStatusElectionOutcome.WON:
-        await release_definite_non_delivery(db, claim, FailureType.REJECTED)
-        await db.commit()
+        await db.rollback()
         if election.outcome is ThreadStatusElectionOutcome.NOT_FOUND:
             return CancelResult(
                 action_id=claim.action_id,
@@ -315,7 +315,7 @@ async def cancel_thread(
         )
     if election is not None:
         await mark_cancel_requested(db, thread_id)
-    await db.commit()
+    await finalize_control_action_acceptance(db, claim)
 
     dispatch = DispatchRequest(
         dispatch_id=claim.dispatch_id,

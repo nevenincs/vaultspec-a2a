@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 
 from ..database import (
@@ -21,10 +20,6 @@ from ..database import (
     successor_thread_write_authority,
     thread_write_expectation,
 )
-from ..thread.action_receipts import (
-    GraphActionReceipt,
-    control_action_payload_fingerprint,
-)
 from ..thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
     read_checkpoint_evidence,
@@ -36,6 +31,7 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from ..thread.terminal_effects import compute_terminal_effects
+from .dispatch_receipts import validate_current_graph_receipt
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,27 +85,8 @@ async def reconcile_run_checkpoint(
         is ControlActionType.PERMISSION_REQUEST_CREATED
     ):
         return RecoveryObservation(status, "awaiting_control", None, False)
-    if action is None or action.graph_receipt_json is None:
-        return RecoveryObservation(status, "incompatible_action_receipt", None, False)
-    try:
-        receipt = GraphActionReceipt.model_validate_json(action.graph_receipt_json)
-        if action.payload_json is None:
-            raise ValueError("accepted payload is absent")
-        fingerprint = control_action_payload_fingerprint(
-            TypeAdapter(dict[str, object]).validate_json(action.payload_json)
-        )
-    except (ValueError, ValidationError):
-        return RecoveryObservation(status, "incompatible_action_receipt", None, False)
-    if (
-        receipt.thread_id != thread_id
-        or receipt.action_id != action.id
-        or receipt.payload_fingerprint != fingerprint
-        or action.action_type != receipt.action_type
-        or receipt.action_type != expectation.authority.action_type
-        or receipt.dispatch_id != expectation.authority.action_receipt_id
-        or receipt.writer_generation != expectation.authority.writer_generation
-        or receipt.run_revision > expectation.authority.run_revision
-    ):
+    receipt = validate_current_graph_receipt(thread, action)
+    if receipt is None or action is None:
         return RecoveryObservation(status, "incompatible_action_receipt", None, False)
     action_id = action.id
     # The checkpoint store is a different transaction owner. Release this read

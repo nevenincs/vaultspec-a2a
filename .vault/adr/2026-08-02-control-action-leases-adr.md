@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:7b8b62f6ddcfbb78f05ce30d2e350f9c9157209bf65c7760abc0e38c3d48b050'
+body_hash: 'sha256:cf881fc2ce8c018a56dcfe72a825991e53d032d3862733d915196735e928a556'
 related:
   - "[[2026-08-02-control-action-leases-research]]"
   - "[[2026-08-02-control-action-leases-reference]]"
@@ -106,3 +106,7 @@ Ephemeral actor tokens never enter the journal or checkpoint. The durable record
 Graph-action acceptance commits the reserved action, renewable lease, conditional thread writer and immutable graph receipt in one database transaction. A lost prior-writer witness refuses acceptance and rolls back the reservation. Recovery may renew only an action that already owns the current run; delivery cannot promote an action in a later transaction.
 
 The application engine owns the physical SQLite BEGIN boundary before any SAVEPOINT. Releasing a reservation savepoint must not commit an action independently of the outer acceptance transaction. SQLAlchemy's transaction event begins that transaction; driver-delayed BEGIN is not an alternative authority. Cancellation still requires its separate durable cessation or no-op evidence.
+
+## Acceptance transaction owner
+
+Lease preparation does not commit. The accepting service owns the complete transaction and adds the requested run and permission projections before invoking the verified acceptance finalizer. The finalizer checks the held lease and commits that accepted intention, writer, receipt and its declared effects together before delivery. Refusal or failure before finalization rolls back the attempted acceptance. A repository rule restricting this transaction to the lease alone is superseded: it contradicts atomic accepted state and cannot establish ownership by inspecting only unflushed ORM objects. Network delivery is never part of this database transaction.

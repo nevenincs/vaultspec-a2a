@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:8995f8df6efa6fa993d29ac8793937e449e03b5a06473268a5cfa29b75f024e7'
+body_hash: 'sha256:61c70d12d2da909d60c99df67893e3dba8427009acfa1513d149b9e54256efed'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -127,3 +127,26 @@ Two combined four-case invocations reached four dots but produced no pytest sess
 ### s87-test-protocol-typing | medium | correction owned by S34
 
 Verification/type: parent full-file Ty found two S87 topology tests calling get_graph through a protocol that does not declare it. Parent corrected those test inspections with explicit Any casts while owning the same file for S34. Earlier S87 focused Ty evidence did not cover those full-file diagnostics; retain this correction in the audit trail.
+
+### atomic-acceptance-finalizer | high | corrected further S12 transaction ownership
+
+Architecture/atomicity: the former shared claim committed before the caller could add its permission/message/cancellation projection. The repository also explicitly refused composition with unflushed accepted state. Preparation now leaves the winning transaction open, and every production caller explicitly finalizes its verified lease before dispatch after adding the accepted effects. Cancellation and recovery losing paths roll back; clarification early refusal constructs its response before rolling back expired ORM state. The lease-only pending-state guard is removed under the amended binding transaction owner.
+
+Formal self-review found and corrected two clarification early-return paths that could otherwise leave a prepared transaction for an outer caller to commit. The real production-configured SQLite discriminator verifies closing before finalization persists none of the new action/writer/requested projection, while finalization publishes all of them including immutable graph receipt and lease token. Both cases passed in 12.93 seconds through the bounded runner with natural exit zero and whole-containment quiescence. Focused source Ty passed.
+
+### complete-accepted-input-still-open | high | S12 remains open
+
+Architecture/input authority: complete noninitial effective dispatch controls are still not journaled, and message project validation remains after durable acceptance. Initial graph receipt creation still needs to join the initial input transaction. The delivery binder still owns a commit and must become a pure reader of accepted evidence. These are required remaining corrections before the durable retry scheduler can reconstruct every action. Cancellation cessation evidence remains separate and open.
+
+### retired-claim-test-contract | medium | S84 current-contract tests required
+
+Verification/contract: the old auto-committing claim API is removed without an alias. Historical direct-control, recovery, event and verdict tests importing that API must adopt explicit prepare/finalize acceptance and real current receipts. Only the receipt/acceptance discriminator is migrated in this pass; no broad suite pass is claimed. The existing combined-run lifecycle failures remain failed evidence.
+
+### delivery-cannot-create-authority | high | initial atomicity and pure binding corrected in S12
+
+The initial input transaction now prepares its immutable graph receipt before commit. The delivery binder only reads and validates existing evidence; it no longer creates receipts or commits. Recovery and delivery call one current-receipt validator so payload fingerprint, writer generation and action identity have one interpretation. This closes the initial-receipt and binder items from complete-accepted-input-still-open; complete noninitial inputs, preacceptance project validation and cancellation evidence remain open.
+
+Verification: real HTTP receiver independently observed the committed initial input and receipt before acknowledgement, one case passed in 16.94 seconds. A missing-receipt delivery discriminator initially failed because its ingest fixture omitted the required active project (one failed, two passed in 7.42 seconds); after supplying the real temporary project it passed one case in 4.06 seconds. It proves that even committing after binding cannot fabricate missing receipt authority. Receipt-revision preservation and stale-writer refusal passed two cases in 2.86 seconds. All these runner invocations exited naturally; the fixture failure remains failed evidence. Focused Ruff and source Ty passed.
+### delivery-read-transaction-owner | medium | corrected in S12 review
+
+The pure delivery binder now owns a separate short read session. It cannot see uncommitted caller acceptance, publish or discard caller writes, or hold its read transaction across network delivery. The finalized/aborted acceptance discriminator now also attempts binding before finalization and proves that no receipt is exposed; both cases passed in 11.02 seconds. Missing-receipt refusal and committed receipt preservation passed two cases in 3.86 seconds. Shared recovery completion passed one case in 15.46 seconds. All exited naturally with code zero and whole-containment quiescence. Final focused Ruff/Ty and Core error checks passed.

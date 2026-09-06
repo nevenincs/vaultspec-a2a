@@ -20,7 +20,11 @@ from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
 from ._thread_metadata import dispatchable_workspace_root
-from .action_lease import claim_control_action, release_definite_non_delivery
+from .action_lease import (
+    finalize_control_action_acceptance,
+    prepare_control_action_claim,
+    release_definite_non_delivery,
+)
 from .dispatch import safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
@@ -259,7 +263,7 @@ async def redrive_direct_control_actions(
     conflicted = len(rows) - len(stored)
     for action in stored:
         async with session_factory() as db:
-            claim = await claim_control_action(
+            claim = await prepare_control_action_claim(
                 db,
                 thread_id=action.thread_id,
                 action_type=action.action_type,
@@ -284,12 +288,8 @@ async def redrive_direct_control_actions(
                 recursion_limit=recursion_limit,
             )
             if isinstance(dispatch, _Refusal):
-                # No worker was contacted, so the lease release is offered with
-                # the refusal's own type: a definite non-delivery hands the
-                # action straight back for redrive, while a refusal that can
-                # never succeed on its own - an absent active project - is not in
-                # that set and keeps its lease until the TTL, so a permanently
-                # unsatisfiable action backs off instead of spinning.
+                # Refusal aborts this prepared acceptance. The durable retry
+                # coordinator owns classification and later scheduling.
                 logger.warning(
                     "Direct control recovery refused %s on thread %s (%s): %s",
                     action.action_type,
@@ -302,11 +302,7 @@ async def redrive_direct_control_actions(
                         "failure_type": dispatch.failure_type.value,
                     },
                 )
-                await release_definite_non_delivery(
-                    db,
-                    claim,
-                    dispatch.failure_type,
-                )
+                await db.rollback()
                 refused += 1
                 continue
             owns_projection = await _restore_requested_state(
@@ -315,15 +311,11 @@ async def redrive_direct_control_actions(
                 action_receipt_id=claim.dispatch_id,
             )
             if not owns_projection:
-                await release_definite_non_delivery(
-                    db,
-                    claim,
-                    FailureType.REJECTED,
-                )
+                await db.rollback()
                 conflicted += 1
                 continue
+            await finalize_control_action_acceptance(db, claim)
             dispatch = await bind_graph_action_receipt(db, dispatch)
-            await db.commit()
             outcome = await safe_dispatch(
                 worker_client,
                 dispatch,

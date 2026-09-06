@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import (
     ThreadModel,
@@ -24,8 +25,7 @@ from ..thread.action_receipts import (
 from ..thread.enums import NON_ACTIVE_STATUSES, ControlActionType
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
-
+    from ..database.models import ControlActionModel
     from ..database.thread_repository import ThreadWriteExpectation
     from ..ipc.schemas import DispatchRequest
 
@@ -37,6 +37,39 @@ _GRAPH_ACTIONS = {
     ControlActionType.RESUME: "resume",
     ControlActionType.PERMISSION_RESPONSE_SUBMITTED: "resume",
 }
+
+
+def validate_current_graph_receipt(
+    thread: ThreadModel,
+    action: ControlActionModel | None,
+) -> GraphActionReceipt | None:
+    """Validate stored evidence against the current writer without creating it."""
+    if (
+        action is None
+        or action.graph_receipt_json is None
+        or action.payload_json is None
+    ):
+        return None
+    try:
+        receipt = GraphActionReceipt.model_validate_json(action.graph_receipt_json)
+        fingerprint = control_action_payload_fingerprint(
+            _PAYLOAD.validate_json(action.payload_json)
+        )
+        expectation = thread_write_expectation(thread)
+    except (ValueError, ValidationError):
+        return None
+    if (
+        receipt.thread_id != thread.id
+        or receipt.action_id != action.id
+        or receipt.payload_fingerprint != fingerprint
+        or action.action_type != receipt.action_type
+        or receipt.action_type != expectation.authority.action_type
+        or receipt.dispatch_id != expectation.authority.action_receipt_id
+        or receipt.writer_generation != expectation.authority.writer_generation
+        or receipt.run_revision > expectation.authority.run_revision
+    ):
+        return None
+    return receipt
 
 
 async def prepare_graph_action_receipt(
@@ -124,15 +157,25 @@ async def bind_graph_action_receipt(
     db: AsyncSession,
     dispatch: DispatchRequest,
 ) -> DispatchRequest:
-    """Bind current evidence without promoting an action at delivery time."""
+    """Read committed acceptance evidence; delivery creates no receipt or writer."""
     if dispatch.action == "cancel":
         return dispatch
-    receipt = await prepare_graph_action_receipt(
-        db,
-        thread_id=dispatch.thread_id,
-        dispatch_id=dispatch.dispatch_id,
-    )
+    if db.bind is None:
+        raise RuntimeError("receipt delivery requires a bound durable database")
+    # A separate read transaction sees only committed acceptance and is closed
+    # before network delivery. It cannot publish or discard the caller's writes.
+    async with AsyncSession(bind=db.bind) as reader:
+        thread = await reader.get(ThreadModel, dispatch.thread_id)
+        action = await get_control_action_by_dispatch_id(
+            reader,
+            thread_id=dispatch.thread_id,
+            dispatch_id=dispatch.dispatch_id,
+        )
+        receipt = (
+            validate_current_graph_receipt(thread, action)
+            if thread is not None and thread.status not in NON_ACTIVE_STATUSES
+            else None
+        )
     if receipt is not None and _GRAPH_ACTIONS[receipt.action_type] != dispatch.action:
         receipt = None
-    await db.commit()
     return dispatch.model_copy(update={"graph_action_receipt": receipt})

@@ -474,21 +474,8 @@ async def commit_control_action_lease(
     *,
     claim_token: str,
 ) -> ControlActionModel:
-    """Commit a verified lease before its owner performs network dispatch.
-
-    This is the one repository function that commits, against the convention
-    documented at :func:`vaultspec_a2a.control.permission_service` that the
-    dispatch stage owns the commit. The commit is load-bearing and cannot move:
-    durable ownership has to be visible to every other process *before* the
-    network dispatch happens, and the lease ``UPDATE`` lives in this session's
-    open transaction, so no other session could commit it.
-
-    What the commit cannot see is anything else the caller staged on the same
-    session, which it would publish as a side effect. The guard below refuses
-    that composition instead of silently committing it: the transaction handed
-    here must contain the claim election and nothing else.
-    """
-    _assert_no_foreign_pending_state(session)
+    """Commit verified lease ownership and its complete accepted projections."""
+    await session.flush()
     action = await session.get(ControlActionModel, action_id, populate_existing=True)
     if (
         action is None
@@ -499,30 +486,6 @@ async def commit_control_action_lease(
         raise RuntimeError("control action lease is not owned by this dispatcher")
     await session.commit()
     return action
-
-
-def _assert_no_foreign_pending_state(session: AsyncSession) -> None:
-    """Refuse to commit a session carrying unflushed work that is not the lease.
-
-    Detection is limited to ORM state the session has not yet flushed - inserts,
-    deletes, and attribute mutations still held in the unit of work. Work the
-    caller already flushed is indistinguishable at this seam from the claim's own
-    flushed rows, so the contract stated above remains the caller's to honour;
-    this closes the case the session can actually see.
-    """
-    sync_session = session.sync_session
-    pending: list[object] = [
-        *sync_session.new,
-        *sync_session.deleted,
-        *(obj for obj in sync_session.dirty if sync_session.is_modified(obj)),
-    ]
-    if pending:
-        kinds = sorted({type(obj).__name__ for obj in pending})
-        raise RuntimeError(
-            "control action lease commit refused: the session carries unflushed "
-            f"changes to {kinds}. Committing the lease would publish them as a "
-            "side effect. Commit or discard that work before claiming the lease."
-        )
 
 
 async def release_control_action_lease(

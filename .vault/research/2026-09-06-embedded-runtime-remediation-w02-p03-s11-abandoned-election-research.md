@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:58c2487b73188273fdac7ab843a9e7d0e529469e5b2929b2c4f0f2585abecfbe'
+body_hash: 'sha256:5107a9235fbe398a9cb9418e39d1d8434057461d0a6d539e01555b85e0cd312f'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-audit]]"
@@ -88,3 +88,13 @@ A real checkpointer test completes one action, interrupts a second, reopens the 
 The gateway can settle an exact successful graph completion without provider reconstruction. One reader validates current action incorporation and completion, classifies unavailable, incompatible, prior, pending, interrupted and failed evidence, and never infers completion from empty pending writes. Startup and served reads use the same database election and fresh post-election projection. An explicit startup trigger distinguishes abandoned process ownership from live execution observed by a read.
 
 This removes mutable configuration and wall-clock row age as deadline authority. It does not supply the missing frozen execution deadline or retry lease: those require durable accepted control inputs and scheduling ownership. Worker preflight, notification settlement and deferred replay must consume the same authority before the recovery architecture is complete.
+
+## Acceptance projection transaction
+
+The shared lease primitive previously ended the database transaction before its service could record the accepted permission response or requested run state. The lease repository's unflushed-state guard made that separation explicit, despite being unable to detect already flushed unrelated work. The coherent owner is the service's acceptance transaction: prepare the claim and exact writer/receipt, record accepted effects, then verify and commit once before delivery. Physical SQLite transaction ownership makes aborting before that barrier remove all newly prepared state.
+
+This fixes publication ordering but does not supply omitted effective control input. Recovery scheduling still requires frozen complete dispatch input and execution deadlines, and delivery must consume already committed evidence without creating it.
+
+## Delivery reads accepted authority
+
+Initial admission can prepare the graph receipt inside the same transaction as its stored effective input. A later delivery binder therefore needs no write authority: it reads the action and current run witness, validates their immutable receipt, and refuses absent evidence. Sharing that validator with gateway recovery prevents delivery and checkpoint settlement from interpreting the same action differently. Full noninitial dispatch input remains the next acceptance prerequisite for safe redrive.

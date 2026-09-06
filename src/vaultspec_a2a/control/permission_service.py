@@ -43,7 +43,8 @@ from ..thread.snapshots import (
 )
 from .action_lease import (
     ControlActionClaim,
-    claim_control_action,
+    finalize_control_action_acceptance,
+    prepare_control_action_claim,
     release_definite_non_delivery,
 )
 from .dispatch import safe_dispatch
@@ -790,7 +791,7 @@ async def _record_permission_transition(
         notes,
     )
 
-    claim = await claim_control_action(
+    claim = await prepare_control_action_claim(
         db,
         write_expectation=write_expectation,
         thread_id=thread_id,
@@ -872,9 +873,7 @@ async def _record_permission_transition(
             approval_response_action_id=claim.action_id,
         )
     await mark_permission_response_requested(db, thread_id)
-    # ``claim_control_action`` committed the election. Commit the accepted
-    # permission projection as a second pre-network durability boundary.
-    await db.commit()
+    await finalize_control_action_acceptance(db, claim)
 
     return _PermissionTransition(
         claim=claim,

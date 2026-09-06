@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..control.action_lease import (
-    claim_control_action,
+    finalize_control_action_acceptance,
+    prepare_control_action_claim,
     release_definite_non_delivery,
 )
 from ..control.dispatch import safe_dispatch
@@ -137,7 +138,7 @@ async def send_followup_message(
     resolved_idempotency_key = idempotency_key or default_message_key(
         thread_id, agent_id, content
     )
-    claim = await claim_control_action(
+    claim = await prepare_control_action_claim(
         db,
         thread_id=thread_id,
         action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
@@ -172,7 +173,7 @@ async def send_followup_message(
         )
 
     await mark_message_followup_requested(db, thread_id)
-    await db.commit()
+    await finalize_control_action_acceptance(db, claim)
 
     # -- Metadata extraction ---------------------------------------------
     # A follow-up inherits the active project the run was created with; it is

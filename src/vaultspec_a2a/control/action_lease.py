@@ -25,7 +25,8 @@ if TYPE_CHECKING:
 __all__ = [
     "CONTROL_ACTION_LEASE_TTL",
     "ControlActionClaim",
-    "claim_control_action",
+    "finalize_control_action_acceptance",
+    "prepare_control_action_claim",
     "release_definite_non_delivery",
 ]
 
@@ -53,7 +54,7 @@ class ControlActionClaim:
     claim_token: str | None
 
 
-async def claim_control_action(
+async def prepare_control_action_claim(
     db: AsyncSession,
     *,
     thread_id: str,
@@ -66,11 +67,11 @@ async def claim_control_action(
     lease_ttl: timedelta = CONTROL_ACTION_LEASE_TTL,
     write_expectation: ThreadWriteExpectation | None = None,
 ) -> ControlActionClaim:
-    """Atomically reserve one intention and acquire its renewable dispatch lease.
+    """Prepare one accepted action inside the caller's acceptance transaction.
 
-    A winning lease is committed before this function returns. A replay with a
-    fresh lease returns ``acquired=False`` and performs no write. A competing
-    payload is reported without acquiring the winner or exposing its body.
+    The winner remains uncommitted so requested projections join the receipt,
+    writer and lease. The caller must finalize acceptance before any network
+    delivery. Losing claims roll back their attempted acceptance.
     """
     instant = now or datetime.now(UTC)
     reservation = await reserve_control_action(
@@ -118,13 +119,7 @@ async def claim_control_action(
         if receipt is None:
             acquired = False
             authority_matches = False
-    if acquired and claim_token is not None:
-        await commit_control_action_lease(
-            db,
-            action_id,
-            claim_token=claim_token,
-        )
-    else:
+    if not acquired:
         claim_token = None
         await db.rollback()
 
@@ -138,6 +133,20 @@ async def claim_control_action(
         applied=applied,
         result_status=result_status,
         claim_token=claim_token,
+    )
+
+
+async def finalize_control_action_acceptance(
+    db: AsyncSession,
+    claim: ControlActionClaim,
+) -> None:
+    """Commit the verified claim and all accepted effects before delivery."""
+    if not claim.acquired or claim.claim_token is None:
+        raise RuntimeError("cannot finalize an unowned control action acceptance")
+    await commit_control_action_lease(
+        db,
+        claim.action_id,
+        claim_token=claim.claim_token,
     )
 
 

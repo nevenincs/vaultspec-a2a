@@ -39,7 +39,11 @@ from ..thread.enums import (
     ControlActionType,
 )
 from ._thread_metadata import dispatchable_workspace_root
-from .action_lease import claim_control_action, release_definite_non_delivery
+from .action_lease import (
+    finalize_control_action_acceptance,
+    prepare_control_action_claim,
+    release_definite_non_delivery,
+)
 from .dispatch import safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
@@ -294,7 +298,7 @@ async def respond_to_clarification(
             # pretending the now-absent questionnaire invalidates the write.
             return _result(existing)
 
-    # ``claim_control_action`` rolls back the caller's session when this request
+    # ``prepare_control_action_claim`` rolls back the caller's session when this request
     # loses a concurrent insert.  SQLAlchemy expires every loaded ORM instance
     # on that rollback, so all thread fields needed after the election must be
     # copied first; reading an expired attribute here would attempt implicit
@@ -318,7 +322,7 @@ async def respond_to_clarification(
             failure_type=FailureType.INCOMPATIBLE_STATE,
         )
 
-    claim = await claim_control_action(
+    claim = await prepare_control_action_claim(
         db,
         write_expectation=write_expectation,
         thread_id=thread_id,
@@ -354,19 +358,23 @@ async def respond_to_clarification(
         return _result(action, applied=True)
 
     if parked is None or parked.request_id != request_id:
-        return _result(
+        result = _result(
             action,
             accepted=False,
             error_detail="Clarification application cannot be confirmed",
             error_status_code=409,
         )
+        await db.rollback()
+        return result
     if thread_status in NON_ACTIVE_STATUSES:
-        return _result(
+        result = _result(
             action,
             accepted=False,
             error_detail="Run is not active",
             error_status_code=409,
         )
+        await db.rollback()
+        return result
 
     if not claim.acquired:
         return _result(action)
@@ -381,6 +389,7 @@ async def respond_to_clarification(
         recursion_limit=recursion_limit,
         model_assignment=execution_authority.model_assignment,
     )
+    await finalize_control_action_acceptance(db, claim)
     dispatch = await bind_graph_action_receipt(db, dispatch)
     outcome = await safe_dispatch(
         worker_client,

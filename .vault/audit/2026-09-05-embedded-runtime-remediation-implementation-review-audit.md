@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:a50a51cb8689e7be6170ca6089302dc73a29b5510e2956ce006bc9a8e9512aab'
+body_hash: 'sha256:ac41088d08795f492849942c841459863844bd46e982b028a934ee65154cb102'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -504,3 +504,34 @@ remediation W01.P02.S05 remain blocked by this HIGH evidence gap. An initial
 worker-health ReadTimeout failure followed by a clean 61.71-second rerun after
 concurrent live-process cleanup remains owned by the queued W01.P02.S06
 resource-lifecycle work.
+### p01-s11-graph-cache-omits-frozen-assignment | high | resolved pending formal review
+
+Type: execution state isolation and restart integrity. The full-assignment
+production discriminator exposed that the worker graph cache keyed only on team
+preset, canonical workspace and autonomous mode. Concurrent runs with different
+schema-v1 frozen assignments could therefore share whichever graph compiled
+first, silently substituting one run's provider/model/control/fallback authority
+for another's. The P01.S11 correction makes the canonical semantic digest of
+the complete closed IPC model assignment the fourth required cache-key element,
+rejects a changed assignment on an already mapped thread, and retains reuse only
+for exact equal assignments. Real child gateway/worker recovery now drives two
+equal freezes and one distinct freeze at the same topology/workspace/mode and
+proves separate per-thread checkpoint digests; direct cache tests cover equality,
+partitioning, and changed-assignment refusal. No three-element compatibility
+constructor remains. Owner: P01.S11; formal re-review is required before closure.
+
+### p01-s11-node-metadata-is-not-thread-scoped | high | resolved pending formal review
+
+Type: execution state isolation and truthful disclosure. While binding complete
+assignment evidence, a distinct concurrent run revealed that the control
+surface's graph node metadata cache was global by node name rather than scoped by
+thread. Histories or team projections for runs sharing node names could therefore
+show provider/model metadata from the most recently registered graph. The S11
+correction keys live graph metadata by thread and node at registration, cache-hit,
+relay, emission, team-status and snapshot seams, with no global lookup. The
+production Executor also writes the graph's safe node descriptors and complete
+assignment digest into each run's LangGraph checkpoint; completed-run history
+prefers that durable thread-scoped authority. A real child gateway/worker recovery
+with concurrent equal and distinct assignments proves each run retains its own
+provider, model and digest, and a direct relay test proves one thread cannot
+overwrite another. Owner: P01.S11; formal re-review is required before closure.

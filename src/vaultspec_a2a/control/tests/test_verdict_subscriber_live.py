@@ -464,7 +464,12 @@ def _install_receipt_graph(
     builder.add_edge("worker", "__end__")
     executor.register_compiled_graph(
         thread_id,
-        ("verdict-receipt-preset", None, False),
+        (
+            "verdict-receipt-preset",
+            None,
+            False,
+            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        ),
         builder.compile(checkpointer=checkpointer),
     )
 

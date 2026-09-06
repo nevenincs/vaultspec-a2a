@@ -96,7 +96,12 @@ def _install_probe_graph(
         checkpointer=executor._checkpointer
     )
 
-    cache_key = ("token-preset", None, False)
+    cache_key = (
+        "token-preset",
+        None,
+        False,
+        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
 
@@ -166,7 +171,12 @@ def _install_interrupting_graph(
         checkpointer=executor._checkpointer
     )
 
-    cache_key = ("gate-preset", None, False)
+    cache_key = (
+        "gate-preset",
+        None,
+        False,
+        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
 

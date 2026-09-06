@@ -150,6 +150,12 @@ class ThreadStateSnapshot(BaseModel):
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
     plan: list[PlanEntry] = Field(default_factory=list)
     agents: list[AgentSnapshot] = Field(default_factory=list)
+    model_assignment_digest: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+    )
     last_sequence: int
     checkpoint_id: str | None = None
     checkpoint_created_at: datetime | None = None

@@ -93,7 +93,12 @@ if TYPE_CHECKING:
     from ...thread.state import TeamState
     from ...worker.graph_lifecycle import RegisteredCompiledGraph
 
-_CACHE_KEY = ("verdict-loop-live", None, False)
+_CACHE_KEY = (
+    "verdict-loop-live",
+    None,
+    False,
+    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+)
 
 # Every dispatch names an active project, as a real one does. This package's own
 # directory is real, absolute, and present on either platform.

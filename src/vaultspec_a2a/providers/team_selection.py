@@ -29,6 +29,7 @@ __all__ = [
     "TeamSelectionError",
     "freeze_team_selection",
     "frozen_team_selection_from_record",
+    "model_assignment_digest",
     "normalize_replay_selection",
 ]
 
@@ -52,6 +53,17 @@ def _require_exact_keys(
 
 class TeamSelectionError(ValueError):
     """A safe-to-surface refusal of an explicit catalog selection."""
+
+
+def model_assignment_digest(assignment: dict[str, dict[str, Any]]) -> str:
+    """Return a canonical semantic digest of a complete compiler assignment.
+
+    The assignment has already crossed the closed IPC validator before a worker
+    compiles it. Sorting every object key makes the digest insensitive to JSON
+    object ordering while preserving every nested value and list position.
+    """
+    canonical = json.dumps(assignment, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

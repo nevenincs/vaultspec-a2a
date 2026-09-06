@@ -18,6 +18,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from ..domain_config import domain_config
 from ..graph.compiler import _resolve_model_for_worker, compile_team_graph
 from ..ipc.schemas import canonical_project_root
+from ..providers.team_selection import model_assignment_digest
 from ..providers.warmup import warm_model_imports
 from ..streaming import StreamableGraph, node_metadata_from_graph
 from ..team.team_config import (
@@ -68,18 +69,20 @@ logger = logging.getLogger(__name__)
 # Public type for the graph cache key.  The explicit registration seam lets
 # real-behavior tests install a pre-compiled graph without reaching mutable
 # cache dictionaries.
-type GraphCacheKey = tuple[str, str | None, bool]
+type GraphCacheKey = tuple[str, str | None, bool, str]
 
 
 def graph_cache_key(
     team_preset: str,
     workspace_root: str | None,
     autonomous: bool,
+    assignment_digest: str,
 ) -> GraphCacheKey:
     """Form the cache key for a compiled team graph.
 
     The single site that builds a key, so the workspace element is always the
-    run's canonical project spelling. Keys are compared as plain tuples, so two
+    run's canonical project spelling and the final element binds the complete
+    catalog-frozen compiler assignment. Keys are compared as plain tuples, so two
     spellings of one directory used to occupy two entries: a run's first
     dispatch keyed on a locally re-resolved path while every later dispatch
     keyed on the spelling stored at admission, and the first follow-up on a
@@ -92,6 +95,7 @@ def graph_cache_key(
         team_preset,
         canonical_project_root(workspace_root) if workspace_root else None,
         autonomous,
+        assignment_digest,
     )
 
 
@@ -286,7 +290,7 @@ class GraphLifecycleManager:
         self._graph_cache[cache_key] = graph
         self._graph_cache.move_to_end(cache_key)
         self._thread_to_cache_key[thread_id] = cache_key
-        self._aggregator.register_graph(graph)
+        self._aggregator.register_graph(thread_id, graph)
 
     # ------------------------------------------------------------------
     # Graph cache lookup and compilation
@@ -303,9 +307,17 @@ class GraphLifecycleManager:
         compile a new one, cache it, and register with the aggregator.
         Returns ``None`` if no preset is available.
         """
-        # Check if thread already has a cached graph.
+        assignment_digest = model_assignment_digest(req.model_assignment)
+
+        # Check if thread already has a cached graph. A thread's accepted
+        # assignment is immutable; changing it under the same identity is a
+        # structural dispatch error, never a reason to reuse or replace a graph.
         cache_key = self._thread_to_cache_key.get(req.thread_id)
         if cache_key and cache_key in self._graph_cache:
+            if cache_key[3] != assignment_digest:
+                raise GraphCompilationError(
+                    "dispatch model assignment does not match the compiled run"
+                )
             self._graph_cache.move_to_end(cache_key)
             return self._graph_cache[cache_key]
 
@@ -320,13 +332,21 @@ class GraphLifecycleManager:
         if not team_preset:
             return None
 
-        new_key = graph_cache_key(team_preset, workspace_root, autonomous)
+        new_key = graph_cache_key(
+            team_preset,
+            workspace_root,
+            autonomous,
+            assignment_digest,
+        )
 
         # Check if another thread already compiled for this key.
         if new_key in self._graph_cache:
             self._graph_cache.move_to_end(new_key)
             self._thread_to_cache_key[req.thread_id] = new_key
-            return self._graph_cache[new_key]
+            graph = self._graph_cache[new_key]
+            self._aggregator.register_graph(req.thread_id, graph)
+            await self._send_graph_registered(req.thread_id, graph)
+            return graph
 
         # Compile fresh.
         async with ws_span("executor.compile_graph", thread_id=req.thread_id) as span:
@@ -350,7 +370,7 @@ class GraphLifecycleManager:
 
         self._graph_cache[new_key] = graph
         self._thread_to_cache_key[req.thread_id] = new_key
-        self._aggregator.register_graph(graph)
+        self._aggregator.register_graph(req.thread_id, graph)
         # Relay node metadata to the control-surface aggregator so
         # REST /team-status and WS team_status events include role/display_name.
         await self._send_graph_registered(req.thread_id, graph)
@@ -731,6 +751,9 @@ class GraphLifecycleManager:
                     "active_agent": "",
                     "artifacts": [],
                     "current_plan": [],
+                    "model_assignment_digest": model_assignment_digest(
+                        req.model_assignment
+                    ),
                     "token_usage": {},
                     "active_feature": req.active_feature,
                     "feedback_batch_id": req.feedback_batch_id,

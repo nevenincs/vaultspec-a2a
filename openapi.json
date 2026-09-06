@@ -4765,6 +4765,20 @@
             "type": "array",
             "title": "Agents"
           },
+          "model_assignment_digest": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Assignment Digest"
+          },
           "last_sequence": {
             "type": "integer",
             "title": "Last Sequence"

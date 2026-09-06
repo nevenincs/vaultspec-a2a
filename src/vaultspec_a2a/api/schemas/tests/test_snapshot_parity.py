@@ -234,6 +234,7 @@ def _populated_thread_state() -> domain.ThreadStateData:
             )
         ],
         execution_tasks=[domain.ExecutionTaskData(task_id="task-1", name="node")],
+        model_assignment_digest="a" * 64,
     )
 
 
@@ -260,6 +261,7 @@ def test_production_seam_carries_every_domain_field_to_the_wire() -> None:
     # The nested values survive, not merely the keys.
     assert emitted["agents"][0]["provider"] == Provider.CLAUDE
     assert emitted["agents"][0]["model_name"] == "catalog-model"
+    assert emitted["model_assignment_digest"] == "a" * 64
     assert emitted["execution_tasks"][0]["task_id"] == "task-1"
     assert emitted["pending_permissions"][0]["options"][0]["option_id"] == "allow_once"
     assert emitted["messages"][0]["agent_id"] == "supervisor"

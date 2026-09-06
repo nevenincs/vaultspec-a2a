@@ -107,7 +107,12 @@ def _make_bridge(
 
 
 # Default cache key for test graphs.
-_TEST_CACHE_KEY = ("test-preset", None, False)
+_TEST_CACHE_KEY = (
+    "test-preset",
+    None,
+    False,
+    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+)
 
 # Every dispatch names an active project, as a real one does. This package's own
 # directory is real, absolute, and present on either platform.
@@ -688,7 +693,12 @@ class TestLazyRecompilation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                cache_key = ("vaultspec-solo-coder", None, False)
+                cache_key = (
+                    "vaultspec-solo-coder",
+                    None,
+                    False,
+                    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                )
                 _inject_graph(executor, "t-cache", cache_key=cache_key)
                 assert executor.graph_count == 1
             finally:
@@ -736,7 +746,12 @@ class TestLazyRecompilation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                cache_key = ("vaultspec-solo-coder", _WORKSPACE, False)
+                cache_key = (
+                    "vaultspec-solo-coder",
+                    _WORKSPACE,
+                    False,
+                    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                )
                 _inject_graph(executor, "t-preset", cache_key=cache_key)
                 assert executor.graph_count == 1
             finally:
@@ -1037,7 +1052,12 @@ def _install_completing_graph(executor: Executor, thread_id: str) -> None:
         checkpointer=executor._checkpointer
     )
 
-    cache_key = ("settle-preset", None, False)
+    cache_key = (
+        "settle-preset",
+        None,
+        False,
+        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
 
@@ -1059,7 +1079,12 @@ def _install_gated_graph(executor: Executor, thread_id: str) -> None:
         checkpointer=executor._checkpointer
     )
 
-    cache_key = ("settle-gated-preset", None, False)
+    cache_key = (
+        "settle-gated-preset",
+        None,
+        False,
+        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
 
@@ -1694,7 +1719,14 @@ class TestPreRunRefusalsCarryTheirReason:
                 builder.add_edge("boom", "__end__")
                 graph: RegisteredCompiledGraph = builder.compile(checkpointer=cp)
                 executor.register_compiled_graph(
-                    thread_id, ("boom-preset", None, False), graph
+                    thread_id,
+                    (
+                        "boom-preset",
+                        None,
+                        False,
+                        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                    ),
+                    graph,
                 )
 
                 first = DispatchRequest(

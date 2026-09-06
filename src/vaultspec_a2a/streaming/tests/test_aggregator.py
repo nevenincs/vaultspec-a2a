@@ -486,7 +486,7 @@ class TestEventEmission:
         class _MinimalGraph:
             nodes: ClassVar[dict[str, _MinimalNode]] = {"worker": _MinimalNode()}
 
-        aggregator.register_graph(cast("StreamableGraph", _MinimalGraph()))
+        aggregator.register_graph("thread-1", cast("StreamableGraph", _MinimalGraph()))
 
         await aggregator.emit_team_status(
             thread_id="thread-1",

@@ -115,7 +115,7 @@ def test_direct_and_relayed_registration_agree_field_for_field() -> None:
     graph = _graph()
 
     direct = EventAggregator()
-    direct.register_graph(cast("StreamableGraph", graph))
+    direct.register_graph("thread-1", cast("StreamableGraph", graph))
 
     # Exactly the payload vaultspec_a2a.worker.graph_lifecycle relays.
     relayed = EventAggregator()
@@ -124,8 +124,8 @@ def test_direct_and_relayed_registration_agree_field_for_field() -> None:
         {"type": "graph_registered", "nodes": node_metadata_from_graph(graph)},
     )
 
-    direct_summaries = direct.get_node_summaries()
-    assert direct_summaries == relayed.get_node_summaries()
+    direct_summaries = direct.get_node_summaries("thread-1")
+    assert direct_summaries == relayed.get_node_summaries("thread-1")
     # Pinned literally rather than only against each other: the two paths now
     # share one extraction, so a same-direction change to that extraction would
     # keep them equal while still breaking the wire contract.
@@ -147,13 +147,39 @@ def test_direct_and_relayed_registration_agree_field_for_field() -> None:
     }
 
 
+def test_relayed_graph_metadata_is_scoped_to_its_thread() -> None:
+    aggregator = EventAggregator()
+    first = node_metadata_from_graph(_graph())
+    second = {name: dict(fields) for name, fields in first.items()}
+    second["reviewer"]["provider"] = "codex"
+    second["reviewer"]["model_name"] = "second-model"
+
+    aggregator.sync_worker_event(
+        "first-thread", {"type": "graph_registered", "nodes": first}
+    )
+    aggregator.sync_worker_event(
+        "second-thread", {"type": "graph_registered", "nodes": second}
+    )
+
+    first_summary = aggregator.get_node_summaries("first-thread")[0]
+    second_summary = aggregator.get_node_summaries("second-thread")[0]
+    assert (first_summary["provider"], first_summary["model_name"]) == (
+        "claude",
+        "provider-model",
+    )
+    assert (second_summary["provider"], second_summary["model_name"]) == (
+        "codex",
+        "second-model",
+    )
+
+
 @pytest.mark.asyncio
 async def test_team_status_defaults_every_field_but_keeps_caller_values() -> None:
     """emit_team_status fills every field without clobbering supplied ones."""
     aggregator = EventAggregator()
     queue = aggregator.add_subscriber("client-1")
     aggregator.subscribe("client-1", ["thread-1"])
-    aggregator.register_graph(cast("StreamableGraph", _graph()))
+    aggregator.register_graph("thread-1", cast("StreamableGraph", _graph()))
 
     await aggregator.emit_team_status(
         thread_id="thread-1",

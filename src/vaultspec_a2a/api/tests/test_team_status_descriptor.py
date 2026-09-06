@@ -76,6 +76,7 @@ def _exact_assignment() -> dict[str, dict[str, object]]:
         "model_name": "deterministic",
         "controls": [],
         "fallbacks": [],
+        "provenance": {"selection_source": "team_selection"},
     }
     return {_WORKER_ID: lane}
 
@@ -102,11 +103,11 @@ async def test_team_status_reports_the_resolved_provider_and_model(
     )
 
     aggregator = EventAggregator()
-    aggregator.register_graph(cast("StreamableGraph", graph))
+    aggregator.register_graph("thread-team-status", cast("StreamableGraph", graph))
 
     async with session_factory() as db:
         status = await build_team_status(
-            db=db, aggregator=aggregator, heartbeat_threads=[]
+            db=db, aggregator=aggregator, heartbeat_threads=["thread-team-status"]
         )
     agents = {agent.agent_id: agent for agent in status.agents}
     assert _WORKER_ID in agents, f"compiled worker missing from {list(agents)}"
@@ -138,7 +139,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
         model_assignment=_exact_assignment(),
     )
     aggregator = EventAggregator()
-    aggregator.register_graph(cast("StreamableGraph", graph))
+    aggregator.register_graph(thread_id, cast("StreamableGraph", graph))
 
     app, _agg, _worker, _cp = make_app(
         session_factory, checkpointer, aggregator=aggregator
@@ -191,9 +192,8 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
         model_assignment=_exact_assignment(),
     )
     aggregator = EventAggregator()
-    aggregator.register_graph(cast("StreamableGraph", graph))
-
     thread_id = "thread-descriptor-broadcast"
+    aggregator.register_graph(thread_id, cast("StreamableGraph", graph))
     queue = aggregator.add_subscriber("descriptor-client")
     aggregator.subscribe("descriptor-client", [thread_id])
 
@@ -262,18 +262,19 @@ async def test_team_status_reports_unknown_assignment_as_null(
     """
     aggregator = EventAggregator()
     aggregator._subscribers_mgr.set_node_metadata(
+        "thread-unresolved",
         {
             "unresolved-agent": {
                 "role": "coder",
                 "display_name": "Unresolved",
                 "description": "Registered before its model resolved.",
             },
-        }
+        },
     )
 
     async with session_factory() as db:
         status = await build_team_status(
-            db=db, aggregator=aggregator, heartbeat_threads=[]
+            db=db, aggregator=aggregator, heartbeat_threads=["thread-unresolved"]
         )
 
     agent = status.agents[0]

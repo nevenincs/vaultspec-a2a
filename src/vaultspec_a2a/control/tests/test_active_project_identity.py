@@ -27,11 +27,13 @@ from ...context.metadata import ThreadMetadata
 from ...control._thread_metadata import dispatchable_workspace_root
 from ...database.thread_repository import normalize_workspace_identity
 from ...ipc.schemas import DispatchRequest, canonical_project_root
+from ...providers.team_selection import model_assignment_digest
 from ...streaming.aggregator import EventAggregator
 from ...thread.errors import ConfigError
 from ...thread.state import TeamState
 from ...worker.catalog_store import RunCatalogStore
 from ...worker.graph_lifecycle import (
+    GraphCompilationError,
     GraphLifecycleManager,
     RegisteredCompiledGraph,
     graph_cache_key,
@@ -52,6 +54,22 @@ def _uncanonical_spelling(workspace: Path) -> str:
     took: the same directory written two ways.
     """
     return str(workspace.parent / "sibling" / ".." / workspace.name).replace("\\", "/")
+
+
+def _assignment(model_name: str) -> dict[str, dict[str, object]]:
+    return {
+        "coder": {
+            "provider": "deterministic",
+            "execution_mode": "in-process-deterministic",
+            "catalog_revision": "revision",
+            "entry_id": "entry",
+            "model_name": model_name,
+            "controls": [],
+            "fallbacks": [],
+            "provenance": {"selection_source": "team_selection"},
+            "schema_version": 1,
+        }
+    }
 
 
 @pytest.fixture
@@ -412,13 +430,32 @@ class TestOneWorkspaceOneGraphEntry:
         return builder.compile(checkpointer=InMemorySaver())
 
     def test_two_spellings_key_the_same_entry(self, workspace: Path) -> None:
-        assert graph_cache_key("preset", str(workspace), False) == graph_cache_key(
-            "preset", _uncanonical_spelling(workspace), False
-        )
+        digest = model_assignment_digest({})
+        assert graph_cache_key(
+            "preset", str(workspace), False, digest
+        ) == graph_cache_key("preset", _uncanonical_spelling(workspace), False, digest)
 
     def test_a_project_less_key_is_still_a_key(self) -> None:
         """A run with no project still keys, so the mint cannot break cancel."""
-        assert graph_cache_key("preset", None, True) == ("preset", None, True)
+        digest = model_assignment_digest({})
+        assert graph_cache_key("preset", None, True, digest) == (
+            "preset",
+            None,
+            True,
+            digest,
+        )
+
+    def test_model_assignment_identity_partitions_the_graph_cache(self) -> None:
+        first = model_assignment_digest({"coder": {"model_name": "first"}})
+        same = model_assignment_digest({"coder": {"model_name": "first"}})
+        other = model_assignment_digest({"coder": {"model_name": "second"}})
+
+        assert graph_cache_key("preset", None, False, first) == graph_cache_key(
+            "preset", None, False, same
+        )
+        assert graph_cache_key("preset", None, False, first) != graph_cache_key(
+            "preset", None, False, other
+        )
 
     def test_two_threads_on_one_workspace_share_one_cached_graph(
         self, workspace: Path
@@ -433,10 +470,19 @@ class TestOneWorkspaceOneGraphEntry:
         graph = self._graph()
 
         manager.register_compiled_graph(
-            "run-1", ("preset", str(workspace), False), graph
+            "run-1",
+            ("preset", str(workspace), False, model_assignment_digest({})),
+            graph,
         )
         manager.register_compiled_graph(
-            "run-2", ("preset", _uncanonical_spelling(workspace), False), graph
+            "run-2",
+            (
+                "preset",
+                _uncanonical_spelling(workspace),
+                False,
+                model_assignment_digest({}),
+            ),
+            graph,
         )
 
         assert manager.graph_count == 1
@@ -457,7 +503,14 @@ class TestOneWorkspaceOneGraphEntry:
         manager = self._manager()
         graph = self._graph()
         manager.register_compiled_graph(
-            "run-1", ("preset", str(workspace), False), graph
+            "run-1",
+            (
+                "preset",
+                str(workspace),
+                False,
+                model_assignment_digest({}),
+            ),
+            graph,
         )
 
         follow_up = DispatchRequest(
@@ -471,3 +524,36 @@ class TestOneWorkspaceOneGraphEntry:
 
         assert resolved is graph
         assert manager.graph_count == 1
+
+    @pytest.mark.asyncio
+    async def test_a_thread_cannot_reuse_a_graph_for_another_assignment(
+        self, workspace: Path
+    ) -> None:
+        manager = self._manager()
+        graph = self._graph()
+        accepted = _assignment("accepted")
+        manager.register_compiled_graph(
+            "run-1",
+            (
+                "preset",
+                str(workspace),
+                False,
+                model_assignment_digest(accepted),
+            ),
+            graph,
+        )
+
+        with pytest.raises(
+            GraphCompilationError,
+            match="model assignment does not match the compiled run",
+        ):
+            await manager.get_or_compile_graph(
+                DispatchRequest(
+                    action="ingest",
+                    thread_id="run-1",
+                    team_preset="preset",
+                    workspace_root=str(workspace),
+                    recursion_limit=25,
+                    model_assignment=_assignment("changed"),
+                )
+            )

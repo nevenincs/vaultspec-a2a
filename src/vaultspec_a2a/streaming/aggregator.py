@@ -126,11 +126,14 @@ class EventAggregator:
         """
         self._subscribers_mgr.enqueue_payload(thread_id, project_run_progress(payload))
 
-    def register_graph(self, graph: StreamableGraph) -> None:
-        self._subscribers_mgr.register_graph(graph)
+    def register_graph(self, thread_id: str, graph: StreamableGraph) -> None:
+        self._subscribers_mgr.register_graph(thread_id, graph)
 
-    def get_node_summaries(self) -> list[dict[str, str]]:
-        return self._subscribers_mgr.get_node_summaries()
+    def get_node_summaries(self, thread_id: str) -> list[dict[str, str]]:
+        return self._subscribers_mgr.get_node_summaries(thread_id)
+
+    def remove_node_metadata(self, thread_id: str) -> None:
+        self._subscribers_mgr.remove_node_metadata(thread_id)
 
     # -- Buffering (delegates to buffering) -----------------------------
 

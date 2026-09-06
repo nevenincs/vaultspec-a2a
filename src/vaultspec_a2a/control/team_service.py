@@ -124,16 +124,16 @@ async def build_team_status(
         | {permission.thread_id for permission in nonterminal_durable_pending}
     )
 
-    node_summaries = aggregator.get_node_summaries()
-    agent_states = aggregator.get_agent_states()
-
-    agents = [
-        build_agent_descriptor(
-            s,
-            agent_states.get(s["agent_id"], AgentLifecycleState.IDLE),
+    agents = []
+    for thread_id in active_threads:
+        agent_states = aggregator.get_agent_states(thread_id)
+        agents.extend(
+            build_agent_descriptor(
+                summary,
+                agent_states.get(summary["agent_id"], AgentLifecycleState.IDLE),
+            )
+            for summary in aggregator.get_node_summaries(thread_id)
         )
-        for s in node_summaries
-    ]
 
     # Public pending permissions must be durable-backed; aggregator state is
     # still used for agents and active-thread liveness, not permission truth.

@@ -467,6 +467,7 @@ class ThreadStateData:
     artifacts: list[ArtifactData] = field(default_factory=list)
     plan: list[PlanEntry] = field(default_factory=list)
     agents: list[AgentData] = field(default_factory=list)
+    model_assignment_digest: str | None = None
     checkpoint_id: str | None = None
     checkpoint_created_at: datetime | None = None
     checkpoint_parent_id: str | None = None

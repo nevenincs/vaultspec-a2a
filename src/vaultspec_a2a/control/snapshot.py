@@ -74,11 +74,26 @@ def enrich_snapshot_from_state(
     artifact_dicts = normalize_artifacts(state.values.get("artifacts", []))
     artifact_data = [ArtifactData(**d) for d in artifact_dicts]
 
-    # Populate agents from aggregator node summaries + agent states
+    # Populate agents from the thread's checkpoint-owned graph descriptors.
+    # The thread-scoped live cache is used only before that first checkpoint
+    # lands; there is no process-global node-name fallback.
     agent_data: list[AgentData] = []
-    if aggregator is not None:
-        node_summaries = aggregator.get_node_summaries()
-        agent_states = aggregator.get_agent_states(snapshot.thread_id)
+    raw_descriptors = state.values.get("agent_descriptors")
+    node_summaries: list[dict[str, str]] = []
+    if isinstance(raw_descriptors, dict):
+        node_summaries = [
+            {"node_name": name, "agent_id": name, **descriptor}
+            for name, descriptor in raw_descriptors.items()
+            if isinstance(name, str) and isinstance(descriptor, dict)
+        ]
+    elif aggregator is not None:
+        node_summaries = aggregator.get_node_summaries(snapshot.thread_id)
+    if node_summaries:
+        agent_states = (
+            aggregator.get_agent_states(snapshot.thread_id)
+            if aggregator is not None
+            else {}
+        )
         for node in node_summaries:
             agent_id = node.get("agent_id", node.get("node_name", ""))
             agent_data.append(
@@ -185,6 +200,10 @@ def enrich_snapshot_from_state(
             )
 
     snapshot.messages = msgs
+    assignment_digest = state.values.get("model_assignment_digest")
+    snapshot.model_assignment_digest = (
+        assignment_digest if isinstance(assignment_digest, str) else None
+    )
     snapshot.checkpoint_id = checkpoint_id
     snapshot.plan = plan_entries
     snapshot.artifacts = artifact_data

@@ -33,8 +33,8 @@ class SubscriberManager:
         self._subscriptions: dict[str, set[str]] = defaultdict(set)
         # Broadcast hooks: called on every event (used by worker bridge relay).
         self._broadcast_hooks: list[Callable[[SequencedEvent], Awaitable[None]]] = []
-        # Node metadata cache: node_name -> {role, display_name, description}
-        self._node_metadata: dict[str, dict[str, str]] = {}
+        # Node metadata cache: thread_id -> node_name -> safe descriptor fields.
+        self._node_metadata: dict[str, dict[str, dict[str, str]]] = {}
         # Lock for subscriber mutation
         self._lock = asyncio.Lock()
         self._telemetry = telemetry
@@ -156,6 +156,11 @@ class SubscriberManager:
         """Remove ``thread_id`` from every active subscriber subscription set."""
         for client_id in list(self._subscriptions):
             self._subscriptions[client_id].discard(thread_id)
+        self._node_metadata.pop(thread_id, None)
+
+    def remove_node_metadata(self, thread_id: str) -> None:
+        """Drop the live graph descriptors for one terminal worker thread."""
+        self._node_metadata.pop(thread_id, None)
 
     def add_broadcast_hook(
         self, hook: Callable[[SequencedEvent], Awaitable[None]]
@@ -202,27 +207,31 @@ class SubscriberManager:
     # Graph registration
     # ------------------------------------------------------------------
 
-    def register_graph(self, graph: StreamableGraph) -> None:
+    def register_graph(self, thread_id: str, graph: StreamableGraph) -> None:
         """Cache node metadata from a compiled LangGraph graph."""
-        self._node_metadata = node_metadata_from_graph(graph)
+        self._node_metadata[thread_id] = node_metadata_from_graph(graph)
         logger.debug(
-            "register_graph: cached metadata for %d nodes", len(self._node_metadata)
+            "register_graph: cached metadata for %d nodes on %s",
+            len(self._node_metadata[thread_id]),
+            thread_id,
         )
 
-    def get_node_summaries(self) -> list[dict[str, str]]:
+    def get_node_summaries(self, thread_id: str) -> list[dict[str, str]]:
         """Return a list of node metadata dicts for the team status endpoint."""
         return [
             {"node_name": name, "agent_id": name, **meta}
-            for name, meta in self._node_metadata.items()
+            for name, meta in self._node_metadata.get(thread_id, {}).items()
         ]
 
-    def get_node_metadata(self) -> dict[str, dict[str, str]]:
+    def get_node_metadata(self, thread_id: str) -> dict[str, dict[str, str]]:
         """Return the raw node metadata dict (used by emitters)."""
-        return self._node_metadata
+        return self._node_metadata.get(thread_id, {})
 
-    def set_node_metadata(self, metadata: dict[str, dict[str, str]]) -> None:
+    def set_node_metadata(
+        self, thread_id: str, metadata: dict[str, dict[str, str]]
+    ) -> None:
         """Replace node metadata (used by sync_worker_event)."""
-        self._node_metadata = metadata
+        self._node_metadata[thread_id] = metadata
 
     # ------------------------------------------------------------------
     # Broadcasting

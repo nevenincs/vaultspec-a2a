@@ -182,7 +182,9 @@ class TeamState(TypedDict):
     loop_count: NotRequired[int]
 
     # --- existing fields ---
+    agent_descriptors: NotRequired[dict[str, dict[str, str]]]
     messages: Annotated[list[BaseMessage], add_messages]
+    model_assignment_digest: NotRequired[str]
     next: NotRequired[str]
 
     # --- SDD blackboard awareness ---

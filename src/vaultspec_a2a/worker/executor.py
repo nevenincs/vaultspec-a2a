@@ -20,6 +20,7 @@ from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..ipc.serializers import sequenced_to_dict
 from ..providers import ProviderCondition
 from ..streaming.aggregator import EventAggregator
+from ..streaming.node_metadata import node_metadata_from_graph
 from ..team.team_config import load_team_config
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
@@ -296,6 +297,7 @@ class Executor:
         if outcome in TERMINAL_STATUSES:
             self._token_store.drop(thread_id)
             self._catalog_store.drop(thread_id)
+            self._aggregator.remove_node_metadata(thread_id)
         self._bridge.untrack_thread(thread_id)
         # Prune sequences for threads that are no longer actively executing.
         self._aggregator.prune_sequences(active_snapshot)
@@ -776,6 +778,8 @@ class Executor:
             graph_input = GraphLifecycleManager.build_graph_input(
                 req, is_first_ingest=is_first_ingest
             )
+            if is_first_ingest:
+                graph_input["agent_descriptors"] = node_metadata_from_graph(graph)
             config = {
                 "configurable": {"thread_id": req.thread_id},
                 "recursion_limit": (

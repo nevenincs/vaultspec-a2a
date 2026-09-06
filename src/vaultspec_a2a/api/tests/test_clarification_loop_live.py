@@ -66,7 +66,12 @@ if TYPE_CHECKING:
 
 _BUNDLE_FREE_PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
-_CACHE_KEY: GraphCacheKey = ("clarification-loop-live", None, False)
+_CACHE_KEY: GraphCacheKey = (
+    "clarification-loop-live",
+    None,
+    False,
+    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+)
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 

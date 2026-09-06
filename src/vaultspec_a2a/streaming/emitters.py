@@ -579,7 +579,7 @@ class EventEmitters:
         active_thread_ids: list[str] | None = None,
     ) -> None:
         """Emit a team status event (on transitions only)."""
-        node_metadata = self._subscribers.get_node_metadata()
+        node_metadata = self._subscribers.get_node_metadata(thread_id)
         agent_summaries: list[dict[str, str]] = []
         for agent_data in agents:
             data = dict(agent_data)
@@ -696,15 +696,16 @@ class EventEmitters:
             self._pending_permissions.pop(request_id, None)
         self.next_sequence(thread_id)
 
-    def _sync_graph_registered(self, _thread_id: str, payload: dict[str, Any]) -> None:
+    def _sync_graph_registered(self, thread_id: str, payload: dict[str, Any]) -> None:
         nodes = payload.get("nodes", {})
         if isinstance(nodes, dict):
             self._subscribers.set_node_metadata(
+                thread_id,
                 {
                     name: node_metadata_fields(meta)
                     for name, meta in nodes.items()
                     if isinstance(meta, dict)
-                }
+                },
             )
             logger.debug(
                 "sync_worker_event: cached metadata for %d nodes",

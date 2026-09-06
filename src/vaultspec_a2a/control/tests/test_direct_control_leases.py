@@ -132,7 +132,12 @@ def _install_receipt_graph(
     graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
     executor.register_compiled_graph(
         thread_id,
-        ("settle-preset", None, False),
+        (
+            "settle-preset",
+            None,
+            False,
+            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        ),
         graph,
     )
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:bf475f3b9e9ce08e24266206c2c2655807d2d469e92a1583ad7fc8eb9b46c7f0'
+body_hash: 'sha256:2e5cb3187922ce713519bf414264e41d2cc303cdaa411006fd19b25655c1d443'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -171,4 +171,4 @@ Real file-backed SQLite tests retain one witness across independent sessions and
 
 S09 establishes the repository election and does not claim ER02 production closure. Current terminal payloads still omit the dispatch receipt and writer generation; S78/S12 own that evidence and S13 owns terminal adoption. Caller inventory places transitional writers under S10, abandoned-run writers under S11, terminal settlement under S13 and durable retry under S14. Archive and deletion-saga entry were not explicit in the original decomposition, so S10 now names their atomic adoption and removal of the unconditional lifecycle setter after its final current caller migrates.
 Formal S09 review found a transaction-visibility requirement that the initial boundary omitted. A winning Core update is insufficient when the supplied ORM session already identity-maps the thread and retains it after commit: with session synchronization disabled, the durable row advances while the mapped object remains at the expected state and authority. Election ownership therefore includes same-session truthfulness. A winner must synchronize or expire any mapped thread before same-transaction effects can inspect it, and the regression proof must cover status and all four authority fields both before and after commit under the production expire_on_commit=False configuration. This is HIGH and blocks S09; it does not change the later production-adoption owners.
-
+The S09 winner also owns same-session truth. Formal review proved that a correct durable update with session synchronization disabled can leave an already mapped thread at the losing state indefinitely under `expire_on_commit=False`. The corrected winner path refreshes the exact row with `populate_existing` inside the transaction before returning, so caller-owned repair, approval and journal effects observe the new status and all four authority fields. A changed-action regression verifies the same mapped object before and after commit.

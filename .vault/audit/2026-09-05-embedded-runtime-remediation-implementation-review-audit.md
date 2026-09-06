@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:b4978882b9f07c94a5c1964ff66dea9a8b45acf5191cd15129432cd481808f10'
+body_hash: 'sha256:4c2f2625b92459a6f4596b3097f21821df74e21248e5f69fea946f99d4f7ffed'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1278,4 +1278,6 @@ Type: lifecycle correctness and transaction consistency. Formal review of 8c37f8
 ### s09-formal-review-verification | low | verified subject to blocking correction
 
 Type: formal verification. The exact conditional predicate, successor revision/generation rules, same-thread/action/receipt requirement, typed refusal outcomes, terminal non-reopen and early completion behavior are sound at the durable SQL boundary. The focused suite passed 25 tests in 3.72 seconds; Ruff and Ty passed. A reviewer-run overlapping SQLite discriminator yielded one WON and one LOST. Current production adoption remains honestly queued across S10, S11, S78/S12/S13 and S14; archive/deletion adoption remains HIGH/open in S10; live PostgreSQL proof remains MEDIUM/open. No legacy, deprecated, default, backfill, translation, alias, fallback or inferred-authority behavior was added.
+### s09-same-session-election-truth | high | resolved pending formal rereview
 
+Type: lifecycle correctness and transaction consistency. Formal FAIL `7aa096ec` proved that implementation `8c37f800` used `synchronize_session=False`: the conditional SQL update returned WON and persisted COMPLETED/revision one while an already identity-mapped thread in the same `expire_on_commit=False` session remained RUNNING/revision zero before and after commit. The correction performs a `populate_existing` read inside the winner transaction before returning. Its regression installs a new CANCEL authority and proves the identical mapped object observes CANCELLED, revision one, generation two, CANCEL and the exact new receipt both before and after commit. The focused correction gate passes 10 tests in 4.48 seconds; the combined election/transition gate passes 26 tests in 3.55 seconds. Formal rereview remains required.

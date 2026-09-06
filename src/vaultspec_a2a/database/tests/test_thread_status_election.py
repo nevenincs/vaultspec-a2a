@@ -168,6 +168,55 @@ async def test_completion_before_running_wins_and_late_running_loses(
 
 
 @pytest.mark.asyncio
+async def test_winner_refreshes_same_session_identity_map(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    thread_id = "same-session-truth"
+    await _seed(
+        sessions, thread_id, ThreadStatus.RUNNING, "same-session-truth-receipt"
+    )
+    async with sessions() as session:
+        loaded = await get_thread(session, thread_id)
+        assert loaded is not None
+        expected = thread_write_expectation(loaded)
+        await create_control_action(
+            session,
+            thread_id=thread_id,
+            action_type=ControlActionType.CANCEL,
+            idempotency_key="same-session-cancel",
+            dispatch_id="same-session-cancel-receipt",
+        )
+        successor = _successor(
+            expected,
+            action_type=ControlActionType.CANCEL,
+            receipt="same-session-cancel-receipt",
+            generation=2,
+        )
+        result = await elect_thread_status(
+            session,
+            thread_id,
+            expectation=expected,
+            status=ThreadStatus.CANCELLED,
+            successor=successor,
+        )
+        same_object = await get_thread(session, thread_id)
+        assert same_object is loaded
+        assert loaded.status == ThreadStatus.CANCELLED.value
+        assert loaded.run_revision == 1
+        assert loaded.writer_generation == 2
+        assert loaded.writer_action_type == ControlActionType.CANCEL.value
+        assert loaded.writer_action_receipt_id == "same-session-cancel-receipt"
+        await session.commit()
+        assert loaded.status == ThreadStatus.CANCELLED.value
+        assert loaded.run_revision == 1
+        assert loaded.writer_generation == 2
+        assert loaded.writer_action_type == ControlActionType.CANCEL.value
+        assert loaded.writer_action_receipt_id == "same-session-cancel-receipt"
+
+    assert result.outcome is ThreadStatusElectionOutcome.WON
+
+
+@pytest.mark.asyncio
 async def test_each_stale_authority_dimension_loses(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:

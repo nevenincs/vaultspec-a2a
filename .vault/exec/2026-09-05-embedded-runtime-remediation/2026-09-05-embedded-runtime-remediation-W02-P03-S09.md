@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:10167a13803956b30e96f47e61a13516a06f5efbcb760ef0d581ad9e6f7fa924'
+body_hash: 'sha256:d1ee955258a24b601249e7b11388d6c19b8beb43957472f23d370dea31aee13d'
 step_id: 'S09'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -26,7 +26,8 @@ related:
 - `A` `src/vaultspec_a2a/database/tests/test_thread_status_election.py`
 - `M` `src/vaultspec_a2a/thread/tests/test_transitions.py`
 - `M` `src/vaultspec_a2a/thread/transitions.py`
-- `verify:` `pytest atomic-election and transition gate` -> `pass` (25 tests in 6.58 seconds)
+- `verify:` `pytest atomic-election and transition gate` -> `pass` (26 tests in 3.55 seconds)
 - `verify:` `pytest retained status-update discriminator` -> `pass` (8 tests in 0.75 seconds)
 - `verify:` `ruff check` on exact changed Python paths -> `pass`
 - `verify:` `ty check` on election production and test paths -> `pass`
+- `verify:` `pytest same-session correction gate` -> `pass` (10 tests in 4.48 seconds)

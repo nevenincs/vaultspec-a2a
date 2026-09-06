@@ -594,6 +594,15 @@ async def elect_thread_status(
     )
     result = cast("CursorResult[object]", await session.execute(statement))
     if result.rowcount == 1:
+        # Callers apply repair, approval and journal side effects in this same
+        # transaction. Refresh an already identity-mapped row before returning
+        # so those steps observe the elected status and authority rather than
+        # the witness that just lost ownership.
+        await session.scalar(
+            select(ThreadModel)
+            .where(ThreadModel.id == thread_id)
+            .execution_options(populate_existing=True)
+        )
         return ThreadStatusElectionResult(ThreadStatusElectionOutcome.WON)
 
     row_exists = await session.scalar(

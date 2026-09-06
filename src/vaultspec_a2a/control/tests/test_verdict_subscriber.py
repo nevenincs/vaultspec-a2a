@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -41,7 +40,6 @@ if TYPE_CHECKING:
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
-from ...control.action_lease import CONTROL_ACTION_LEASE_TTL, claim_control_action
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import (
@@ -52,7 +50,6 @@ from ...control.verdict_subscriber import (
     _recovery_high_water,
     _StreamInterruptedError,
     _verdict_resume_idempotency_key,
-    _verdict_resume_payload,
 )
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
@@ -62,7 +59,7 @@ from ...database import (
     get_thread,
     update_thread_status,
 )
-from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.enums import ThreadStatus
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -849,53 +846,6 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
                 {"verdict": "approved", "notes": "ship"},
                 {"verdict": "rejected", "notes": "revise"},
             )
-
-
-@pytest.mark.asyncio
-async def test_expired_verdict_lease_is_redriven(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
-) -> None:
-    """A still-parked run whose dispatch was lost is re-driven, not orphaned.
-
-    The crash window: a shared journal lease was committed before a dispatch that
-    never landed. The run is still parked at the same gate and the lease is expired,
-    so the subscriber re-acquires the same action and reuses its stable dispatch id.
-    """
-    checkpoints = tmp_path / "cp-stale.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await _seed_parked_thread(
-            session_factory,
-            checkpointer,
-            thread_id="stale",
-            proposal_ids=["proposal:research"],
-            changeset_ids=["cs:research"],
-            gate_pending="proposal:research",
-            team_preset="verdict-receipt-preset",
-        )
-        expired_now = (
-            datetime.now(UTC) - CONTROL_ACTION_LEASE_TTL - timedelta(seconds=10)
-        )
-        async with session_factory() as session:
-            stale_claim = await claim_control_action(
-                session,
-                thread_id="stale",
-                action_type=ControlActionType.RESUME,
-                idempotency_key=_verdict_resume_idempotency_key("proposal:research"),
-                request_id="proposal:research",
-                payload=_verdict_resume_payload("request_changes", None),
-                now=expired_now,
-            )
-        assert stale_claim.acquired
-        async with _worker_runtime(
-            checkpointer,
-            receipt_threads=("stale",),
-        ) as (worker_client, worker_app, _bridge):
-            subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
-            await subscriber._resume_with_verdict(
-                "stale", "request_changes", None, {"proposal:research"}
-            )
-            assert len(worker_app.state.dispatch_ids) == 1
-            assert stale_claim.dispatch_id in worker_app.state.dispatch_ids
 
 
 # Two settlement tests were dropped when the deterministic-scenarios branch

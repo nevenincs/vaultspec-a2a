@@ -68,13 +68,11 @@ from ...authoring import (
     verdict_from_event,
 )
 from ...conftest import materialize_schema
-from ...control.action_lease import claim_control_action
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.event_handlers import relay_event
 from ...control.verdict_subscriber import (
     VerdictSubscriber,
     _verdict_resume_idempotency_key,
-    _verdict_resume_payload,
 )
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
@@ -85,7 +83,7 @@ from ...database import (
     record_permission_request,
     update_thread_status,
 )
-from ...thread.enums import ControlActionType, PermissionRequestStatus, ThreadStatus
+from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -400,7 +398,6 @@ async def test_live_verdict_round_trip_parks_and_resumes(
         assert set(matched) == {"approved", "rejected", "request_changes"}
 
     await db_engine.dispose()
-
 
 async def _seed_parked_gate(
     session_factory: async_sessionmaker[AsyncSession],
@@ -775,108 +772,5 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
                 )
             assert settled is not None
             assert settled.applied_at is not None
-
-    await db_engine.dispose()
-
-
-@pytest.mark.service
-@pytest.mark.asyncio
-async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
-    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path: Path
-) -> None:
-    """The broadened RUNNING candidacy does NOT false-re-drive an in-flight resume.
-
-    Guard: including RUNNING threads in the reconcile candidate set must not
-    double-drive a run whose resume is legitimately already in flight. The
-    control-action lease taken by ``_resume_with_verdict`` is the observable
-    proof-of-in-flight: a RUNNING run parked at a gate WITH a decided verdict on the
-    engine AND a live lease on that exact gate's typed verdict is a run whose resume
-    was just dispatched and has not yet advanced the checkpoint - re-dispatching
-    would be the false re-drive. The reconcile must correlate it (RUNNING is now a
-    candidate) yet dispatch NOTHING, because losing the lease election
-    short-circuits the per-thread resume.
-
-    Same real round-trip as the recovery tests (real engine decision, real DB, real
-    checkpointer, real worker app), differing only in the seeded live lease
-    and the zero-dispatch assertion. Lease EXPIRY - the re-drivable case that stops
-    a lost dispatch orphaning a run - is owned by the action-lease tests, which is
-    where the TTL itself lives.
-    """
-    run_id = f"fc-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    client._actor_token = minted.data["raw_token"]
-
-    session = AuthoringSession(client, run_id)
-    await session.create_session(scope="repo", title=run_id)
-    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
-    assert isinstance(reviewer, AuthoringResponse)
-    reviewer_token = reviewer.data["raw_token"]
-
-    info = await _submit_proposal(session, run_id, "adr")
-    await _decide(
-        client, reviewer_token, info, "edit", "tighten the rationale", run_id, "adr"
-    )
-
-    db_file = tmp_path / "fc.db"
-    materialize_schema(Path(db_file))
-    db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
-    checkpoints = tmp_path / "fc-cp.db"
-    thread_id = f"thread-{run_id}"
-
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await checkpointer.setup()
-        await _seed_parked_gate(
-            session_factory,
-            checkpointer,
-            thread_id=thread_id,
-            proposal_id=info["proposal_id"],
-            changeset_id=info["changeset_id"],
-            status=ThreadStatus.RUNNING,
-        )
-        # A FRESH lease on the exact current gate: a resume is already in flight.
-        # Claimed through the production verb with the production key and payload,
-        # so this is the same journal row a real in-flight resume would hold - not
-        # a hand-shaped stand-in the subscriber might read differently.
-        async with session_factory() as db:
-            seeded = await claim_control_action(
-                db,
-                thread_id=thread_id,
-                action_type=ControlActionType.RESUME,
-                idempotency_key=_verdict_resume_idempotency_key(info["proposal_id"]),
-                request_id=info["proposal_id"],
-                payload=_verdict_resume_payload("request_changes", None),
-            )
-        # Sanity: the seed genuinely OWNS the lease, so the subscriber's own claim
-        # loses to a live owner rather than to an already-applied or absent row.
-        assert seeded.acquired, "seeded lease did not acquire the in-flight resume"
-        assert seeded.claim_token is not None
-
-        async with _worker_runtime(checkpointer) as (
-            worker_client,
-            worker_app,
-            _bridge,
-        ):
-            subscriber = VerdictSubscriber(
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-                worker_client=worker_client,
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=3, recovery_timeout=30.0
-                ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://worker", worker_port=1, auto_spawn=False
-                ),
-                endpoint_provider=lambda: live_engine,
-                recursion_limit=25,
-            )
-
-            await subscriber._reconcile_parked_runs(live_engine)
-
-            # The fresh claim short-circuited the resume: NO false re-drive.
-            assert len(worker_app.state.dispatch_ids) == 0
 
     await db_engine.dispose()

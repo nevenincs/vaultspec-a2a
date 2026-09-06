@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:ac2df0860b75131dd9dd396da3d8add1b9575285241e75e1809bbc85774c8ef0'
+body_hash: 'sha256:49a4619acc205c43582341a5d1a31263c48614f52923bf44da00ee3ce2d63fc5'
 step_id: 'S84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -55,3 +55,21 @@ S84 remains open for the six recorded control-test modules and the complete cond
 - Remaining collection failures: `test_direct_control_leases.py`, `test_direct_control_recovery.py`, `test_verdict_loop_live.py` through its live-subscriber import, `test_verdict_subscriber.py`, and `test_verdict_subscriber_live.py`.
 
 S84 remains open. The collection blocker count fell from six modules to five; S13 still owns durable receipt validation by terminal event consumers.
+## Retired verdict-lease test removal
+
+- `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber.py`.
+- `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py`.
+- Deleted the expired and fresh verdict-lease scenarios because they constructed the removed partial verdict payload through the retired implicit claim API.
+- No skipped test, alias, compatibility fixture, partial accepted input, or default reconstruction remains.
+- `verify:` canonical control collection -> 474 of 480 tests collected, six deselected, with two remaining import errors; natural exit 1.
+- `verify:` verdict subscriber unit suite -> 20 passed and two failed in 24.39 seconds; natural exit 1.
+- `verify:` focused Ruff -> pass.
+- `verify:` focused Ty -> fail on three four-member graph cache fixtures that lack the required executable-graph digest.
+
+Open review queue:
+
+- HIGH: current accepted-input tests must replace proof of expired verdict redrive and fresh-lease duplicate suppression; deletion does not qualify those behaviors.
+- HIGH: `test_verdict_subscriber.py`, `test_verdict_subscriber_live.py`, and `test_verdict_loop_live.py` retain pre-current four-member graph cache keys and must bind the exact frozen graph digest.
+- HIGH: `test_direct_control_leases.py` and `test_direct_control_recovery.py` are the last two collection blockers importing the retired claim API.
+
+S84 remains open.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:65213182ea9daba695e89151fc4905e992e439f7e0800d4934f78a5edda97299'
+body_hash: 'sha256:153adef19afd3fd5e8bd8863db0153dde6bc14386926500cfa956e7021945e94'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -197,3 +197,12 @@ Architecture follow-up: S12 remains open for durable cancellation cessation/no-o
 The event-handler tests no longer import or reproduce the retired implicit claim API. Their setup now creates the journal row and acquires the durable lease through the current database primitives, which are the only state the event consumer presently reads. All twelve focused cases pass. The complete control collection now reaches 452 cases and stops on five remaining retired imports instead of six.
 
 The setup deliberately carries no accepted-action-v2 payload or graph receipt. This is evidence for the existing high-severity `receipt-consumer-boundary` finding: the current event handler settles a leased action from dispatch identity alone. S13 remains responsible for requiring and validating durable receipt evidence. S84 must not invent valid acceptance evidence merely to keep that older consumer test green.
+### verdict-lease-retirement | high | obsolete fixtures removed; current recovery proof open
+
+The two verdict tests that manually created expired or fresh leases used the removed implicit claim operation and a partial verdict-only payload. They are deleted rather than skipped or translated. Control collection now passes the verdict modules and stops only on the two direct-control modules.
+
+Their behavioral obligations remain open: an expired accepted verdict must redrive the exact stable dispatch, and a fresh accepted verdict lease must suppress duplicate dispatch. Replacement proofs must begin from accepted-action-input-v2 plus the exact frozen executable graph and receipt. They may not restore the partial payload through a fixture.
+
+### verdict-graph-cache-identity | high | three current test fixtures omit frozen graph identity
+
+The verdict subscriber unit run produced 20 passes, then two failures before dispatch because its injected compiled graph uses the retired four-member cache key. Focused Ty identifies the same omission in the unit, live subscriber and verdict-loop fixtures. The current cache authority is five members and includes the frozen graph-definition digest. S84 must migrate all three fixtures from actual accepted graph authority; a constant placeholder digest would not prove the worker consumes the same graph.

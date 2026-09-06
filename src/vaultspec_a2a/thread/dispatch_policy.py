@@ -42,6 +42,7 @@ class FailureType(StrEnum):
     # rather than a transport error.
     NO_ACTIVE_PROJECT = "no_active_project"
     INCOMPATIBLE_STATE = "incompatible_state"
+    CREDENTIALS_REQUIRED = "credentials_required"
 
 
 @dataclass(frozen=True, slots=True)

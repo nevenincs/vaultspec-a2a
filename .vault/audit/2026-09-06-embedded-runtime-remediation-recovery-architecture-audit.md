@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:61c70d12d2da909d60c99df67893e3dba8427009acfa1513d149b9e54256efed'
+body_hash: 'sha256:bafefc1ebaa0e880a06cd319d5352642738aa6457ef26eb37185123fbaf2cf34'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -150,3 +150,21 @@ Verification: real HTTP receiver independently observed the committed initial in
 ### delivery-read-transaction-owner | medium | corrected in S12 review
 
 The pure delivery binder now owns a separate short read session. It cannot see uncommitted caller acceptance, publish or discard caller writes, or hold its read transaction across network delivery. The finalized/aborted acceptance discriminator now also attempts binding before finalization and proves that no receipt is exposed; both cases passed in 11.02 seconds. Missing-receipt refusal and committed receipt preservation passed two cases in 3.86 seconds. Shared recovery completion passed one case in 15.46 seconds. All exited naturally with code zero and whole-containment quiescence. Final focused Ruff/Ty and Core error checks passed.
+
+### complete-current-dispatch-input | high | further S12 checkpoint correction
+
+Architecture/input: initial, message, permission, clarification, verdict and cancel producers now retain every effective non-secret DispatchRequest field in accepted-action-input-v1 with semantic intention and credential requirement. The stable action dispatch ID is excluded from payload comparison and is supplied explicitly to reservation. Permission/clarification replay readers consume the strict envelope. Receipt validation rejects retired partial payloads. Direct redrive consumes the frozen input rather than current preset, permission rows, agent defaults or a supplied recursion limit. Actor credential absence has a distinct credentials_required refusal. Delivery never substitutes ambient credentials.
+
+Project validation for follow-up and resume paths now precedes claim preparation: the shared metadata reader requires an explicitly named existing canonical directory; unavailable projects return refusal before the new action is reserved. Initial input serialization occurs before run creation. The initial gateway already owns project admission, but direct low-level initial service validation of every unusable-project case is not fully discriminated in this pass.
+
+### accepted-input-verification | medium | bounded evidence and failure retained
+
+Real SQLite current-input acceptance/revision cases passed three in 5.29 seconds. The real HTTP initial input/receipt visibility case passed one in 6.36 seconds. The redrive discriminator passed two in 9.05 seconds: changed thread preset and empty current metadata did not replace accepted preset, recursion limit, decision or frozen provider assignment, and retired partial input produced no dispatch. All exited naturally with code zero and whole-containment quiescence. A final test annotation Ty diagnostic and Ruff line-length diagnostic were corrected; final focused source/test Ty and Ruff passed.
+
+The subsequent current-input recovery-direct invocation (session 45164) emitted no output during observation, later one dot, and the runner reported no pytest session result within 60 seconds with tree_reaped=true. It is FAIL. The exact observed owned process tree was shell 45060, uv 7524/38412, runner 67312/2504, child 50768/64392. A guarded cleanup command found that tree already gone and the census verified zero survivors. No hung run is counted as passed.
+
+### remaining-recovery-root-work | high | S12 S11 S13 S83 S84 remain open
+
+Architecture: DispatchRequest still names a team preset rather than freezing the executable graph/topology and sanctioned step timeout. Persist those accepted runtime controls before deriving an execution deadline; do not infer them from current configuration. Cancellation still lacks durable cessation/no-op proof. S11 still needs worker preflight, event settlement and deferred startup/network dispatch to use the shared checkpoint-first authority; old worker empty-pending-writes and unreadable-checkpoint fallback behavior remains. S13 still trusts raw application/terminal events. S83 still lacks the durable classified retry record, bounded leased scheduler, permanent-refusal election and frozen execution deadline. These are required root corrections, not optional polish.
+
+Verification: S84 must replace historical tests importing the removed auto-committing claim API, old initial input schema and retired startup/abandonment helpers. The current redrive, receipt, recovery and initial-input fixtures are migrated; no whole-suite pass is claimed. Filesystem project existence currently uses a synchronous directory probe; its bounded ownership under slow filesystem failure remains an open liveness discriminator.

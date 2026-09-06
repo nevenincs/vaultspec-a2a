@@ -9,7 +9,6 @@ an HTTP response.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -34,6 +33,8 @@ from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..thread.idempotency import default_message_key
 from ..thread.message_policy import can_send_followup
+from ._thread_metadata import dispatchable_workspace_root
+from .accepted_input import freeze_accepted_input
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 
 if TYPE_CHECKING:
@@ -134,6 +135,38 @@ async def send_followup_message(
             failure_type=FailureType.INCOMPATIBLE_STATE,
         )
 
+    # -- Metadata extraction ---------------------------------------------
+    # A follow-up inherits the active project the run was created with; it is
+    # never re-derived and never defaulted. Degrading an unreadable or absent
+    # workspace root to None here used to dispatch the turn anyway, and the
+    # provider layer then sited the agent - and its filesystem sandbox - in
+    # whatever directory the worker was started in. Refuse instead.
+    workspace_root = dispatchable_workspace_root(thread_metadata)
+    if workspace_root is None:
+        return MessageResult(
+            action_id="",
+            thread_id=thread_id,
+            thread_status=thread_status,
+            dispatched=False,
+            error_detail=(
+                "run carries no active project: its stored metadata names no "
+                "workspace_root, so a follow-up cannot be sited. Start a new run."
+            ),
+            failure_type=FailureType.NO_ACTIVE_PROJECT,
+        )
+
+    # -- Dispatch construction & send ------------------------------------
+    dispatch = DispatchRequest(
+        action=to_dispatch_action(ControlActionType.INGEST),
+        thread_id=thread_id,
+        agent_id=agent_id,
+        content=content,
+        team_preset=team_preset,
+        workspace_root=workspace_root,
+        recursion_limit=recursion_limit,
+        model_assignment=execution_authority.model_assignment,
+    )
+
     # -- Durable reservation and dispatch election -----------------------
     resolved_idempotency_key = idempotency_key or default_message_key(
         thread_id, agent_id, content
@@ -143,7 +176,10 @@ async def send_followup_message(
         thread_id=thread_id,
         action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
         idempotency_key=resolved_idempotency_key,
-        payload={"content": content, "agent_id": agent_id},
+        payload=freeze_accepted_input(
+            dispatch, intent={"content": content, "agent_id": agent_id}
+        ),
+        dispatch_id=dispatch.dispatch_id,
         write_expectation=write_expectation,
     )
     if not claim.authority_matches:
@@ -172,50 +208,9 @@ async def send_followup_message(
             dispatched=False,
         )
 
+    dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
     await mark_message_followup_requested(db, thread_id)
     await finalize_control_action_acceptance(db, claim)
-
-    # -- Metadata extraction ---------------------------------------------
-    # A follow-up inherits the active project the run was created with; it is
-    # never re-derived and never defaulted. Degrading an unreadable or absent
-    # workspace root to None here used to dispatch the turn anyway, and the
-    # provider layer then sited the agent - and its filesystem sandbox - in
-    # whatever directory the worker was started in. Refuse instead.
-    workspace_root: str | None = None
-    if thread_metadata:
-        try:
-            meta = json.loads(thread_metadata)
-        except (json.JSONDecodeError, TypeError):
-            meta = None
-        if isinstance(meta, dict):
-            candidate = meta.get("workspace_root")
-            if isinstance(candidate, str) and candidate:
-                workspace_root = candidate
-    if workspace_root is None:
-        return MessageResult(
-            action_id=claim.action_id,
-            thread_id=thread_id,
-            thread_status=thread_status,
-            dispatched=False,
-            error_detail=(
-                "run carries no active project: its stored metadata names no "
-                "workspace_root, so a follow-up cannot be sited. Start a new run."
-            ),
-            failure_type=FailureType.NO_ACTIVE_PROJECT,
-        )
-
-    # -- Dispatch construction & send ------------------------------------
-    dispatch = DispatchRequest(
-        dispatch_id=claim.dispatch_id,
-        action=to_dispatch_action(ControlActionType.INGEST),
-        thread_id=thread_id,
-        agent_id=agent_id,
-        content=content,
-        team_preset=team_preset,
-        workspace_root=workspace_root,
-        recursion_limit=recursion_limit,
-        model_assignment=execution_authority.model_assignment,
-    )
 
     logger.info(
         "Dispatching message dispatch_id=%s for thread %s",

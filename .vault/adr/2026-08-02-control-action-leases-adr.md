@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:cf881fc2ce8c018a56dcfe72a825991e53d032d3862733d915196735e928a556'
+body_hash: 'sha256:30b640ee1ce39b5aee6e65436adf0017551a80e953c1822a9efa934d0ca9709d'
 related:
   - "[[2026-08-02-control-action-leases-research]]"
   - "[[2026-08-02-control-action-leases-reference]]"
@@ -110,3 +110,7 @@ The application engine owns the physical SQLite BEGIN boundary before any SAVEPO
 ## Acceptance transaction owner
 
 Lease preparation does not commit. The accepting service owns the complete transaction and adds the requested run and permission projections before invoking the verified acceptance finalizer. The finalizer checks the held lease and commits that accepted intention, writer, receipt and its declared effects together before delivery. Refusal or failure before finalization rolls back the attempted acceptance. A repository rule restricting this transaction to the lease alone is superseded: it contradicts atomic accepted state and cannot establish ownership by inspecting only unflushed ORM objects. Network delivery is never part of this database transaction.
+
+## Closed accepted dispatch input
+
+Every accepted dispatch, including follow-up, permission, clarification, verdict and cancellation, retains its complete effective non-secret dispatch fields in one current versioned envelope. The semantic intention and whether fresh actor credentials are required are explicit fields. Stable dispatch identity belongs to the action journal, outside replay payload comparison. Recovery reads this envelope without reloading preset, permission or routing defaults. Missing, partial and retired envelopes receive typed refusal without translation. Graph receipt authority validates the current envelope before dispatch or checkpoint settlement. The frozen executable graph and sanctioned execution deadline remain governed by the state-truthfulness contract; a preset name does not freeze those facts.

@@ -23,6 +23,7 @@ from ..thread.action_receipts import (
     control_action_payload_fingerprint,
 )
 from ..thread.enums import NON_ACTIVE_STATUSES, ControlActionType
+from .accepted_input import AcceptedActionInput
 
 if TYPE_CHECKING:
     from ..database.models import ControlActionModel
@@ -52,6 +53,11 @@ def validate_current_graph_receipt(
         return None
     try:
         receipt = GraphActionReceipt.model_validate_json(action.graph_receipt_json)
+        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+        if accepted.dispatch["thread_id"] != thread.id or accepted.dispatch[
+            "action"
+        ] != _GRAPH_ACTIONS.get(receipt.action_type):
+            return None
         fingerprint = control_action_payload_fingerprint(
             _PAYLOAD.validate_json(action.payload_json)
         )
@@ -104,6 +110,11 @@ async def prepare_graph_action_receipt(
     try:
         action_type = ControlActionType(action.action_type)
         payload = _PAYLOAD.validate_json(action.payload_json)
+        accepted = AcceptedActionInput.model_validate(payload)
+        if accepted.dispatch["thread_id"] != thread_id or accepted.dispatch[
+            "action"
+        ] != _GRAPH_ACTIONS.get(action_type):
+            return None
     except (ValueError, ValidationError):
         return None
     if action_type not in _GRAPH_ACTIONS:

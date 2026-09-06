@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:388da82519dfe6ee928cf4acd33982c380c6f578535dc74ee324e16465054f88'
+body_hash: 'sha256:6ce6f3e010a0fa7ed04726fc1375dc042a31e0deebe34dd490652e4e673f2f9f'
 step_id: 'S12'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -79,3 +79,34 @@ S12 remains open for complete accepted effective inputs, initial receipt atomici
 - `verify:` `receipt revision preservation and stale writer refusal` -> `pass`
 
 Initial receipt atomicity and pure delivery binding are corrected. S12 remains open for complete noninitial effective inputs, project validation before acceptance and cancellation evidence.
+
+## Current-input checkpoint and handoff
+
+- `A` `src/vaultspec_a2a/control/accepted_input.py`
+- `A` `src/vaultspec_a2a/control/tests/test_accepted_input_recovery.py`
+- `M` `src/vaultspec_a2a/control/action_lease.py`
+- `M` `src/vaultspec_a2a/control/dispatch_receipts.py`
+- `M` `src/vaultspec_a2a/control/thread_service.py`
+- `M` `src/vaultspec_a2a/control/message_service.py`
+- `M` `src/vaultspec_a2a/control/permission_service.py`
+- `M` `src/vaultspec_a2a/control/clarification_service.py`
+- `M` `src/vaultspec_a2a/control/verdict_subscriber.py`
+- `M` `src/vaultspec_a2a/control/cancel_service.py`
+- `M` `src/vaultspec_a2a/control/direct_control_recovery.py`
+- `M` `src/vaultspec_a2a/control/_thread_metadata.py`
+- `M` `src/vaultspec_a2a/thread/dispatch_policy.py`
+- `M` `src/vaultspec_a2a/api/app.py`
+- `M` `src/vaultspec_a2a/control/tests/test_dispatch_receipts.py`
+- `M` `src/vaultspec_a2a/control/tests/test_recovery_authority.py`
+- `M` `src/vaultspec_a2a/control/tests/test_thread_service_tokens.py`
+- `verify:` `bounded test_dispatch_receipts -k share_acceptance-or-retry_preserves, three cases` -> `pass`
+- `verify:` `bounded test_thread_service_tokens -k tokens_to_worker, one case` -> `pass`
+- `verify:` `bounded test_accepted_input_recovery, two cases` -> `pass`
+- `verify:` `bounded test_recovery_authority -k direct, session 45164` -> `fail`
+- `verify:` `focused production/test Ty and Ruff` -> `pass`
+
+S12 remains OPEN. Complete non-secret dispatch fields and preclaim follow-up/resume project checks are implemented. Still required: freeze executable graph/runtime step limits for the execution deadline; durable cancellation cessation/no-op evidence; finish worker/event/checkpoint consolidation and durable retry/refusal ownership through S11/S13/S83; replace retired contract tests in S84. Do not restore compatibility aliases or partial-payload interpretation.
+
+Next command: `.venv/Scripts/python.exe -m vaultspec_a2a.testing.runner --run-timeout 60 --exit-timeout 5 -- src/vaultspec_a2a/control/tests/test_recovery_authority.py -q -k direct`. This is an unresolved discriminator, not permission to repeat until green. If it fails or hangs, retain FAIL and inspect only the exact owned process tree. Read the recovery architecture audit before extending the implementation. The next source focus is frozen graph/runtime deadline authority, followed by durable scheduler storage and checkpoint-first worker/event consumers.
+
+The failed owned run reported no pytest session result within 60 seconds and tree_reaped=true. Its exact process census ended with zero survivors (45060, 7524, 38412, 67312, 2504, 50768, 64392). The guarded cleanup found that tree already gone. There are no active owned verification sessions to resume at handoff. Parent-owned provider files are outside this checkpoint.

@@ -61,6 +61,7 @@ async def prepare_control_action_claim(
     action_type: ControlActionType | str,
     idempotency_key: str,
     payload: dict[str, object] | None,
+    dispatch_id: str,
     request_id: str | None = None,
     worker_generation: int = 0,
     now: datetime | None = None,
@@ -81,6 +82,7 @@ async def prepare_control_action_claim(
         idempotency_key=idempotency_key,
         request_id=request_id,
         payload=payload,
+        dispatch_id=dispatch_id,
         worker_generation=worker_generation,
     )
     action = reservation.action

@@ -407,7 +407,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 worker_client=worker_client,
                 circuit_breaker=circuit_breaker,
                 worker_spawner=worker_spawner,
-                recursion_limit=domain_config.graph_recursion_limit,
                 trace_headers=trace_headers(),
             )
             app.state.direct_control_recovery_summary = direct_summary
@@ -437,7 +436,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                         worker_client=worker_client,
                         circuit_breaker=circuit_breaker,
                         worker_spawner=worker_spawner,
-                        recursion_limit=domain_config.graph_recursion_limit,
                         trace_headers=trace_headers(),
                     )
                 )

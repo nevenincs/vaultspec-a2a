@@ -18,12 +18,14 @@ from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
 )
+from ...ipc.schemas import DispatchRequest
 from ...thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
     read_checkpoint_evidence,
 )
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.state import TeamState
+from ..accepted_input import freeze_accepted_input
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
 from ..run_discovery_service import discover_active_runs
@@ -54,7 +56,16 @@ async def durable_run(tmp_path, request):
             action_type=ControlActionType.INGEST,
             idempotency_key="accepted",
             dispatch_id="accepted",
-            payload={"content": "work"},
+            payload=freeze_accepted_input(
+                DispatchRequest(
+                    action="ingest",
+                    thread_id="run",
+                    content="work",
+                    workspace_root=str(tmp_path),
+                    recursion_limit=25,
+                ),
+                intent={"content": "work"},
+            ),
         )
         receipt = await prepare_graph_action_receipt(
             db, thread_id="run", dispatch_id="accepted"

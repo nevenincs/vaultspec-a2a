@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:5107a9235fbe398a9cb9418e39d1d8434057461d0a6d539e01555b85e0cd312f'
+body_hash: 'sha256:5afc11874ef1e99c1551a4ea90b480e036e3cddab0be132b6e3d82dfef89e4b3'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-audit]]"
@@ -98,3 +98,9 @@ This fixes publication ordering but does not supply omitted effective control in
 ## Delivery reads accepted authority
 
 Initial admission can prepare the graph receipt inside the same transaction as its stored effective input. A later delivery binder therefore needs no write authority: it reads the action and current run witness, validates their immutable receipt, and refuses absent evidence. Sharing that validator with gateway recovery prevents delivery and checkpoint settlement from interpreting the same action differently. Full noninitial dispatch input remains the next acceptance prerequisite for safe redrive.
+
+## Durable checkpoint handoff: accepted effective dispatch input
+
+The current accepted envelope retains complete non-secret transport input and semantic intention separately from stable journal dispatch identity. Recovery therefore reproduces accepted controls without reading current preset metadata or permission definitions. A real HTTP redrive discriminator changed those current values and still received the original preset, recursion limit, decision and provider assignment; retired partial input was refused. Actor credentials remain ephemeral and their required renewal is explicit.
+
+This closes omission of effective DispatchRequest fields. It does not freeze the executable graph behind a preset or its sanctioned step timeout. That is the next deadline prerequisite. Durable cancellation proof, typed permanent-refusal election, independent leased retries and checkpoint-first worker/event consumers remain unfinished. The complete next-action handoff is in the S12 execution record; the latest recovery-direct invocation is failed process-lifecycle evidence with zero surviving owned processes.

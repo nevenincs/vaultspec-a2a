@@ -59,6 +59,7 @@ from ..thread.enums import (
 )
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
 from ._thread_metadata import dispatchable_workspace_root
+from .accepted_input import freeze_accepted_input
 from .action_lease import (
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -624,6 +625,12 @@ class VerdictSubscriber:
             thread_metadata = thread.thread_metadata
             write_expectation = thread_write_expectation(thread)
             workspace_root = dispatchable_workspace_root(thread_metadata)
+            if workspace_root is None:
+                logger.warning(
+                    "Refusing verdict resume: accepted project unavailable",
+                    extra={"thread_id": thread_id, "failure_type": "no_active_project"},
+                )
+                return
             try:
                 execution_authority = resolve_execution_authority(thread_metadata)
             except ExecutionAuthorityError as exc:
@@ -646,6 +653,15 @@ class VerdictSubscriber:
             return
 
         resume_value = _verdict_resume_payload(verdict, notes)
+        dispatch = DispatchRequest(
+            action=to_dispatch_action(ControlActionType.RESUME),
+            thread_id=thread_id,
+            option_id=resume_value,
+            team_preset=team_preset,
+            workspace_root=workspace_root,
+            recursion_limit=self._recursion_limit,
+            model_assignment=execution_authority.model_assignment,
+        )
         async with self._session_factory() as db:
             claim = await prepare_control_action_claim(
                 db,
@@ -654,7 +670,8 @@ class VerdictSubscriber:
                 action_type=ControlActionType.RESUME,
                 idempotency_key=_verdict_resume_idempotency_key(current_gate),
                 request_id=current_gate,
-                payload=resume_value,
+                payload=freeze_accepted_input(dispatch, intent=resume_value),
+                dispatch_id=dispatch.dispatch_id,
             )
             if not claim.authority_matches:
                 logger.warning(
@@ -680,16 +697,7 @@ class VerdictSubscriber:
         if claim.claim_token is None:
             raise RuntimeError("acquired verdict lease has no claim token")
 
-        dispatch = DispatchRequest(
-            dispatch_id=claim.dispatch_id,
-            action=to_dispatch_action(ControlActionType.RESUME),
-            thread_id=thread_id,
-            option_id=resume_value,
-            team_preset=team_preset,
-            workspace_root=workspace_root,
-            recursion_limit=self._recursion_limit,
-            model_assignment=execution_authority.model_assignment,
-        )
+        dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
         trace_headers = self._trace_headers_fn() if self._trace_headers_fn else None
         logger.info(
             "Resuming thread %s with verdict=%s (dispatch_id=%s)",

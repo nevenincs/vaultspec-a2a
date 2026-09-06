@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
+from ..control.accepted_input import freeze_accepted_input
 from ..control.dispatch import safe_dispatch
 from ..control.dispatch_receipts import (
     bind_graph_action_receipt,
@@ -538,6 +539,11 @@ async def create_and_dispatch_thread(
         if requires_dispatch(req.team_preset)
         else None
     )
+    accepted_input = (
+        freeze_accepted_input(dispatch, intent={"initial_message": req.initial_message})
+        if dispatch is not None
+        else None
+    )
     thread = await create_thread(
         db,
         write_authority=RunWriteAuthority(
@@ -597,13 +603,7 @@ async def create_and_dispatch_thread(
         action_type=ControlActionType.INGEST,
         dispatch_id=action_receipt_id,
         idempotency_key=f"thread-create:{thread.id}",
-        payload={
-            "schema": "initial-dispatch-v1",
-            "dispatch": dispatch.model_dump(
-                mode="json", exclude={"actor_tokens", "graph_action_receipt"}
-            ),
-            "actor_tokens_required": req.actor_tokens is not None,
-        },
+        payload=accepted_input,
     )
     await mark_ingest_requested(db, thread.id)
     receipt = await prepare_graph_action_receipt(

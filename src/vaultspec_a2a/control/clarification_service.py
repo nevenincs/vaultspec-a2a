@@ -39,6 +39,7 @@ from ..thread.enums import (
     ControlActionType,
 )
 from ._thread_metadata import dispatchable_workspace_root
+from .accepted_input import AcceptedActionInput, freeze_accepted_input
 from .action_lease import (
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -139,8 +140,10 @@ def _stored_resolution(
     if not action.payload_json or action.request_id is None:
         return None
     try:
-        payload: object = json.loads(action.payload_json)
-        return parse_clarification_resolution(payload, request_id=action.request_id)
+        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+        return parse_clarification_resolution(
+            accepted.intent, request_id=action.request_id
+        )
     except (json.JSONDecodeError, ValueError):
         return None
 
@@ -308,6 +311,17 @@ async def respond_to_clarification(
     worker_generation = thread.repair_generation
     team_preset = thread.team_preset
     workspace_root = dispatchable_workspace_root(thread.thread_metadata)
+    if workspace_root is None:
+        return ClarificationResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            error_detail="The accepted run's project is unavailable",
+            error_status_code=409,
+            failure_type=FailureType.NO_ACTIVE_PROJECT,
+        )
     try:
         execution_authority = resolve_execution_authority(thread.thread_metadata)
     except ExecutionAuthorityError as exc:
@@ -322,6 +336,15 @@ async def respond_to_clarification(
             failure_type=FailureType.INCOMPATIBLE_STATE,
         )
 
+    dispatch = DispatchRequest(
+        action=to_dispatch_action(ControlActionType.RESUME),
+        thread_id=thread_id,
+        option_id=payload,
+        team_preset=team_preset,
+        workspace_root=workspace_root,
+        recursion_limit=recursion_limit,
+        model_assignment=execution_authority.model_assignment,
+    )
     claim = await prepare_control_action_claim(
         db,
         write_expectation=write_expectation,
@@ -329,7 +352,8 @@ async def respond_to_clarification(
         action_type=ControlActionType.RESUME,
         idempotency_key=idempotency_key,
         request_id=request_id,
-        payload=payload,
+        payload=freeze_accepted_input(dispatch, intent=payload),
+        dispatch_id=dispatch.dispatch_id,
         worker_generation=worker_generation,
     )
     if not claim.authority_matches:
@@ -379,16 +403,7 @@ async def respond_to_clarification(
     if not claim.acquired:
         return _result(action)
 
-    dispatch = DispatchRequest(
-        dispatch_id=claim.dispatch_id,
-        action=to_dispatch_action(ControlActionType.RESUME),
-        thread_id=thread_id,
-        option_id=payload,
-        team_preset=team_preset,
-        workspace_root=workspace_root,
-        recursion_limit=recursion_limit,
-        model_assignment=execution_authority.model_assignment,
-    )
+    dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
     await finalize_control_action_acceptance(db, claim)
     dispatch = await bind_graph_action_receipt(db, dispatch)
     outcome = await safe_dispatch(

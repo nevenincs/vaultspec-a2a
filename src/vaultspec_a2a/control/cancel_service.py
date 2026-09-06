@@ -11,6 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -184,12 +185,18 @@ async def cancel_thread(
     # it must not create a second dispatchable intention.
     resolved_idempotency_key = default_cancel_key(thread_id)
     response_idempotency_key = idempotency_key or resolved_idempotency_key
+    dispatch = DispatchRequest(
+        action=to_dispatch_action(ControlActionType.CANCEL),
+        thread_id=thread_id,
+        recursion_limit=recursion_limit,
+    )
     claim = await prepare_control_action_claim(
         db,
         thread_id=thread_id,
         action_type=ControlActionType.CANCEL,
         idempotency_key=resolved_idempotency_key,
-        payload={"cancel": True},
+        payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
+        dispatch_id=dispatch.dispatch_id,
     )
     if not claim.payload_matches:
         return CancelResult(
@@ -317,12 +324,7 @@ async def cancel_thread(
         await mark_cancel_requested(db, thread_id)
     await finalize_control_action_acceptance(db, claim)
 
-    dispatch = DispatchRequest(
-        dispatch_id=claim.dispatch_id,
-        action=to_dispatch_action(ControlActionType.CANCEL),
-        thread_id=thread_id,
-        recursion_limit=recursion_limit,
-    )
+    dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
     logger.info(
         "Dispatching cancel dispatch_id=%s for thread %s",
         dispatch.dispatch_id,

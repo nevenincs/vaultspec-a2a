@@ -19,6 +19,7 @@ from ...database.models import Base, RunWriteAuthority
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...thread.enums import ControlActionType, ThreadStatus
+from ..accepted_input import freeze_accepted_input
 from ..action_lease import (
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -95,7 +96,16 @@ async def test_retry_preserves_original_receipt_after_state_revision(sessions):
             thread_id="run",
             action_type=ControlActionType.RESUME,
             idempotency_key="resume",
-            payload={"option_id": "yes"},
+            payload=freeze_accepted_input(
+                DispatchRequest(
+                    action="resume",
+                    thread_id="run",
+                    option_id="yes",
+                    recursion_limit=25,
+                ),
+                intent={"option_id": "yes"},
+            ),
+            dispatch_id="resume",
             write_expectation=witness,
         )
         assert claim.acquired
@@ -173,7 +183,16 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(sessio
             thread_id="run",
             action_type=ControlActionType.RESUME,
             idempotency_key="resume",
-            payload={"option_id": "yes"},
+            payload=freeze_accepted_input(
+                DispatchRequest(
+                    action="resume",
+                    thread_id="run",
+                    option_id="yes",
+                    recursion_limit=25,
+                ),
+                intent={"option_id": "yes"},
+            ),
+            dispatch_id="resume",
             write_expectation=witness,
         )
         assert not claim.acquired
@@ -204,7 +223,16 @@ async def test_requested_projection_and_receipt_share_acceptance_commit(
             thread_id="run",
             action_type=ControlActionType.RESUME,
             idempotency_key="resume",
-            payload={"option_id": "yes"},
+            payload=freeze_accepted_input(
+                DispatchRequest(
+                    action="resume",
+                    thread_id="run",
+                    option_id="yes",
+                    recursion_limit=25,
+                ),
+                intent={"option_id": "yes"},
+            ),
+            dispatch_id="resume",
             write_expectation=witness,
         )
         assert claim.acquired

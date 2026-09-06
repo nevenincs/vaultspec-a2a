@@ -41,6 +41,8 @@ from ..thread.snapshots import (
     LOCALLY_RESPONDABLE_PAUSE_CAUSES,
     PLAN_APPROVAL_PAUSE_CAUSES,
 )
+from ._thread_metadata import dispatchable_workspace_root
+from .accepted_input import AcceptedActionInput, freeze_accepted_input
 from .action_lease import (
     ControlActionClaim,
     finalize_control_action_acceptance,
@@ -99,8 +101,10 @@ def _action_payload_matches(action: object, option_id: str, notes: str | None) -
     if not isinstance(raw, str):
         return False
     try:
-        return json.loads(raw) == _response_payload(option_id, notes)
-    except json.JSONDecodeError:
+        return AcceptedActionInput.model_validate_json(raw).intent == _response_payload(
+            option_id, notes
+        )
+    except ValueError:
         return False
 
 
@@ -236,10 +240,7 @@ class _PermissionTransition:
     """
 
     claim: ControlActionClaim
-    resume_value: str | dict[str, str | None]
-    team_preset: str | None
-    workspace_root: str | None
-    model_assignment: dict[str, dict[str, object]]
+    dispatch: DispatchRequest
     approval_status: str | None
 
 
@@ -341,6 +342,7 @@ async def respond_to_permission(
         request_id=request_id,
         option_id=option_id,
         notes=notes,
+        recursion_limit=recursion_limit,
     )
     if isinstance(transition, PermissionResult):
         return transition
@@ -354,7 +356,6 @@ async def respond_to_permission(
         circuit_breaker=circuit_breaker,
         worker_spawner=worker_spawner,
         worker_client=worker_client,
-        recursion_limit=recursion_limit,
         trace_headers=trace_headers,
     )
 
@@ -718,6 +719,7 @@ async def _record_permission_transition(
     request_id: str,
     option_id: str,
     notes: str | None,
+    recursion_limit: int,
 ) -> PermissionResult | _PermissionTransition:
     """Write the durable pre-dispatch transition for an authorized response.
 
@@ -758,16 +760,20 @@ async def _record_permission_transition(
     # ``str | None`` while the read admitted any JSON value, so a stored number or
     # object flowed through untouched and only failed further downstream, if at
     # all.
-    workspace_root: str | None = None
-    if thread_record.thread_metadata:
-        try:
-            meta = json.loads(thread_record.thread_metadata)
-        except json.JSONDecodeError:
-            meta = None
-        if isinstance(meta, dict):
-            candidate = meta.get("workspace_root")
-            if isinstance(candidate, str) and candidate:
-                workspace_root = candidate
+    workspace_root = dispatchable_workspace_root(thread_record.thread_metadata)
+    if workspace_root is None:
+        return PermissionResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            idempotency_key=resolved_idempotency_key,
+            approval_status=replay_approval_status,
+            error_detail="The accepted run's project is unavailable",
+            error_status_code=409,
+            failure_type=FailureType.NO_ACTIVE_PROJECT,
+        )
 
     try:
         execution_authority = resolve_execution_authority(thread_record.thread_metadata)
@@ -791,6 +797,16 @@ async def _record_permission_transition(
         notes,
     )
 
+    dispatch = DispatchRequest(
+        action=to_dispatch_action(ControlActionType.RESUME),
+        thread_id=thread_id,
+        option_id=resume_value,
+        team_preset=team_preset,
+        workspace_root=workspace_root,
+        recursion_limit=recursion_limit,
+        model_assignment=execution_authority.model_assignment,
+    )
+
     claim = await prepare_control_action_claim(
         db,
         write_expectation=write_expectation,
@@ -798,7 +814,10 @@ async def _record_permission_transition(
         action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
         request_id=request_id,
         idempotency_key=permission_response_action_key(request_id),
-        payload=_response_payload(option_id, notes),
+        payload=freeze_accepted_input(
+            dispatch, intent=_response_payload(option_id, notes)
+        ),
+        dispatch_id=dispatch.dispatch_id,
     )
     if not claim.authority_matches:
         return PermissionResult(
@@ -877,10 +896,7 @@ async def _record_permission_transition(
 
     return _PermissionTransition(
         claim=claim,
-        resume_value=resume_value,
-        team_preset=team_preset,
-        workspace_root=workspace_root,
-        model_assignment=execution_authority.model_assignment,
+        dispatch=dispatch.model_copy(update={"dispatch_id": claim.dispatch_id}),
         approval_status=submitted_approval_status,
     )
 
@@ -896,7 +912,6 @@ async def _dispatch_permission_resume(
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: LazyWorkerSpawner,
     worker_client: httpx.AsyncClient,
-    recursion_limit: int,
     trace_headers: dict[str, str] | None,
 ) -> PermissionResult:
     """Dispatch the resume to the worker and settle the response.
@@ -911,16 +926,7 @@ async def _dispatch_permission_resume(
     resolved_idempotency_key = authorized.resolved_idempotency_key
     claim = transition.claim
 
-    dispatch = DispatchRequest(
-        dispatch_id=claim.dispatch_id,
-        action=to_dispatch_action(ControlActionType.RESUME),
-        thread_id=thread_id,
-        option_id=transition.resume_value,
-        team_preset=transition.team_preset,
-        workspace_root=transition.workspace_root,
-        recursion_limit=recursion_limit,
-        model_assignment=transition.model_assignment,
-    )
+    dispatch = transition.dispatch
 
     logger.info(
         "Dispatching resume dispatch_id=%s for thread %s (request_id=%s)",

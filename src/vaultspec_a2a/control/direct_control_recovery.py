@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
@@ -11,15 +12,16 @@ from sqlalchemy import select
 
 from ..database import (
     ControlActionModel,
-    get_permission_request,
     get_thread,
     thread_write_expectation,
 )
-from ..ipc.schemas import DispatchRequest, to_dispatch_action
-from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
-from ._thread_metadata import dispatchable_workspace_root
+from .accepted_input import (
+    AcceptedActionInput,
+    ActorCredentialsRequiredError,
+    restore_accepted_dispatch,
+)
 from .action_lease import (
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -27,13 +29,12 @@ from .action_lease import (
 )
 from .dispatch import safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
-from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
-from .permission_dispatch import permission_resume_value
 
 if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from ..ipc.schemas import DispatchRequest
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 
@@ -43,6 +44,8 @@ logger = logging.getLogger(__name__)
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _RECOVERABLE_TYPES = frozenset(
     {
+        ControlActionType.INGEST.value,
+        ControlActionType.RESUME.value,
         ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value,
         ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value,
         ControlActionType.CANCEL.value,
@@ -81,6 +84,7 @@ class _Refusal:
 
 @dataclass(frozen=True, slots=True)
 class _StoredAction:
+    dispatch_id: str
     thread_id: str
     action_type: str
     request_id: str | None
@@ -103,100 +107,35 @@ async def _reconstruct_dispatch(
     action: _StoredAction,
     *,
     dispatch_id: str,
-    recursion_limit: int,
 ) -> DispatchRequest | _Refusal:
     thread = await get_thread(db, action.thread_id)
     if thread is None:
-        return _Refusal(
-            FailureType.NOT_FOUND,
-            "the thread this action belongs to no longer exists",
-        )
-
-    if action.action_type == ControlActionType.CANCEL.value:
-        # A cancel names no active project by design: it tears a run down rather
-        # than siting one, so it is reconstructed before the project gate below.
-        return DispatchRequest(
-            dispatch_id=dispatch_id,
-            action=to_dispatch_action(ControlActionType.CANCEL),
-            thread_id=action.thread_id,
-            recursion_limit=recursion_limit,
-        )
-
-    # Both remaining actions re-enter graph execution, and a recovery pass runs
-    # after the worker that held the run is gone: there is no live graph still
-    # carrying the project, so a resume needs it named as much as a follow-up
-    # does. Refuse here, typed, the way the follow-up path refuses - rather than
-    # dispatching with nothing and letting the provider seam site the agent and
-    # its sandbox roots in whatever directory the worker was started in.
-    workspace_root = dispatchable_workspace_root(thread.thread_metadata)
-    if workspace_root is None:
-        return _Refusal(
-            FailureType.NO_ACTIVE_PROJECT,
-            "run carries no active project: its stored metadata names no usable "
-            "workspace_root, so a recovered dispatch cannot be sited. "
-            "Start a new run.",
-        )
-
+        return _Refusal(FailureType.NOT_FOUND, "the accepted run no longer exists")
     try:
-        execution_authority = resolve_execution_authority(thread.thread_metadata)
-    except ExecutionAuthorityError as exc:
+        accepted = AcceptedActionInput.model_validate(action.payload)
+        dispatch = restore_accepted_dispatch(accepted, dispatch_id=dispatch_id)
+    except ActorCredentialsRequiredError as exc:
+        return _Refusal(FailureType.CREDENTIALS_REQUIRED, str(exc))
+    except ValueError as exc:
         return _Refusal(FailureType.INCOMPATIBLE_STATE, str(exc))
-
-    if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
-        content = action.payload.get("content")
-        agent_value = action.payload.get("agent_id")
-        if not isinstance(content, str):
-            return _Refusal(
-                FailureType.REJECTED,
-                "the stored follow-up carries no message content",
-            )
-        agent_id = (
-            agent_value
-            if isinstance(agent_value, str) and agent_value
-            else DEFAULT_SUPERVISOR_ID
+    expected_action = {
+        ControlActionType.INGEST.value: "ingest",
+        ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value: "ingest",
+        ControlActionType.RESUME.value: "resume",
+        ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value: "resume",
+        ControlActionType.CANCEL.value: "cancel",
+    }.get(action.action_type)
+    if dispatch.thread_id != action.thread_id or dispatch.action != expected_action:
+        return _Refusal(
+            FailureType.INCOMPATIBLE_STATE, "accepted input identity mismatch"
         )
-        return DispatchRequest(
-            dispatch_id=dispatch_id,
-            action=to_dispatch_action(ControlActionType.INGEST),
-            thread_id=action.thread_id,
-            agent_id=agent_id,
-            content=content,
-            team_preset=thread.team_preset,
-            workspace_root=workspace_root,
-            recursion_limit=recursion_limit,
-            model_assignment=execution_authority.model_assignment,
-        )
-    if (
-        action.action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
-        and action.request_id is not None
+    if dispatch.action != "cancel" and (
+        dispatch.workspace_root is None or not Path(dispatch.workspace_root).is_dir()
     ):
-        permission = await get_permission_request(db, action.request_id)
-        option_value = action.payload.get("option_id")
-        notes_value = action.payload.get("notes")
-        if permission is None or not isinstance(option_value, str):
-            return _Refusal(
-                FailureType.REJECTED,
-                "the permission request this response answers is unreadable",
-            )
-        notes = notes_value if isinstance(notes_value, str) else None
-        return DispatchRequest(
-            dispatch_id=dispatch_id,
-            action=to_dispatch_action(ControlActionType.RESUME),
-            thread_id=action.thread_id,
-            option_id=permission_resume_value(
-                permission.pause_reason_type,
-                option_value,
-                notes,
-            ),
-            team_preset=thread.team_preset,
-            workspace_root=workspace_root,
-            recursion_limit=recursion_limit,
-            model_assignment=execution_authority.model_assignment,
+        return _Refusal(
+            FailureType.NO_ACTIVE_PROJECT, "accepted project is unavailable"
         )
-    return _Refusal(
-        FailureType.REJECTED,
-        f"stored action type {action.action_type!r} has no recoverable dispatch",
-    )
+    return dispatch
 
 
 async def _restore_requested_state(
@@ -229,7 +168,6 @@ async def redrive_direct_control_actions(
     worker_client: httpx.AsyncClient,
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: LazyWorkerSpawner,
-    recursion_limit: int,
     trace_headers: dict[str, str] | None,
 ) -> DirectControlRecoverySummary:
     """Reacquire expired direct-control leases and resend their stable dispatch."""
@@ -248,6 +186,7 @@ async def redrive_direct_control_actions(
         )
         stored = [
             _StoredAction(
+                dispatch_id=row.dispatch_id,
                 thread_id=row.thread_id,
                 action_type=row.action_type,
                 request_id=row.request_id,
@@ -256,7 +195,8 @@ async def redrive_direct_control_actions(
                 worker_generation=row.worker_generation,
             )
             for row in rows
-            if (payload := _decode_payload(row.payload_json)) is not None
+            if row.dispatch_id
+            and (payload := _decode_payload(row.payload_json)) is not None
         ]
 
     dispatched = deferred = refused = 0
@@ -270,6 +210,7 @@ async def redrive_direct_control_actions(
                 request_id=action.request_id,
                 idempotency_key=action.idempotency_key,
                 payload=action.payload,
+                dispatch_id=action.dispatch_id,
                 worker_generation=action.worker_generation,
             )
             if not claim.authority_matches:
@@ -285,7 +226,6 @@ async def redrive_direct_control_actions(
                 db,
                 action,
                 dispatch_id=claim.dispatch_id,
-                recursion_limit=recursion_limit,
             )
             if isinstance(dispatch, _Refusal):
                 # Refusal aborts this prepared acceptance. The durable retry

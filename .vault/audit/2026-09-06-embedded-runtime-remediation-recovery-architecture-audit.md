@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:80e10be0523a3f3fae25d22c6cbc72cd047cb14169ace808e5e5d47a5cf3b06b'
+body_hash: 'sha256:614f0b5a274007a7e16db865366f45fc6b5f63385f2e52a400e4df02046b5be7'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -307,3 +307,6 @@ Formal review resolves HIGH stale-failure overwrite, unbound classification and 
 Three executor failure fixtures now carry complete accepted-action-input-v2, the frozen `mock-success-single` graph definition and a graph receipt fingerprint derived from that exact payload. Ordinary runtime failure and both unhandled-settlement backstops emit action-specific failure evidence with the accepted dispatch identity. Two cases passed naturally in 0.37 seconds and the third in 0.32 seconds; focused Ruff passes.
 
 The failed-checkpoint replay discriminator remains HIGH S84 work because it still injects an arbitrary graph under the retired four-member cache authority. Full executor-test Ty continues to report that case and five other known four-member cache fixtures. They require actual frozen compiler provenance, not a constant digest or compatibility cache shape.
+### s13-terminal-authority-closure | high | resolved
+
+S13 is closed after current executor runtime/backstop production proof. Bare application and terminal notifications have no lifecycle authority. Exact incorporated graph receipts settle application; immutable completion receipts settle success; cancellation cessation/no-active evidence settles cancellation; and classified graph-failure evidence settles failure. Each consumer revalidates or elects the exact current durable writer before committing dependent effects. S14/S83 own delivery retry, and S84 owns the remaining retired executor checkpoint/cache fixtures.

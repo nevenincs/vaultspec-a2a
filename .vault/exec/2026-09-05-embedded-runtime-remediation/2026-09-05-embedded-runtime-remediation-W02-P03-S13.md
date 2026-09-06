@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:96cb79a4117d25fc995a76235da275ca3c4056e85125ad40542a3d96263e5a73'
+body_hash: 'sha256:6600d2d7cf0220093228cea8d3c66bd64f1461ac1f903e689036d6dc5363155b'
 step_id: 'S13'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -132,3 +132,8 @@ The three failing historical cases exited naturally in 0.89 seconds. They are no
 The migrated executor cases construct accepted-action-input-v2 from a frozen `mock-success-single` graph, derive the receipt fingerprint from that exact accepted payload, and pass the complete receipt to the worker. Runtime failure and both unhandled-settlement paths emit `graph-failure-v1` with the same dispatch identity. No test-only partial dispatch or inferred graph authority remains in these three cases.
 
 Formal review resolves the HIGH executor-wiring proof gap for ordinary runtime failure and the unhandled-settlement backstop. The failed-checkpoint replay case remains HIGH S84 work because it still registers an arbitrary graph under a retired four-member cache identity. Full executor-test Ty reports that case and five other existing four-member cache fixtures; this increment does not claim them or add a placeholder digest.
+## Closure
+
+S13 is closed. Application settlement now requires the complete accepted graph receipt and exact incorporated checkpoint. Completed terminals reconcile immutable graph completion, cancelled terminals elect action-specific cessation/no-active evidence, and failed terminals elect action-specific classified failure evidence. Every terminal side effect commits only for the exact current writer. The generic unconditional terminal writer is deleted.
+
+S14/S83 retain durable relay retry. S84 retains replacement of the separate failed-checkpoint executor fixture and the remaining arbitrary four-member cache fixtures. Those owners do not reopen S13's production authority.

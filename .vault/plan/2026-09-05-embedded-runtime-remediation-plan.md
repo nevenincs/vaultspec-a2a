@@ -25,7 +25,7 @@ related:
   - '[[2026-09-06-embedded-runtime-remediation-codex-native-control-protocol-research]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:453be1fad2deb0a502cab8bcd74f17663df7c410af5390d4a3339571946e7923'
+body_hash: 'sha256:dab95fbd32a535ef98a33c536fa733c918420641aaa6b920f58c5a38384d1ff5'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -84,7 +84,7 @@ Remove stale-write and early-completion races while retaining existing state obl
 - [ ] `W02.P03.S83` - Persist one leased recovery attempt per run revision and action receipt with classified condition, attempt count, next eligible attempt and run-derived deadline; drain it during startup and ordinary operation so circuit-open, capacity, typed rejection and transport loss cannot strand accepted work or depend on client polling; `src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/database/migrations, src/vaultspec_a2a/control/recovery.py`.
 - [ ] `W02.P03.S84` - Verify the recovery architecture against the complete conditions 1-16 matrix using real durable receipts and fresh projections: refuse absent, corrupt, retired or mismatched authority and unusable projects; retain and schedule retryable worker conditions; honor newer terminal and deletion winners; settle checkpoint truth before abandonment; and disclose recovery before the client observation deadline; `src/vaultspec_a2a/control/tests, src/vaultspec_a2a/api/tests/test_catalog_restart_redispatch.py`.
 - [x] `W02.P03.S85` - Correct condition 17 at its outer process-lifecycle root: run every canonical pytest target beneath one OS-contained owner, accept pytest session completion only as a receipt that starts a bounded result-to-exit deadline, reap the complete owned tree on violation, and report natural exit separately from passing assertions; `src/vaultspec_a2a/testing, src/vaultspec_a2a/utils/process.py, dev/toolchain.py, dev/just/test.just, dev/just/build.just, dev/tests/test_ci_contract.py`.
-- [ ] `W02.P03.S13` - Settle application only from the durable receipt and reconcile completion arriving before running has committed; `src/vaultspec_a2a/control/event_handlers.py`.
+- [x] `W02.P03.S13` - Settle application only from the durable receipt and reconcile completion arriving before running has committed; `src/vaultspec_a2a/control/event_handlers.py`.
 - [ ] `W02.P03.S14` - Give durable terminal delivery an independent bounded retry/reconciliation owner so a failed relay cannot strand an otherwise completed run; `src/vaultspec_a2a/control/direct_control_recovery.py`.
 - [ ] `W02.P03.S82` - After recovery, checkpoint incorporation, terminal settlement and durable retry have migrated the remaining writers, prove zero callers and delete the unconditional lifecycle setter plus its export; `src/vaultspec_a2a/database/thread_repository.py, src/vaultspec_a2a/database/__init__.py`.
 - [x] `W02.P03.S88` - Replace the filesystem completion marker with an authenticated loopback receipt so Windows file locks cannot overwrite the owned pytest exit outcome after tree reaping; `src/vaultspec_a2a/testing/runner.py, src/vaultspec_a2a/testing/plugin.py, src/vaultspec_a2a/testing/tests/test_runner.py`.

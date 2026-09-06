@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:5c96053221ffc3d883de1778fee0fcf82688373f61c529caa6d206c433c76dd0'
+body_hash: 'sha256:b4157f1ec85d7a2aa5cf0f5031a0a85e3fac6d3df0544e2e025419e2eb0e54c3'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1367,3 +1367,8 @@ Type: recovery authority and fail-closed admission. Direct-control recovery no l
 ### w02-p03-s10-cancel-post-rollback-removed-row | medium | resolved pending formal rereview
 
 Type: typed API race handling. The fresh-lease cancellation replay now performs an identity re-read with populate-existing after claim rollback. Concurrent final deletion returns typed NOT_FOUND with no dispatch instead of refreshing a removed ORM object and raising.
+### w02-p03-s10-final-formal-rereview | low | PASS
+
+Type: formal implementation review disposition. Final rereview accepts implementation `6c5f5384`, first correction `0c47b4db` and exact-current correction `a24bfccc`. Recovery no longer uses wall time or elects a different stored receipt: worker dispatch requires current status, action type and receipt to exactly match the action. Fresh CANCEL lease replay re-reads by identity and returns typed conflict or NOT_FOUND without dispatch. Initial 429 remains a definite failure when a different CANCEL action wins. Archive and deletion loser paths return typed not-found after concurrent removal.
+
+The final exact-current/race group passed four tests in 13.68 seconds; prior focused archive/deletion, permission, initial dispatch and concurrency gates remain recorded; Ruff, Ty and all 19 Core checks pass. Remaining unconditional writers are HIGH/open under S11, S78, S12, S13, S14 and S82. Live PostgreSQL contention proof and the resource-aware test-process shutdown leak remain MEDIUM/open. No legacy, deprecated, compatibility, fallback, default authority, wall-clock authority or invented receipt was added. No critical, high or medium S10 implementation defect remains.

@@ -50,6 +50,7 @@ from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 
 
 async def _seed_unapplied_leased_action(
@@ -743,6 +744,78 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
         stored_action = await session.get(ControlActionModel, action.id)
         assert stored_action is not None
         assert stored_action.applied_at is not None
+
+
+@pytest.mark.asyncio
+async def test_failure_evidence_elects_only_its_current_graph_action(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: InMemorySaver,
+) -> None:
+    detail = "provider transport ended before a response"
+    condition = "network_unreachable"
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="exact-failure-thread",
+            status=ThreadStatus.RUNNING,
+        )
+        action, receipt, _checkpoint = await _seed_unapplied_leased_action(
+            session,
+            checkpointer,
+            thread_id=thread.id,
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            idempotency_key="message:exact-failure",
+        )
+        await session.commit()
+    evidence = GraphFailureEvidence(
+        schema_version="graph-failure-v1",
+        action=receipt,
+        outcome="failed",
+        detail_fingerprint=failure_detail_fingerprint(detail),
+        provider_condition=condition,
+    )
+
+    await _handle_terminal_event(
+        thread.id,
+        {
+            "event_type": "thread_terminal",
+            "status": "failed",
+            "error_detail": "a different failure",
+            "provider_condition": condition,
+            "failure_evidence": evidence.model_dump(mode="json"),
+        },
+        session_factory=session_factory,
+    )
+    async with session_factory() as session:
+        refused_thread = await session.get(ThreadModel, thread.id)
+        refused_action = await session.get(ControlActionModel, action.id)
+    assert refused_thread is not None
+    assert refused_thread.status == ThreadStatus.RUNNING.value
+    assert refused_action is not None
+    assert refused_action.applied_at is None
+
+    await _handle_terminal_event(
+        thread.id,
+        {
+            "event_type": "thread_terminal",
+            "status": "failed",
+            "error_detail": detail,
+            "provider_condition": condition,
+            "failure_evidence": evidence.model_dump(mode="json"),
+        },
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        stored_thread = await session.get(ThreadModel, thread.id)
+        stored_action = await session.get(ControlActionModel, action.id)
+    assert stored_thread is not None
+    assert stored_thread.status == ThreadStatus.FAILED.value
+    assert stored_thread.failure_reason == detail
+    assert stored_thread.provider_condition == condition
+    assert stored_action is not None
+    assert stored_action.applied_at is not None
 
 
 @pytest.mark.asyncio

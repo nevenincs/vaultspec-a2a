@@ -20,6 +20,7 @@ from ..ipc.schemas import (
 )
 from ..providers import ProviderCondition
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
+from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
@@ -381,6 +382,7 @@ class StateProjector:
         *,
         provider_condition: ProviderCondition | None = None,
         cancellation_evidence: CancellationEvidence | None = None,
+        failure_evidence: GraphFailureEvidence | None = None,
     ) -> None:
         """Emit a ``thread_terminal`` event to the gateway.
 
@@ -413,6 +415,21 @@ class StateProjector:
             return
         if cancellation_evidence is not None and outcome != ThreadStatus.CANCELLED:
             raise ValueError("cancellation evidence requires a cancelled terminal")
+        if failure_evidence is not None and outcome != ThreadStatus.FAILED:
+            raise ValueError("failure evidence requires a failed terminal")
+        if outcome == ThreadStatus.CANCELLED and cancellation_evidence is None:
+            raise ValueError("cancelled terminal requires cancellation evidence")
+        if outcome == ThreadStatus.FAILED and failure_evidence is None:
+            raise ValueError("failed terminal requires failure evidence")
+        resolved_condition = provider_condition or ProviderCondition.UNKNOWN
+        if failure_evidence is not None and (
+            not error_detail
+            or failure_evidence.action.thread_id != thread_id
+            or failure_evidence.detail_fingerprint
+            != failure_detail_fingerprint(error_detail)
+            or failure_evidence.provider_condition != resolved_condition.value
+        ):
+            raise ValueError("failure evidence does not match terminal payload")
         payload: dict[str, object] = {
             "event_type": "thread_terminal",
             "thread_id": thread_id,
@@ -421,13 +438,13 @@ class StateProjector:
         if error_detail:
             payload["error_detail"] = error_detail
         if outcome == ThreadStatus.FAILED:
-            payload["provider_condition"] = (
-                provider_condition or ProviderCondition.UNKNOWN
-            ).value
+            payload["provider_condition"] = resolved_condition.value
         if cancellation_evidence is not None:
             payload["cancellation_evidence"] = cancellation_evidence.model_dump(
                 mode="json"
             )
+        if failure_evidence is not None:
+            payload["failure_evidence"] = failure_evidence.model_dump(mode="json")
         await self._bridge.send_event(thread_id, payload)
         # Flush terminal events immediately -- do not batch.
         # A lost thread_terminal event leaves the thread stuck in RUNNING

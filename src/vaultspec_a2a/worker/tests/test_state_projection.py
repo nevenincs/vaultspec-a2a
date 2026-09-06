@@ -15,8 +15,10 @@ from langgraph.types import Interrupt, PregelTask
 from pydantic import BaseModel, ConfigDict
 
 from ...providers import ProviderCondition
+from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
-from ...thread.enums import ThreadStatus
+from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..ipc import WorkerBridge
 from ..state_projection import StateProjector
 
@@ -139,6 +141,27 @@ def _relayed_terminal_projector(
     return StateProjector(checkpointer=InMemorySaver(), bridge=bridge)
 
 
+def _failure_evidence(
+    thread_id: str, detail: str, condition: ProviderCondition
+) -> GraphFailureEvidence:
+    return GraphFailureEvidence(
+        schema_version="graph-failure-v1",
+        action=GraphActionReceipt(
+            schema_version="graph-action-v1",
+            thread_id=thread_id,
+            action_id="accepted-action",
+            action_type=ControlActionType.INGEST,
+            payload_fingerprint=f"sha256:{'0' * 64}",
+            dispatch_id="accepted-dispatch",
+            run_revision=0,
+            writer_generation=1,
+        ),
+        outcome="failed",
+        detail_fingerprint=failure_detail_fingerprint(detail),
+        provider_condition=condition.value,
+    )
+
+
 class TestTerminalConditionCarriage:
     """The condition rides the terminal event the gateway persists.
 
@@ -151,12 +174,16 @@ class TestTerminalConditionCarriage:
         """A classified failure reports the lane's own verdict, not the floor."""
         relayed: list[dict[str, Any]] = []
         projector = _relayed_terminal_projector(relayed)
+        detail = "the provider refused for rate"
 
         await projector.emit_terminal_status(
             "thread-throttled",
             ThreadStatus.FAILED,
-            error_detail="the provider refused for rate",
+            error_detail=detail,
             provider_condition=ProviderCondition.THROTTLED,
+            failure_evidence=_failure_evidence(
+                "thread-throttled", detail, ProviderCondition.THROTTLED
+            ),
         )
 
         assert len(relayed) == 1
@@ -175,11 +202,15 @@ class TestTerminalConditionCarriage:
         """
         relayed: list[dict[str, Any]] = []
         projector = _relayed_terminal_projector(relayed)
+        detail = "no graph to run"
 
         await projector.emit_terminal_status(
             "thread-unclassified",
             ThreadStatus.FAILED,
-            error_detail="no graph to run",
+            error_detail=detail,
+            failure_evidence=_failure_evidence(
+                "thread-unclassified", detail, ProviderCondition.UNKNOWN
+            ),
         )
 
         assert len(relayed) == 1

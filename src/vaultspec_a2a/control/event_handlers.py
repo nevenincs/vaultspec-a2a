@@ -25,7 +25,8 @@ from ..ipc.schemas import (
 from ..providers import ProviderCondition
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
-from ..thread.enums import InvalidTransitionError, ThreadStatus
+from ..thread.enums import ThreadStatus
+from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..thread.permission_fsm import (
     compute_permission_request_effects,
     compute_permission_resolution_effects,
@@ -187,6 +188,86 @@ async def _persist_proven_cancellation(
         return True
 
 
+async def _persist_proven_failure(
+    factory: async_sessionmaker[AsyncSession],
+    *,
+    thread_id: str,
+    evidence: GraphFailureEvidence,
+    failure_reason: str,
+    provider_condition: ProviderCondition,
+    last_sequence: int | None,
+) -> bool:
+    """Elect and settle one failure for the exact current graph action."""
+    from ..database import (
+        ThreadStatusElectionOutcome,
+        elect_thread_status,
+        expire_pending_permission_requests,
+        get_control_action_by_dispatch_id,
+        get_thread,
+        mark_control_action_applied,
+        set_thread_approval_state,
+        set_thread_repair_state,
+        successor_thread_write_authority,
+        thread_write_expectation,
+    )
+    from ..thread.enums import NON_ACTIVE_STATUSES
+    from .dispatch_receipts import validate_current_graph_receipt
+
+    async with factory() as db:
+        thread = await get_thread(db, thread_id)
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id=thread_id, dispatch_id=evidence.action.dispatch_id
+        )
+        if (
+            thread is None
+            or action is None
+            or ThreadStatus(thread.status) in NON_ACTIVE_STATUSES
+            or validate_current_graph_receipt(thread, action) != evidence.action
+        ):
+            await db.rollback()
+            return False
+        expectation = thread_write_expectation(thread)
+        election = await elect_thread_status(
+            db,
+            thread_id,
+            expectation=expectation,
+            status=ThreadStatus.FAILED,
+            successor=successor_thread_write_authority(
+                expectation,
+                action_type=evidence.action.action_type,
+                action_receipt_id=evidence.action.dispatch_id,
+            ),
+            failure_reason=failure_reason,
+            provider_condition=provider_condition.value,
+        )
+        if election.outcome is not ThreadStatusElectionOutcome.WON:
+            await db.rollback()
+            return False
+        if last_sequence is not None:
+            thread.last_sequence = last_sequence
+        await mark_control_action_applied(db, action.id)
+        await expire_pending_permission_requests(db, thread_id=thread_id)
+        await set_thread_approval_state(
+            db,
+            thread_id,
+            approval_status=None,
+            approval_request_id=None,
+            approval_reason=None,
+            approval_response_action_id=None,
+        )
+        effects = compute_terminal_effects(ThreadStatus.FAILED, has_cancel_action=False)
+        await set_thread_repair_state(
+            db,
+            thread_id,
+            repair_status=effects.repair_status,
+            repair_reason=effects.repair_reason,
+            execution_readiness=effects.repair_status.value,
+            last_applied_action=effects.last_applied_action,
+        )
+        await db.commit()
+        return True
+
+
 def _skip_without_database(what: str, thread_id: str) -> None:
     """Record a durable write skipped because this process has no database.
 
@@ -216,36 +297,6 @@ def _option_mappings(value: object) -> list[dict[str, object]]:
         return _OPTION_MAPPINGS.validate_python(value)[:50]
     except ValidationError:
         return []
-
-
-def _durable_provider_condition(value: object, *, status: ThreadStatus) -> str | None:
-    """Resolve a relayed terminal's provider condition for the durable write.
-
-    Only a member of the closed vocabulary is admitted. The column is read by a
-    second repository that validates it against the same closed set, so relaying
-    an unrecognised string through would hand that consumer a value it must
-    reject - worse than the floor, which it can at least render.
-
-    A FAILED terminal always yields a condition, falling back to the floor when
-    the payload carried none or carried something unrecognised. That is the
-    invariant this campaign establishes: a null condition on a failed run is a
-    defect rather than a normal outcome, and enforcing it at the durable write
-    means it holds however the terminal reached here. Any other status yields
-    nothing at all, since the floor on a run that did not fail would read as a
-    provider failure nobody observed.
-    """
-    if status != ThreadStatus.FAILED:
-        return None
-    if isinstance(value, str):
-        try:
-            return ProviderCondition(value).value
-        except ValueError:
-            logger.warning(
-                "Discarding an unrecognised provider condition %r from a terminal"
-                " event; recording the floor instead",
-                value[:64],
-            )
-    return ProviderCondition.UNKNOWN.value
 
 
 def _schedule_terminal_settlement(
@@ -364,12 +415,19 @@ async def _handle_terminal_event(
     terminal_status = ThreadStatus(status_str)
     factory = _session_factory(session_factory)
     raw_cancellation_evidence = payload.get("cancellation_evidence")
+    raw_failure_evidence = payload.get("failure_evidence")
     if (
         raw_cancellation_evidence is not None
         and terminal_status is not ThreadStatus.CANCELLED
     ):
         logger.warning(
             "Refusing cancellation evidence on non-cancelled terminal for %s",
+            thread_id,
+        )
+        return
+    if raw_failure_evidence is not None and terminal_status is not ThreadStatus.FAILED:
+        logger.warning(
+            "Refusing failure evidence on non-failed terminal for %s",
             thread_id,
         )
         return
@@ -468,126 +526,66 @@ async def _handle_terminal_event(
             extra={"thread_id": thread_id, "action": "missing_cancellation_evidence"},
         )
         return
-    try:
-        from ..database import (
-            expire_pending_permission_requests,
-            set_thread_approval_state,
-            set_thread_repair_state,
-            update_thread_status,
-        )
-
-        factory = _session_factory(session_factory)
-        if factory is None:
-            _skip_without_database("the terminal status write", thread_id)
+    if terminal_status is ThreadStatus.FAILED:
+        if raw_failure_evidence is None:
+            logger.warning(
+                "Refusing failure without exact action evidence for %s",
+                thread_id,
+                extra={"thread_id": thread_id, "action": "missing_failure_evidence"},
+            )
             return
-        # error_detail rides the same thread_terminal payload the SSE relay
-        # already surfaces it through (012840a4); threading it into the
-        # durable status write here is the only additional step needed for a
-        # reloaded panel (run-status alone, never the live stream) to recover
-        # it too. update_thread_status leaves the column untouched on every
-        # other outcome (completed, cancelled) since failure_reason is falsy.
+        try:
+            failure_evidence = GraphFailureEvidence.model_validate(raw_failure_evidence)
+        except ValidationError:
+            logger.warning(
+                "Refusing invalid failure evidence for thread %s",
+                thread_id,
+                extra={"thread_id": thread_id, "action": "invalid_failure_evidence"},
+            )
+            return
         error_detail = payload.get("error_detail")
-        failure_reason = error_detail if isinstance(error_detail, str) else None
-        # The condition rides the same payload as the detail and is persisted
-        # beside it, because the reason answers what happened and the condition
-        # answers what the reader should do. A client that had to derive the
-        # second from the first would be back to matching vendor prose, which is
-        # the pattern this campaign exists to stop setting.
-        provider_condition = _durable_provider_condition(
-            payload.get("provider_condition"),
-            status=ThreadStatus(status_str),
-        )
-
-        async with factory() as db:
-            thread = await update_thread_status(
-                db,
+        raw_condition = payload.get("provider_condition")
+        if not isinstance(error_detail, str) or not error_detail:
+            return
+        try:
+            provider_condition = ProviderCondition(raw_condition)
+        except (TypeError, ValueError):
+            return
+        if (
+            failure_evidence.detail_fingerprint
+            != failure_detail_fingerprint(error_detail)
+            or failure_evidence.provider_condition != provider_condition.value
+        ):
+            logger.warning(
+                "Refusing mismatched failure evidence for thread %s",
                 thread_id,
-                ThreadStatus(status_str),
-                failure_reason=failure_reason,
-                provider_condition=provider_condition,
+                extra={"thread_id": thread_id, "action": "mismatched_failure_evidence"},
             )
-            await expire_pending_permission_requests(db, thread_id=thread_id)
-            if thread is not None:
-                # Set directly on the row `update_thread_status` already
-                # returned, rather than adding a parameter to that function:
-                # database/thread_repository.py is under concurrent edit by
-                # another session right now, and this is the same session/
-                # transaction/commit boundary as the write above, not a second
-                # persistence path. `last_sequence is not None` on purpose --
-                # not truthiness -- since 0 is a legitimate captured value
-                # (see database/models.py's field comment) and a truthy guard
-                # would silently drop it, the same bug class this closes.
-                if last_sequence is not None:
-                    thread.last_sequence = last_sequence
-                await set_thread_approval_state(
-                    db,
-                    thread_id,
-                    approval_status=None,
-                    approval_request_id=None,
-                    approval_reason=None,
-                    approval_response_action_id=None,
-                )
-            effects = compute_terminal_effects(
-                ThreadStatus(status_str),
-                has_cancel_action=False,
-            )
-            await set_thread_repair_state(
-                db,
+            return
+        if factory is None:
+            _skip_without_database("the failure terminal election", thread_id)
+            return
+        accepted = await _persist_proven_failure(
+            factory,
+            thread_id=thread_id,
+            evidence=failure_evidence,
+            failure_reason=error_detail,
+            provider_condition=provider_condition,
+            last_sequence=last_sequence,
+        )
+        if not accepted:
+            logger.warning(
+                "Refusing stale failure evidence for thread %s",
                 thread_id,
-                repair_status=effects.repair_status,
-                repair_reason=effects.repair_reason,
-                execution_readiness=effects.repair_status.value,
-                last_applied_action=effects.last_applied_action,
+                extra={"thread_id": thread_id, "action": "stale_failure_evidence"},
             )
-            await db.commit()
-        logger.info(
-            "Thread %s status updated to %s",
-            thread_id,
-            status_str,
-            extra={
-                "thread_id": thread_id,
-                "status": status_str,
-                "event_type": payload.get("event_type", ""),
-                "action": "thread_terminal_status_updated",
-            },
-        )
-        # The terminal status has just been persisted, and only the first terminal
-        # event for a run reaches this point (a duplicate raises
-        # InvalidTransitionError below), so this is the idempotent once-per-run
-        # settlement trigger for complete, cancel, and fail. It authenticates to
-        # the dashboard with attach-control only - never worker IPC - and carries
-        # only the run and its non-secret lease identity.
-        _schedule_terminal_settlement(thread_id, ThreadStatus(status_str), factory)
-    except InvalidTransitionError:
-        # Race condition — cancel endpoint already set terminal status.
-        # This is expected and not an error.
-        logger.info(
-            "Thread %s transition to %s skipped (already terminal)",
-            thread_id,
-            status_str,
-            extra={
-                "thread_id": thread_id,
-                "status": status_str,
-                "event_type": payload.get("event_type", ""),
-                "action": "thread_terminal_status_skipped",
-            },
-        )
-    finally:
-        # Release the run's admission on every exit above, including a failed
-        # status write. The gate counts live executions, not successful
-        # bookkeeping: the terminal event says the work is over, so releasing
-        # after a failed write cannot let a drain quiesce over live work, while
-        # withholding it there would strand exactly the flaky-database runs a
-        # drain most needs to count correctly. Release is idempotent, so racing
-        # with the cancel verb's release for the same run is safe.
+            return
+        _schedule_terminal_settlement(thread_id, terminal_status, factory)
         if drain_gate is not None:
             await drain_gate.release(thread_id)
-        # The terminal status either committed or was already terminal, and every
-        # other database exception still propagates after this finally block. Keep
-        # the in-memory relay state aligned with that terminal observation only
-        # after releasing the idempotent admission gate.
         if aggregator is not None:
             aggregator.clear_thread_state(thread_id)
+        return
 
 
 _PERMISSION_REQUEST_EVENT_TYPES = frozenset(

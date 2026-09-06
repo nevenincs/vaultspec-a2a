@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:dab9725c96d45cc30aeeba3281ef47241ebf586c6399e2b4e119005f0456e834'
+body_hash: 'sha256:f3dcb6ceec903e1369aa8a930477303029c995c04a77b1f60b8df9cf34a2c86a'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -295,3 +295,10 @@ A completed worker event is now only a trigger for the shared checkpoint recover
 Evidence-free cancellation is refused before lifecycle mutation, admission release or aggregation cleanup. Cancellation evidence attached to a non-cancelled terminal is also refused before completion reconciliation. The retired database-failure test that required cleanup from an unproven terminal was deleted rather than retained as compatibility behavior.
 
 Formal review resolves HIGH notification-as-completion, evidence-free cancellation and contradictory terminal-evidence findings. HIGH failed-terminal authority remains: failed events still reach the unconditional writer and require exact checkpoint/task failure evidence plus classified failure ownership. MEDIUM S14/S83 delivery retry also remains when the checkpoint is unavailable. Three exact terminal cases passed naturally in 3.29 seconds; focused Ruff and Ty pass.
+### exact-failure-terminal-authority | high | runtime root resolved; current executor proof open
+
+A new closed `graph-failure-v1` evidence object binds the complete accepted graph action, exact failure-detail fingerprint and provider condition. Executor compile refusal, runtime settle and unhandled-dispatch paths construct it; state projection rejects missing or contradictory failure evidence. The gateway validates those fields against the current durable graph receipt and elects FAILED from the exact writer witness. Only the winner commits failure detail, provider condition, stream sequence, exact action application, permission and approval cleanup, and repair projection.
+
+The final generic unconditional terminal writer is deleted. Completion uses immutable checkpoint completion, cancellation uses action-specific cessation/no-active evidence, and failure uses action-specific classified failure evidence. None of the three terminal outcomes can mutate lifecycle state or release the drain from a bare notification.
+
+Formal review resolves HIGH stale-failure overwrite, unbound classification and unconditional-writer findings. MEDIUM S14/S83 durable delivery remains because evidence is durable only after gateway commit. HIGH S84 producer qualification remains: three historical executor failure tests use partial pre-current dispatches, with one also carrying the previously queued four-member compiled-graph key. They failed naturally in 0.89 seconds and require replacement from complete accepted input and frozen graph authority, not compatibility reconstruction. Exact consumer/producer-selection tests passed six cases in 7.87 seconds; the complete event-handler and state-projection modules passed 25 cases in 3.56 seconds; focused Ruff and Ty pass.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:f5d786933ebb542199597c12a3983e6d64767cb368c2bc9dc6d95e536b0f1af5'
+body_hash: 'sha256:27476f7673f14c8ae77cec61cadae399c0dfea2d3accbb0e26cc456bcf6e1c31'
 step_id: 'S13'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -91,3 +91,31 @@ Formal review findings:
 - MEDIUM / terminal delivery: checkpoint-unavailable completion remains active and visible but still needs S14/S83 durable retry scheduling.
 
 S13 remains open for exact failed-task settlement and removal of the final generic terminal writer.
+## Exact failure terminal checkpoint
+
+- `A` `src/vaultspec_a2a/thread/failure_evidence.py`
+- `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `M` `src/vaultspec_a2a/worker/executor.py`
+- `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `M` `src/vaultspec_a2a/worker/tests/test_state_projection.py`
+- `verify:` `exact failure consumer and terminal producer selection, six cases in 7.87 seconds` -> `pass`
+- `verify:` `complete event-handler and state-projection modules, 25 cases in 3.56 seconds` -> `pass`
+- `verify:` `focused Ruff and Ty across all changed files` -> `pass`
+- `verify:` `three historical executor failure cases` -> `fail`
+
+## Notes
+
+`graph-failure-v1` binds a worker-observed failure to the complete accepted graph receipt, exact error-detail fingerprint and provider condition. The executor constructs it at compile refusal, runtime settle and unhandled-dispatch boundaries. State projection refuses missing or contradictory failed-terminal evidence. The gateway requires the same closed evidence, verifies its detail and condition, validates it against the current durable graph receipt, and elects FAILED before committing the action result, failure account, stream sequence, permission/approval cleanup and repair projection.
+
+The last unconditional lifecycle write and its unconditional drain/aggregation cleanup are deleted. Completed, cancelled and failed notifications now each have a distinct evidence authority.
+
+Formal review findings:
+
+- HIGH / stale failed terminal overwrite: raw failed notifications could overwrite newer lifecycle authority -> resolved by exact accepted-action evidence and election.
+- HIGH / unbound failure classification: provider condition and detail were accepted independently of action identity -> resolved by the evidence fingerprint and condition binding.
+- HIGH / unconditional terminal writer: one generic status setter remained reachable for failed events -> resolved; the branch is deleted.
+- HIGH / producer qualification: three historical executor tests use pre-current partial dispatches; one now correctly fails for missing failure evidence and another also carries the already-queued four-member cache key -> open under S84 for current accepted-input and frozen-graph replacement, without adapters or defaults.
+- MEDIUM / delivery durability: failure evidence becomes durable only when the gateway commits it; relay exhaustion still belongs to S14/S83.
+
+The three failing historical cases exited naturally in 0.89 seconds. They are not qualification evidence and must not be restored through partial request support. S13 implementation is complete, but its plan checkbox remains open until the current executor producer proof is added.

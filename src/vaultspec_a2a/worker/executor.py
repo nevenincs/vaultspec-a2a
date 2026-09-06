@@ -27,6 +27,10 @@ from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
 from ..thread.errors import describe_exception_chain
+from ..thread.failure_evidence import (
+    GraphFailureEvidence,
+    failure_detail_fingerprint,
+)
 from .catalog_store import RunCatalogStore
 from .graph_lifecycle import (
     GraphCacheKey,
@@ -281,6 +285,25 @@ class Executor:
             outcome=outcome,
         )
 
+    @staticmethod
+    def _failure_evidence(
+        req: DispatchRequest,
+        *,
+        detail: str | None,
+        condition: ProviderCondition,
+    ) -> GraphFailureEvidence | None:
+        """Bind one classified worker failure to its accepted graph action."""
+        receipt = req.graph_action_receipt
+        if receipt is None or not detail:
+            return None
+        return GraphFailureEvidence(
+            schema_version="graph-failure-v1",
+            action=receipt,
+            outcome="failed",
+            detail_fingerprint=failure_detail_fingerprint(detail),
+            provider_condition=condition.value,
+        )
+
     async def _emit_dispatch_application_receipt(self, req: DispatchRequest) -> None:
         """Report incorporation only after reading its committed checkpoint proof."""
         if req.action not in {"ingest", "resume"}:
@@ -512,7 +535,13 @@ class Executor:
             recoverable=False,
         )
         await self._state_projector.emit_terminal_status(
-            req.thread_id, ThreadStatus.FAILED, error_detail=reason
+            req.thread_id,
+            ThreadStatus.FAILED,
+            error_detail=reason,
+            provider_condition=_EXECUTOR_CONDITION,
+            failure_evidence=self._failure_evidence(
+                req, detail=reason, condition=_EXECUTOR_CONDITION
+            ),
         )
         self._graph_lifecycle.release_thread(req.thread_id)
         self._aggregator.remove_node_metadata(req.thread_id)
@@ -643,6 +672,15 @@ class Executor:
             # or cancelled run is never stamped with a condition it never had.
             provider_condition=failure_condition,
             cancellation_evidence=cancellation_evidence,
+            failure_evidence=(
+                self._failure_evidence(
+                    req,
+                    detail=failure_reason,
+                    condition=failure_condition or _EXECUTOR_CONDITION,
+                )
+                if outcome == ThreadStatus.FAILED
+                else None
+            ),
         )
         if outcome == ThreadStatus.COMPLETED:
             await self._close_authoring_session_best_effort(
@@ -835,6 +873,9 @@ class Executor:
                 ThreadStatus.FAILED,
                 error_detail=reason,
                 provider_condition=condition,
+                failure_evidence=self._failure_evidence(
+                    req, detail=reason, condition=condition
+                ),
             )
             if owns_slot:
                 await self._mark_ingest_done(

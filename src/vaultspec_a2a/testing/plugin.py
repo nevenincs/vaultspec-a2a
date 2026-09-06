@@ -30,8 +30,8 @@ from __future__ import annotations
 
 import contextlib
 import os
+import socket
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -65,17 +65,19 @@ _SESSION_LEASE: object | None = None
 _ADMISSION_LINE: str = ""
 
 
-def _write_completion_receipt(exitstatus: int) -> None:
+def _send_completion_receipt(exitstatus: int) -> None:
     """Notify the containing runner that pytest has produced its result."""
-    from .runner import COMPLETION_OWNER_PID_ENV, COMPLETION_RECEIPT_ENV
+    from .runner import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 
-    destination = os.environ.get(COMPLETION_RECEIPT_ENV)
+    endpoint = os.environ.get(COMPLETION_ENDPOINT_ENV)
     owner_pid = os.environ.get(COMPLETION_OWNER_PID_ENV)
-    if not destination or owner_pid != str(os.getpid()):
+    if not endpoint or owner_pid != str(os.getpid()):
         return
-    target = Path(destination)
-    with target.open("x", encoding="ascii") as stream:
-        stream.write(f"exitstatus={exitstatus}\n")
+    host, port_text, token = endpoint.split(":", maxsplit=2)
+    if host != "127.0.0.1" or not port_text.isdigit() or not token:
+        raise ValueError("invalid pytest completion endpoint")
+    with socket.create_connection((host, int(port_text)), timeout=1.0) as connection:
+        connection.sendall(f"{token}:{exitstatus}\n".encode("ascii"))
 
 
 @pytest.hookimpl(trylast=True)
@@ -83,8 +85,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Publish completion independently of interpreter/process teardown."""
     del session
     try:
-        _write_completion_receipt(exitstatus)
-    except OSError as exc:
+        _send_completion_receipt(exitstatus)
+    except (OSError, ValueError) as exc:
         print(
             f"resource-aware completion receipt failed: {exc}",
             file=sys.stderr,

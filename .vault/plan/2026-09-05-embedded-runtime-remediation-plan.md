@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:c49b6b510174e39158c8c187570683a1f43abd993c4d5c89afa40f968165454b'
+body_hash: 'sha256:a13b8b374ccd8c04012481a75d711fae1dae8943c5f22ccbf96395441ed48c46'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -86,6 +86,7 @@ Remove stale-write and early-completion races while retaining existing state obl
 - [ ] `W02.P03.S13` - Settle application only from the durable receipt and reconcile completion arriving before running has committed; `src/vaultspec_a2a/control/event_handlers.py`.
 - [ ] `W02.P03.S14` - Give durable terminal delivery an independent bounded retry/reconciliation owner so a failed relay cannot strand an otherwise completed run; `src/vaultspec_a2a/control/direct_control_recovery.py`.
 - [ ] `W02.P03.S82` - After recovery, checkpoint incorporation, terminal settlement and durable retry have migrated the remaining writers, prove zero callers and delete the unconditional lifecycle setter plus its export; `src/vaultspec_a2a/database/thread_repository.py, src/vaultspec_a2a/database/__init__.py`.
+- [x] `W02.P03.S88` - Replace the filesystem completion marker with an authenticated loopback receipt so Windows file locks cannot overwrite the owned pytest exit outcome after tree reaping; `src/vaultspec_a2a/testing/runner.py, src/vaultspec_a2a/testing/plugin.py, src/vaultspec_a2a/testing/tests/test_runner.py`.
 
 ### Phase `W02.P04` - Drain ordered accepted work
 

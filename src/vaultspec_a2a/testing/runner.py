@@ -11,12 +11,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import hmac
 import os
+import secrets
+import socket
 import subprocess
 import sys
-import tempfile
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from ..utils.process import ProcessContainment, ProcessContainmentError
@@ -24,12 +25,38 @@ from ..utils.process import ProcessContainment, ProcessContainmentError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-COMPLETION_RECEIPT_ENV = "VAULTSPEC_PYTEST_COMPLETION_RECEIPT"
+COMPLETION_ENDPOINT_ENV = "VAULTSPEC_PYTEST_COMPLETION_ENDPOINT"
 COMPLETION_OWNER_PID_ENV = "VAULTSPEC_PYTEST_COMPLETION_OWNER_PID"
 TEARDOWN_TIMEOUT_EXIT = 124
 RUN_TIMEOUT_EXIT = 125
 DESCENDANT_TIMEOUT_EXIT = 126
 _POLL_SECONDS = 0.05
+
+
+def _completion_received(listener: socket.socket, token: str) -> bool:
+    """Accept one bounded authenticated completion message without blocking."""
+    try:
+        connection, _address = listener.accept()
+    except BlockingIOError:
+        return False
+    with connection:
+        connection.settimeout(0.1)
+        received = bytearray()
+        try:
+            while len(received) < 256 and b"\n" not in received:
+                chunk = connection.recv(256 - len(received))
+                if not chunk:
+                    break
+                received.extend(chunk)
+            payload = bytes(received).decode("ascii")
+        except (OSError, UnicodeDecodeError):
+            return False
+    supplied, separator, exitstatus = payload.partition(":")
+    return bool(
+        separator
+        and exitstatus.rstrip("\n").lstrip("-").isdigit()
+        and hmac.compare_digest(supplied, token)
+    )
 
 
 def _terminate(
@@ -58,9 +85,14 @@ def run_pytest(
         raise ValueError("run_timeout_s must be positive when supplied")
 
     containment = ProcessContainment.create()
-    with tempfile.TemporaryDirectory(prefix="vaultspec-pytest-owner-") as scratch:
-        receipt = Path(scratch) / "session-complete"
-        env = {**os.environ, COMPLETION_RECEIPT_ENV: str(receipt)}
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.setblocking(False)
+        port = listener.getsockname()[1]
+        token = secrets.token_hex(32)
+        endpoint = f"127.0.0.1:{port}:{token}"
+        env = {**os.environ, COMPLETION_ENDPOINT_ENV: endpoint}
         command = [
             sys.executable,
             "-m",
@@ -105,7 +137,7 @@ def run_pytest(
             while True:
                 returncode = process.poll()
                 now = time.monotonic()
-                if completion_seen is None and receipt.is_file():
+                if completion_seen is None and _completion_received(listener, token):
                     completion_seen = now
                 if returncode is not None:
                     if containment.is_quiescent() is True:

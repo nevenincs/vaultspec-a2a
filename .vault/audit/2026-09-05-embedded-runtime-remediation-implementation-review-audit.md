@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:e57f74f347862109f606aa3b9dca6ca9c13ed5a6550da41792d541514aba4cf6'
+body_hash: 'sha256:1ab30a8a7d87172c2b1a931a207784e926e0140df9ce2a3dde7eaa0bd5715b1a'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1132,3 +1132,7 @@ ER22 alone closes with S08. The unreleased Starlette tree remains MEDIUM/open pe
 ### w04-p10-s47-cooperative-server-owner | high | corrected-pending-review
 
 Type: runtime lifecycle ownership. The authenticated administrative stop previously closed admission and then used process-directed `SIGINT`; on Windows that did not establish a cooperative Uvicorn-owned transition. The production gateway entry point now owns the current Uvicorn server instance and injects its `should_exit` callback. The route refuses 503 before closing admission when that owner is absent, and otherwise invokes it after the 202 response grace interval. This removes the Windows process-signal trigger without adding compatibility behavior. It is the prerequisite for S49's total shutdown deadline, does not touch S48 discovery, and awaits a separate S47 formal review.
+
+### w04-p10-s47-formal-fail-correction | medium | corrected-pending-rereview
+
+Type: lifecycle correctness, test integrity and traceability. Formal review `b80e843b` found a malformed non-callable owner could return 202 and close admission before a deferred `TypeError`; the test substituted a lambda instead of exercising production Uvicorn ownership; two comments retained the removed process-signal language; and the shared `api/app.py` ownership boundary plus feature index were incomplete. The route now validates callable shape before closing admission. Absent and malformed owners both return 503 with admission demonstrably OPEN. The production serve path calls a named `_bind_server_shutdown_owner`, and a real Uvicorn HTTP test proves the 202 response reaches its client before the serving task exits, then observes `should_exit` and bounded completion. Current source describes only cooperative owner behavior. The S47 record assigns that construction/injection seam to S47 and reserves total deadlines, stream drain and escalation for S49. The corrected focused gate passes 15 tests in 35.79 seconds; Ruff and Ty pass. Feature indexing and Core validation are part of the correction commit. All five review findings are corrected pending separate rereview; S47 remains open.

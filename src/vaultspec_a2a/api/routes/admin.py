@@ -2,7 +2,7 @@
 
 import asyncio
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..auth import authenticate_request
 from ..dependencies import require_lifecycle_capability
@@ -11,7 +11,7 @@ from .gateway import admission_gate
 router = APIRouter()
 
 # Brief delay before the in-process stop so this 202 response flushes to the
-# caller before the SIGINT-driven graceful shutdown tears the listener down.
+# caller before the owning Uvicorn server begins its cooperative shutdown.
 _STOP_DELAY_SECONDS = 0.25
 
 
@@ -50,11 +50,9 @@ async def shutdown_endpoint(request: Request) -> dict[str, str]:
     and application lifespan teardown.
     """
     request_shutdown = getattr(request.app.state, "request_server_shutdown", None)
-    if request_shutdown is None:
+    if not callable(request_shutdown):
         # A route mounted without the owning serve entry point cannot promise a
         # lifecycle transition. Refuse before closing admission permanently.
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=503, detail="Gateway lifecycle owner absent")
     await admission_gate(request.app).close_admission()
     asyncio.get_running_loop().call_later(_STOP_DELAY_SECONDS, request_shutdown)

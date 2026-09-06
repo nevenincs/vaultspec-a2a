@@ -654,6 +654,15 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.info("Gateway shutdown complete")
 
 
+def _bind_server_shutdown_owner(app: FastAPI, server: uvicorn.Server) -> None:
+    """Bind the served app to the cooperative transition of its Uvicorn owner."""
+
+    def request_shutdown() -> None:
+        server.should_exit = True
+
+    app.state.request_server_shutdown = request_shutdown
+
+
 def main() -> None:
     """Launch the vaultspec-a2a server.
 
@@ -673,7 +682,7 @@ def main() -> None:
         loop="auto",
     )
     server = uvicorn.Server(config)
-    app.state.request_server_shutdown = lambda: setattr(server, "should_exit", True)
+    _bind_server_shutdown_owner(app, server)
     server.run()
 
 

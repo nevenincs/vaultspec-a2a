@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:c45a1796536f353e6b30beb903b1a414faa90a6cc34c64f18c4f5b2485c444f3'
+body_hash: 'sha256:db6400f7d9e82b6cb1e8200bd36dc6ddcf01df49ffe47e75eec2b54e48e858ea'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -108,3 +108,7 @@ This immediate correction has a wider provenance boundary than its three-line ta
 ## W04.P10.S47 cooperative server ownership prerequisite
 
 The existing gateway administrative shutdown route closed run admission and then sent `SIGINT` to its own process. On Windows that process-signal path did not provide a Uvicorn-owned cooperative transition and could terminate before the response and lifespan ownership contract completed. S47 now makes the production serve entry point instantiate the current Uvicorn server directly and inject its `should_exit` transition into application state. The authenticated, receipt-bound route refuses with 503 when that owner is absent, before closing admission, and otherwise invokes the owner only after its 202 response grace interval. This is the lifecycle ownership prerequisite for S49's total-deadline implementation; S47 remains open for separate formal review and its broader readiness/drain consumer-generation contract. S48 discovery is unchanged.
+
+## W04.P10.S47 formal-review correction
+
+Formal review found that a non-callable lifecycle-owner value passed the original presence check, closed admission and returned 202 before its deferred `TypeError`. S47 now requires a callable owner before admission changes; both absent and malformed state return 503 while a subsequent admission remains OPEN. The production serve path and its test share `_bind_server_shutdown_owner`: S47 owns this named Uvicorn `should_exit` construction/injection seam in `api/app.py`, while S49 owns the total deadline, connection/stream drain and bounded escalation around it. A real Uvicorn HTTP test proves the authenticated 202 reaches the client while the serving task remains live, then the exact bound owner sets `should_exit` and exits within two seconds. Retired process-signal descriptions were removed. S48 remains separate.

@@ -120,9 +120,9 @@ async def test_admin_stop_closes_admission_and_refuses_new_runs(
 
     An authenticated, receipt-owned ``/admin/shutdown`` closes run admission
     before it initiates the (deferred) process stop, so a run-start issued after
-    it is refused 503 while the gateway is still up. Driven in-process over ASGI:
-    the deferred self-SIGINT is scheduled on the test loop and discarded when the
-    loop closes, so it never stops the test runner.
+    it is refused 503 while the gateway is still up. This ASGI-level case observes
+    the deferred owner callback; the live-server test exercises the production
+    Uvicorn binding and response ordering.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     stop_requested: list[bool] = []

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import httpx
 import pytest
+import uvicorn
 from httpx import ASGITransport
 
-from ...api.app import create_app
+from ...api.app import _bind_server_shutdown_owner, create_app
 from ...api.dependencies import LIFECYCLE_CAPABILITY_HEADER
+from ...api.routes.gateway import admission_gate
+from ...control.drain import AdmissionState
 
 _ATTACH = "attach-credential-token-1122334455667788"
 _CAPABILITY = "ownership-capability-token-99aabbccddeeff00"
@@ -36,6 +40,70 @@ async def _post_shutdown(headers: dict[str, str]) -> httpx.Response:
         transport=transport, base_url="http://desktop.test"
     ) as client:
         return await client.post("/admin/shutdown", headers=headers)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner", [None, object()])
+async def test_shutdown_refuses_missing_or_malformed_owner_before_admission_close(
+    owner: object | None,
+) -> None:
+    app = _make_app()
+    if owner is not None:
+        app.state.request_server_shutdown = owner
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://desktop.test"
+    ) as client:
+        response = await client.post(
+            "/admin/shutdown",
+            headers={
+                "Authorization": f"Bearer {_ATTACH}",
+                LIFECYCLE_CAPABILITY_HEADER: _CAPABILITY,
+            },
+        )
+
+    assert response.status_code == 503
+    admission = await admission_gate(app).admit("still-open-after-refusal")
+    assert admission.admitted
+    assert admission.state is AdmissionState.OPEN
+
+
+@pytest.mark.asyncio
+async def test_production_uvicorn_owner_returns_202_before_cooperative_exit() -> None:
+    app = _make_app()
+    config = uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=0,
+        log_level="error",
+        lifespan="off",
+    )
+    server = uvicorn.Server(config)
+    _bind_server_shutdown_owner(app, server)
+    serving = asyncio.create_task(server.serve())
+    try:
+        for _ in range(500):
+            if server.started and server.servers:
+                break
+            await asyncio.sleep(0.01)
+        assert server.started and server.servers, "Uvicorn owner did not start"
+        port = server.servers[0].sockets[0].getsockname()[1]
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.post(
+                f"http://127.0.0.1:{port}/admin/shutdown",
+                headers={
+                    "Authorization": f"Bearer {_ATTACH}",
+                    LIFECYCLE_CAPABILITY_HEADER: _CAPABILITY,
+                },
+            )
+        assert response.status_code == 202
+        assert not serving.done(), "server exited before the 202 reached the caller"
+        await asyncio.wait_for(serving, timeout=2.0)
+        assert server.should_exit
+    finally:
+        server.should_exit = True
+        if not serving.done():
+            await asyncio.wait_for(serving, timeout=2.0)
 
 
 @pytest.mark.asyncio

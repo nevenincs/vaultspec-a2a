@@ -676,6 +676,7 @@ class VerdictSubscriber:
                 request_id=current_gate,
                 payload=freeze_accepted_input(dispatch, intent=resume_value),
                 dispatch_id=dispatch.dispatch_id,
+                recovery_timeout_seconds=graph_definition.run_timeout_seconds,
             )
             if not claim.authority_matches:
                 logger.warning(

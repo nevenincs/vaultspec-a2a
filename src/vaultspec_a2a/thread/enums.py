@@ -81,6 +81,7 @@ class RecoveryCondition(StrEnum):
     """Closed reasons a durable recovery attempt needs another decision."""
 
     CIRCUIT_OPEN = "circuit_open"
+    DISPATCH_PENDING = "dispatch_pending"
     AT_CAPACITY = "at_capacity"
     UNREACHABLE = "unreachable"
     REJECTED = "rejected"

@@ -42,6 +42,7 @@ gates, not prompt convention, drive transitions.
 
 [team.graph]
 step_timeout_seconds = 600
+run_timeout_seconds = 30000
 recursion_limit      = 50
 
 [[team.workers]]

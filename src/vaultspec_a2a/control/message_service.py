@@ -185,6 +185,7 @@ async def send_followup_message(
         ),
         dispatch_id=dispatch.dispatch_id,
         write_expectation=write_expectation,
+        recovery_timeout_seconds=graph_definition.run_timeout_seconds,
     )
     if not claim.authority_matches:
         return MessageResult(

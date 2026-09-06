@@ -31,6 +31,7 @@ nothing. This turn exists to reach the provider, not to produce work.
 
 [team.graph]
 step_timeout_seconds = 120
+run_timeout_seconds = 480
 recursion_limit      = 4
 
 # No authoring bridge and no workspace surfaces: this preset must be startable

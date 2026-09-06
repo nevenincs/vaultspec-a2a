@@ -318,6 +318,7 @@ async def create_control_action(
         ControlActionResultStatus.ACCEPTED_NOT_APPLIED
     ),
     dispatch_id: str | None = None,
+    recovery_deadline_at: datetime | None = None,
 ) -> ControlActionModel:
     """Append a durable control journal record."""
     model = ControlActionModel(
@@ -330,6 +331,7 @@ async def create_control_action(
         worker_generation=worker_generation,
         result_status=_coerce_control_result(result_status).value,
         dispatch_id=dispatch_id or uuid4().hex,
+        recovery_deadline_at=recovery_deadline_at,
     )
     return await save_model(session, model)
 
@@ -347,6 +349,7 @@ async def get_or_create_control_action(
         ControlActionResultStatus.ACCEPTED_NOT_APPLIED
     ),
     dispatch_id: str | None = None,
+    recovery_deadline_at: datetime | None = None,
     absence_already_resolved: bool = False,
 ) -> tuple[ControlActionModel, bool]:
     """Return the journal record for ``(thread_id, idempotency_key)``, inserting it
@@ -390,6 +393,7 @@ async def get_or_create_control_action(
                 worker_generation=worker_generation,
                 result_status=result_status,
                 dispatch_id=dispatch_id,
+                recovery_deadline_at=recovery_deadline_at,
             )
     except IntegrityError:
         conflicting = await get_control_action_by_idempotency_key(
@@ -413,6 +417,7 @@ async def reserve_control_action(
     payload: dict[str, object] | None = None,
     worker_generation: int = 0,
     dispatch_id: str | None = None,
+    recovery_deadline_at: datetime | None = None,
 ) -> ControlActionReservation:
     """Reserve one durable intention and compare any replay with its winner."""
     resolved_type = _coerce_control_action_type(action_type).value
@@ -425,6 +430,7 @@ async def reserve_control_action(
         payload=payload,
         worker_generation=worker_generation,
         dispatch_id=dispatch_id,
+        recovery_deadline_at=recovery_deadline_at,
     )
     matches = (
         action.action_type == resolved_type

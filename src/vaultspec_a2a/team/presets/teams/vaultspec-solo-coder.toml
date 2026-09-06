@@ -31,6 +31,7 @@ You are the Vaultspec-Orchestrator, overseeing a single, un-supervised coding ag
 
 [team.graph]
 step_timeout_seconds = 120
+run_timeout_seconds = 1200
 recursion_limit      = 10
 
 # Arm the per-run engine authoring bridge: the coder gets the engine's propose/read

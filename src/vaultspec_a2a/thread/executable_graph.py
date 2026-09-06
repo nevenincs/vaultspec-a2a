@@ -36,6 +36,11 @@ class FrozenGraphDefinition(BaseModel):
             raise ValueError(
                 "graph execution requires a declared positive step timeout"
             )
+        if (
+            team.graph.run_timeout_seconds is None
+            or team.graph.run_timeout_seconds <= 0
+        ):
+            raise ValueError("graph execution requires a declared positive run timeout")
         expected_agents = {worker.agent_id for worker in team.workers}
         if set(self.agents) != expected_agents:
             raise ValueError(
@@ -75,6 +80,13 @@ class FrozenGraphDefinition(BaseModel):
         timeout = TeamConfig.model_validate(self.team).graph.step_timeout_seconds
         if timeout is None or timeout <= 0:
             raise ValueError("accepted graph has no positive step timeout")
+        return timeout
+
+    @property
+    def run_timeout_seconds(self) -> int:
+        timeout = TeamConfig.model_validate(self.team).graph.run_timeout_seconds
+        if timeout is None or timeout <= 0:
+            raise ValueError("accepted graph has no positive run timeout")
         return timeout
 
     def compiler_inputs(

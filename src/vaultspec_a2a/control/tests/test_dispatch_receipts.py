@@ -123,6 +123,7 @@ async def test_retry_preserves_original_receipt_after_state_revision(
             ),
             dispatch_id="resume",
             write_expectation=witness,
+            recovery_timeout_seconds=60,
         )
         assert claim.acquired
         await finalize_control_action_acceptance(db, claim)
@@ -233,6 +234,7 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
             ),
             dispatch_id="resume",
             write_expectation=witness,
+            recovery_timeout_seconds=60,
         )
         assert not claim.acquired
         assert not claim.authority_matches
@@ -280,6 +282,7 @@ async def test_requested_projection_and_receipt_share_acceptance_commit(
             ),
             dispatch_id="resume",
             write_expectation=witness,
+            recovery_timeout_seconds=60,
         )
         assert claim.acquired
         row = await get_thread(db, "run")

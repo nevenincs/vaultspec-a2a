@@ -15,7 +15,7 @@ branch_labels: str | tuple[str, ...] | None = None
 depends_on: str | tuple[str, ...] | None = None
 
 _CONDITIONS = (
-    "'circuit_open', 'at_capacity', 'unreachable', 'rejected', "
+    "'circuit_open', 'dispatch_pending', 'at_capacity', 'unreachable', 'rejected', "
     "'incompatible_state', 'no_active_project', 'credentials_required', "
     "'deadline_exceeded', 'not_found', 'terminal', 'input_required', 'conflict'"
 )

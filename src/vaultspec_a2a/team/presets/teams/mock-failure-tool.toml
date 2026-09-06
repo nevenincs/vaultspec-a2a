@@ -15,6 +15,7 @@ directive = "Simulate tool crash."
 
 [team.graph]
 step_timeout_seconds = 60
+run_timeout_seconds = 600
 recursion_limit      = 10
 
 [[team.workers]]

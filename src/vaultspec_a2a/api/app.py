@@ -29,7 +29,6 @@ from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..authoring import resolve_engine
-from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
 from ..control.circuit_breaker import WorkerCircuitBreaker
 from ..control.clarification_service import redrive_clarification_actions
 from ..control.config import settings
@@ -84,6 +83,8 @@ from .body_limit import BoundedV1WriteBodyMiddleware
 from .internal import internal_router
 from .routes import register_routes
 from .schemas.gateway import LivenessResponse
+
+_RECOVERY_POLL_SECONDS = 2.0
 
 __all__ = [
     "create_app",
@@ -387,49 +388,16 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
         watchdog_task = asyncio.create_task(watchdog.run())
 
-        # Deferred-reconciliation gate: ordinary armed desktop boot must not start
-        # the worker. The worker starts only on the first authenticated execution
-        # demand, which fires this event once its single-flight start reaches
-        # readiness (see the dispatch demand path). Reconciliation of RECONCILING
-        # threads then runs against the already-started worker. The Compose and
-        # development profiles keep eager boot reconciliation: their worker is
-        # either standalone (no auto-spawn) or foreground-spawned at boot.
+        # Worker readiness remains observable to the demand path. Recovery itself
+        # starts immediately: an accepted durable action is already execution
+        # demand, and waiting for a new client read or write would strand it.
+        # With no due obligation the recovery pass sends nothing and lazy worker
+        # startup remains intact.
         worker_demand_ready = asyncio.Event()
         app.state.worker_demand_ready = worker_demand_ready
 
-        async def _deferred_reconcile() -> None:
-            await worker_demand_ready.wait()
-            await _redispatch_recovery()
-
-        async def _redispatch_recovery() -> None:
-            direct_summary = await redrive_direct_control_actions(
-                get_session_factory(),
-                worker_client=worker_client,
-                circuit_breaker=circuit_breaker,
-                worker_spawner=worker_spawner,
-                trace_headers=trace_headers(),
-            )
-            app.state.direct_control_recovery_summary = direct_summary
-            await redispatch_reconciling_threads(
-                worker_client,
-                circuit_breaker,
-                worker_spawner,
-                record_worker_contact=record_worker_contact,
-                trace_headers_fn=trace_headers,
-            )
-            app.state.clarification_recovery_summary = (
-                await redrive_clarification_actions(
-                    get_session_factory(),
-                    checkpointer=checkpointer,
-                    worker_client=worker_client,
-                    circuit_breaker=circuit_breaker,
-                    worker_spawner=worker_spawner,
-                    recursion_limit=domain_config.graph_recursion_limit,
-                    trace_headers=trace_headers(),
-                )
-            )
-            if direct_summary.deferred:
-                await asyncio.sleep(CONTROL_ACTION_LEASE_TTL.total_seconds())
+        async def _direct_recovery_pass() -> None:
+            try:
                 app.state.direct_control_recovery_summary = (
                     await redrive_direct_control_actions(
                         get_session_factory(),
@@ -439,15 +407,50 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                         trace_headers=trace_headers(),
                     )
                 )
+                app.state.direct_control_recovery_error = None
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                app.state.direct_control_recovery_error = type(exc).__name__
+                logger.exception("Direct recovery pass failed; the owner will retry")
+
+        async def _redispatch_recovery() -> None:
+            await _direct_recovery_pass()
+            try:
+                await redispatch_reconciling_threads(
+                    worker_client,
+                    circuit_breaker,
+                    worker_spawner,
+                    record_worker_contact=record_worker_contact,
+                    trace_headers_fn=trace_headers,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Startup reconciliation dispatch failed")
+            try:
+                app.state.clarification_recovery_summary = (
+                    await redrive_clarification_actions(
+                        get_session_factory(),
+                        checkpointer=checkpointer,
+                        worker_client=worker_client,
+                        circuit_breaker=circuit_breaker,
+                        worker_spawner=worker_spawner,
+                        recursion_limit=domain_config.graph_recursion_limit,
+                        trace_headers=trace_headers(),
+                    )
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Clarification recovery pass failed")
+            while True:
+                await asyncio.sleep(_RECOVERY_POLL_SECONDS)
+                await _direct_recovery_pass()
 
         if armed:
-            # Hand the spawner the event it fires once the first demand-driven
-            # single-flight worker start reaches readiness; the parked
-            # reconciliation above then wakes.
             worker_spawner.demand_ready_event = worker_demand_ready
-            reconcile_task = asyncio.create_task(_deferred_reconcile())
-        else:
-            reconcile_task = asyncio.create_task(_redispatch_recovery())
+        reconcile_task = asyncio.create_task(_redispatch_recovery())
 
         # Publish and heartbeat the machine-global discovery file so the
         # engine can attach-never-own. A crashed/stale prior record is reclaimed;

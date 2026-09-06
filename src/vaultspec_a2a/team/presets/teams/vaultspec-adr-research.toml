@@ -88,6 +88,7 @@ a seven-stage pipeline: Ground -> Diverge -> Synthesize -> Gate 1 -> Decide -> G
 
 [team.graph]
 step_timeout_seconds = 1800
+run_timeout_seconds = 90000
 recursion_limit      = 50
 
 [[team.workers]]

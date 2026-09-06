@@ -359,6 +359,7 @@ async def respond_to_clarification(
         payload=freeze_accepted_input(dispatch, intent=payload),
         dispatch_id=dispatch.dispatch_id,
         worker_generation=worker_generation,
+        recovery_timeout_seconds=graph_definition.run_timeout_seconds,
     )
     if not claim.authority_matches:
         return ClarificationResult(

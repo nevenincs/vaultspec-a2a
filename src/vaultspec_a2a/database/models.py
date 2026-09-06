@@ -613,6 +613,9 @@ class ControlActionModel(Base):
     claim_expires_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime(), default=None
     )
+    recovery_deadline_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), default=None
+    )
 
     thread: Mapped["ThreadModel"] = relationship(
         back_populates="control_actions", lazy="raise"

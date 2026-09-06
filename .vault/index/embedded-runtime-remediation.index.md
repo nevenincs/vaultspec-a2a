@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d4bc04b6773df72c395d9611478ecef335edc57db3f0c9a4583309a61253c32a'
+body_hash: 'sha256:dcfe4f5a507255b5bfe10580efb37f10d623f03064cb9c417b07b9ad89f262b3'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -21,9 +21,11 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S10]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S11]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S12]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S13]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S76]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S77]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S78]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S83]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S84]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S85]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S86]]'
@@ -43,6 +45,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W04-P10-S90]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
+  - '[[2026-09-05-embedded-runtime-remediation-ledger]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-provider-selection-prerequisites-reference]]'
@@ -77,6 +80,7 @@ related:
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s77-lexer-correction-rereview-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s77-lifecycle-closure-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s77-schema-fingerprint-rereview-audit]]'
+  - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s83-recovery-ledger-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-rereview-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s47-lifecycle-closure-review-audit]]'
@@ -120,6 +124,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s77-lexer-correction-rereview-audit` - `embedded-runtime-remediation` audit: `W02 P03 S77 lexer correction rereview`
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s77-lifecycle-closure-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S77 lifecycle closure review`
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s77-schema-fingerprint-rereview-audit` - `embedded-runtime-remediation` audit: `W02 P03 S77 schema fingerprint rereview`
+- `2026-09-06-embedded-runtime-remediation-w02-p03-s83-recovery-ledger-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S83 recovery ledger review`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-rereview-audit` - `embedded-runtime-remediation` audit: `W04.P10.S47 cooperative server owner formal rereview`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-review-audit` - `embedded-runtime-remediation` audit: `W04.P10.S47 cooperative server owner formal review`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s47-lifecycle-closure-review-audit` - `embedded-runtime-remediation` audit: `W04.P10.S47 lifecycle closure formal review`
@@ -135,6 +140,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P01-S03` - Record prerequisite status and exact evidence needed from catalog plan P03.S19 and P03.S20; allow independent local remediation while missing provider or Dashboard qualification blocks only its dependent proof
 - `2026-09-05-embedded-runtime-remediation-W01-P01-summary` - `embedded-runtime-remediation` `W01.P01` summary
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S04` - Run PostgreSQL URL checks under the locked server dependency profile and make that profile explicit while preserving the SQLite binary profile
+- `2026-09-05-embedded-runtime-remediation-ledger` - `embedded-runtime-remediation` ledger
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S05` - Verify catalog availability-test correction under owner P01.S11 in 2026-08-02-provider-model-catalog-plan, preserving exact-mode admission assertions
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S06` - Align an isolated RAG client/service test environment and rerun the real project-pinning discriminator without altering an unrelated shared daemon
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S07` - Diagnose the intermittent compilation loop-gap measurement on the named representative host/load and correct the owning warmup path if required without relaxing its existing budget
@@ -143,9 +149,11 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S10` - Adopt the atomic election for lifecycle writers that already carry a durable applicable receipt, including initial dispatch, cancellation, direct-control recovery, permission-request projection, archive and atomic deletion-saga entry, with side effects only after the winner
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S11` - Replace fragmented startup redispatch, read-time abandonment and pre-election projection with one durable recovery coordinator covering conditions 1-16
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S12` - Persist request-scoped checkpoint incorporation evidence for graph actions before reporting application, retaining dispatch identity and winning payload fingerprint; use durable cessation or no-op evidence for cancellation without graph incorporation
+- `2026-09-05-embedded-runtime-remediation-W02-P03-S13` - Settle application only from the durable receipt and reconcile completion arriving before running has committed
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S76` - Declare durable run revision and writer generation plus action-specific receipt identity without storing credentials or duplicating transcript authority
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S77` - Add the current ownership and receipt schema with upgrade validation; refuse pre-current or unknown-ownership rows as incompatible without backfill, translation, migration-time substitution or execution
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S78` - Declare immutable current-schema checkpointed graph-action receipts binding journal action, accepted payload fingerprint, dispatch identity and run ownership; reject conflicting receipt reuse and prove persistence through a real checkpoint reopen before coordinator implementation
+- `2026-09-05-embedded-runtime-remediation-W02-P03-S83` - Persist one leased recovery attempt per run revision and action receipt with classified condition, attempt count, next eligible attempt and run-derived deadline; drain it during startup and ordinary operation so circuit-open, capacity, typed rejection and transport loss cannot strand accepted work or depend on client polling
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S84` - Verify the recovery architecture against the complete conditions 1-16 matrix using real durable receipts and fresh projections
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S85` - Correct condition 17 at its outer process-lifecycle root: run every canonical pytest target beneath one OS-contained owner, accept pytest session completion only as a receipt that starts a bounded result-to-exit deadline, reap the complete owned tree on violation, and report natural exit separately from passing assertions
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S86` - Commit the complete non-secret initial dispatch input and stable receipt atomically with run acceptance before network delivery; build configuration and workspace inputs before taking the database write lock, retain actor-token requirement without secrets, and reject invalid input without a partial durable reservation

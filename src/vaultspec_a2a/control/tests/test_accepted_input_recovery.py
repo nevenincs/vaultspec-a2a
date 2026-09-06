@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import httpx
 import pytest
 from fastapi import FastAPI, Request
@@ -73,6 +74,7 @@ async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
             idempotency_key="accepted",
             dispatch_id="accepted",
             payload=payload,
+            recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
         )
         receipt = await prepare_graph_action_receipt(
             db, thread_id="run", dispatch_id="accepted"

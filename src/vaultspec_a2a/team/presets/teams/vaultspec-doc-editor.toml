@@ -47,6 +47,7 @@ worker, one target document, one instruction.
 
 [team.graph]
 step_timeout_seconds = 600
+run_timeout_seconds = 6000
 recursion_limit      = 10
 
 # Arm the per-run engine authoring bridge: the doc-editor gets the engine's

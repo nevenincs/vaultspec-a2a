@@ -822,6 +822,7 @@ async def _record_permission_transition(
             dispatch, intent=_response_payload(option_id, notes)
         ),
         dispatch_id=dispatch.dispatch_id,
+        recovery_timeout_seconds=graph_definition.run_timeout_seconds,
     )
     if not claim.authority_matches:
         return PermissionResult(

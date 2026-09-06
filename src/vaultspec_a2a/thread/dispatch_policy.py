@@ -43,6 +43,7 @@ class FailureType(StrEnum):
     NO_ACTIVE_PROJECT = "no_active_project"
     INCOMPATIBLE_STATE = "incompatible_state"
     CREDENTIALS_REQUIRED = "credentials_required"
+    DEADLINE_EXCEEDED = "deadline_exceeded"
 
 
 @dataclass(frozen=True, slots=True)

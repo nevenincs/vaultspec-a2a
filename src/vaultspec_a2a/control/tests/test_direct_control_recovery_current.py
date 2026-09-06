@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...database import (
@@ -19,9 +21,10 @@ from ...database import (
     elect_thread_status,
     get_control_action_by_dispatch_id,
     get_thread,
+    mark_control_action_applied,
     thread_write_expectation,
 )
-from ...database.models import Base, RunWriteAuthority
+from ...database.models import Base, RecoveryAttemptModel, RunWriteAuthority
 from ...database.session import configure_sqlite_transactions
 from ...database.thread_repository import ThreadStatusElectionOutcome
 from ...ipc.schemas import DispatchRequest
@@ -29,6 +32,7 @@ from ...team.team_config import load_team_config
 from ...thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
+    RecoveryCondition,
     RepairStatus,
     ThreadStatus,
 )
@@ -138,7 +142,12 @@ def _accepted_cases(workspace: Path) -> tuple[_AcceptedCase, ...]:
     )
 
 
-async def _persist_case(db: AsyncSession, case: _AcceptedCase) -> None:
+async def _persist_case(
+    db: AsyncSession,
+    case: _AcceptedCase,
+    *,
+    deadline_at: datetime | None = None,
+) -> None:
     authority = RunWriteAuthority(0, 1, case.action_type, case.dispatch.dispatch_id)
     await create_thread(
         db,
@@ -155,6 +164,7 @@ async def _persist_case(db: AsyncSession, case: _AcceptedCase) -> None:
         idempotency_key=f"accepted:{case.thread_id}",
         dispatch_id=case.dispatch.dispatch_id,
         payload=freeze_accepted_input(case.dispatch, intent=case.intent),
+        recovery_deadline_at=deadline_at or datetime(2100, 1, 1, tzinfo=UTC),
     )
     if case.action_type is not ControlActionType.CANCEL:
         receipt = await prepare_graph_action_receipt(
@@ -313,6 +323,7 @@ async def test_older_accepted_action_loses_to_newer_exact_authority(
             payload=freeze_accepted_input(
                 newer_dispatch, intent={"reason": "user_requested"}
             ),
+            recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
         )
         elected = await elect_thread_status(
             db,
@@ -326,7 +337,150 @@ async def test_older_accepted_action_loses_to_newer_exact_authority(
 
     summary, received = await _run_recovery(sessions)
 
-    assert summary.examined == 2
+    assert summary.examined == 1
     assert summary.dispatched == 1
-    assert summary.conflicted == 1
+    assert summary.conflicted == 0
     assert [item["dispatch_id"] for item in received] == ["newer-cancel"]
+
+
+@pytest.mark.asyncio
+async def test_expired_run_is_quarantined_without_dispatch(
+    tmp_path: Path,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    case = _accepted_cases(tmp_path)[0]
+    async with sessions() as db:
+        await _persist_case(
+            db,
+            case,
+            deadline_at=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+        accepted = await get_control_action_by_dispatch_id(
+            db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
+        )
+        assert accepted is not None
+        accepted.requested_at = datetime(2019, 1, 1, tzinfo=UTC)
+        await db.commit()
+
+    summary, received = await _run_recovery(sessions)
+
+    assert not received
+    assert summary.examined == 1
+    assert summary.refused == 1
+    async with sessions() as db:
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
+        )
+        thread = await get_thread(db, case.thread_id)
+        attempt = await db.scalar(
+            select(RecoveryAttemptModel).where(
+                RecoveryAttemptModel.thread_id == case.thread_id
+            )
+        )
+    assert action is not None and action.applied_at is not None
+    assert thread is not None
+    assert thread.status == ThreadStatus.RECONCILING.value
+    assert thread.repair_reason is not None
+    assert thread.repair_reason.startswith("deadline_exceeded:")
+    assert attempt is not None
+    assert attempt.condition == RecoveryCondition.DEADLINE_EXCEEDED.value
+    assert attempt.settled_at is not None
+
+
+@pytest.mark.asyncio
+async def test_capacity_failure_waits_for_durable_next_eligibility(
+    tmp_path: Path,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    case = _accepted_cases(tmp_path)[0]
+    async with sessions() as db:
+        await _persist_case(db, case)
+        await db.commit()
+
+    received = 0
+    app = FastAPI()
+
+    @app.post("/dispatch")
+    async def receive() -> JSONResponse:
+        nonlocal received
+        received += 1
+        if received == 1:
+            return JSONResponse({"detail": "at capacity"}, status_code=429)
+        return JSONResponse({"status": "dispatched"})
+
+    breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
+    spawner = LazyWorkerSpawner(
+        worker_url="http://worker", worker_port=8001, auto_spawn=False
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://worker"
+    ) as client:
+        first = await redrive_direct_control_actions(
+            sessions,
+            worker_client=client,
+            circuit_breaker=breaker,
+            worker_spawner=spawner,
+            trace_headers=None,
+        )
+        second = await redrive_direct_control_actions(
+            sessions,
+            worker_client=client,
+            circuit_breaker=breaker,
+            worker_spawner=spawner,
+            trace_headers=None,
+        )
+        async with sessions() as db:
+            attempt = await db.scalar(
+                select(RecoveryAttemptModel).where(
+                    RecoveryAttemptModel.thread_id == case.thread_id
+                )
+            )
+            assert attempt is not None
+            assert attempt.condition == RecoveryCondition.AT_CAPACITY.value
+            assert attempt.attempt_count == 2
+            assert attempt.settled_at is None
+            attempt.next_eligible_at = attempt.created_at
+            await db.commit()
+        third = await redrive_direct_control_actions(
+            sessions,
+            worker_client=client,
+            circuit_breaker=breaker,
+            worker_spawner=spawner,
+            trace_headers=None,
+        )
+        async with sessions() as db:
+            action = await get_control_action_by_dispatch_id(
+                db,
+                thread_id=case.thread_id,
+                dispatch_id=case.dispatch.dispatch_id,
+            )
+            attempt = await db.scalar(
+                select(RecoveryAttemptModel).where(
+                    RecoveryAttemptModel.thread_id == case.thread_id
+                )
+            )
+            assert action is not None and attempt is not None
+            await mark_control_action_applied(db, action.id)
+            attempt.next_eligible_at = attempt.created_at
+            await db.commit()
+        fourth = await redrive_direct_control_actions(
+            sessions,
+            worker_client=client,
+            circuit_breaker=breaker,
+            worker_spawner=spawner,
+            trace_headers=None,
+        )
+
+    assert first.deferred == 1
+    assert second.examined == 0
+    assert third.dispatched == 1
+    assert fourth.examined == 1
+    assert fourth.dispatched == 0
+    assert received == 2
+    async with sessions() as db:
+        attempt = await db.scalar(
+            select(RecoveryAttemptModel).where(
+                RecoveryAttemptModel.thread_id == case.thread_id
+            )
+        )
+    assert attempt is not None and attempt.settled_at is not None

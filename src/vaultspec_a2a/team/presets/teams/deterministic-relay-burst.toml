@@ -15,6 +15,7 @@ directive = "Run the in-process deterministic relay-burst scenario."
 
 [team.graph]
 step_timeout_seconds = 300
+run_timeout_seconds = 3000
 recursion_limit      = 10
 
 [[team.workers]]

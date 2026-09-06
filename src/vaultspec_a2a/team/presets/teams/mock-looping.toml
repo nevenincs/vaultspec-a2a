@@ -15,6 +15,7 @@ directive = "Loop infinitely."
 
 [team.graph]
 step_timeout_seconds = 60
+run_timeout_seconds = 6000
 recursion_limit      = 100
 
 [[team.workers]]

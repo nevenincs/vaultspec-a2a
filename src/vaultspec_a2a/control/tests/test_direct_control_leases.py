@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -253,6 +254,7 @@ async def _create_current_thread(
         payload=freeze_accepted_input(
             dispatch, intent={"content": "seed accepted graph authority"}
         ),
+        recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
     )
     receipt = await prepare_graph_action_receipt(
         db,

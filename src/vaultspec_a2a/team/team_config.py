@@ -500,6 +500,7 @@ class TeamGraphConfig(BaseModel):
     """Team-level graph execution settings."""
 
     step_timeout_seconds: int | None = None
+    run_timeout_seconds: int | None = None
     recursion_limit: int = Field(default=25, ge=1, le=500)
 
 

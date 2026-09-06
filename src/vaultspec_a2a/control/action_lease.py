@@ -14,7 +14,7 @@ from ..database import (
     reserve_control_action,
 )
 from ..thread.dispatch_policy import FailureType
-from ..thread.enums import ControlActionType
+from ..thread.enums import RECOVERY_ACTION_TYPES, ControlActionType
 from .dispatch_receipts import prepare_graph_action_receipt
 
 if TYPE_CHECKING:
@@ -67,6 +67,8 @@ async def prepare_control_action_claim(
     now: datetime | None = None,
     lease_ttl: timedelta = CONTROL_ACTION_LEASE_TTL,
     write_expectation: ThreadWriteExpectation | None = None,
+    recovery_timeout_seconds: int | None = None,
+    recovery_deadline_at: datetime | None = None,
 ) -> ControlActionClaim:
     """Prepare one accepted action inside the caller's acceptance transaction.
 
@@ -75,6 +77,20 @@ async def prepare_control_action_claim(
     delivery. Losing claims roll back their attempted acceptance.
     """
     instant = now or datetime.now(UTC)
+    resolved_type = ControlActionType(action_type)
+    if resolved_type in RECOVERY_ACTION_TYPES:
+        if (recovery_timeout_seconds is None) == (recovery_deadline_at is None):
+            raise ValueError(
+                "recoverable action requires exactly one run timeout or deadline"
+            )
+        if recovery_timeout_seconds is not None:
+            if recovery_timeout_seconds < 1:
+                raise ValueError("recovery_timeout_seconds must be positive")
+            recovery_deadline_at = instant + timedelta(seconds=recovery_timeout_seconds)
+        if recovery_deadline_at is None or recovery_deadline_at <= instant:
+            raise ValueError("recovery deadline must be later than acceptance")
+    elif recovery_timeout_seconds is not None or recovery_deadline_at is not None:
+        raise ValueError("non-recoverable action cannot carry a recovery deadline")
     reservation = await reserve_control_action(
         db,
         thread_id=thread_id,
@@ -84,6 +100,7 @@ async def prepare_control_action_claim(
         payload=payload,
         dispatch_id=dispatch_id,
         worker_generation=worker_generation,
+        recovery_deadline_at=recovery_deadline_at,
     )
     action = reservation.action
     if action.dispatch_id is None:
@@ -100,8 +117,11 @@ async def prepare_control_action_claim(
 
     claim_token: str | None = None
     acquired = False
-    authority_matches = True
-    if reservation.payload_matches and action.applied_at is None:
+    authority_matches = resolved_type not in RECOVERY_ACTION_TYPES or (
+        action.recovery_deadline_at is not None
+        and action.recovery_deadline_at > instant
+    )
+    if authority_matches and reservation.payload_matches and action.applied_at is None:
         claim_token = uuid4().hex
         acquired = await acquire_control_action_lease(
             db,

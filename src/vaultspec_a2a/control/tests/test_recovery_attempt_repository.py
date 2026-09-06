@@ -19,6 +19,7 @@ from ..recovery import (
     acquire_due_recovery_attempts,
     record_recovery_failure,
     reschedule_recovery_attempt,
+    seed_recovery_attempts,
     settle_recovery_attempt,
 )
 
@@ -40,7 +41,7 @@ async def sessions(
     await engine.dispose()
 
 
-async def _thread(db: AsyncSession) -> RunWriteAuthority:
+async def _thread(db: AsyncSession, *, deadline_at: datetime) -> RunWriteAuthority:
     authority = RunWriteAuthority(
         7,
         4,
@@ -55,6 +56,7 @@ async def _thread(db: AsyncSession) -> RunWriteAuthority:
         idempotency_key="accepted:run",
         dispatch_id=authority.action_receipt_id,
         payload={"schema_version": "test-current"},
+        recovery_deadline_at=deadline_at,
     )
     return authority
 
@@ -66,7 +68,7 @@ async def test_failure_updates_one_exact_schedule(
     now = datetime(2026, 9, 6, 12, tzinfo=UTC)
     deadline = now + timedelta(minutes=10)
     async with sessions() as db:
-        authority = await _thread(db)
+        authority = await _thread(db, deadline_at=deadline)
         first = await record_recovery_failure(
             db,
             thread_id="run",
@@ -103,7 +105,7 @@ async def test_failure_refuses_stale_or_fabricated_writer(
 ) -> None:
     now = datetime(2026, 9, 6, 12, tzinfo=UTC)
     async with sessions() as db:
-        authority = await _thread(db)
+        authority = await _thread(db, deadline_at=now + timedelta(minutes=1))
         stale = RunWriteAuthority(
             authority.run_revision + 1,
             authority.writer_generation,
@@ -135,7 +137,7 @@ async def test_claim_is_exclusive_and_reschedule_is_token_guarded(
     now = datetime(2026, 9, 6, 12, tzinfo=UTC)
     deadline = now + timedelta(minutes=10)
     async with sessions() as db:
-        authority = await _thread(db)
+        authority = await _thread(db, deadline_at=deadline)
         await record_recovery_failure(
             db,
             thread_id="run",
@@ -220,3 +222,29 @@ async def test_claim_is_exclusive_and_reschedule_is_token_guarded(
             claim_expires_at=now + timedelta(minutes=2),
             limit=10,
         )
+
+
+@pytest.mark.asyncio
+async def test_seed_captures_the_post_acceptance_crash_window(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    now = datetime(2026, 9, 6, 12, tzinfo=UTC)
+    deadline = now + timedelta(minutes=10)
+    async with sessions() as db:
+        authority = await _thread(db, deadline_at=deadline)
+        await db.commit()
+
+    async with sessions() as db:
+        assert await seed_recovery_attempts(db, observed_at=now, limit=10) == 1
+        assert await seed_recovery_attempts(db, observed_at=now, limit=10) == 0
+        await db.commit()
+
+    async with sessions() as db:
+        [claim] = await acquire_due_recovery_attempts(
+            db,
+            acquired_at=now,
+            claim_expires_at=now + timedelta(seconds=30),
+            limit=10,
+        )
+        assert claim.authority == authority
+        assert claim.condition is RecoveryCondition.DISPATCH_PENDING

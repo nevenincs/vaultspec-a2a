@@ -17,6 +17,7 @@ directive = "Work autonomously in a loop to solve the problem."
 
 [team.graph]
 step_timeout_seconds = 60
+run_timeout_seconds = 1200
 recursion_limit      = 20
 
 [[team.workers]]

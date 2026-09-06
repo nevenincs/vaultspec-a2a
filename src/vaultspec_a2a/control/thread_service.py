@@ -12,7 +12,9 @@ import asyncio
 import contextlib
 import json
 import logging
+from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -25,7 +27,6 @@ from ..control.dispatch_receipts import (
     prepare_graph_action_receipt,
 )
 from ..control.repair_transitions import (
-    mark_dispatch_failed,
     mark_ingest_applied,
     mark_ingest_requested,
 )
@@ -46,7 +47,6 @@ from ..database.models import RunWriteAuthority, ThreadModel
 from ..domain_config import domain_config
 from ..graph.nodes.vault_reader import build_initial_vault_index
 from ..ipc.schemas import DispatchRequest, canonical_project_root, to_dispatch_action
-from ..providers.conditions import ProviderCondition
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
@@ -55,6 +55,7 @@ from ..thread.enums import (
     ApprovalStatus,
     CleanupKind,
     ControlActionType,
+    RecoveryCondition,
     RepairStatus,
     ThreadStatus,
 )
@@ -64,6 +65,7 @@ from ..thread.lifecycle_guards import can_archive, can_delete
 from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES, project_checkpoint_tuple
 from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
 from .permission_options import extract_allowed_option_ids
+from .recovery import RecoveryAuthorityLostError, record_recovery_failure
 from .repositories import (
     CleanupItemResult,
     advance_deletion_cleanup_item,
@@ -73,7 +75,6 @@ from .repositories import (
 )
 
 if TYPE_CHECKING:
-    from datetime import datetime
     from pathlib import Path
 
     import httpx
@@ -599,6 +600,9 @@ async def create_and_dispatch_thread(
     # Durable acceptance includes the actual graph input. Recovery cannot
     # reconstruct a user's message from title/preset metadata after a crash.
     # Tokens remain ephemeral; their required presence is an explicit fact.
+    recovery_deadline_at = datetime.now(UTC) + timedelta(
+        seconds=dispatch.require_graph_definition().run_timeout_seconds
+    )
     await create_control_action(
         db,
         thread_id=thread.id,
@@ -606,6 +610,7 @@ async def create_and_dispatch_thread(
         dispatch_id=action_receipt_id,
         idempotency_key=f"thread-create:{thread.id}",
         payload=accepted_input,
+        recovery_deadline_at=recovery_deadline_at,
     )
     await mark_ingest_requested(db, thread.id)
     receipt = await prepare_graph_action_receipt(
@@ -642,29 +647,25 @@ async def create_and_dispatch_thread(
     )
 
     if not outcome.success:
-        policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-        election = None
-        if policy.should_mark_failed:
-            expectation = thread_write_expectation(thread)
-            election = await elect_thread_status(
+        _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
+        if typed_failure is None:
+            raise RuntimeError("failed initial dispatch carries no failure type")
+        observed_at = datetime.now(UTC)
+        # A checkpoint or another accepted action may win while dispatch is in
+        # flight. Its exact authority decides the result, so discard stale work.
+        with suppress(RecoveryAuthorityLostError):
+            await record_recovery_failure(
                 db,
-                thread.id,
-                expectation=expectation,
-                status=ThreadStatus.FAILED,
-                successor=successor_thread_write_authority(
-                    expectation,
-                    action_type=ControlActionType.INGEST,
-                    action_receipt_id=action_receipt_id,
+                thread_id=thread.id,
+                authority=thread_write_expectation(thread).authority,
+                condition=RecoveryCondition(typed_failure.value),
+                observed_at=observed_at,
+                next_eligible_at=min(
+                    observed_at + timedelta(seconds=2), recovery_deadline_at
                 ),
-                failure_reason=outcome.detail or "Worker dispatch failed",
-                provider_condition=ProviderCondition.UNKNOWN.value,
+                deadline_at=recovery_deadline_at,
+                detail=outcome.detail,
             )
-            if election.outcome is ThreadStatusElectionOutcome.WON:
-                await mark_dispatch_failed(
-                    db,
-                    thread.id,
-                    reason=outcome.detail or "Worker dispatch failed",
-                )
         await db.commit()
         current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
         if current_thread is None:
@@ -677,22 +678,10 @@ async def create_and_dispatch_thread(
                 failure_type=FailureType.NOT_FOUND,
             )
         if (
-            election is not None
-            and election.outcome is ThreadStatusElectionOutcome.RECEIPT_MISMATCH
-        ):
-            return ThreadCreationResult(
-                thread_id=thread.id,
-                status=current_thread.status,
-                nickname=req.nickname,
-                dispatched=False,
-                error_detail="Initial dispatch receipt no longer matches its action",
-                failure_type=FailureType.INCOMPATIBLE_STATE,
-            )
-        if (
-            election is not None
-            and election.outcome is ThreadStatusElectionOutcome.LOST
-            and current_thread.writer_action_type == ControlActionType.INGEST.value
+            current_thread.writer_action_type == ControlActionType.INGEST.value
             and current_thread.writer_action_receipt_id == action_receipt_id
+            and current_thread.status
+            in {ThreadStatus.COMPLETED.value, ThreadStatus.FAILED.value}
         ):
             return ThreadCreationResult(
                 thread_id=thread.id,

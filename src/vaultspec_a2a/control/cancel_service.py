@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from ..control.accepted_input import freeze_accepted_input
@@ -25,6 +26,7 @@ from ..control.repair_transitions import (
 from ..database import (
     ThreadStatusElectionOutcome,
     elect_thread_status,
+    get_control_action_by_dispatch_id,
     get_thread,
     successor_thread_write_authority,
     thread_write_expectation,
@@ -128,6 +130,8 @@ def raise_for_cancel_failure(result: CancelResult, *, resource_noun: str) -> Non
         )
     if result.failure_type == FailureType.CONFLICT:
         raise HTTPException(status_code=409, detail=result.error_detail)
+    if result.failure_type == FailureType.DEADLINE_EXCEEDED:
+        raise HTTPException(status_code=409, detail=result.error_detail)
     if result.failure_type is not None:
         raise HTTPException(
             status_code=502, detail=result.error_detail or "Cancel dispatch failed"
@@ -178,6 +182,29 @@ async def cancel_thread(
     # rows. Capture the response state and exact election witness before claiming.
     thread_status = thread.status
     expectation = thread_write_expectation(thread)
+    owning_action = await get_control_action_by_dispatch_id(
+        db,
+        thread_id=thread_id,
+        dispatch_id=expectation.authority.action_receipt_id,
+    )
+    if owning_action is None or owning_action.recovery_deadline_at is None:
+        return CancelResult(
+            action_id=None,
+            thread_id=thread_id,
+            cancelled=False,
+            thread_status=thread_status,
+            error_detail="The accepted run carries no recovery deadline",
+            failure_type=FailureType.INCOMPATIBLE_STATE,
+        )
+    if owning_action.recovery_deadline_at <= datetime.now(UTC):
+        return CancelResult(
+            action_id=None,
+            thread_id=thread_id,
+            cancelled=False,
+            thread_status=thread_status,
+            error_detail="The accepted run deadline has expired",
+            failure_type=FailureType.DEADLINE_EXCEEDED,
+        )
 
     # Cancellation is a resource transition, so one thread has one durable
     # ownership key even when racing callers supplied different retry labels.
@@ -197,6 +224,7 @@ async def cancel_thread(
         idempotency_key=resolved_idempotency_key,
         payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
         dispatch_id=dispatch.dispatch_id,
+        recovery_deadline_at=owning_action.recovery_deadline_at,
     )
     if not claim.payload_matches:
         return CancelResult(

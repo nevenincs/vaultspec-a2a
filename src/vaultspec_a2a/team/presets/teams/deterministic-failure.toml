@@ -39,6 +39,7 @@ budget allows.
 
 [team.graph]
 step_timeout_seconds = 60
+run_timeout_seconds = 180
 recursion_limit      = 3
 
 [[team.workers]]

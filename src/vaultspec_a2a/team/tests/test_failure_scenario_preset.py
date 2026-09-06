@@ -71,6 +71,7 @@ def _compiled_graph() -> CompiledTeamGraph:
     return compile_team_graph(
         team_config,
         agent_configs,
+        step_timeout=team_config.graph.step_timeout_seconds,
         provider_factory=ProviderFactory(),
         workspace_root=Path.cwd(),
         model_assignment={ref.agent_id: dict(lane) for ref in team_config.workers},

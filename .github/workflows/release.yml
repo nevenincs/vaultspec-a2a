@@ -31,7 +31,8 @@
 # runs on and has no cross-compilation flag, so a target built elsewhere would
 # ship the wrong interpreter inside a correctly-named archive — which composes
 # cleanly, verifies cleanly, and fails only on a user's machine. All four
-# runners below are GitHub-hosted and native, including `ubuntu-24.04-arm`.
+# runners below are self-hosted fleet runners and native, including the
+# Linux/ARM64 leg.
 name: Release
 
 on:
@@ -62,16 +63,16 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-24.04
+            runner: [self-hosted, Linux, X64]
             archive: tar.gz
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
+            runner: [self-hosted, ARM64, Linux]
             archive: tar.gz
           - target: aarch64-apple-darwin
-            runner: macos-14
+            runner: [self-hosted, macOS, ARM64]
             archive: tar.gz
           - target: x86_64-pc-windows-msvc
-            runner: windows-2022
+            runner: [self-hosted, Windows, X64]
             archive: zip
     steps:
       - name: Checkout repository
@@ -309,7 +310,7 @@ jobs:
   publish:
     name: Publish to the release
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 15
     permissions:
       contents: write

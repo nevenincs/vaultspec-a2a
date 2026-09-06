@@ -5,11 +5,26 @@
 # queues forever with no logs and no failure. Enumerating the set here turns
 # that silent, unbounded stall into a lint error on the pull request.
 #
-# `dev-runner` is DECLARED but not currently registered to this repository -
-# `bootstrap-branch.yml` targets it, and every historical run of that workflow
-# was cancelled by hand rather than completing. It is listed here because the
-# workflow legitimately expects an on-demand runner to be provisioned under that
-# label; it is not evidence that one exists today.
+# Every job in this repository now runs on the self-hosted fleet; no workflow
+# requests a GitHub-hosted image. The four label sets below are the fleet's
+# canonical ones, and each resolves to exactly one runner registered to this
+# repository:
+#
+#   self-hosted + Linux  + X64     the WSL Ubuntu runner on the workstation
+#   self-hosted + Windows + X64    the native Windows service on the workstation
+#   self-hosted + macOS  + ARM64   the native launchd agent on the MacBook
+#   self-hosted + Linux  + ARM64   the colima container on the MacBook
+#
+# `dev-runner` serves `bootstrap-branch.yml` alone and is carried by the WSL
+# runner registered under that name, in addition to the Linux/X64 set.
+#
+# Adding a runner label means declaring it here AND registering a runner that
+# carries it. Either half alone is the stall this file exists to prevent.
 self-hosted-runner:
   labels:
     - dev-runner
+    - Linux
+    - Windows
+    - macOS
+    - X64
+    - ARM64

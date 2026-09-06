@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:0269bf85e7a1036eee7b9b4e8de64906c94887a4b51685b63442170c7ecf3727'
+body_hash: 'sha256:422bf385c2b4122b991d43d326503d64e0951234240e0fa6ee65b5120b9a8fae'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -251,3 +251,10 @@ Focused Ruff and Ty pass. The default invocation deselected all five service cas
 The verdict-loop service fixture no longer dispatches an ingest before durable authority exists. It commits the thread, complete v2 accepted request, stable dispatch identity and immutable graph receipt first, then sends that exact frozen request through the authenticated real worker route. Its cache identity carries preset, workspace, mode, provider digest and graph digest; the gate permission projection occurs only after the graph actually parks. Focused Ruff and Ty pass. The service case exited naturally with one skip in 1.76 seconds because no healthy engine discovery record resolved.
 
 A HIGH proof-integrity finding remains: the test injects a custom phase-gate compiled object under a cache identity derived from the catalog `mock-success-single` frozen definition. This verifies current acceptance and identity plumbing but not that the compiled executable was produced from the receipt-bound definition. The unit and live subscriber receipt fixtures use the same injection pattern. S84 must replace arbitrary graph injection with compilation from durable declarative authority, or qualify the actual frozen compiler topology. Digest-shaped cache keys alone are insufficient evidence of executable provenance.
+### direct-control-lease-current-authority | high | fixture and stable identity corrected; race classification open
+
+The direct-control lease suite now constructs every nonterminal run from complete accepted v2 initial graph authority and an immutable receipt. Receipt-bearing execution uses the corresponding provider and graph digests, five-member cache identity, authenticated worker route and real in-process event relay. Message and permission behavior no longer fail early because their thread lacks current initial authority, and executor teardown no longer waits on a dead event target.
+
+`message_service` now returns `claim.action_id` when graph authority validation loses, preserving the durable stable identity already known by the claim. One intermediate full run showed why this matters: exactly one identical message dispatched while its competitor returned `INCOMPATIBLE_STATE` with an empty identity. The outward identity loss is resolved. A HIGH concurrency finding remains because an identical concurrent retry can still be classified as incompatible after receipt-authority election; S12/S83 must distinguish a same-action in-flight winner from genuinely stale authority without reconstructing or weakening receipt proof.
+
+Evidence is retained in order: one focused race passed in 6.05 seconds; a full run failed three and passed five in 13.77 seconds due missing current initial authority; the next failed one and passed seven in 49.49 seconds due erased stable identity; the final run passed all eight in 22.48 seconds. Every run exited naturally. Focused Ruff and Ty pass. Semantic provenance of the injected one-node compiled graph remains part of the existing HIGH proof-integrity queue.

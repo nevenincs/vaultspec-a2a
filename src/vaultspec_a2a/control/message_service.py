@@ -188,7 +188,7 @@ async def send_followup_message(
     )
     if not claim.authority_matches:
         return MessageResult(
-            action_id="",
+            action_id=claim.action_id,
             thread_id=thread_id,
             thread_status=thread_status,
             dispatched=False,

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:03cbc2d8f26b5d8311ef0d1b544b177c21c4faab7190776a8b2de640d1e0cfdf'
+body_hash: 'sha256:4b533f92428dc6ce706d31a88a56fcb8ea66664d3ebcd1c691914fd6a7277b8f'
 step_id: 'S84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -173,3 +173,28 @@ Formal review queue:
 - HIGH / scope: the same injected-graph limitation applies to the unit and live subscriber receipt fixtures migrated earlier. Their identity plumbing is current, but semantic compiler provenance remains unqualified.
 
 S84 remains open for semantic compiled-graph provenance, live service execution, current action-recovery replacements and the complete conditions matrix.
+## Direct-control lease current-authority migration
+
+- `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`.
+- `M` `src/vaultspec_a2a/control/message_service.py`.
+- Every nonterminal direct-control fixture now begins with a complete accepted initial graph action, immutable receipt, active project, frozen `mock-success-single` definition and current provider assignment. The receipt graph uses the matching five-member identity and exact authenticated worker dispatch.
+- The worker event bridge now uses a real in-process receiver, and receipt settlement observes either buffered or already-relayed events. Dead-port retry time is removed from the lease behaviors.
+- An authority-mismatch response now preserves the durable `claim.action_id` instead of erasing an already-known stable identity.
+
+Formal review findings:
+
+- HIGH / contract: message and permission fixtures without initial accepted graph authority failed before their intended behavior -> resolved by one current thread-authority builder.
+- HIGH / identity: the losing authority-mismatch arm returned an empty action id despite a durable reservation -> resolved by returning the claim's stable action id.
+- MEDIUM / verification liveness: the real executor relayed events to a dead port during teardown -> resolved with a real ASGI receiver.
+- HIGH / concurrency: one identical-message run elected one dispatch but the losing caller transiently reported `INCOMPATIBLE_STATE` after failing receipt authority. The final stable identity is now retained, but the transaction/receipt election can still misclassify an identical concurrent retry and remains queued.
+- HIGH / proof integrity: the one-node injected receipt graph is still not proven to have been compiled from its frozen definition; this joins the existing semantic compiler-provenance finding.
+
+Verification evidence:
+
+- Focused receipt race passed once in 6.05 seconds.
+- The first full run naturally failed three cases and passed five in 13.77 seconds, exposing missing initial graph authority in retained setups.
+- After current setup migration, the next full run naturally failed one case and passed seven in 49.49 seconds, exposing erased stable identity on the intermittent authority-mismatch arm.
+- Final full run passed all eight cases in 22.48 seconds with natural exit 0.
+- Focused Ruff and Ty passed.
+
+S84 remains open for the identical-retry authority classification, semantic compiled-graph provenance, current recovery replacements, live service proof and the complete conditions matrix.

@@ -18,7 +18,7 @@ import anyio
 import httpx
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -27,8 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
 from ...api.tests.clarification_harness import new_state_graph
+from ...control.accepted_input import freeze_accepted_input
 from ...control.cancel_service import CancelResult, cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.config import settings
+from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
 from ...control.message_service import MessageResult, send_followup_message
@@ -38,6 +41,7 @@ from ...control.permission_service import (
 )
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
+    create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
     get_permission_request,
@@ -45,9 +49,12 @@ from ...database import (
     record_permission_request,
 )
 from ...database.models import Base
+from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
+from ...team.team_config import load_team_config
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ...thread.idempotency import default_cancel_key
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
@@ -58,6 +65,15 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
     from ...worker.graph_lifecycle import RegisteredCompiledGraph
+
+
+_TEST_INTERNAL_TOKEN = "direct-control-lease-test-token"
+
+
+@pytest.fixture(autouse=True)
+def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give both sides of real worker dispatch the current IPC credential."""
+    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
 
 
 @pytest_asyncio.fixture
@@ -82,17 +98,33 @@ async def _worker_runtime(
 ) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge]]:
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
         await saver.setup()
-        bridge = WorkerBridge("http://127.0.0.1:1", "direct-control-lease-test")
+        relayed_events: list[dict[str, object]] = []
+        event_sink = FastAPI()
+
+        @event_sink.post("/internal/events/batch")
+        async def accept_event_batch(request: Request) -> JSONResponse:
+            body = await request.json()
+            relayed_events.extend(cast("list[dict[str, object]]", body["events"]))
+            return JSONResponse({"status": "ok"})
+
+        bridge = WorkerBridge("http://control", "direct-control-lease-test")
+        await bridge._client.aclose()
+        bridge._client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=event_sink),
+            base_url="http://control",
+        )
         executor = Executor(saver, bridge)
         for thread_id in receipt_threads:
             _install_receipt_graph(executor, saver, thread_id)
         app = create_worker_app()
         app.state.executor = executor
+        app.state.relayed_events = relayed_events
         async with anyio.create_task_group() as tasks:
             app.state.task_group = tasks
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url="http://worker",
+                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
             ) as client:
                 yield client, app, bridge
             tasks.cancel_scope.cancel()
@@ -129,15 +161,21 @@ def _install_receipt_graph(
     builder.add_edge("__start__", "worker")
     builder.add_edge("worker", "__end__")
     graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
+    workspace = Path(_ACTIVE_PROJECT)
+    definition = freeze_graph_definition(
+        load_team_config("mock-success-single", workspace_root=workspace),
+        workspace_root=workspace,
+    )
     executor.register_compiled_graph(
         thread_id,
         (
-            "settle-preset",
-            None,
+            "mock-success-single",
+            str(workspace),
             False,
             resolve_execution_authority(
-                current_execution_metadata(Path(_ACTIVE_PROJECT))
+                current_execution_metadata(workspace)
             ).model_assignment_digest,
+            definition.digest(),
         ),
         graph,
     )
@@ -159,18 +197,69 @@ async def _running_thread(
     sessions: async_sessionmaker[AsyncSession],
     thread_id: str,
     *,
-    team_preset: str | None = None,
+    team_preset: str = "mock-success-single",
 ) -> None:
     async with sessions() as db:
-        await create_thread(
+        await _create_current_thread(
             db,
-            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             status=ThreadStatus.RUNNING,
             team_preset=team_preset,
-            metadata=_active_project_metadata(),
         )
         await db.commit()
+
+
+async def _create_current_thread(
+    db: AsyncSession,
+    *,
+    thread_id: str,
+    status: ThreadStatus,
+    team_preset: str = "mock-success-single",
+) -> None:
+    """Persist a thread with the complete current initial graph authority."""
+    authority = make_test_write_authority()
+    workspace = Path(_ACTIVE_PROJECT)
+    metadata = _active_project_metadata()
+    execution_authority = resolve_execution_authority(metadata)
+    definition = freeze_graph_definition(
+        load_team_config(team_preset, workspace_root=workspace),
+        workspace_root=workspace,
+    )
+    await create_thread(
+        db,
+        write_authority=authority,
+        thread_id=thread_id,
+        status=status,
+        team_preset=team_preset,
+        metadata=metadata,
+    )
+    dispatch = DispatchRequest(
+        dispatch_id=authority.action_receipt_id,
+        action="ingest",
+        thread_id=thread_id,
+        content="seed accepted graph authority",
+        team_preset=team_preset,
+        graph_definition=definition,
+        workspace_root=str(workspace),
+        recursion_limit=25,
+        model_assignment=execution_authority.model_assignment,
+    )
+    await create_control_action(
+        db,
+        thread_id=thread_id,
+        action_type=authority.action_type,
+        idempotency_key=f"thread-create:{thread_id}",
+        dispatch_id=authority.action_receipt_id,
+        payload=freeze_accepted_input(
+            dispatch, intent={"content": "seed accepted graph authority"}
+        ),
+    )
+    receipt = await prepare_graph_action_receipt(
+        db,
+        thread_id=thread_id,
+        dispatch_id=authority.action_receipt_id,
+    )
+    assert receipt is not None
 
 
 @pytest.mark.asyncio
@@ -182,12 +271,10 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
     thread_id = "permission-ack-only-thread"
     request_id = f"{thread_id}:permission"
     async with session_factory() as db:
-        await create_thread(
+        await _create_current_thread(
             db,
-            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             status=ThreadStatus.INPUT_REQUIRED,
-            metadata=current_execution_metadata(tmp_path),
         )
         await record_permission_request(
             db,
@@ -256,7 +343,9 @@ async def test_concurrent_identical_custom_key_messages_dispatch_once(
 ) -> None:
     thread_id = "identical-message-thread"
     custom_key = "client-message-retry"
-    await _running_thread(session_factory, thread_id, team_preset="settle-preset")
+    await _running_thread(
+        session_factory, thread_id, team_preset="mock-success-single"
+    )
 
     async with _worker_runtime(
         tmp_path / "identical-message-checkpoints.db",
@@ -298,7 +387,11 @@ async def test_concurrent_identical_custom_key_messages_dispatch_once(
                     "list[dict[str, object]]",
                     getattr(bridge, "_event_buffer", []),
                 )
-                for item in buffered:
+                relayed = cast(
+                    "list[dict[str, object]]",
+                    worker_app.state.relayed_events,
+                )
+                for item in [*buffered, *relayed]:
                     candidate = item.get("payload")
                     candidate_mapping = (
                         cast("dict[str, object]", candidate)

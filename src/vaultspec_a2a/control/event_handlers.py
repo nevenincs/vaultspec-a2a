@@ -18,7 +18,10 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
-from ..ipc.schemas import ExecutionStateProjectionPayload
+from ..ipc.schemas import (
+    DispatchApplicationReceiptPayload,
+    ExecutionStateProjectionPayload,
+)
 from ..providers import ProviderCondition
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
@@ -39,6 +42,7 @@ from ..utils.coercion import coerce_object_mapping
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from ..database.checkpoints import Checkpointer
     from ..streaming.aggregator import EventAggregator
     from .drain import DrainGate
 
@@ -773,33 +777,140 @@ async def _handle_progress_event(
     payload: dict[str, object],
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    checkpointer: Checkpointer | None = None,
 ) -> str | None:
     """Settle one exact control action from a private worker receipt."""
     if payload.get("type") != "dispatch_applied":
         return
     from ..database import (
+        ControlActionModel,
+        ThreadModel,
         get_control_action_by_dispatch_id,
+        get_thread,
         mark_control_action_applied,
         update_thread_status,
     )
+    from ..thread.checkpoint_evidence import read_checkpoint_evidence
     from ..thread.enums import ControlActionType
     from .repair_transitions import mark_message_followup_applied
+
+    try:
+        application = DispatchApplicationReceiptPayload.model_validate(payload)
+    except ValidationError:
+        logger.warning(
+            "Refusing invalid dispatch application receipt for thread %s",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "invalid_application_receipt"},
+        )
+        return
+    if application.graph_action_receipt.thread_id != thread_id:
+        logger.warning(
+            "Refusing cross-thread dispatch application receipt for thread %s",
+            thread_id,
+            extra={
+                "thread_id": thread_id,
+                "action": "cross_thread_application_receipt",
+            },
+        )
+        return
+    receipt_action = application.graph_action_receipt.action_type
+    expected_transport_action = (
+        "ingest"
+        if receipt_action
+        in {
+            ControlActionType.INGEST,
+            ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+        }
+        else "resume"
+    )
+    if application.action != expected_transport_action:
+        logger.warning(
+            "Refusing mismatched dispatch application verb for thread %s",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "mismatched_application_verb"},
+        )
+        return
 
     factory = _session_factory(session_factory)
     if factory is None:
         _skip_without_database("the control-action settlement", thread_id)
         return
+    if checkpointer is None:
+        logger.warning(
+            "Skipping application receipt for %s: no checkpointer is available",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "checkpoint_proof_unavailable"},
+        )
+        return
     async with factory() as db:
-        dispatch_value = payload.get("dispatch_id")
-        dispatch_id = dispatch_value if isinstance(dispatch_value, str) else ""
-        if not dispatch_id:
-            return
         action = await get_control_action_by_dispatch_id(
             db,
             thread_id=thread_id,
-            dispatch_id=dispatch_id,
+            dispatch_id=application.dispatch_id,
         )
-        if action is None or action.applied_at is not None:
+        thread = await get_thread(db, thread_id)
+        if action is None or thread is None or action.applied_at is not None:
+            return
+        from .dispatch_receipts import validate_current_graph_receipt
+
+        stored_receipt = validate_current_graph_receipt(thread, action)
+        if stored_receipt != application.graph_action_receipt:
+            logger.warning(
+                "Refusing non-current dispatch application receipt for thread %s",
+                thread_id,
+                extra={
+                    "thread_id": thread_id,
+                    "dispatch_id": application.dispatch_id,
+                    "action": "non_current_application_receipt",
+                },
+            )
+            return
+        await db.commit()
+        from ..domain_config import domain_config
+
+        evidence = await read_checkpoint_evidence(
+            checkpointer,
+            stored_receipt,
+            timeout_seconds=domain_config.aget_state_timeout_seconds,
+            checkpoint_id=application.checkpoint_id,
+        )
+        if not evidence.incorporated:
+            logger.warning(
+                "Refusing %s dispatch application receipt for thread %s",
+                evidence.kind.value,
+                thread_id,
+                extra={
+                    "thread_id": thread_id,
+                    "dispatch_id": application.dispatch_id,
+                    "checkpoint_id": application.checkpoint_id,
+                    "condition": evidence.kind.value,
+                    "action": "unincorporated_application_receipt",
+                },
+            )
+            return
+        from sqlalchemy import select
+
+        thread = await db.scalar(
+            select(ThreadModel)
+            .where(ThreadModel.id == thread_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        action = await db.scalar(
+            select(ControlActionModel)
+            .where(
+                ControlActionModel.thread_id == thread_id,
+                ControlActionModel.dispatch_id == application.dispatch_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            action is None
+            or thread is None
+            or action.applied_at is not None
+            or validate_current_graph_receipt(thread, action) != stored_receipt
+        ):
             return
         if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
             await mark_control_action_applied(db, action.id)
@@ -871,6 +982,7 @@ async def relay_event(
     *,
     aggregator: EventAggregator | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    checkpointer: Checkpointer | None = None,
     drain_gate: DrainGate | None = None,
 ) -> None:
     """Consolidated relay: run all 4 event handlers in sequence.
@@ -901,6 +1013,7 @@ async def relay_event(
         thread_id,
         payload,
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
     if applied_permission_id is not None and aggregator is not None:
         aggregator.resolve_permission(applied_permission_id)

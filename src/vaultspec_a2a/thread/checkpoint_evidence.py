@@ -38,11 +38,16 @@ async def read_checkpoint_evidence(
     receipt: GraphActionReceipt,
     *,
     timeout_seconds: float,
+    checkpoint_id: str | None = None,
 ) -> CheckpointEvidence:
     """Read terminal truth without compiling providers or guessing scheduled work."""
+    requested_checkpoint_id = checkpoint_id
+    configurable = {"thread_id": receipt.thread_id}
+    if checkpoint_id is not None:
+        configurable["checkpoint_id"] = checkpoint_id
     try:
         checkpoint = await asyncio.wait_for(
-            checkpointer.aget_tuple({"configurable": {"thread_id": receipt.thread_id}}),
+            checkpointer.aget_tuple({"configurable": configurable}),
             timeout=timeout_seconds,
         )
     except Exception:
@@ -52,6 +57,10 @@ async def read_checkpoint_evidence(
     checkpoint_id = checkpoint.checkpoint.get("id")
     if not isinstance(checkpoint_id, str) or not checkpoint_id:
         return CheckpointEvidence(CheckpointEvidenceKind.INCOMPATIBLE, None, False)
+    if requested_checkpoint_id is not None and checkpoint_id != requested_checkpoint_id:
+        return CheckpointEvidence(
+            CheckpointEvidenceKind.INCOMPATIBLE, checkpoint_id, False
+        )
     values = checkpoint.checkpoint.get("channel_values", {})
     if not isinstance(values, dict) or not isinstance(checkpoint.metadata, dict):
         return CheckpointEvidence(

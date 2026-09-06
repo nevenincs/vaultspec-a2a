@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:22a053bb6d3aeebdf5583526ba8e392298388f661007ba7d315f2cb0fb7e4ca3'
+body_hash: 'sha256:0edfd52d7f35d029675c932060c64b8ce54c53746c874bd80c3588d17b6ba18b'
 step_id: 'S13'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -37,3 +37,34 @@ Formal review findings:
 - MEDIUM / duplicate evidence observation: replay after the first cancellation commit is refused as stale rather than acknowledged as an idempotent duplicate -> open for S13 review with the durable delivery owner.
 
 Evidence exited naturally: four focused cancellation cases passed in 5.85 seconds, then the complete event-handler and state-projection modules passed 24 cases in 3.22 seconds. The Step remains open.
+## Durable application receipt checkpoint
+
+- `M` `src/vaultspec_a2a/api/internal.py`
+- `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `M` `src/vaultspec_a2a/thread/checkpoint_evidence.py`
+- `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`
+- `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py`
+- `verify:` `focused Ruff and Ty across all six changed files` -> `pass`
+- `verify:` `event-handler module before final lock refinement, 16 cases in 39.01 seconds` -> `pass`
+- `verify:` `direct receipt plus recovery authority, seven cases in 14.96 seconds` -> `pass`
+- `verify:` `exact application and missing-checkpoint discriminators, first run in 8.72 seconds` -> `pass`
+- `verify:` `API internal module, 60-second bounded run` -> `fail`
+- `verify:` `isolated API private-receipt case, 30-second bounded run` -> `fail`
+- `verify:` `combined event/direct/recovery gate, 60-second bounded run` -> `fail`
+- `verify:` `final repeat of two application discriminators, 30-second bounded run` -> `fail`
+
+## Notes
+
+The gateway now parses the closed `DispatchApplicationReceiptPayload`, validates its complete graph receipt against the current stored accepted action, verifies the transport verb, and reads the exact named checkpoint. The checkpoint must contain matching incorporated graph authority from a loop commit. After that external read, the consumer locks and revalidates the current thread and action rows before committing journal, permission, repair or lifecycle effects. Internal HTTP, batch and WebSocket relay paths pass the application-owned checkpointer explicitly. Missing checkpointer, partial payload, cross-thread identity, wrong checkpoint and stale current authority all refuse settlement.
+
+Formal review findings:
+
+- HIGH / bare identity settlement: a dispatch id alone previously applied a journal action -> resolved.
+- HIGH / invented incorporation: the gateway previously ignored the supplied graph receipt and checkpoint id -> resolved through exact durable checkpoint validation.
+- HIGH / concurrent authority overwrite: application effects could commit after a newer writer won -> resolved by post-checkpoint row locks and exact current-receipt revalidation.
+- MEDIUM / unavailable checkpoint recovery: an unavailable or timed-out checkpoint leaves the action visibly leased but this consumer does not itself schedule durable retry -> open under S14/S83.
+- MEDIUM / verification instability: bounded API and combined runs repeatedly hang before producing a result on this host, while isolated receipt and recovery gates naturally pass -> open as a harness/resource condition; all reaped runs remain FAIL evidence.
+- HIGH / generic terminal authority: completed, failed and evidence-free cancelled terminals still use the unconditional lifecycle writer -> open in S13.
+
+No compatibility parser, partial-payload fallback, alias, backfill or inferred receipt was added. S13 remains open.

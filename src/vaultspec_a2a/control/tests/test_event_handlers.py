@@ -3,9 +3,12 @@
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from langgraph.checkpoint.base import empty_checkpoint
+from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
@@ -20,6 +23,7 @@ from vaultspec_a2a.tests._write_authority import make_test_write_authority
 from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
 from ...control.accepted_input import freeze_accepted_input
+from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.drain import DrainGate
 from ...control.event_handlers import (
     _handle_permission_event,
@@ -44,25 +48,102 @@ from ...database.models import ControlActionModel, RunWriteAuthority, ThreadMode
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
+from ...team.team_config import load_team_config
+from ...thread.action_receipts import GraphActionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 
 
 async def _seed_unapplied_leased_action(
     session: AsyncSession,
+    checkpointer: InMemorySaver,
     *,
     thread_id: str,
     action_type: ControlActionType,
     idempotency_key: str,
     request_id: str | None = None,
-) -> ControlActionModel:
-    """Create only the journal and lease state consumed by event settlement."""
+) -> tuple[ControlActionModel, GraphActionReceipt, str]:
+    """Create current accepted graph authority and its unapplied lease."""
+    dispatch_id = uuid4().hex
+    graph_definition = freeze_graph_definition(
+        load_team_config("mock-success-single", workspace_root=Path.cwd()),
+        workspace_root=Path.cwd(),
+    )
+    intent: dict[str, object]
+    if action_type is ControlActionType.MESSAGE_FOLLOWUP_REQUESTED:
+        dispatch = DispatchRequest(
+            dispatch_id=dispatch_id,
+            action="ingest",
+            thread_id=thread_id,
+            content="current follow-up",
+            workspace_root=str(Path.cwd()),
+            team_preset="mock-success-single",
+            graph_definition=graph_definition,
+            recursion_limit=25,
+        )
+        intent = {
+            "content": "current follow-up",
+            "agent_id": dispatch.agent_id,
+        }
+    elif action_type is ControlActionType.PERMISSION_RESPONSE_SUBMITTED:
+        dispatch = DispatchRequest(
+            dispatch_id=dispatch_id,
+            action="resume",
+            thread_id=thread_id,
+            option_id={"option_id": "allow_once", "notes": None},
+            workspace_root=str(Path.cwd()),
+            team_preset="mock-success-single",
+            graph_definition=graph_definition,
+            recursion_limit=25,
+        )
+        intent = {"option_id": "allow_once", "notes": None}
+    else:
+        raise ValueError(f"unsupported graph action fixture: {action_type}")
     action = await create_control_action(
         session,
         thread_id=thread_id,
         action_type=action_type,
         idempotency_key=idempotency_key,
         request_id=request_id,
+        dispatch_id=dispatch_id,
+        payload=freeze_accepted_input(dispatch, intent=intent),
+    )
+    thread = await session.get(ThreadModel, thread_id)
+    assert thread is not None
+    expectation = thread_write_expectation(thread)
+    election = await elect_thread_status(
+        session,
+        thread_id,
+        expectation=expectation,
+        status=expectation.status,
+        successor=successor_thread_write_authority(
+            expectation,
+            action_type=action_type,
+            action_receipt_id=dispatch_id,
+        ),
+    )
+    assert election.outcome is ThreadStatusElectionOutcome.WON
+    receipt = await prepare_graph_action_receipt(
+        session, thread_id=thread_id, dispatch_id=dispatch_id
+    )
+    assert receipt is not None
+    checkpoint = empty_checkpoint()
+    checkpoint_id = uuid4().hex
+    checkpoint["id"] = checkpoint_id
+    checkpoint["channel_values"] = {
+        "active_graph_action_receipt": receipt.model_dump(mode="json"),
+        "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
+    }
+    checkpoint["channel_versions"] = {
+        "active_graph_action_receipt": 1,
+        "graph_action_receipts": 1,
+    }
+    await checkpointer.aput(
+        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        checkpoint["channel_versions"],
     )
     acquired = await acquire_control_action_lease(
         session,
@@ -71,12 +152,13 @@ async def _seed_unapplied_leased_action(
         claim_expires_at=datetime.now(UTC) + timedelta(minutes=1),
     )
     assert acquired
-    return action
+    return action, receipt, checkpoint_id
 
 
 @pytest.mark.asyncio
 async def test_dispatch_application_receipt_settles_exact_message_action(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: InMemorySaver,
 ) -> None:
     """A worker receipt settles its named follow-up, never another action."""
     async with session_factory() as session:
@@ -86,17 +168,23 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
             thread_id="message-receipt-thread",
             status="running",
         )
-        expected = await _seed_unapplied_leased_action(
+        other, _other_receipt, _other_checkpoint = await _seed_unapplied_leased_action(
             session,
-            thread_id=thread.id,
-            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-            idempotency_key="message:expected",
-        )
-        other = await _seed_unapplied_leased_action(
-            session,
+            checkpointer,
             thread_id=thread.id,
             action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
             idempotency_key="message:other",
+        )
+        (
+            expected,
+            expected_receipt,
+            expected_checkpoint,
+        ) = await _seed_unapplied_leased_action(
+            session,
+            checkpointer,
+            thread_id=thread.id,
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            idempotency_key="message:expected",
         )
         await session.commit()
 
@@ -106,8 +194,11 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
             "type": "dispatch_applied",
             "dispatch_id": expected.dispatch_id,
             "action": "ingest",
+            "graph_action_receipt": expected_receipt.model_dump(mode="json"),
+            "checkpoint_id": expected_checkpoint,
         },
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:
@@ -125,6 +216,47 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
     assert stored_thread.last_applied_action == "message_followup_applied"
 
 
+@pytest.mark.asyncio
+async def test_dispatch_application_receipt_requires_named_durable_checkpoint(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: InMemorySaver,
+) -> None:
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="missing-application-checkpoint",
+            status="running",
+        )
+        action, receipt, _checkpoint_id = await _seed_unapplied_leased_action(
+            session,
+            checkpointer,
+            thread_id=thread.id,
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            idempotency_key="message:missing-checkpoint",
+        )
+        await session.commit()
+
+    await _handle_progress_event(
+        thread.id,
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": action.dispatch_id,
+            "action": "ingest",
+            "graph_action_receipt": receipt.model_dump(mode="json"),
+            "checkpoint_id": uuid4().hex,
+        },
+        session_factory=session_factory,
+        checkpointer=checkpointer,
+    )
+
+    async with session_factory() as session:
+        stored = await session.get(ControlActionModel, action.id)
+    assert stored is not None
+    assert stored.applied_at is None
+    assert stored.claim_token is not None
+
+
 @pytest_asyncio.fixture
 async def engine(tmp_path_factory: pytest.TempPathFactory):
     """Create a file-backed engine for replay-focused control tests."""
@@ -140,6 +272,12 @@ async def engine(tmp_path_factory: pytest.TempPathFactory):
 async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """Provide an async session factory bound to the test engine."""
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest.fixture
+def checkpointer() -> InMemorySaver:
+    """Keep exact incorporated checkpoints for application receipts."""
+    return InMemorySaver()
 
 
 async def _seed_current_cancel(
@@ -282,6 +420,7 @@ async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
 @pytest.mark.asyncio
 async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: InMemorySaver,
 ) -> None:
     """A replayed permission_resolved event must not append a second applied action."""
     async with session_factory() as session:
@@ -313,8 +452,13 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
             option_id="allow_once",
             idempotency_key="response-1",
         )
-        submitted = await _seed_unapplied_leased_action(
+        (
+            submitted,
+            submitted_receipt,
+            submitted_checkpoint,
+        ) = await _seed_unapplied_leased_action(
             session,
+            checkpointer,
             thread_id=thread.id,
             action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
             idempotency_key=permission_response_action_key(request_id),
@@ -328,8 +472,11 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
             "type": "dispatch_applied",
             "dispatch_id": submitted.dispatch_id,
             "action": "resume",
+            "graph_action_receipt": submitted_receipt.model_dump(mode="json"),
+            "checkpoint_id": submitted_checkpoint,
         },
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:
@@ -463,9 +610,7 @@ async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
         "type": "permission_request",
         "request_id": request_id,
         "description": "Allow the first action?",
-        "options": [
-            {"option_id": "allow", "name": "Allow", "kind": "allow_once"}
-        ],
+        "options": [{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
         "tool_call": "bash",
     }
     await _handle_permission_event(
@@ -627,12 +772,13 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
 
 async def _answered_rejection(
     session_factory,
+    checkpointer: InMemorySaver,
     *,
     title: str,
     pause_reason_type: str,
     options: list[dict[str, object]],
     stamp_thread_rejected: bool,
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, GraphActionReceipt, str]:
     """Park a thread on a permission the human denied, awaiting settlement.
 
     Reproduces the real pre-settlement state: the response has been submitted
@@ -663,8 +809,13 @@ async def _answered_rejection(
             option_id="reject",
             idempotency_key="response-reject-1",
         )
-        submitted = await _seed_unapplied_leased_action(
+        (
+            submitted,
+            submitted_receipt,
+            submitted_checkpoint,
+        ) = await _seed_unapplied_leased_action(
             session,
+            checkpointer,
             thread_id=thread.id,
             action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
             idempotency_key=permission_response_action_key(request_id),
@@ -689,7 +840,13 @@ async def _answered_rejection(
         assert permission.request_status == "answered_pending_apply"
         assert permission.response_option_id == "reject"
 
-    return thread_id, request_id, dispatch_id
+    return (
+        thread_id,
+        request_id,
+        dispatch_id,
+        submitted_receipt,
+        submitted_checkpoint,
+    )
 
 
 _PLAN_OPTIONS: list[dict[str, object]] = [
@@ -708,6 +865,7 @@ _KIMI_OPTIONS: list[dict[str, object]] = [
 @pytest.mark.asyncio
 async def test_plan_rejection_survives_the_resolution_projection(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: InMemorySaver,
 ) -> None:
     """The resolution handler must not overwrite a denial with an approval.
 
@@ -717,8 +875,15 @@ async def test_plan_rejection_survives_the_resolution_projection(
     *id* -- so the bare ``"reject"`` the plan gate mints read as an approval and was
     written straight over the correct state.
     """
-    thread_id, request_id, _dispatch_id = await _answered_rejection(
+    (
+        thread_id,
+        request_id,
+        _dispatch_id,
+        _receipt,
+        _checkpoint,
+    ) = await _answered_rejection(
         session_factory,
+        checkpointer,
         title="Plan rejection",
         pause_reason_type="plan_approval_request",
         options=_PLAN_OPTIONS,
@@ -744,10 +909,18 @@ async def test_plan_rejection_survives_the_resolution_projection(
 @pytest.mark.asyncio
 async def test_generic_progress_does_not_settle_an_answered_permission(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: InMemorySaver,
 ) -> None:
     """Uncorrelated progress must not settle any answered permission."""
-    thread_id, request_id, _dispatch_id = await _answered_rejection(
+    (
+        thread_id,
+        request_id,
+        _dispatch_id,
+        _receipt,
+        _checkpoint,
+    ) = await _answered_rejection(
         session_factory,
+        checkpointer,
         title="Plan rejection via progress",
         pause_reason_type="plan_approval_request",
         options=_PLAN_OPTIONS,
@@ -773,6 +946,7 @@ async def test_generic_progress_does_not_settle_an_answered_permission(
 @pytest.mark.asyncio
 async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: InMemorySaver,
 ) -> None:
     """A provider-defined rejecting id must settle as a denial, not an approval.
 
@@ -781,8 +955,15 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     the ACP agent does receive ``"reject"`` and the tool is refused, so recording
     it as applied corrupts the journal rather than authorising anything.
     """
-    resolved_thread, resolved_request, _resolved_dispatch = await _answered_rejection(
+    (
+        resolved_thread,
+        resolved_request,
+        _resolved_dispatch,
+        _resolved_receipt,
+        _resolved_checkpoint,
+    ) = await _answered_rejection(
         session_factory,
+        checkpointer,
         title="Kimi denial via resolution",
         pause_reason_type="bash",
         options=_KIMI_OPTIONS,
@@ -794,8 +975,15 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
         session_factory=session_factory,
     )
 
-    progress_thread, progress_request, progress_dispatch = await _answered_rejection(
+    (
+        progress_thread,
+        progress_request,
+        progress_dispatch,
+        progress_receipt,
+        progress_checkpoint,
+    ) = await _answered_rejection(
         session_factory,
+        checkpointer,
         title="Kimi denial via progress",
         pause_reason_type="bash",
         options=_KIMI_OPTIONS,
@@ -807,8 +995,11 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
             "type": "dispatch_applied",
             "dispatch_id": progress_dispatch,
             "action": "resume",
+            "graph_action_receipt": progress_receipt.model_dump(mode="json"),
+            "checkpoint_id": progress_checkpoint,
         },
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:

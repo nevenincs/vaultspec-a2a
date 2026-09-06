@@ -416,6 +416,7 @@ async def test_live_verdict_round_trip_parks_and_resumes(
 
     await db_engine.dispose()
 
+
 async def _seed_parked_gate(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
@@ -712,7 +713,12 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             # the column is nullable for the pre-dispatch row only.
             assert action.dispatch_id is not None
             receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
-            await relay_event(thread_id, receipt, session_factory=session_factory)
+            await relay_event(
+                thread_id,
+                receipt,
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+            )
 
             async with session_factory() as db:
                 gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
@@ -832,7 +838,12 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
             # the column is nullable for the pre-dispatch row only.
             assert action.dispatch_id is not None
             receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
-            await relay_event(thread_id, receipt, session_factory=session_factory)
+            await relay_event(
+                thread_id,
+                receipt,
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+            )
             async with session_factory() as db:
                 settled = await get_control_action_by_idempotency_key(
                     db,

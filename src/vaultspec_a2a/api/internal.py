@@ -167,6 +167,7 @@ async def _relay_single_event(
     *,
     agg: Any,
     session_factory: Any,
+    checkpointer: Any,
     drain_gate: Any = None,
     transport: str = "http",
 ) -> None:
@@ -193,6 +194,7 @@ async def _relay_single_event(
             thread_id,
             payload,
             session_factory=session_factory,
+            checkpointer=checkpointer,
             drain_gate=drain_gate,
         )
         return
@@ -216,6 +218,7 @@ async def _relay_single_event(
         payload,
         aggregator=agg,
         session_factory=session_factory,
+        checkpointer=checkpointer,
         drain_gate=drain_gate,
     )
 
@@ -242,11 +245,13 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
     # Read the seated gate rather than get-or-creating it: a gate that has never
     # been seated has admitted nothing, so there is nothing to release.
     drain_gate = getattr(websocket.app.state, "drain_gate", None)
+    checkpointer = getattr(websocket.app.state, "checkpointer", None)
     await _relay_single_event(
         thread_id,
         payload,
         agg=agg,
         session_factory=session_factory,
+        checkpointer=checkpointer,
         drain_gate=drain_gate,
         transport="ws",
     )
@@ -374,6 +379,7 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
         payload,
         agg=agg,
         session_factory=_app_session_factory(request.app),
+        checkpointer=getattr(request.app.state, "checkpointer", None),
         drain_gate=getattr(request.app.state, "drain_gate", None),
     )
     return {"status": "ok"}
@@ -421,6 +427,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
 
     session_factory = _app_session_factory(request.app)
     drain_gate = getattr(request.app.state, "drain_gate", None)
+    checkpointer = getattr(request.app.state, "checkpointer", None)
 
     for idx, evt in enumerate(events):
         thread_id = evt.get("thread_id", "")
@@ -440,6 +447,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
             payload,
             agg=agg,
             session_factory=session_factory,
+            checkpointer=checkpointer,
             drain_gate=drain_gate,
         )
 

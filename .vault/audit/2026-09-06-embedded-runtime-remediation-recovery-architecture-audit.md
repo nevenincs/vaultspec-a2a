@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:464dea65958a0cebd0f24bbf35ab37da1368a49251521e82c2cf2bc9fef624b1'
+body_hash: 'sha256:b6e3a64b56707bbb3e696ed0114cfb632d80dd6127e567a85310e3049db7f199'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -281,3 +281,10 @@ The cancellation consumer now treats durable cessation evidence as an authority-
 Formal review resolves the prior HIGH stale-overwrite and split-settlement findings for evidence-bearing cancellation. It retains HIGH S13 findings for every terminal without cancellation evidence: cancelled, completed and failed events still enter the generic unconditional lifecycle writer. Progress-event action settlement also still trusts a dispatch identity without complete receipt validation. A MEDIUM replay finding remains because duplicate exact cancellation evidence after the committed win is classified as stale rather than an idempotent already-applied observation; coordinate its final contract with S14/S83 durable delivery.
 
 Four focused cancellation cases passed naturally in 5.85 seconds. The complete event-handler and state-projection modules then passed 24 cases naturally in 3.22 seconds. Focused Ruff and Ty passed. S13 remains open.
+### application-receipt-consumer-authority | high | durable receipt and checkpoint validation resolved; retry open
+
+The private `dispatch_applied` consumer no longer settles from a bare dispatch id. It requires the closed application payload, exact current stored graph receipt, matching ingest/resume transport verb and the named durable loop checkpoint containing that incorporated receipt. After releasing the database snapshot for the checkpoint read, it locks and revalidates both current thread and exact action before committing any journal, permission, repair or lifecycle effect. The HTTP, batch and WebSocket relay paths supply the gateway-owned checkpointer explicitly. Missing and partial shapes are refused; no retired payload interpretation remains.
+
+Formal review resolves HIGH bare-identity settlement, invented incorporation and concurrent newer-writer overwrite. It retains MEDIUM durable retry ownership: checkpoint unavailability leaves the accepted action leased and unapplied for S14/S83 rather than inventing success. It also retains the HIGH generic terminal finding because completed, failed and evidence-free cancelled notifications still reach the unconditional lifecycle writer.
+
+Static Ruff and Ty pass all six changed files. Natural evidence includes 16 event-handler cases in 39.01 seconds, seven direct-receipt/recovery cases in 14.96 seconds, and the two exact checkpoint discriminators in 8.72 seconds. Verification instability is retained as MEDIUM: the API module was reaped after 60 seconds, its isolated first case after 30 seconds, a combined event/direct/recovery gate after 60 seconds, and a final repeat of the two discriminators after 30 seconds. Each produced no pytest session result and remains FAIL evidence rather than being counted from emitted progress.

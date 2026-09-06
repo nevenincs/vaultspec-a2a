@@ -95,7 +95,7 @@ async def _worker_runtime(
     checkpoint_path: Path,
     *,
     receipt_threads: tuple[str, ...] = (),
-) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge]]:
+) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge, AsyncSqliteSaver]]:
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
         await saver.setup()
         relayed_events: list[dict[str, object]] = []
@@ -126,7 +126,7 @@ async def _worker_runtime(
                 base_url="http://worker",
                 headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
             ) as client:
-                yield client, app, bridge
+                yield client, app, bridge, saver
             tasks.cancel_scope.cancel()
         await executor.shutdown()
         await bridge.close()
@@ -300,6 +300,7 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
         worker_client,
         _worker_app,
         _bridge,
+        _checkpointer,
     ):
         async with session_factory() as db:
             result = await respond_to_permission(
@@ -343,14 +344,12 @@ async def test_concurrent_identical_custom_key_messages_dispatch_once(
 ) -> None:
     thread_id = "identical-message-thread"
     custom_key = "client-message-retry"
-    await _running_thread(
-        session_factory, thread_id, team_preset="mock-success-single"
-    )
+    await _running_thread(session_factory, thread_id, team_preset="mock-success-single")
 
     async with _worker_runtime(
         tmp_path / "identical-message-checkpoints.db",
         receipt_threads=(thread_id,),
-    ) as (worker_client, worker_app, bridge):
+    ) as (worker_client, worker_app, bridge, checkpointer):
 
         async def send() -> MessageResult:
             async with session_factory() as db:
@@ -412,6 +411,7 @@ async def test_concurrent_identical_custom_key_messages_dispatch_once(
             thread_id,
             receipt,
             session_factory=session_factory,
+            checkpointer=checkpointer,
         )
         async with session_factory() as db:
             settled = await get_control_action_by_idempotency_key(
@@ -435,6 +435,7 @@ async def test_competing_same_key_messages_conflict_and_dispatch_once(
         worker_client,
         worker_app,
         _bridge,
+        _checkpointer,
     ):
 
         async def send(content: str) -> MessageResult:
@@ -474,6 +475,7 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
         worker_client,
         worker_app,
         _bridge,
+        _checkpointer,
     ):
 
         async def cancel(label: str) -> CancelResult:
@@ -526,6 +528,7 @@ async def test_message_definite_failure_releases_and_ambiguous_failure_retains(
         worker_client,
         worker_app,
         _bridge,
+        _checkpointer,
     ):
         breaker = _circuit_breaker()
         breaker.force_open()

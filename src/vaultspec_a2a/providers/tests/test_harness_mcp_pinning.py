@@ -27,7 +27,7 @@ import socket
 import sys
 import tempfile
 import tomllib
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -82,8 +82,8 @@ RAG_PIN_VARIABLE = "VAULTSPEC_RAG_ROOT"
 _LIVE_PROBE_TIMEOUT_SECONDS = 120.0
 _SERVICE_CONTROL_TIMEOUT_SECONDS = 120.0
 _SERVICE_STOP_ATTEMPT_SECONDS = 10.0
-_SERVICE_CLEANUP_TIMEOUT_SECONDS = 30.0
-_SERVICE_LATE_RECORD_RESERVE_SECONDS = 10.0
+_SERVICE_CLEANUP_RESERVE_SECONDS = 15.0
+_SERVICE_LATE_RECORD_RESERVE_SECONDS = 5.0
 _CONTROL_OUTPUT_LIMIT_BYTES = 64 * 1024
 
 
@@ -137,11 +137,13 @@ async def _run_rag_cli(
     env: dict[str, str],
     timeout_seconds: float = _SERVICE_CONTROL_TIMEOUT_SECONDS,
     command_prefix: tuple[str, ...] = (),
+    absolute_deadline: float | None = None,
 ) -> dict[str, object]:
     """Run one exact-version command inside one launch/reap/output deadline."""
     loop = asyncio.get_running_loop()
-    total_deadline = loop.time() + timeout_seconds
-    reap_reserve = min(5.0, max(1.0, timeout_seconds * 0.4))
+    total_deadline = absolute_deadline or loop.time() + timeout_seconds
+    available = max(0.0, total_deadline - loop.time())
+    reap_reserve = min(5.0, max(1.0, available * 0.4))
     operation_deadline = total_deadline - reap_reserve
     process: asyncio.subprocess.Process | None = None
     control_owner: psutil.Process | None = None
@@ -185,10 +187,14 @@ async def _run_rag_cli(
                 except psutil.NoSuchProcess:
                     owned_tree = []
                 for owned in reversed(owned_tree):
-                    if owned.is_running():
-                        owned.kill()
+                    try:
+                        if owned.is_running():
+                            owned.kill()
+                    except psutil.NoSuchProcess:
+                        pass
                 if process.returncode is None:
-                    process.kill()
+                    with suppress(ProcessLookupError):
+                        process.kill()
                 remaining = max(0.0, total_deadline - loop.time())
                 async with asyncio.timeout(remaining):
                     await process.wait()
@@ -223,14 +229,20 @@ async def _terminate_owned_process_tree(owner: psutil.Process) -> None:
         return
     descendants = owner.children(recursive=True)
     for process in [*reversed(descendants), owner]:
-        if process.is_running():
-            process.terminate()
+        try:
+            if process.is_running():
+                process.terminate()
+        except psutil.NoSuchProcess:
+            pass
     _, alive = await asyncio.to_thread(
         psutil.wait_procs, [*descendants, owner], timeout=5.0
     )
     for process in alive:
-        if process.is_running():
-            process.kill()
+        try:
+            if process.is_running():
+                process.kill()
+        except psutil.NoSuchProcess:
+            pass
     if alive:
         _, alive = await asyncio.to_thread(psutil.wait_procs, alive, timeout=5.0)
     assert not alive, "the exact owned private RAG process tree survived cleanup"
@@ -260,10 +272,11 @@ async def _private_endpoint_matches(owner: _OwnedRagService) -> bool:
     )
 
 
-async def _await_private_service_absent(owner: _OwnedRagService) -> None:
+async def _await_private_service_absent(
+    owner: _OwnedRagService, *, absolute_deadline: float
+) -> None:
     """Prove both the retained process identity and private listener are gone."""
-    deadline = asyncio.get_running_loop().time() + 10.0
-    while asyncio.get_running_loop().time() < deadline:
+    while asyncio.get_running_loop().time() < absolute_deadline:
         if not owner.process.is_running() and _loopback_port_is_closed(owner.port):
             return
         await asyncio.sleep(0.05)
@@ -277,9 +290,10 @@ async def _cleanup_private_rag_service(
     requirement: str,
     env: dict[str, str],
     receipt: _CleanupReceipt,
+    absolute_deadline: float,
 ) -> None:
     """Stop the private daemon, falling back only through its retained identity."""
-    async with asyncio.timeout(_SERVICE_CLEANUP_TIMEOUT_SECONDS):
+    async with asyncio.timeout_at(absolute_deadline):
         try:
             stopped = await _run_rag_cli(
                 requirement,
@@ -289,7 +303,11 @@ async def _cleanup_private_rag_service(
                 str(owner.port),
                 "--json",
                 env=env,
-                timeout_seconds=_SERVICE_STOP_ATTEMPT_SECONDS,
+                timeout_seconds=min(
+                    _SERVICE_STOP_ATTEMPT_SECONDS,
+                    max(0.0, absolute_deadline - asyncio.get_running_loop().time()),
+                ),
+                absolute_deadline=absolute_deadline,
             )
             if stopped.get("ok") is not True:
                 raise RuntimeError("the private RAG stop command refused cleanup")
@@ -308,7 +326,7 @@ async def _cleanup_private_rag_service(
             receipt.fallback_used = True
             await _terminate_owned_process_tree(owner.process)
 
-        await _await_private_service_absent(owner)
+        await _await_private_service_absent(owner, absolute_deadline=absolute_deadline)
         receipt.process_absent = not owner.process.is_running()
         receipt.port_absent = _loopback_port_is_closed(owner.port)
         owner.record_path.unlink(missing_ok=True)
@@ -406,10 +424,9 @@ async def _isolated_rag_service(
     service_record_path = status_dir / "service.json"
     owner: _OwnedRagService | None = None
     receipt = cleanup_receipt or _CleanupReceipt()
-    readiness_deadline = asyncio.get_running_loop().time() + start_timeout_seconds
-    control_timeout = max(
-        1.0, start_timeout_seconds - _SERVICE_LATE_RECORD_RESERVE_SECONDS
-    )
+    operation_deadline = asyncio.get_running_loop().time() + start_timeout_seconds
+    cleanup_start_deadline = operation_deadline - _SERVICE_CLEANUP_RESERVE_SECONDS
+    control_deadline = cleanup_start_deadline - _SERVICE_LATE_RECORD_RESERVE_SECONDS
     try:
         start_attempted = True
         start = await _run_rag_cli(
@@ -424,8 +441,8 @@ async def _isolated_rag_service(
             "--no-updates",
             "--json",
             env=env,
-            timeout_seconds=control_timeout,
             command_prefix=start_control_prefix,
+            absolute_deadline=control_deadline,
         )
         assert start.get("ok") is True, start
         start_data = start.get("data")
@@ -453,7 +470,7 @@ async def _isolated_rag_service(
             # window so that late-owned service is still reaped.
             while (
                 not service_record_path.exists()
-                and asyncio.get_running_loop().time() < readiness_deadline
+                and asyncio.get_running_loop().time() < cleanup_start_deadline
             ):
                 await asyncio.sleep(0.05)
         if owner is None and (started or service_record_path.exists()):
@@ -470,7 +487,11 @@ async def _isolated_rag_service(
         if owner is not None:
             cleanup = asyncio.create_task(
                 _cleanup_private_rag_service(
-                    owner=owner, requirement=requirement, env=env, receipt=receipt
+                    owner=owner,
+                    requirement=requirement,
+                    env=env,
+                    receipt=receipt,
+                    absolute_deadline=operation_deadline,
                 )
             )
             await _shield_private_cleanup(cleanup)
@@ -1007,7 +1028,7 @@ while True:
             pytest.fail("the deliberately short readiness budget was not enforced")
 
     elapsed = asyncio.get_running_loop().time() - started_at
-    assert elapsed < 90.0, "readiness and cleanup exceeded their combined bounds"
+    assert elapsed < 60.0, "readiness and cleanup exceeded their one total bound"
     assert publication_marker.read_text(encoding="utf-8") == "observed"
     assert receipt.late_service_record_observed
     assert receipt.process_absent

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d0bcd87487cd6b0132777fa6aae4c50749786133c0a388b93ac5e5bfbdfd930c'
+body_hash: 'sha256:246c8fd4ec3016f3c9ad2bc030c805321c466c1504bac608041c26c4dd98a769'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -924,7 +924,7 @@ checks remain required before commit. No product hook, compatibility path,
 deprecated/legacy behavior, fake transport, monkeypatch or warning suppression
 was added. S06 remains open for formal re-review.
 
-### w01-p02-s06-readiness-cleanup-deadline-split | medium | open
+### w01-p02-s06-readiness-cleanup-deadline-split | medium | resolved pending formal re-review
 
 Type: test readiness and owned-service lifecycle. Correction `1d3f99e9afcb2a8265882a9fdaee97bd004fb90e` makes the CLI control subprocess itself bounded, but `_isolated_rag_service` still composes two independent budgets. It sets `readiness_deadline = start + start_timeout_seconds` at `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py:409`, may spend that budget on launch/reap plus late-record discovery, and only afterward enters `_cleanup_private_rag_service`'s separate thirty-second timeout at line 282. The new proof exposes this split at line 1010 by accepting a sixty-second readiness request when the combined operation returns in anything under ninety seconds. This does not satisfy S06's required one total launch, termination, output-drain, late-record and owned-cleanup deadline.
 
@@ -935,3 +935,32 @@ S06 remains review-blocked. Establish one absolute deadline before control launc
 Type: formal correction review disposition. The four-path correction resolves the earlier unbounded pipe wait: stdout/stderr use owned files, decoded reads cap each stream at 64 KiB, and the CLI wrapper plus exact observed descendants are killed and reaped inside the control deadline without `communicate()` or pipe-EOF waits. Its real wrapper launches the exact locked RAG service, observes the private record before holding handles, times out non-vacuously, discovers the detached service and proves process/listener absence. Independent review reran that case (`1 passed` in 51.58 seconds). The recorded module result is 35 passes across all three live cases. Raw credential material is absent from the current tree, only one-way comparisons remain, operator-owned rotation evidence is non-secret, and the prior cancellation/failed-stop cleanup remains intact. Ruff format/check, Ty, diff and all 19 remediation Core checks pass. ER20-only scope and the separate S07/S49 cold-catalog/Uvicorn ownership remain intact; no legacy/deprecated behavior was added.
 
 The remaining split deadline is a MEDIUM defect in S06's explicit bounded-readiness success shape. S06 does not pass formal review and remains open for correction and re-review.
+
+### w01-p02-s06-single-absolute-deadline | medium | corrected pending formal re-review
+
+Type: test readiness and owned-service lifecycle. Formal review `1322d4ef`
+confirmed the previous correction still added a relative cleanup budget after
+readiness. The context now mints one absolute deadline before control launch.
+It reserves five seconds for late record discovery and fifteen seconds for
+owned cleanup before giving time to readiness. The same absolute timestamp is
+passed through the bounded CLI stop, exact process-tree fallback and final
+process/listener absence poll; no phase resets or extends it. The real degraded
+wrapper test requests sixty seconds and asserts the complete launch, control
+timeout/reap, late-record binding and owned cleanup return in less than sixty.
+It passed independently in 39.69 seconds and at 35.52 seconds inside the final
+module run. The full module passed 35 tests in 161.51 seconds; the real pin case
+took 80.75 seconds and cancellation/failed-stop took 43.58 seconds.
+
+### w01-p02-s06-terminal-pid-signal-race | medium | resolved
+
+Type: test subprocess lifecycle and cleanup race. The first combined run of the
+single-deadline correction surfaced an exact child exiting between
+`psutil.Process.is_running()` and `kill()`, which raised `NoSuchProcess` and
+failed the timeout proof despite the process already being terminal. The
+correction retains the exact captured process identities and accepts only
+`psutil.NoSuchProcess` or the asyncio process handle's `ProcessLookupError` as a
+successful terminal signal race. Every other signal/reap error remains visible.
+The focused and complete reruns above pass with private process and port absence
+and unchanged shared digest. No new product, deprecated/legacy, compatibility,
+mock, monkeypatch, fake transport or warning-suppression path was added. S06
+remains open for formal re-review.

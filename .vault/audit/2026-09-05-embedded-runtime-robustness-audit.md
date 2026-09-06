@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:fbf54e7d1129d1b197b22f627d58a7f51acdc3b4abeeaf01264ff553b194d669'
+body_hash: 'sha256:b92064fc9e18b422af40b7d256a10c3803bcb43b1df2c766d7e9011686f19b68'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -668,3 +668,14 @@ control wrapper held inherited handles; the timeout returned in 49.77 seconds
 inside the asserted combined bound, and the complete 35-test module passed in
 143.04 seconds. Private process and listener were absent; shared digest remained
 `changed=false`. Formal S06 re-review remains required.
+
+
+**S06 one-deadline correction:** review `1322d4ef` found separate readiness and
+cleanup envelopes. The current test environment creates one absolute deadline
+before launch, reserves late discovery and cleanup within it, and passes the
+same timestamp through stop, exact fallback reap and absence proof. The real
+degraded case requests sixty seconds and returns in 35.52 seconds in the final
+35-pass module. A MEDIUM child-exit signal race surfaced during the first broad
+rerun and was resolved by accepting only exact terminal
+`NoSuchProcess`/`ProcessLookupError` outcomes. Shared digest remained
+`changed=false`; formal S06 re-review remains required.

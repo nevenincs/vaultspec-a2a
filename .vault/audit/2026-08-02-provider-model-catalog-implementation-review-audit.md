@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:1939a0717f9fbb8af59ed8b2b96afa4ca56a3da4c20cf726793b41889e7ed5ff'
+body_hash: 'sha256:a4ca8ae01d62de8ca2ded42a96671c1bcff5de862378132e9073294b70c8cc2e'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -1008,3 +1008,13 @@ private-service cleanup. A real exact-version service publishes its owned record
 before a filesystem control wrapper holds the handles; the timeout returns and
 proves process/port absence without changing the shared-service digest. The
 final pinning module passes 35 tests. Remediation S06 remains open for review.
+
+### w01-p02-s06-single-deadline-follow-up | medium | resolved pending formal review
+
+Type: test-environment resource lifecycle. Review `1322d4ef` found readiness
+and cleanup budgets were additive. S06 now uses one absolute deadline from
+launch through late-record discovery and private process/listener absence. Its
+real degraded sixty-second proof returns in 35.52 seconds in the passing
+35-test module. An exact child-exit signal race surfaced and is resolved by
+accepting only terminal `NoSuchProcess`/`ProcessLookupError`; all other errors
+remain visible. Shared-service digest remained unchanged. S06 review is open.

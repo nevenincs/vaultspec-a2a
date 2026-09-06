@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:5545ea8e47ba1bbd7ce3f4e46ace85bca14857e6ebe0198159a1664ab36f198c'
+body_hash: 'sha256:bec93fd47454ab7881a0c33c0c52ea8e198af7653c5a1528d8edf314eca74e52'
 step_id: 'S49'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -49,3 +49,17 @@ S47's prerequisite cooperative server owner is isolated in implementation `24dab
 The instrumented production restart check crossed real catalog discovery but timed out with three current-schema runs still reconciling and the demand run still running. It never initiated shutdown. The separate HIGH recovery hang has the currently open correction owner `2026-08-05-served-capability-contract-plan W04.P08.S56`; this plan's open W02.P03.S11 owns verification and atomic-election integration. Exact last state and zero-process-residue evidence are retained in the audits and research.
 
 Formal review `dcac3b27` failed S49 on a late child created inside the cooperative request after the original identity snapshot. The correction makes containment mandatory for every gateway spawn, seats restored uncontained roots before cooperation, skips cooperation when seating cannot be established, and runs forced cleanup plus handle release in a cancellation-safe `finally`. Real initially uncontained/then-seated and precontained late-child variants both exit root and child within the original four-second deadline without a host-wide scan or reused-pid risk. S49 stays open for rereview.
+
+## Assignment-before-authority correction
+
+Formal rereview `91c882fe` failed the prior correction because Windows Job assignment could raise before containment recorded authority. `_reap_unready_worker` then treated the empty containment as success and left the exact retained root live. Cleanup now uses containment only when assignment succeeded; otherwise it retains the live `Popen` root and descendants as creation-time-guarded psutil identities, terminates only that scoped tree, waits the original handle, releases containment and re-raises the original assignment error. Comments now describe mandatory all-profile containment and the narrow restored/unassigned fallback.
+
+The real Windows discriminator starts a root plus two 300-second descendants, closes Job assignment, and drives the production pre-admission readiness seam. It propagated `ProcessContainmentError` in 0.59 seconds and left no root or descendant. An initial invalid proof retained the uv venv redirector and exceeded 60 seconds; the owned test tree was interrupted and reaped with zero survivors, and the fixture was corrected to launch the base interpreter. That invalid run is classified MEDIUM/resolved measurement-integrity and supports no runtime claim.
+
+- `verify:` `.venv/Scripts/python.exe -m pytest src/vaultspec_a2a/control/tests/test_unready_worker_reap.py::test_failed_containment_assignment_reaps_exact_tree_and_propagates -q -s` -> `pass` (1 passed in 1.05s; call 0.59s)
+- `verify:` `.venv/Scripts/python.exe -m pytest src/vaultspec_a2a/control/tests/test_unready_worker_reap.py src/vaultspec_a2a/utils/tests/test_process_containment.py -q` -> `pass` (24 passed in 12.09s)
+- `verify:` `.venv/Scripts/python.exe -m pytest <complete S49 focused modules> -q` -> `pass` (68 passed in 50.17s)
+- `verify:` `.venv/Scripts/python.exe -m ruff check <correction paths>` -> `pass`
+- `verify:` `.venv/Scripts/python.exe -m ty check <correction production paths>` -> `pass`
+
+S49 stays open for independent rereview. S48 remains untouched, S50 retains frozen-worker execution proof, durable terminal recovery remains under W02.P03.S14, and the post-catalog polling hang remains HIGH under served-capability W04.P08.S56 with W02.P03.S11 integration ownership.

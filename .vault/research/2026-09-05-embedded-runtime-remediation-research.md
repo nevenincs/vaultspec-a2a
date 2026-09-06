@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:64b8fdb44643ba6d0b42d4eb5aab0d692e1c182b9b07b63562c0d5e8fbe1ae7b'
+body_hash: 'sha256:4d362906bc09892e9dc325b161ede2ebfaf53040e1589753f9202e5eab5d2395'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -138,3 +138,9 @@ The cooperative path and every forced cleanup now sit inside one cancellation-sa
 The complete post-correction S49 focused gate passed 67 tests in 56.64 seconds; Ruff and Ty passed on every changed Python path.
 
 Windows seating uses the exact retained Popen OS handle rather than reopening a numeric pid, so exit and pid reuse cannot redirect containment to an unrelated process. POSIX retains the isolated process-group authority established at spawn. The late-child variants plus containment utility coverage pass 15 tests in 27.60 seconds.
+
+## W04.P10.S49 containment-assignment failure correction
+
+Formal rereview `91c882fe` found that a Windows Job assignment failure occurred before `ProcessContainment` recorded authority. The unready-worker cleanup then trusted the empty containment, waited 5.0086 seconds on the still-live root and raised `TimeoutExpired`, leaving that root alive. Cleanup now uses containment only after successful assignment. Before assignment, it derives a psutil identity from the retained live `Popen`, caches the creation-time guard, suspends that exact root while retaining its scoped descendants, terminates those identities and waits the original handle. It performs no host-wide scan and never reopens or signals a bare numeric pid after root exit. The original `ProcessContainmentError` propagates after cleanup.
+
+A real Windows discriminator closes the Job assignment capability, starts an actual worker root with two 300-second descendants, and drives the production pre-admission readiness seam. The corrected call completed in 0.59 seconds, propagated the assignment error and left root and descendants absent. The first proof attempt instead retained the uv virtual-environment redirector as its nominal root and exceeded 60 seconds. The owned pytest tree was interrupted and reaped with zero survivors; the fixture now launches `sys._base_executable`, matching the production identity being measured. This MEDIUM measurement-harness hang is resolved and retained as invalid-run evidence. The focused containment gate passes 24 tests in 12.09 seconds and the complete S49 gate passes 68 tests in 50.17 seconds; Ruff and Ty pass. S49 remains open for independent rereview.

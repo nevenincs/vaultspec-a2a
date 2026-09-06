@@ -1063,8 +1063,9 @@ class ProcessContainment:
     Lifecycle: :meth:`create` builds the containment, :meth:`spawn_kwargs` feeds
     the spawn call, :meth:`assign` binds the just-spawned pid before it does
     descendant work, and :meth:`terminate` reaps the tree with bounded
-    escalation. An unassigned containment falls back to a per-pid tree kill so a
-    spawn is never left unreapable, and the fallback is logged.
+    escalation. An unassigned containment owns no process identity; its caller
+    must retain and reap the spawned process rather than treating this object as
+    authority for that process.
     """
 
     def __init__(self) -> None:
@@ -1136,8 +1137,8 @@ class ProcessContainment:
 
         POSIX records the new process group (its id equals the session leader's
         pid). Windows assigns the process to the job. A Windows assignment failure
-        raises :class:`ProcessContainmentError`; the caller may downgrade to the
-        per-pid fallback rather than fail the spawn.
+        raises :class:`ProcessContainmentError`; an ownership caller must reap the
+        exact retained process and fail the spawn.
         """
         if sys.platform != "win32":
             if pid <= 1 or pid == os.getpid():
@@ -1179,7 +1180,8 @@ class ProcessContainment:
         # the real command escapes the job on Windows (which has no true ``execv``),
         # and one that spawns it as a child would need a full stdio proxy for the
         # ACP provider. KILL_ON_JOB_CLOSE still reaps everything that did join the
-        # job, and the per-pid fallback backstops a wholly failed assignment.
+        # job. A failed assignment leaves cleanup to the caller's exact retained
+        # process handle.
         kernel32 = _win_kernel32()
         kernel32.OpenProcess.restype = wintypes.HANDLE
         kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
@@ -1243,9 +1245,9 @@ class ProcessContainment:
 
         POSIX escalates ``killpg`` SIGTERM -> (wait ``term_timeout``) -> SIGKILL
         (wait ``kill_timeout``) over the owned process group. Windows terminates
-        the job. An unassigned containment (assignment failed or never ran) falls
-        back to the per-pid tree kill so the root is never left unreapable, logging
-        the downgrade.
+        the job. An unassigned containment is empty and cannot establish that an
+        independently retained root was reaped; ownership callers must handle
+        that root through their retained process identity.
 
         A failed POSIX reap retains its group for a later retry. Windows always
         closes the kill-on-close handle as the last termination backstop; if job

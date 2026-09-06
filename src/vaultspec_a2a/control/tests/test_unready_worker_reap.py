@@ -34,13 +34,14 @@ if TYPE_CHECKING:
 
 from ...control.worker_management import (
     LazyWorkerSpawner,
+    _await_worker_ready,
     _reap_unready_worker,
     _shutdown_worker_process,
 )
 from ...lifecycle.discovery import is_pid_alive
 from ...lifecycle.shutdown import ShutdownDeadline
 from ...utils import kill_pid_tree_async
-from ...utils.process import ProcessContainment
+from ...utils.process import ProcessContainment, ProcessContainmentError
 
 # A stand-in for the half-started worker: spawns real grandchildren, prints their
 # pids so the test can watch them independently of the parent, then sleeps well
@@ -106,11 +107,15 @@ def _spawn_tree(
     containment: ProcessContainment | None,
 ) -> tuple[subprocess.Popen[bytes], list[int]]:
     """Spawn the stand-in worker and return it with its real grandchild pids."""
+    # A uv-managed Windows venv executable is a redirector process.  Use the
+    # retained base interpreter so the returned Popen is the actual worker root
+    # whose identity and descendants production cleanup must own.
+    interpreter = getattr(sys, "_base_executable", sys.executable)
     new_session = containment is not None and bool(
         containment.spawn_kwargs().get("start_new_session")
     )
     process = subprocess.Popen(
-        [sys.executable, "-c", _WORKER_WITH_CHILDREN],
+        [interpreter, "-c", _WORKER_WITH_CHILDREN],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         start_new_session=new_session,
@@ -142,10 +147,10 @@ async def _force_cleanup(pids: list[int]) -> None:
 
 @pytest.mark.asyncio
 async def test_unready_worker_tree_is_reaped_without_a_containment() -> None:
-    """The Compose / development band reaps the whole tree, not just the root.
+    """The unassigned fallback reaps the whole tree, not just the root.
 
-    This band has no OS containment, which is exactly where a bare
-    ``Popen.terminate`` used to leave both grandchildren running.
+    This direct failure seam has no OS containment, which is exactly where a
+    bare ``Popen.terminate`` used to leave both grandchildren running.
     """
     process, child_pids = _spawn_tree(None)
     try:
@@ -154,6 +159,35 @@ async def test_unready_worker_tree_is_reaped_without_a_containment() -> None:
         assert process.poll() is not None, "the worker root survived the reap"
         survivors = _await_gone(child_pids)
         assert not survivors, f"worker descendants survived the reap: {survivors}"
+    finally:
+        await _force_cleanup([process.pid, *child_pids])
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job assignment proof")
+@pytest.mark.asyncio
+async def test_failed_containment_assignment_reaps_exact_tree_and_propagates(
+    tmp_path: Path,
+) -> None:
+    """A real closed Job authority cannot admit or strand its live process."""
+    process, child_pids = _spawn_tree(None)
+    containment = ProcessContainment.create()
+    containment.close()
+    started = asyncio.get_running_loop().time()
+    try:
+        with pytest.raises(ProcessContainmentError):
+            await _await_worker_ready(
+                process,
+                containment,
+                worker_url="http://127.0.0.1:9",
+                worker_port=9,
+                generation=1,
+                worker_command=["assignment-failure-worker"],
+                stderr_log_path=tmp_path / "assignment-failure.log",
+            )
+        elapsed = asyncio.get_running_loop().time() - started
+        assert elapsed < 15.2, f"assignment-failure reap took {elapsed:.4f}s"
+        assert process.poll() is not None, "failed assignment left root live"
+        assert not _await_gone(child_pids), "failed assignment left descendants live"
     finally:
         await _force_cleanup([process.pid, *child_pids])
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:a5813bb402464ed68573692656014403844e10679a0310e368efbc8a4907107f'
+body_hash: 'sha256:e52511afb5a9b1af84fca5a3d5e070da84f2c144af0b7a9c4ba5cdec419860d1'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1174,3 +1174,13 @@ The new real discriminator creates no child before shutdown, spawns its only 300
 The complete post-correction S49 focused gate passed 67 tests in 56.64 seconds; Ruff and Ty passed on every changed Python path.
 
 Windows seating uses the exact retained Popen OS handle rather than reopening a numeric pid, so exit and pid reuse cannot redirect containment to an unrelated process. POSIX retains the isolated process-group authority established at spawn. The late-child variants plus containment utility coverage pass 15 tests in 27.60 seconds.
+
+### s49-failed-assignment-exact-popen-reap | high | corrected-pending-rereview
+
+Type: lifecycle correctness, process containment and admission safety. Formal FAIL `91c882fe` proved that a Windows Job assignment failure left `ProcessContainment` empty, so cleanup reported false success, waited 5.0086 seconds and raised `TimeoutExpired` while the exact root remained live. Cleanup now treats only successfully assigned containment as authority. Otherwise it retains the live `Popen` root as a psutil creation-time identity, suspends it while collecting scoped descendants, terminates those exact identities, waits the retained process handle and releases containment before re-raising the original assignment error. It does not scan the host, reopen a bare pid after exit or admit the failed worker.
+
+The real Windows proof uses a closed Job assignment capability and an actual root with two 300-second descendants. The production `_await_worker_ready` seam propagates `ProcessContainmentError` in 0.59 seconds with root and descendants absent. The 24-test containment gate passes in 12.09 seconds and the complete S49 gate passes 68 tests in 50.17 seconds; Ruff and Ty pass. The HIGH finding is corrected pending independent rereview. S49 and ER15/ER16 remain open.
+
+### s49-assignment-proof-uv-redirector-hang | medium | resolved measurement-integrity
+
+Type: verification harness and developer-time blocker. The first new assignment-failure proof used the uv Windows virtual-environment redirector as the retained worker `Popen`, so it measured the wrong process identity and exceeded 60 seconds. The owned pytest tree was interrupted after its bound, its workspace-scoped descendants were reaped and an exact scan found no survivor. The fixture now starts `sys._base_executable`, consistent with the existing real-process probes and the production root-identity contract. The corrected proof completes in 0.59 seconds. The invalid run supports no runtime pass claim.

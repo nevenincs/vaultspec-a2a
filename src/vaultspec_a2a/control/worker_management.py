@@ -39,7 +39,6 @@ from ..lifecycle.pairing import (
     classify_worker_pairing,
     eviction_is_authorized,
 )
-from ..utils import kill_pid_tree_async
 from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..utils.runtime_exec import module_command
@@ -606,11 +605,10 @@ async def _spawn_worker(
     became ready is reaped tree-and-all before returning, so a failed spawn
     never leaves an orphan holding the worker port.
 
-    When *containment* is supplied (the armed desktop gateway owning its worker),
-    the worker is spawned inside it - a new POSIX session/process group or a
-    Windows Job Object - and assigned before it does any descendant work, so the
-    whole worker tree is reaped as one on shutdown. A Windows assignment failure
-    is logged and downgraded to the per-pid fallback rather than failing the spawn.
+    Gateway-owned workers receive *containment*: a new POSIX session/process
+    group or Windows Job Object assigned before descendant work can begin. A
+    failed assignment reaps the exact retained process tree and fails the spawn;
+    the worker is never admitted without that authority.
 
     Ownership contract - the caller allocates *containment* and the caller
     releases it. This function never releases it on the caller's behalf, on any
@@ -970,21 +968,17 @@ async def _reap_unready_worker(
 ) -> None:
     """Reap a worker that spawned but never became ready, tree and all.
 
-    Both bands must escalate and must fell the whole tree, because the caller
+    Every failure path must escalate and fell the whole tree, because the caller
     returns ``None`` afterwards - it reports the spawn as failed, and anything
     still alive is by definition an orphan holding the worker port. The next
     spawn then meets its own leftover on that port and refuses it as an
     unidentified occupant, so an incomplete reap here wedges the band rather
     than merely leaking a process.
 
-    Armed desktop: the OS containment fells the tree at once (Job Object or
-    process group), and is itself safe when assignment never completed - it
-    downgrades to the same per-pid tree kill used below.
-
-    Compose / development: no containment exists, so the shared per-pid tree
-    kill does the escalation. A bare ``Popen.terminate`` is not enough - it
-    signals only the immediate process, never escalates past a SIGTERM the
-    worker may be ignoring, and leaves any descendant behind.
+    An assigned Job Object or process group is authoritative for the tree. If
+    assignment failed before authority was recorded, cleanup suspends the exact
+    retained ``Popen`` identity, retains its descendants with creation guards,
+    and terminates only those identities before waiting the root handle.
 
     Either way the handle is waited afterwards so no zombie is left on POSIX.
     """
@@ -999,20 +993,85 @@ async def _stop_worker_tree(
     kill_timeout: float = 5.0,
 ) -> None:
     try:
-        if containment is not None:
+        if containment is not None and containment.assigned:
             reaped = await containment.terminate(
                 term_timeout=term_timeout, kill_timeout=kill_timeout
             )
         else:
-            reaped = await kill_pid_tree_async(
-                process.pid, term_timeout=term_timeout, kill_timeout=kill_timeout
+            reaped = await _stop_exact_popen_tree(
+                process,
+                term_timeout=term_timeout,
+                kill_timeout=kill_timeout,
             )
         if not reaped:
             raise ProcessContainmentError(
                 f"Worker process tree {process.pid} did not terminate"
             )
     finally:
-        await asyncio.to_thread(process.wait, max(kill_timeout, 0.1))
+        await asyncio.to_thread(process.wait, 0.1)
+
+
+def _retained_process_owner(
+    process: subprocess.Popen[bytes],
+) -> psutil.Process | None:
+    """Return a reuse-guarded psutil identity for the exact live ``Popen``."""
+    if process.poll() is not None:
+        return None
+    try:
+        owner = psutil.Process(process.pid)
+        owner.create_time()
+    except psutil.NoSuchProcess:
+        return None
+    # The first poll proved our retained handle live before lookup; the second
+    # rejects an exit/reuse race during lookup. ``owner`` has cached creation
+    # identity, so every later signal refuses a reused numeric pid.
+    if process.poll() is not None:
+        return None
+    return owner
+
+
+async def _stop_exact_popen_tree(
+    process: subprocess.Popen[bytes],
+    *,
+    term_timeout: float,
+    kill_timeout: float,
+) -> bool:
+    """Stop the exact retained root and its observed tree without reopening a pid."""
+    owner = _retained_process_owner(process)
+    if owner is None:
+        return process.poll() is not None
+    retained: list[psutil.Process] = [owner]
+    try:
+        owner.suspend()
+        for child in owner.children(recursive=True):
+            try:
+                if child.is_running():
+                    child.suspend()
+                    retained.append(child)
+            except psutil.NoSuchProcess:
+                pass
+        for target in reversed(retained):
+            try:
+                if target.is_running():
+                    target.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        _, alive = await asyncio.to_thread(
+            psutil.wait_procs, retained, timeout=term_timeout
+        )
+        for target in alive:
+            try:
+                if target.is_running():
+                    target.kill()
+            except psutil.NoSuchProcess:
+                pass
+        if alive:
+            _, alive = await asyncio.to_thread(
+                psutil.wait_procs, alive, timeout=kill_timeout
+            )
+        return not alive
+    except (psutil.AccessDenied, psutil.NoSuchProcess):
+        return process.poll() is not None
 
 
 async def _shutdown_worker_process(
@@ -1023,11 +1082,10 @@ async def _shutdown_worker_process(
 ) -> None:
     """Shut down the worker child process and its whole tree.
 
-    When *containment* is present (the armed desktop worker), the tree is reaped
-    through its OS containment - a POSIX process-group ``killpg`` escalation or a
-    Windows Job Object termination - never a parent-pid tree walk. Without a
-    containment (Compose / development band), the shared per-pid tree kill
-    (Windows ``taskkill /T /F``, POSIX SIGTERM->SIGKILL) is used unchanged.
+    Assigned containment reaps through a POSIX process group or Windows Job
+    Object. Missing or unassigned containment uses exact retained process
+    identities, including creation-time reuse guards, and never treats an empty
+    containment as authority for a live root.
     """
     if process.poll() is not None and containment is None:
         return
@@ -1110,9 +1168,9 @@ class LazyWorkerSpawner:
         self._worker_port = worker_port
         self._auto_spawn = auto_spawn
         self._process: subprocess.Popen[bytes] | None = None
-        # OS containment for the worker tree, created only for the armed desktop
-        # gateway that exclusively owns its worker. Compose and development-band
-        # spawns leave it None and keep the unchanged per-pid shutdown path.
+        # Every worker spawned by this gateway carries OS containment. ``None``
+        # means no owned process or an explicitly restored fallback handle that
+        # shutdown must seat before offering a cooperative interval.
         self._containment: ProcessContainment | None = None
         self._stderr_log_path = (
             _worker_stderr_log_path(worker_port) if auto_spawn else None
@@ -1197,11 +1255,9 @@ class LazyWorkerSpawner:
                 "First dispatch received — starting worker at %s...",
                 self._worker_url,
             )
-            # The armed desktop gateway owns its worker exclusively, so it spawns
-            # the worker inside an OS containment and reaps the whole tree on
-            # shutdown. Other profiles keep the unchanged per-pid path. The spawn
-            # seam hands back a containment only alongside the live tree it
-            # contains, so these two fields are never separately true.
+            # Every gateway-spawned worker is seated inside OS containment and its
+            # whole tree is reaped on shutdown. The spawn seam hands containment
+            # back only alongside the live tree it contains.
             generation = self.next_generation()
             self._process, self._containment = await _spawn_worker_owned(
                 self._worker_url,
@@ -1668,7 +1724,7 @@ class WorkerWatchdog:
             if old_proc is not None:
                 await _shutdown_worker_process(old_proc, self._spawner.containment)
 
-            # Spawn a new worker inside a fresh containment (armed desktop only),
+            # Spawn a new worker inside fresh containment,
             # and hand it to the spawner so shutdown reaps the replacement's tree.
             # A restart that fails hands back no containment either, so a retry
             # loop cannot accumulate one handle per attempt.

@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -28,10 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
 from ...api.tests.clarification_harness import new_state_graph
-from ...control.action_lease import claim_control_action
 from ...control.cancel_service import CancelResult, cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.direct_control_recovery import redrive_direct_control_actions
 from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
 from ...control.message_service import MessageResult, send_followup_message
@@ -46,7 +43,6 @@ from ...database import (
     get_permission_request,
     get_thread,
     record_permission_request,
-    record_permission_response_submission,
 )
 from ...database.models import Base
 from ...streaming.aggregator import EventAggregator
@@ -424,52 +420,6 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
 
 
 @pytest.mark.asyncio
-async def test_fresh_cancel_lease_without_thread_authority_is_not_reported_accepted(
-    tmp_path: Path,
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    thread_id = "cancel-lease-before-election"
-    await _running_thread(session_factory, thread_id)
-
-    async with session_factory() as interrupted:
-        claim = await claim_control_action(
-            interrupted,
-            thread_id=thread_id,
-            action_type=ControlActionType.CANCEL,
-            idempotency_key=default_cancel_key(thread_id),
-            payload={"cancel": True},
-        )
-        assert claim.acquired is True
-
-    async with (
-        _worker_runtime(tmp_path / "cancel-lease-before-election.db") as runtime,
-        session_factory() as retry,
-    ):
-        worker_client, worker_app, _bridge = runtime
-        result = await cancel_thread(
-            retry,
-            thread_id=thread_id,
-            idempotency_key="retry-after-interrupted-owner",
-            circuit_breaker=_circuit_breaker(),
-            worker_spawner=_spawner(),
-            worker_client=worker_client,
-            recursion_limit=25,
-        )
-
-    assert result.cancelled is False
-    assert result.accepted is False
-    assert result.thread_status == ThreadStatus.RUNNING.value
-    assert result.failure_type is FailureType.CONFLICT
-    assert len(worker_app.state.dispatch_ids) == 0
-    async with session_factory() as verify:
-        thread = await get_thread(verify, thread_id)
-    assert thread is not None
-    assert thread.status == ThreadStatus.RUNNING.value
-    assert thread.run_revision == 0
-    assert thread.writer_action_type == ControlActionType.INGEST.value
-
-
-@pytest.mark.asyncio
 async def test_message_definite_failure_releases_and_ambiguous_failure_retains(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
@@ -666,109 +616,3 @@ async def test_terminal_state_before_cancel_prevents_dispatch_reservation(
             idempotency_key=default_cancel_key(thread_id),
         )
     assert action is None
-
-
-@pytest.mark.asyncio
-async def test_restart_redrives_expired_permission_message_and_cancel_actions(
-    tmp_path: Path,
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    """A new gateway reconstructs all three direct control dispatches.
-
-    Each thread names a real active project, as a run created through the API
-    always does: a redriven follow-up or permission resume re-enters graph
-    execution and is refused without one. The subject here is lease expiry and
-    reconstruction; the project gate itself is proved in
-    ``test_direct_control_recovery.py``.
-    """
-    expired_now = datetime.now(UTC) - timedelta(minutes=5)
-    async with session_factory() as db:
-        for thread_id, status in (
-            ("recover-message", ThreadStatus.RUNNING),
-            ("recover-cancel", ThreadStatus.CANCELLING),
-            ("recover-permission", ThreadStatus.INPUT_REQUIRED),
-        ):
-            await create_thread(
-                db,
-                write_authority=make_test_write_authority(),
-                thread_id=thread_id,
-                status=status,
-                metadata=_active_project_metadata(),
-            )
-        request_id = "recover-permission:permission-1"
-        await record_permission_request(
-            db,
-            request_id=request_id,
-            thread_id="recover-permission",
-            pause_reason_type="bash",
-            description="Allow?",
-            allowed_options=[
-                {
-                    "option_id": "allow_once",
-                    "name": "Allow once",
-                    "kind": "allow_once",
-                }
-            ],
-            tool_call="bash",
-        )
-        await record_permission_response_submission(
-            db,
-            request_id=request_id,
-            option_id="allow_once",
-            idempotency_key="permission-client-key",
-        )
-        claims = [
-            await claim_control_action(
-                db,
-                thread_id="recover-message",
-                action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-                idempotency_key="recover-message-key",
-                payload={"content": "continue", "agent_id": "supervisor"},
-                now=expired_now,
-                lease_ttl=timedelta(seconds=1),
-            ),
-            await claim_control_action(
-                db,
-                thread_id="recover-cancel",
-                action_type=ControlActionType.CANCEL,
-                idempotency_key=default_cancel_key("recover-cancel"),
-                payload={"cancel": True},
-                now=expired_now,
-                lease_ttl=timedelta(seconds=1),
-            ),
-            await claim_control_action(
-                db,
-                thread_id="recover-permission",
-                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-                request_id=request_id,
-                idempotency_key=f"permission-response:{request_id}",
-                payload={"option_id": "allow_once", "notes": None},
-                now=expired_now,
-                lease_ttl=timedelta(seconds=1),
-            ),
-        ]
-        await db.commit()
-
-    async with _worker_runtime(tmp_path / "direct-recovery-checkpoints.db") as (
-        worker_client,
-        worker_app,
-        _bridge,
-    ):
-        summary = await redrive_direct_control_actions(
-            session_factory,
-            worker_client=worker_client,
-            circuit_breaker=_circuit_breaker(),
-            worker_spawner=_spawner(),
-            recursion_limit=25,
-            trace_headers=None,
-        )
-        assert summary.examined == 3
-        assert summary.dispatched == 3
-        assert summary.deferred == 0
-        assert summary.conflicted == 0
-        admitted_ids = {
-            dispatch_id
-            for dispatch_id in (claim.dispatch_id for claim in claims)
-            if dispatch_id in worker_app.state.dispatch_ids
-        }
-        assert admitted_ids == {claim.dispatch_id for claim in claims}

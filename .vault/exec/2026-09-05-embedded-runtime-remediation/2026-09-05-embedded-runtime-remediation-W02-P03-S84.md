@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:49a4619acc205c43582341a5d1a31263c48614f52923bf44da00ee3ce2d63fc5'
+body_hash: 'sha256:f35b81af318e67a804650aa2fce282b95824ddedf275208661c73d35f910775f'
 step_id: 'S84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -71,5 +71,23 @@ Open review queue:
 - HIGH: current accepted-input tests must replace proof of expired verdict redrive and fresh-lease duplicate suppression; deletion does not qualify those behaviors.
 - HIGH: `test_verdict_subscriber.py`, `test_verdict_subscriber_live.py`, and `test_verdict_loop_live.py` retain pre-current four-member graph cache keys and must bind the exact frozen graph digest.
 - HIGH: `test_direct_control_leases.py` and `test_direct_control_recovery.py` are the last two collection blockers importing the retired claim API.
+
+S84 remains open.
+## Direct-control lease contract retirement
+
+- `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`.
+- Deleted the visible fresh-cancel-lease-without-authority scenario: current acceptance commits lease and thread authority atomically, so another session cannot observe that intermediate state.
+- Deleted the restart test that persisted three partial legacy payloads; complete accepted-input recovery remains covered by `test_accepted_input_recovery.py`, while action-specific recovery coverage remains open in `test_direct_control_recovery.py`.
+- Removed the retired implicit claim and direct-recovery imports.
+- `verify:` isolated direct-control lease collection -> eight tests collected in 20.16 seconds, natural exit 0.
+- `verify:` focused Ruff initially found one now-removed unused import.
+- `verify:` focused Ty -> fail on the file's existing four-member graph cache key, which lacks the frozen graph-definition digest.
+- `verify:` one parallel focused suite and one parallel full collection each reached the 90-second owner deadline without a pytest session result; both reported `tree_reaped=true` and are classified FAIL.
+
+Open review queue:
+
+- HIGH: migrate the direct-control graph fixture to an exact accepted five-member cache identity before counting runtime results.
+- HIGH: migrate `test_direct_control_recovery.py` from partial action payloads to accepted-action-input-v2; it is now the final retired-import collection blocker.
+- MEDIUM: do not run two cold control suites concurrently on this host; the bounded owners prevented hangs but resource contention consumed both deadlines.
 
 S84 remains open.

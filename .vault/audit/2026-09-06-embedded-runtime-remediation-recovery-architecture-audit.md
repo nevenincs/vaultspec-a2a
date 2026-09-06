@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:153adef19afd3fd5e8bd8863db0153dde6bc14386926500cfa956e7021945e94'
+body_hash: 'sha256:efbef149d3bd545997609d92b1745b1074d4f41bec68d7644ce269e5c6c7392e'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -206,3 +206,12 @@ Their behavioral obligations remain open: an expired accepted verdict must redri
 ### verdict-graph-cache-identity | high | three current test fixtures omit frozen graph identity
 
 The verdict subscriber unit run produced 20 passes, then two failures before dispatch because its injected compiled graph uses the retired four-member cache key. Focused Ty identifies the same omission in the unit, live subscriber and verdict-loop fixtures. The current cache authority is five members and includes the frozen graph-definition digest. S84 must migrate all three fixtures from actual accepted graph authority; a constant placeholder digest would not prove the worker consumes the same graph.
+### direct-control-legacy-state-tests | high | impossible and partial states removed; current action recovery open
+
+The direct-control lease suite no longer asserts that another session can observe a committed cancellation lease before its thread authority. Current cancellation acceptance performs reservation, election and final commit in one transaction, so that intermediate state is not part of the supported architecture. Its old three-action restart test also persisted partial message, cancellation and permission payloads that accepted-action-input-v2 rejects. Both scenarios are deleted rather than rebuilt as compatibility fixtures.
+
+The retained eight lease tests collect through the current schema. Runtime qualification remains blocked by that file's four-member compiled-graph key, which omits the required frozen graph digest. Action-specific restart behavior remains assigned to migration of `test_direct_control_recovery.py`; the existing complete-input recovery discriminator proves shape refusal but does not replace the three behavioral cases.
+
+### parallel-cold-control-verification | medium | bounded resource contention classified
+
+Running the direct-lease suite and full control collection concurrently produced no pytest session result within either 90-second deadline. Both owners reaped their trees and are failures. A subsequent isolated collection naturally exited with eight cases in 20.16 seconds. Continue these cold database and graph checks serially on this host.

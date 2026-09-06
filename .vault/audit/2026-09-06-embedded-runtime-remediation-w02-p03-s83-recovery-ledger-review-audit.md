@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:e02a91a4d26dbb93b5ab22f8172110b1eab490c9bc11c9ae16ea0980974af8ed'
+body_hash: 'sha256:2f3d2a5d438ba99aed6f72aa7283d3458cd0fd5eb8238ccfc3a3cf2e1d6df56d'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-adr]]"
@@ -73,6 +73,4 @@ Continue S83 in this order: atomically quarantine corrupt accepted input; persis
 
 ## Handoff state
 
-S83 is open. The workspace contains the reviewed runtime increment and migration 0020 but is not yet committed. Next work should first make corrupt-input quarantine atomic, then persist the observed failure condition in every live producer path, then define deadline-versus-application precedence. Do not add compatibility behavior, aliases, inferred deadlines, or legacy-store backfill.
-
-
+S83 is open. The reviewed runtime increment and migration 0020 are checkpointed in commit `a7ba047c`. Next work should first make corrupt-input quarantine atomic, then persist the observed failure condition in every live producer path, then define deadline-versus-application precedence. Do not add compatibility behavior, aliases, inferred deadlines, or legacy-store backfill.

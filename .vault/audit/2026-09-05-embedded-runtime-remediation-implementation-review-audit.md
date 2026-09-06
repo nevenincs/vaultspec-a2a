@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:83b46709b8352027b72ea910818cdace519dba1552d83e1f2cd56d2c1168f2f4'
+body_hash: 'sha256:671b0d0f0acb702eff08d8335a90e765bb6eeaed6ed10ee8eac1259f57eaebfd'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1286,3 +1286,8 @@ Type: lifecycle correctness and transaction consistency. Formal FAIL `7aa096ec` 
 Type: lifecycle correctness and transaction consistency. Formal rereview accepts correction 2fab08a4 after FAIL 7aa096ec. The winner refreshes the exact row with populate-existing inside the winning transaction. The production-style regression proves the identical mapped object sees status plus run revision, writer generation, action type and receipt before and after commit under expire-on-commit false. The focused election suite passed 10 tests in 3.66 seconds; Ruff and Ty passed. Formal verdict: PASS. S09 remains open for its separate lifecycle closure record and review.
 
 Production writer adoption remains HIGH/open across S10, S11, S78/S12/S13 and S14. Archive/deletion adoption remains HIGH/open in S10. Live PostgreSQL concurrency proof remains MEDIUM/open. No legacy, deprecated, default, backfill, translation, alias, fallback or inferred-authority behavior was added.
+### w02-p03-s09-core-lifecycle-closure | low | closed pending closure-record review
+
+Type: lifecycle traceability. Formal PASS `586ce1b9` accepts implementation `8c37f800`, formal FAIL `7aa096ec`, and same-session correction `2fab08a4`. Vaultspec Core closes only `W02.P03.S09`; the remediation plan is 13 of 81 Steps complete and `W02.P03.S10` is next. The repository primitive now performs an exact status-plus-four-authority election, requires same-thread/action receipt correspondence, retains early completion, prevents stale terminal replacement and refreshes the winner's mapped row inside the transaction.
+
+Production adoption remains HIGH/open across S10, S11, S78, S12, S13 and S14. S10 explicitly includes archive, atomic deletion-saga entry and final unconditional-setter removal. Live PostgreSQL election proof remains MEDIUM/open. Closure adds no legacy, deprecated, default, backfill, translation, alias, fallback or compatibility behavior.

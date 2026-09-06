@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:7ecde793a55e042fdf8523099c89424e1d798122fdd658ada3331dd77ede6655'
+body_hash: 'sha256:199bc52ed7162608d4e69c8a557b745e1c11f66f4436cc93b5a140a9c049a776'
 related:
   - "[[2026-08-02-provider-model-catalog-adr]]"
   - "[[2026-08-02-provider-model-catalog-plan]]"
@@ -384,3 +384,48 @@ format, Ty and diff checks pass. Feature Core validation is clean at the final
 audit commit. No critical, high or medium runtime defect remains. This review
 passes, while Core plan closure and the uncommitted S10 Step Record remain owned
 by the executor.
+
+## P01.S10 closure reconciliation
+
+The final formal review at `039eea81fcb48d94daeadd369a442f41e7ebe6cb`
+resolves every review-blocking finding through implementation commits `15766f92`,
+`2f783efc`, and `6e7015a6`. P01.S10 closes on the exact current-only authority:
+served catalog selection is frozen once, every persisted and IPC layer is closed
+to unknown fields, every role and fallback is structurally validated before any
+provider construction, and only `ProviderRuntimeUnavailableError` permits a
+frozen fallback. Retired state is detected only to return a terminal refusal.
+
+The deletion-to-replacement coverage map is concrete:
+
+- Deleted profile resolver and eligibility coverage maps to
+  `test_team_selection.py`, `test_catalog_selection_evidence.py`, and
+  `test_no_legacy_model_authority.py` for exact selection, persistence, schema
+  refusal, and absence of static/profile authority.
+- Deleted profile-bound lane-admission cases map to
+  `test_lane_admission_current.py` for every-provider classification,
+  deny-by-default, proof citation resolution, proof immutability, and the
+  web-proof-implies-turn rule.
+- Deleted preset profile/web-policy coverage maps to
+  `test_preset_capability_claims.py` for an anti-vacuous sweep proving topology-only
+  descriptions make no lane-dependent web claim.
+- Deleted compatibility restart coverage maps to
+  `test_redispatch_failure_ladder.py`, `test_team_selection.py`, and
+  `test_model_assignment_schema.py` for unchanged-digest unknown-field refusal,
+  stale-state terminal settlement, nested IPC rejection, and zero worker contact.
+- Deleted permissive compiler/factory fallback cases map to `test_compiler.py` and
+  `test_factory.py` for whole-assignment provider/mode/control validation,
+  zero-construction structural refusal, in-process control rejection, and the
+  real missing-runtime typed fallback boundary.
+- Deleted Gemini and ACP compatibility tests map to
+  `test_no_legacy_model_authority.py`, current catalog tests, and OpenAPI artifact
+  parity for absent Gemini construction/wire authority and configOptions-only ACP
+  discovery.
+
+Final exact-commit validation passes 1,378 provider/team/graph/IPC/redispatch and
+catalog-restart tests with 38 deselected and zero failures. Ruff lint and format,
+Ty on changed runtime paths, OpenAPI generation/parity, diff checks, feature Core
+validation, architecture curation, and formal code review all pass. The previously
+queued environment, desktop, hook, process-record, provider-directory, Starlette,
+and closed-pipe findings retain their recorded owners and do not restore retired
+runtime authority. P01.S11 and remediation S05 remain open on their independent
+evidence boundaries.

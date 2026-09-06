@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:5e26a90f7cf0ec64bb20082cdcbe6c613eb2c7a4083ec5aa147a80bd719b3168'
+body_hash: 'sha256:8bdd976730327bd8dd8bc1eaef59ef8d715a36b9a2c6498713c68312c746e7fb'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-adr]]"
@@ -20,7 +20,7 @@ Formal implementation review of S83 durable recovery scheduling, accepted-run de
 
 ## Review verdict
 
-The increment establishes a durable retry owner and closes the crash window between accepted action persistence and worker dispatch. It is safe to checkpoint as an incomplete S83 increment. S83 remains open because producer-side failure classification, deadline/application precedence, corrupted-input quarantine, and health disclosure still require architectural work.
+The reviewed increment now covers durable retry ownership, typed producer failure settlement, corrupt-input quarantine, exact lease races, applied-action rechecks, and recovery-owner health disclosure. It is safe to checkpoint as an incomplete S83 increment. S83 remains open for checkpoint/deadline precedence and schema-local deadline authority.
 
 ## Implemented state
 
@@ -60,6 +60,8 @@ The increment establishes a durable retry owner and closes the crash window betw
 | FAIL | earlier broad combined lane | emitted 65 passes, then exceeded 60s and was reaped |
 | UNVERIFIED | pre-compaction thread-service run | process session disappeared before a natural result |
 | FAIL | current team config, frozen graph, and schema parity lane | 227 passed in 39.73s, then the owned process tree missed the 5s exit deadline and was reaped |
+| PASS | isolated recovery repository timing probe | 1 passed in 2.56s; bounded owner returned naturally in 15.40s |
+| PASS | cold-start localization | virtualenv Python 0.405s; graph import 0.441s; action-lease import 4.113-4.965s; collect-only wall 7.888s versus pytest-reported 1.20s |
 
 ## Findings
 
@@ -75,7 +77,7 @@ The increment establishes a durable retry owner and closes the crash window betw
 | RESOLVED MEDIUM | Operations | Closed | Lease contention now persists next eligibility at the known action-lease boundary, bounded by the accepted deadline, instead of waking every two seconds. | this increment |
 | MEDIUM | Data lifecycle | Open | Settled recovery rows have no bounded retention or archival policy. | later persistence step |
 | MEDIUM | Contract drift | Open | `RecoveryCondition` duplicates most of `FailureType`; mapping completeness can drift without an exhaustive current-contract assertion or one shared closed vocabulary. | S84 |
-| MEDIUM | Test infrastructure | Open | Broad combined pytest lanes can pass many tests but exceed their bounded session deadline on this host; retain smaller authoritative lanes and investigate teardown/startup latency separately. | audit harness queue |
+| MEDIUM | Test infrastructure | Open | A narrow recovery test spends about 0.37s in setup/body and reports completion in 2.56s, while the bounded owner takes 15.40s end to end. No orphaned pytest process remains and plain Python starts in 0.405s. Cold import profiling attributes 4.965s to `control.action_lease`, including 4.278s under the eager `database` package initializer and 2.092s under schema validation/migration imports. Replace the 69-caller aggregate persistence import surface with direct repository boundaries in a dedicated pass; do not preserve it through compatibility aliases. | audit harness queue |
 | RESOLVED HIGH | Correctness | Closed | Initial dispatch failure attempted to record stale recovery after an exact terminal or cancel action won in flight. A typed authority-loss result now preserves the winner and creates no stale ledger row. | this increment |
 | RESOLVED MEDIUM | Correctness | Closed | Slow successful dispatch could schedule eligibility before observation. The schedule now clamps to delivery time and the lease boundary. | this increment |
 | RESOLVED HIGH | Concurrency | Closed | Deadline classification is now written only after locking and rechecking the exact thread and action; an action already marked applied cannot acquire a contradictory deadline ledger row. | this increment |
@@ -86,4 +88,4 @@ Continue S83 by defining application-receipt precedence at the deadline and enfo
 
 ## Handoff state
 
-S83 is open. The reviewed runtime increment and migration 0020 are checkpointed in commit `a7ba047c`. Next work should define deadline-versus-application precedence and enforce the recoverable-action deadline invariant at the repository/schema boundary. Do not add compatibility behavior, aliases, inferred deadlines, or legacy-store backfill.
+S83 is open. Runtime work is checkpointed through `a164f120`, with Vault status through `7de34fc0`. The next implementation target is the recoverable-action deadline invariant at the repository/schema boundary. Deadline-versus-application closure requires S12 persisted incorporation evidence. The measured test delay is cold aggregate import/collection overhead, not a surviving pytest tree; its 69-caller persistence boundary conversion remains queued. Do not add compatibility behavior, aliases, inferred deadlines, or legacy-store backfill.

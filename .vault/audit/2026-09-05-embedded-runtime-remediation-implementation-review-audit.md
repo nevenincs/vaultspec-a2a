@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:4c2f2625b92459a6f4596b3097f21821df74e21248e5f69fea946f99d4f7ffed'
+body_hash: 'sha256:83b46709b8352027b72ea910818cdace519dba1552d83e1f2cd56d2c1168f2f4'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1281,3 +1281,8 @@ Type: formal verification. The exact conditional predicate, successor revision/g
 ### s09-same-session-election-truth | high | resolved pending formal rereview
 
 Type: lifecycle correctness and transaction consistency. Formal FAIL `7aa096ec` proved that implementation `8c37f800` used `synchronize_session=False`: the conditional SQL update returned WON and persisted COMPLETED/revision one while an already identity-mapped thread in the same `expire_on_commit=False` session remained RUNNING/revision zero before and after commit. The correction performs a `populate_existing` read inside the winner transaction before returning. Its regression installs a new CANCEL authority and proves the identical mapped object observes CANCELLED, revision one, generation two, CANCEL and the exact new receipt both before and after commit. The focused correction gate passes 10 tests in 4.48 seconds; the combined election/transition gate passes 26 tests in 3.55 seconds. Formal rereview remains required.
+### s09-same-session-election-correction-rereview | high | resolved and formally passed
+
+Type: lifecycle correctness and transaction consistency. Formal rereview accepts correction 2fab08a4 after FAIL 7aa096ec. The winner refreshes the exact row with populate-existing inside the winning transaction. The production-style regression proves the identical mapped object sees status plus run revision, writer generation, action type and receipt before and after commit under expire-on-commit false. The focused election suite passed 10 tests in 3.66 seconds; Ruff and Ty passed. Formal verdict: PASS. S09 remains open for its separate lifecycle closure record and review.
+
+Production writer adoption remains HIGH/open across S10, S11, S78/S12/S13 and S14. Archive/deletion adoption remains HIGH/open in S10. Live PostgreSQL concurrency proof remains MEDIUM/open. No legacy, deprecated, default, backfill, translation, alias, fallback or inferred-authority behavior was added.

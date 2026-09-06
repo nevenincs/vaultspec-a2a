@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:f897cd405ba65f165a804b163a089d2e94c69b5703b14924dd6ab064553a323e'
+body_hash: 'sha256:7154fd90b79ec4dca158eed4f8f42d15bed2d473f86a62f7b2aa183a547c97ea'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1203,3 +1203,8 @@ Type: state-ownership model declaration. S76 adds one frozen, slotted `RunWriteA
 ### w02-p03-s76-schema-installation-dependency | high | open under W02.P03.S77
 
 Type: migration ordering and current-schema integrity. Required ownership columns cannot be mapped onto `ThreadModel` before their physical migration: doing so makes every mapped SELECT and existing `create_thread` insert fail against schema 0016. Nullable columns or defaults would accept missing authority and manufacture history, violating the current-only contract. S76 therefore keeps the strict authority declaration separate from ORM persistence. S77 must atomically install and map all four required fields, validate the resulting schema, and refuse populated pre-current or unknown stores. It may not backfill, translate, alias, default or retain rows without complete authority.
+### w02-p03-s76-core-lifecycle-closure | low | closed pending closure-record review
+
+Type: lifecycle traceability. Formal PASS `821409d1` accepts implementation `8551069913f393a55cf9e5fe3c1bd33e9e6ff907`. Vaultspec Core closes only `W02.P03.S76`; plan status is 11 of 81 Steps complete and `W02.P03.S77` is next. The Step Record retains the completed 131-pass implementation gate, independent 14-pass focused review, Ruff, Ty and diff evidence. Remediation and served-capability-contract feature checks each pass all 19 Core checks with zero diagnostics.
+
+The physical persistence dependency remains HIGH/open under `W02.P03.S77`, including atomic installation and mapping of all four required fields and refusal of populated pre-current or unknown stores without nullable fields, defaults, backfill, translation, substitution or execution. The independent database command's post-`[100%]` pytest teardown hang remains MEDIUM/open under `resource-aware-test-execution` with its exact command, more-than-90-second wall, session `71187` interrupt and process-absence evidence preserved in the formal review. Closure adds no runtime, legacy, deprecated, compatibility, backfill, translation or default behavior.

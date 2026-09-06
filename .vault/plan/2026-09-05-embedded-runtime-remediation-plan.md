@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:5f3debc31db260187351e4a392f2683158b510948f5a0c7b9dc114eab3b44746'
+body_hash: 'sha256:071549a92625add8113964623e3a67a52ebf1cbe31c023ded0c3d6c7bd4bfeab'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -71,7 +71,7 @@ Implement uncovered persistence, queue, cancellation and worker-capacity correct
 
 Remove stale-write and early-completion races while retaining existing state obligation owners.
 
-- [ ] `W02.P03.S76` - Declare durable run revision and writer generation plus action-specific receipt identity without storing credentials or duplicating transcript authority; `src/vaultspec_a2a/database/models.py`.
+- [x] `W02.P03.S76` - Declare durable run revision and writer generation plus action-specific receipt identity without storing credentials or duplicating transcript authority; `src/vaultspec_a2a/database/models.py`.
 - [ ] `W02.P03.S77` - Add the current ownership and receipt schema with upgrade validation; refuse pre-current or unknown-ownership rows as incompatible without backfill, translation, migration-time substitution or execution; `src/vaultspec_a2a/database/migrations`.
 - [ ] `W02.P03.S09` - Add atomic expected-state/revision election with durable writer/action identity and test completed-versus-cancelled stale sessions; `src/vaultspec_a2a/database/thread_repository.py`.
 - [ ] `W02.P03.S10` - Verify transitional-writer and projection obligations under 2026-08-05-served-capability-contract-plan W04.P07.S22 and W04.P08.S26 against the new election primitive; `state obligation dependency`.

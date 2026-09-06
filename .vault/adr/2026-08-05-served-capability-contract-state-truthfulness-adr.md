@@ -3,12 +3,13 @@ tags:
   - '#adr'
   - '#served-capability-contract'
 date: '2026-08-05'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:57946eeda9ff11e61d31e02849d6284cea7dcb71ac63a083d8a59a3a4707b083'
+body_hash: 'sha256:a9ebd7f6449ab50bb00e426fd5d4fb2513cfde7518cbe9b825dd6f66d6d4a2bd'
 related:
   - "[[2026-08-05-served-capability-contract-gateway-contract-audit]]"
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
+  - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]'
 ---
 
 # `served-capability-contract` adr: `terminal states, obligated writers, and fields that must not contradict the run` | (**status:** `accepted`)
@@ -215,7 +216,6 @@ argued.
 
 ## Open questions
 
-- **How are legacy rows without T6 ownership classified?** T6 decides the persisted ownership contract for new transitions. Migration and reconciliation must distinguish legacy unknown ownership from a current live writer, without inventing history or treating missing data as evidence of cessation. The implementation proof must cover both populations.
 
 - **What is the compatibility relation for each health field?** T4 forbids
   contradiction but the specific incompatible combinations are per-field and are
@@ -226,3 +226,16 @@ argued.
   what a terminal status means to a consumer that already reads it. Settled with
   the consuming repository under the mutual-reference discipline; until then, T3
   can record the distinction internally without serving it.
+## Amendment (2026-09-06): one durable recovery authority
+
+The seventeen-condition analysis in `2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research` refines T2, T3 and T6. One durable recovery coordinator owns every exit from `reconciling`. Startup, periodic operation and API reads may trigger that coordinator, but they do not carry separate policies or write outcomes independently.
+
+The coordinator evaluates evidence in this order: current thread authority and applicable action receipt; checkpoint terminal or incorporation truth; current project and frozen provider authority; typed worker availability; run-derived execution deadline. It then chooses exactly one atomic outcome: settle checkpoint-proven terminal truth, record a permanent current-schema refusal, schedule a durable retry, retain an in-progress obligation, accept a newer writer's result, or observe deletion. Receipt mismatch is a typed current-schema integrity failure, never an indefinitely reconciling row.
+
+Retry state is durable and names the run revision, writer generation, action receipt, classified condition, attempt number, next eligible attempt and run-derived deadline. Circuit-open, capacity and transport failure therefore survive process restart. Typed worker rejection is classified by its reason rather than collapsed into transport failure. The coordinator runs independently of a polling client.
+
+The run-derived execution deadline and the client observation deadline are distinct. Observation expiry does not fail sanctioned work. Before a client deadline expires, the served state must disclose a terminal result or the durable recovery condition and next action; bare `reconciling` without that evidence is untruthful.
+
+Every response projection is built after reconciliation from a fresh durable read. Election loss, concurrent completion or cancellation, and concurrent deletion cannot be served from a projection captured before the election.
+
+Only current-schema ownership is admitted. Pre-current, retired or unknown ownership is refused before recovery without translation, backfill, substitution, migration-time invention or dispatch. This replaces the former open question about supporting legacy rows; there is no supported legacy population.

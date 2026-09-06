@@ -3,13 +3,14 @@ tags:
   - '#adr'
   - '#control-action-leases'
 date: '2026-08-02'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:d58d2be809cc62e6948c24bf717fd201b2d8c89409801b2c4f183878d582ba81'
+body_hash: 'sha256:fee6515d06eca1d4185e92f869bd279cd610679300024526341b0f70a715811c'
 related:
   - "[[2026-08-02-control-action-leases-research]]"
   - "[[2026-08-02-control-action-leases-reference]]"
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
+  - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]'
 ---
 
 # `control-action-leases` adr: `durable leased dispatch claims` | (**status:** `accepted`)
@@ -46,7 +47,7 @@ permission, follow-up, cancel, and verdict paths. The decision is grounded by
 - Definite non-delivery releases ownership; ambiguous delivery waits for reconciliation or expiry.
 - Graph-mutating message, clarification, permission and verdict actions settle only from durable request-scoped evidence associating action identity, winning payload fingerprint and dispatch identity with a persisted checkpoint proving incorporation. Cancellation settles from durable action-specific cessation or terminal/no-start no-op evidence; it does not require a checkpoint for work that never started. Worker acceptance, first output, generic progress and provider completion alone do not establish application or cessation. Recovery reconciles the journal with the evidence required for that action kind before redelivery; uncertain external effects are not blindly replayed.
 - Worker dispatch-ID suppression is synchronous, bounded, and cleared on restart.
-- Existing six-verb gateway compatibility remains unchanged.
+- The current six gateway verbs retain their exact contracts; retired inputs are refused and carry no compatibility behavior.
 
 ## Implementation
 
@@ -85,3 +86,12 @@ and `2026-08-02-control-action-leases-research`.
 - Clarification, permission, message, cancel, and verdict share one election mechanism.
 - Database migrations, lifecycle deletion, worker memory bounds, and recovery tests expand the implementation surface.
 - Lease duration becomes an operational parameter tested against slow real-provider turns.
+## Amendment (2026-09-06): durable recovery scheduling
+
+The recovery coordinator decided by the state-truthfulness ADR leases recovery work through a durable recovery record rather than a one-shot startup sweep. The record binds the current run revision, writer generation and applicable action receipt to the classified condition, attempt number, next eligible attempt and run-derived deadline. One dispatcher may own an eligible attempt; crash or lease expiry makes it eligible again without changing action identity.
+
+Permanent current-schema refusal settles atomically and is never retried. Circuit-open, capacity and transport-unreachable outcomes retain accepted work and schedule typed retry. Capacity does not affect transport health. Transport failure may affect the circuit breaker. Worker rejection follows its served reason. Ambiguous delivery reconciles checkpoint and action evidence before redelivery.
+
+Checkpoint terminal truth takes precedence over timeout classification. A receipt mismatch is a current-schema integrity refusal, not a reason to leave accepted work pending. Startup and ordinary operation drain the same durable recovery owner. API reads may request an immediate coordinator pass but cannot create a second lease policy or report a pre-election projection.
+
+No retired action, provider or ownership representation is supported. Recovery never translates, backfills, aliases, substitutes or dispatches it.

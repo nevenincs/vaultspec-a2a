@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#served-capability-contract'
 date: '2026-08-05'
-modified: '2026-09-03'
+modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:77c11d103f6b8b1776b346d0c208d892f4e661076dd91aac777865f2d9aa8eec'
+body_hash: 'sha256:d893e2e95b6300ccb91169877b41392c907607f89426168b5f42b98f7d1cdea2'
 related:
   - '[[2026-08-05-served-capability-contract-adr]]'
   - '[[2026-08-05-served-capability-contract-canonical-vocabulary-adr]]'
@@ -29,7 +29,7 @@ Auto-generated index of all documents tagged with `#served-capability-contract`.
 - `2026-08-05-served-capability-contract-adr` - `served-capability-contract` adr: `the capability a preset serves, and who routes to it` | (**status:** `proposed`)
 - `2026-08-05-served-capability-contract-canonical-vocabulary-adr` - `served-capability-contract` adr: `one declaration per served vocabulary` | (**status:** `proposed`)
 - `2026-08-05-served-capability-contract-failure-observability-adr` - `served-capability-contract` adr: `a failure must reach the log before the process does` | (**status:** `proposed`)
-- `2026-08-05-served-capability-contract-state-truthfulness-adr` - `served-capability-contract` adr: `terminal states, obligated writers, and fields that must not contradict the run` | (**status:** `proposed`)
+- `2026-08-05-served-capability-contract-state-truthfulness-adr` - `served-capability-contract` adr: `terminal states, obligated writers, and fields that must not contradict the run` | (**status:** `accepted`)
 
 ### audit
 

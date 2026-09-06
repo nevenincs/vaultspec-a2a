@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d53f5b17413dcd9ea18ae348d5ee33abdc614b7466ac4e8cdc3cfca35fcefcfc'
+body_hash: 'sha256:049c241800c3e306a5f2c81244ddd81c35c589ba24c3398566618e9f1d8d6cc1'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
   - '[[2026-09-05-embedded-runtime-robustness-audit]]'
@@ -47,7 +47,7 @@ The scope is the Dashboard-embedded binary component, not a standalone product. 
 
 Parent decisions define the architecture but their implementations are not presumed stable: the audit's evidence governs that judgement. The provider capability, catalog and served-contract plans contain active dependencies. SDK replacement, broader capabilities and historical packaging apparatus are not prerequisites invented by this campaign.
 
-The owner explicitly auto-approved the remediation ADRs on 2026-09-05. This acceptance and the related in-place amendments use that authorization. The implementation plan remains unapproved; this documentation pass stops at its review boundary.
+The owner explicitly auto-approved the remediation ADRs on 2026-09-05. This acceptance and the related in-place amendments use that authorization. The implementation plan is approved and active. Architecture amendments are applied before further recovery implementation.
 
 ## Implementation
 
@@ -69,7 +69,7 @@ Scenario qualification prevents a narrow code change from becoming a broader rea
 
 ## Consequences
 
-The campaign gains an auditable completion contract and one tracking plan. Cross-repository integration, profile maintenance and real-provider prerequisites remain explicit work. Qualification can remain blocked after implementation when external evidence is unavailable. The plan's approval is a separate user decision; this ADR does not start execution.
+The campaign gains an auditable completion contract and one tracking plan. Cross-repository integration, profile maintenance and real-provider prerequisites remain explicit work. Qualification can remain blocked after implementation when external evidence is unavailable. The approved plan executes this qualification contract and pauses affected implementation whenever formal review exposes an architectural contradiction.
 
 ## Amendment (2026-09-05): qualification excludes legacy support
 
@@ -87,3 +87,10 @@ outcome before provider construction or dispatch, no legacy fields are served,
 and no migration or substitution occurs. A test that successfully restarts,
 reads, translates, or redispatches legacy provider/model state is evidence of a
 defect, not compatibility success.
+## Amendment (2026-09-06): root-cause recovery campaign
+
+The condition registry in `2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research` is the binding recovery scope. Conditions 1 through 16 are one architectural correction, not independent point fixes: replace fragmented startup, read-time, checkpoint, retry and projection decisions with the single durable recovery authority defined by the amended state-truthfulness and control-action-leases ADRs. The served-capability S56 work becomes verification of that authority's checkpoint-first behavior rather than a separate implementation owner.
+
+Condition 17 has a distinct root and remains a separate architectural correction in `src/vaultspec_a2a/testing`: every verification process has one bounded lifecycle owner responsible for plugin sessions, database engines, transports, subprocesses and machine-global leases. A printed test summary does not qualify without natural process exit.
+
+Formal review evaluates architecture and durable behavior before test color. A passing test that preserves fragmented ownership, polling-dependent progress, invented authority or missing process-exit ownership cannot close a Step. The recovery phase requires one architecture reviewer/executor to follow the condition registry across component boundaries and correct shared owners rather than accumulating branch-specific patches.

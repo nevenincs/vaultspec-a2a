@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:491bee501e591b7aeee50e3bf3a9ea930fa69581dee5281c7e89b8fcf1a293c0'
+body_hash: 'sha256:1435b905a201a84ba882e1837f5309848e0452761444492682d6551b0cdf5da6'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -97,7 +97,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S08` - Apply a reviewed locked dependency correction for the Starlette BlockingPortal deprecation and verify the warning disappears without suppression
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S09` - Add atomic expected-state/revision election with durable writer/action identity and test completed-versus-cancelled stale sessions
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S10` - Adopt the atomic election for lifecycle writers that already carry a durable applicable receipt, including initial dispatch, cancellation, direct-control recovery, permission-request projection, archive and atomic deletion-saga entry, with side effects only after the winner
-- `2026-09-05-embedded-runtime-remediation-W02-P03-S11` - Verify abandoned-run reconciliation under owner W04.P08.S56 and integrate the new atomic election without duplicating its existing generic reconciliation assignment
+- `2026-09-05-embedded-runtime-remediation-W02-P03-S11` - Replace fragmented startup redispatch, read-time abandonment and pre-election projection with one durable recovery coordinator covering conditions 1-16
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S76` - Declare durable run revision and writer generation plus action-specific receipt identity without storing credentials or duplicating transcript authority
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S77` - Add the current ownership and receipt schema with upgrade validation; refuse pre-current or unknown-ownership rows as incompatible without backfill, translation, migration-time substitution or execution
 - `2026-09-05-embedded-runtime-remediation-W04-P10-S47` - Conform readiness/drain/shutdown routes and ownership capability handling to the intended consumer generation with fail-closed incompatible attachment
@@ -116,4 +116,4 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 ### research
 
 - `2026-09-05-embedded-runtime-remediation-research` - `embedded-runtime-remediation` research: `remediation choices and implementation ownership`
-- `2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research` - S11 abandoned reconciliation election integration
+- `2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research` - S11 recovery architecture root-cause research

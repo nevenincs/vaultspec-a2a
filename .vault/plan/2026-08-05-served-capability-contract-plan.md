@@ -10,9 +10,10 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
-modified: '2026-09-05'
-body_hash: 'sha256:5bd43562f4f6c5c167e0c4df54f8b77c0739691c42b9800cc290465c7f344270'
+modified: '2026-09-06'
+body_hash: 'sha256:bdb2e9666ceb98adfaff4b43e663de230932894a4339e7204e4cc377090101a0'
 ---
+
 # `served-capability-contract` plan
 
 ## Description
@@ -223,7 +224,7 @@ Fix the projections that serve untrue values on completed and failed runs.
 - [ ] `W04.P08.S41` - F31 - fold the authoring session reference into thread state on the submitter path as well as the bridge path, so a run discloses the session the engine recorded for it; `src/vaultspec_a2a/authoring/submitter.py`.
 - [ ] `W04.P08.S42` - F32 - preserve the recorded approval outcome across a terminal transition, so pruning a pending request stops erasing the decision a human made; `src/vaultspec_a2a/control/thread_state_service.py`.
 - [ ] `W04.P08.S50` - F47 LIVE - the harness-readiness verdict is computed for the document editor on every run start and then discarded, so byte-identical harness incompleteness refuses a research_adr run and admits a doc-editor one. Fix the root cause rather than the branch: the topology-only predicate stands in for a question about roles and declared surfaces, so a point fix in the eligibility branch leaves the misclassification everywhere else. The probe helper's docstring also describes behaviour its code does not implement; `src/vaultspec_a2a/control/run_start_policy.py`.
-- [ ] `W04.P08.S56` - F61 - consult the checkpoint before resolving an abandoned run to failed, so a graph that already reached its end is recognised rather than timed out. This is the only FALSE RED in the audit and it belongs against the same non-contradiction clause as the false greens, which does not care which way a contradiction points; `src/vaultspec_a2a/control/run_discovery_service.py`.
+- [ ] `W04.P08.S56` - Verify the shared remediation recovery coordinator consults checkpoint terminal truth before abandonment, returns a fresh durable projection, and cannot leave a client polling bare reconciling through its observation deadline; do not implement a second reconciler; `src/vaultspec_a2a/control/recovery.py, src/vaultspec_a2a/control/run_discovery_service.py, src/vaultspec_a2a/control/thread_state_service.py`.
 
 ### Phase `W04.P09` - drive and specify the live surface
 

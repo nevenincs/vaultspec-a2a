@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:1509c084f223b7fb5b6bd60b23086c5ea875273f03a19550b559603909de6ffa'
+body_hash: 'sha256:2c486c5f65326757c47f62cd82851b868eb4b11dd5a409e491a9a791a3c1c47b'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -31,6 +31,7 @@ related:
   - '[[2026-09-06-embedded-runtime-remediation-starlette-blocking-portal-dependency-reference]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s76-lifecycle-closure-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s76-write-authority-review-audit]]'
+  - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s77-current-schema-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-rereview-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s47-lifecycle-closure-review-audit]]'
@@ -56,6 +57,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit` - `embedded-runtime-remediation` audit: `no-legacy architecture reconciliation`
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s76-lifecycle-closure-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S76 lifecycle closure review`
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s76-write-authority-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S76 run write authority review`
+- `2026-09-06-embedded-runtime-remediation-w02-p03-s77-current-schema-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S77 current ownership schema review`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-rereview-audit` - `embedded-runtime-remediation` audit: `W04.P10.S47 cooperative server owner formal rereview`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-review-audit` - `embedded-runtime-remediation` audit: `W04.P10.S47 cooperative server owner formal review`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s47-lifecycle-closure-review-audit` - `embedded-runtime-remediation` audit: `W04.P10.S47 lifecycle closure formal review`

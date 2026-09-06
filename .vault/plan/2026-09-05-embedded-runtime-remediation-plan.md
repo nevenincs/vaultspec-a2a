@@ -22,9 +22,10 @@ related:
   - '[[2026-08-05-served-capability-contract-plan]]'
   - '[[2026-08-02-llm-context-provider-abstraction-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
+  - '[[2026-09-06-embedded-runtime-remediation-codex-native-control-protocol-research]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:31064282ac1b6a0fdc342f0054aed2e6f741f80c6db6de33dbf3434754b6f8ad'
+body_hash: 'sha256:b6b1f7e3d3bce602526d0c21be7bfaf6e16d651a7586e8a203584b0587a5e83d'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -143,7 +144,7 @@ Join session command discovery to intentional execution without a generic shell 
 - [ ] `W03.P08.S36` - Verify existing exact-capability evidence and invalidation under owner P02.S03-S04; retain new command and compaction claims as blocked until their later effect qualification; `capability proof dependency`.
 - [x] `W03.P08.S37` - Expose session-scoped command advertisements with explicit supported, blocked and unsupported dispositions; `src/vaultspec_a2a/providers/_acp_protocol.py`.
 - [x] `W03.P08.S38` - Execute negotiated native commands with validated arguments, busy disposition and observable outcomes; require independent native-compaction effects before claiming support; `src/vaultspec_a2a/providers/acp_chat_model.py`.
-- [ ] `W03.P08.S81` - Implement the admitted Codex app-server lane's native-control mapping against its verified protocol and session identity, with explicit absent-control refusal, bounded outcomes and no arbitrary RPC escape; keep new claims blocked until effect proof; `src/vaultspec_a2a/providers/codex_chat_model.py`.
+- [x] `W03.P08.S81` - Implement the admitted Codex app-server lane's native-control mapping against its verified protocol and session identity, with explicit absent-control refusal, bounded outcomes and no arbitrary RPC escape; keep new claims blocked until effect proof; `src/vaultspec_a2a/providers/codex_chat_model.py`.
 
 ## Wave `W04` - Conform the consumer and binary lifecycle
 

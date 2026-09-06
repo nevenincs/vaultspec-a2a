@@ -37,6 +37,7 @@ from ..thread.enums import (
     TaskQueueStatus,
     ThreadStatus,
 )
+from .write_authority_schema import WRITE_ACTION_SQL_VALUES
 
 __all__ = [
     "MONEY_PRECISION",
@@ -243,9 +244,6 @@ class Base(DeclarativeBase):
 
 
 _MAX_ACTION_RECEIPT_ID_LENGTH = 64
-_CURRENT_CONTROL_ACTION_SQL_VALUES = ", ".join(
-    repr(action.value) for action in ControlActionType
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,7 +306,7 @@ class ThreadModel(Base):
             name="ck_threads_writer_generation_positive",
         ),
         CheckConstraint(
-            f"writer_action_type IN ({_CURRENT_CONTROL_ACTION_SQL_VALUES})",
+            f"writer_action_type IN ({WRITE_ACTION_SQL_VALUES})",
             name="ck_threads_writer_action_type_current",
         ),
         CheckConstraint(

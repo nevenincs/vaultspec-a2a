@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:cc4e5b955163993cee2b46c4aace1e71a96b0f309b76e91177065263b04630e4'
+body_hash: 'sha256:e8c9062c88feac191774b3de0296a0dc25bc092a62a59ee3ba3a027d5e7d1edf'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -157,3 +157,7 @@ Schema 0017 installs the four required authority fields only when `threads` is e
 Fresh run creation mints one receipt before either row exists. Revision zero, writer generation one, INGEST and that receipt are written to the thread; the identical receipt is written as the INGEST control action dispatch identity and sent in `DispatchRequest`. The thread and action are committed together before worker HTTP. No nullable field, database or ORM default, backfill, alias, translation, inferred value or migration-time execution supplies authority.
 
 The Dashboard migration owner already runs the packaged migration entrypoint under quiescence and snapshot rollback. The packaged head advances dynamically to 0017. A populated pre-current installation receives the typed migration failure and rollback; later release assembly must pin the S77-bearing A2A commit and must not retry with invented authority. No Dashboard runtime source change or component-manifest migration-range field belongs to S77.
+
+Formal S77 review showed that schema-object names alone are not identity. A same-name `CHECK (1)` and a same-name unique index over `threads.id` could pass the initial validators. The correction gives ordinary compatibility and migration preflight one current fingerprint for required column shapes, normalized named predicates and the exact unique receipt-index column sequence. SQLite compatibility extracts balanced named CHECK expressions from the read-only `CREATE TABLE` text and reads index columns through parameterized pragma queries. Alembic preflight uses dialect inspection and applies structural validation to empty stores already at 0017 or a descendant as well as every populated store. Empty pre-0017 stores remain eligible for 0017 installation, and valid populated 0017 stores remain eligible for later current migrations.
+
+PostgreSQL inspection commonly renders equivalent checks with text casts, `btrim`, redundant parentheses and `ARRAY`/`ANY`; the shared fingerprint normalizes those dialect forms and has a deterministic rendered-expression proof. No locked PostgreSQL service or connection environment was available for this correction pass, so live PostgreSQL catalog output remains a MEDIUM evidence gap. This does not weaken the SQLite Dashboard contract or silently declare PostgreSQL unsupported.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:22e617d5b495576e97bc9f03f30b3d3b30b531066ed66eb6cd054d10603eea9b'
+body_hash: 'sha256:868d2bba16fedf18e7a816fc15630a95290fde8ab6c3c28cc5b9e5fa7bfa8dff'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1224,3 +1224,15 @@ Type: test contract and plan decomposition. The S77 row names migrations, but a 
 ### w02-p03-s77-dashboard-release-pin | medium | open under Dashboard release coordination
 
 Type: consumer packaging. The A2A package derives head 0017 from its installed graph, while the Dashboard package lock still selects an earlier A2A commit. Dashboard already owns quiescence, bounded candidate migration, snapshot rollback and typed failure. Its later release assembly must pin the reviewed S77 generation and preserve populated pre-current refusal; it must not retry, backfill or invent authority. S77 requires no Dashboard source change.
+
+### w02-p03-s77-schema-fingerprint-formal-fail | high | resolved pending formal rereview
+
+Type: schema integrity and admission safety. Formal FAIL `da7cd035` proved that the initial validator trusted required CHECK names without comparing predicates and trusted the receipt-index name plus uniqueness without comparing its indexed columns. A forged same-name `CHECK (1)` schema admitted invalid future authority, and a same-name unique index over another column could admit duplicate receipts. The correction centralizes current column, normalized predicate and exact index-column fingerprints. Ordinary read-only compatibility rejects both real-SQLite forgeries in two tests completing in 2.39 seconds. Migration preflight rejects both forged empty current stores before Alembic and admits a valid populated current store in three tests completing in 3.19 seconds. Formal rereview remains required.
+
+### w02-p03-s77-postgresql-fingerprint-evidence | medium | open
+
+Type: dialect validation evidence. PostgreSQL remains a locked server dependency profile. The correction normalizes the catalog forms PostgreSQL uses for equivalent VARCHAR checks, including casts, `btrim`, redundant parentheses and `ARRAY`/`ANY`, and the deterministic rendered-expression proof passes. No locked PostgreSQL service or connection environment was available during this bounded correction, so real catalog introspection and a live future-migration admission proof remain open. The Dashboard SQLite product path has real-store proof.
+
+### w02-p03-s77-correction-module-teardown | medium | open under resource-aware-test-execution
+
+Type: test lifecycle and developer-time loss. The corrected nine-case migration module emitted nine passing nodes and `[100%]` at 30 seconds, then stalled after results. Session `96385` was interrupted immediately and no matching pytest process remained. The authoritative terminal correction gates are the completed three-case migration-preflight discriminator, two-case read-only compatibility discriminator and three-case schema-fingerprint unit gate. This is the same post-result teardown class already queued; it supports no completed-module pass claim.

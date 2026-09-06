@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:64ed9c76c1eb49fd8b211f02a3f77dc115406e48e788c2e5e34d7b1f06b61450'
+body_hash: 'sha256:9d98f21fc3c83fdf3911b719171d577f8de077364488c0c0db2f0f0894401751'
 step_id: 'S77'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -96,6 +96,18 @@ related:
 - `verify:` `pytest src/vaultspec_a2a/database/tests/test_compatibility.py -q` -> `fail` (15 nodes reached 100%; post-result teardown stalled and was interrupted)
 - `verify:` `ruff check` on all changed Python paths -> `pass`
 - `verify:` `ty check` on production and focused test paths -> `pass`
+- `M` `src/vaultspec_a2a/database/compatibility.py`
+- `M` `src/vaultspec_a2a/database/migrations/env.py`
+- `M` `src/vaultspec_a2a/database/models.py`
+- `A` `src/vaultspec_a2a/database/write_authority_schema.py`
+- `A` `src/vaultspec_a2a/database/tests/_write_authority_schema_cases.py`
+- `M` `src/vaultspec_a2a/database/tests/test_compatibility.py`
+- `M` `src/vaultspec_a2a/database/tests/test_thread_write_authority_migration.py`
+- `A` `src/vaultspec_a2a/database/tests/test_write_authority_schema.py`
+- `verify:` `pytest` exact forged-schema migration-preflight discriminator -> `pass` (3 tests in 3.19 seconds)
+- `verify:` `pytest` exact forged-schema read-only compatibility discriminator -> `pass` (2 tests in 2.39 seconds)
+- `verify:` `pytest` canonical read-only compatibility discriminator -> `pass` (1 test in 1.14 seconds)
+- `verify:` `pytest src/vaultspec_a2a/database/tests/test_write_authority_schema.py -q` -> `pass` (3 tests in 0.07 seconds)
 
 ## Notes
 

@@ -20,7 +20,6 @@ import asyncio
 import sqlite3
 from pathlib import Path
 
-from ..thread.enums import ControlActionType
 from .checkpoint_schema import (
     CHECKPOINT_SCHEMA_VERSION,
     CheckpointSchemaError,
@@ -31,6 +30,13 @@ from .migrate import build_migration_config
 from .migrations import (
     CheckpointStateMigrationError,
     count_pending_sdd_backfill_connection,
+)
+from .write_authority_schema import (
+    WRITE_ACTION_TYPES,
+    WRITE_AUTHORITY_COLUMNS,
+    extract_named_check_predicates,
+    write_authority_checks_match,
+    write_authority_receipt_index_matches,
 )
 
 __all__ = [
@@ -45,20 +51,6 @@ _REMEDY = (
     "one-time transaction descriptor to bring this application home to the "
     "current schema; ordinary desktop boot never migrates."
 )
-
-_WRITE_AUTHORITY_COLUMNS = {
-    "run_revision": "INTEGER",
-    "writer_generation": "INTEGER",
-    "writer_action_type": "VARCHAR(32)",
-    "writer_action_receipt_id": "VARCHAR(64)",
-}
-_WRITE_AUTHORITY_CHECKS = {
-    "ck_threads_run_revision_nonnegative",
-    "ck_threads_writer_generation_positive",
-    "ck_threads_writer_action_type_current",
-    "ck_threads_writer_action_receipt_id_bounded",
-}
-_WRITE_ACTION_TYPES = tuple(action.value for action in ControlActionType)
 
 
 class SchemaCompatibilityError(RuntimeError):
@@ -147,7 +139,7 @@ def _validate_write_authority(db_path: Path) -> None:
             str(row[1]): (str(row[2]).upper(), bool(row[3]), row[4])
             for row in conn.execute("PRAGMA table_info(threads)")
         }
-        for name, expected_type in _WRITE_AUTHORITY_COLUMNS.items():
+        for name, expected_type in WRITE_AUTHORITY_COLUMNS.items():
             actual = columns.get(name)
             if actual != (expected_type, True, None):
                 raise SchemaCompatibilityError(
@@ -155,11 +147,23 @@ def _validate_write_authority(db_path: Path) -> None:
                     f"write-authority column {name!r}; expected required "
                     f"{expected_type} with no default. {_REMEDY}"
                 )
-        indexes = {
-            str(row[1]): bool(row[2])
-            for row in conn.execute("PRAGMA index_list(threads)")
-        }
-        if indexes.get("ux_threads_writer_action_receipt_id") is not True:
+        indexes = []
+        for row in conn.execute("PRAGMA index_list(threads)"):
+            name = str(row[1])
+            indexes.append(
+                {
+                    "name": name,
+                    "unique": bool(row[2]),
+                    "column_names": tuple(
+                        str(info[0])
+                        for info in conn.execute(
+                            "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
+                            (name,),
+                        )
+                    ),
+                }
+            )
+        if not write_authority_receipt_index_matches(indexes):
             raise SchemaCompatibilityError(
                 f"desktop primary database at {db_path} lacks the unique current "
                 f"write-authority receipt index. {_REMEDY}"
@@ -167,13 +171,13 @@ def _validate_write_authority(db_path: Path) -> None:
         table_sql_row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'"
         ).fetchone()
-        table_sql = "" if table_sql_row is None else str(table_sql_row[0]).lower()
-        if not all(check in table_sql for check in _WRITE_AUTHORITY_CHECKS):
+        table_sql = "" if table_sql_row is None else str(table_sql_row[0])
+        if not write_authority_checks_match(extract_named_check_predicates(table_sql)):
             raise SchemaCompatibilityError(
                 f"desktop primary database at {db_path} lacks required current "
                 f"write-authority checks. {_REMEDY}"
             )
-        placeholders = ", ".join("?" for _ in _WRITE_ACTION_TYPES)
+        placeholders = ", ".join("?" for _ in WRITE_ACTION_TYPES)
         invalid = conn.execute(
             f"""SELECT id FROM threads
                  WHERE run_revision < 0
@@ -182,7 +186,7 @@ def _validate_write_authority(db_path: Path) -> None:
                     OR length(trim(writer_action_receipt_id)) < 1
                     OR length(writer_action_receipt_id) > 64
                  LIMIT 1""",
-            _WRITE_ACTION_TYPES,
+            WRITE_ACTION_TYPES,
         ).fetchone()
         if invalid is not None:
             raise SchemaCompatibilityError(

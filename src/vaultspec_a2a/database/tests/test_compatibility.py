@@ -32,6 +32,10 @@ from ..compatibility import (
 )
 from ..migrate import run_migrations
 from ..session import init_db
+from ._write_authority_schema_cases import (
+    point_receipt_index_at_thread_id,
+    replace_authority_checks_with_true,
+)
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -105,6 +109,36 @@ class TestCompatibleStoresValidateWithoutMutation:
 
 
 class TestIncompatibleStoresFailLoud:
+    @pytest.mark.asyncio
+    async def test_same_named_permissive_checks_are_refused_read_only(
+        self, runtime_dir: Path
+    ) -> None:
+        primary, checkpoint = await _make_compatible_stores(runtime_dir)
+        replace_authority_checks_with_true(primary)
+        before = _schema_dump(primary)
+
+        with pytest.raises(SchemaCompatibilityError, match=r"required current.*checks"):
+            await validate_desktop_schema(
+                database_url=_url(primary), checkpoint_path=checkpoint
+            )
+
+        assert _schema_dump(primary) == before
+
+    @pytest.mark.asyncio
+    async def test_same_named_wrong_column_receipt_index_is_refused_read_only(
+        self, runtime_dir: Path
+    ) -> None:
+        primary, checkpoint = await _make_compatible_stores(runtime_dir)
+        point_receipt_index_at_thread_id(primary)
+        before = _schema_dump(primary)
+
+        with pytest.raises(SchemaCompatibilityError, match="unique current"):
+            await validate_desktop_schema(
+                database_url=_url(primary), checkpoint_path=checkpoint
+            )
+
+        assert _schema_dump(primary) == before
+
     @pytest.mark.asyncio
     async def test_stamped_head_without_receipt_index_is_refused_read_only(
         self, runtime_dir: Path

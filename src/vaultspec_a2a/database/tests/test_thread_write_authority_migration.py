@@ -5,13 +5,26 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.util import CommandError
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from ...thread.enums import ControlActionType
 from ..migrate import run_migrations
+from ..models import RunWriteAuthority
+from ..permission_repository import create_control_action
+from ..thread_repository import create_thread
+from ._write_authority_schema_cases import (
+    point_receipt_index_at_thread_id,
+    replace_authority_checks_with_true,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _ALEMBIC_INI = Path(__file__).resolve().parents[4] / "alembic.ini"
 
@@ -27,6 +40,13 @@ def _version(path: Path) -> str:
         row = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     assert row is not None
     return str(row[0])
+
+
+def _schema_dump(path: Path) -> list[tuple[object, ...]]:
+    with sqlite3.connect(path) as connection:
+        return connection.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name"
+        ).fetchall()
 
 
 def test_empty_store_installs_required_authority_without_defaults(
@@ -136,6 +156,64 @@ async def test_runtime_runner_refuses_older_populated_store_before_any_revision(
     assert _version(db) == "0007"
     assert after_schema == before_schema
     assert after_rows == before_rows
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case_name", "forge_schema"),
+    [
+        ("permissive-checks", replace_authority_checks_with_true),
+        ("wrong-index-column", point_receipt_index_at_thread_id),
+    ],
+)
+async def test_runtime_runner_refuses_forged_empty_current_schema(
+    runtime_dir: Path,
+    case_name: str,
+    forge_schema: Callable[[Path], None],
+) -> None:
+    db = runtime_dir / f"forged-{case_name}.db"
+    await run_migrations(f"sqlite+aiosqlite:///{db}")
+    forge_schema(db)
+    before = _schema_dump(db)
+
+    with pytest.raises(CommandError, match="complete current write authority"):
+        await run_migrations(f"sqlite+aiosqlite:///{db}")
+
+    assert _schema_dump(db) == before
+
+
+@pytest.mark.asyncio
+async def test_runtime_runner_accepts_populated_valid_current_schema(
+    runtime_dir: Path,
+) -> None:
+    db = runtime_dir / "valid-current.db"
+    url = f"sqlite+aiosqlite:///{db}"
+    await run_migrations(url)
+    engine = create_async_engine(url)
+    receipt = "valid-current-receipt"
+    async with AsyncSession(engine) as session:
+        await create_thread(
+            session,
+            write_authority=RunWriteAuthority(
+                run_revision=0,
+                writer_generation=1,
+                action_type=ControlActionType.INGEST,
+                action_receipt_id=receipt,
+            ),
+            thread_id="valid-current",
+        )
+        await create_control_action(
+            session,
+            thread_id="valid-current",
+            action_type=ControlActionType.INGEST,
+            idempotency_key="valid-current-ingest",
+            dispatch_id=receipt,
+        )
+        await session.commit()
+    await engine.dispose()
+
+    await run_migrations(url)
+    assert _version(db) == "0017"
 
 
 def test_populated_current_store_cannot_erase_authority(runtime_dir: Path) -> None:

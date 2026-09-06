@@ -51,16 +51,20 @@ from sqlalchemy.exc import IntegrityError
 
 from ...database import (
     ThreadDeletionSagaModel,
+    ThreadStatusElectionOutcome,
     delete_thread,
-    mark_thread_deleting,
+    elect_thread_deleting,
+    get_thread,
+    thread_write_expectation,
 )
-from ...thread.enums import CleanupKind
+from ...thread.enums import CleanupKind, ThreadStatus
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from sqlalchemy import CursorResult, Result
     from sqlalchemy.ext.asyncio import AsyncSession
+
 
 __all__ = [
     "CleanupItem",
@@ -410,7 +414,7 @@ async def create_deletion_saga(
     *,
     thread_id: str,
     manifest: Sequence[CleanupItem],
-) -> DeletionSaga:
+) -> DeletionSaga | None:
     """Create one deletion saga and transition the thread to ``deleting``.
 
     Idempotent: when a saga already exists for the thread the captured manifest
@@ -423,8 +427,26 @@ async def create_deletion_saga(
     not an irreversible external effect.
     """
     existing = await session.get(ThreadDeletionSagaModel, thread_id)
+    thread = await get_thread(session, thread_id)
+    if thread is None:
+        return None
+    expectation = thread_write_expectation(thread)
     if existing is not None:
-        return _hydrate(existing, created=False)
+        if expectation.status is ThreadStatus.DELETING:
+            return _hydrate(existing, created=False)
+        try:
+            election = await elect_thread_deleting(
+                session,
+                thread_id,
+                expectation=expectation,
+            )
+        except ValueError:
+            await session.rollback()
+            raise
+        if election.outcome is ThreadStatusElectionOutcome.WON:
+            return _hydrate(existing, created=False)
+        await session.rollback()
+        return None
 
     row = ThreadDeletionSagaModel(
         thread_id=thread_id,
@@ -443,8 +465,18 @@ async def create_deletion_saga(
             raise
         return _hydrate(existing, created=False)
 
-    await mark_thread_deleting(session, thread_id)
-    await session.flush()
+    try:
+        election = await elect_thread_deleting(
+            session,
+            thread_id,
+            expectation=expectation,
+        )
+    except ValueError:
+        await session.rollback()
+        raise
+    if election.outcome is not ThreadStatusElectionOutcome.WON:
+        await session.rollback()
+        return None
     return _hydrate(row, created=True)
 
 

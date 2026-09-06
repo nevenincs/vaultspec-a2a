@@ -31,9 +31,19 @@ from ...control.thread_service import (
     generate_thread_id,
 )
 from ...control.worker_management import LazyWorkerSpawner
+from ...database import (
+    ThreadStatusElectionOutcome,
+    delete_thread,
+    elect_thread_status,
+    get_thread,
+    successor_thread_write_authority,
+    thread_write_expectation,
+)
 from ...database.models import ControlActionModel, ThreadModel
 from ...domain_config import domain_config
 from ...thread.actor_tokens import ActorTokenBundle
+from ...thread.dispatch_policy import FailureType
+from ...thread.enums import ThreadStatus
 
 _CODER_TOKEN = "secret-coder-xyz"
 _REVIEWER_TOKEN = "secret-reviewer-xyz"
@@ -58,6 +68,61 @@ def _capturing_worker(captured: dict[str, Any]) -> FastAPI:
     async def _dispatch(request: Request) -> JSONResponse:
         captured["body"] = await request.json()
         return JSONResponse({"status": "dispatched", "thread_id": "x"})
+
+    return app
+
+
+def _early_terminal_worker(
+    captured: dict[str, Any],
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    response_status: int = 200,
+) -> FastAPI:
+    """Settle the run before acknowledging its initial dispatch."""
+    app = FastAPI()
+
+    @app.post("/dispatch")
+    async def _dispatch(request: Request) -> JSONResponse:
+        body = await request.json()
+        captured["body"] = body
+        async with session_factory() as session:
+            thread = await get_thread(session, body["thread_id"])
+            assert thread is not None
+            expectation = thread_write_expectation(thread)
+            result = await elect_thread_status(
+                session,
+                thread.id,
+                expectation=expectation,
+                status=ThreadStatus.COMPLETED,
+                successor=successor_thread_write_authority(
+                    expectation,
+                    action_type=expectation.authority.action_type,
+                    action_receipt_id=body["dispatch_id"],
+                ),
+            )
+            assert result.outcome is ThreadStatusElectionOutcome.WON
+            await session.commit()
+        return JSONResponse(
+            {"status": "dispatched", "thread_id": body["thread_id"]},
+            status_code=response_status,
+        )
+
+    return app
+
+
+def _deleting_worker(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> FastAPI:
+    """Delete the durable reservation before acknowledging dispatch."""
+    app = FastAPI()
+
+    @app.post("/dispatch")
+    async def _dispatch(request: Request) -> JSONResponse:
+        body = await request.json()
+        async with session_factory() as session:
+            assert await delete_thread(session, body["thread_id"])
+            await session.commit()
+        return JSONResponse({"status": "dispatched", "thread_id": body["thread_id"]})
 
     return app
 
@@ -131,7 +196,7 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
         assert rows, "run-start must have journaled at least the ingest action"
         thread = await session.get(ThreadModel, thread_id)
         assert thread is not None
-        assert thread.run_revision == 0
+        assert thread.run_revision == 1
         assert thread.writer_generation == 1
         assert thread.writer_action_type == "ingest"
         assert thread.writer_action_receipt_id == rows[0].dispatch_id
@@ -139,3 +204,149 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
         journal_blob = json.dumps([row.payload_json for row in rows])
         for secret in (_CODER_TOKEN, _REVIEWER_TOKEN, _BEARER):
             assert secret not in journal_blob, "token leaked into control journal"
+
+
+@pytest.mark.asyncio
+async def test_early_terminal_initial_dispatch_cannot_be_reopened(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, Any] = {}
+    spawner = LazyWorkerSpawner(
+        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+    )
+    spawner.replace_process(None)
+    thread_id = generate_thread_id()
+    async with (
+        httpx.AsyncClient(
+            transport=ASGITransport(
+                app=_early_terminal_worker(captured, session_factory)
+            ),
+            base_url="http://worker",
+        ) as worker_client,
+        session_factory() as session,
+    ):
+        result = await create_and_dispatch_thread(
+            session,
+            ThreadCreationRequest(
+                thread_id=thread_id,
+                title="early terminal",
+                initial_message="finish immediately",
+                team_preset=_PRESET,
+                autonomous=True,
+                nickname=None,
+                metadata=None,
+                metadata_json=None,
+                workspace_root=tmp_path,
+            ),
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=1, recovery_timeout=1.0
+            ),
+            worker_spawner=spawner,
+            worker_client=worker_client,
+            recursion_limit=domain_config.graph_recursion_limit,
+            trace_headers=None,
+        )
+    assert result.dispatched is True
+    assert result.status == ThreadStatus.COMPLETED.value
+    async with session_factory() as session:
+        thread = await get_thread(session, thread_id)
+    assert thread is not None
+    assert thread.status == ThreadStatus.COMPLETED.value
+    assert thread.run_revision == 1
+    assert thread.writer_action_receipt_id == captured["body"]["dispatch_id"]
+    assert thread.last_applied_action is None
+
+
+@pytest.mark.asyncio
+async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    spawner = LazyWorkerSpawner(
+        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+    )
+    spawner.replace_process(None)
+    thread_id = generate_thread_id()
+    async with (
+        httpx.AsyncClient(
+            transport=ASGITransport(app=_deleting_worker(session_factory)),
+            base_url="http://worker",
+        ) as worker_client,
+        session_factory() as session,
+    ):
+        result = await create_and_dispatch_thread(
+            session,
+            ThreadCreationRequest(
+                thread_id=thread_id,
+                title="deleted before ack",
+                initial_message="start",
+                team_preset=_PRESET,
+                autonomous=True,
+                nickname=None,
+                metadata=None,
+                metadata_json=None,
+                workspace_root=tmp_path,
+            ),
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=1, recovery_timeout=1.0
+            ),
+            worker_spawner=spawner,
+            worker_client=worker_client,
+            recursion_limit=domain_config.graph_recursion_limit,
+            trace_headers=None,
+        )
+    assert result.dispatched is True
+    assert result.status == ""
+    assert result.failure_type is FailureType.NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_lost_initial_ack_yields_to_early_terminal_authority(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, Any] = {}
+    spawner = LazyWorkerSpawner(
+        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+    )
+    spawner.replace_process(None)
+    thread_id = generate_thread_id()
+    async with (
+        httpx.AsyncClient(
+            transport=ASGITransport(
+                app=_early_terminal_worker(
+                    captured,
+                    session_factory,
+                    response_status=503,
+                )
+            ),
+            base_url="http://worker",
+        ) as worker_client,
+        session_factory() as session,
+    ):
+        result = await create_and_dispatch_thread(
+            session,
+            ThreadCreationRequest(
+                thread_id=thread_id,
+                title="terminal before lost ack",
+                initial_message="finish",
+                team_preset=_PRESET,
+                autonomous=True,
+                nickname=None,
+                metadata=None,
+                metadata_json=None,
+                workspace_root=tmp_path,
+            ),
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=1, recovery_timeout=1.0
+            ),
+            worker_spawner=spawner,
+            worker_client=worker_client,
+            recursion_limit=domain_config.graph_recursion_limit,
+            trace_headers=None,
+        )
+    assert result.status == ThreadStatus.COMPLETED.value
+    assert result.dispatched is True
+    assert result.error_detail is None
+    assert result.failure_type is None

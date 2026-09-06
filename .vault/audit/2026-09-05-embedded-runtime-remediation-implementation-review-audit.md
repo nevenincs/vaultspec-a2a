@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:671b0d0f0acb702eff08d8335a90e765bb6eeaed6ed10ee8eac1259f57eaebfd'
+body_hash: 'sha256:d25d4e42df4fc66bd5b1b04fc30b99040fdcbb00ae5cd31e03d2470923f5d9fb'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1291,3 +1291,45 @@ Production writer adoption remains HIGH/open across S10, S11, S78/S12/S13 and S1
 Type: lifecycle traceability. Formal PASS `586ce1b9` accepts implementation `8c37f800`, formal FAIL `7aa096ec`, and same-session correction `2fab08a4`. Vaultspec Core closes only `W02.P03.S09`; the remediation plan is 13 of 81 Steps complete and `W02.P03.S10` is next. The repository primitive now performs an exact status-plus-four-authority election, requires same-thread/action receipt correspondence, retains early completion, prevents stale terminal replacement and refreshes the winner's mapped row inside the transaction.
 
 Production adoption remains HIGH/open across S10, S11, S78, S12, S13 and S14. S10 explicitly includes archive, atomic deletion-saga entry and final unconditional-setter removal. Live PostgreSQL election proof remains MEDIUM/open. Closure adds no legacy, deprecated, default, backfill, translation, alias, fallback or compatibility behavior.
+### s10-setter-removal-dependency-cycle | high | resolved in plan decomposition
+
+Type: plan ordering and authority integrity. The prior S10 row required every current writer to migrate and the unconditional setters to be deleted before S11/S78/S12/S13/S14 create the checkpoint, terminal and reconciliation receipt evidence their callers need. S10 could only close by breaking the build or inventing authority. Vaultspec Core narrows S10 to writers with an existing durable applicable receipt and inserts W02.P03.S82 after S14 for a mechanical zero-caller proof and deletion of `update_thread_status`, `mark_thread_deleting` and exports. No adapter, generated receipt, default, fallback, legacy or deprecated path is authorized during the interval.
+### w02-p03-s10-permission-stale-receipt-replay | high | resolved
+
+Type: durable authority and replay safety. A repeated permission-created event could find its old durable action and reinstall that receipt after a newer permission response or lifecycle action already owned the run, reopening INPUT_REQUIRED from stale evidence. The corrected projection elects only a newly reserved creation action or treats an exact current-authority duplicate as a no-op; every other persisted old receipt is refused before projection side effects.
+
+### w02-p03-s10-lost-initial-ack-terminal-overridden | high | resolved
+
+Type: distributed acknowledgement ordering. When initial INGEST dispatch was accepted but its response was lost, an early terminal event could win durable authority while the initiating call still returned the stale transport failure. The caller now refreshes after the lost election and returns the durable terminal outcome. A concurrently deleted row yields typed NOT_FOUND and receipt mismatch yields typed conflict; no inferred status or fallback authority is served.
+
+### w02-p03-s10-permission-duplicate-direct-create | high | resolved
+
+Type: idempotency and transactional integrity. Direct permission action creation could collide with the unique durable request identity before replay classification. The projection now reserves the action, validates payload identity and uses its exact dispatch receipt before election, so exact replay is a no-op and conflicting payload is refused.
+
+### w02-p03-s10-direct-recovery-post-dispatch-election | high | resolved
+
+Type: external side-effect ordering. Direct-control recovery initially performed worker HTTP before establishing that the stored action still won lifecycle authority. Recovery now elects the exact stored dispatch receipt first and dispatches only for WON or exact already-owned replay; losers perform no external side effect.
+
+### w02-p03-s10-delete-rejection-orphan-saga | high | resolved
+
+Type: cross-store deletion transaction. Creating the deletion saga before an unconditional DELETING write could leave an orphan pending saga when lifecycle eligibility or concurrency rejected deletion. Saga insert and the narrow exact-witness DELETING election now share one transaction; rejection rolls back the insert, while a DELETING replay rejoins the existing saga. The zero-caller unconditional `mark_thread_deleting` API and export were removed.
+
+### w02-p03-s10-cancel-loser-transaction-classification | high | resolved
+
+Type: cancellation authority and transactional boundaries. The first adoption draft could classify an election loser from stale mapped state and did not make lease release durable before returning. The corrected path releases and commits the losing reservation, refreshes current state, and distinguishes missing row, receipt mismatch, terminal state, already-cancelled state and still-cancellable conflict. Definitive non-delivery records repair evidence without rolling lifecycle authority backward.
+
+### w02-p03-s10-receipt-ready-writer-adoption | high | resolved pending formal review
+
+Type: production lifecycle adoption. Initial INGEST dispatch, cancellation, stored-action direct recovery, permission-request projection, archive and deletion-saga entry now use complete expected status/revision/generation/action/receipt witnesses. External or projection side effects occur only after WON, and exact replay avoids revision churn. Focused implementation gates pass, including the two stale-replay/lost-ack corrections; Ruff and Ty pass.
+
+### w02-p03-s10-deferred-unconditional-writers | high | open under W02.P03.S11, W02.P03.S78, W02.P03.S12, W02.P03.S13, W02.P03.S14 and W02.P03.S82
+
+Type: durable writer adoption. Remaining production callers of `update_thread_status` are reconciliation, run discovery, redispatch, terminal event, dispatch-applied, verdict and repair paths whose applicable durable checkpoint, incorporation, settlement or recovery receipts are created by the named later Steps. S82 owns the final zero-caller proof and deletion of the unconditional setter and export. No temporary receipt, translation, default, fallback, compatibility or legacy path is authorized.
+
+### w02-p03-s10-live-postgresql-contention-proof | medium | open
+
+Type: production-dialect verification. SQLite race and replay coverage proves the conditional-write behavior used by the receipt-ready callers, but live PostgreSQL contention remains unmeasured. This does not permit a PostgreSQL qualification claim and remains queued with the atomic-election evidence work.
+
+### w02-p03-s10-focused-test-process-exit | low | resolved measurement-integrity
+
+Type: verification harness. The parent could not recover output from one earlier nine-node pytest invocation after context compaction, but an exact process scan found no matching Python, pytest or uv process. The three regressions covering the two parent-discovered HIGH defects were rerun separately and exited normally: 3 passed in 3.49 seconds. No completed result is claimed for the unrecoverable invocation and no broad rerun was used.

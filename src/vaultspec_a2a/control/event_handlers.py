@@ -419,12 +419,16 @@ async def _persist_permission_request(
     request id is ignored, matching the prior inline guard.
     """
     from ..database import (
-        create_control_action,
+        ThreadStatusElectionOutcome,
+        elect_thread_status,
+        get_thread,
         record_permission_request,
+        reserve_control_action,
         set_thread_approval_state,
         set_thread_repair_state,
+        successor_thread_write_authority,
         supersede_permission_requests,
-        update_thread_status,
+        thread_write_expectation,
     )
     from ..thread.enums import (
         ApprovalStatus,
@@ -444,11 +448,10 @@ async def _persist_permission_request(
         else classify_permission_pause_reason(tool_call)
     )
     fx = compute_permission_request_effects(pause_reason_type)
-    await supersede_permission_requests(
-        db,
-        thread_id=thread_id,
-        except_request_id=request_id,
-    )
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        return
+    expectation = thread_write_expectation(thread)
     description_value = payload.get("description")
     # The same declaration the streamed permission frame truncates at, so the
     # row a reload replays from cannot hold less than the operator was shown.
@@ -458,6 +461,55 @@ async def _persist_permission_request(
         else ""
     )
     allowed_options = _option_mappings(payload.get("options"))
+    reservation = await reserve_control_action(
+        db,
+        thread_id=thread_id,
+        action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
+        request_id=request_id,
+        idempotency_key=f"permission-request:{request_id}",
+        payload={"description": description},
+    )
+    if not reservation.payload_matches:
+        await db.rollback()
+        return
+    action = reservation.action
+    action.result_status = ControlActionResultStatus.APPLIED.value
+    if action.dispatch_id is None:
+        await db.rollback()
+        raise RuntimeError("permission-request action has no durable receipt")
+    if (
+        expectation.status is fx.thread_status
+        and expectation.authority.action_type
+        is ControlActionType.PERMISSION_REQUEST_CREATED
+        and expectation.authority.action_receipt_id == action.dispatch_id
+    ):
+        await db.rollback()
+        return
+    if not reservation.created:
+        # A persisted creation receipt proves only that this event was handled
+        # before. Once a newer action owns the run, replaying the old event must
+        # never reinstall its receipt or reopen the old permission pause.
+        await db.rollback()
+        return
+    election = await elect_thread_status(
+        db,
+        thread_id,
+        expectation=expectation,
+        status=fx.thread_status,
+        successor=successor_thread_write_authority(
+            expectation,
+            action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
+            action_receipt_id=action.dispatch_id,
+        ),
+    )
+    if election.outcome is not ThreadStatusElectionOutcome.WON:
+        await db.rollback()
+        return
+    await supersede_permission_requests(
+        db,
+        thread_id=thread_id,
+        except_request_id=request_id,
+    )
     await record_permission_request(
         db,
         request_id=request_id,
@@ -467,16 +519,6 @@ async def _persist_permission_request(
         allowed_options=allowed_options,
         tool_call=tool_call,
     )
-    await create_control_action(
-        db,
-        thread_id=thread_id,
-        action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
-        request_id=request_id,
-        idempotency_key=f"permission-request:{request_id}",
-        payload={"description": description},
-        result_status=ControlActionResultStatus.APPLIED,
-    )
-    await update_thread_status(db, thread_id, fx.thread_status)
     await set_thread_repair_state(
         db,
         thread_id,

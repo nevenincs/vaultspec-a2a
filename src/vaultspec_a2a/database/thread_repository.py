@@ -32,6 +32,7 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from ..thread.errors import NicknameConflictError
+from ..thread.lifecycle_guards import can_delete
 from ..thread.transitions import validate_transition
 from ._helpers import (
     _UNSET,
@@ -57,6 +58,7 @@ __all__ = [
     "ThreadWriteExpectation",
     "create_thread",
     "delete_thread",
+    "elect_thread_deleting",
     "elect_thread_status",
     "get_thread",
     "get_thread_execution_state",
@@ -64,12 +66,12 @@ __all__ = [
     "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",
-    "mark_thread_deleting",
     "normalize_workspace_identity",
     "path_safe_run_id_clause",
     "record_thread_execution_state",
     "set_thread_approval_state",
     "set_thread_repair_state",
+    "successor_thread_write_authority",
     "thread_write_expectation",
     "update_thread_status",
 ]
@@ -126,6 +128,32 @@ def thread_write_expectation(thread: ThreadModel) -> ThreadWriteExpectation:
             action_type=_coerce_control_action_type(thread.writer_action_type),
             action_receipt_id=thread.writer_action_receipt_id,
         ),
+    )
+
+
+def successor_thread_write_authority(
+    expectation: ThreadWriteExpectation,
+    *,
+    action_type: ControlActionType,
+    action_receipt_id: str,
+) -> RunWriteAuthority:
+    """Build the exact next authority from an observed durable receipt."""
+    if not isinstance(expectation, ThreadWriteExpectation):
+        raise TypeError("expectation must be a ThreadWriteExpectation")
+    if not isinstance(action_type, ControlActionType):
+        raise TypeError("action_type must be a ControlActionType")
+    current = expectation.authority
+    same_action = (
+        action_type is current.action_type
+        and action_receipt_id == current.action_receipt_id
+    )
+    return RunWriteAuthority(
+        run_revision=current.run_revision + 1,
+        writer_generation=(
+            current.writer_generation if same_action else current.writer_generation + 1
+        ),
+        action_type=action_type,
+        action_receipt_id=action_receipt_id,
     )
 
 
@@ -430,31 +458,6 @@ async def delete_thread(session: AsyncSession, thread_id: str) -> bool:
     return True
 
 
-async def mark_thread_deleting(
-    session: AsyncSession,
-    thread_id: str,
-) -> ThreadModel | None:
-    """Mark a thread as ``deleting`` for cross-store teardown.
-
-    Deletion is not a lifecycle transition: it is an out-of-band teardown that
-    begins from a settled (terminal or archived) thread and ends in row
-    removal. Routing it through :func:`update_thread_status` would require
-    adding ``deleting`` as a target of the terminal states and so break the
-    invariant that a settled thread only ever advances to ``archived``. This
-    setter therefore writes the sink state directly and clears ``is_active`` so
-    discovery and product reads immediately stop surfacing the thread. The
-    deletion saga is the sole caller and only after eligibility is confirmed.
-    """
-    thread = await session.get(ThreadModel, thread_id)
-    if thread is None:
-        return None
-    thread.status = ThreadStatus.DELETING.value
-    thread.is_active = False
-    thread.updated_at = _utcnow()
-    await session.flush()
-    return thread
-
-
 # Bounds threads.failure_reason so a pathological exception message (or one
 # wrapping a large response body) can never blow up the durable row or the
 # RunStatusResponse it is served through. This is the last-line durable-write
@@ -612,6 +615,85 @@ async def elect_thread_status(
         return ThreadStatusElectionResult(ThreadStatusElectionOutcome.NOT_FOUND)
 
     matching_receipt = await session.scalar(select(receipt_exists))
+    if not matching_receipt:
+        return ThreadStatusElectionResult(
+            ThreadStatusElectionOutcome.RECEIPT_MISMATCH
+        )
+    return ThreadStatusElectionResult(ThreadStatusElectionOutcome.LOST)
+
+
+async def elect_thread_deleting(
+    session: AsyncSession,
+    thread_id: str,
+    *,
+    expectation: ThreadWriteExpectation,
+) -> ThreadStatusElectionResult:
+    """Atomically enter the out-of-band deletion sink from an exact witness.
+
+    Deletion retains the current action identity because it has no control-action
+    receipt of its own.  This narrow operation cannot target any other state and
+    ordinary lifecycle elections still cannot enter or leave ``DELETING``.
+    """
+    if not isinstance(expectation, ThreadWriteExpectation):
+        raise TypeError("expectation must be a ThreadWriteExpectation")
+    eligibility = can_delete(expectation.status.value)
+    if not eligibility.allowed:
+        raise ValueError(eligibility.reason)
+    current = expectation.authority
+    successor = successor_thread_write_authority(
+        expectation,
+        action_type=current.action_type,
+        action_receipt_id=current.action_receipt_id,
+    )
+    statement = (
+        update(ThreadModel)
+        .where(
+            ThreadModel.id == thread_id,
+            ThreadModel.status == expectation.status.value,
+            ThreadModel.run_revision == current.run_revision,
+            ThreadModel.writer_generation == current.writer_generation,
+            ThreadModel.writer_action_type == current.action_type.value,
+            ThreadModel.writer_action_receipt_id == current.action_receipt_id,
+            exists(
+                select(ControlActionModel.id).where(
+                    ControlActionModel.thread_id == thread_id,
+                    ControlActionModel.action_type == current.action_type.value,
+                    ControlActionModel.dispatch_id == current.action_receipt_id,
+                )
+            ),
+        )
+        .values(
+            status=ThreadStatus.DELETING.value,
+            is_active=False,
+            updated_at=_utcnow(),
+            run_revision=successor.run_revision,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    result = cast("CursorResult[object]", await session.execute(statement))
+    if result.rowcount == 1:
+        await session.scalar(
+            select(ThreadModel)
+            .where(ThreadModel.id == thread_id)
+            .execution_options(populate_existing=True)
+        )
+        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.WON)
+    if (
+        await session.scalar(select(ThreadModel.id).where(ThreadModel.id == thread_id))
+        is None
+    ):
+        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.NOT_FOUND)
+    matching_receipt = await session.scalar(
+        select(
+            exists(
+                select(ControlActionModel.id).where(
+                    ControlActionModel.thread_id == thread_id,
+                    ControlActionModel.action_type == current.action_type.value,
+                    ControlActionModel.dispatch_id == current.action_receipt_id,
+                )
+            )
+        )
+    )
     if not matching_receipt:
         return ThreadStatusElectionResult(
             ThreadStatusElectionOutcome.RECEIPT_MISMATCH

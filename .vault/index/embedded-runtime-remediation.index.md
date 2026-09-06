@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6860d98f667a8833bae2216c80a117be17935925e7e4f8d4c7759d568f8f301b'
+body_hash: 'sha256:d009ffa1fa42cd79f120f6c5b2b0aa50bc447719e8fffa4c0a153b35741450b7'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -18,6 +18,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S07]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S08]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S09]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S10]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S76]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S77]]'
   - '[[2026-09-05-embedded-runtime-remediation-W04-P10-S47]]'
@@ -91,6 +92,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S07` - Diagnose the intermittent compilation loop-gap measurement on the named representative host/load and correct the owning warmup path if required without relaxing its existing budget
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S08` - Apply a reviewed locked dependency correction for the Starlette BlockingPortal deprecation and verify the warning disappears without suppression
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S09` - Add atomic expected-state/revision election with durable writer/action identity and test completed-versus-cancelled stale sessions
+- `2026-09-05-embedded-runtime-remediation-W02-P03-S10` - Adopt the atomic election for lifecycle writers that already carry a durable applicable receipt, including initial dispatch, cancellation, direct-control recovery, permission-request projection, archive and atomic deletion-saga entry, with side effects only after the winner
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S76` - Declare durable run revision and writer generation plus action-specific receipt identity without storing credentials or duplicating transcript authority
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S77` - Add the current ownership and receipt schema with upgrade validation; refuse pre-current or unknown-ownership rows as incompatible without backfill, translation, migration-time substitution or execution
 - `2026-09-05-embedded-runtime-remediation-W04-P10-S47` - Conform readiness/drain/shutdown routes and ownership capability handling to the intended consumer generation with fail-closed incompatible attachment

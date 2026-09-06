@@ -133,6 +133,7 @@ from .thread_repository import (
 from .thread_repository import ThreadWriteExpectation as ThreadWriteExpectation
 from .thread_repository import create_thread as create_thread
 from .thread_repository import delete_thread as delete_thread
+from .thread_repository import elect_thread_deleting as elect_thread_deleting
 from .thread_repository import elect_thread_status as elect_thread_status
 from .thread_repository import get_thread as get_thread
 from .thread_repository import (
@@ -146,7 +147,6 @@ from .thread_repository import (
     list_non_terminal_threads as list_non_terminal_threads,
 )
 from .thread_repository import list_threads as list_threads
-from .thread_repository import mark_thread_deleting as mark_thread_deleting
 from .thread_repository import (
     normalize_workspace_identity as normalize_workspace_identity,
 )
@@ -160,6 +160,9 @@ from .thread_repository import (
     set_thread_approval_state as set_thread_approval_state,
 )
 from .thread_repository import set_thread_repair_state as set_thread_repair_state
+from .thread_repository import (
+    successor_thread_write_authority as successor_thread_write_authority,
+)
 from .thread_repository import (
     thread_write_expectation as thread_write_expectation,
 )
@@ -198,6 +201,7 @@ __all__ = [
     "create_control_action",
     "create_thread",
     "delete_thread",
+    "elect_thread_deleting",
     "elect_thread_status",
     "expire_pending_permission_requests",
     "get_artifact",
@@ -226,7 +230,6 @@ __all__ = [
     "mark_control_action_superseded",
     "mark_permission_request_applied",
     "mark_task_complete",
-    "mark_thread_deleting",
     "migration_script_location",
     "normalize_workspace_identity",
     "path_safe_run_id_clause",
@@ -243,6 +246,7 @@ __all__ = [
     "set_thread_approval_state",
     "set_thread_repair_state",
     "settle_control_action_lease",
+    "successor_thread_write_authority",
     "sum_cost_by_agent",
     "sum_cost_by_thread",
     "supersede_permission_requests",

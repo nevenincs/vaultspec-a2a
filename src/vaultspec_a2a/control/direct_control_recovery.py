@@ -11,14 +11,17 @@ from sqlalchemy import select
 
 from ..database import (
     ControlActionModel,
+    ThreadStatusElectionOutcome,
+    elect_thread_status,
     get_permission_request,
     get_thread,
-    update_thread_status,
+    successor_thread_write_authority,
+    thread_write_expectation,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import ControlActionType, InvalidTransitionError, ThreadStatus
 from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
@@ -202,15 +205,49 @@ async def _reconstruct_dispatch(
 async def _restore_requested_state(
     db: AsyncSession,
     action: _StoredAction,
-) -> None:
+    *,
+    action_receipt_id: str,
+) -> bool:
+    thread = await get_thread(db, action.thread_id)
+    if thread is None:
+        return False
+    expectation = thread_write_expectation(thread)
+    action_type = ControlActionType(action.action_type)
+    if action_type is ControlActionType.MESSAGE_FOLLOWUP_REQUESTED:
+        target = ThreadStatus.RUNNING
+    elif action_type is ControlActionType.CANCEL:
+        target = ThreadStatus.CANCELLING
+    else:
+        target = expectation.status
+    if (
+        target is expectation.status
+        and action_type is expectation.authority.action_type
+        and action_receipt_id == expectation.authority.action_receipt_id
+    ):
+        return True
+    try:
+        election = await elect_thread_status(
+            db,
+            action.thread_id,
+            expectation=expectation,
+            status=target,
+            successor=successor_thread_write_authority(
+                expectation,
+                action_type=action_type,
+                action_receipt_id=action_receipt_id,
+            ),
+        )
+    except InvalidTransitionError:
+        return False
+    if election.outcome is not ThreadStatusElectionOutcome.WON:
+        return False
     if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
         await mark_message_followup_requested(db, action.thread_id)
-        await update_thread_status(db, action.thread_id, ThreadStatus.RUNNING)
     elif action.action_type == ControlActionType.CANCEL.value:
         await mark_cancel_requested(db, action.thread_id)
-        await update_thread_status(db, action.thread_id, ThreadStatus.CANCELLING)
     elif action.action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value:
         await mark_permission_response_requested(db, action.thread_id)
+    return True
 
 
 async def redrive_direct_control_actions(
@@ -266,9 +303,6 @@ async def redrive_direct_control_actions(
                 conflicted += 1
                 continue
             if not claim.acquired:
-                if not claim.applied:
-                    await _restore_requested_state(db, action)
-                    await db.commit()
                 deferred += 1
                 continue
             dispatch = await _reconstruct_dispatch(
@@ -303,6 +337,20 @@ async def redrive_direct_control_actions(
                 )
                 refused += 1
                 continue
+            owns_projection = await _restore_requested_state(
+                db,
+                action,
+                action_receipt_id=claim.dispatch_id,
+            )
+            if not owns_projection:
+                await release_definite_non_delivery(
+                    db,
+                    claim,
+                    FailureType.REJECTED,
+                )
+                conflicted += 1
+                continue
+            await db.commit()
             outcome = await safe_dispatch(
                 worker_client,
                 dispatch,
@@ -321,11 +369,9 @@ async def redrive_direct_control_actions(
                     failure_type,
                 )
                 if not released:
-                    await _restore_requested_state(db, action)
                     await db.commit()
                 deferred += 1
                 continue
-            await _restore_requested_state(db, action)
             await db.commit()
             dispatched += 1
 

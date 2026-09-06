@@ -19,6 +19,8 @@ import anyio
 import httpx
 import pytest
 import pytest_asyncio
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -58,8 +60,6 @@ from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
-
-    from fastapi import FastAPI
 
     from ...worker.graph_lifecycle import RegisteredCompiledGraph
 
@@ -532,6 +532,92 @@ async def test_ambiguous_cancel_preserves_durable_cancelling_intent(
     assert action.claim_expires_at is not None
     assert thread is not None
     assert thread.status == ThreadStatus.CANCELLING.value
+
+
+@pytest.mark.asyncio
+async def test_definite_cancel_non_delivery_never_rolls_back_lifecycle_authority(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    thread_id = "definite-cancel-thread"
+    await _running_thread(session_factory, thread_id)
+    app = FastAPI()
+
+    @app.post("/dispatch")
+    async def reject_dispatch() -> JSONResponse:
+        return JSONResponse({"detail": "at capacity"}, status_code=429)
+
+    async with (
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://worker"
+        ) as worker_client,
+        session_factory() as db,
+    ):
+        result = await cancel_thread(
+            db,
+            thread_id=thread_id,
+            idempotency_key="definite-cancel-attempt",
+            circuit_breaker=_circuit_breaker(),
+            worker_spawner=_spawner(),
+            worker_client=worker_client,
+            recursion_limit=25,
+            trace_headers=None,
+        )
+    assert result.cancelled is False
+    assert result.accepted is False
+    assert result.failure_type is FailureType.AT_CAPACITY
+    assert result.thread_status == ThreadStatus.CANCELLING.value
+    async with session_factory() as db:
+        action = await get_control_action_by_idempotency_key(
+            db,
+            thread_id=thread_id,
+            idempotency_key=default_cancel_key(thread_id),
+        )
+        thread = await get_thread(db, thread_id)
+    assert action is not None
+    assert action.claim_token is None
+    assert action.claim_expires_at is None
+    assert thread is not None
+    assert thread.status == ThreadStatus.CANCELLING.value
+    assert thread.run_revision == 1
+    assert thread.writer_action_type == ControlActionType.CANCEL.value
+    assert thread.writer_action_receipt_id == action.dispatch_id
+
+
+@pytest.mark.asyncio
+async def test_terminal_state_before_cancel_prevents_dispatch_reservation(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    thread_id = "terminal-before-cancel"
+    async with session_factory() as db:
+        await create_thread(
+            db,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status=ThreadStatus.COMPLETED,
+        )
+        await db.commit()
+    async with (
+        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
+        session_factory() as db,
+    ):
+        result = await cancel_thread(
+            db,
+            thread_id=thread_id,
+            idempotency_key="too-late",
+            circuit_breaker=_circuit_breaker(),
+            worker_spawner=_spawner("http://127.0.0.1:1"),
+            worker_client=worker_client,
+            recursion_limit=25,
+        )
+    assert result.accepted is False
+    assert result.failure_type is FailureType.TERMINAL
+    async with session_factory() as db:
+        action = await get_control_action_by_idempotency_key(
+            db,
+            thread_id=thread_id,
+            idempotency_key=default_cancel_key(thread_id),
+        )
+    assert action is None
 
 
 @pytest.mark.asyncio

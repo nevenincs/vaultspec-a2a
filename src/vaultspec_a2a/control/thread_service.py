@@ -20,24 +20,28 @@ from ..context.metadata import ThreadMetadata, discover_context_refs, generate_n
 from ..context.preamble import build_context_preamble
 from ..control.dispatch import safe_dispatch
 from ..control.repair_transitions import (
-    apply_dispatch_failure,
+    mark_dispatch_failed,
     mark_ingest_applied,
     mark_ingest_requested,
 )
 from ..database import (
+    ThreadStatusElectionOutcome,
     create_control_action,
     create_thread,
+    elect_thread_status,
     get_artifacts_by_thread,
     get_pending_permission_requests,
     get_thread,
     get_thread_execution_state,
     list_threads,
-    update_thread_status,
+    successor_thread_write_authority,
+    thread_write_expectation,
 )
-from ..database.models import RunWriteAuthority
+from ..database.models import RunWriteAuthority, ThreadModel
 from ..domain_config import domain_config
 from ..graph.nodes.vault_reader import build_initial_vault_index
 from ..ipc.schemas import DispatchRequest, canonical_project_root, to_dispatch_action
+from ..providers.conditions import ProviderCondition
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
@@ -613,21 +617,66 @@ async def create_and_dispatch_thread(
 
     if not outcome.success:
         policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
+        election = None
         if policy.should_mark_failed:
-            await apply_dispatch_failure(
+            expectation = thread_write_expectation(thread)
+            election = await elect_thread_status(
                 db,
                 thread.id,
-                failed_status=ThreadStatus.FAILED,
-                reason=outcome.detail or "Worker dispatch failed",
+                expectation=expectation,
+                status=ThreadStatus.FAILED,
+                successor=successor_thread_write_authority(
+                    expectation,
+                    action_type=ControlActionType.INGEST,
+                    action_receipt_id=action_receipt_id,
+                ),
+                failure_reason=outcome.detail or "Worker dispatch failed",
+                provider_condition=ProviderCondition.UNKNOWN.value,
             )
+            if election.outcome is ThreadStatusElectionOutcome.WON:
+                await mark_dispatch_failed(
+                    db,
+                    thread.id,
+                    reason=outcome.detail or "Worker dispatch failed",
+                )
         await db.commit()
+        current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
+        if current_thread is None:
+            return ThreadCreationResult(
+                thread_id=thread.id,
+                status="",
+                nickname=req.nickname,
+                dispatched=False,
+                error_detail="Thread disappeared while initial dispatch settled",
+                failure_type=FailureType.NOT_FOUND,
+            )
+        if (
+            election is not None
+            and election.outcome is ThreadStatusElectionOutcome.RECEIPT_MISMATCH
+        ):
+            return ThreadCreationResult(
+                thread_id=thread.id,
+                status=current_thread.status,
+                nickname=req.nickname,
+                dispatched=False,
+                error_detail="Initial dispatch receipt no longer matches its action",
+                failure_type=FailureType.INCOMPATIBLE_STATE,
+            )
+        if (
+            election is not None
+            and election.outcome is ThreadStatusElectionOutcome.LOST
+        ):
+            return ThreadCreationResult(
+                thread_id=thread.id,
+                status=current_thread.status,
+                nickname=req.nickname,
+                dispatched=True,
+                error_detail=None,
+                failure_type=None,
+            )
         return ThreadCreationResult(
             thread_id=thread.id,
-            status=(
-                ThreadStatus.FAILED.value
-                if policy.should_mark_failed
-                else thread.status
-            ),
+            status=current_thread.status,
             nickname=req.nickname,
             dispatched=False,
             error_detail=outcome.detail,
@@ -635,13 +684,44 @@ async def create_and_dispatch_thread(
         )
 
     # -- Success ---------------------------------------------------------------
-    await update_thread_status(db, thread.id, ThreadStatus.RUNNING)
-    await mark_ingest_applied(db, thread.id)
+    expectation = thread_write_expectation(thread)
+    election = await elect_thread_status(
+        db,
+        thread.id,
+        expectation=expectation,
+        status=ThreadStatus.RUNNING,
+        successor=successor_thread_write_authority(
+            expectation,
+            action_type=ControlActionType.INGEST,
+            action_receipt_id=action_receipt_id,
+        ),
+    )
+    if election.outcome is ThreadStatusElectionOutcome.WON:
+        await mark_ingest_applied(db, thread.id)
     await db.commit()
+    current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
+    if current_thread is None:
+        return ThreadCreationResult(
+            thread_id=thread.id,
+            status="",
+            nickname=req.nickname,
+            dispatched=True,
+            error_detail="Thread disappeared while initial dispatch settled",
+            failure_type=FailureType.NOT_FOUND,
+        )
+    if election.outcome is ThreadStatusElectionOutcome.RECEIPT_MISMATCH:
+        return ThreadCreationResult(
+            thread_id=thread.id,
+            status=current_thread.status,
+            nickname=req.nickname,
+            dispatched=True,
+            error_detail="Initial dispatch receipt no longer matches its action",
+            failure_type=FailureType.INCOMPATIBLE_STATE,
+        )
 
     return ThreadCreationResult(
         thread_id=thread.id,
-        status=ThreadStatus.RUNNING.value,
+        status=current_thread.status,
         nickname=req.nickname,
         dispatched=True,
         error_detail=None,
@@ -709,7 +789,18 @@ async def delete_thread_service(
             await get_artifacts_by_thread(db, thread_id),
             include_checkpoint=checkpointer is not None,
         )
-        await create_deletion_saga(db, thread_id=thread_id, manifest=manifest)
+        saga = await create_deletion_saga(
+            db,
+            thread_id=thread_id,
+            manifest=manifest,
+        )
+        if saga is None:
+            await db.refresh(thread)
+            if thread.status != ThreadStatus.DELETING.value:
+                return DeleteResult(
+                    deleted=False,
+                    error_detail="Thread state changed before deletion could begin",
+                )
         await db.commit()
 
     return await _run_deletion_saga(db, thread_id, checkpointer=checkpointer)
@@ -789,6 +880,30 @@ async def archive_thread(db: AsyncSession, thread_id: str) -> ArchiveResult:
     if not eligibility.allowed:
         return ArchiveResult(archived=False, error_detail=eligibility.reason)
 
-    await update_thread_status(db, thread_id, ThreadStatus.ARCHIVED)
+    expectation = thread_write_expectation(thread)
+    election = await elect_thread_status(
+        db,
+        thread_id,
+        expectation=expectation,
+        status=ThreadStatus.ARCHIVED,
+        successor=successor_thread_write_authority(
+            expectation,
+            action_type=expectation.authority.action_type,
+            action_receipt_id=expectation.authority.action_receipt_id,
+        ),
+    )
+    if election.outcome is not ThreadStatusElectionOutcome.WON:
+        await db.rollback()
+        await db.refresh(thread)
+        refreshed = can_archive(thread.status)
+        if refreshed.already_archived:
+            return ArchiveResult(archived=True, already_archived=True)
+        return ArchiveResult(
+            archived=False,
+            error_detail=(
+                refreshed.reason
+                or "Thread authority changed during archive election"
+            ),
+        )
     await db.commit()
     return ArchiveResult(archived=True)

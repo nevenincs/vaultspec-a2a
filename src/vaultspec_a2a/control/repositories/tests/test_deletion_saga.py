@@ -36,7 +36,8 @@ from ....control.repositories import (
     serialize_manifest,
     serialize_results,
 )
-from ....database import create_thread, get_thread
+from ....control.thread_service import archive_thread
+from ....database import create_control_action, create_thread, get_thread
 from ....database.models import ThreadDeletionSagaModel
 from ....thread.enums import CleanupKind, ThreadStatus
 
@@ -71,17 +72,75 @@ def _count_saga_rows(thread_id: str):
 
 
 async def _seed_terminal_thread(
-    session_factory: async_sessionmaker[AsyncSession], thread_id: str = "t-del"
+    session_factory: async_sessionmaker[AsyncSession],
+    thread_id: str = "t-del",
+    *,
+    status: ThreadStatus = ThreadStatus.COMPLETED,
 ) -> str:
     async with session_factory() as session:
+        authority = make_test_write_authority()
         await create_thread(
             session,
-            write_authority=make_test_write_authority(),
+            write_authority=authority,
             thread_id=thread_id,
-            status=ThreadStatus.COMPLETED,
+            status=status,
+        )
+        await create_control_action(
+            session,
+            thread_id=thread_id,
+            action_type=authority.action_type,
+            dispatch_id=authority.action_receipt_id,
+            idempotency_key=f"seed:{thread_id}",
         )
         await session.commit()
     return thread_id
+
+
+@pytest.mark.asyncio
+async def test_deletion_refusal_leaves_no_orphan_saga(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    thread_id = await _seed_terminal_thread(
+        session_factory,
+        "t-active-delete",
+        status=ThreadStatus.RUNNING,
+    )
+    async with session_factory() as session:
+        with pytest.raises(ValueError, match="Cannot delete"):
+            await create_deletion_saga(
+                session,
+                thread_id=thread_id,
+                manifest=_manifest(thread_id),
+            )
+        await session.commit()
+    async with session_factory() as session:
+        assert (await session.execute(_count_saga_rows(thread_id))).scalar_one() == 0
+        thread = await get_thread(session, thread_id)
+    assert thread is not None
+    assert thread.status == ThreadStatus.RUNNING.value
+    assert thread.run_revision == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_archive_requests_advance_authority_once(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    thread_id = await _seed_terminal_thread(session_factory, "t-archive-race")
+
+    async def archive_once():
+        async with session_factory() as session:
+            return await archive_thread(session, thread_id)
+
+    first, second = await asyncio.gather(archive_once(), archive_once())
+    assert first.archived is True
+    assert second.archived is True
+    assert sum(result.already_archived for result in (first, second)) == 1
+    async with session_factory() as session:
+        thread = await get_thread(session, thread_id)
+    assert thread is not None
+    assert thread.status == ThreadStatus.ARCHIVED.value
+    assert thread.run_revision == 1
+    assert thread.writer_generation == 1
 
 
 def test_manifest_and_results_round_trip_through_json() -> None:
@@ -122,6 +181,7 @@ async def test_create_transitions_thread_and_captures_manifest(
         )
         await session.commit()
 
+    assert saga is not None
     assert saga.created is True
     assert [item.key for item in saga.manifest] == ["checkpoint", "artifact:a1"]
 
@@ -157,6 +217,8 @@ async def test_create_is_idempotent_and_keeps_the_first_manifest(
         )
         await session.commit()
 
+    assert first is not None
+    assert second is not None
     assert first.created is True
     assert second.created is False
     # The authoritative manifest is the one captured first, not the replay's.

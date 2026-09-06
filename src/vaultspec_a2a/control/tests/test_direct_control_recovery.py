@@ -19,6 +19,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from vaultspec_a2a.tests._write_authority import make_test_write_authority
@@ -30,10 +31,11 @@ from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_thread,
     get_control_action_by_idempotency_key,
+    get_thread,
     record_permission_request,
     record_permission_response_submission,
 )
-from ...database.models import Base
+from ...database.models import Base, ControlActionModel
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.idempotency import default_cancel_key
 from ...worker.app import create_worker_app
@@ -278,6 +280,39 @@ async def test_recovery_dispatches_every_action_when_the_project_is_named(
         admitted = worker_app.state.dispatch_ids
         assert len(admitted) == 3
         assert all(value in admitted for value in dispatch_ids.values())
+
+        async with session_factory() as db:
+            for thread_id, receipt in dispatch_ids.items():
+                thread = await get_thread(db, thread_id)
+                assert thread is not None
+                assert thread.run_revision == 1
+                assert thread.writer_action_receipt_id == receipt
+            await db.execute(
+                update(ControlActionModel).values(
+                    claim_expires_at=datetime.now(UTC) - timedelta(seconds=1)
+                )
+            )
+            await db.commit()
+
+        replay = await redrive_direct_control_actions(
+            session_factory,
+            worker_client=worker_client,
+            circuit_breaker=_circuit_breaker(),
+            worker_spawner=_spawner(),
+            recursion_limit=25,
+            trace_headers=None,
+        )
+        assert replay.dispatched == 3
+        assert len(worker_app.state.dispatch_ids) == 3
+        assert all(
+            value in worker_app.state.dispatch_ids for value in dispatch_ids.values()
+        )
+        async with session_factory() as db:
+            for thread_id, receipt in dispatch_ids.items():
+                thread = await get_thread(db, thread_id)
+                assert thread is not None
+                assert thread.run_revision == 1
+                assert thread.writer_action_receipt_id == receipt
 
 
 @pytest.mark.asyncio

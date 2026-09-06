@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:f6f4dfb9040d73568d095605acc7f1d719792627c82bb2bc4489bb5822f2749b'
+body_hash: 'sha256:2355f5a701d0ec28fa19baa1221102fc059727d3cdb83476968a18e05775a708'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -74,12 +74,13 @@ Remove stale-write and early-completion races while retaining existing state obl
 - [x] `W02.P03.S76` - Declare durable run revision and writer generation plus action-specific receipt identity without storing credentials or duplicating transcript authority; `src/vaultspec_a2a/database/models.py`.
 - [x] `W02.P03.S77` - Add the current ownership and receipt schema with upgrade validation; refuse pre-current or unknown-ownership rows as incompatible without backfill, translation, migration-time substitution or execution; `src/vaultspec_a2a/database/migrations`.
 - [x] `W02.P03.S09` - Add atomic expected-state/revision election with durable writer/action identity and test completed-versus-cancelled stale sessions; `src/vaultspec_a2a/database/thread_repository.py`.
-- [ ] `W02.P03.S10` - Verify every current transitional writer and projection obligation under 2026-08-05-served-capability-contract-plan W04.P07.S22 and W04.P08.S26 adopts the election primitive, including archive and atomic deletion-saga entry, and remove the unconditional lifecycle setter after the final caller migrates; `src/vaultspec_a2a/control, src/vaultspec_a2a/database`.
+- [ ] `W02.P03.S10` - Adopt the atomic election for lifecycle writers that already carry a durable applicable receipt, including initial dispatch, cancellation, direct-control recovery, permission-request projection, archive and atomic deletion-saga entry, with side effects only after the winner; `src/vaultspec_a2a/control, src/vaultspec_a2a/database`.
 - [ ] `W02.P03.S11` - Verify abandoned-run reconciliation under owner W04.P08.S56 and integrate the new atomic election without duplicating its existing generic reconciliation assignment; `abandoned transition dependency`.
 - [ ] `W02.P03.S78` - Declare checkpointed graph-action receipts binding action, payload fingerprint and dispatch identity while retaining existing typed clarification and permission state; `src/vaultspec_a2a/thread/state.py`.
 - [ ] `W02.P03.S12` - Persist request-scoped checkpoint incorporation evidence for graph actions before reporting application, retaining dispatch identity and winning payload fingerprint; use durable cessation or no-op evidence for cancellation without graph incorporation; `src/vaultspec_a2a/worker/executor.py`.
 - [ ] `W02.P03.S13` - Settle application only from the durable receipt and reconcile completion arriving before running has committed; `src/vaultspec_a2a/control/event_handlers.py`.
 - [ ] `W02.P03.S14` - Give durable terminal delivery an independent bounded retry/reconciliation owner so a failed relay cannot strand an otherwise completed run; `src/vaultspec_a2a/control/direct_control_recovery.py`.
+- [ ] `W02.P03.S82` - After recovery, checkpoint incorporation, terminal settlement and durable retry have migrated the remaining writers, prove zero callers and delete the unconditional lifecycle setter plus its export; `src/vaultspec_a2a/database/thread_repository.py, src/vaultspec_a2a/database/__init__.py`.
 
 ### Phase `W02.P04` - Drain ordered accepted work
 

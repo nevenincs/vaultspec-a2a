@@ -28,17 +28,22 @@ from ...control.event_handlers import (
 )
 from ...control.permission_service import permission_response_action_key
 from ...database import (
+    ThreadStatusElectionOutcome,
+    create_control_action,
     create_thread,
+    elect_thread_status,
     get_permission_request,
     record_permission_request,
     record_permission_response_submission,
     set_thread_approval_state,
+    successor_thread_write_authority,
+    thread_write_expectation,
 )
 from ...database.models import ControlActionModel, ThreadModel
 from ...graph.enums import ServerEventType
 from ...streaming.aggregator import EventAggregator
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
-from ...thread.enums import ControlActionType
+from ...thread.enums import ControlActionType, ThreadStatus
 
 
 @pytest.mark.asyncio
@@ -243,6 +248,11 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         payload,
         session_factory=session_factory,
     )
+    await _handle_permission_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
 
     async with session_factory() as session:
         permission = await get_permission_request(session, request_id)
@@ -256,6 +266,96 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         assert thread is not None
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
+        assert thread.run_revision == 1
+        actions = (
+            (
+                await session.execute(
+                    select(ControlActionModel).where(
+                        ControlActionModel.thread_id == thread_id,
+                        ControlActionModel.action_type
+                        == ControlActionType.PERMISSION_REQUEST_CREATED.value,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(actions) == 1
+        assert thread.writer_action_receipt_id == actions[0].dispatch_id
+
+
+@pytest.mark.asyncio
+async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            title="Stale permission replay",
+        )
+        await session.commit()
+        thread_id = thread.id
+    request_id = f"{thread_id}:stale-permission"
+    payload: dict[str, object] = {
+        "type": "permission_request",
+        "request_id": request_id,
+        "description": "Allow the first action?",
+        "options": [
+            {"option_id": "allow", "name": "Allow", "kind": "allow_once"}
+        ],
+        "tool_call": "bash",
+    }
+    await _handle_permission_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        thread = await session.get(ThreadModel, thread_id)
+        assert thread is not None
+        expectation = thread_write_expectation(thread)
+        response = await create_control_action(
+            session,
+            thread_id=thread_id,
+            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+            request_id=request_id,
+            idempotency_key=f"permission-response:{request_id}",
+            payload={"option_id": "allow"},
+        )
+        assert response.dispatch_id is not None
+        election = await elect_thread_status(
+            session,
+            thread_id,
+            expectation=expectation,
+            status=ThreadStatus.RUNNING,
+            successor=successor_thread_write_authority(
+                expectation,
+                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+                action_receipt_id=response.dispatch_id,
+            ),
+        )
+        assert election.outcome is ThreadStatusElectionOutcome.WON
+        await session.commit()
+        expected_revision = thread.run_revision
+        expected_generation = thread.writer_generation
+        expected_receipt = thread.writer_action_receipt_id
+
+    await _handle_permission_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        thread = await session.get(ThreadModel, thread_id)
+    assert thread is not None
+    assert thread.status == ThreadStatus.RUNNING.value
+    assert thread.run_revision == expected_revision
+    assert thread.writer_generation == expected_generation
+    assert thread.writer_action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED
+    assert thread.writer_action_receipt_id == expected_receipt
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:05803ce9dfaea03eb6ab5ba795ebc5ff5c5d551d5cf9096a2d92537645039151'
+body_hash: 'sha256:00fc0616d539d78089e085b85791b5b117cf0c1f6af47f32cff1f14a2f3c7708'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -781,3 +781,9 @@ no deprecated/legacy path was restored, and no new implementation finding was
 surfaced. W01.P02.S05 remains open for formal review; downstream catalog
 P03.S19-P03.S20 and remediation W05.P12.S57 retain assembled external/consumer
 qualification ownership.
+
+### w01-p02-s05-er19-evidence-formal-review | low | PASS
+
+Type: formal evidence review disposition. Evidence-only commit `1daa2ea9e1b2d5aeb726c3f818fc689cee508ecd` has exact parent `c1da77cdcdaa16846be96c76fdaea2cb7206035d`, changes only the two owning audit documents, and passes `git diff --check`. The production ASGI route test keys the parsed response by provider identity, accepts only observed `available` or `unavailable` catalog state for OpenAI and Z.AI, requires catalog/health equality, and validates the corresponding closed payload shape. The v1 DTO bounds reason text, identifiers, entries, controls and provider collections. Both exact registered modes remain independently `not_admitted` and nonselectable regardless of discovery outcome; the current exact-mode inventory and zero-retired-authority guards pass, so no deprecated provider/profile/model authority is restored.
+
+Independent review reran the exact discriminator (one pass), the complete route file (11 passes), and the current-lane plus zero-retired-authority guard set (10 passes); Ruff format/check and Ty pass for the route test. The recorded 34-pass surrounding catalog/selection result is consistent with the already reviewed and closed P01.S11 prerequisite. Full Core reports all 19 checks clean for `embedded-runtime-remediation`. No runtime or test correction is required and no new finding surfaced. S05 is review-passed but remains open for its separate Core lifecycle closure; downstream external and Dashboard qualification remains owned by W05.P12.S57.

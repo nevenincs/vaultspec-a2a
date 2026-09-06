@@ -21,6 +21,8 @@ from typing import Any, cast
 import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
@@ -104,6 +106,19 @@ _HEALTH_DB: Any = Depends(get_db)
 
 # The runtime singletons the readiness probe needs in order to probe at all.
 _HEALTH_PROBE_SINGLETONS = ("worker_client", "circuit_breaker", "worker_spawner")
+
+
+async def _bounded_request_validation_error(
+    _request: Request, exc: Exception
+) -> JSONResponse:
+    """Return typed validation locations without reflecting rejected values."""
+    if not isinstance(exc, RequestValidationError):
+        raise exc
+    errors = [
+        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 
 async def _unarmed_health_aggregate(app: FastAPI, db: AsyncSession) -> dict[str, Any]:
@@ -690,6 +705,7 @@ def create_app(
     app.state.allow_unauthenticated_v1_for_testing = (
         allow_unauthenticated_v1_for_testing
     )
+    app.add_exception_handler(RequestValidationError, _bounded_request_validation_error)
     # The receipt-bound lifecycle ownership capability is only present under the
     # armed desktop profile; unarmed profiles never carry one.
     app.state.lifecycle_capability = None

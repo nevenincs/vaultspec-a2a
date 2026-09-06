@@ -157,30 +157,83 @@ async def test_run_start_refuses_every_retired_selection_surface_before_dispatch
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         current = await _run_fields(client)
-        cases: tuple[tuple[str, tuple[str, ...], str, object], ...] = (
-            ("profile-id", (), "profile_id", "retired-profile"),
-            ("default-profile", (), "default_profile_id", "retired-profile"),
-            ("profile-object", (), "profile", {"id": "retired-profile"}),
-            ("model-profile", (), "model_profile", {"id": "retired-profile"}),
-            ("free-provider", (), "provider", "gemini"),
-            ("free-model", (), "model", "retired-model"),
-            ("nested-profile", ("selection",), "profile_id", "retired-profile"),
-            ("nested-model", ("selection",), "model_name", "retired-model"),
-            ("gemini-provider", ("selection",), "provider_id", "gemini"),
+        cases: tuple[tuple[str, tuple[str, ...], str, object, str, str | None], ...] = (
+            (
+                "profile-id",
+                (),
+                "profile_id",
+                "retired-profile",
+                "retired-profile",
+                None,
+            ),
+            (
+                "default-profile",
+                (),
+                "default_profile_id",
+                "retired-profile",
+                "retired-profile",
+                None,
+            ),
+            (
+                "profile-object",
+                (),
+                "profile",
+                {"id": "retired-profile"},
+                "retired-profile",
+                None,
+            ),
+            (
+                "model-profile",
+                (),
+                "model_profile",
+                {"id": "retired-profile"},
+                "retired-profile",
+                None,
+            ),
+            ("free-provider", (), "provider", "gemini", "gemini", None),
+            ("free-model", (), "model", "retired-model", "retired-model", None),
+            (
+                "nested-profile",
+                ("selection",),
+                "profile_id",
+                "retired-profile",
+                "retired-profile",
+                None,
+            ),
+            (
+                "nested-model",
+                ("selection",),
+                "model_name",
+                "retired-model",
+                "retired-model",
+                None,
+            ),
+            (
+                "gemini-provider",
+                ("selection",),
+                "provider_id",
+                "gemini",
+                "gemini",
+                "selection names an unknown provider execution lane",
+            ),
             (
                 "gemini-mode",
                 ("selection",),
                 "execution_mode",
                 "gemini-cli-acp",
+                "gemini-cli-acp",
+                "selection names an unknown provider execution lane",
             ),
             (
                 "stale-revision",
                 ("selection",),
                 "catalog_revision",
                 "retired-revision",
+                "retired-revision",
+                "selection names a stale catalog revision",
             ),
         )
-        for label, path, field, value in cases:
+        for label, path, field, value, retired_value, domain_reason in cases:
             fields = deepcopy(current)
             target: object = fields
             for key in path:
@@ -199,9 +252,57 @@ async def test_run_start_refuses_every_retired_selection_surface_before_dispatch
                 },
             )
             assert response.status_code == 422, (label, response.text)
-            assert response.json().get("detail"), label
+            detail = response.json()["detail"]
+            if domain_reason is not None:
+                assert detail == domain_reason, label
+            else:
+                assert isinstance(detail, list), label
+                assert any(
+                    item.get("type") == "extra_forbidden"
+                    and item.get("loc") == ["body", *path, field]
+                    for item in detail
+                ), (label, detail)
+            assert retired_value not in response.text, (label, response.text)
 
         assert worker.dispatches == []
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_validation_errors_remain_actionable_without_reflecting_input(
+    session_factory, checkpointer
+) -> None:
+    """The bounded 422 retains type, field location and a safe message."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        fields = await _run_fields(client)
+        selection = cast("dict[str, Any]", fields["selection"])
+        selection["schema_version"] = 2
+        response = await client.post(
+            "/v1/runs",
+            json={
+                "run_id": "invalid-current-schema",
+                "team_preset": _PRESET,
+                "message": "go",
+                **fields,
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": [
+            {
+                "type": "literal_error",
+                "loc": ["body", "selection", "schema_version"],
+                "msg": "Input should be 1",
+            }
+        ]
+    }
+    assert '"input"' not in response.text
+    assert '"ctx"' not in response.text
+    assert worker.dispatches == []
 
 
 @pytest.mark.asyncio(loop_scope="function")

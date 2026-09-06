@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:bafefc1ebaa0e880a06cd319d5352642738aa6457ef26eb37185123fbaf2cf34'
+body_hash: 'sha256:9f8cfa56c40e86040cc8263d7b6eb64dbfa3600594efdd9efdd1dda3a5823f89'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -168,3 +168,8 @@ The subsequent current-input recovery-direct invocation (session 45164) emitted 
 Architecture: DispatchRequest still names a team preset rather than freezing the executable graph/topology and sanctioned step timeout. Persist those accepted runtime controls before deriving an execution deadline; do not infer them from current configuration. Cancellation still lacks durable cessation/no-op proof. S11 still needs worker preflight, event settlement and deferred startup/network dispatch to use the shared checkpoint-first authority; old worker empty-pending-writes and unreadable-checkpoint fallback behavior remains. S13 still trusts raw application/terminal events. S83 still lacks the durable classified retry record, bounded leased scheduler, permanent-refusal election and frozen execution deadline. These are required root corrections, not optional polish.
 
 Verification: S84 must replace historical tests importing the removed auto-committing claim API, old initial input schema and retired startup/abandonment helpers. The current redrive, receipt, recovery and initial-input fixtures are migrated; no whole-suite pass is claimed. Filesystem project existence currently uses a synchronous directory probe; its bounded ownership under slow filesystem failure remains an open liveness discriminator.
+### retired-abandonment-contract | high | resolved in partial S84
+
+The deleted `test_reconciling_abandonment.py` imported the removed read-time abandonment helper and asserted the retired mutable-preset timeout plus global 300-second floor. Recreating that helper would restore invalid recovery authority. Its current requirements are covered by checkpoint-first recovery, startup-only unfinished-execution demotion, and the public fresh-projection terminal-winner discriminator.
+
+A canonical collection-only run after deletion collected 439 current control tests and exited 1 with six remaining collection errors. Every error is a historical test importing the removed auto-committing `claim_control_action` API: direct-control leases, direct recovery, event handlers, verdict loop, verdict subscriber, and live verdict subscriber. This failed collection is the exact S84 queue for the next migration pass. No alias or compatibility helper will be added.

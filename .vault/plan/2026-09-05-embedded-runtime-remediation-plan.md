@@ -25,7 +25,7 @@ related:
   - '[[2026-09-06-embedded-runtime-remediation-codex-native-control-protocol-research]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:b6b1f7e3d3bce602526d0c21be7bfaf6e16d651a7586e8a203584b0587a5e83d'
+body_hash: 'sha256:453be1fad2deb0a502cab8bcd74f17663df7c410af5390d4a3339571946e7923'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -171,6 +171,7 @@ Make discovery, readiness and shutdown satisfy one identified consumer contract.
 - [ ] `W04.P10.S48` - Emit the intended generation's discovery filename, schema, identity and liveness fields and reject stale or foreign-service substitution; `src/vaultspec_a2a/lifecycle/discovery.py`.
 - [x] `W04.P10.S49` - Use cooperative server shutdown with admission closed first and one total deadline covering active work, streams and bounded forced escalation; `src/vaultspec_a2a/api/app.py`.
 - [ ] `W04.P10.S50` - After A2A publishes fixed per-target versioned archives and SHA-256 sidecars, replace Dashboard source checkout/build/commit pinning with version-only fetch-verify-bundle, then qualify the released worker and positive module/MCP paths through the receipt-matched Dashboard launch; `A2A release workflow, Dashboard component lock and scripts/prove_artifact_lifecycle.sh`.
+- [x] `W04.P10.S90` - Remove missing or blank worker-target adoption and refuse unproven incumbents without eviction; `src/vaultspec_a2a/control/worker_management.py`.
 
 ## Wave `W05` - Measure the complete qualification matrix
 

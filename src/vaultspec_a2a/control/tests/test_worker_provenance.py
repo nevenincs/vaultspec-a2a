@@ -130,15 +130,15 @@ async def test_ensure_worker_attaches_to_a_same_gateway_worker() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ensure_worker_adopts_legacy_missing_or_blank_target() -> None:
-    """The public attach path keeps both legacy target forms adoptable."""
-    legacy_without_target: dict[str, object] = {"status": "ok", "service": "worker"}
-    legacy_with_blank_target: dict[str, object] = {
+async def test_ensure_worker_refuses_missing_or_blank_target() -> None:
+    """The public attach path requires explicit current gateway evidence."""
+    without_target: dict[str, object] = {"status": "ok", "service": "worker"}
+    with_blank_target: dict[str, object] = {
         "status": "ok",
         "service": "worker",
         "gateway_url": "",
     }
-    for body in (legacy_without_target, legacy_with_blank_target):
+    for body in (without_target, with_blank_target):
         with _worker_like(body) as (url, port, _log):
             spawner = LazyWorkerSpawner(
                 worker_url=url,
@@ -146,8 +146,24 @@ async def test_ensure_worker_adopts_legacy_missing_or_blank_target() -> None:
                 auto_spawn=False,
             )
             await spawner.ensure_worker()
-        assert spawner.spawned is True
+        assert spawner.spawned is False
         assert spawner.process is None
+
+
+@pytest.mark.asyncio
+async def test_auto_spawn_does_not_evict_a_worker_without_target_evidence() -> None:
+    body: dict[str, object] = {"status": "ok", "service": "worker"}
+    with _worker_like(body) as (url, port, shutdown):
+        spawner = LazyWorkerSpawner(
+            worker_url=url,
+            worker_port=port,
+            auto_spawn=True,
+        )
+        await spawner.ensure_worker()
+
+    assert spawner.spawned is False
+    assert spawner.process is None
+    assert shutdown["called"] is False
 
 
 @pytest.mark.asyncio

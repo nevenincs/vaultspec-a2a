@@ -465,16 +465,12 @@ def _is_indeterminate_probe_failure(exc: BaseException) -> bool:
 
 
 def _same_gateway(worker_target: object, our_gateway: str) -> bool:
-    """Whether a worker's declared heartbeat target is *this* gateway.
-
-    A missing/blank target (an older worker whose ``/health`` predates the
-    ``gateway_url`` field) is treated as a match so the fix never regresses a
-    correctly-wired legacy worker into a needless eviction; only a present,
-    differing target marks a stale orphan.
-    """
-    if not isinstance(worker_target, str) or not worker_target:
-        return True
-    return worker_target.rstrip("/") == our_gateway.rstrip("/")
+    """Whether a worker explicitly declares *this* gateway as its target."""
+    return (
+        isinstance(worker_target, str)
+        and bool(worker_target.strip())
+        and worker_target.rstrip("/") == our_gateway.rstrip("/")
+    )
 
 
 def _classify_worker_body(
@@ -510,20 +506,16 @@ async def worker_ready_and_ours(
     Profile-split enforcement (the authenticated-pairing decision): under the
     ARMED desktop profile the authenticated pairing verdict is the authority -
     only a worker whose reported gateway lifetime and spawn generation classify
-    as ``OWNED`` is adopted; blank, legacy, or foreign evidence fails closed.
-    Unarmed profiles keep the legacy declared-``gateway_url`` comparison so
-    registry- and Compose-managed workers (which legitimately carry no pairing
-    evidence) are not disowned.
+    as ``OWNED`` is adopted; missing, blank, or foreign evidence fails closed.
+    Unarmed profiles require an exact declared ``gateway_url`` match. Registry-
+    and Compose-managed workers publish that current evidence through health.
 
     An occupant that answered but reported nothing readable is not ours under
     either profile. This is the opposite reading from the spawn path, which
     treats the same occupant as a reason NOT to spawn - deliberately so: "some
     process holds this port" and "this process is provably mine" are different
     questions, and the safe answer to the first is the unsafe answer to the
-    second. Only the legacy comparison could get this wrong, since a missing
-    declared target reads as a match by design; an empty body is the absence of
-    evidence rather than a legacy worker's silence, so it is refused before the
-    lenient rule can adopt it.
+    second. Missing, blank and unreadable targets are all absence of evidence.
     """
     probe = await probe_worker_health(worker_url)
     body = probe.body
@@ -679,7 +671,7 @@ async def _spawn_worker(
                 return None
     # Only the Compose and development band profiles probe the port for an
     # already-running same-gateway worker (adopt) or a stale foreign orphan
-    # (evict) before spawning, using the legacy declared-gateway_url signal.
+    # (evict) before spawning, using the exact declared gateway target.
     if not settings.desktop_profile_armed:
         existing = await probe_worker_health(worker_url)
         if existing.healthy:
@@ -690,8 +682,16 @@ async def _spawn_worker(
                     worker_port,
                 )
                 return None
+            declared_target = existing.body.get("gateway_url")
+            if not isinstance(declared_target, str) or not declared_target.strip():
+                logger.error(
+                    "Worker port %d is held by a healthy worker without an exact "
+                    "gateway target — refusing to spawn, adopt, or evict",
+                    worker_port,
+                )
+                return None
             if _same_gateway(
-                existing.body.get("gateway_url"),
+                declared_target,
                 settings.gateway_url,
             ):
                 logger.info(
@@ -709,7 +709,7 @@ async def _spawn_worker(
                 "Worker at %s targets a foreign gateway (%s != %s) — evicting the"
                 " stale orphan before spawning a fresh worker",
                 worker_url,
-                existing.body.get("gateway_url"),
+                declared_target,
                 settings.gateway_url,
             )
             if not await _evict_stale_worker(worker_url, worker_port):

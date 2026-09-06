@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:1c39a3705ad43b154d3b0a4b2132282a80cdf8977f6adf5375e65e38cf7ff537'
+body_hash: 'sha256:6ed0047b0491ff69e35ca5a019a7645a10a748ca9ea836c8ce475d23bd6da17c'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -295,3 +295,8 @@ The correction changes exactly three accepted ADRs, the tool-cores plan, and two
 ### missing-worker-target-adoption | high | open
 
 Control-test collection exposes `test_ensure_worker_adopts_legacy_missing_or_blank_target`, which explicitly approves attachment to a worker whose provenance target is missing or blank. Missing ownership evidence cannot imply compatibility with the current gateway. Remove the production adoption branch and the approving test; retain exact matching-target attachment and foreign or absent-target refusal proofs.
+### missing-worker-target-adoption-resolution | high | resolved by S90
+
+Unarmed worker attachment now requires a nonblank explicit `gateway_url` equal to the current gateway. Missing and blank targets are refused. Automatic spawn also refuses to adopt, evict, or spawn over a healthy incumbent with missing target evidence; only an explicit different target enters the foreign-worker eviction path. The prior approving test is replaced by missing and blank refusal plus no-eviction proof. Exact matching-target attachment remains supported.
+
+Three focused cases passed in 2.47 seconds with natural exit. Ruff and Ty passed. The broader provenance invocation timed out after emitting eight case markers and was reaped, so it is not counted as a pass.

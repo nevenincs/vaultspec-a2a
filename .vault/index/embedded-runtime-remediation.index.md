@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:dd40e3849de3f5aff39b262dfd96adf816343ce0bbaafa7c85364a4910a25684'
+body_hash: 'sha256:d4bc04b6773df72c395d9611478ecef335edc57db3f0c9a4583309a61253c32a'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -40,6 +40,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W03-P08-S81]]'
   - '[[2026-09-05-embedded-runtime-remediation-W04-P10-S47]]'
   - '[[2026-09-05-embedded-runtime-remediation-W04-P10-S49]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W04-P10-S90]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
@@ -161,6 +162,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W03-P08-S81` - Implement the admitted Codex app-server lane's native-control mapping against its verified protocol and session identity, with explicit absent-control refusal, bounded outcomes and no arbitrary RPC escape; keep new claims blocked until effect proof
 - `2026-09-05-embedded-runtime-remediation-W04-P10-S47` - Conform readiness/drain/shutdown routes and ownership capability handling to the intended consumer generation with fail-closed incompatible attachment
 - `2026-09-05-embedded-runtime-remediation-W04-P10-S49` - Use cooperative server shutdown with admission closed first and one total deadline covering active work, streams and bounded forced escalation
+- `2026-09-05-embedded-runtime-remediation-W04-P10-S90` - Remove missing or blank worker-target adoption and refuse unproven incumbents without eviction
 
 ### plan
 

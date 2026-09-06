@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:c8c80d894d590d9bb7564da983f6dd260cb62a6e8cfd54d67838dfef580a44dc'
+body_hash: 'sha256:75a2cd9cce1028c2a281727637da64643b33dd75a4bff2b53ac5ff6f39b38e42'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -224,3 +224,6 @@ Three obligations remain open for current-schema replacement: unavailable active
 ### legacy-worker-adoption-surface | high | open no-legacy violation discovered during collection
 
 The clean collection enumerated `test_ensure_worker_adopts_legacy_missing_or_blank_target`. A supported worker attachment path must not accept missing provenance as an older implied shape. Review the production worker-provenance branch and delete both the adoption behavior and its approving test under the existing no-legacy campaign before qualification.
+### legacy-worker-adoption-surface-resolution | high | resolved by S90
+
+The production comparison now treats missing and blank gateway targets as absent authority. Non-spawning attachment refuses them, and auto-spawn refuses to evict an incumbent whose target cannot be proven. Exact current target attachment remains admitted; explicit foreign targets retain their separately tested refusal and controlled eviction path. Three focused cases passed naturally, with Ruff and Ty clean. The full-file timeout remains recorded as failed verification.

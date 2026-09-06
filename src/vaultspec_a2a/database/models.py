@@ -30,9 +30,11 @@ from sqlalchemy.types import TypeEngine
 
 from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import (
+    RECOVERY_ACTION_TYPES,
     ControlActionResultStatus,
     ControlActionType,
     PermissionRequestStatus,
+    RecoveryCondition,
     RepairStatus,
     TaskQueueStatus,
     ThreadStatus,
@@ -50,6 +52,7 @@ __all__ = [
     "MoneyAmount",
     "PermissionLogModel",
     "PermissionRequestModel",
+    "RecoveryAttemptModel",
     "RunWriteAuthority",
     "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",
@@ -462,6 +465,9 @@ class ThreadModel(Base):
     control_actions: Mapped[list["ControlActionModel"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
+    recovery_attempts: Mapped[list["RecoveryAttemptModel"]] = relationship(
+        back_populates="thread", cascade="all, delete-orphan", lazy="raise"
+    )
     execution_state: Mapped["ThreadExecutionStateModel | None"] = relationship(
         back_populates="thread",
         cascade="all, delete-orphan",
@@ -610,6 +616,100 @@ class ControlActionModel(Base):
 
     thread: Mapped["ThreadModel"] = relationship(
         back_populates="control_actions", lazy="raise"
+    )
+
+
+_RECOVERY_CONDITION_SQL_VALUES = ", ".join(
+    f"'{condition.value}'" for condition in RecoveryCondition
+)
+_RECOVERY_ACTION_SQL_VALUES = ", ".join(
+    f"'{action.value}'" for action in RECOVERY_ACTION_TYPES
+)
+
+
+class RecoveryAttemptModel(Base):
+    """Durable retry schedule for one exact accepted run writer."""
+
+    __tablename__ = "recovery_attempts"
+
+    __table_args__ = (
+        CheckConstraint(
+            "run_revision >= 0",
+            name="ck_recovery_attempts_run_revision_nonnegative",
+        ),
+        CheckConstraint(
+            "writer_generation >= 1",
+            name="ck_recovery_attempts_writer_generation_positive",
+        ),
+        CheckConstraint(
+            "attempt_count >= 1",
+            name="ck_recovery_attempts_attempt_count_positive",
+        ),
+        CheckConstraint(
+            "next_eligible_at >= created_at AND deadline_at > created_at "
+            "AND next_eligible_at <= deadline_at",
+            name="ck_recovery_attempts_schedule_ordered",
+        ),
+        CheckConstraint(
+            "(claim_token IS NULL AND claim_expires_at IS NULL) OR "
+            "(claim_token IS NOT NULL AND claim_expires_at IS NOT NULL)",
+            name="ck_recovery_attempts_claim_complete",
+        ),
+        CheckConstraint(
+            "settled_at IS NULL OR claim_token IS NULL",
+            name="ck_recovery_attempts_settled_unclaimed",
+        ),
+        CheckConstraint(
+            f"condition IN ({_RECOVERY_CONDITION_SQL_VALUES})",
+            name="ck_recovery_attempts_condition_current",
+        ),
+        CheckConstraint(
+            f"action_type IN ({_RECOVERY_ACTION_SQL_VALUES})",
+            name="ck_recovery_attempts_action_type_current",
+        ),
+        CheckConstraint(
+            "length(trim(action_receipt_id)) >= 1 AND length(action_receipt_id) <= 64",
+            name="ck_recovery_attempts_action_receipt_id_bounded",
+        ),
+        UniqueConstraint(
+            "thread_id",
+            "run_revision",
+            "writer_generation",
+            "action_receipt_id",
+            name="uq_recovery_attempts_writer",
+        ),
+        Index(
+            "ix_recovery_attempts_due",
+            "settled_at",
+            "next_eligible_at",
+            "claim_expires_at",
+        ),
+        Index("ix_recovery_attempts_thread_id", "thread_id"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
+    run_revision: Mapped[int] = mapped_column()
+    writer_generation: Mapped[int] = mapped_column()
+    action_type: Mapped[str] = mapped_column(String(32))
+    action_receipt_id: Mapped[str] = mapped_column(String(64))
+    condition: Mapped[str] = mapped_column(String(32))
+    attempt_count: Mapped[int] = mapped_column()
+    next_eligible_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    deadline_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    detail: Mapped[str | None] = mapped_column(Text, default=None)
+    claim_token: Mapped[str | None] = mapped_column(default=None)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), default=None
+    )
+    settled_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=_utcnow, onupdate=_utcnow
+    )
+
+    thread: Mapped["ThreadModel"] = relationship(
+        back_populates="recovery_attempts", lazy="raise"
     )
 
 

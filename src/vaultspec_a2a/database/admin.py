@@ -315,6 +315,7 @@ def _action_restore(name: str, yes: bool) -> None:
 # reported success. An incomplete truncation that announces completion is worse
 # than none, because the operator stops looking.
 _CLEAR_ORDER: tuple[str, ...] = (
+    "recovery_attempts",
     "artifacts",
     "permission_logs",
     "permission_requests",

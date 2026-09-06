@@ -9,6 +9,7 @@ from enum import StrEnum
 __all__ = [
     "ACTIVE_STATUSES",
     "NON_ACTIVE_STATUSES",
+    "RECOVERY_ACTION_TYPES",
     "TERMINAL_STATUSES",
     "TERMINAL_STATUS_VALUES",
     "ApprovalStatus",
@@ -18,6 +19,7 @@ __all__ = [
     "DegradedReason",
     "InvalidTransitionError",
     "PermissionRequestStatus",
+    "RecoveryCondition",
     "RepairStatus",
     "ReplayStatus",
     "TaskQueueStatus",
@@ -73,6 +75,23 @@ class RepairStatus(StrEnum):
     CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
     NEEDS_RECONCILIATION = "needs_reconciliation"
     OPERATOR_INTERVENTION_REQUIRED = "operator_intervention_required"
+
+
+class RecoveryCondition(StrEnum):
+    """Closed reasons a durable recovery attempt needs another decision."""
+
+    CIRCUIT_OPEN = "circuit_open"
+    AT_CAPACITY = "at_capacity"
+    UNREACHABLE = "unreachable"
+    REJECTED = "rejected"
+    INCOMPATIBLE_STATE = "incompatible_state"
+    NO_ACTIVE_PROJECT = "no_active_project"
+    CREDENTIALS_REQUIRED = "credentials_required"
+    DEADLINE_EXCEEDED = "deadline_exceeded"
+    NOT_FOUND = "not_found"
+    TERMINAL = "terminal"
+    INPUT_REQUIRED = "input_required"
+    CONFLICT = "conflict"
 
 
 class ReplayStatus(StrEnum):
@@ -175,6 +194,15 @@ class ControlActionType(StrEnum):
     MESSAGE_FOLLOWUP_APPLIED = "message_followup_applied"
     REPAIR_STARTED = "repair_started"
     REPAIR_FINISHED = "repair_finished"
+
+
+RECOVERY_ACTION_TYPES: tuple[ControlActionType, ...] = (
+    ControlActionType.INGEST,
+    ControlActionType.RESUME,
+    ControlActionType.CANCEL,
+    ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+    ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+)
 
 
 class ControlActionResultStatus(StrEnum):

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:8bd3030ae8454580a0fa3270bc6daf8b16ae9dae0333f80072bba5fc77584bc6'
+body_hash: 'sha256:a50a51cb8689e7be6170ca6089302dc73a29b5510e2956ce006bc9a8e9512aab'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -476,3 +476,31 @@ typed, non-disclosing refusal. These evidence findings are owned by catalog
 P01.S11; remediation W01.P02.S05 remains blocked. The separately queued RAG
 version drift and cold-catalog shutdown timeout remain correctly classified
 MEDIUM under W01.P02.S06.
+### p01-s11-validation-error-input-reflection | medium | resolved
+
+Type: runtime security and response disclosure. Tightening the P01.S11 retired
+input discriminator exposed that FastAPI's default request-validation response
+returned the rejected caller value in each error object's `input` field. A
+retired provider, model or profile value was therefore refused before dispatch
+but reflected through the public 422 response, violating the no-disclosure
+contract. The gateway now owns a bounded `RequestValidationError` handler that
+retains the actionable validation `type`, field `loc` and safe `msg` while
+removing `input` and `ctx`. Real loopback tests prove exact typed field errors,
+exact bounded stale/domain reasons, absence of every submitted retired value,
+and preservation of actionable current-schema validation. Resolved in the
+P01.S11 correction following `ba9f70bd`; formal re-review remains required.
+
+### p01-s11-correction-formal-rereview | high | FAIL - complete frozen identity remains unproven
+
+Type: prerequisite implementation review disposition. A2A correction
+`550f26fc944182eca92d5afe007f925dd3e9d388` resolves the prior fake-worker and
+validation-disclosure findings: restart now crosses a production child gateway,
+auto-spawned worker, real loopback and Executor, while the global 422 handler
+retains OpenAPI-declared actionable fields and removes reflected rejected values.
+However, the restart discriminator samples provider, mode, model, controls and
+revision rather than comparing the full frozen JSON/digest or binding that exact
+complete assignment to production-worker consumption. Catalog P01.S11 and
+remediation W01.P02.S05 remain blocked by this HIGH evidence gap. An initial
+worker-health ReadTimeout failure followed by a clean 61.71-second rerun after
+concurrent live-process cleanup remains owned by the queued W01.P02.S06
+resource-lifecycle work.

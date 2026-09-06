@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:35c8bbe9bcdb96b425b75ab49426b7aca2368bb6a1462e4211754b11960f6966'
+body_hash: 'sha256:6c02ec62fcad713af0f256c4b80603ec1e5dd8ef4fdef9ecef8733434d558e49'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -267,3 +267,75 @@ correctly classified as MEDIUM, owned by remediation W01.P02.S06, and do not
 invalidate the passing S11 behavior subset. The HIGH production-restart gap and
 MEDIUM refusal-typing assertion gap prevent P01.S11 closure. Keep S11 and
 remediation W01.P02.S05 open pending correction and formal re-review.
+### p01-s11-validation-error-input-reflection | medium | resolved
+
+Type: runtime security and response disclosure. Tightening the P01.S11 retired
+input discriminator exposed that FastAPI's default request-validation response
+returned the rejected caller value in each error object's `input` field. A
+retired provider, model or profile value was therefore refused before dispatch
+but reflected through the public 422 response, violating the no-disclosure
+contract. The gateway now owns a bounded `RequestValidationError` handler that
+retains the actionable validation `type`, field `loc` and safe `msg` while
+removing `input` and `ctx`. Real loopback tests prove exact typed field errors,
+exact bounded stale/domain reasons, absence of every submitted retired value,
+and preservation of actionable current-schema validation. Resolved in the
+P01.S11 correction following `ba9f70bd`; formal re-review remains required.
+
+### p01-s11-production-worker-boundary | high | resolved
+
+Type: behavioral evidence completeness. Correction
+`550f26fc944182eca92d5afe007f925dd3e9d388` replaces the minimal
+`ASGITransport` receiver on the positive restart path with a child production
+gateway, its lazily auto-spawned production worker, real loopback HTTP, seated
+durable SQLite state and the production Executor. A seeded schema-v1 run with a
+revision absent from the live catalog reaches completion and worker-produced
+history under its frozen deterministic lane. The prior production-boundary HIGH
+is resolved.
+
+### p01-s11-validation-error-contract | medium | resolved
+
+Type: runtime security and response compatibility. The bounded
+`RequestValidationError` handler removes only Pydantic's reflected `input` and
+`ctx`, retains actionable `type`, `loc` and `msg`, and matches the fields declared
+by the OpenAPI validation-error schema. Direct loopback assertions cover each
+retired request field, exact stale/unknown-lane domain reasons, absence of the
+submitted retired values, and a current schema-version error. No handler-wide
+compatibility or serialization regression was found. The prior refusal-typing
+MEDIUM is resolved.
+
+### p01-s11-full-frozen-identity-is-sampled-not-compared | high | open
+
+Type: replay and restart evidence integrity. Status: review-blocking for P01.S11
+at `550f26fc944182eca92d5afe007f925dd3e9d388`. The real-process test checks each
+role's provider, execution mode, model, controls and catalog revision from the
+status disclosure, then checks only provider and model in worker-produced
+history. It never compares the complete persisted/disclosed frozen selection or
+its digest with the seeded record, and it does not expose the exact assignment
+accepted by the production worker. The test can remain green if entry IDs,
+display identities, provenance, defaulted-control identity, roles, fallbacks or
+digest drift; its deterministic lane also has empty controls, so dropping a
+non-empty control would not discriminate. Owner: P01.S11. Assert full canonical
+frozen-assignment JSON and digest equality before and after recovery and bind
+that exact complete assignment to production-worker consumption, using a
+non-vacuous controlled lane where necessary, without a recording fake or patch.
+
+### p01-s11-correction-formal-rereview | high | FAIL - complete frozen identity is not proven
+
+Type: formal implementation review disposition. The correction has exact parent
+`a93ab85292667e5c170df20914059d8790434f8c`, changes the gateway validation
+handler and two S11 test paths, and resolves both preceding findings at their
+reported production-process and typed-error boundaries. The source still meets
+the current-only catalog contract; no runtime selection, restart or global
+validation-response regression was found. The new full-identity HIGH prevents
+S11 closure.
+
+The four-test correction selection first reproduced the queued resource-lifecycle
+class: after a worker health `ReadTimeout`, the seeded run remained reconciling
+and the discriminator failed in 158.88 seconds. After concurrent Dashboard live
+processes were stopped, the exact discriminator passed in 61.71 seconds; the
+other three correction tests passed. This intermittent host/process contention
+remains MEDIUM under remediation W01.P02.S06 and does not replace the separate
+exactness blocker. The recorded broader 136-pass, OpenAPI six-pass, Ruff,
+format, Ty and diff evidence is consistent with independent static checks;
+feature Core checks have zero diagnostics. Keep P01.S11 and remediation
+W01.P02.S05 open pending exact-identity correction and formal re-review.

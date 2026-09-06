@@ -12,11 +12,24 @@ from sqlalchemy import select
 
 from ..database import (
     ControlActionModel,
+    ThreadModel,
+    ThreadStatusElectionOutcome,
+    elect_thread_status,
+    get_control_action_by_dispatch_id,
     get_thread,
+    mark_control_action_applied,
+    set_thread_repair_state,
+    successor_thread_write_authority,
     thread_write_expectation,
 )
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import (
+    NON_ACTIVE_STATUSES,
+    ControlActionResultStatus,
+    ControlActionType,
+    RepairStatus,
+    ThreadStatus,
+)
 from .accepted_input import (
     AcceptedActionInput,
     ActorCredentialsRequiredError,
@@ -162,6 +175,64 @@ async def _restore_requested_state(
     )
 
 
+async def _settle_permanent_refusal(
+    db: AsyncSession,
+    action: _StoredAction,
+    refusal: _Refusal,
+) -> bool:
+    """Quarantine one impossible accepted action under exact current authority."""
+    thread = await db.scalar(
+        select(ThreadModel)
+        .where(ThreadModel.id == action.thread_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    row = await get_control_action_by_dispatch_id(
+        db, thread_id=action.thread_id, dispatch_id=action.dispatch_id
+    )
+    if (
+        thread is None
+        or row is None
+        or ThreadStatus(thread.status) in NON_ACTIVE_STATUSES
+    ):
+        return False
+    expectation = thread_write_expectation(thread)
+    action_type = ControlActionType(action.action_type)
+    if (
+        expectation.authority.action_type is not action_type
+        or expectation.authority.action_receipt_id != action.dispatch_id
+    ):
+        return False
+    if expectation.status is not ThreadStatus.RECONCILING:
+        election = await elect_thread_status(
+            db,
+            action.thread_id,
+            expectation=expectation,
+            status=ThreadStatus.RECONCILING,
+            successor=successor_thread_write_authority(
+                expectation,
+                action_type=action_type,
+                action_receipt_id=action.dispatch_id,
+            ),
+        )
+        if election.outcome is not ThreadStatusElectionOutcome.WON:
+            return False
+    await mark_control_action_applied(
+        db,
+        row.id,
+        result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
+    )
+    await set_thread_repair_state(
+        db,
+        action.thread_id,
+        repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+        repair_reason=f"{refusal.failure_type.value}: {refusal.reason}",
+        execution_readiness=RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    )
+    await db.commit()
+    return True
+
+
 async def redrive_direct_control_actions(
     session_factory: async_sessionmaker[AsyncSession],
     *,
@@ -242,8 +313,11 @@ async def redrive_direct_control_actions(
                         "failure_type": dispatch.failure_type.value,
                     },
                 )
-                await db.rollback()
-                refused += 1
+                if await _settle_permanent_refusal(db, action, dispatch):
+                    refused += 1
+                else:
+                    await db.rollback()
+                    conflicted += 1
                 continue
             owns_projection = await _restore_requested_state(
                 db,

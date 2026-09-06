@@ -17,6 +17,7 @@ from ...database import (
     create_control_action,
     create_thread,
     elect_thread_status,
+    get_control_action_by_dispatch_id,
     get_thread,
     thread_write_expectation,
 )
@@ -25,7 +26,12 @@ from ...database.session import configure_sqlite_transactions
 from ...database.thread_repository import ThreadStatusElectionOutcome
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    RepairStatus,
+    ThreadStatus,
+)
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ..accepted_input import freeze_accepted_input
 from ..circuit_breaker import WorkerCircuitBreaker
@@ -260,6 +266,27 @@ async def test_unavailable_project_refuses_graph_action_but_allows_cancel(
     assert summary.dispatched == 1
     assert summary.refused == 1
     assert [item["dispatch_id"] for item in received] == ["cancel-stable"]
+    async with sessions() as db:
+        refused_action = await get_control_action_by_dispatch_id(
+            db,
+            thread_id=graph_case.thread_id,
+            dispatch_id=graph_case.dispatch.dispatch_id,
+        )
+        refused_thread = await get_thread(db, graph_case.thread_id)
+    assert refused_action is not None
+    assert refused_action.applied_at is not None
+    assert (
+        refused_action.result_status
+        == ControlActionResultStatus.REJECTED_INVALID_STATE.value
+    )
+    assert refused_thread is not None
+    assert refused_thread.status == ThreadStatus.RECONCILING.value
+    assert (
+        refused_thread.repair_status
+        == RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+    )
+    assert refused_thread.repair_reason is not None
+    assert refused_thread.repair_reason.startswith("no_active_project:")
 
 
 @pytest.mark.asyncio
@@ -292,9 +319,7 @@ async def test_older_accepted_action_loses_to_newer_exact_authority(
             old.thread_id,
             expectation=expectation,
             status=ThreadStatus.CANCELLING,
-            successor=RunWriteAuthority(
-                1, 2, ControlActionType.CANCEL, "newer-cancel"
-            ),
+            successor=RunWriteAuthority(1, 2, ControlActionType.CANCEL, "newer-cancel"),
         )
         assert elected.outcome is ThreadStatusElectionOutcome.WON
         await db.commit()

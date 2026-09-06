@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:614f0b5a274007a7e16db865366f45fc6b5f63385f2e52a400e4df02046b5be7'
+body_hash: 'sha256:66c012d697da297da4bb3e0df0a769a101660ec8483cb6f554108c0cf27de44b'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -310,3 +310,8 @@ The failed-checkpoint replay discriminator remains HIGH S84 work because it stil
 ### s13-terminal-authority-closure | high | resolved
 
 S13 is closed after current executor runtime/backstop production proof. Bare application and terminal notifications have no lifecycle authority. Exact incorporated graph receipts settle application; immutable completion receipts settle success; cancellation cessation/no-active evidence settles cancellation; and classified graph-failure evidence settles failure. Each consumer revalidates or elects the exact current durable writer before committing dependent effects. S14/S83 own delivery retry, and S84 owns the remaining retired executor checkpoint/cache fixtures.
+### permanent-recovery-refusal-quarantine | high | immediate retry loop resolved; S83 scheduler open
+
+Direct-control recovery no longer rolls back an acquired claim when complete current accepted input cannot be reconstructed. Under a locked exact current thread/action witness it elects RECONCILING when necessary, settles the action as `rejected_invalid_state`, and projects `operator_intervention_required` with the typed refusal and reason. Newer authority or a terminal row wins without mutation. The impossible action leaves the unapplied scan instead of consuming every recovery pass forever.
+
+Formal review resolves the HIGH permanent-refusal retry loop. HIGH S83 work remains for a classified durable attempt row carrying attempt count, next eligibility and run-derived deadline, plus an ordinary-operation leased drain. The refusal classification currently survives in the thread repair reason while the action result uses the generic closed rejection status; the attempt schema must make classification independently queryable. The complete current recovery module passed three cases in 21.63 seconds, and the strengthened unavailable-project case passed in 5.27 seconds. Focused Ruff and Ty pass.

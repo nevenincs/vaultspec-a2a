@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:ffd9be0f6773b9d1b58decb6af7b93f3a024535553de7be202b81cdb3eb3fdc9'
+body_hash: 'sha256:28c1bbf2b14a51369165205c7ddf1e839effa4bcab35a49774b97076307556c8'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -647,3 +647,16 @@ Real held-SQLite, endpoint 429, cancellation, timeout, high-volume terminal,
 durable late-reentry and same/distinct-key concurrency controls pass. No retired
 state is parsed, reflected, migrated or dispatched. Owner remains P01.S11;
 remediation W01.P02.S05 and S11 stay open until formal re-review.
+
+### p01-s11-bounded-lifecycle-correction-formal-rereview | high | FAIL
+
+Type: remediation prerequisite review disposition. Catalog correction
+`3f5ef6e7d401506fb9a5ee3fb471162af6e8fe91` resolves the retired-root,
+precompile deadline, terminal identity retention and exact-key compile-flight
+findings, and its focused evidence passes. One HIGH capacity-ownership race still
+blocks P01.S11 and remediation W01.P02.S05: a settled dispatch releases its plain
+thread-id reservation in `_mark_ingest_done` and again in the outer handler
+`finally`, so an intervening new dispatch's reservation can be removed by the
+old owner. Require one owned/tokenized or single-site release invariant and an
+orchestrated A-terminal/B-reserve/A-finally discriminator across endpoint and
+direct paths. No remediation row is closed by this audit update.

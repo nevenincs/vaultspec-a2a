@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:038f316431bd2ecd0376b38ed76b2308529bf7ff38498dc887f697dc2d455364'
+body_hash: 'sha256:3ba4aa20f9e0f1b85a40b297788ee06e104c43dfeb082bb90eed67a7939428d8'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -707,3 +707,54 @@ executor and state-projection suite passes 145 tests; its new concurrency and
 lifecycle subset passes 32 tests. The only warning is the already queued
 Starlette `BlockingPortal` alias deprecation. P01.S11 remains open for independent
 formal review.
+
+### p01-s11-capacity-release-has-a-thread-id-aba-race | high | open
+
+Type: concurrency admission and reservation ownership. Endpoint and direct
+entry now reserve capacity before checkpoint or compile work, but the reservation
+is a plain thread-id set entry and one successful dispatch releases it twice.
+`_mark_ingest_done` discards the entry during settlement, then
+`handle_reserved_dispatch` unconditionally discards the same thread id again in
+its outer `finally`. A new dispatch can reserve the same thread between those two
+release sites; the older dispatch's final release then removes the new owner's
+permit. Capacity becomes under-counted and a third same-thread or over-capacity
+dispatch can be admitted while the second is live.
+
+Independent review reproduced the exact ABA sequence with production reservation
+methods and a controlled real Executor task: A reserved and settled, B reserved
+while A remained inside its handler, and A's final release changed the active
+count from one to zero. The committed tests verify ordinary timeout/cancellation
+cleanup but do not interleave a new owner between the two releases.
+
+Ownership: P01.S11. Give each admitted dispatch an opaque reservation token or
+generation and release only on matching ownership, or establish one exclusive
+release site after all settlement work. A terminal cleanup must never release a
+newer dispatch's capacity. Add an orchestrated A-terminal/B-reserve/A-finally
+control proving B remains counted and blocks a third same-thread dispatch, plus
+completion, failure, timeout, cancellation and endpoint/direct variants.
+
+### p01-s11-bounded-authority-lifecycle-formal-rereview | high | FAIL
+
+Type: formal implementation review disposition. Exact correction
+`3f5ef6e7d401506fb9a5ee3fb471162af6e8fe91`, parent
+`6c3e6fcbb3cf62b14de06e5de206bcbb2e4616a6`, resolves the four prior findings in
+their direct paths. The complete six-key retired root set is checked before the
+current freeze and returns a bounded non-reflecting refusal with zero worker
+contact. Endpoint and direct ingest/resume entry reserve configured capacity
+before checkpoint and graph-lock work, and preflight plus assignment binding
+share one total checkpoint-read deadline. Timeout and cancellation clean the
+thread/key lock reference counts. Terminal emission precedes thread identity
+cleanup, interrupted runs retain it, shared graph cache entries survive, and
+high-volume terminal traffic leaves no per-thread binding. Exact four-element
+cache keys now single-flight across threads with reference-count cleanup, while
+different assignment digests compile independently. No provider/profile default,
+translation, migration or legacy execution authority was restored.
+
+The new HIGH ABA finding above means capacity ownership is not yet atomic across
+settlement and subsequent dispatch, so P01.S11 and remediation W01.P02.S05 remain
+blocked. Independent review passed 139 authority, redispatch, cache, worker,
+endpoint and timeout tests in 28.41 seconds and reproduced the race separately.
+The committed 145 focused and 585 expanded results, eight known server-profile
+environment failures, six OpenAPI checks and static/Core evidence are consistent
+with the reviewed positive paths. S11 stays open; this review changes no runtime
+or plan row.

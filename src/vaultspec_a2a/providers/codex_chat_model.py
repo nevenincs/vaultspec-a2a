@@ -166,6 +166,7 @@ class _CodexProtocolError(RuntimeError):
         *,
         condition: ProviderCondition = ProviderCondition.UNKNOWN,
         will_retry: bool | None = None,
+        effects_may_have_occurred: bool = False,
     ) -> None:
         """Initialize the protocol failure.
 
@@ -180,11 +181,14 @@ class _CodexProtocolError(RuntimeError):
                 a stated ``False``: only the notification that carries the flag
                 can answer, and inferring it elsewhere is exactly the guess this
                 field exists to replace.
+            effects_may_have_occurred: Whether action activity preceded the
+                failure, making a fresh turn unsafe to replay blindly.
         """
         super().__init__(message)
         self.message = message
         self.condition = condition
         self.will_retry = will_retry
+        self.effects_may_have_occurred = effects_may_have_occurred
 
 
 def _response_error_message(error: JsonValue) -> str:
@@ -320,6 +324,9 @@ def _carry_condition(
         failure.message,
         condition=observed.condition,
         will_retry=failure.will_retry,
+        effects_may_have_occurred=(
+            failure.effects_may_have_occurred or observed.effects_may_have_occurred
+        ),
     )
 
 
@@ -1111,6 +1118,7 @@ class CodexChatModel(BaseChatModel):
         # completion rather than per frame, because chunk addition SUMS usage
         # metadata and would otherwise multiply-count the same tokens.
         usage: UsageMetadata | None = None
+        effects_may_have_occurred = False
         while True:
             try:
                 message = await asyncio.wait_for(
@@ -1124,6 +1132,7 @@ class CodexChatModel(BaseChatModel):
                     # rather than a bare "stream ended", which describes the
                     # transport and not the failure the operator is chasing.
                     if deferred is not None:
+                        deferred.effects_may_have_occurred |= effects_may_have_occurred
                         raise _carry_condition(deferred, None)
                     # Otherwise reuse the SAME diagnostic the request path
                     # builds for an early exit: the child's real status and its
@@ -1136,6 +1145,7 @@ class CodexChatModel(BaseChatModel):
                 # told us why it was struggling. Reporting the silence instead
                 # would replace a typed, actionable refusal with a bare timeout.
                 if deferred is not None:
+                    deferred.effects_may_have_occurred |= effects_may_have_occurred
                     raise deferred from None
                 raise
             # A supervised rung that suspended the graph did so to ask a human,
@@ -1156,16 +1166,24 @@ class CodexChatModel(BaseChatModel):
                 delta = params.get("delta")
                 if isinstance(delta, str) and delta:
                     yield ChatGenerationChunk(message=AIMessageChunk(content=delta))
+            elif method == "item/started":
+                if params.get("threadId") not in (None, thread_id):
+                    continue
+                item = lenient_json_object(params.get("item"))
+                if item.get("type") in _ACTION_ITEM_TYPES:
+                    effects_may_have_occurred = True
             elif method == "item/completed":
                 if params.get("threadId") not in (None, thread_id):
                     continue
                 action = _completed_action_chunk(params)
                 if action is not None:
+                    effects_may_have_occurred = True
                     yield action
             elif method == "error":
                 failure = _turn_failure(
                     params.get("error"), will_retry=params.get("willRetry")
                 )
+                failure.effects_may_have_occurred = effects_may_have_occurred
                 if failure.will_retry:
                     # The lane stated it is about to try again, so this frame
                     # announces an attempt rather than an outcome. Raising here
@@ -1206,7 +1224,9 @@ class CodexChatModel(BaseChatModel):
                 )
                 status = turn.get("status")
                 if status != "completed":
-                    raise _carry_condition(_failed_turn_error(turn, status), deferred)
+                    failure = _failed_turn_error(turn, status)
+                    failure.effects_may_have_occurred = effects_may_have_occurred
+                    raise _carry_condition(failure, deferred)
                 if usage is not None:
                     # Empty content so the accumulated message text is unchanged;
                     # this frame exists only to carry the turn's accounting.

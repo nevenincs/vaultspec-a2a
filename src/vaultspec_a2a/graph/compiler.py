@@ -271,6 +271,10 @@ def _worker_retry_on(exc: Exception) -> bool:
         cause = exc.__cause__
         if cause is None:
             return False
+        # Tool/action activity can mutate the world even when no text reached
+        # the client. A fresh model turn cannot prove that replay is harmless.
+        if getattr(cause, "effects_may_have_occurred", False) is True:
+            return False
         if isinstance(cause, _NO_RETRY_EXCEPTIONS):
             return False
         return _retry_verdict(cause)
@@ -278,8 +282,19 @@ def _worker_retry_on(exc: Exception) -> bool:
     return _retry_verdict(exc)
 
 
-#: RetryPolicy applied to every worker and supervisor node (T05).
-_NODE_RETRY_POLICY = RetryPolicy(retry_on=_worker_retry_on)
+#: RetryPolicy applied to every worker and supervisor node (T05). Every timing
+#: field is explicit so a LangGraph dependency update cannot silently widen the
+#: number of attempts or the elapsed retry budget. The served ACP wire exposes
+#: no retry delay and Codex exposes only ``willRetry``, so there is no provider
+#: duration to merge into this fixed local schedule.
+_NODE_RETRY_POLICY = RetryPolicy(
+    initial_interval=0.5,
+    backoff_factor=2.0,
+    max_interval=1.0,
+    max_attempts=3,
+    jitter=False,
+    retry_on=_worker_retry_on,
+)
 
 
 def _resolve_model_for_worker(

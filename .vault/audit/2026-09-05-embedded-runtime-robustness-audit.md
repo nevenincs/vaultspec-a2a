@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:de2614325f34ea05e2c187464e1ec3c25e6e26af6b1b59f92ce11946739f93a2'
+body_hash: 'sha256:4f79d343b3e00f6ae583fe10ad2862385cbe5e2677dd77235c1a8fb01c33f3cf'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -108,7 +108,7 @@ FAIL means at least one specified requirement is contradicted; it does not imply
 | A17 | FAIL | M06 / ER07 required facts and tool associations lost in prompt compaction; native P behavior unproven |
 | A18 | NOT MEASURED | No native compaction queue/cancel/crash drill |
 | A19 | FAIL | M08 / ER12 known setup condition discarded; full P fault matrix unmeasured |
-| A20 | PARTIAL | ER26/ER27 are related breaker findings; frozen retry/delay/failover assertions are not fully measured or directly disproved |
+| A20 | PARTIAL | W03.P07.S34 proves local condition attempts, a fixed elapsed bound and no replay after observed output/effect uncertainty; supported wires expose no retry duration; ER26/ER27 plus external-provider/failover qualification remain |
 | A21 | PARTIAL | M01 status behavior and source readiness ownership; five-boundary failure/recovery timing unmeasured |
 | A22 | FAIL | M01 terminal reconnect works; ER06 attachment race and missing overflow-gap signal remain |
 | A23 | FAIL | M03/M04 and ER01/ER02 violate settlement and terminal consistency |

@@ -14,7 +14,7 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel
@@ -47,6 +47,8 @@ from ..factory import (
 from ..provider_readiness import probe_provider_readiness
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ...conftest import ExternalPrerequisiteRule
     from .._acp_types import PermissionCallback
     from .._json_contract import JsonObject
@@ -551,7 +553,8 @@ def test_factory_creates_codex_chat_model() -> None:
 def test_factory_codex_requires_an_exact_catalog_model() -> None:
     """The repository does not invent a Codex default model id."""
     with pytest.raises(TypeError, match="model"):
-        ProviderFactory().create(Provider.CODEX)
+        create = cast("Callable[..., object]", ProviderFactory().create)
+        create(Provider.CODEX)
 
 
 def test_codex_output_message_accepts_name_assignment() -> None:
@@ -850,6 +853,29 @@ async def test_an_unannounced_error_still_ends_the_turn_immediately() -> None:
     finally:
         await client.aclose()
     assert caught.value.condition is ProviderCondition.UNAUTHENTICATED
+
+
+@pytest.mark.asyncio
+async def test_action_started_before_failure_marks_effects_uncertain() -> None:
+    client = await _notifier_client(
+        [
+            {
+                "method": "item/started",
+                "params": {
+                    "threadId": "thread-1",
+                    "item": {"id": "cmd-1", "type": "commandExecution"},
+                },
+            },
+            _error_frame("provider overloaded", 429, will_retry=False),
+        ]
+    )
+    try:
+        with pytest.raises(_CodexProtocolError) as caught:
+            await _drain(client)
+    finally:
+        await client.aclose()
+    assert caught.value.condition is ProviderCondition.THROTTLED
+    assert caught.value.effects_may_have_occurred is True
 
 
 @pytest.mark.asyncio

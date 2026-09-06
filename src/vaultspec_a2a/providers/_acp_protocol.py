@@ -45,6 +45,10 @@ _CAPABILITY_REQUIREMENTS: dict[str, str] = {
     # client->server request.  No clientCapability flag governs it.
 }
 
+_EFFECTFUL_SERVER_METHODS = frozenset(
+    {"fs/write_text_file", "terminal/create", "terminal/kill"}
+)
+
 
 def _json_string(value: JsonValue | None, *, default: str = "") -> str:
     """Return one protocol string, falling back for malformed fields."""
@@ -234,6 +238,8 @@ async def handle_server_rpc(
 
     handler = rpc_handler_map.get(method)
     if handler is not None:
+        if method in _EFFECTFUL_SERVER_METHODS:
+            ctx.effects_may_have_occurred = True
         try:
             resp = await handler(rpc_id, params, ctx, config)
         except asyncio.CancelledError:
@@ -319,8 +325,10 @@ async def handle_session_update(
                     "Chunk queue full — dropping tool_call_chunk to prevent deadlock"
                 )
     elif u_type == "tool_call":
+        ctx.effects_may_have_occurred = True
         await on_tool_call(update, ctx)
     elif u_type == "tool_call_update":
+        ctx.effects_may_have_occurred = True
         await on_tool_call_update(update, ctx)
     elif u_type == "current_mode_update":
         ctx.agent_modes["currentModeId"] = update.get("currentModeId")

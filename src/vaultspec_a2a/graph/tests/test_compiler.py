@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
@@ -133,7 +134,9 @@ async def test_compile_graph_structure(
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
     assert expected_workers <= node_keys
     terminal_edges = [
-        edge for edge in graph.get_graph().edges if edge.target == "__end__"
+        edge
+        for edge in cast("Any", graph).get_graph().edges
+        if edge.target == "__end__"
     ]
     assert [edge.source for edge in terminal_edges] == ["_record_graph_completion"]
 
@@ -499,7 +502,9 @@ async def test_compile_pipeline_loop_structure(
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
     assert "supervisor" not in node_keys
     terminal_edges = [
-        edge for edge in graph.get_graph().edges if edge.target == "__end__"
+        edge
+        for edge in cast("Any", graph).get_graph().edges
+        if edge.target == "__end__"
     ]
     assert [edge.source for edge in terminal_edges] == ["_record_graph_completion"]
     assert {
@@ -1039,16 +1044,27 @@ async def test_a_throttled_failure_retries_under_the_shipped_backoff() -> None:
     than a value only this test ever sees.
     """
     started = time.monotonic()
-    attempts = await _attempts_for(
-        _FAILURE_BY_CONDITION[ProviderCondition.THROTTLED],
-        policy=_NODE_RETRY_POLICY,
+    attempts = await asyncio.wait_for(
+        _attempts_for(
+            _FAILURE_BY_CONDITION[ProviderCondition.THROTTLED],
+            policy=_NODE_RETRY_POLICY,
+        ),
+        timeout=3.0,
     )
     elapsed = time.monotonic() - started
 
     assert len(attempts) == _NODE_RETRY_POLICY.max_attempts
-    # Two sleeps separate three attempts; the first alone is at least the
-    # configured initial interval, so anything shorter means no real backoff ran.
-    assert elapsed >= _NODE_RETRY_POLICY.initial_interval
+    expected_delay = sum(
+        min(
+            _NODE_RETRY_POLICY.max_interval,
+            _NODE_RETRY_POLICY.initial_interval
+            * (_NODE_RETRY_POLICY.backoff_factor**retry_index),
+        )
+        for retry_index in range(_NODE_RETRY_POLICY.max_attempts - 1)
+    )
+    assert _NODE_RETRY_POLICY.jitter is False
+    assert expected_delay == 1.5
+    assert expected_delay <= elapsed < 3.0
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -1297,6 +1313,11 @@ class TestARetryNeverDuplicatesRelayedOutput:
         """Without the companion, the guard is indistinguishable from off."""
         failure, _cause = self._refusal(relayed=False)
         assert _worker_retry_on(failure) is True
+
+    def test_possible_external_effect_outranks_retryable_condition(self) -> None:
+        failure, cause = self._refusal(relayed=False)
+        cause.effects_may_have_occurred = True
+        assert _worker_retry_on(failure) is False
 
     def test_streamed_output_outranks_a_lane_hint_that_says_retry(self) -> None:
         """A vendor cannot consent to duplicated output on the user's behalf.

@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:622028eee50cdc20d4fa0456a49f7a2c7f8d03a82d44b6d47a8e473c793352a1'
+body_hash: 'sha256:6aecb5c359553f59375d1f93095f4b1e1f08d0c153990fc606b41df5f23c323b'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -131,7 +131,7 @@ Preserve supplied meaning through initialization, streaming and retry decisions.
 - [x] `W03.P07.S32` - Settle every supplied ACP stop reason promptly and preserve refusal, cancellation and budget-exhaustion meaning through the stream consumer; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/_acp_types.py, src/vaultspec_a2a/providers/tests/test_acp_handler_failure.py`.
 - [x] `W03.P07.S80` - Propagate retained ACP stop meaning through the chat-model stream consumer and authoritative outcome path so resolved futures, partial output and transport success cannot become false completed work; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/acp_exceptions.py, src/vaultspec_a2a/providers/__init__.py, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/providers/tests/test_acp_stop_outcomes.py, src/vaultspec_a2a/streaming/tests/test_aggregator.py`.
 - [x] `W03.P07.S33` - Carry known setup/authentication/model-configuration wire conditions through AcpSessionError with truthful unknown/coarse fallback; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/_acp_auth.py, src/vaultspec_a2a/providers/tests/test_acp_model_selection.py, src/vaultspec_a2a/providers/tests/test_acp_exceptions.py`.
-- [ ] `W03.P07.S34` - Verify condition-derived retry attempts, supplied delays and elapsed bounds while refusing blind replay of uncertain external effects; `src/vaultspec_a2a/providers/conditions.py`.
+- [x] `W03.P07.S34` - Verify condition-derived retry attempts, freeze the complete local delay and elapsed bound where supported wires expose no retry duration, and refuse blind replay after client output or uncertain external effects; `src/vaultspec_a2a/providers/conditions.py, src/vaultspec_a2a/providers/acp_exceptions.py, src/vaultspec_a2a/providers/_acp_types.py, src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/codex_chat_model.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/tests/test_compiler.py, src/vaultspec_a2a/providers/tests/test_acp_stop_outcomes.py, src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`.
 
 ### Phase `W03.P08` - Expose proven native controls
 

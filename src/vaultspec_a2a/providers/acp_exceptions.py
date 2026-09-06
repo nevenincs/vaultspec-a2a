@@ -37,7 +37,14 @@ class AcpErrorCode(IntEnum):
 class AcpError(Exception):
     """Base exception for all ACP-related errors."""
 
-    __slots__ = ("code", "condition", "data", "message", "request_id")
+    __slots__ = (
+        "code",
+        "condition",
+        "data",
+        "effects_may_have_occurred",
+        "message",
+        "request_id",
+    )
 
     def __init__(
         self,
@@ -47,6 +54,7 @@ class AcpError(Exception):
         request_id: str | int | None = None,
         *,
         condition: ProviderCondition = ProviderCondition.UNKNOWN,
+        effects_may_have_occurred: bool = False,
     ) -> None:
         """Initialize the ACP error.
 
@@ -60,12 +68,15 @@ class AcpError(Exception):
                 reporting site can classify without re-parsing a vendor-shaped
                 payload. Defaults to the unknown member, which is the honest
                 value for a failure raised where no wire discriminator exists.
+            effects_may_have_occurred: Whether the failed turn observed tool or
+                client-RPC activity whose external effects cannot be disproved.
         """
         self.message = message
         self.code = code
         self.data = data
         self.request_id = request_id
         self.condition = condition
+        self.effects_may_have_occurred = effects_may_have_occurred
         super().__init__(self._format_message())
 
     def _format_message(self) -> str:

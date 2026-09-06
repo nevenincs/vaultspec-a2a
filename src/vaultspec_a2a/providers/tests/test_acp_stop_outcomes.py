@@ -9,7 +9,7 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 
-from .._acp_protocol import handle_client_response
+from .._acp_protocol import handle_client_response, handle_session_update
 from .._acp_types import AcpResponseFuture, AcpSessionContext
 from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpPromptCancelledError, AcpPromptError
@@ -84,5 +84,33 @@ def test_partial_output_does_not_turn_refusal_into_success() -> None:
                 seen.append(str(chunk.message.content))
         assert seen == ["partial"]
         assert caught.value.data == {"acp_stop_reason": "refusal"}
+
+    asyncio.run(exercise())
+
+
+def test_tool_activity_prevents_retry_after_terminal_failure() -> None:
+    async def exercise() -> None:
+        ctx = _context()
+        await handle_session_update(
+            {
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "effect-1",
+                    "title": "write",
+                    "rawInput": {"path": "result.txt"},
+                }
+            },
+            ctx,
+        )
+        future = cast("AcpResponseFuture", asyncio.get_running_loop().create_future())
+        ctx.response_futures[7] = future
+        await handle_client_response(
+            {"id": 7, "result": {"stopReason": "max_tokens"}}, ctx
+        )
+        model = AcpChatModel(command=["unused"])
+        with pytest.raises(AcpPromptError) as caught:
+            async for _chunk in model._yield_chunks(ctx, future, None):
+                pass
+        assert caught.value.effects_may_have_occurred is True
 
     asyncio.run(exercise())

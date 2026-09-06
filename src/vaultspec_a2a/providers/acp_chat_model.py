@@ -168,7 +168,9 @@ def _required_session_id(result: JsonObject, *, operation: str) -> str:
     return session_id
 
 
-def _raise_prompt_error(response: JsonObject) -> Never:
+def _raise_prompt_error(
+    response: JsonObject, *, effects_may_have_occurred: bool = False
+) -> Never:
     """Raise a typed prompt failure from one JSON-RPC error response.
 
     The adapter attaches a categorical error kind to this frame precisely so a
@@ -190,10 +192,13 @@ def _raise_prompt_error(response: JsonObject) -> Never:
         code=code,
         data=error.get("data"),
         condition=condition_from_acp_error(error),
+        effects_may_have_occurred=effects_may_have_occurred,
     )
 
 
-def _raise_for_prompt_stop_reason(stop_reason: str | None) -> None:
+def _raise_for_prompt_stop_reason(
+    stop_reason: str | None, *, effects_may_have_occurred: bool = False
+) -> None:
     """Preserve every non-success ACP terminal outcome as a typed result."""
     if stop_reason == "end_turn":
         return
@@ -202,28 +207,33 @@ def _raise_for_prompt_stop_reason(stop_reason: str | None) -> None:
         raise AcpPromptCancelledError(
             "ACP prompt was cancelled by the agent",
             data=data,
+            effects_may_have_occurred=effects_may_have_occurred,
         )
     if stop_reason == "max_turn_requests":
         raise AcpPromptError(
             "ACP prompt exhausted its turn-request budget",
             data=data,
             condition=ProviderCondition.BUDGET_EXHAUSTED,
+            effects_may_have_occurred=effects_may_have_occurred,
         )
     if stop_reason == "max_tokens":
         raise AcpPromptError(
             "ACP prompt reached its output token limit",
             data=data,
             condition=ProviderCondition.INVALID_REQUEST,
+            effects_may_have_occurred=effects_may_have_occurred,
         )
     if stop_reason == "refusal":
         raise AcpPromptError(
             "ACP agent refused the prompt",
             data=data,
             condition=ProviderCondition.INVALID_REQUEST,
+            effects_may_have_occurred=effects_may_have_occurred,
         )
     raise AcpPromptError(
         f"ACP prompt ended without a supported stop reason: {stop_reason!r}",
         data=data,
+        effects_may_have_occurred=effects_may_have_occurred,
     )
 
 
@@ -656,7 +666,12 @@ class AcpChatModel(BaseChatModel):
                     if prompt_future.done():
                         resp = prompt_future.result()
                         if "error" in resp:
-                            _raise_prompt_error(resp)
+                            _raise_prompt_error(
+                                resp,
+                                effects_may_have_occurred=(
+                                    ctx.effects_may_have_occurred
+                                ),
+                            )
                     logger.warning(
                         "ACP subprocess exited before end_turn",
                         extra=runtime_log_extra(
@@ -667,7 +682,10 @@ class AcpChatModel(BaseChatModel):
                             exit_code=ctx.process.returncode,
                         ),
                     )
-                    raise AcpError("ACP subprocess exited before end_turn")
+                    raise AcpError(
+                        "ACP subprocess exited before end_turn",
+                        effects_may_have_occurred=ctx.effects_may_have_occurred,
+                    )
                 if run_manager:
                     token = chunk.message.content
                     await run_manager.on_llm_new_token(
@@ -678,7 +696,10 @@ class AcpChatModel(BaseChatModel):
                 if prompt_future.done():
                     resp = prompt_future.result()
                     if "error" in resp:
-                        _raise_prompt_error(resp)
+                        _raise_prompt_error(
+                            resp,
+                            effects_may_have_occurred=ctx.effects_may_have_occurred,
+                        )
                 self._enforce_turn_deadline(ctx)
                 continue
 
@@ -695,7 +716,10 @@ class AcpChatModel(BaseChatModel):
         # Propagate any interrupt that raced with end_turn
         if ctx.interrupt_exc:
             raise ctx.interrupt_exc[0]
-        _raise_for_prompt_stop_reason(ctx.prompt_stop_reason)
+        _raise_for_prompt_stop_reason(
+            ctx.prompt_stop_reason,
+            effects_may_have_occurred=ctx.effects_may_have_occurred,
+        )
 
     async def _cleanup_session(
         self,

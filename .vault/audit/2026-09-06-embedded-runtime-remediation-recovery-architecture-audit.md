@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:8ec76d6d4f5ff0becb3ee7686687d0a744ee3ce962ddc63925b14487ebf68cbf'
+body_hash: 'sha256:26e826153b516e7d9bceca9cf292b8aece4597c9dc0f69f54fd9abb98c98e5c7'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -232,3 +232,12 @@ The production comparison now treats missing and blank gateway targets as absent
 The verdict subscriber unit fixture now persists the complete initial accepted input, immutable receipt and frozen executable graph, writes both compilation digests to its checkpoint, and registers its real graph under the matching five-member cache identity. Focused Ruff and Ty pass, resolving the unit fixture's stale cache shape without a placeholder digest.
 
 The suite reaches 20 passes. Its two real dispatch cases now fail later: the ASGI worker returns HTTP 500 before adding either dispatch identity to its admission set. The fixture must satisfy the current gateway-to-worker dispatch-auth contract before these concurrency behaviors can qualify. Live subscriber and verdict-loop fixtures still require the same frozen graph migration.
+### verdict-unit-dispatch-lifecycle-resolution | high | resolved in partial S84
+
+The verdict subscriber's real ASGI worker path now uses the current exact bearer credential on both sides of dispatch. Executor callbacks target a real in-process event receiver, parked state retains LangGraph's valid generated checkpoint identity, and persisted verdict assertions inspect the semantic intent inside `accepted-action-input-v2`. No unauthenticated path, partial payload reader, compatibility alias or default reconstruction was added.
+
+Formal review classified and resolved four findings: HIGH missing dispatch authentication; MEDIUM unrelated IPC retry/hang exposure; MEDIUM invalid synthetic checkpoint identity; and MEDIUM stale flat-payload expectation. A LOW intermediate test-construction error attempted to patch a read-only declaration property and was corrected to configure the mutable current token.
+
+Failed evidence remains explicit: the paired race cases timed out at 90 seconds and were reaped; the isolated concurrent-resume case timed out at 60 seconds and was reaped; and the competing-payload case naturally failed once in 14.84 seconds before its stale assertion and fixture lifecycle were corrected. Final evidence exited naturally: two race cases passed in 38.12 seconds and all 22 subscriber tests passed in 56.19 seconds. Focused Ruff and Ty passed.
+
+The unit fixture is current. The live subscriber and verdict-loop fixtures remain HIGH S84 work because they still lack complete accepted initial graph authority and matching five-member compiled-graph identity.

@@ -20,6 +20,7 @@ import anyio
 import httpx
 import pytest
 import pytest_asyncio
+from fastapi import FastAPI, Response
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -36,12 +37,11 @@ from ...conftest import materialize_schema
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
-    from fastapi import FastAPI
-
 from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
 from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.config import settings
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import (
@@ -70,6 +70,14 @@ from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 from ._catalog_authority import current_execution_metadata
+
+_TEST_INTERNAL_TOKEN = "verdict-subscriber-test-token"
+
+
+@pytest.fixture(autouse=True)
+def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give both sides of the real ASGI dispatch the current IPC credential."""
+    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
 
 
 @pytest_asyncio.fixture
@@ -145,7 +153,18 @@ async def _worker_runtime(
     *,
     receipt_threads: tuple[str, ...] = (),
 ) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge]]:
-    bridge = WorkerBridge("http://127.0.0.1:1", "verdict-receipt-test")
+    event_sink = FastAPI()
+
+    @event_sink.post("/internal/events/batch")
+    async def _accept_event_batch() -> Response:
+        return Response(content='{"status":"ok"}', media_type="application/json")
+
+    bridge = WorkerBridge("http://control", "verdict-receipt-test")
+    await bridge._client.aclose()
+    bridge._client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=event_sink),
+        base_url="http://control",
+    )
     executor = Executor(checkpointer, bridge)
     for thread_id in receipt_threads:
         _install_receipt_graph(executor, checkpointer, thread_id)
@@ -156,6 +175,7 @@ async def _worker_runtime(
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://worker",
+            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
         ) as client:
             yield client, app, bridge
         tasks.cancel_scope.cancel()
@@ -187,7 +207,6 @@ async def _seed_parked_thread(
     )
     await checkpointer.setup()
     checkpoint = empty_checkpoint()
-    checkpoint["id"] = f"cp-{thread_id}"
     checkpoint["channel_values"]["authoring_proposal_ids"] = proposal_ids
     checkpoint["channel_values"]["authoring_changeset_ids"] = changeset_ids
     if gate_pending is not None:
@@ -899,7 +918,9 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
             )
             assert action is not None
             assert action.request_id == "proposal:research"
-            assert json.loads(action.payload_json or "null") in (
+            accepted_input = json.loads(action.payload_json or "null")
+            assert accepted_input["schema_version"] == "accepted-action-input-v2"
+            assert accepted_input["intent"] in (
                 {"verdict": "approved", "notes": "ship"},
                 {"verdict": "rejected", "notes": "revise"},
             )

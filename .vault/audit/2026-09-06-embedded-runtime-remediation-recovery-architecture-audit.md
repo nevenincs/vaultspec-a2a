@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:422bf385c2b4122b991d43d326503d64e0951234240e0fa6ee65b5120b9a8fae'
+body_hash: 'sha256:49e7fba930720046bc7bb88ef790ddb7c9492d9216785f3dc50cdc6734d0fdd8'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -258,3 +258,10 @@ The direct-control lease suite now constructs every nonterminal run from complet
 `message_service` now returns `claim.action_id` when graph authority validation loses, preserving the durable stable identity already known by the claim. One intermediate full run showed why this matters: exactly one identical message dispatched while its competitor returned `INCOMPATIBLE_STATE` with an empty identity. The outward identity loss is resolved. A HIGH concurrency finding remains because an identical concurrent retry can still be classified as incompatible after receipt-authority election; S12/S83 must distinguish a same-action in-flight winner from genuinely stale authority without reconstructing or weakening receipt proof.
 
 Evidence is retained in order: one focused race passed in 6.05 seconds; a full run failed three and passed five in 13.77 seconds due missing current initial authority; the next failed one and passed seven in 49.49 seconds due erased stable identity; the final run passed all eight in 22.48 seconds. Every run exited naturally. Focused Ruff and Ty pass. Semantic provenance of the injected one-node compiled graph remains part of the existing HIGH proof-integrity queue.
+### current-direct-control-recovery-proofs | high | three deleted obligations resolved
+
+A new current-schema recovery module proves the behaviors formerly hidden behind partial payloads and separately patched authority. Message, permission and cancellation rows each carry a complete accepted v2 input and exact stable identity; graph actions also carry immutable receipts and frozen graph/provider authority. Recovery restores all effective controls, including message or option data, recursion and preset. Cancellation remains correctly outside graph-incorporation receipt semantics.
+
+A graph action whose accepted project no longer exists is refused while cancellation still dispatches. A fully accepted older permission action is rejected after a newer cancellation receipt wins thread authority, and only the newer stable cancellation is delivered. No defaults or compatibility interpretation participate.
+
+The initial runtime passed three cases in 25.05 seconds. Stronger full-field assertions then passed three in 15.30 seconds. Both exited naturally; final Ruff and Ty pass. An intermediate Ty pass exposed only test-construction typing errors (async fixture annotation, heterogeneous kwargs, summary type and election property), all corrected before qualification. The three current action-recovery obligations recorded under `direct-control-recovery-retired-fixture` are now resolved.

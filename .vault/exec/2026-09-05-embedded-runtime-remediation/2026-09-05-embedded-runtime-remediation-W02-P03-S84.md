@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:4b533f92428dc6ce706d31a88a56fcb8ea66664d3ebcd1c691914fd6a7277b8f'
+body_hash: 'sha256:1d7df0fc20fbacc8a7d6d17dd26a06cc490a02bab155179ed4bd4b74dfe0a5fd'
 step_id: 'S84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -198,3 +198,24 @@ Verification evidence:
 - Focused Ruff and Ty passed.
 
 S84 remains open for the identical-retry authority classification, semantic compiled-graph provenance, current recovery replacements, live service proof and the complete conditions matrix.
+## Current direct-control recovery replacements
+
+- `A` `src/vaultspec_a2a/control/tests/test_direct_control_recovery_current.py`.
+- Replaced the three behavioral obligations left by deletion of the partial-payload recovery fixture with current-schema proofs.
+- Complete accepted message, permission and cancellation actions redrive their original stable dispatch identities. The graph actions restore the frozen preset, recursion, message/option data and exact receipt; cancellation carries no graph receipt.
+- A missing accepted project refuses the graph resume while the cancellation for the same missing location still dispatches.
+- An older, fully accepted and receipted permission action loses after a newer exact cancellation authority wins; only the newer cancellation dispatches.
+- No partial payload, post-claim authority patch, default reconstruction, legacy alias or compatibility state exists in the fixture.
+
+Formal review findings:
+
+- MEDIUM / test typing: the initial fixture used an async-generator return annotation, heterogeneous dynamic keyword mapping, untyped summary result and a nonexistent election convenience property. Ruff passed, while Ty reported these construction errors. They were corrected with exact types, explicit DispatchRequest fields and the election outcome enum before runtime evidence was accepted.
+- No new production finding surfaced. The previously queued three current-action recovery obligations are resolved.
+
+Verification evidence:
+
+- Initial three-case runtime passed in 25.05 seconds with natural exit 0.
+- After strengthening full-field replay assertions, all three passed in 15.30 seconds with natural exit 0.
+- Final focused Ruff and Ty passed.
+
+S84 remains open for the identical-retry authority classification, semantic compiler provenance, live service proof and the complete conditions matrix.

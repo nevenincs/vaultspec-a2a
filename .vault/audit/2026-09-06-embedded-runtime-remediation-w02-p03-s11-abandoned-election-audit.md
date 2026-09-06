@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:e3dd9af88e86318efa3e370a3d45392d20e655ea204543b5d2ae151ab080dacd'
+body_hash: 'sha256:855657a8beedde43c4d8243b0f0f06b6eaeb612b1db3cd898d6bc54890ad5710'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
 ---
@@ -40,3 +40,18 @@ Keep S56 open for checkpoint-aware correction of the 90-second production recove
 **FAIL for `4001cc77`.** HIGH correctness and state-truthfulness: active discovery captures `reconciling` in an `ActiveThreadProjection` before invoking recovery. When the recovery election loses to concurrent completion or cancellation, it refreshes a separate ORM row and returns false; discovery then serves the captured stale status once. MEDIUM measurement coverage: the new stale-session test invokes the helper directly and verifies only the durable row, so it cannot detect the false active projection.
 
 Receipt correspondence, winner-gated startup refusal, session transaction reuse and current-schema-only refusal passed review. The production 90-second recovery hang remains HIGH/open. The post-result pytest exit failure remains MEDIUM/open. The Step is expanded under the amended ADRs and remains open for the single recovery-authority correction.
+## Fresh-projection formal rereview
+
+### stale-served-active-projection | high | resolved
+
+Commit `99dbf79d` replaced the failed pre-election projection path with the shared checkpoint recovery authority and an unconditional post-recovery active-page query. The first page is only a bounded candidate list. A terminal or deleted winner cannot be copied from it into the response.
+
+### public-race-discriminator | medium | resolved
+
+The focused real-SQLite regression drives `discover_active_runs` itself. Recovery elects `completed` after the candidate page has been read; the served result then contains no active run and reports no truncation. This covers the response seam omitted by the earlier helper-only test.
+
+### remaining-coordinator-scope | high | open
+
+This rereview closes the two findings against `4001cc77`; it does not close S11. Worker preflight, event settlement, invalid-receipt quarantine, frozen execution deadlines, and durable leased retry/refusal ownership remain assigned to S11/S12/S13/S83. The separately tracked production recovery hang remains open until those owners qualify it.
+
+Verification: the canonical process owner ran the focused race discriminator with a 60-second run deadline and 5-second teardown deadline; one test passed in 4.51 seconds and the process exited naturally. Ruff and Ty passed the production path and focused test. No legacy API, compatibility alias, fallback projection, or default recovery authority was added.

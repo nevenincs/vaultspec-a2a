@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:a7195e63280da52b3cc624d0cf9a8baaa20c2797f60368d33e4b4dfcd914dc10'
+body_hash: 'sha256:23bfe0f771ec98cc5d5c6938e693422c294be6705a76f261c7c7a1d9e474b480'
 step_id: 'S11'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -55,3 +55,12 @@ The focused pytest command emitted `14 passed in 25.05s` but did not exit natura
 - `verify:` `isolated startup discriminator and split current five-case evidence` -> `pass`
 
 S11 remains open. Worker/event consumers, invalid-receipt quarantine, frozen execution deadlines and durable leased retries remain required. This pass does not replace the failed historical evidence above with a whole-step success claim.
+## Fresh active-projection checkpoint
+
+- `A` `src/vaultspec_a2a/control/tests/test_run_discovery_fresh_projection.py`
+- `review:` HIGH stale served projection from `4001cc77` -> resolved by the unconditional post-recovery query in `99dbf79d`.
+- `review:` MEDIUM missing public response race coverage -> resolved by the real-SQLite discovery discriminator.
+- `verify:` canonical bounded focused test -> one passed in 4.51 seconds, natural exit 0.
+- `verify:` focused Ruff and Ty -> pass.
+
+S11 remains open for its recorded worker/event, quarantine, frozen-deadline and durable retry/refusal scope. This checkpoint closes only the stale served-projection review failure and its missing measurement.

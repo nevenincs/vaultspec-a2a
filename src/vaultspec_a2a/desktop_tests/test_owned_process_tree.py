@@ -135,10 +135,9 @@ async def test_provider_tree_reaped_on_forced_orphaned_terminal() -> None:
             await asyncio.wait_for(process.wait(), timeout=10.0)
         assert all(is_pid_alive(p) for p in mcp_pids), "descendants should be orphaned"
 
-        # The containment still reaps the orphaned descendants via job / group
-        # membership - no parent-pid walk from the dead root.
-        reaped = await containment.terminate(term_timeout=10.0, kill_timeout=5.0)
-        assert reaped is True
+        # Provider cleanup still reaps the orphaned descendants via job / group
+        # membership and releases the asyncio transport after the dead root.
+        await kill_process_tree(process)
         _await_gone(mcp_pids)
     finally:
         await _reap_pids(mcp_pids)

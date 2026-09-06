@@ -3,12 +3,11 @@ tags:
   - '#exec'
   - '#desktop-product-profile'
 date: '2026-07-19'
-modified: '2026-07-19'
-body_hash: 'sha256:46f309a89481279a15b8ac1ecee25256a7df914a0f1d743cbddcb2a1d756ea02'
+modified: '2026-09-06'
+body_hash: 'sha256:be43bad5dc8bef6988ac392ddcea2e389c4f39115e9fa1471b3cf17760a053df'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
-
 # `desktop-product-profile` `W04.P11` summary
 
 Phase P11 delivered whole-tree process ownership: a bounded drain gate wired
@@ -66,3 +65,7 @@ remediation scrubbed audit-lock coordinates from three test docstrings and
 added a deterministic administrative-stop drain test. The run-start
 admission-release guarantee on unexpected failure is owned by the admission
 phase together with its certification.
+
+## Reopening note — 2026-09-06
+
+The original S60 closure remains historical evidence. S49 review later proved its Windows assignment-failure downgrade could return an uncontained provider and let empty containment report false cleanup success, so Core reopened S60 in `141147db`. The current correction is implemented and awaits formal review: provider roots start suspended on Windows, enter the Job through the retained process handle before their first instruction, and fail admission only after exact-identity cleanup when seating cannot complete. The Phase is not re-closed by this implementation commit.

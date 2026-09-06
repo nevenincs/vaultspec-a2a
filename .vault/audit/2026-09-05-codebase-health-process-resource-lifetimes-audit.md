@@ -5,12 +5,11 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:3b9bac6f7218f91b44030095ac3da76c0824d1fef4e73dd058135aad71782608'
+body_hash: 'sha256:3532c38f52fc218fef9706ce4e63c4c6d1d0b105a349879f8c82d9d94a76c230'
 related:
   - "[[2026-07-19-codebase-health-plan]]"
   - "[[2026-09-05-codebase-health-process-resource-lifetimes-research]]"
 ---
-
 # `codebase-health` audit: `process resource lifetimes`
 
 ## Scope
@@ -161,7 +160,7 @@ Type: resource leak / native handle ownership. Status: fixed and verified. `Proc
 
 ### launch-containment-window | medium | Assignment after Windows startup cannot guarantee containment of early children
 
-Type: architectural limitation / portability. Status: queued. Existing `ProcessContainment.assign` relies on provider startup latency; a child created before assignment may escape the job. Owner: process launcher follow-up. Specify atomic job admission or a gated launcher with real native spawn proof before claiming containment from the first instruction.
+Type: architectural limitation / portability. Status: corrected in reopened desktop-product-profile W04.P11.S60, pending formal review. Windows provider roots now start with `CREATE_SUSPENDED`; the exact retained `Popen` handle is assigned to the Job before the single initial thread is resumed through documented Tool Help and thread APIs. POSIX remains seated by `start_new_session` at exec. Native Windows shell and exec launches, a child created after a delay, and a child retained after root exit all prove the provider tree stays under the owned containment.
 
 ### posix-owner-crash-and-escape | medium | POSIX groups cannot enforce automatic owner-crash or setsid cleanup
 
@@ -183,6 +182,18 @@ Repair the confirmed ownership violations within the current design, run real su
 
 ### provider-empty-containment-false-success | high | reopened under desktop-product-profile W04.P11.S60
 
-Type: provider lifecycle correctness, process containment and developer-time blocker. Status: reopened/current. Review of the S49 worker assignment-failure correction exposed the same already-shipped contract drift in `providers/_subprocess.py`: `spawn_acp_process` catches `ProcessContainment.assign(pid)` failure and returns the live provider with an unassigned containment, while `_kill_process_tree` later calls that empty containment's `terminate()`. Empty containment has no process identity and returns success, so provider cleanup can report success while the retained ACP/Codex root and descendants remain live. This is distinct from the S49 worker fix and from S50 packaging.
+Type: provider lifecycle correctness, process containment and developer-time blocker. Status: corrected in reopened desktop-product-profile W04.P11.S60, pending formal review. Review of the S49 worker assignment-failure correction exposed the same already-shipped contract drift in `providers/_subprocess.py`: `spawn_acp_process` caught `ProcessContainment.assign(pid)` failure and returned the live provider with an unassigned containment, while `_kill_process_tree` later called that empty containment's `terminate()`. Empty containment had no process identity and returned success, so provider cleanup could report success while the retained ACP/Codex root and descendants remained live.
 
-Canonical correction owner is reopened `2026-07-18-desktop-product-profile-plan W04.P11.S60`, whose accepted row requires OS containment for every ACP/Codex provider root before descendant work. Correction must fail admission on assignment failure, reap through the exact retained provider process identity under one bound, avoid a host-wide scan or post-exit bare-pid action, preserve the original assignment error, and prove real root/descendant absence. The earlier `launch-containment-window` finding remains related architectural evidence; its vague process-launcher owner is superseded by this exact reopened Step.
+The provider spawn now fails before returning whenever atomic seating or resume fails. Assigned Jobs reap through Job authority; an unassigned root is suspended and reaped with the shared S49 creation-time-guarded `Popen` identity authority, with no host scan or post-exit bare-pid action, and the original admission error remains the raised exception. A native closed-Job proof reaped the real root and two 120-second descendants in 0.52 seconds. The five-case provider module covers shell and exec roots, late children, root exit, assignment failure, bounded cleanup, and zero survivors.
+
+### provider-root-exit-proof-pipe-wait | medium | Test awaited inherited pipe closure instead of root exit
+
+Type: measurement integrity and developer-time blocker. Status: fixed in the S60 proof. The first root-exit discriminator awaited `asyncio.Process.wait()` while its intentionally live child inherited stdout. Windows had already reported root return code 0, but the transport correctly kept the wait pending until pipe closure, consuming the full 10-second bound. The proof now observes root return code without draining the descendant-owned pipe, then invokes production provider cleanup, which closes Job members and the asyncio transport. The corrected case completes in 0.85 seconds with no survivor.
+
+### pytest-zero-peer-startup-delay | medium | Focused process test waits about 23 seconds before collection
+
+Type: test infrastructure performance and developer-time blocker. Status: open; owner `resource-aware-test-execution` follow-up in `src/vaultspec_a2a/testing`. Two native focused runs displayed `resource-aware admission: 0 live peer test session(s); serial run` only after roughly 23 seconds, while the real provider process body took 0.80 seconds and the subsequent five-case module took 6.12 seconds. This is not a provider lifecycle hang. Measure import, session registration, stale-lease reclamation, and plugin initialization separately; remove the delay without bypassing machine-global exclusion.
+
+### owned-tree-current-context-fixtures | medium | Integrated fixtures omit current lifecycle context
+
+Type: test contract drift. Status: open; owners are the desktop owned-process-tree test and current lifecycle harness. The broad S60 regression passed 43 cases and failed two unrelated integrated cases in 174.66 seconds. `test_terminal_child_tree_contained_and_reaped` constructs `_TerminalCtx` without the current `closing` field and receives JSON-RPC error `-32603`; update or replace the fixture against `AcpSessionContext`. `test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown` launches a gateway without binding the current server shutdown owner and correctly receives typed 503 `Gateway lifecycle owner absent`; its proof must install the real lifecycle owner or assert that current refusal. No retired behavior, translation, runtime fallback, or compatibility path is authorized.

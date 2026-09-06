@@ -1,10 +1,14 @@
-"""Async process-tree termination, platform-aware and dependency-free.
+"""Platform-aware process-tree termination and OS containment.
 
 The single async "kill this pid and its whole tree" escalation shared by the
 worker-management shutdown and the ACP subprocess reaper. It works by PID (never a
 process handle), so a ``subprocess.Popen`` caller and an
 ``asyncio.subprocess.Process`` caller both use it and each keeps its own final
 wait/reap bookkeeping.
+
+The exact-``Popen`` path complements that portable primitive for ownership
+failures: it retains creation-time-guarded identities and never scans the host
+or reopens a bare pid after its root exits.
 
 Windows fells the whole tree with ``taskkill /T /F`` because a bare
 ``terminate()`` only kills the immediate process and orphans grandchildren
@@ -31,6 +35,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+import psutil
+
 from .async_cleanup import complete_cleanup
 
 if TYPE_CHECKING:
@@ -50,6 +56,7 @@ __all__ = [
     "port_listener_pid",
     "posix_descendant_pids",
     "posix_parent_map",
+    "terminate_exact_popen_tree",
 ]
 
 logger = logging.getLogger(__name__)
@@ -88,6 +95,9 @@ _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9  # JobObjectExtendedLimitInforma
 _JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS = 1  # JobObjectBasicAccountingInformation
 _PROCESS_TERMINATE = 0x0001
 _PROCESS_SET_QUOTA = 0x0100
+_CREATE_SUSPENDED = 0x00000004
+_TH32CS_SNAPTHREAD = 0x00000004
+_THREAD_SUSPEND_RESUME = 0x0002
 
 
 @dataclass(frozen=True, slots=True)
@@ -1061,11 +1071,12 @@ class ProcessContainment:
       parent-pid discovery.
 
     Lifecycle: :meth:`create` builds the containment, :meth:`spawn_kwargs` feeds
-    the spawn call, :meth:`assign` binds the just-spawned pid before it does
-    descendant work, and :meth:`terminate` reaps the tree with bounded
-    escalation. An unassigned containment owns no process identity; its caller
-    must retain and reap the spawned process rather than treating this object as
-    authority for that process.
+    the spawn call, and :meth:`terminate` reaps the tree with bounded escalation.
+    POSIX :meth:`assign` records the group established at exec. Windows owners
+    that require containment before the first instruction create the root
+    suspended and call :meth:`assign_suspended_process`. An unassigned
+    containment owns no process identity; its caller must retain and reap the
+    spawned process rather than treating this object as authority for it.
     """
 
     def __init__(self) -> None:
@@ -1163,25 +1174,9 @@ class ProcessContainment:
 
         if self._job is None:
             raise ProcessContainmentError("Windows containment has no job object")
-        # Assign-after-spawn window (documented reliance, not silence): the root is
-        # created, then opened and assigned here, so a descendant the root forks in
-        # the microseconds between CreateProcess and AssignProcessToJobObject would
-        # not join the job. In practice the owned roots never fork that fast: the
-        # worker assigns nothing until its asyncio loop and single-flight startup
-        # run (seconds later); the provider CLI does Node/handshake init before it
-        # launches an MCP server; a terminal command's first act is not a
-        # microsecond-latency grandchild. Boot/init latency covers the window.
-        # The structural close is the OS-native atomic path - creating the process
-        # already in the job (PROC_THREAD_ATTRIBUTE_JOB_LIST via a STARTUPINFOEX
-        # attribute list) - which stdlib ``subprocess`` cannot pass. The considered
-        # alternatives are disproportionate or unsound here: CREATE_SUSPENDED plus
-        # resume needs a thread handle ``Popen`` does not expose (or the
-        # undocumented ``NtResumeProcess``); a stdin-gated trampoline that ``execv``s
-        # the real command escapes the job on Windows (which has no true ``execv``),
-        # and one that spawns it as a child would need a full stdio proxy for the
-        # ACP provider. KILL_ON_JOB_CLOSE still reaps everything that did join the
-        # job. A failed assignment leaves cleanup to the caller's exact retained
-        # process handle.
+        # This pid-only entry point is for roots already running. Owners that must
+        # establish containment before the first instruction use
+        # ``assign_suspended_process`` and retain the Popen process handle.
         kernel32 = _win_kernel32()
         kernel32.OpenProcess.restype = wintypes.HANDLE
         kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
@@ -1212,6 +1207,106 @@ class ProcessContainment:
         if handle is None:
             raise ProcessContainmentError("Popen has no retained Windows handle")
         self._assign_win_handle(process.pid, handle)
+
+    def assign_suspended_process(self, process: subprocess.Popen[bytes]) -> None:
+        """Atomically admit a Windows ``CREATE_SUSPENDED`` root, then run it.
+
+        Assignment uses the exact process handle retained by ``Popen``. The only
+        initial thread is resumed through documented Tool Help and thread APIs
+        after Job membership succeeds, so no provider instruction or descendant
+        creation can occur outside the Job. A failure leaves the root suspended or
+        Job-owned for the caller to reap through the same retained handle.
+
+        POSIX roots are already seated by ``start_new_session`` at exec and only
+        need their process group recorded.
+        """
+        if sys.platform != "win32":
+            self.assign_process(process)
+            return
+        self.assign_process(process)
+        self._resume_suspended_win_process(process.pid)
+
+    @staticmethod
+    def suspended_creation_flag() -> int:
+        """Return the Windows flag used with :meth:`assign_suspended_process`."""
+        return _CREATE_SUSPENDED if sys.platform == "win32" else 0
+
+    @staticmethod
+    def _resume_suspended_win_process(pid: int) -> None:
+        if sys.platform != "win32":
+            return
+        import ctypes
+        from ctypes import wintypes
+
+        class _ThreadEntry32(ctypes.Structure):
+            _fields_ = (
+                ("dwSize", wintypes.DWORD),
+                ("cntUsage", wintypes.DWORD),
+                ("th32ThreadID", wintypes.DWORD),
+                ("th32OwnerProcessID", wintypes.DWORD),
+                ("tpBasePri", wintypes.LONG),
+                ("tpDeltaPri", wintypes.LONG),
+                ("dwFlags", wintypes.DWORD),
+            )
+
+        kernel32 = _win_kernel32()
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+        snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
+        if snapshot == ctypes.c_void_p(-1).value:
+            raise ProcessContainmentError(
+                f"could not enumerate suspended process {pid}: "
+                f"{ctypes.WinError(ctypes.get_last_error())}"
+            )
+        resumed = 0
+        try:
+            entry = _ThreadEntry32()
+            entry.dwSize = ctypes.sizeof(entry)
+            kernel32.Thread32First.restype = wintypes.BOOL
+            kernel32.Thread32First.argtypes = (
+                wintypes.HANDLE,
+                ctypes.POINTER(_ThreadEntry32),
+            )
+            kernel32.Thread32Next.restype = wintypes.BOOL
+            kernel32.Thread32Next.argtypes = (
+                wintypes.HANDLE,
+                ctypes.POINTER(_ThreadEntry32),
+            )
+            more = bool(kernel32.Thread32First(snapshot, ctypes.byref(entry)))
+            while more:
+                if entry.th32OwnerProcessID == pid:
+                    kernel32.OpenThread.restype = wintypes.HANDLE
+                    kernel32.OpenThread.argtypes = (
+                        wintypes.DWORD,
+                        wintypes.BOOL,
+                        wintypes.DWORD,
+                    )
+                    thread = kernel32.OpenThread(
+                        _THREAD_SUSPEND_RESUME, False, entry.th32ThreadID
+                    )
+                    if not thread:
+                        raise ProcessContainmentError(
+                            f"could not open suspended process {pid} thread: "
+                            f"{ctypes.WinError(ctypes.get_last_error())}"
+                        )
+                    try:
+                        kernel32.ResumeThread.restype = wintypes.DWORD
+                        kernel32.ResumeThread.argtypes = (wintypes.HANDLE,)
+                        previous = kernel32.ResumeThread(thread)
+                        if previous != 1:
+                            raise ProcessContainmentError(
+                                f"could not resume suspended process {pid} thread"
+                            )
+                        resumed += 1
+                    finally:
+                        kernel32.CloseHandle(thread)
+                more = bool(kernel32.Thread32Next(snapshot, ctypes.byref(entry)))
+        finally:
+            kernel32.CloseHandle(snapshot)
+        if resumed != 1:
+            raise ProcessContainmentError(
+                f"suspended process {pid} exposed {resumed} resumable threads"
+            )
 
     def _assign_win_handle(self, pid: int, handle: Any) -> None:
         if sys.platform != "win32" or self._job is None:
@@ -1407,3 +1502,63 @@ class ProcessContainment:
         if not kernel32.CloseHandle(self._job):
             raise ctypes.WinError(ctypes.get_last_error())
         self._job = None
+
+
+def _retained_process_owner(
+    process: subprocess.Popen[bytes],
+) -> psutil.Process | None:
+    """Return a creation-time-guarded identity for the exact live ``Popen``."""
+    if process.poll() is not None:
+        return None
+    try:
+        owner = psutil.Process(process.pid)
+        owner.create_time()
+    except psutil.NoSuchProcess:
+        return None
+    if process.poll() is not None:
+        return None
+    return owner
+
+
+async def terminate_exact_popen_tree(
+    process: subprocess.Popen[bytes],
+    *,
+    term_timeout: float,
+    kill_timeout: float,
+) -> bool:
+    """Stop one retained root and its observed tree without reopening a bare pid."""
+    owner = _retained_process_owner(process)
+    if owner is None:
+        return process.poll() is not None
+    retained: list[psutil.Process] = [owner]
+    try:
+        owner.suspend()
+        for child in owner.children(recursive=True):
+            try:
+                if child.is_running():
+                    child.suspend()
+                    retained.append(child)
+            except psutil.NoSuchProcess:
+                pass
+        for target in reversed(retained):
+            try:
+                if target.is_running():
+                    target.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        _, alive = await asyncio.to_thread(
+            psutil.wait_procs, retained, timeout=term_timeout
+        )
+        for target in alive:
+            try:
+                if target.is_running():
+                    target.kill()
+            except psutil.NoSuchProcess:
+                pass
+        if alive:
+            _, alive = await asyncio.to_thread(
+                psutil.wait_procs, alive, timeout=kill_timeout
+            )
+        return not alive
+    except (psutil.AccessDenied, psutil.NoSuchProcess):
+        return process.poll() is not None

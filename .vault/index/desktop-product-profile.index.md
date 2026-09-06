@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#desktop-product-profile'
 date: '2026-07-22'
-modified: '2026-09-03'
+modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:3e223a44cb1d3f6b7a4ae9920ad204f3375f37391610787e8f39a89aad731307'
+body_hash: 'sha256:5129b69b57e16377332161052f39b14881a7dfb08ad68753ba59f405a3606715'
 related:
   - '[[2026-07-18-desktop-product-profile-W01-P01-summary]]'
   - '[[2026-07-18-desktop-product-profile-W01-P02-summary]]'
@@ -17,6 +17,7 @@ related:
   - '[[2026-07-18-desktop-product-profile-W03-P08-summary]]'
   - '[[2026-07-18-desktop-product-profile-W03-P09-summary]]'
   - '[[2026-07-18-desktop-product-profile-W04-P10-summary]]'
+  - '[[2026-07-18-desktop-product-profile-W04-P11-S60]]'
   - '[[2026-07-18-desktop-product-profile-W04-P11-summary]]'
   - '[[2026-07-18-desktop-product-profile-W04-P12-summary]]'
   - '[[2026-07-18-desktop-product-profile-W05-P13-summary]]'
@@ -67,6 +68,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-18-desktop-product-profile-W04-P12-summary` - `desktop-product-profile` `W04.P12` summary
 - `2026-07-18-desktop-product-profile-W05-P13-summary` - `desktop-product-profile` `W05.P13` summary
 - `2026-07-18-desktop-product-profile-W05-P14-summary` - `desktop-product-profile` `W05.P14` summary
+- `2026-07-18-desktop-product-profile-W04-P11-S60` - Spawn each run-owned ACP or Codex provider root in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work; correct empty-containment false success and prove assignment-failure cleanup through the exact retained provider identity before returning the spawn
 
 ### plan
 

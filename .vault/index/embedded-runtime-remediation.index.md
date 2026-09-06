@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:ae5f255966ed2ec79e94ea32bc9ac20d4d76300efffe9c1430f080a9f914a713'
+body_hash: 'sha256:6860d98f667a8833bae2216c80a117be17935925e7e4f8d4c7759d568f8f301b'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -17,6 +17,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S06]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S07]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S08]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S09]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S76]]'
   - '[[2026-09-05-embedded-runtime-remediation-W02-P03-S77]]'
   - '[[2026-09-05-embedded-runtime-remediation-W04-P10-S47]]'
@@ -29,6 +30,9 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
   - '[[2026-09-06-embedded-runtime-remediation-starlette-blocking-portal-dependency-reference]]'
+  - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s09-atomic-election-review-audit]]'
+  - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s09-identity-refresh-rereview-audit]]'
+  - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s09-lifecycle-closure-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s76-lifecycle-closure-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s76-write-authority-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s77-current-schema-review-audit]]'
@@ -58,6 +62,9 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 
 - `2026-09-05-embedded-runtime-remediation-implementation-review-audit` - `embedded-runtime-remediation` audit: `rolling implementation review queue`
 - `2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit` - `embedded-runtime-remediation` audit: `no-legacy architecture reconciliation`
+- `2026-09-06-embedded-runtime-remediation-w02-p03-s09-atomic-election-review-audit` - embedded-runtime-remediation audit: W02.P03.S09 atomic lifecycle election formal review
+- `2026-09-06-embedded-runtime-remediation-w02-p03-s09-identity-refresh-rereview-audit` - embedded-runtime-remediation audit: W02.P03.S09 identity refresh correction rereview
+- `2026-09-06-embedded-runtime-remediation-w02-p03-s09-lifecycle-closure-review-audit` - embedded-runtime-remediation audit: W02.P03.S09 lifecycle closure review
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s76-lifecycle-closure-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S76 lifecycle closure review`
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s76-write-authority-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S76 run write authority review`
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s77-current-schema-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S77 current ownership schema review`
@@ -83,6 +90,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S06` - Align an isolated RAG client/service test environment and rerun the real project-pinning discriminator without altering an unrelated shared daemon
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S07` - Diagnose the intermittent compilation loop-gap measurement on the named representative host/load and correct the owning warmup path if required without relaxing its existing budget
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S08` - Apply a reviewed locked dependency correction for the Starlette BlockingPortal deprecation and verify the warning disappears without suppression
+- `2026-09-05-embedded-runtime-remediation-W02-P03-S09` - Add atomic expected-state/revision election with durable writer/action identity and test completed-versus-cancelled stale sessions
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S76` - Declare durable run revision and writer generation plus action-specific receipt identity without storing credentials or duplicating transcript authority
 - `2026-09-05-embedded-runtime-remediation-W02-P03-S77` - Add the current ownership and receipt schema with upgrade validation; refuse pre-current or unknown-ownership rows as incompatible without backfill, translation, migration-time substitution or execution
 - `2026-09-05-embedded-runtime-remediation-W04-P10-S47` - Conform readiness/drain/shutdown routes and ownership capability handling to the intended consumer generation with fail-closed incompatible attachment

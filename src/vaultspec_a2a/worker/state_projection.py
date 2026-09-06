@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
     from ..streaming.types import StreamableGraph
+    from ..thread.cancellation_evidence import CancellationEvidence
     from .ipc import WorkerBridge
 
 __all__ = ["StateProjector"]
@@ -379,6 +380,7 @@ class StateProjector:
         error_detail: str | None = None,
         *,
         provider_condition: ProviderCondition | None = None,
+        cancellation_evidence: CancellationEvidence | None = None,
     ) -> None:
         """Emit a ``thread_terminal`` event to the gateway.
 
@@ -409,7 +411,9 @@ class StateProjector:
         """
         if outcome not in TERMINAL_STATUSES:
             return
-        payload: dict[str, str] = {
+        if cancellation_evidence is not None and outcome != ThreadStatus.CANCELLED:
+            raise ValueError("cancellation evidence requires a cancelled terminal")
+        payload: dict[str, object] = {
             "event_type": "thread_terminal",
             "thread_id": thread_id,
             "status": outcome,
@@ -420,6 +424,10 @@ class StateProjector:
             payload["provider_condition"] = (
                 provider_condition or ProviderCondition.UNKNOWN
             ).value
+        if cancellation_evidence is not None:
+            payload["cancellation_evidence"] = cancellation_evidence.model_dump(
+                mode="json"
+            )
         await self._bridge.send_event(thread_id, payload)
         # Flush terminal events immediately -- do not batch.
         # A lost thread_terminal event leaves the thread stuck in RUNNING

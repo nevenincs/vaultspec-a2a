@@ -11,7 +11,7 @@ import asyncio
 import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from langgraph.types import Command
 
@@ -23,6 +23,7 @@ from ..providers.team_selection import model_assignment_digest
 from ..streaming.aggregator import EventAggregator
 from ..streaming.node_metadata import node_metadata_from_graph
 from ..telemetry import ws_span
+from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
 from ..thread.errors import describe_exception_chain
@@ -198,6 +199,7 @@ class Executor:
         self._aggregator.add_broadcast_hook(_relay_event)
 
         self._active_ingests: dict[str, DispatchCapacityReservation] = {}
+        self._pending_cancellations: dict[str, str] = {}
         self._ingest_lock = asyncio.Lock()
         self._next_capacity_generation = 0
         self._dispatch_reservation: ContextVar[DispatchCapacityReservation | None] = (
@@ -261,6 +263,22 @@ class Executor:
             team_preset=req.team_preset,
             autonomous=req.autonomous,
             **fields,
+        )
+
+    def _take_cancellation_evidence(
+        self,
+        thread_id: str,
+        *,
+        outcome: Literal["ceased", "no_active_work"],
+    ) -> CancellationEvidence | None:
+        """Consume the accepted cancel identity that produced one outcome."""
+        dispatch_id = self._pending_cancellations.pop(thread_id, None)
+        if dispatch_id is None:
+            return None
+        return CancellationEvidence(
+            schema_version="cancellation-evidence-v1",
+            dispatch_id=dispatch_id,
+            outcome=outcome,
         )
 
     async def _emit_dispatch_application_receipt(self, req: DispatchRequest) -> None:
@@ -609,6 +627,11 @@ class Executor:
                 fallback_reason,
                 recoverable=False,
             )
+        cancellation_evidence = None
+        if outcome == ThreadStatus.CANCELLED:
+            cancellation_evidence = self._take_cancellation_evidence(
+                req.thread_id, outcome="ceased"
+            )
         await self._state_projector.emit_terminal_status(
             req.thread_id,
             outcome,
@@ -619,6 +642,7 @@ class Executor:
             # persists. Left as None when ingest resolved nothing, so a completed
             # or cancelled run is never stamped with a condition it never had.
             provider_condition=failure_condition,
+            cancellation_evidence=cancellation_evidence,
         )
         if outcome == ThreadStatus.COMPLETED:
             await self._close_authoring_session_best_effort(
@@ -677,6 +701,13 @@ class Executor:
                         await self._handle_resume(req)
                     case ControlActionType.CANCEL:
                         span.add_event("thread_cancelled")
+                        if req.dispatch_id is None:
+                            raise ValueError(
+                                "cancel dispatch requires a stable identity"
+                            )
+                        self._pending_cancellations.setdefault(
+                            req.thread_id, req.dispatch_id
+                        )
                         self._aggregator.cancel_thread(req.thread_id)
                         # Release the run's tokens and cached catalog on the
                         # TERMINAL boundary only. When an ingest is still active
@@ -693,7 +724,11 @@ class Executor:
                             self._token_store.drop(req.thread_id)
                             self._catalog_store.drop(req.thread_id)
                             await self._state_projector.emit_terminal_status(
-                                req.thread_id, ThreadStatus.CANCELLED
+                                req.thread_id,
+                                ThreadStatus.CANCELLED,
+                                cancellation_evidence=self._take_cancellation_evidence(
+                                    req.thread_id, outcome="no_active_work"
+                                ),
                             )
                             self._graph_lifecycle.release_thread(req.thread_id)
                             self._aggregator.remove_node_metadata(req.thread_id)
@@ -1059,4 +1094,5 @@ class Executor:
     async def shutdown(self) -> None:
         """Release held resources (aggregator debounce tasks, etc.)."""
         await self._aggregator.shutdown()
+        self._pending_cancellations.clear()
         self._graph_lifecycle.clear()

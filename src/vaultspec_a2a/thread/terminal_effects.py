@@ -43,6 +43,8 @@ def compute_terminal_effects(
     return TerminalEffects(
         repair_status=RepairStatus.HEALTHY,
         repair_reason=None,
-        last_applied_action=(ControlActionType.CANCEL if is_cancelled else None),
+        last_applied_action=(
+            ControlActionType.CANCEL if is_cancelled and has_cancel_action else None
+        ),
         should_finalize_cancel=has_cancel_action and is_cancelled,
     )

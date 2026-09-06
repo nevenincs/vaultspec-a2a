@@ -185,6 +185,8 @@ class ControlActionResultStatus(StrEnum):
     REJECTED_INVALID_STATE = "rejected_invalid_state"
     SUPERSEDED = "superseded"
     DUPLICATE = "duplicate"
+    CANCELLED_CEASED = "cancelled_ceased"
+    CANCELLED_NO_ACTIVE_WORK = "cancelled_no_active_work"
 
 
 class PermissionRequestStatus(StrEnum):

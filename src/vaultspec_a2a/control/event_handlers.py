@@ -20,6 +20,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..ipc.schemas import ExecutionStateProjectionPayload
 from ..providers import ProviderCondition
+from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ..thread.enums import InvalidTransitionError, ThreadStatus
 from ..thread.permission_fsm import (
@@ -276,7 +277,7 @@ async def _handle_terminal_event(
             set_thread_repair_state,
             update_thread_status,
         )
-        from ..thread.enums import ControlActionType
+        from ..thread.enums import ControlActionResultStatus, ControlActionType
 
         factory = _session_factory(session_factory)
         if factory is None:
@@ -332,13 +333,47 @@ async def _handle_terminal_event(
             latest_cancel = await get_latest_control_action(
                 db, thread_id=thread_id, action_type=ControlActionType.CANCEL
             )
+            cancellation_evidence = None
+            raw_cancellation_evidence = payload.get("cancellation_evidence")
+            if raw_cancellation_evidence is not None:
+                try:
+                    cancellation_evidence = CancellationEvidence.model_validate(
+                        raw_cancellation_evidence
+                    )
+                except ValidationError:
+                    logger.warning(
+                        "Ignoring invalid cancellation evidence for thread %s",
+                        thread_id,
+                        extra={
+                            "thread_id": thread_id,
+                            "action": "invalid_cancellation_evidence",
+                        },
+                    )
+            cancellation_evidence_matches = (
+                ThreadStatus(status_str) is ThreadStatus.CANCELLED
+                and latest_cancel is not None
+                and thread is not None
+                and cancellation_evidence is not None
+                and latest_cancel.dispatch_id == cancellation_evidence.dispatch_id
+                and thread.writer_action_type == ControlActionType.CANCEL.value
+                and thread.writer_action_receipt_id
+                == cancellation_evidence.dispatch_id
+            )
             effects = compute_terminal_effects(
                 ThreadStatus(status_str),
-                has_cancel_action=latest_cancel is not None,
+                has_cancel_action=cancellation_evidence_matches,
             )
             if effects.should_finalize_cancel and latest_cancel is not None:
+                assert cancellation_evidence is not None
                 await mark_control_action_applied(
-                    db, latest_cancel.id, applied_at=_time_now_utc()
+                    db,
+                    latest_cancel.id,
+                    applied_at=_time_now_utc(),
+                    result_status=(
+                        ControlActionResultStatus.CANCELLED_CEASED
+                        if cancellation_evidence.outcome == "ceased"
+                        else ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK
+                    ),
                 )
             await set_thread_repair_state(
                 db,

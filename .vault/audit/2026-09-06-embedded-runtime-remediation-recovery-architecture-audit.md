@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:49e7fba930720046bc7bb88ef790ddb7c9492d9216785f3dc50cdc6734d0fdd8'
+body_hash: 'sha256:66cf2bda75b46e740a62e050f084084c9fcafb4228064b5aa7e276f2efd0d233'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -265,3 +265,12 @@ A new current-schema recovery module proves the behaviors formerly hidden behind
 A graph action whose accepted project no longer exists is refused while cancellation still dispatches. A fully accepted older permission action is rejected after a newer cancellation receipt wins thread authority, and only the newer stable cancellation is delivered. No defaults or compatibility interpretation participate.
 
 The initial runtime passed three cases in 25.05 seconds. Stronger full-field assertions then passed three in 15.30 seconds. Both exited naturally; final Ruff and Ty pass. An intermediate Ty pass exposed only test-construction typing errors (async fixture annotation, heterogeneous kwargs, summary type and election property), all corrected before qualification. The three current action-recovery obligations recorded under `direct-control-recovery-retired-fixture` are now resolved.
+### cancellation-cessation-evidence | high | S12 evidence and action settlement corrected; terminal election open
+
+Cancellation now has a closed action-specific proof instead of borrowing graph incorporation or trusting a generic terminal. `cancellation-evidence-v1` binds one accepted cancel dispatch to `ceased` or `no_active_work`. The worker emits the no-active disposition immediately and retains an active cancel identity until the cancelled execution settle consumes it once. State projection refuses to attach this evidence to any other terminal outcome.
+
+The gateway applies a cancel action only when the evidence validates, names the latest durable cancel dispatch and matches current thread writer authority. The durable action result records `cancelled_ceased` or `cancelled_no_active_work`. Missing and mismatched evidence leave the action leased and unapplied, and terminal effects no longer invent `last_applied_action=cancel` without proven action evidence.
+
+Formal review retains three HIGH boundaries. S13 still owns atomic terminal writer election because the generic terminal consumer writes lifecycle status before this cancellation-specific validation. S14/S83 still own durable event-delivery recovery when the worker cannot get evidence committed. S20-S22/S54 still own the completion-versus-cancel wakeup and cleanup races for live graph/provider awaits. The worker's pending identity is intentionally volatile; losing it cannot settle cancellation and therefore leaves a visible recovery obligation instead of manufacturing proof.
+
+Four gateway discriminators passed in 16.77 seconds; the combined producer/transport/consumer gate passed eight in 6.99 seconds; and the full event-handler plus state-projection modules passed 24 in 8.77 seconds. All exited naturally. Ruff passes all changed files, and Ty passes the production/event/projector set. Full executor-test Ty remains blocked by its previously queued four-member cache fixtures and is not claimed.

@@ -19,6 +19,7 @@ from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
 from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
+from ...control.accepted_input import freeze_accepted_input
 from ...control.drain import DrainGate
 from ...control.event_handlers import (
     _handle_permission_event,
@@ -39,11 +40,12 @@ from ...database import (
     successor_thread_write_authority,
     thread_write_expectation,
 )
-from ...database.models import ControlActionModel, ThreadModel
+from ...database.models import ControlActionModel, RunWriteAuthority, ThreadModel
 from ...graph.enums import ServerEventType
+from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
-from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 
 
 async def _seed_unapplied_leased_action(
@@ -138,6 +140,136 @@ async def engine(tmp_path_factory: pytest.TempPathFactory):
 async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """Provide an async session factory bound to the test engine."""
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+async def _seed_current_cancel(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    thread_id: str,
+    dispatch_id: str,
+) -> str:
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            thread_id=thread_id,
+            status=ThreadStatus.CANCELLING,
+            write_authority=RunWriteAuthority(
+                0, 1, ControlActionType.CANCEL, dispatch_id
+            ),
+        )
+        action = await create_control_action(
+            session,
+            thread_id=thread_id,
+            action_type=ControlActionType.CANCEL,
+            idempotency_key=f"cancel:{thread_id}",
+            dispatch_id=dispatch_id,
+            payload=freeze_accepted_input(
+                DispatchRequest(
+                    dispatch_id=dispatch_id,
+                    action="cancel",
+                    thread_id=thread_id,
+                    recursion_limit=25,
+                ),
+                intent={"cancel": True},
+            ),
+        )
+        acquired = await acquire_control_action_lease(
+            session,
+            action.id,
+            claim_token=f"claim:{thread_id}",
+            claim_expires_at=datetime.now(UTC) + timedelta(minutes=1),
+        )
+        assert acquired
+        await session.commit()
+        return action.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("outcome", "result_status"),
+    [
+        ("ceased", ControlActionResultStatus.CANCELLED_CEASED),
+        (
+            "no_active_work",
+            ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK,
+        ),
+    ],
+)
+async def test_exact_cancellation_evidence_settles_current_action(
+    session_factory: async_sessionmaker[AsyncSession],
+    outcome: str,
+    result_status: ControlActionResultStatus,
+) -> None:
+    thread_id = f"cancel-evidence-{outcome}"
+    dispatch_id = f"dispatch-{outcome}"
+    action_id = await _seed_current_cancel(
+        session_factory, thread_id=thread_id, dispatch_id=dispatch_id
+    )
+
+    await _handle_terminal_event(
+        thread_id,
+        {
+            "event_type": "thread_terminal",
+            "status": "cancelled",
+            "cancellation_evidence": {
+                "schema_version": "cancellation-evidence-v1",
+                "dispatch_id": dispatch_id,
+                "outcome": outcome,
+            },
+        },
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        action = await session.get(ControlActionModel, action_id)
+        thread = await session.get(ThreadModel, thread_id)
+    assert action is not None
+    assert action.applied_at is not None
+    assert action.result_status == result_status.value
+    assert action.claim_token is None
+    assert thread is not None
+    assert thread.status == ThreadStatus.CANCELLED.value
+    assert thread.last_applied_action == ControlActionType.CANCEL.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("evidence_dispatch_id", [None, "different-dispatch"])
+async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
+    session_factory: async_sessionmaker[AsyncSession],
+    evidence_dispatch_id: str | None,
+) -> None:
+    thread_id = f"unproven-cancel-{evidence_dispatch_id or 'absent'}"
+    dispatch_id = f"dispatch-{thread_id}"
+    action_id = await _seed_current_cancel(
+        session_factory, thread_id=thread_id, dispatch_id=dispatch_id
+    )
+    payload: dict[str, object] = {
+        "event_type": "thread_terminal",
+        "status": "cancelled",
+    }
+    if evidence_dispatch_id is not None:
+        payload["cancellation_evidence"] = {
+            "schema_version": "cancellation-evidence-v1",
+            "dispatch_id": evidence_dispatch_id,
+            "outcome": "ceased",
+        }
+
+    await _handle_terminal_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        action = await session.get(ControlActionModel, action_id)
+        thread = await session.get(ThreadModel, thread_id)
+    assert action is not None
+    assert action.applied_at is None
+    assert action.result_status == ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value
+    assert action.claim_token is not None
+    assert thread is not None
+    assert thread.status == ThreadStatus.CANCELLED.value
+    assert thread.last_applied_action is None
 
 
 @pytest.mark.asyncio

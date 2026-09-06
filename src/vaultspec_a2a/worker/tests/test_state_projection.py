@@ -15,6 +15,7 @@ from langgraph.types import Interrupt, PregelTask
 from pydantic import BaseModel, ConfigDict
 
 from ...providers import ProviderCondition
+from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ThreadStatus
 from ..ipc import WorkerBridge
 from ..state_projection import StateProjector
@@ -201,3 +202,40 @@ class TestTerminalConditionCarriage:
 
         assert len(relayed) == 1
         assert "provider_condition" not in relayed[0]["payload"]
+
+    @pytest.mark.asyncio
+    async def test_cancelled_terminal_carries_exact_cancellation_evidence(self) -> None:
+        relayed: list[dict[str, Any]] = []
+        projector = _relayed_terminal_projector(relayed)
+        evidence = CancellationEvidence(
+            schema_version="cancellation-evidence-v1",
+            dispatch_id="cancel-dispatch",
+            outcome="ceased",
+        )
+
+        await projector.emit_terminal_status(
+            "thread-cancelled",
+            ThreadStatus.CANCELLED,
+            cancellation_evidence=evidence,
+        )
+
+        assert len(relayed) == 1
+        assert relayed[0]["payload"]["cancellation_evidence"] == (
+            evidence.model_dump(mode="json")
+        )
+
+    @pytest.mark.asyncio
+    async def test_non_cancelled_terminal_refuses_cancellation_evidence(self) -> None:
+        projector = _relayed_terminal_projector([])
+        evidence = CancellationEvidence(
+            schema_version="cancellation-evidence-v1",
+            dispatch_id="cancel-dispatch",
+            outcome="no_active_work",
+        )
+
+        with pytest.raises(ValueError, match="requires a cancelled terminal"):
+            await projector.emit_terminal_status(
+                "thread-completed",
+                ThreadStatus.COMPLETED,
+                cancellation_evidence=evidence,
+            )

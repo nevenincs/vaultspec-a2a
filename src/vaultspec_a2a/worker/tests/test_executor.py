@@ -87,6 +87,7 @@ def _make_bridge(
     *,
     api_url: str = "http://control:8000",
     worker_id: str = "test-worker",
+    relayed: list[dict[str, Any]] | None = None,
 ) -> WorkerBridge:
     """Create a WorkerBridge backed by a real in-process FastAPI ASGI gateway.
 
@@ -96,6 +97,9 @@ def _make_bridge(
 
     @_app.post("/internal/events/batch")
     async def _batch(request: Request) -> Response:
+        if relayed is not None:
+            body = await request.json()
+            relayed.extend(body["events"])
         return Response(content='{"status":"ok"}', media_type="application/json")
 
     @_app.post("/internal/heartbeat")
@@ -527,7 +531,8 @@ class TestHandleDispatch:
 
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
-            bridge = _make_bridge()
+            relayed: list[dict[str, Any]] = []
+            bridge = _make_bridge(relayed=relayed)
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
 
@@ -545,8 +550,67 @@ class TestHandleDispatch:
 
                 # The event should now be set
                 assert cancel_event.is_set()
+                terminal = [
+                    item["payload"]
+                    for item in relayed
+                    if item["payload"].get("event_type") == "thread_terminal"
+                ]
+                assert terminal == [
+                    {
+                        "event_type": "thread_terminal",
+                        "thread_id": "t-cancel-me",
+                        "status": "cancelled",
+                        "cancellation_evidence": {
+                            "schema_version": "cancellation-evidence-v1",
+                            "dispatch_id": req.dispatch_id,
+                            "outcome": "no_active_work",
+                        },
+                    }
+                ]
             finally:
                 await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_active_cancel_retains_exact_cessation_evidence_for_settle(
+        self,
+    ) -> None:
+        thread_id = "t-active-cancel"
+        relayed: list[dict[str, Any]] = []
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge(relayed=relayed)
+            executor = Executor(checkpointer=cp, bridge=bridge)
+            try:
+                reservation = await executor.reserve_dispatch_capacity(thread_id)
+                assert reservation is not None
+                request = DispatchRequest(
+                    dispatch_id="active-cancel-dispatch",
+                    action="cancel",
+                    thread_id=thread_id,
+                    recursion_limit=25,
+                )
+
+                await executor.handle_dispatch(request)
+
+                assert [
+                    item
+                    for item in relayed
+                    if item["payload"].get("event_type") == "thread_terminal"
+                ] == []
+                evidence = executor._take_cancellation_evidence(
+                    thread_id, outcome="ceased"
+                )
+                assert evidence is not None
+                assert evidence.dispatch_id == "active-cancel-dispatch"
+                assert evidence.outcome == "ceased"
+                assert (
+                    executor._take_cancellation_evidence(thread_id, outcome="ceased")
+                    is None
+                )
+                await executor.release_dispatch_capacity(reservation)
+            finally:
+                await bridge.close()
+                await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_ingest_without_graph_or_preset_logs_warning(

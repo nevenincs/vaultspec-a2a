@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:e96fcbf7d080a481a59e8d98e60d5599be829237c506d380c09a5f49b6c141aa'
+body_hash: 'sha256:ecdcd0c3e03a04494c6e466872494697bc1502935da94dc432a65a3ba044424b'
 step_id: 'S12'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -136,3 +136,31 @@ Final review discriminator: bounded recovery-authority and dispatch-receipt batt
 Commands: `.venv/Scripts/python.exe -m vaultspec_a2a.testing.runner --run-timeout 60 --exit-timeout 5 -- src/vaultspec_a2a/worker/tests/test_frozen_graph_authority.py src/vaultspec_a2a/control/tests/test_accepted_input_recovery.py src/vaultspec_a2a/control/tests/test_dispatch_receipts.py -q -o addopts=`; the second substituted `test_recovery_authority.py` and `test_thread_service_tokens.py`; the final substituted `test_recovery_authority.py` and `test_dispatch_receipts.py`.
 
 Next command: inspect `src/vaultspec_a2a/control/cancel_service.py` and `src/vaultspec_a2a/worker/executor.py` cancellation handling against the durable cessation/no-op contract before extending S12. The earlier direct-recovery owned-run failure remains preserved above; these later completed runs do not erase it.
+## Durable cancellation disposition checkpoint
+
+- `A` `src/vaultspec_a2a/thread/cancellation_evidence.py`.
+- `M` worker executor/state projection, gateway event settlement, terminal effects and result vocabulary.
+- A worker cancellation terminal can now carry one closed `cancellation-evidence-v1` object binding the accepted cancel dispatch identity to either `ceased` or `no_active_work`.
+- The no-active worker path emits `no_active_work`; an active run retains the exact cancel identity until its cancelled settle consumes it as `ceased`. Evidence is one-shot and cannot attach to a non-cancelled terminal.
+- Gateway settlement validates the schema, exact latest cancel dispatch id and current thread writer authority before applying the cancel action. It persists the disposition as `cancelled_ceased` or `cancelled_no_active_work`.
+- An absent, malformed or mismatched cancellation proof may still report a terminal observation, but it leaves the cancel action leased/unapplied and does not claim `last_applied_action=cancel`.
+
+Formal review findings:
+
+- HIGH / false application: any cancelled terminal previously applied the latest cancel row without action identity -> resolved for cancellation settlement.
+- HIGH / missing semantic outcome: worker terminals could not distinguish active cessation from a no-start/no-active no-op -> resolved with the closed two-member evidence vocabulary.
+- HIGH / false projection: terminal effects claimed cancel as the last applied action even when no cancel action existed -> resolved; the claim now requires validated cancellation evidence.
+- HIGH / consumer election: `_handle_terminal_event` still writes terminal lifecycle status through the older unconditional terminal consumer before cancellation evidence validation. S13 remains responsible for exact terminal writer election; this checkpoint only prevents unproven cancel-action settlement.
+- HIGH / delivery durability: evidence becomes durable when the gateway commits it to the control action. Worker crash or exhausted event delivery before that commit leaves an unresolved cancellation lease; S14/S83 still own durable delivery/retry.
+- HIGH / completion race: active work can still complete concurrently with cancellation before the ingest loop observes its cancel event. S20-S22/S54 remain required for wakeup, cleanup and terminal-winner proof.
+- MEDIUM / verification: full-file Ty for `worker/tests/test_executor.py` remains blocked by its already queued four-member graph cache fixtures. Changed production files and the other changed tests pass Ty; Ruff passes all changed files.
+
+Verification evidence:
+
+- Four exact/missing/mismatched gateway settlement cases passed in 16.77 seconds.
+- Producer, transport and consumer selection passed eight cases in 6.99 seconds.
+- Full event-handler plus state-projection modules passed 24 cases in 8.77 seconds.
+- No-active and active retained-identity executor producer cases plus projector discriminators passed in the focused gates; the latest three-case producer gate passed in 0.33 seconds before the active retained-identity case was added, and the final eight-case combined gate includes it.
+- Focused production/test Ruff and production plus event/projector Ty passed.
+
+S12 remains open for the named S13/S14/S20-S22 authority consumers and later-action provider/project qualification. This checkpoint closes cancellation evidence shape and exact cancel-action settlement only.

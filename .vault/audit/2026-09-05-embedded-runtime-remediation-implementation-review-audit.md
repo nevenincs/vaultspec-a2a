@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:9eea97cd0f9c9691defa55dd556088f2bb5e81478b941692620a2098e39af18e'
+body_hash: 'sha256:cbb891481bca521aff520702eb5c40c9e2479970880e96d045c27f3f8d782bd7'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1009,7 +1009,7 @@ The Step Record retains the complete `9d56e23e` through `613d23e2` implementatio
 
 Current-tree scans find no disclosed raw credential or restored legacy/deprecated claim. Index, audits, Step Record and plan agree. No finding surfaced; the S06 lifecycle closure passes mandatory review.
 
-### w01-p02-s07-compile-loop-gap-diagnosis | medium | corrected pending formal review
+### w01-p02-s07-compile-loop-gap-diagnosis | medium | closed
 
 Type: performance evidence and measurement integrity. S07 retains ER21's original failed 25.312691-second compile with a 0.6182457-second maximum loop gap and the unchanged M15 success. Current source still offloads the cold model stack before provider construction. Fresh controls on the named Windows/Ryzen host measured a 3.5688-second on-loop gap, 0.0851-second offloaded gap and 0.0552-second production compile gap. The new gate drives five fresh production compile subprocesses under five owned CPU-bound processes, matching frozen execution capacity `C=5`, while an idle event-loop control under the same load terminally refuses an inconclusive scheduler-starved sample. Final idle gap was 0.0191561 seconds; compile gaps were 0.0464355-0.0816821 seconds; every load owner accrued 43.34-48.55 CPU seconds. The 0.5-second ceiling is unchanged. The warmup module passed 4 tests in 66.85 seconds and requires no production correction.
 
@@ -1027,7 +1027,7 @@ No runtime authority, provider surface, compatibility path, deprecated option or
 
 Type: measurement-harness resource cleanup. Final review of the owned CPU-load helper found a process could exit between `poll()` and `terminate()`. Cleanup now accepts only terminal `ProcessLookupError`, still waits each exact process and escalates its same handle on timeout, and the test asserts every retained `psutil.Process` identity is absent after the load context. The authoritative combined run passes and an independent command-line scan reports zero matching burner processes.
 
-### w01-p02-s07-compile-window-includes-teardown | medium | resolved pending corrected formal review
+### w01-p02-s07-compile-window-includes-teardown | medium | closed
 
 Type: performance measurement integrity. In `src/vaultspec_a2a/providers/tests/probe_loop_responsiveness.py:59-116`, `_run_compile` captures `compile_seconds` immediately after `get_or_compile_graph`, but then awaits `bridge.close()` and exits the checkpointer context before returning while the shared heartbeat continues until `_measure` stops it at lines 149-150. The asserted `max_loop_gap_seconds` therefore covers graph compilation plus bridge/checkpointer teardown, while `work_seconds` covers compilation alone. Independent formal review reproduced the named `C=5` gate and one trial reported `work_seconds=2.3452` with `max_loop_gap_seconds=11.0947`; a loop gap almost nine seconds longer than the measured work proves the two fields do not describe the same interval. This invalidates the five-trial compile-only conclusion and blocks S07 evidence closure.
 
@@ -1043,7 +1043,7 @@ Type: formal implementation review disposition. Commit `76cb91e54c42b6b9881b16e9
 
 The exact cold catalog/current-schema restart case independently passed once in 24.50 seconds, supporting the documented absence of warmup coupling while leaving its separate S49 ownership open. Ruff format/check, Ty, diff and all 19 remediation Core checks pass; no legacy/deprecated surface was added. The recorded six cold-catalog passes and original load results remain evidence, but the independent named-load run failed with gaps `0.0620, 11.0947, 0.0572, 0.0569, 0.0666` seconds (`1 failed` in 76.51 seconds). The contaminated timing window and separately unclassified teardown stall are MEDIUM findings. S07 does not pass and remains open for correction and re-review.
 
-### w01-p02-s07-exact-phase-boundary-correction | medium | corrected pending formal review
+### w01-p02-s07-exact-phase-boundary-correction | medium | closed
 
 Type: performance measurement integrity. Correction after formal FAIL `691f62cc60260e30a82ef5c8c1682276bbe8aba7` makes the heartbeat's last-tick timestamp shared state and freezes each maximum gap synchronously at the same monotonic timestamp that ends its reported duration. The compile result therefore ends before cleanup starts. `WorkerBridge.close()`, checkpointer exit and a post-cleanup ambient scheduler interval each receive their own reset duration/gap window. A real unloaded probe reported compile 2.5533 seconds / 0.0417-second gap, bridge close 3.4184 / 0.0268, checkpointer exit 0.0014 / 0.0014 and ambient scheduler 0.1021 / 0.0157.
 
@@ -1062,3 +1062,9 @@ Type: formal correction review disposition. Correction `82c8e5181453e2c3a6f7712c
 The historical 25.312691-second/0.6182457-second ER21 failure, the formal-review contaminated 2.3452-second/11.0947-second sample, and the correction's first intentionally failing diagnostic remain preserved. That diagnostic measured all five compile gaps at 0.0546-0.1796 seconds, bridge close at 7.1849 seconds with a 3.6920-second gap, checkpointer exit at no more than 0.0032 seconds and ambient scheduling at no more than 0.0175 seconds. The distinct bridge lifecycle finding remains MEDIUM and open under `W04.P10.S49`; there is no xfail, suppression or lifecycle-pass claim in S07.
 
 Independent re-review passed the full warmup module, 5 tests in 113.80 seconds, and the current-schema restart/catalog discriminator, 1 test in 42.34 seconds. Ruff format/check, Ty and diff checks pass. Both remediation and robustness Core checks report all 19 checks clean; the current-only scan finds no retired/deprecated surface and the owned-load process scan is empty. No new finding surfaced. S07 is review-passed and ready for separate lifecycle closure; this review leaves it open.
+
+### w01-p02-s07-lifecycle-closure | low | closed pending closure-record review
+
+Type: lifecycle traceability. Formal PASS `6c742790f42b21d433c371ed6db738c866d0fcd7` accepted correction `82c8e5181453e2c3a6f7712c2f9d8a6048342876` after original implementation `76cb91e54c42b6b9881b16e97dbcb47d354ce50e` and formal FAIL `691f62cc60260e30a82ef5c8c1682276bbe8aba7`. The S07 Step Record retains original ER21 25.312691-second work / 0.6182457-second gap / 1557 ticks, unchanged M15 success, corrected non-vacuous `C=5` compile gaps 0.0546-0.1796 seconds, independent 5-test and restart checks, static/Core/current-only scans, and the exact review chain.
+
+Vaultspec Core closed only `W01.P02.S07`; plan status is 7 of 81 Steps complete and `W01.P02.S08` is next. ER21's compile diagnosis is closed. The phase-isolated 7.1849-second `WorkerBridge.close()` / 3.6920-second loop stall and the distinct cold provider-catalog/Uvicorn lifecycle issue both remain MEDIUM and open under `W04.P10.S49`. All historical failures and reviews remain in the audit. No runtime source changed during lifecycle closure.

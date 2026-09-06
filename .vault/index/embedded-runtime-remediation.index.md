@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:cf2ce078d2d4e417734290afd084723b4d804568dc7c5460671a2fea1c375e73'
+body_hash: 'sha256:9fbd8399c468b07f96467d131a5dea7d91d2c98ac4f35e15710210d95701766f'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -15,6 +15,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S04]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S05]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S06]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S07]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
@@ -48,6 +49,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S04` - Run PostgreSQL URL checks under the locked server dependency profile and make that profile explicit while preserving the SQLite binary profile
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S05` - Verify catalog availability-test correction under owner P01.S11 in 2026-08-02-provider-model-catalog-plan, preserving exact-mode admission assertions
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S06` - Align an isolated RAG client/service test environment and rerun the real project-pinning discriminator without altering an unrelated shared daemon
+- `2026-09-05-embedded-runtime-remediation-W01-P02-S07` - Diagnose the intermittent compilation loop-gap measurement on the named representative host/load and correct the owning warmup path if required without relaxing its existing budget
 
 ### plan
 

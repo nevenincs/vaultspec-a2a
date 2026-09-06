@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:de6031280597ffc0d173427fed692f9eea7cbe4230a697b8c2c08fef8693cf62'
+body_hash: 'sha256:59ace72c57a82bb6e30ae763e892f525e387863ebbc07f8fdce8e4b707175743'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -224,9 +224,9 @@ service. Shared PID 56028 and port 8766 stayed unchanged; service-token SHA-256
 compared `changed=false`. Formal
 S06 review remains required.
 
-### ER21-compile-loop-budget | medium | corrected pending W01.P02.S07 formal review
+### ER21-compile-loop-budget | medium | CLOSED
 
-**OPEN; performance; M02; separate from A29's unmeasured HTTP percentiles.** `providers/tests/test_model_stack_warmup.py:114` measures a cold production graph-compilation subprocess. Observed work 25.312691 seconds, max loop gap **0.6182457 seconds**, 1557 ticks, versus its existing **0.5-second** ceiling. This is a measured threshold failure, not proof of the test message's asserted import-causality diagnosis. M15 passed on the targeted recheck without code or threshold changes. Host contention and repeatability require separation; this is retained as an intermittent observation, not declared fixed. **Owner:** worker warmup/performance tests. **Close when:** the gap is explained and the fixed budget holds on the named representative host/load; retain both failed and successful rechecks.
+**CLOSED by W01.P02.S07; performance; M02; separate from A29's unmeasured HTTP percentiles.** The original cold production graph-compilation subprocess took 25.312691 seconds and recorded a 0.6182457-second maximum loop gap across 1557 ticks against the unchanged 0.5-second ceiling. M15 later passed without source or threshold changes. S07 named the Windows/Ryzen host and established five exact CPU-bound owners matching frozen capacity `C=5`; after formal review corrected a contaminated compile/teardown timing boundary, all five exact compile gaps measured 0.0546-0.1796 seconds. Formal PASS `6c742790f42b21d433c371ed6db738c866d0fcd7` accepts the diagnosis and fixed-budget proof. The phase-isolated 7.1849-second `WorkerBridge.close()` / 3.6920-second loop stall is a distinct MEDIUM production lifecycle finding and remains open under `W04.P10.S49`; closing ER21 does not close or weaken that finding.
 
 ### ER22-upstream-testclient-deprecation | low | Starlette's test client uses a deprecated AnyIO alias
 
@@ -696,4 +696,4 @@ The historical cold-catalog/Uvicorn observation did not reproduce across six fre
 
 Formal review `691f62cc60260e30a82ef5c8c1682276bbe8aba7` invalidated M16's five-trial compile-only conclusion because `work_seconds` stopped at graph completion while the heartbeat continued through bridge and checkpointer cleanup. Its independent load run preserved the contaminated failure: one result combined 2.3452 seconds of compile work with an impossible 11.0947-second supposed compile gap.
 
-The corrected probe freezes duration and gap at one exact timestamp for each independent phase. Its first five-trial `C=5` rerun found compile gaps 0.0546-0.1796 seconds, all below the unchanged 0.5-second ER21 ceiling. The same run separately found a 3.6920-second loop gap during a 7.1849-second `WorkerBridge.close()` in trial four; checkpointer and ambient scheduler windows remained below 0.018 seconds. This is a confirmed production lifecycle observation owned by `W04.P10.S49`, not compile evidence. The corrected S07 module passed 5 tests in 139.74 seconds. A separate current-schema restart/catalog run passed in 51.63 seconds without shutdown failure. S07 keeps the teardown metrics and open S49 finding visible while qualifying only its compile-window contract pending formal review.
+The corrected probe freezes duration and gap at one exact timestamp for each independent phase. Its first five-trial `C=5` rerun found compile gaps 0.0546-0.1796 seconds, all below the unchanged 0.5-second ER21 ceiling. The same run separately found a 3.6920-second loop gap during a 7.1849-second `WorkerBridge.close()` in trial four; checkpointer and ambient scheduler windows remained below 0.018 seconds. This is a confirmed production lifecycle observation owned by `W04.P10.S49`, not compile evidence. The corrected S07 module passed 5 tests in 139.74 seconds. A separate current-schema restart/catalog run passed in 51.63 seconds without shutdown failure. Formal PASS `6c742790f42b21d433c371ed6db738c866d0fcd7` accepted the compile-window contract. Core closes ER21 and S07 while the teardown finding remains visible and open under S49.

@@ -3,14 +3,13 @@ tags:
   - '#research'
   - '#codebase-health'
 date: '2026-09-05'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:0d7a2d10ec68c5b8d11615b1f34dc009b716be0632764518e6b212089caed6ce'
+body_hash: 'sha256:e0bef2b9e6a84cd3393f063f20c631ea81801f7f178f4bbe21aa910e3025f02b'
 related:
   - "[[2026-07-19-codebase-health-adr]]"
   - "[[2026-07-18-desktop-product-profile-adr]]"
 ---
-
 # `codebase-health` research: `process resource lifetimes`
 
 The audit found that the accepted ownership topology can support bounded normal teardown, but its implementation confused root exit with descendant exit and ordinary exceptions with cancellation. The corrective pass repairs those boundaries; stronger owner-crash and deliberate-escape guarantees still need platform supervision.
@@ -39,7 +38,7 @@ The audit found that the accepted ownership topology can support bounded normal 
 
 ### Native containment has limits beyond ordinary teardown
 
-Windows assignment still occurs after process creation; startup latency cannot prove containment of early descendants. POSIX groups cannot prevent deliberate setsid escape or automatically kill children after owner SIGKILL. Python cannot forcibly terminate callbacks that suppress cancellation. Failed cleanup also needs a separate retry and ownership-recovery contract. These limits remain follow-up work rather than stronger guarantees implied by passing normal-lifecycle tests. Windows assignment semantics are documented at https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject.
+Windows Job assignment ordinarily occurs after process creation, so startup latency cannot prove containment of early descendants. The provider launcher closes that window by creating shell and exec roots suspended, assigning the retained process handle, and resuming the single initial thread only after Job admission. A failed assignment therefore has one exact suspended root and no possible descendants; killing and waiting that retained handle is complete cleanup without process-table discovery. Other Windows owners that start a root before assignment retain the general limitation. POSIX groups cannot prevent deliberate setsid escape or automatically kill children after owner SIGKILL. Python cannot forcibly terminate callbacks that suppress cancellation. Failed cleanup also needs a separate retry and ownership-recovery contract. Windows assignment semantics are documented at https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject.
 
 ## Sources
 

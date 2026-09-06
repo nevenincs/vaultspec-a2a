@@ -40,11 +40,7 @@ from ..lifecycle.pairing import (
     eviction_is_authorized,
 )
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import (
-    ProcessContainment,
-    ProcessContainmentError,
-    terminate_exact_popen_tree,
-)
+from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..utils.runtime_exec import module_command
 from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
 from .worker_status import WorkerConnectionStatus
@@ -1002,7 +998,7 @@ async def _stop_worker_tree(
                 term_timeout=term_timeout, kill_timeout=kill_timeout
             )
         else:
-            reaped = await terminate_exact_popen_tree(
+            reaped = await _stop_exact_popen_tree(
                 process,
                 term_timeout=term_timeout,
                 kill_timeout=kill_timeout,
@@ -1013,6 +1009,69 @@ async def _stop_worker_tree(
             )
     finally:
         await asyncio.to_thread(process.wait, 0.1)
+
+
+def _retained_process_owner(
+    process: subprocess.Popen[bytes],
+) -> psutil.Process | None:
+    """Return a reuse-guarded psutil identity for the exact live ``Popen``."""
+    if process.poll() is not None:
+        return None
+    try:
+        owner = psutil.Process(process.pid)
+        owner.create_time()
+    except psutil.NoSuchProcess:
+        return None
+    # The first poll proved our retained handle live before lookup; the second
+    # rejects an exit/reuse race during lookup. ``owner`` has cached creation
+    # identity, so every later signal refuses a reused numeric pid.
+    if process.poll() is not None:
+        return None
+    return owner
+
+
+async def _stop_exact_popen_tree(
+    process: subprocess.Popen[bytes],
+    *,
+    term_timeout: float,
+    kill_timeout: float,
+) -> bool:
+    """Stop the exact retained root and its observed tree without reopening a pid."""
+    owner = _retained_process_owner(process)
+    if owner is None:
+        return process.poll() is not None
+    retained: list[psutil.Process] = [owner]
+    try:
+        owner.suspend()
+        for child in owner.children(recursive=True):
+            try:
+                if child.is_running():
+                    child.suspend()
+                    retained.append(child)
+            except psutil.NoSuchProcess:
+                pass
+        for target in reversed(retained):
+            try:
+                if target.is_running():
+                    target.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        _, alive = await asyncio.to_thread(
+            psutil.wait_procs, retained, timeout=term_timeout
+        )
+        for target in alive:
+            try:
+                if target.is_running():
+                    target.kill()
+            except psutil.NoSuchProcess:
+                pass
+        if alive:
+            _, alive = await asyncio.to_thread(
+                psutil.wait_procs, alive, timeout=kill_timeout
+            )
+        return not alive
+    except (psutil.AccessDenied, psutil.NoSuchProcess):
+        return process.poll() is not None
 
 
 async def _shutdown_worker_process(

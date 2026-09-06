@@ -21,12 +21,9 @@ import sys
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
+from ..utils import kill_pid_tree_async
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import (
-    ProcessContainment,
-    ProcessContainmentError,
-    terminate_exact_popen_tree,
-)
+from ..utils.process import ProcessContainment, ProcessContainmentError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -164,6 +161,7 @@ async def _spawn_acp_process(
     *,
     use_exec: bool,
     metadata: Mapping[str, object] | None,
+    containment: ProcessContainment | None = None,
 ) -> asyncio.subprocess.Process:
     """Spawn an ACP subprocess with platform-appropriate isolation.
 
@@ -185,7 +183,7 @@ async def _spawn_acp_process(
     # the CLI, its node/grandchildren, and the MCP bridges it launches - is reaped
     # as one on run terminal, without a parent-pid walk. The containment rides on
     # the returned Process for the shared reaper to reach.
-    containment = ProcessContainment.create()
+    containment = containment or ProcessContainment.create()
     spawn_mode = "exec" if sys.platform != "win32" or use_exec else "shell"
     log_extra = _metadata_extra(metadata)
     log_extra.update(
@@ -298,9 +296,17 @@ async def _reap_provider_admission_failure(
         if containment.assigned:
             stopped = await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
         else:
-            stopped = await terminate_exact_popen_tree(
-                _retained_popen(process), term_timeout=5.0, kill_timeout=5.0
-            )
+            # Windows provider roots are created suspended and reach this branch
+            # only when Job assignment failed. The provider has executed zero
+            # instructions, so the exact retained root is the complete tree.
+            popen = _retained_popen(process)
+            popen.kill()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except TimeoutError:
+                stopped = False
+            else:
+                stopped = process.returncode is not None
         if not stopped:
             raise ProcessContainmentError(
                 f"Provider process tree {process.pid} could not be reaped after "
@@ -331,16 +337,16 @@ async def _kill_process_tree(
 
     A provider spawned by :func:`spawn_acp_process` carries an assigned OS
     containment, so its whole tree (Windows: the Job Object; POSIX: the process
-    group) is reaped at once with no parent-pid discovery. A directly retained
-    process without containment is reaped through its exact ``Popen`` identity
-    and creation-time guarded descendants.
+    group) is reaped at once with no parent-pid discovery. A directly created
+    process uses the explicit per-pid tree cleanup contract; failed provider
+    admission never reaches that path.
 
     The asyncio transport handle is closed last to prevent OS handle leaks
     when the event loop finalizer runs (cpython#114177).
     """
     containment = process_containment(process)
     has_containment = containment is not None and containment.assigned
-    kill_strategy = "os_containment" if has_containment else "exact_popen_tree"
+    kill_strategy = "os_containment" if has_containment else "per_pid_tree_kill"
     log_extra = _metadata_extra(metadata)
     log_extra.update(
         {
@@ -350,15 +356,14 @@ async def _kill_process_tree(
         }
     )
     logger.info("ACP subprocess termination starting", extra=log_extra)
-    # Reap a successfully assigned provider through its OS containment. A direct
-    # subprocess that did not come from the provider launcher still retains its
-    # Popen identity; terminate only that creation-time-guarded tree.
+    # Returned providers use the authority acquired before admission. Direct
+    # subprocess owners use the explicit per-pid cleanup contract.
     try:
         if containment is not None and containment.assigned:
             stopped = await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
         else:
-            stopped = await terminate_exact_popen_tree(
-                _retained_popen(process), term_timeout=5.0, kill_timeout=5.0
+            stopped = await kill_pid_tree_async(
+                process.pid, term_timeout=5.0, kill_timeout=5.0
             )
         if not stopped:
             raise ProcessContainmentError(

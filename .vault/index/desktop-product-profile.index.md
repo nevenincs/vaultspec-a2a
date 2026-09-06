@@ -6,7 +6,7 @@ tags:
 date: '2026-07-22'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:5129b69b57e16377332161052f39b14881a7dfb08ad68753ba59f405a3606715'
+body_hash: 'sha256:f5ab7b774efb9f2f0f60e1d98dd30779d0def884f417109199ecb32b15beb7c7'
 related:
   - '[[2026-07-18-desktop-product-profile-W01-P01-summary]]'
   - '[[2026-07-18-desktop-product-profile-W01-P02-summary]]'
@@ -32,6 +32,7 @@ related:
   - '[[2026-07-19-desktop-product-profile-audit]]'
   - '[[2026-07-19-desktop-product-profile-w01-p03-capsule-review-audit]]'
   - '[[2026-07-20-desktop-product-profile-s101-lost-ack-audit]]'
+  - '[[2026-09-06-desktop-product-profile-s60-atomic-provider-containment-review-audit]]'
 ---
 
 # `desktop-product-profile` feature index
@@ -51,6 +52,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-19-desktop-product-profile-audit` - `desktop-product-profile` audit: `W01 P01 S01 dependency profile review`
 - `2026-07-19-desktop-product-profile-w01-p03-capsule-review-audit` - `desktop-product-profile` audit: `w01 p03 capsule review`
 - `2026-07-20-desktop-product-profile-s101-lost-ack-audit` - `desktop-product-profile` audit: `S101 retained inputs and lost-ack hardening`
+- `2026-09-06-desktop-product-profile-s60-atomic-provider-containment-review-audit` - `desktop-product-profile` audit: `S60 atomic provider containment formal review`
 
 ### exec
 

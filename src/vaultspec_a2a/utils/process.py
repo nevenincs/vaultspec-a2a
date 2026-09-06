@@ -6,10 +6,6 @@ process handle), so a ``subprocess.Popen`` caller and an
 ``asyncio.subprocess.Process`` caller both use it and each keeps its own final
 wait/reap bookkeeping.
 
-The exact-``Popen`` path complements that portable primitive for ownership
-failures: it retains creation-time-guarded identities and never scans the host
-or reopens a bare pid after its root exits.
-
 Windows fells the whole tree with ``taskkill /T /F`` because a bare
 ``terminate()`` only kills the immediate process and orphans grandchildren
 (node.exe under a cmd.exe shim, an engine a worker spawned). POSIX has no
@@ -35,8 +31,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-import psutil
-
 from .async_cleanup import complete_cleanup
 
 if TYPE_CHECKING:
@@ -56,7 +50,6 @@ __all__ = [
     "port_listener_pid",
     "posix_descendant_pids",
     "posix_parent_map",
-    "terminate_exact_popen_tree",
 ]
 
 logger = logging.getLogger(__name__)
@@ -1310,7 +1303,9 @@ class ProcessContainment:
 
     def _assign_win_handle(self, pid: int, handle: Any) -> None:
         if sys.platform != "win32" or self._job is None:
-            raise ProcessContainmentError("Windows containment has no job object")
+            raise ProcessContainmentError(
+                f"Windows containment has no job object for process {pid}"
+            )
         import ctypes
         from ctypes import wintypes
 
@@ -1375,13 +1370,8 @@ class ProcessContainment:
         if self._pid is None:
             return True
         if not self._assigned:
-            logger.warning(
-                "Process %d has no OS containment; falling back to a per-pid"
-                " tree kill (containment assignment did not complete)",
-                self._pid,
-            )
-            return await kill_pid_tree_async(
-                self._pid, term_timeout=term_timeout, kill_timeout=kill_timeout
+            raise ProcessContainmentError(
+                f"Process {self._pid} is not assigned to this containment"
             )
         if sys.platform == "win32":
             return await self._terminate_win_job(kill_timeout=kill_timeout)
@@ -1502,63 +1492,3 @@ class ProcessContainment:
         if not kernel32.CloseHandle(self._job):
             raise ctypes.WinError(ctypes.get_last_error())
         self._job = None
-
-
-def _retained_process_owner(
-    process: subprocess.Popen[bytes],
-) -> psutil.Process | None:
-    """Return a creation-time-guarded identity for the exact live ``Popen``."""
-    if process.poll() is not None:
-        return None
-    try:
-        owner = psutil.Process(process.pid)
-        owner.create_time()
-    except psutil.NoSuchProcess:
-        return None
-    if process.poll() is not None:
-        return None
-    return owner
-
-
-async def terminate_exact_popen_tree(
-    process: subprocess.Popen[bytes],
-    *,
-    term_timeout: float,
-    kill_timeout: float,
-) -> bool:
-    """Stop one retained root and its observed tree without reopening a bare pid."""
-    owner = _retained_process_owner(process)
-    if owner is None:
-        return process.poll() is not None
-    retained: list[psutil.Process] = [owner]
-    try:
-        owner.suspend()
-        for child in owner.children(recursive=True):
-            try:
-                if child.is_running():
-                    child.suspend()
-                    retained.append(child)
-            except psutil.NoSuchProcess:
-                pass
-        for target in reversed(retained):
-            try:
-                if target.is_running():
-                    target.terminate()
-            except psutil.NoSuchProcess:
-                pass
-        _, alive = await asyncio.to_thread(
-            psutil.wait_procs, retained, timeout=term_timeout
-        )
-        for target in alive:
-            try:
-                if target.is_running():
-                    target.kill()
-            except psutil.NoSuchProcess:
-                pass
-        if alive:
-            _, alive = await asyncio.to_thread(
-                psutil.wait_procs, alive, timeout=kill_timeout
-            )
-        return not alive
-    except (psutil.AccessDenied, psutil.NoSuchProcess):
-        return process.poll() is not None

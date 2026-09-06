@@ -10,16 +10,20 @@ processes.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
+import re
 import sys
 import time
+from typing import TYPE_CHECKING
 
 import pytest
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 from ...lifecycle.discovery import is_pid_alive
 from ...providers._subprocess import (
-    _admit_provider_process,
+    _spawn_acp_process,
     kill_process_tree,
     spawn_acp_process,
 )
@@ -46,14 +50,6 @@ _PROVIDER_EXITS_AFTER_GRANDCHILD = (
     "import subprocess,sys;"
     "g=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)']);"
     "print(g.pid,flush=True)"
-)
-
-_PROVIDER_WITH_TWO_GRANDCHILDREN = (
-    "import subprocess,sys,time;"
-    "kids=[subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'])"
-    " for _ in range(2)];"
-    "[print(k.pid,flush=True) for k in kids];"
-    "time.sleep(120)"
 )
 
 
@@ -159,37 +155,28 @@ async def test_containment_reaps_child_after_provider_root_exits() -> None:
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows Job assignment proof")
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_assignment_failure_reaps_exact_provider_tree_and_preserves_error() -> (
-    None
-):
-    process = await asyncio.create_subprocess_exec(
-        _base_interpreter(),
-        "-c",
-        _PROVIDER_WITH_TWO_GRANDCHILDREN,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    assert process.stdout is not None
-    children = [
-        int((await asyncio.wait_for(process.stdout.readline(), timeout=10.0)).strip())
-        for _ in range(2)
-    ]
+async def test_assignment_failure_reaps_suspended_root_before_first_instruction(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "provider-first-instruction"
+    script = f"from pathlib import Path; Path({str(marker)!r}).touch()"
     containment = ProcessContainment.create()
     containment.close()
     started = time.monotonic()
-    try:
-        with pytest.raises(
-            ProcessContainmentError, match="Windows containment has no job object"
-        ):
-            await _admit_provider_process(process, containment)
-        elapsed = time.monotonic() - started
-        assert elapsed < 10.5, f"assignment-failure cleanup took {elapsed:.4f}s"
-        assert process.returncode is not None
-        _await_gone(children)
-    finally:
-        with contextlib.suppress(Exception):
-            process.kill()
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(process.wait(), timeout=2.0)
-        await _force_reap(children)
+    with pytest.raises(
+        ProcessContainmentError, match="Windows containment has no job object"
+    ) as caught:
+        await _spawn_acp_process(
+            [_base_interpreter(), "-c", script],
+            os.environ.copy(),
+            os.getcwd(),
+            use_exec=True,
+            metadata=None,
+            containment=containment,
+        )
+    elapsed = time.monotonic() - started
+    assert elapsed < 10.5, f"assignment-failure cleanup took {elapsed:.4f}s"
+    pid_match = re.search(r"process (\d+)", str(caught.value))
+    assert pid_match is not None
+    assert not marker.exists(), "provider executed before failed Job assignment"
+    assert not is_pid_alive(int(pid_match.group(1)))

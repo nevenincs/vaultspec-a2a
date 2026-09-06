@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:74eab0dd52b9d0595e1b8cf910f678533087218754eb2c954e9e5d2184e4a087'
+body_hash: 'sha256:d0bcd87487cd6b0132777fa6aae4c50749786133c0a388b93ac5e5bfbdfd930c'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -923,3 +923,15 @@ cancellation/failed-stop 43.18 seconds. Ruff, format, Ty, diff and feature Core
 checks remain required before commit. No product hook, compatibility path,
 deprecated/legacy behavior, fake transport, monkeypatch or warning suppression
 was added. S06 remains open for formal re-review.
+
+### w01-p02-s06-readiness-cleanup-deadline-split | medium | open
+
+Type: test readiness and owned-service lifecycle. Correction `1d3f99e9afcb2a8265882a9fdaee97bd004fb90e` makes the CLI control subprocess itself bounded, but `_isolated_rag_service` still composes two independent budgets. It sets `readiness_deadline = start + start_timeout_seconds` at `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py:409`, may spend that budget on launch/reap plus late-record discovery, and only afterward enters `_cleanup_private_rag_service`'s separate thirty-second timeout at line 282. The new proof exposes this split at line 1010 by accepting a sixty-second readiness request when the combined operation returns in anything under ninety seconds. This does not satisfy S06's required one total launch, termination, output-drain, late-record and owned-cleanup deadline.
+
+S06 remains review-blocked. Establish one absolute deadline before control launch and pass its remaining budget through control-tree reap, late-record discovery, CLI stop/fallback and process/port absence proof. Reserve cleanup inside that same deadline and make the discriminator require terminal return within the requested sixty seconds, including a degraded late-service cleanup path. Preserve exact-identity refusal and shared-service isolation.
+
+### w01-p02-s06-readiness-correction-formal-rereview | medium | FAIL
+
+Type: formal correction review disposition. The four-path correction resolves the earlier unbounded pipe wait: stdout/stderr use owned files, decoded reads cap each stream at 64 KiB, and the CLI wrapper plus exact observed descendants are killed and reaped inside the control deadline without `communicate()` or pipe-EOF waits. Its real wrapper launches the exact locked RAG service, observes the private record before holding handles, times out non-vacuously, discovers the detached service and proves process/listener absence. Independent review reran that case (`1 passed` in 51.58 seconds). The recorded module result is 35 passes across all three live cases. Raw credential material is absent from the current tree, only one-way comparisons remain, operator-owned rotation evidence is non-secret, and the prior cancellation/failed-stop cleanup remains intact. Ruff format/check, Ty, diff and all 19 remediation Core checks pass. ER20-only scope and the separate S07/S49 cold-catalog/Uvicorn ownership remain intact; no legacy/deprecated behavior was added.
+
+The remaining split deadline is a MEDIUM defect in S06's explicit bounded-readiness success shape. S06 does not pass formal review and remains open for correction and re-review.

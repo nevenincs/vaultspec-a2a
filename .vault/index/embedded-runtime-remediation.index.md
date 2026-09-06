@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:3d8a2f81dcd910a3cbb8bb5199a69d198b5846e9cc5fb429dfbd95eb40b9f736'
+body_hash: 'sha256:66c513c8d9d11b422b80e728a7d0b389a213d0bb2ed24a25710cf99055a81e11'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -29,6 +29,7 @@ related:
   - '[[2026-09-06-embedded-runtime-remediation-starlette-blocking-portal-dependency-reference]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-rereview-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-review-audit]]'
+  - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s49-containment-rereview-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s49-cooperative-shutdown-review-audit]]'
 ---
 
@@ -48,6 +49,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit` - `embedded-runtime-remediation` audit: `no-legacy architecture reconciliation`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-rereview-audit` - `embedded-runtime-remediation` audit: `W04.P10.S47 cooperative server owner formal rereview`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-review-audit` - `embedded-runtime-remediation` audit: `W04.P10.S47 cooperative server owner formal review`
+- `2026-09-06-embedded-runtime-remediation-w04-p10-s49-containment-rereview-audit` - `embedded-runtime-remediation` audit: `W04.P10.S49 containment correction formal rereview`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s49-cooperative-shutdown-review-audit` - `embedded-runtime-remediation` audit: `W04.P10.S49 cooperative shutdown formal review`
 
 ### exec

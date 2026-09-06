@@ -228,16 +228,6 @@ class TestEventEmission:
             "vaultspec-doc-editor": AgentLifecycleState.WORKING
         }
 
-        # Omitting thread_id preserves the historical cross-thread aggregate
-        # (unchanged behaviour for callers that intentionally want every
-        # role this worker process has ever reported, e.g. a multi-run
-        # overview) - both entries are visible there.
-        all_states = aggregator.get_agent_states()
-        assert all_states == {
-            "vaultspec-doc-editor": AgentLifecycleState.WORKING,
-            "vaultspec-researcher": AgentLifecycleState.WORKING,
-        }
-
     @pytest.mark.asyncio
     async def test_clear_thread_state_drops_only_that_threads_agent_states(
         self, aggregator: EventAggregator

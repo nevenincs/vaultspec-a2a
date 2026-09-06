@@ -194,9 +194,12 @@ def test_persisted_selection_rejects_unknown_fields_without_digest_change(
 
 
 def test_restart_refuses_any_retired_model_profile_state() -> None:
-    from ...control.dispatch import (
-        RetiredModelProfileStateError,
-        _frozen_model_assignment,
+    import json
+
+    from ...control.execution_authority import (
+        ExecutionAuthorityError,
+        ExecutionAuthorityFailure,
+        resolve_execution_authority,
     )
 
     frozen = freeze_team_selection(
@@ -206,13 +209,16 @@ def test_restart_refuses_any_retired_model_profile_state() -> None:
         required_roles=("coder",),
         records=(_record(),),
     )
-    with pytest.raises(RetiredModelProfileStateError, match="cannot be restarted"):
-        _frozen_model_assignment(
-            {
-                "provider_catalog_selection": frozen.to_record(),
-                "model_profile": {"profile_id": "must-not-win", "roles": {}},
-            }
+    with pytest.raises(ExecutionAuthorityError) as raised:
+        resolve_execution_authority(
+            json.dumps(
+                {
+                    "provider_catalog_selection": frozen.to_record(),
+                    "model_profile": {"profile_id": "must-not-win", "roles": {}},
+                }
+            )
         )
+    assert raised.value.reason is ExecutionAuthorityFailure.RETIRED
 
 
 @pytest.mark.parametrize(

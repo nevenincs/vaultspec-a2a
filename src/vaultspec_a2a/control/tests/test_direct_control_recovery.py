@@ -37,6 +37,7 @@ from ...thread.idempotency import default_cancel_key
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
+from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
@@ -251,7 +252,7 @@ async def test_recovery_dispatches_every_action_when_the_project_is_named(
     workspace.mkdir()
     dispatch_ids = await _seed_unapplied_actions(
         session_factory,
-        metadata=json.dumps({"workspace_root": str(workspace)}),
+        metadata=current_execution_metadata(workspace),
     )
 
     async with _worker_runtime(tmp_path / "dispatched-checkpoints.db") as (

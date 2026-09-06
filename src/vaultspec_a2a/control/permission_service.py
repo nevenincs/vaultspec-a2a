@@ -46,6 +46,7 @@ from .action_lease import (
     release_definite_non_delivery,
 )
 from .dispatch import safe_dispatch
+from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .permission_dispatch import permission_resume_value
 from .permission_options import extract_allowed_option_ids
 from .repair_transitions import (
@@ -235,6 +236,7 @@ class _PermissionTransition:
     resume_value: str | dict[str, str | None]
     team_preset: str | None
     workspace_root: str | None
+    model_assignment: dict[str, dict[str, object]]
     approval_status: str | None
 
 
@@ -763,6 +765,22 @@ async def _record_permission_transition(
             if isinstance(candidate, str) and candidate:
                 workspace_root = candidate
 
+    try:
+        execution_authority = resolve_execution_authority(thread_record.thread_metadata)
+    except ExecutionAuthorityError as exc:
+        return PermissionResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            idempotency_key=resolved_idempotency_key,
+            approval_status=replay_approval_status,
+            error_detail=str(exc),
+            error_status_code=409,
+            failure_type=FailureType.INCOMPATIBLE_STATE,
+        )
+
     resume_value = permission_resume_value(
         permission.pause_reason_type,
         option_id,
@@ -846,6 +864,7 @@ async def _record_permission_transition(
         resume_value=resume_value,
         team_preset=team_preset,
         workspace_root=workspace_root,
+        model_assignment=execution_authority.model_assignment,
         approval_status=submitted_approval_status,
     )
 
@@ -884,6 +903,7 @@ async def _dispatch_permission_resume(
         team_preset=transition.team_preset,
         workspace_root=transition.workspace_root,
         recursion_limit=recursion_limit,
+        model_assignment=transition.model_assignment,
     )
 
     logger.info(

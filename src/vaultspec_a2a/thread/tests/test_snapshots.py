@@ -513,6 +513,7 @@ def test_agent_data_round_trip() -> None:
     from ...api.schemas.snapshots import AgentSnapshot
 
     data = AgentData(
+        thread_id="thread-1",
         agent_id="agent-1",
         node_name="supervisor",
         state=AgentLifecycleState.IDLE,
@@ -541,6 +542,7 @@ def test_build_agent_descriptor_reads_provider_and_model_from_node_metadata() ->
             "description": "Writes code.",
         },
         AgentLifecycleState.WORKING,
+        thread_id="thread-1",
     )
     assert descriptor.provider is Provider.ZAI
     assert descriptor.model_name == "catalog-model"
@@ -552,6 +554,7 @@ def test_build_agent_descriptor_leaves_unresolved_assignment_unknown() -> None:
     descriptor = build_agent_descriptor(
         {"agent_id": "planner", "node_name": "planner", "provider": ""},
         AgentLifecycleState.SUBMITTED,
+        thread_id="thread-1",
     )
     assert descriptor.provider is None
     assert descriptor.model_name is None
@@ -562,6 +565,7 @@ def test_build_agent_descriptor_rejects_an_unrecognised_provider() -> None:
     descriptor = build_agent_descriptor(
         {"agent_id": "x", "node_name": "x", "provider": "not-a-provider"},
         AgentLifecycleState.IDLE,
+        thread_id="thread-1",
     )
     assert descriptor.provider is None
 

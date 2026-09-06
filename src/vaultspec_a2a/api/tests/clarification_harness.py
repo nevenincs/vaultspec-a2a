@@ -173,7 +173,10 @@ def clarification_graph(checkpointer: AsyncSqliteSaver) -> ClarificationGraph:
 
 
 async def park_clarification(
-    checkpointer: AsyncSqliteSaver, *, thread_id: str
+    checkpointer: AsyncSqliteSaver,
+    *,
+    thread_id: str,
+    model_assignment_digest: str | None = None,
 ) -> ParkedClarification:
     """Park the shared graph and return its checkpoint-authoritative request."""
     graph = clarification_graph(checkpointer)
@@ -188,6 +191,8 @@ async def park_clarification(
         "active_feature": "agent-panel",
         "token_usage": {},
     }
+    if model_assignment_digest is not None:
+        state["model_assignment_digest"] = model_assignment_digest
     await graph.ainvoke(state, config=config)
     request = pending_clarification(
         await checkpointer.aget_tuple(config), thread_id=thread_id

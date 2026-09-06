@@ -28,6 +28,7 @@ import asyncio
 import itertools
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import anyio
@@ -42,8 +43,14 @@ from ...control.action_lease import (
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.clarification_service import redrive_clarification_actions
+from ...control.execution_authority import resolve_execution_authority
+from ...control.tests._catalog_authority import current_execution_metadata
 from ...control.worker_management import LazyWorkerSpawner
-from ...database import create_thread, get_control_action_by_idempotency_key
+from ...database import (
+    create_thread,
+    get_control_action_by_idempotency_key,
+    get_thread_metadata,
+)
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
     ClarificationAnswers,
@@ -66,14 +73,23 @@ if TYPE_CHECKING:
 
 _BUNDLE_FREE_PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
-_CACHE_KEY: GraphCacheKey = (
-    "clarification-loop-live",
-    None,
-    False,
-    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-)
 
 type SessionFactory = async_sessionmaker[AsyncSession]
+
+
+async def _cache_key_for_thread(
+    session_factory: SessionFactory, thread_id: str
+) -> GraphCacheKey:
+    """Bind the registered real graph to the run's exact durable authority."""
+    async with session_factory() as db:
+        metadata_json = await get_thread_metadata(db, thread_id)
+    authority = resolve_execution_authority(metadata_json)
+    return (
+        _BUNDLE_FREE_PRESET,
+        None,
+        False,
+        authority.model_assignment_digest,
+    )
 
 
 @asynccontextmanager
@@ -111,7 +127,10 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
         assert create_resp.status_code == 201
         thread_id = create_resp.json()["run_id"]
 
-        parked = await park_clarification(checkpointer, thread_id=thread_id)
+        cache_key = await _cache_key_for_thread(session_factory, thread_id)
+        parked = await park_clarification(
+            checkpointer, thread_id=thread_id, model_assignment_digest=cache_key[3]
+        )
         request_id = parked.request.request_id
 
         # Disclosure still works normally (unaffected by the worker swap below).
@@ -126,7 +145,11 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
         # seam and a real ephemeral loopback callback server. ---
         async with loopback_callback_bridge() as bridge:
             executor = Executor(checkpointer=checkpointer, bridge=bridge)
-            executor.register_compiled_graph(thread_id, _CACHE_KEY, parked.graph)
+            executor.register_compiled_graph(
+                thread_id,
+                cache_key,
+                parked.graph,
+            )
 
             worker_app = create_worker_app(lifespan=_worker_test_lifespan)
             worker_app.state.executor = executor
@@ -168,7 +191,9 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
                         for _ in range(6)
                     )
                 )
-                assert [response.status_code for response in replays] == [200] * 6
+                assert [response.status_code for response in replays] == [200] * 6, [
+                    response.text for response in replays
+                ]
 
                 # The dispatch is fire-and-forget inside the worker; poll the
                 # REAL graph's own state (not a recorded receiver call) until
@@ -225,7 +250,10 @@ async def test_new_prompt_resumes_the_parked_graph_as_a_real_human_turn(
         assert create_resp.status_code == 201
         thread_id = create_resp.json()["run_id"]
 
-        parked = await park_clarification(checkpointer, thread_id=thread_id)
+        cache_key = await _cache_key_for_thread(session_factory, thread_id)
+        parked = await park_clarification(
+            checkpointer, thread_id=thread_id, model_assignment_digest=cache_key[3]
+        )
         request_id = parked.request.request_id
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
 
@@ -236,7 +264,11 @@ async def test_new_prompt_resumes_the_parked_graph_as_a_real_human_turn(
 
         async with loopback_callback_bridge() as bridge:
             executor = Executor(checkpointer=checkpointer, bridge=bridge)
-            executor.register_compiled_graph(thread_id, _CACHE_KEY, parked.graph)
+            executor.register_compiled_graph(
+                thread_id,
+                cache_key,
+                parked.graph,
+            )
 
             worker_app = create_worker_app(lifespan=_worker_test_lifespan)
             worker_app.state.executor = executor
@@ -309,7 +341,10 @@ async def test_decline_resumes_the_parked_graph_with_the_fixed_marker(
         assert create_resp.status_code == 201
         thread_id = create_resp.json()["run_id"]
 
-        parked = await park_clarification(checkpointer, thread_id=thread_id)
+        cache_key = await _cache_key_for_thread(session_factory, thread_id)
+        parked = await park_clarification(
+            checkpointer, thread_id=thread_id, model_assignment_digest=cache_key[3]
+        )
         request_id = parked.request.request_id
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
 
@@ -319,7 +354,11 @@ async def test_decline_resumes_the_parked_graph_with_the_fixed_marker(
 
         async with loopback_callback_bridge() as bridge:
             executor = Executor(checkpointer=checkpointer, bridge=bridge)
-            executor.register_compiled_graph(thread_id, _CACHE_KEY, parked.graph)
+            executor.register_compiled_graph(
+                thread_id,
+                cache_key,
+                parked.graph,
+            )
 
             worker_app = create_worker_app(lifespan=_worker_test_lifespan)
             worker_app.state.executor = executor
@@ -380,10 +419,15 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
             db,
             status=ThreadStatus.RUNNING,
             team_preset=_BUNDLE_FREE_PRESET,
+            metadata=current_execution_metadata(Path.cwd()),
         )
         await db.commit()
         thread_id = thread.id
 
+    cache_key = await _cache_key_for_thread(session_factory, thread_id)
+    # This current-schema run predates checkpoint evidence. The production
+    # resume command must bind the exact durable digest atomically with the
+    # interrupt response, without an update_state call that invalidates it.
     parked = await park_clarification(checkpointer, thread_id=thread_id)
     request_id = parked.request.request_id
     resolution = ClarificationAnswers(
@@ -407,7 +451,11 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
 
     async with loopback_callback_bridge() as bridge:
         executor = Executor(checkpointer=checkpointer, bridge=bridge)
-        executor.register_compiled_graph(thread_id, _CACHE_KEY, parked.graph)
+        executor.register_compiled_graph(
+            thread_id,
+            cache_key,
+            parked.graph,
+        )
         worker_app = create_worker_app(lifespan=_worker_test_lifespan)
         worker_app.state.executor = executor
         circuit_breaker = WorkerCircuitBreaker(
@@ -451,6 +499,7 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
             assert settled.values["clarification_answers"] == {
                 request_id: {"provider": "codex"}
             }
+            assert settled.values["model_assignment_digest"] == cache_key[3]
 
             second = await redrive_clarification_actions(
                 session_factory,

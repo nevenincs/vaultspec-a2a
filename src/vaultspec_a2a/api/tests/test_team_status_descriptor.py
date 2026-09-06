@@ -169,6 +169,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
 
     assert resp.status_code == 200
     agents = {a["agent_id"]: a for a in resp.json()["state"]["agents"]}
+    assert agents[_WORKER_ID]["thread_id"] == thread_id
     assert agents[_WORKER_ID]["provider"] == Provider.DETERMINISTIC.value
     assert agents[_WORKER_ID]["model_name"] == "deterministic"
 
@@ -214,6 +215,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
     wire = domain_to_wire(sequenced.event, sequenced.sequence)
     assert isinstance(wire, TeamStatusEvent)
     summary = next(a for a in wire.agents if a.agent_id == _WORKER_ID)
+    assert summary.thread_id == thread_id
     assert summary.provider is Provider.DETERMINISTIC
     assert summary.model_name == "deterministic"
 
@@ -223,6 +225,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
         {"type": "team_status", **wire.model_dump(mode="json")}
     )
     projected = cast("list[dict[str, str]]", payload["agents"])
+    assert projected[0]["thread_id"] == thread_id
     assert projected[0]["provider"] == Provider.DETERMINISTIC.value
     assert projected[0]["model_name"] == "deterministic"
 
@@ -245,7 +248,7 @@ async def test_aggregator_agent_states_are_enum_members_not_strings() -> None:
         state=AgentLifecycleState.WORKING,
     )
 
-    states = aggregator.get_agent_states()
+    states = aggregator.get_agent_states("thread-agent-state-type")
     observed = states[_WORKER_ID]
     assert isinstance(observed, AgentLifecycleState)
     assert observed is AgentLifecycleState.WORKING
@@ -278,5 +281,6 @@ async def test_team_status_reports_unknown_assignment_as_null(
         )
 
     agent = status.agents[0]
+    assert agent.thread_id == "thread-unresolved"
     assert agent.provider is None
     assert agent.model_name is None

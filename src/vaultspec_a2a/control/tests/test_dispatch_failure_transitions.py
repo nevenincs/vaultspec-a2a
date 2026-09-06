@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,6 +32,7 @@ from ...providers.conditions import ProviderCondition
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
+from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -67,8 +67,8 @@ _ACTIVE_PROJECT = tempfile.mkdtemp(prefix="vaultspec-active-project-")
 
 
 def _active_project_metadata() -> str:
-    """Return thread metadata naming a real active project."""
-    return json.dumps({"workspace_root": _ACTIVE_PROJECT})
+    """Return current execution authority naming a real active project."""
+    return current_execution_metadata(Path(_ACTIVE_PROJECT))
 
 
 @pytest.mark.asyncio
@@ -82,6 +82,7 @@ async def test_ambiguous_followup_failure_preserves_redrive_eligibility(
             title="Dispatch failure",
             repair_status="healthy",
             execution_readiness="healthy",
+            metadata=_active_project_metadata(),
         )
         await session.commit()
 
@@ -299,6 +300,7 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
                 title="Undelivered clarification resume",
                 repair_status="paused_resumable",
                 execution_readiness="paused_resumable",
+                metadata=current_execution_metadata(tmp_path),
             )
             await session.commit()
 

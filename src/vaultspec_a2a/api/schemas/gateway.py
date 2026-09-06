@@ -702,6 +702,7 @@ class RunArchiveResponse(BaseModel):
 class RunAgentSummary(BaseModel):
     """One agent's disclosed operational state in the team projection."""
 
+    run_id: PathSafeRunId
     agent_id: str
     display_name: str | None = None
     state: str

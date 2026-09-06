@@ -110,6 +110,7 @@ class AgentSnapshot(BaseModel):
     Mirrors ``thread.snapshots.AgentData``.
     """
 
+    thread_id: str
     agent_id: str
     node_name: str
     state: AgentLifecycleState

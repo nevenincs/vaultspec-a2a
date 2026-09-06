@@ -324,6 +324,7 @@ _PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         "agents": _ObjectList(
             64,
             {
+                "thread_id": _Text(128),
                 "agent_id": _Text(63),
                 "state": _ENUM,
                 "node_name": _Text(128),

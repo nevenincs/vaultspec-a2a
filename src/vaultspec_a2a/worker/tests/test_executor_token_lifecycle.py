@@ -31,7 +31,10 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import interrupt
 
 from ...api.tests.clarification_harness import new_state_graph
+from ...control.execution_authority import resolve_execution_authority
+from ...control.tests._catalog_authority import current_execution_metadata
 from ...ipc.schemas import DispatchRequest
+from ...providers.team_selection import model_assignment_digest
 from ...thread.actor_tokens import ActorTokenBundle
 from ..executor import Executor
 from ..ipc import WorkerBridge
@@ -46,6 +49,12 @@ _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 _CODER_TOKEN = "secret-coder-token"
 _REVIEWER_TOKEN = "secret-reviewer-token"
 _BEARER = "secret-machine-bearer"
+
+
+def _current_assignment() -> dict[str, dict[str, object]]:
+    return resolve_execution_authority(
+        current_execution_metadata(pathlib.Path.cwd())
+    ).model_assignment
 
 
 def _make_bridge() -> WorkerBridge:
@@ -100,7 +109,7 @@ def _install_probe_graph(
         "token-preset",
         None,
         False,
-        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        model_assignment_digest(_current_assignment()),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -128,6 +137,7 @@ async def test_tokens_injected_during_run_and_dropped_after() -> None:
                 team_preset="token-preset",
                 recursion_limit=10,
                 actor_tokens=bundle,
+                model_assignment=_current_assignment(),
             )
             await executor.handle_dispatch(req)
 
@@ -175,7 +185,7 @@ def _install_interrupting_graph(
         "gate-preset",
         None,
         False,
-        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        model_assignment_digest(_current_assignment()),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -206,6 +216,7 @@ async def test_tokens_retained_through_interrupt_and_dropped_on_resume() -> None
                 team_preset="gate-preset",
                 recursion_limit=10,
                 actor_tokens=_bundle(),
+                model_assignment=_current_assignment(),
             )
             await executor.handle_dispatch(ingest)
 
@@ -221,6 +232,7 @@ async def test_tokens_retained_through_interrupt_and_dropped_on_resume() -> None
                 team_preset="gate-preset",
                 recursion_limit=10,
                 actor_tokens=_bundle(),
+                model_assignment=_current_assignment(),
             )
             await executor.handle_dispatch(resume)
 
@@ -251,6 +263,7 @@ async def test_cancel_of_parked_run_drops_tokens_at_terminal() -> None:
                     team_preset="gate-preset",
                     recursion_limit=10,
                     actor_tokens=_bundle(),
+                    model_assignment=_current_assignment(),
                 )
             )
             assert executor.token_store.has(thread_id) is True
@@ -294,6 +307,7 @@ async def test_tokens_absent_from_durable_checkpoint() -> None:
                 team_preset="token-preset",
                 recursion_limit=10,
                 actor_tokens=bundle,
+                model_assignment=_current_assignment(),
             )
             await executor.handle_dispatch(req)
 
@@ -333,6 +347,7 @@ async def test_tokens_absent_from_logs_during_dispatch(
                 team_preset="token-preset",
                 recursion_limit=10,
                 actor_tokens=bundle,
+                model_assignment=_current_assignment(),
             )
             with caplog.at_level(logging.DEBUG):
                 await executor.handle_dispatch(req)

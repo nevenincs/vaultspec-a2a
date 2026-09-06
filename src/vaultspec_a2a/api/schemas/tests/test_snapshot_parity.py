@@ -223,6 +223,7 @@ def _populated_thread_state() -> domain.ThreadStateData:
         ],
         agents=[
             domain.AgentData(
+                thread_id="thread-parity",
                 agent_id="supervisor",
                 node_name="supervisor",
                 state=AgentLifecycleState.WORKING,

@@ -209,3 +209,60 @@ class TestSettledSnapshotReachesTerminalToolCallStatus:
 
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].status == str(ToolCallStatus.PENDING)
+
+
+class TestCheckpointExecutionEvidenceIsClosed:
+    def test_wrong_assignment_digest_degrades_without_disclosure(self) -> None:
+        result = enrich_snapshot_from_state(
+            _snapshot(),
+            MinimalState(values={"model_assignment_digest": "b" * 64}),
+            expected_assignment_digest="a" * 64,
+        )
+
+        assert result.model_assignment_digest is None
+        assert result.snapshot_complete is False
+        assert "invalid_assignment_digest" in result.degraded_reasons
+
+    def test_descriptor_identity_override_is_rejected(self) -> None:
+        result = enrich_snapshot_from_state(
+            _snapshot(),
+            MinimalState(
+                values={
+                    "model_assignment_digest": "a" * 64,
+                    "agent_descriptors": {
+                        "coder": {
+                            "agent_id": "other-thread",
+                            "role": "coder",
+                        }
+                    },
+                }
+            ),
+            expected_assignment_digest="a" * 64,
+        )
+
+        assert result.agents == []
+        assert result.snapshot_complete is False
+        assert "invalid_agent_descriptors" in result.degraded_reasons
+
+    def test_exact_current_evidence_is_disclosed(self) -> None:
+        descriptor = {
+            "role": "coder",
+            "display_name": "Coder",
+            "description": "Codes",
+            "provider": "deterministic",
+            "model_name": "deterministic",
+        }
+        result = enrich_snapshot_from_state(
+            _snapshot(),
+            MinimalState(
+                values={
+                    "model_assignment_digest": "a" * 64,
+                    "agent_descriptors": {"coder": descriptor},
+                }
+            ),
+            expected_assignment_digest="a" * 64,
+        )
+
+        assert result.model_assignment_digest == "a" * 64
+        assert result.agents[0].thread_id == "thread-1"
+        assert result.agents[0].agent_id == "coder"

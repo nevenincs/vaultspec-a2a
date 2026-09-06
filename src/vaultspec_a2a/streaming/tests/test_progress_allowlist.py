@@ -226,6 +226,7 @@ def test_team_status_keeps_the_roster_liveness_fields() -> None:
             "active_thread_ids": ["run-1", "run-2"],
             "agents": [
                 {
+                    "thread_id": "run-1",
                     "agent_id": "researcher_00",
                     "state": "working",
                     "node_name": "research_dispatch",
@@ -244,6 +245,7 @@ def test_team_status_keeps_the_roster_liveness_fields() -> None:
     # present and the smuggled provider payload has no place to hide.
     assert frame["agents"] == [
         {
+            "thread_id": "run-1",
             "agent_id": "researcher_00",
             "state": "working",
             "node_name": "research_dispatch",

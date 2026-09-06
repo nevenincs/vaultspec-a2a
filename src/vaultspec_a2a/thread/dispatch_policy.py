@@ -41,6 +41,7 @@ class FailureType(StrEnum):
     # so it carries the same status as the equivalent refusal at run creation
     # rather than a transport error.
     NO_ACTIVE_PROJECT = "no_active_project"
+    INCOMPATIBLE_STATE = "incompatible_state"
 
 
 @dataclass(frozen=True, slots=True)

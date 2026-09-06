@@ -28,10 +28,13 @@ from opentelemetry.sdk.trace import ReadableSpan, Span, TracerProvider
 from pydantic import ValidationError
 
 from ...api.tests.clarification_harness import new_state_graph
+from ...control.execution_authority import resolve_execution_authority
+from ...control.tests._catalog_authority import current_execution_metadata
 from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
+from ...providers.team_selection import model_assignment_digest
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ThreadStatus
 from ..executor import _INGEST_GUARDS, _RESUME_GUARDS, Executor
@@ -106,12 +109,18 @@ def _make_bridge(
     return bridge
 
 
+def _current_assignment() -> dict[str, dict[str, object]]:
+    return resolve_execution_authority(
+        current_execution_metadata(pathlib.Path.cwd())
+    ).model_assignment
+
+
 # Default cache key for test graphs.
 _TEST_CACHE_KEY = (
     "test-preset",
     None,
     False,
-    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    model_assignment_digest(_current_assignment()),
 )
 
 # Every dispatch names an active project, as a real one does. This package's own
@@ -353,6 +362,7 @@ class TestHandleDispatch:
                     thread_id="t-no-graph",
                     content="Hello",
                     recursion_limit=25,
+                    model_assignment=_current_assignment(),
                 )
                 with caplog.at_level(
                     logging.WARNING, logger="vaultspec_a2a.worker.executor"
@@ -388,6 +398,7 @@ class TestHandleDispatch:
                     thread_id="t-no-graph",
                     option_id="opt-1",
                     recursion_limit=25,
+                    model_assignment=_current_assignment(),
                 )
                 with caplog.at_level(
                     logging.WARNING, logger="vaultspec_a2a.worker.executor"
@@ -434,6 +445,7 @@ class TestHandleDispatch:
                     thread_id="t-1",
                     content="Hello",
                     recursion_limit=25,
+                    model_assignment=_current_assignment(),
                 )
                 with caplog.at_level(
                     logging.WARNING, logger="vaultspec_a2a.worker.executor"
@@ -486,6 +498,7 @@ class TestHandleDispatch:
                     thread_id="t-resume",
                     option_id={"verdict": "rejected", "notes": None},
                     recursion_limit=25,
+                    model_assignment=_current_assignment(),
                 )
                 with caplog.at_level(
                     logging.WARNING, logger="vaultspec_a2a.worker.executor"
@@ -697,7 +710,7 @@ class TestLazyRecompilation:
                     "vaultspec-solo-coder",
                     None,
                     False,
-                    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                    model_assignment_digest(_current_assignment()),
                 )
                 _inject_graph(executor, "t-cache", cache_key=cache_key)
                 assert executor.graph_count == 1
@@ -719,6 +732,7 @@ class TestLazyRecompilation:
                     thread_id="t-no-graph",
                     option_id="allow_once",
                     recursion_limit=25,
+                    model_assignment=_current_assignment(),
                 )
                 with caplog.at_level(
                     logging.WARNING, logger="vaultspec_a2a.worker.executor"
@@ -750,7 +764,7 @@ class TestLazyRecompilation:
                     "vaultspec-solo-coder",
                     _WORKSPACE,
                     False,
-                    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                    model_assignment_digest(_current_assignment()),
                 )
                 _inject_graph(executor, "t-preset", cache_key=cache_key)
                 assert executor.graph_count == 1
@@ -1056,7 +1070,7 @@ def _install_completing_graph(executor: Executor, thread_id: str) -> None:
         "settle-preset",
         None,
         False,
-        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        model_assignment_digest(_current_assignment()),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -1083,7 +1097,7 @@ def _install_gated_graph(executor: Executor, thread_id: str) -> None:
         "settle-gated-preset",
         None,
         False,
-        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        model_assignment_digest(_current_assignment()),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -1122,6 +1136,7 @@ class TestSettleOrdering:
                         content="continue",
                         team_preset="settle-preset",
                         recursion_limit=10,
+                        model_assignment=_current_assignment(),
                     )
                 )
 
@@ -1163,6 +1178,7 @@ class TestSettleOrdering:
                     content="build it",
                     team_preset="settle-preset",
                     recursion_limit=10,
+                    model_assignment=_current_assignment(),
                     actor_tokens=ActorTokenBundle(
                         tokens={"vaultspec-synthesist": "settle-token"},
                         engine_bearer="settle-bearer",
@@ -1218,6 +1234,7 @@ class TestSettleOrdering:
                         content="build it",
                         team_preset="settle-gated-preset",
                         recursion_limit=10,
+                        model_assignment=_current_assignment(),
                         actor_tokens=bundle,
                     )
                 )
@@ -1232,6 +1249,7 @@ class TestSettleOrdering:
                         option_id="approve",
                         team_preset="settle-gated-preset",
                         recursion_limit=10,
+                        model_assignment=_current_assignment(),
                         actor_tokens=bundle,
                     )
                 )
@@ -1455,6 +1473,7 @@ class TestUnhandledDispatchTerminal:
                         thread_id=thread_id,
                         content="build it",
                         recursion_limit=10,
+                        model_assignment=_current_assignment(),
                     ),
                     _wrapped_failure(),
                 )
@@ -1549,6 +1568,7 @@ class TestPreRunRefusalsCarryTheirReason:
                         thread_id=thread_id,
                         content="build it",
                         recursion_limit=10,
+                        model_assignment=_current_assignment(),
                     )
                 )
                 await bridge.flush_events()
@@ -1677,6 +1697,7 @@ class TestPreRunRefusalsCarryTheirReason:
                         thread_id=thread_id,
                         option_id="allow_once",
                         recursion_limit=10,
+                        model_assignment=_current_assignment(),
                     )
                 )
                 await bridge.flush_events()
@@ -1724,7 +1745,7 @@ class TestPreRunRefusalsCarryTheirReason:
                         "boom-preset",
                         None,
                         False,
-                        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                        model_assignment_digest(_current_assignment()),
                     ),
                     graph,
                 )
@@ -1736,6 +1757,7 @@ class TestPreRunRefusalsCarryTheirReason:
                     content="build it",
                     team_preset="boom-preset",
                     recursion_limit=10,
+                    model_assignment=_current_assignment(),
                 )
                 await executor.handle_dispatch(first)
                 await bridge.flush_events()

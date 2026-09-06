@@ -203,15 +203,10 @@ _MODE_POLICY_ID = "authoring.operation_modes"
 _PRESET_DETERMINISTIC = "vaultspec-adr-research-deterministic"
 _PRESET_LIVE = "vaultspec-adr-research"
 
-# The provider axis, after model profiles were retired.
-#
-# It used to be a `profile_id` naming an overlay declared inside the live preset
-# (`codex`, `zai`, `codex-all`). A preset carries no provider policy now, so the
-# axis moved to where the lane is actually chosen: the run-start `selection` (the
-# whole-team lane) plus per-role `overrides`. The intent is unchanged and each
-# lane below still makes its own distinct claim - a MIXED lane runs two providers
-# in one run, an ALL lane runs exactly one - but the identifiers are supplied by
-# the operator from the currently served catalog rather than authored here.
+# The provider axis comes from the run-start `selection` (the whole-team lane)
+# plus per-role `overrides`. Each lane makes a distinct claim: a MIXED lane runs
+# two providers in one run and an ALL lane runs exactly one. The operator selects
+# identifiers from the catalog currently served for the workspace.
 #
 # A case names only the PROVIDER it certifies, never a model: the entry, the
 # native control, and its option are opaque operator-supplied values, and a lane
@@ -1201,9 +1196,8 @@ class AcceptanceHarness:
             "team_preset": self.case.preset,
             "message": self.case.prompt,
             "run_id": run_id,
-            # The explicit served selection replaces the retired profile_id.
-            # run-start refuses a body without it and revalidates it against
-            # the catalog served for this workspace.
+            # Run-start requires this explicit selection and revalidates it
+            # against the catalog served for this workspace.
             "selection": self.selection,
             "actor_tokens": {"tokens": tokens, "engine_bearer": self.engine_bearer},
             "metadata": meta,

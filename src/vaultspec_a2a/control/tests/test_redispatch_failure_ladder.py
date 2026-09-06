@@ -155,10 +155,10 @@ async def test_retired_stored_authority_fails_closed_without_redispatch(
         assert thread is not None
         assert thread.status == ThreadStatus.FAILED.value
         assert thread.failure_reason == (
-            "retired model-profile state is unsupported; start a new run"
+            "stored execution authority is incompatible (retired)"
         )
         assert any(
-            "Refusing retired model-profile state" in record.getMessage()
+            "Refusing incompatible execution authority (retired)" in record.getMessage()
             for record in caplog.records
         )
     finally:
@@ -241,24 +241,26 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             extra = await get_thread(session, "unchanged-digest-extra-field")
         assert corrupt is not None
         assert corrupt.status == ThreadStatus.FAILED.value
-        assert (
-            corrupt.failure_reason == "persisted provider catalog selection is invalid"
+        assert corrupt.failure_reason == (
+            "stored execution authority is incompatible (corrupt)"
         )
         assert absent is not None
         assert absent.status == ThreadStatus.FAILED.value
         assert absent.failure_reason == (
-            "persisted provider catalog selection is invalid"
+            "stored execution authority is incompatible (absent)"
         )
         assert extra is not None
         assert extra.status == ThreadStatus.FAILED.value
-        assert extra.failure_reason == "persisted provider catalog selection is invalid"
+        assert extra.failure_reason == (
+            "stored execution authority is incompatible (corrupt)"
+        )
         assert any(
-            "Refusing invalid frozen assignment" in record.getMessage()
+            "Refusing incompatible execution authority" in record.getMessage()
             for record in caplog.records
         )
         assert any(
             "absent-after-corrupt" in record.getMessage()
-            and "invalid_frozen_assignment" in record.getMessage()
+            and "incompatible_execution_authority" in record.getMessage()
             for record in caplog.records
         )
     finally:

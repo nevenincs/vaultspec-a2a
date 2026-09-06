@@ -31,6 +31,7 @@ from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..thread.idempotency import default_message_key
 from ..thread.message_policy import can_send_followup
+from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 
 if TYPE_CHECKING:
     import httpx
@@ -117,6 +118,17 @@ async def send_followup_message(
     thread_status = thread.status
     team_preset = thread.team_preset
     thread_metadata = thread.thread_metadata
+    try:
+        execution_authority = resolve_execution_authority(thread_metadata)
+    except ExecutionAuthorityError as exc:
+        return MessageResult(
+            action_id="",
+            thread_id=thread_id,
+            thread_status=thread_status,
+            dispatched=False,
+            error_detail=str(exc),
+            failure_type=FailureType.INCOMPATIBLE_STATE,
+        )
 
     # -- Durable reservation and dispatch election -----------------------
     resolved_idempotency_key = idempotency_key or default_message_key(
@@ -188,6 +200,7 @@ async def send_followup_message(
         team_preset=team_preset,
         workspace_root=workspace_root,
         recursion_limit=recursion_limit,
+        model_assignment=execution_authority.model_assignment,
     )
 
     logger.info(

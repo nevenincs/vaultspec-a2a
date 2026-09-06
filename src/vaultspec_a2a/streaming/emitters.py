@@ -220,23 +220,12 @@ class EventEmitters:
     # Agent state management
     # ------------------------------------------------------------------
 
-    def get_agent_states(
-        self, thread_id: str | None = None
-    ) -> dict[str, AgentLifecycleState]:
+    def get_agent_states(self, thread_id: str) -> dict[str, AgentLifecycleState]:
         """Return a snapshot of current agent lifecycle states.
 
-        ``thread_id`` omitted preserves the historical cross-thread
-        aggregate view (every agent_id this worker process has ever seen,
-        last-write-wins on a shared agent_id across threads - unchanged
-        behaviour for callers building a multi-run overview). Passing
-        ``thread_id`` scopes the result to that run alone, closing the
-        cross-run leak for a per-run status read.
+        The required identity prevents a per-run projection from silently
+        becoming a cross-run last-write-wins aggregate.
         """
-        if thread_id is None:
-            return {
-                agent_id: state
-                for (_tid, agent_id), state in self._agent_states.items()
-            }
         return {
             agent_id: state
             for (tid, agent_id), state in self._agent_states.items()

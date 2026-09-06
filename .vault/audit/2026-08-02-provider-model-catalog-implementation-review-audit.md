@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:496a6772d5eade4fc33caf2113ea58bf01ee1b790268018aaa19ccb2a04db548'
+body_hash: 'sha256:561d7c1afe4b3aee41b2644bf07a73e0f3a21c0097d3efbdcbef982716ad3371'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -371,7 +371,7 @@ with concurrent equal and distinct assignments proves each run retains its own
 provider, model and digest, and a direct relay test proves one thread cannot
 overwrite another. Owner: P01.S11; formal re-review is required before closure.
 
-### p01-s11-execution-reentry-omits-frozen-assignment | high | open
+### p01-s11-execution-reentry-omits-frozen-assignment | high | resolved pending formal review
 
 Type: messaging, resume and restart integrity. Status: review-blocking. The new
 worker cache correctly compares a mapped thread's complete assignment digest,
@@ -394,7 +394,7 @@ before dispatch, with no translation, repair or disclosure. Add real current-run
 message, permission, clarification, verdict and recovered-action tests proving
 the same complete digest reaches the worker and the graph turn executes.
 
-### p01-s11-thread-assignment-binding-depends-on-cache-residency | high | open
+### p01-s11-thread-assignment-binding-depends-on-cache-residency | high | resolved pending formal review
 
 Type: concurrency and execution authority isolation. Status: review-blocking.
 `get_or_compile_graph` compares the mapped thread's digest only when its graph is
@@ -420,7 +420,7 @@ cross-thread reuse only for exact four-element key equality. Add eviction, fresh
 worker, concurrent first-dispatch, equal duplicate, changed duplicate and
 compile-failure cleanup discriminators.
 
-### p01-s11-current-checkpoint-evidence-is-not-reconciled | medium | open
+### p01-s11-current-checkpoint-evidence-is-not-reconciled | medium | resolved pending formal review
 
 Type: durable evidence continuity. The safe agent descriptors and complete
 assignment digest are written only when checkpoint preflight calls an ingest
@@ -473,7 +473,7 @@ S11 open, correct the shared re-entry and atomic thread-binding seams, add the
 specified evidence, and obtain formal re-review. This review changes no runtime
 or plan row.
 
-### p01-s11-checkpoint-assignment-evidence-is-not-validated | medium | open
+### p01-s11-checkpoint-assignment-evidence-is-not-validated | medium | resolved pending formal review
 
 Type: persisted-state integrity and bounded failure. Snapshot enrichment accepts
 any string as `model_assignment_digest`; the public schema later requires exact
@@ -491,7 +491,7 @@ state outcome; absent, old or retired provider authority remains incompatible
 and is never translated or repaired. Test malformed and valid-but-wrong digests
 through the real history route.
 
-### p01-s11-checkpoint-descriptors-are-not-closed-at-read | medium | open
+### p01-s11-checkpoint-descriptors-are-not-closed-at-read | medium | resolved pending formal review
 
 Type: persisted-state validation. Snapshot enrichment accepts every descriptor
 dict and spreads its fields after the checkpoint-owned node name, allowing a
@@ -506,7 +506,7 @@ or agent identity and surface malformed state as a bounded degraded snapshot.
 Add corrupt descriptor and safe current descriptor controls at the history
 route.
 
-### p01-s11-team-status-drops-thread-association | medium | open
+### p01-s11-team-status-drops-thread-association | medium | resolved pending formal review
 
 Type: concurrent state projection. Team status now performs correct thread-scoped
 metadata lookups, then flattens every active thread's agents into `AgentData`,
@@ -519,7 +519,7 @@ Ownership: add the originating thread identity to each team-status agent or
 define one deterministic per-thread aggregation that preserves association.
 Exercise two live threads with identical agent ids and distinct assignments.
 
-### p01-s11-optional-cross-thread-agent-state-accessor-remains | low | open
+### p01-s11-optional-cross-thread-agent-state-accessor-remains | low | resolved pending formal review
 
 Type: API hardening. The emitter's agent-state accessor still permits an omitted
 thread id and deliberately returns a historical cross-thread aggregate. Current
@@ -529,3 +529,47 @@ optional compatibility seam can reintroduce one silently.
 Ownership: require thread identity in the accessor and move any deliberate
 process-wide diagnostic to an explicitly named bounded method with no role in
 run or team projections.
+
+### p01-s11-reentry-and-durable-binding-correction | high | resolved pending formal review
+
+Type: execution authority, concurrency and persisted-state integrity. The S11
+correction introduces one exact current-schema resolver for startup, message,
+permission, clarification, verdict and direct recovery graph re-entry. It
+refuses absent, corrupt and retired authority before worker contact and supplies
+the same closed compiler map everywhere else. Worker graph acquisition binds a
+thread to the canonical complete-assignment digest before compilation, serializes
+same-thread first delivery, retains the binding through LRU eviction, and checks
+an existing checkpoint on a fresh worker. Equal concurrent deliveries share one
+compile; different assignments, malformed checkpoint digests and valid-but-wrong
+digests fail before construction.
+
+Current checkpoint evidence is written on every message turn and atomically in
+the real LangGraph resume `Command.update`. Read projection compares the exact
+lowercase digest with the durable current freeze and accepts only closed bounded
+agent descriptors whose identity cannot be overridden. Agents retain their run
+identity through history, team status and SSE projection; the optional global
+agent-state accessor is removed. Focused cache, checkpoint, schema, OpenAPI and
+projection checks pass, as do the real worker clarification message/new-prompt/
+decline/startup-redrive cases and the production current-schema restart.
+
+### p01-s11-pre-resume-state-update-invalidated-interrupt | high | resolved pending formal review
+
+Type: recovery and graph-state integrity. While adding checkpoint evidence, the
+first correction called `aupdate_state` immediately before `Command(resume=...)`.
+A real worker clarification test showed that this minted a new checkpoint and
+invalidated the parked interrupt, so the accepted action never executed. Evidence
+now travels in the resume command's own atomic `update`, while ordinary turns
+carry it in graph input. A current-schema checkpoint missing those evidence fields
+is reconciled from the exact validated durable assignment during the real resume;
+malformed or mismatched present bindings remain terminal. No migration,
+translation, provider substitution or retired authority is accepted.
+
+### p01-s11-fast-clarification-replay-lost-accepted-result | high | resolved pending formal review
+
+Type: idempotency and control messaging. A fast production worker could consume
+the parked clarification between the first accepted response and identical
+concurrent replays. The replay path found the matching durable action but then
+treated the vanished questionnaire as a new invalid request and returned 409.
+It now returns the matching accepted action once request identity and canonical
+resolution fingerprint agree. The real loopback worker test proves six concurrent
+same-id replays remain accepted while the single graph resume completes.

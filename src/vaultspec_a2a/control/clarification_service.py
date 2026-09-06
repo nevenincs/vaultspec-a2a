@@ -40,6 +40,7 @@ from ..thread.enums import (
 from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
+from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .repair_transitions import record_undelivered_dispatch
 from .thread_state_service import read_run_snapshot
 
@@ -284,6 +285,12 @@ async def respond_to_clarification(
             return _result(existing, applied=True)
         if existing.applied_at is not None:
             return _result(existing, applied=True)
+        if parked is None or parked.request_id != request_id:
+            # The exact resolution already owns this durable idempotency key.
+            # A fast worker may have consumed the interrupt before its receipt
+            # becomes visible; replay returns that accepted action rather than
+            # pretending the now-absent questionnaire invalidates the write.
+            return _result(existing)
 
     # ``claim_control_action`` rolls back the caller's session when this request
     # loses a concurrent insert.  SQLAlchemy expires every loaded ORM instance
@@ -294,6 +301,19 @@ async def respond_to_clarification(
     worker_generation = thread.repair_generation
     team_preset = thread.team_preset
     workspace_root = dispatchable_workspace_root(thread.thread_metadata)
+    try:
+        execution_authority = resolve_execution_authority(thread.thread_metadata)
+    except ExecutionAuthorityError as exc:
+        return ClarificationResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            error_detail=str(exc),
+            error_status_code=409,
+            failure_type=FailureType.INCOMPATIBLE_STATE,
+        )
 
     claim = await claim_control_action(
         db,
@@ -344,6 +364,7 @@ async def respond_to_clarification(
         team_preset=team_preset,
         workspace_root=workspace_root,
         recursion_limit=recursion_limit,
+        model_assignment=execution_authority.model_assignment,
     )
     outcome = await safe_dispatch(
         worker_client,

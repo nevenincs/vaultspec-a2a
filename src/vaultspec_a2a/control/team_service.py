@@ -131,6 +131,7 @@ async def build_team_status(
             build_agent_descriptor(
                 summary,
                 agent_states.get(summary["agent_id"], AgentLifecycleState.IDLE),
+                thread_id=thread_id,
             )
             for summary in aggregator.get_node_summaries(thread_id)
         )

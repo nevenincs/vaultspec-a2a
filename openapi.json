@@ -1394,6 +1394,10 @@
       },
       "AgentSnapshot": {
         "properties": {
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id"
+          },
           "agent_id": {
             "type": "string",
             "title": "Agent Id"
@@ -1444,6 +1448,7 @@
         },
         "type": "object",
         "required": [
+          "thread_id",
           "agent_id",
           "node_name",
           "state"
@@ -3007,6 +3012,13 @@
       },
       "RunAgentSummary": {
         "properties": {
+          "run_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+            "title": "Run Id"
+          },
           "agent_id": {
             "type": "string",
             "title": "Agent Id"
@@ -3029,6 +3041,7 @@
         },
         "type": "object",
         "required": [
+          "run_id",
           "agent_id",
           "state"
         ],

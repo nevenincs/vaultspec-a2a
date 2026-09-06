@@ -15,8 +15,10 @@ the worker's own cache-key former and registration seam.
 
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import TYPE_CHECKING, Any
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
@@ -471,7 +473,12 @@ class TestOneWorkspaceOneGraphEntry:
 
         manager.register_compiled_graph(
             "run-1",
-            ("preset", str(workspace), False, model_assignment_digest({})),
+            (
+                "preset",
+                str(workspace),
+                False,
+                model_assignment_digest(_assignment("current")),
+            ),
             graph,
         )
         manager.register_compiled_graph(
@@ -480,7 +487,7 @@ class TestOneWorkspaceOneGraphEntry:
                 "preset",
                 _uncanonical_spelling(workspace),
                 False,
-                model_assignment_digest({}),
+                model_assignment_digest(_assignment("current")),
             ),
             graph,
         )
@@ -508,7 +515,7 @@ class TestOneWorkspaceOneGraphEntry:
                 "preset",
                 str(workspace),
                 False,
-                model_assignment_digest({}),
+                model_assignment_digest(_assignment("current")),
             ),
             graph,
         )
@@ -519,6 +526,7 @@ class TestOneWorkspaceOneGraphEntry:
             team_preset="preset",
             workspace_root=_uncanonical_spelling(workspace),
             recursion_limit=25,
+            model_assignment=_assignment("current"),
         )
         resolved = await manager.get_or_compile_graph(follow_up)
 
@@ -545,7 +553,7 @@ class TestOneWorkspaceOneGraphEntry:
 
         with pytest.raises(
             GraphCompilationError,
-            match="model assignment does not match the compiled run",
+            match="model assignment does not match the bound run",
         ):
             await manager.get_or_compile_graph(
                 DispatchRequest(
@@ -557,3 +565,242 @@ class TestOneWorkspaceOneGraphEntry:
                     model_assignment=_assignment("changed"),
                 )
             )
+
+    @pytest.mark.asyncio
+    async def test_eviction_does_not_remove_the_thread_assignment_binding(
+        self, workspace: Path
+    ) -> None:
+        manager = self._manager()
+        accepted = _assignment("accepted")
+        manager.register_compiled_graph(
+            "run-1",
+            (
+                "preset",
+                str(workspace),
+                False,
+                model_assignment_digest(accepted),
+            ),
+            self._graph(),
+        )
+        manager.evict_cached_graphs()
+
+        with pytest.raises(GraphCompilationError, match="bound run"):
+            await manager.get_or_compile_graph(
+                DispatchRequest(
+                    action="ingest",
+                    thread_id="run-1",
+                    team_preset="preset",
+                    workspace_root=str(workspace),
+                    recursion_limit=25,
+                    model_assignment=_assignment("changed"),
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_concurrent_first_dispatches_bind_once_and_reject_a_competitor(
+        self, workspace: Path
+    ) -> None:
+        class ControlledManager(GraphLifecycleManager):
+            def __init__(self) -> None:
+                super().__init__(
+                    checkpointer=InMemorySaver(),
+                    bridge=WorkerBridge(
+                        api_url="http://127.0.0.1:1", worker_id="identity"
+                    ),
+                    aggregator=EventAggregator(),
+                    token_store=RunTokenStore(),
+                    catalog_store=RunCatalogStore(),
+                )
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+                self.compile_count = 0
+
+            async def _compile_graph(
+                self, req: DispatchRequest
+            ) -> RegisteredCompiledGraph:
+                del req
+                self.compile_count += 1
+                self.started.set()
+                await self.release.wait()
+                return TestOneWorkspaceOneGraphEntry._graph()
+
+        manager = ControlledManager()
+
+        def request(assignment: dict[str, dict[str, object]]) -> DispatchRequest:
+            return DispatchRequest(
+                action="ingest",
+                thread_id="run-race",
+                team_preset="preset",
+                workspace_root=str(workspace),
+                recursion_limit=25,
+                model_assignment=assignment,
+            )
+
+        first = asyncio.create_task(
+            manager.get_or_compile_graph(request(_assignment("a")))
+        )
+        await manager.started.wait()
+        competing = asyncio.create_task(
+            manager.get_or_compile_graph(request(_assignment("b")))
+        )
+        manager.release.set()
+        assert await first is not None
+        with pytest.raises(GraphCompilationError, match="bound run"):
+            await competing
+        assert manager.compile_count == 1
+
+    @pytest.mark.asyncio
+    async def test_concurrent_equal_first_dispatches_share_the_compilation(
+        self, workspace: Path
+    ) -> None:
+        class ControlledManager(GraphLifecycleManager):
+            def __init__(self) -> None:
+                super().__init__(
+                    checkpointer=InMemorySaver(),
+                    bridge=WorkerBridge(
+                        api_url="http://127.0.0.1:1", worker_id="identity"
+                    ),
+                    aggregator=EventAggregator(),
+                    token_store=RunTokenStore(),
+                    catalog_store=RunCatalogStore(),
+                )
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+                self.compile_count = 0
+
+            async def _compile_graph(
+                self, req: DispatchRequest
+            ) -> RegisteredCompiledGraph:
+                del req
+                self.compile_count += 1
+                self.started.set()
+                await self.release.wait()
+                return TestOneWorkspaceOneGraphEntry._graph()
+
+        manager = ControlledManager()
+        req = DispatchRequest(
+            action="ingest",
+            thread_id="run-equal-race",
+            team_preset="preset",
+            workspace_root=str(workspace),
+            recursion_limit=25,
+            model_assignment=_assignment("same"),
+        )
+        first = asyncio.create_task(manager.get_or_compile_graph(req))
+        await manager.started.wait()
+        duplicate = asyncio.create_task(manager.get_or_compile_graph(req))
+        manager.release.set()
+        assert await first is await duplicate
+        assert manager.compile_count == 1
+
+    @pytest.mark.asyncio
+    async def test_fresh_worker_refuses_a_digest_that_disagrees_with_checkpoint(
+        self, workspace: Path
+    ) -> None:
+        accepted_digest = model_assignment_digest(_assignment("accepted"))
+
+        class DigestCheckpointer:
+            async def aget_tuple(self, _config: object) -> object:
+                return SimpleNamespace(
+                    checkpoint={
+                        "channel_values": {"model_assignment_digest": accepted_digest}
+                    }
+                )
+
+        manager = GraphLifecycleManager(
+            checkpointer=cast("Any", DigestCheckpointer()),
+            bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
+            aggregator=EventAggregator(),
+            token_store=RunTokenStore(),
+            catalog_store=RunCatalogStore(),
+        )
+        with pytest.raises(GraphCompilationError, match="durable run"):
+            await manager.get_or_compile_graph(
+                DispatchRequest(
+                    action="ingest",
+                    thread_id="run-fresh-worker",
+                    team_preset="preset",
+                    workspace_root=str(workspace),
+                    recursion_limit=25,
+                    model_assignment=_assignment("changed"),
+                )
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stored_digest", ["A" * 64, "not-a-digest"])
+    async def test_fresh_worker_refuses_noncurrent_checkpoint_binding_before_compile(
+        self, workspace: Path, stored_digest: str | None
+    ) -> None:
+        class DigestCheckpointer:
+            async def aget_tuple(self, _config: object) -> object:
+                values = {}
+                if stored_digest is not None:
+                    values["model_assignment_digest"] = stored_digest
+                return SimpleNamespace(checkpoint={"channel_values": values})
+
+        class CompileTrap(GraphLifecycleManager):
+            async def _compile_graph(
+                self, req: DispatchRequest
+            ) -> RegisteredCompiledGraph:
+                raise AssertionError(
+                    f"compiled incompatible checkpoint for {req.thread_id}"
+                )
+
+        manager = CompileTrap(
+            checkpointer=cast("Any", DigestCheckpointer()),
+            bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
+            aggregator=EventAggregator(),
+            token_store=RunTokenStore(),
+            catalog_store=RunCatalogStore(),
+        )
+        with pytest.raises(GraphCompilationError, match="incompatible"):
+            await manager.get_or_compile_graph(
+                DispatchRequest(
+                    action="ingest",
+                    thread_id="run-noncurrent-checkpoint",
+                    team_preset="preset",
+                    workspace_root=str(workspace),
+                    recursion_limit=25,
+                    model_assignment=_assignment("current"),
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_compile_failure_releases_the_thread_lock_for_an_exact_retry(
+        self, workspace: Path
+    ) -> None:
+        class FailOnceManager(GraphLifecycleManager):
+            def __init__(self) -> None:
+                super().__init__(
+                    checkpointer=InMemorySaver(),
+                    bridge=WorkerBridge(
+                        api_url="http://127.0.0.1:1", worker_id="identity"
+                    ),
+                    aggregator=EventAggregator(),
+                    token_store=RunTokenStore(),
+                    catalog_store=RunCatalogStore(),
+                )
+                self.calls = 0
+
+            async def _compile_graph(
+                self, req: DispatchRequest
+            ) -> RegisteredCompiledGraph:
+                del req
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("controlled compile failure")
+                return TestOneWorkspaceOneGraphEntry._graph()
+
+        manager = FailOnceManager()
+        req = DispatchRequest(
+            action="ingest",
+            thread_id="run-retry",
+            team_preset="preset",
+            workspace_root=str(workspace),
+            recursion_limit=25,
+            model_assignment=_assignment("same"),
+        )
+        with pytest.raises(GraphCompilationError, match="controlled compile failure"):
+            await manager.get_or_compile_graph(req)
+        assert await manager.get_or_compile_graph(req) is not None
+        assert manager.calls == 2

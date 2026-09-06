@@ -26,13 +26,10 @@ from ..ipc.schemas import (
     DispatchResponse,
     to_dispatch_action,
 )
-from ..providers.team_selection import (
-    TeamSelectionError,
-    frozen_team_selection_from_record,
-)
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..utils.coercion import coerce_object_mapping
 from ._thread_metadata import workspace_root_from_metadata
+from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -58,25 +55,6 @@ logger = logging.getLogger(__name__)
 # first occurrence logs in full, every Nth repeat thereafter logs in full, the
 # rest only advance the counter a batch-end summary reports.
 _REDISPATCH_LOG_EVERY_N = 5
-
-
-class RetiredModelProfileStateError(TeamSelectionError):
-    """A stored run uses the retired model-profile execution authority."""
-
-
-def _frozen_model_assignment(
-    metadata: dict[str, object],
-) -> dict[str, dict[str, object]]:
-    """Extract a modern frozen selection or refuse retired stored authority."""
-    if "model_profile" in metadata:
-        raise RetiredModelProfileStateError(
-            "retired model-profile state cannot be restarted; start a new run"
-        )
-    modern_record = metadata.get("provider_catalog_selection")
-    if modern_record is not None:
-        frozen = frozen_team_selection_from_record(modern_record)
-        return frozen.compiler_map()
-    raise TeamSelectionError("persisted provider catalog selection is absent")
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,43 +298,27 @@ async def redispatch_reconciling_threads(
                 # restart so the run recompiles the exact launched models, never
                 # a re-resolution against possibly-drifted config.
                 try:
-                    frozen_map = _frozen_model_assignment(meta)
-                except RetiredModelProfileStateError:
+                    frozen_map = resolve_execution_authority(
+                        thread.thread_metadata
+                    ).model_assignment
+                except ExecutionAuthorityError as exc:
                     await update_thread_status(
                         db,
                         thread.id,
                         ThreadStatus.FAILED,
                         failure_reason=(
-                            "retired model-profile state is unsupported; "
-                            "start a new run"
+                            "stored execution authority is incompatible "
+                            f"({exc.reason.value})"
                         ),
                     )
                     await db.commit()
                     _log_redispatch_failure_ladder(
                         failure_counts,
                         failure_thread_ids,
-                        "unsupported_stored_authority",
+                        "incompatible_execution_authority",
                         thread.id,
-                        "Refusing retired model-profile state for thread %s",
-                        thread.id,
-                    )
-                    continue
-                except TeamSelectionError:
-                    await update_thread_status(
-                        db,
-                        thread.id,
-                        ThreadStatus.FAILED,
-                        failure_reason=(
-                            "persisted provider catalog selection is invalid"
-                        ),
-                    )
-                    await db.commit()
-                    _log_redispatch_failure_ladder(
-                        failure_counts,
-                        failure_thread_ids,
-                        "invalid_frozen_assignment",
-                        thread.id,
-                        "Refusing invalid frozen assignment for thread %s",
+                        "Refusing incompatible execution authority (%s) for thread %s",
+                        exc.reason.value,
                         thread.id,
                     )
                     continue

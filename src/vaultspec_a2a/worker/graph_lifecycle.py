@@ -123,7 +123,6 @@ class RegisteredCompiledGraph(StreamableGraph, Protocol):
         config: RunnableConfig,
     ) -> object: ...
 
-
 def assert_armed_authoring_attachable(
     team_config: Any,
     agent_configs: dict[str, AgentConfig],
@@ -243,6 +242,11 @@ class GraphLifecycleManager:
         # Maps thread_id -> cache key so resume can find the graph
         # and recompile if evicted.
         self._thread_to_cache_key: dict[str, GraphCacheKey] = {}
+        # Assignment identity outlives LRU entries. Per-thread locks make the
+        # first binding atomic across duplicate/concurrent dispatch delivery.
+        self._thread_assignment_digests: dict[str, str] = {}
+        self._thread_compile_locks: dict[str, asyncio.Lock] = {}
+        self._thread_compile_lock_users: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Public accessors
@@ -265,6 +269,13 @@ class GraphLifecycleManager:
         """Clear all cached graphs and thread mappings."""
         self._graph_cache.clear()
         self._thread_to_cache_key.clear()
+        self._thread_assignment_digests.clear()
+        self._thread_compile_locks.clear()
+        self._thread_compile_lock_users.clear()
+
+    def evict_cached_graphs(self) -> None:
+        """Evict compiled graphs while retaining immutable thread bindings."""
+        self._graph_cache.clear()
 
     def register_compiled_graph(
         self,
@@ -282,6 +293,12 @@ class GraphLifecycleManager:
         for the same workspace would find, rather than shadowing it.
         """
         cache_key = graph_cache_key(*cache_key)
+        bound = self._thread_assignment_digests.get(thread_id)
+        if bound is not None and bound != cache_key[3]:
+            raise GraphCompilationError(
+                "dispatch model assignment does not match the bound run"
+            )
+        self._thread_assignment_digests[thread_id] = cache_key[3]
         while (
             cache_key not in self._graph_cache
             and len(self._graph_cache) >= domain_config.max_cached_graphs
@@ -307,7 +324,42 @@ class GraphLifecycleManager:
         compile a new one, cache it, and register with the aggregator.
         Returns ``None`` if no preset is available.
         """
+        lock = self._thread_compile_locks.setdefault(req.thread_id, asyncio.Lock())
+        self._thread_compile_lock_users[req.thread_id] = (
+            self._thread_compile_lock_users.get(req.thread_id, 0) + 1
+        )
+        try:
+            async with lock:
+                return await self._get_or_compile_graph_locked(req)
+        finally:
+            users = self._thread_compile_lock_users[req.thread_id] - 1
+            if users == 0:
+                self._thread_compile_lock_users.pop(req.thread_id, None)
+                self._thread_compile_locks.pop(req.thread_id, None)
+            else:
+                self._thread_compile_lock_users[req.thread_id] = users
+
+    async def _get_or_compile_graph_locked(
+        self, req: DispatchRequest
+    ) -> RegisteredCompiledGraph | None:
+        """Resolve one graph while holding the thread's first-dispatch lock."""
+        if not req.model_assignment:
+            raise GraphCompilationError(
+                "graph execution requires an exact current model assignment"
+            )
         assignment_digest = model_assignment_digest(req.model_assignment)
+        bound = self._thread_assignment_digests.get(req.thread_id)
+        if bound is None:
+            checkpoint_digest = await self._checkpoint_assignment_digest(req.thread_id)
+            if checkpoint_digest is not None and checkpoint_digest != assignment_digest:
+                raise GraphCompilationError(
+                    "dispatch model assignment does not match the durable run"
+                )
+            self._thread_assignment_digests[req.thread_id] = assignment_digest
+        elif bound != assignment_digest:
+            raise GraphCompilationError(
+                "dispatch model assignment does not match the bound run"
+            )
 
         # Check if thread already has a cached graph. A thread's accepted
         # assignment is immutable; changing it under the same identity is a
@@ -375,6 +427,30 @@ class GraphLifecycleManager:
         # REST /team-status and WS team_status events include role/display_name.
         await self._send_graph_registered(req.thread_id, graph)
         return graph
+
+    async def _checkpoint_assignment_digest(self, thread_id: str) -> str | None:
+        """Read and validate the current assignment binding from checkpoint state."""
+        checkpoint_tuple = await self._checkpointer.aget_tuple(
+            {"configurable": {"thread_id": thread_id}}
+        )
+        if checkpoint_tuple is None:
+            return None
+        checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
+        if not isinstance(checkpoint, dict):
+            raise GraphCompilationError("durable checkpoint state is incompatible")
+        values = checkpoint.get("channel_values")
+        if not isinstance(values, dict):
+            raise GraphCompilationError("durable checkpoint state is incompatible")
+        digest = values.get("model_assignment_digest")
+        if digest is None:
+            return None
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+        ):
+            raise GraphCompilationError("durable assignment digest is incompatible")
+        return digest
 
     async def _send_graph_registered(
         self, thread_id: str, graph: RegisteredCompiledGraph
@@ -744,6 +820,7 @@ class GraphLifecycleManager:
             "messages": messages,
             "thread_id": req.thread_id,
             "workspace_root": req.workspace_root,
+            "model_assignment_digest": model_assignment_digest(req.model_assignment),
         }
         if is_first_ingest:
             graph_input.update(
@@ -751,9 +828,6 @@ class GraphLifecycleManager:
                     "active_agent": "",
                     "artifacts": [],
                     "current_plan": [],
-                    "model_assignment_digest": model_assignment_digest(
-                        req.model_assignment
-                    ),
                     "token_usage": {},
                     "active_feature": req.active_feature,
                     "feedback_batch_id": req.feedback_batch_id,

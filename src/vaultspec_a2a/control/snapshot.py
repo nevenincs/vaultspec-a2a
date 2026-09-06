@@ -11,6 +11,7 @@ from ..graph.enums import (
     ToolCallStatus,
     ToolKind,
 )
+from ..streaming.node_metadata import NODE_METADATA_FIELDS
 from ..streaming.types import (
     action_detail_projection,
     classify_tool_kind,
@@ -41,6 +42,7 @@ def enrich_snapshot_from_state(
     snapshot: ThreadStateData,
     state: Any,
     aggregator: EventAggregator | None = None,
+    expected_assignment_digest: str | None = None,
 ) -> ThreadStateData:
     """Populate snapshot fields from LangGraph checkpointer state.
 
@@ -81,11 +83,25 @@ def enrich_snapshot_from_state(
     raw_descriptors = state.values.get("agent_descriptors")
     node_summaries: list[dict[str, str]] = []
     if isinstance(raw_descriptors, dict):
-        node_summaries = [
-            {"node_name": name, "agent_id": name, **descriptor}
+        descriptors_valid = all(
+            isinstance(name, str)
+            and 0 < len(name) <= 128
+            and isinstance(descriptor, dict)
+            and set(descriptor) == set(NODE_METADATA_FIELDS)
+            and all(
+                isinstance(value, str) and len(value) <= 1024
+                for value in descriptor.values()
+            )
             for name, descriptor in raw_descriptors.items()
-            if isinstance(name, str) and isinstance(descriptor, dict)
-        ]
+        )
+        if descriptors_valid:
+            node_summaries = [
+                {"node_name": name, "agent_id": name, **descriptor}
+                for name, descriptor in raw_descriptors.items()
+            ]
+        else:
+            snapshot.snapshot_complete = False
+            snapshot.degraded_reasons.append("invalid_agent_descriptors")
     elif aggregator is not None:
         node_summaries = aggregator.get_node_summaries(snapshot.thread_id)
     if node_summaries:
@@ -100,6 +116,7 @@ def enrich_snapshot_from_state(
                 build_agent_descriptor(
                     node,
                     agent_states.get(agent_id, AgentLifecycleState.IDLE),
+                    thread_id=snapshot.thread_id,
                 )
             )
 
@@ -201,9 +218,18 @@ def enrich_snapshot_from_state(
 
     snapshot.messages = msgs
     assignment_digest = state.values.get("model_assignment_digest")
-    snapshot.model_assignment_digest = (
-        assignment_digest if isinstance(assignment_digest, str) else None
-    )
+    if expected_assignment_digest is None:
+        snapshot.snapshot_complete = False
+        snapshot.degraded_reasons.append("incompatible_execution_authority")
+    elif assignment_digest == expected_assignment_digest:
+        snapshot.model_assignment_digest = expected_assignment_digest
+    else:
+        snapshot.snapshot_complete = False
+        snapshot.degraded_reasons.append(
+            "missing_assignment_digest"
+            if assignment_digest is None
+            else "invalid_assignment_digest"
+        )
     snapshot.checkpoint_id = checkpoint_id
     snapshot.plan = plan_entries
     snapshot.artifacts = artifact_data

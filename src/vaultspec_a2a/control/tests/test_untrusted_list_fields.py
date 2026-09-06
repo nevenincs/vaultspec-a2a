@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
 
-from ..dispatch import RetiredModelProfileStateError, _frozen_model_assignment
+from ..execution_authority import (
+    ExecutionAuthorityError,
+    ExecutionAuthorityFailure,
+    resolve_execution_authority,
+)
 from ..thread_state_service import (
     CHANGESET_ID_FIELD,
     PROPOSAL_ID_FIELD,
@@ -50,8 +56,9 @@ def _snapshot(values: dict[str, object]) -> CheckpointTuple:
 class TestRetiredRoleFallbackChain:
     @pytest.mark.parametrize("fallback", (["openai"], [], ["openai", 7], "openai"))
     def test_every_retired_assignment_shape_is_refused(self, fallback: object) -> None:
-        with pytest.raises(RetiredModelProfileStateError):
-            _frozen_model_assignment(_legacy_metadata(fallback))
+        with pytest.raises(ExecutionAuthorityError) as raised:
+            resolve_execution_authority(json.dumps(_legacy_metadata(fallback)))
+        assert raised.value.reason is ExecutionAuthorityFailure.RETIRED
 
 
 class TestRunAuthoringIds:

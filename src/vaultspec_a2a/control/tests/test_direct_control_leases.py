@@ -9,10 +9,10 @@ the worker's synchronous dispatch-ID admission boundary.
 from __future__ import annotations
 
 import asyncio
-import json
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
@@ -29,6 +29,7 @@ from ...control.cancel_service import CancelResult, cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.direct_control_recovery import redrive_direct_control_actions
 from ...control.event_handlers import relay_event
+from ...control.execution_authority import resolve_execution_authority
 from ...control.message_service import MessageResult, send_followup_message
 from ...control.permission_service import (
     permission_response_action_key,
@@ -51,10 +52,10 @@ from ...thread.idempotency import default_cancel_key
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
+from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
-    from pathlib import Path
 
     from fastapi import FastAPI
 
@@ -136,7 +137,9 @@ def _install_receipt_graph(
             "settle-preset",
             None,
             False,
-            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            resolve_execution_authority(
+                current_execution_metadata(Path(_ACTIVE_PROJECT))
+            ).model_assignment_digest,
         ),
         graph,
     )
@@ -150,8 +153,8 @@ _ACTIVE_PROJECT = tempfile.mkdtemp(prefix="vaultspec-active-project-")
 
 
 def _active_project_metadata() -> str:
-    """Return thread metadata naming a real active project."""
-    return json.dumps({"workspace_root": _ACTIVE_PROJECT})
+    """Return current execution authority naming a real active project."""
+    return current_execution_metadata(Path(_ACTIVE_PROJECT))
 
 
 async def _running_thread(
@@ -180,7 +183,12 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
     thread_id = "permission-ack-only-thread"
     request_id = f"{thread_id}:permission"
     async with session_factory() as db:
-        await create_thread(db, thread_id=thread_id, status=ThreadStatus.INPUT_REQUIRED)
+        await create_thread(
+            db,
+            thread_id=thread_id,
+            status=ThreadStatus.INPUT_REQUIRED,
+            metadata=current_execution_metadata(tmp_path),
+        )
         await record_permission_request(
             db,
             request_id=request_id,

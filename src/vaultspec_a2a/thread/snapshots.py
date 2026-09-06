@@ -428,6 +428,7 @@ class AgentData:
     executed.
     """
 
+    thread_id: str
     agent_id: str
     node_name: str
     state: AgentLifecycleState
@@ -533,6 +534,8 @@ def coerce_provider(value: object) -> Provider | None:
 def build_agent_descriptor(
     summary: Mapping[str, str],
     state: AgentLifecycleState,
+    *,
+    thread_id: str,
 ) -> AgentData:
     """Project one aggregator node summary onto the canonical descriptor.
 
@@ -541,6 +544,7 @@ def build_agent_descriptor(
     broadcast together instead of being wired one caller at a time.
     """
     return AgentData(
+        thread_id=thread_id,
         agent_id=summary.get("agent_id") or summary.get("node_name", ""),
         node_name=summary.get("node_name", ""),
         state=state,

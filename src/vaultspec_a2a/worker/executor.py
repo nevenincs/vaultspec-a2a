@@ -19,6 +19,7 @@ from ..domain_config import domain_config
 from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..ipc.serializers import sequenced_to_dict
 from ..providers import ProviderCondition
+from ..providers.team_selection import model_assignment_digest
 from ..streaming.aggregator import EventAggregator
 from ..streaming.node_metadata import node_metadata_from_graph
 from ..team.team_config import load_team_config
@@ -767,6 +768,12 @@ class Executor:
                 await self._reject_missing_graph(req, span, _INGEST_GUARDS)
                 return
 
+            config = {
+                "configurable": {"thread_id": req.thread_id},
+                "recursion_limit": (
+                    req.recursion_limit or domain_config.graph_recursion_limit
+                ),
+            }
             if not await self._mark_ingest_active(req.thread_id):
                 self._reject_slot_held(req, span, _INGEST_GUARDS)
                 return
@@ -778,14 +785,7 @@ class Executor:
             graph_input = GraphLifecycleManager.build_graph_input(
                 req, is_first_ingest=is_first_ingest
             )
-            if is_first_ingest:
-                graph_input["agent_descriptors"] = node_metadata_from_graph(graph)
-            config = {
-                "configurable": {"thread_id": req.thread_id},
-                "recursion_limit": (
-                    req.recursion_limit or domain_config.graph_recursion_limit
-                ),
-            }
+            graph_input["agent_descriptors"] = node_metadata_from_graph(graph)
 
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
@@ -894,7 +894,15 @@ class Executor:
                     req.thread_id,
                     agent_id,
                     graph,
-                    Command(resume=req.option_id),
+                    Command(
+                        resume=req.option_id,
+                        update={
+                            "agent_descriptors": node_metadata_from_graph(graph),
+                            "model_assignment_digest": model_assignment_digest(
+                                req.model_assignment
+                            ),
+                        },
+                    ),
                     config,
                     on_graph_started=lambda: self._emit_dispatch_application_receipt(
                         req

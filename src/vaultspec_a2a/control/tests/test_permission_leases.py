@@ -24,6 +24,7 @@ from ...database.models import Base
 from ...streaming.aggregator import EventAggregator
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
+from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,7 +44,11 @@ async def _run_case(runtime_dir: Path, bodies: list[tuple[str, str | None]]):
         await connection.run_sync(Base.metadata.create_all)
     sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with sessions() as session:
-        thread = await create_thread(session, status=ThreadStatus.INPUT_REQUIRED.value)
+        thread = await create_thread(
+            session,
+            status=ThreadStatus.INPUT_REQUIRED.value,
+            metadata=current_execution_metadata(runtime_dir),
+        )
         request_id = f"{thread.id}:permission"
         await record_permission_request(
             session,

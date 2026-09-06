@@ -339,6 +339,9 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
             assert agents
             assert all(agent["provider"] == "deterministic" for agent in agents)
             assert all(agent["model_name"] == "deterministic" for agent in agents)
+            assert all(
+                agent["thread_id"] == "current-schema-restart" for agent in agents
+            )
             assert history.json()["state"]["model_assignment_digest"] == (
                 exact_assignment_digest
             )
@@ -357,6 +360,12 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
             assert other_history.json()["state"]["model_assignment_digest"] == (
                 other_assignment_digest
             )
+            assert {
+                agent["thread_id"] for agent in same_history.json()["state"]["agents"]
+            } == {"same-assignment-restart"}
+            assert {
+                agent["thread_id"] for agent in other_history.json()["state"]["agents"]
+            } == {"other-assignment-restart"}
             assert {
                 agent["provider"] for agent in other_history.json()["state"]["agents"]
             } == {"deterministic"}
@@ -464,7 +473,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                 assert thread is not None
                 assert thread.status == ThreadStatus.FAILED.value
                 assert thread.failure_reason == (
-                    "persisted provider catalog selection is invalid"
+                    "stored execution authority is incompatible (corrupt)"
                 )
             sentinel = await get_thread(
                 session, "retired-durable-model-profile-sentinel"
@@ -472,7 +481,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
             assert sentinel is not None
             assert sentinel.status == ThreadStatus.FAILED.value
             assert sentinel.failure_reason == (
-                "retired model-profile state is unsupported; start a new run"
+                "stored execution authority is incompatible (retired)"
             )
     finally:
         await worker.client.aclose()

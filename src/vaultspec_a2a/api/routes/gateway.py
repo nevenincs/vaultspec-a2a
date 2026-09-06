@@ -1410,6 +1410,10 @@ def _raise_for_dispatch_failure(
         raise HTTPException(
             status_code=502, detail=detail or "Worker dispatch rejected"
         )
+    if failure_type == FailureType.INCOMPATIBLE_STATE:
+        raise HTTPException(
+            status_code=409, detail=detail or "Run execution state is incompatible"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1885,6 +1889,7 @@ async def team_status_endpoint(
     return TeamStatusV1Response(
         agents=[
             RunAgentSummary(
+                run_id=agent.thread_id,
                 agent_id=agent.agent_id,
                 display_name=agent.display_name,
                 state=agent.state,
@@ -2021,6 +2026,7 @@ async def run_message_endpoint(
         FailureType.INPUT_REQUIRED,
         FailureType.TERMINAL,
         FailureType.CONFLICT,
+        FailureType.INCOMPATIBLE_STATE,
     ):
         raise HTTPException(status_code=409, detail=result.error_detail)
 

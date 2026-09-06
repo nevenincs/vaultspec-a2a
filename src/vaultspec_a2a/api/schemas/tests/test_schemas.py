@@ -181,6 +181,7 @@ def _team_status() -> TeamStatusEvent:
         **ENVELOPE,
         agents=[
             AgentSummary(
+                thread_id="thread-1",
                 agent_id="agent-1",
                 node_name="coder",
                 state=AgentLifecycleState.WORKING,

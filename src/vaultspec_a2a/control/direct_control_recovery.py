@@ -22,6 +22,7 @@ from ..thread.enums import ControlActionType, ThreadStatus
 from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
+from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .permission_dispatch import permission_resume_value
 from .repair_transitions import (
     mark_cancel_requested,
@@ -136,6 +137,11 @@ async def _reconstruct_dispatch(
             "Start a new run.",
         )
 
+    try:
+        execution_authority = resolve_execution_authority(thread.thread_metadata)
+    except ExecutionAuthorityError as exc:
+        return _Refusal(FailureType.INCOMPATIBLE_STATE, str(exc))
+
     if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
         content = action.payload.get("content")
         agent_value = action.payload.get("agent_id")
@@ -158,6 +164,7 @@ async def _reconstruct_dispatch(
             team_preset=thread.team_preset,
             workspace_root=workspace_root,
             recursion_limit=recursion_limit,
+            model_assignment=execution_authority.model_assignment,
         )
     if (
         action.action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
@@ -184,6 +191,7 @@ async def _reconstruct_dispatch(
             team_preset=thread.team_preset,
             workspace_root=workspace_root,
             recursion_limit=recursion_limit,
+            model_assignment=execution_authority.model_assignment,
         )
     return _Refusal(
         FailureType.REJECTED,

@@ -243,6 +243,7 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
         case TeamStatus():
             agents = [
                 AgentSummary(
+                    thread_id=event.thread_id,
                     agent_id=a.get("agent_id", ""),
                     node_name=a.get("node_name", ""),
                     state=AgentLifecycleState(a.get("state", "idle")),

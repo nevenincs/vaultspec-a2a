@@ -155,6 +155,7 @@ class AgentSummary(BaseModel):
     executed and is the field to read when asking which model ran.
     """
 
+    thread_id: str
     agent_id: str
     node_name: str
     state: AgentLifecycleState

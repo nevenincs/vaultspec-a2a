@@ -60,6 +60,7 @@ from ..utils.coercion import coerce_object_list, coerce_object_mapping
 from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
+from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -616,6 +617,13 @@ class VerdictSubscriber:
             team_preset = thread.team_preset
             thread_metadata = thread.thread_metadata
             workspace_root = dispatchable_workspace_root(thread_metadata)
+            try:
+                execution_authority = resolve_execution_authority(thread_metadata)
+            except ExecutionAuthorityError as exc:
+                logger.warning(
+                    "Refusing verdict resume for thread %s: %s", thread_id, exc
+                )
+                return
 
         # Gate-precision: the verdict must answer the gate the run is CURRENTLY
         # parked at, not a superseded earlier gate matched by accumulated ids.
@@ -666,6 +674,7 @@ class VerdictSubscriber:
             team_preset=team_preset,
             workspace_root=workspace_root,
             recursion_limit=self._recursion_limit,
+            model_assignment=execution_authority.model_assignment,
         )
         trace_headers = self._trace_headers_fn() if self._trace_headers_fn else None
         logger.info(

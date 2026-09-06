@@ -47,6 +47,7 @@ from ..thread.snapshots import (
     project_checkpoint_tuple,
 )
 from ..utils.coercion import coerce_object_mapping, coerce_string_list
+from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -327,6 +328,16 @@ async def capture_thread_state(
     snapshot = await enrich_snapshot_from_durable_state(
         db, thread=thread, snapshot=snapshot
     )
+    try:
+        expected_assignment_digest = resolve_execution_authority(
+            thread.thread_metadata
+        ).model_assignment_digest
+    except ExecutionAuthorityError as exc:
+        expected_assignment_digest = None
+        snapshot.snapshot_complete = False
+        snapshot.degraded_reasons.append(
+            f"incompatible_execution_authority_{exc.reason.value}"
+        )
     durable_permission_ids = {
         permission.request_id for permission in snapshot.pending_permissions
     }
@@ -369,6 +380,7 @@ async def capture_thread_state(
                 snapshot,
                 minimal_state,
                 aggregator=aggregator,
+                expected_assignment_digest=expected_assignment_digest,
             )
             snapshot = apply_checkpoint_projection(snapshot, projection)
             snapshot = reconcile_checkpoint_permissions_with_durable_state(

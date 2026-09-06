@@ -41,6 +41,7 @@ from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
 from ...control.action_lease import CONTROL_ACTION_LEASE_TTL, claim_control_action
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import (
     VerdictSubscriber,
     _gate_resume_verdict,
@@ -63,6 +64,7 @@ from ...thread.enums import ControlActionType, ThreadStatus
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
+from ._catalog_authority import current_execution_metadata
 
 
 @pytest_asyncio.fixture
@@ -118,7 +120,9 @@ def _install_receipt_graph(
             "verdict-receipt-preset",
             None,
             False,
-            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            resolve_execution_authority(
+                current_execution_metadata(Path.cwd())
+            ).model_assignment_digest,
         ),
         builder.compile(checkpointer=checkpointer),
     )
@@ -177,6 +181,7 @@ async def _seed_parked_thread(
             session,
             thread_id=thread_id,
             team_preset=team_preset,
+            metadata=current_execution_metadata(Path.cwd()),
         )
         await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
         await session.commit()

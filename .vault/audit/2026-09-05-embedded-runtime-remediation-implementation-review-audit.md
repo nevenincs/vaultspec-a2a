@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6ae070a74b41210ca76851df2e4119c622053ae547533e60901708452ac405cb'
+body_hash: 'sha256:7983931a935b853cee01185d70d6f400845562a8c902e9378f09f961397b7e77'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -536,7 +536,7 @@ with concurrent equal and distinct assignments proves each run retains its own
 provider, model and digest, and a direct relay test proves one thread cannot
 overwrite another. Owner: P01.S11; formal re-review is required before closure.
 
-### p01-s11-execution-reentry-omits-frozen-assignment | high | open
+### p01-s11-execution-reentry-omits-frozen-assignment | high | resolved pending formal review
 
 Type: remediation prerequisite and message/resume integrity. The S11 correction
 keys worker graphs by complete assignment digest, but message, permission,
@@ -548,7 +548,7 @@ exact validated current-schema frozen compiler map; absent, corrupt, retired or
 old-schema authority must fail typed incompatible before dispatch with no repair
 or migration. Cover every re-entry surface with a real current-run test.
 
-### p01-s11-thread-assignment-binding-depends-on-cache-residency | high | open
+### p01-s11-thread-assignment-binding-depends-on-cache-residency | high | resolved pending formal review
 
 Type: remediation prerequisite, concurrency and cache safety. Assignment mismatch
 is checked only while the mapped graph remains in the LRU. After normal eviction,
@@ -558,7 +558,7 @@ bind thread identity to digest before compile, compare independent of graph
 residency, serialize in-flight same-thread compilation, and test eviction plus
 concurrent equal/different deliveries with zero provider construction on mismatch.
 
-### p01-s11-current-checkpoint-evidence-is-not-reconciled | medium | open
+### p01-s11-current-checkpoint-evidence-is-not-reconciled | medium | resolved pending formal review
 
 Type: durable evidence continuity. Descriptor and full-assignment digest fields
 are written only on first ingest, so a pre-existing current-schema checkpoint is
@@ -575,7 +575,7 @@ node-metadata contamination, and independent focused checks pass, but the two
 HIGH execution-authority gaps above block catalog P01.S11 and remediation
 W01.P02.S05. S11 remains open; no remediation row is closed by this review.
 
-### p01-s11-checkpoint-projection-validation | medium | open
+### p01-s11-checkpoint-projection-validation | medium | resolved pending formal review
 
 Type: persisted-state robustness. History accepts malformed or valid-but-wrong
 checkpoint assignment digests without reconciling them to exact current-schema
@@ -584,7 +584,7 @@ Owner: P01.S11. Close and bound checkpoint evidence at read, compare the compile
 digest server-side, and return typed degraded/incompatible state; never repair or
 translate missing, old or retired provider authority.
 
-### p01-s11-team-status-thread-association | medium | open
+### p01-s11-team-status-thread-association | medium | resolved pending formal review
 
 Type: concurrent projection integrity. Thread-scoped metadata lookup is fixed,
 but team status flattens agents from multiple active threads without retaining
@@ -592,8 +592,27 @@ their thread ids, leaving equal role names ambiguous. Owner: P01.S11 or the team
 status contract workstream; preserve run association and prove two concurrent
 same-role runs.
 
-### p01-s11-cross-thread-agent-accessor | low | open
+### p01-s11-cross-thread-agent-accessor | low | resolved pending formal review
 
 Type: hardening. An optional no-thread agent-state accessor remains, although no
 current production caller uses it. Require thread identity so future code cannot
 silently recreate the retired global fallback.
+
+### p01-s11-reentry-binding-and-recovery-correction | high | resolved pending formal review
+
+Type: remediation prerequisite and state integrity. One exact current-schema
+resolver now supplies every graph re-entry. Atomic per-thread digest binding is
+established before compile, survives graph eviction, compares checkpoint evidence
+on fresh workers and serializes concurrent first delivery. Checkpoint evidence is
+closed and reconciled through ordinary turn input or the real resume command's
+atomic update; malformed, wrong, absent provider authority and retired authority
+fail bounded before provider contact. History, team status and SSE agents carry
+their originating run id, and no optional global agent-state accessor remains.
+
+Two implementation findings surfaced and were corrected in the same pass. A
+pre-resume `aupdate_state` invalidated the parked LangGraph interrupt, so evidence
+now rides `Command.update`. A fast worker could consume the questionnaire before
+identical clarification replays read it and those replays returned 409 despite a
+matching accepted durable action; matching request and resolution identity now
+returns that action. Real loopback worker tests cover both paths. Owner: P01.S11;
+formal re-review remains required before S11 or remediation S05 can close.

@@ -217,6 +217,7 @@ class StateProjector:
         thread_id: str,
         *,
         thread_known: bool,
+        timeout_seconds: float = 5.0,
     ) -> tuple[str | None, bool]:
         """Inspect the latest checkpoint before running an ingest.
 
@@ -263,7 +264,7 @@ class StateProjector:
                 self._checkpointer.aget_tuple(
                     {"configurable": {"thread_id": thread_id}}
                 ),
-                timeout=5.0,
+                timeout=timeout_seconds,
             )
         except Exception:
             logger.warning(

@@ -103,8 +103,19 @@ def _current_metadata(workspace_root: str | None) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "retired_key",
+    [
+        "MODEL_MAP",
+        "default_profile",
+        "default_profile_id",
+        "model_profile",
+        "profile",
+        "profile_id",
+    ],
+)
 async def test_retired_stored_authority_fails_closed_without_redispatch(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, retired_key: str
 ) -> None:
     """Stored retired policy is detected by key and refused without interpretation."""
     db_file = tmp_path / "redispatch-retired-authority.db"
@@ -121,9 +132,13 @@ async def test_retired_stored_authority_fails_closed_without_redispatch(
                 metadata=json.dumps(
                     {
                         "workspace_root": str(tmp_path),
-                        # Deliberately malformed: the refusal recognizes only
-                        # the retired key and must never interpret its value.
-                        "model_profile": ["must", "not", "be", "read"],
+                        "provider_catalog_selection": _current_metadata(str(tmp_path))[
+                            "provider_catalog_selection"
+                        ],
+                        # The exact current freeze cannot make a retired root
+                        # authority safe. Its value is deliberately malformed
+                        # and must never be interpreted or reflected.
+                        retired_key: ["must", "not", "be", "read"],
                     }
                 ),
             )

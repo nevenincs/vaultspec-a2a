@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:3ab100442c509a500ad2f92c7e39ee204b508e0aade5c83a4f254e799d2fe7d9'
+body_hash: 'sha256:ffd9be0f6773b9d1b58decb6af7b93f3a024535553de7be202b81cdb3eb3fdc9'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -633,3 +633,17 @@ cross-thread compilation herd also remains queued. Correct these through catalog
 P01.S11, retain interrupted/reconciling identity, prove bounded cleanup and
 zero-contact retired refusal, then obtain another formal review. No remediation
 row is closed by this audit update.
+
+### p01-s11-bounded-authority-lifecycle-correction | high | resolved pending formal review
+
+Type: remediation prerequisite and bounded state integrity. P01.S11 now refuses
+the complete retired root authority set before parsing an otherwise current
+freeze; reserves worker capacity atomically before scheduling, checkpoint reads
+or graph locks; shares one configured total checkpoint deadline; releases every
+reservation on all exit classes; retires per-thread digest/cache identity on
+completed, failed and cancelled settlement while retaining parked interrupts;
+and single-flights compilation across threads by the complete graph cache key.
+Real held-SQLite, endpoint 429, cancellation, timeout, high-volume terminal,
+durable late-reentry and same/distinct-key concurrency controls pass. No retired
+state is parsed, reflected, migrated or dispatched. Owner remains P01.S11;
+remediation W01.P02.S05 and S11 stay open until formal re-review.

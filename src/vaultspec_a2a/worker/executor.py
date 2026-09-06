@@ -118,6 +118,9 @@ _EXECUTOR_CONDITION = ProviderCondition.UNKNOWN
 # either is that dispatch's own to settle; a cancel or an unrecognised action
 # never held the slot, so a held slot there belongs to a concurrent run.
 _SLOT_OWNING_ACTIONS = frozenset({ControlActionType.INGEST, ControlActionType.RESUME})
+_CAPACITY_ACCEPTED = "accepted"
+_CAPACITY_THREAD_ACTIVE = "thread_active"
+_CAPACITY_FULL = "capacity_full"
 
 
 class ConcurrentCapError(RuntimeError):
@@ -139,8 +142,15 @@ class Executor:
         self,
         checkpointer: Checkpointer,
         bridge: WorkerBridge,
+        *,
+        checkpoint_read_timeout_seconds: float | None = None,
     ) -> None:
         self._checkpointer = checkpointer
+        self._checkpoint_read_timeout_seconds = (
+            checkpoint_read_timeout_seconds
+            if checkpoint_read_timeout_seconds is not None
+            else domain_config.aget_state_timeout_seconds
+        )
         self._bridge = bridge
         self._aggregator = EventAggregator()
 
@@ -161,6 +171,7 @@ class Executor:
             aggregator=self._aggregator,
             token_store=self._token_store,
             catalog_store=self._catalog_store,
+            checkpoint_read_timeout_seconds=checkpoint_read_timeout_seconds,
         )
         self._state_projector = StateProjector(
             checkpointer=checkpointer,
@@ -206,11 +217,6 @@ class Executor:
     def active_ingest_count(self) -> int:
         """Number of concurrently active graph ingests."""
         return len(self._active_ingests)
-
-    def at_capacity(self) -> bool:
-        """Return True if the concurrent thread cap has been reached."""
-        cap = domain_config.max_concurrent_threads
-        return len(self._active_ingests) >= cap
 
     def register_compiled_graph(
         self,
@@ -271,13 +277,24 @@ class Executor:
                 ),
             )
 
-    async def _mark_ingest_active(self, thread_id: str) -> bool:
-        """Acquire the ingest slot for *thread_id*; ``False`` if already held."""
+    async def reserve_dispatch_capacity(self, thread_id: str) -> bool:
+        """Atomically reserve pre-compile capacity for one thread dispatch."""
+        return await self._reserve_dispatch_capacity(thread_id) == _CAPACITY_ACCEPTED
+
+    async def _reserve_dispatch_capacity(self, thread_id: str) -> str:
+        """Return the bounded reason for one atomic capacity decision."""
         async with self._ingest_lock:
             if thread_id in self._active_ingests:
-                return False
+                return _CAPACITY_THREAD_ACTIVE
+            if len(self._active_ingests) >= domain_config.max_concurrent_threads:
+                return _CAPACITY_FULL
             self._active_ingests.add(thread_id)
-            return True
+            return _CAPACITY_ACCEPTED
+
+    async def release_dispatch_capacity(self, thread_id: str) -> None:
+        """Release a pre-compile capacity reservation idempotently."""
+        async with self._ingest_lock:
+            self._active_ingests.discard(thread_id)
 
     async def _mark_ingest_done(self, thread_id: str, outcome: str) -> None:
         """Release the ingest slot, untrack thread, prune aggregator.
@@ -296,6 +313,7 @@ class Executor:
         # Drop the run's actor tokens when its active window truly closes,
         # i.e. a terminal outcome - never on an interrupt-park that will resume.
         if outcome in TERMINAL_STATUSES:
+            self._graph_lifecycle.release_thread(thread_id)
             self._token_store.drop(thread_id)
             self._catalog_store.drop(thread_id)
             self._aggregator.remove_node_metadata(thread_id)
@@ -428,6 +446,8 @@ class Executor:
         await self._state_projector.emit_terminal_status(
             req.thread_id, ThreadStatus.FAILED, error_detail=reason
         )
+        self._graph_lifecycle.release_thread(req.thread_id)
+        self._aggregator.remove_node_metadata(req.thread_id)
 
     async def _reject_missing_graph(
         self,
@@ -553,7 +573,40 @@ class Executor:
         await self._mark_ingest_done(req.thread_id, outcome)
 
     async def handle_dispatch(self, req: DispatchRequest) -> None:
-        """Route a ``DispatchRequest``; top-level guard protects the task group."""
+        """Reserve capacity and route a direct ``DispatchRequest`` call."""
+        owns_slot = req.action in _SLOT_OWNING_ACTIONS
+        reservation = (
+            await self._reserve_dispatch_capacity(req.thread_id)
+            if owns_slot
+            else _CAPACITY_ACCEPTED
+        )
+        if reservation != _CAPACITY_ACCEPTED:
+            guards = (
+                _INGEST_GUARDS
+                if req.action == ControlActionType.INGEST
+                else _RESUME_GUARDS
+            )
+            action = (
+                guards.slot_held_action
+                if reservation == _CAPACITY_THREAD_ACTIVE
+                else "dispatch_capacity_refused"
+            )
+            logger.warning(
+                guards.slot_held
+                if reservation == _CAPACITY_THREAD_ACTIVE
+                else "Worker capacity refused dispatch for thread %s",
+                req.thread_id,
+                extra=self._dispatch_log_extra(
+                    req, action=action, runtime_mode=guards.runtime_mode
+                ),
+            )
+            return
+        await self.handle_reserved_dispatch(req, capacity_reserved=owns_slot)
+
+    async def handle_reserved_dispatch(
+        self, req: DispatchRequest, *, capacity_reserved: bool = True
+    ) -> None:
+        """Route an endpoint-admitted dispatch and always release its reservation."""
         try:
             async with ws_span(
                 f"executor.{req.action}",
@@ -585,6 +638,8 @@ class Executor:
                             await self._state_projector.emit_terminal_status(
                                 req.thread_id, ThreadStatus.CANCELLED
                             )
+                            self._graph_lifecycle.release_thread(req.thread_id)
+                            self._aggregator.remove_node_metadata(req.thread_id)
                     case _:
                         logger.warning(
                             "Unknown dispatch action: %s",
@@ -610,6 +665,9 @@ class Executor:
                 ),
             )
             await self._fail_unhandled_dispatch(req, exc)
+        finally:
+            if capacity_reserved:
+                await self.release_dispatch_capacity(req.thread_id)
 
     async def _fail_unhandled_dispatch(
         self, req: DispatchRequest, exc: BaseException
@@ -698,6 +756,10 @@ class Executor:
     async def _handle_ingest(self, req: DispatchRequest) -> None:
         """Compile graph on first use and execute a new user turn."""
         async with ws_span("executor.ingest", thread_id=req.thread_id) as span:
+            checkpoint_deadline = (
+                asyncio.get_running_loop().time()
+                + self._checkpoint_read_timeout_seconds
+            )
             # Pre-flight: detect threads that already reached a terminal or
             # interrupted state before a crash.  Also grounds is_first_ingest
             # in checkpoint truth rather than the stale in-memory cache.
@@ -707,6 +769,10 @@ class Executor:
             ) = await self._state_projector.pre_flight_checkpoint(
                 req.thread_id,
                 thread_known=self._graph_lifecycle.has_thread(req.thread_id),
+                timeout_seconds=max(
+                    0.0,
+                    checkpoint_deadline - asyncio.get_running_loop().time(),
+                ),
             )
             if pre_flight_outcome == ThreadStatus.COMPLETED:
                 logger.info(
@@ -723,6 +789,8 @@ class Executor:
                 await self._state_projector.emit_terminal_status(
                     req.thread_id, ThreadStatus.COMPLETED
                 )
+                self._graph_lifecycle.release_thread(req.thread_id)
+                self._aggregator.remove_node_metadata(req.thread_id)
                 return
             if pre_flight_outcome == ThreadStatus.FAILED:
                 logger.warning(
@@ -759,7 +827,9 @@ class Executor:
             span.set_attribute("is_first_ingest", is_first_ingest)
 
             try:
-                graph = await self._graph_lifecycle.get_or_compile_graph(req)
+                graph = await self._graph_lifecycle.get_or_compile_graph(
+                    req, checkpoint_deadline=checkpoint_deadline
+                )
             except GraphCompilationError as exc:
                 await self._reject_compile_failure(req, span, exc, _INGEST_GUARDS)
                 return
@@ -774,10 +844,6 @@ class Executor:
                     req.recursion_limit or domain_config.graph_recursion_limit
                 ),
             }
-            if not await self._mark_ingest_active(req.thread_id):
-                self._reject_slot_held(req, span, _INGEST_GUARDS)
-                return
-
             self._bridge.track_thread(req.thread_id)
             # Hold the run's per-role tokens for this active window only.
             self._token_store.register(req.thread_id, req.actor_tokens)
@@ -827,21 +893,23 @@ class Executor:
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
         async with ws_span("executor.resume", thread_id=req.thread_id) as span:
+            checkpoint_deadline = (
+                asyncio.get_running_loop().time()
+                + self._checkpoint_read_timeout_seconds
+            )
             # Record resume option (cast to str for span attribute)
             val = str(req.option_id) if req.option_id else "none"
             span.set_attribute("option_id", val)
             try:
-                graph = await self._graph_lifecycle.get_or_compile_graph(req)
+                graph = await self._graph_lifecycle.get_or_compile_graph(
+                    req, checkpoint_deadline=checkpoint_deadline
+                )
             except GraphCompilationError as exc:
                 await self._reject_compile_failure(req, span, exc, _RESUME_GUARDS)
                 return
 
             if graph is None:
                 await self._reject_missing_graph(req, span, _RESUME_GUARDS)
-                return
-
-            if not await self._mark_ingest_active(req.thread_id):
-                self._reject_slot_held(req, span, _RESUME_GUARDS)
                 return
 
             self._bridge.track_thread(req.thread_id)

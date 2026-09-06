@@ -308,8 +308,10 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
             )
             return DispatchResponse(status="dispatched", thread_id=req.thread_id)
 
-        # Reject dispatch when concurrent thread cap is reached.
-        if executor.at_capacity():
+        owns_capacity = req.action in {"ingest", "resume"}
+        if owns_capacity and not await executor.reserve_dispatch_capacity(
+            req.thread_id
+        ):
             raise HTTPException(
                 status_code=429,
                 detail="Worker at capacity — too many concurrent threads",
@@ -318,11 +320,21 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         # No await may be inserted between this admission and scheduling: this is
         # the worker's synchronous duplicate-dispatch boundary.
         if not dispatch_ids.admit(req.dispatch_id):
+            if owns_capacity:
+                await executor.release_dispatch_capacity(req.thread_id)
             return DispatchResponse(status="dispatched", thread_id=req.thread_id)
 
         # Fire-and-forget: the task group keeps the task alive even after
         # this endpoint handler returns.
-        tg.start_soon(executor.handle_dispatch, req)
+        try:
+            if owns_capacity:
+                tg.start_soon(executor.handle_reserved_dispatch, req)
+            else:
+                tg.start_soon(executor.handle_dispatch, req)
+        except BaseException:
+            if owns_capacity:
+                await executor.release_dispatch_capacity(req.thread_id)
+            raise
         logger.info(
             "Worker dispatch accepted",
             extra={

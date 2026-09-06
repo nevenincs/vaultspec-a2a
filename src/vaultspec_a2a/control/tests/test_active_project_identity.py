@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 
 from ...api.tests.clarification_harness import new_state_graph
@@ -694,6 +695,146 @@ class TestOneWorkspaceOneGraphEntry:
         assert manager.compile_count == 1
 
     @pytest.mark.asyncio
+    async def test_different_threads_with_one_exact_key_share_one_compile(
+        self, workspace: Path
+    ) -> None:
+        class ControlledManager(GraphLifecycleManager):
+            def __init__(self) -> None:
+                super().__init__(
+                    checkpointer=InMemorySaver(),
+                    bridge=WorkerBridge(
+                        api_url="http://127.0.0.1:1", worker_id="identity"
+                    ),
+                    aggregator=EventAggregator(),
+                    token_store=RunTokenStore(),
+                    catalog_store=RunCatalogStore(),
+                )
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+                self.compile_count = 0
+
+            async def _compile_graph(
+                self, req: DispatchRequest
+            ) -> RegisteredCompiledGraph:
+                del req
+                self.compile_count += 1
+                self.started.set()
+                await self.release.wait()
+                return TestOneWorkspaceOneGraphEntry._graph()
+
+        manager = ControlledManager()
+
+        def request(thread_id: str) -> DispatchRequest:
+            return DispatchRequest(
+                action="ingest",
+                thread_id=thread_id,
+                team_preset="preset",
+                workspace_root=str(workspace),
+                recursion_limit=25,
+                model_assignment=_assignment("same"),
+            )
+
+        first = asyncio.create_task(manager.get_or_compile_graph(request("run-a")))
+        await manager.started.wait()
+        second = asyncio.create_task(manager.get_or_compile_graph(request("run-b")))
+        await asyncio.sleep(0)
+        assert manager.compile_count == 1
+        assert manager.compile_flight_count == 1
+        manager.release.set()
+        assert await first is await second
+        assert manager.compile_count == 1
+        assert manager.compile_flight_count == 0
+
+    @pytest.mark.asyncio
+    async def test_distinct_assignment_digests_compile_independently(
+        self, workspace: Path
+    ) -> None:
+        class ControlledManager(GraphLifecycleManager):
+            def __init__(self) -> None:
+                super().__init__(
+                    checkpointer=InMemorySaver(),
+                    bridge=WorkerBridge(
+                        api_url="http://127.0.0.1:1", worker_id="identity"
+                    ),
+                    aggregator=EventAggregator(),
+                    token_store=RunTokenStore(),
+                    catalog_store=RunCatalogStore(),
+                )
+                self.both_started = asyncio.Event()
+                self.release = asyncio.Event()
+                self.compile_count = 0
+
+            async def _compile_graph(
+                self, req: DispatchRequest
+            ) -> RegisteredCompiledGraph:
+                del req
+                self.compile_count += 1
+                if self.compile_count == 2:
+                    self.both_started.set()
+                await self.release.wait()
+                return TestOneWorkspaceOneGraphEntry._graph()
+
+        manager = ControlledManager()
+
+        def request(thread_id: str, model_name: str) -> DispatchRequest:
+            return DispatchRequest(
+                action="ingest",
+                thread_id=thread_id,
+                team_preset="preset",
+                workspace_root=str(workspace),
+                recursion_limit=25,
+                model_assignment=_assignment(model_name),
+            )
+
+        first = asyncio.create_task(
+            manager.get_or_compile_graph(request("run-a", "model-a"))
+        )
+        second = asyncio.create_task(
+            manager.get_or_compile_graph(request("run-b", "model-b"))
+        )
+        await asyncio.wait_for(manager.both_started.wait(), timeout=1)
+        assert manager.compile_count == 2
+        assert manager.compile_flight_count == 2
+        manager.release.set()
+        assert await first is not None
+        assert await second is not None
+        assert manager.compile_flight_count == 0
+
+    @pytest.mark.asyncio
+    async def test_real_checkpoint_read_timeout_cleans_all_compile_state(
+        self, workspace: Path, tmp_path: Path
+    ) -> None:
+        checkpoint_path = tmp_path / "held-checkpoint.db"
+        async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
+            await saver.setup()
+            manager = GraphLifecycleManager(
+                checkpointer=saver,
+                bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
+                aggregator=EventAggregator(),
+                token_store=RunTokenStore(),
+                catalog_store=RunCatalogStore(),
+                checkpoint_read_timeout_seconds=0.02,
+            )
+            await saver.lock.acquire()
+            try:
+                with pytest.raises(GraphCompilationError, match="read timed out"):
+                    await manager.get_or_compile_graph(
+                        DispatchRequest(
+                            action="ingest",
+                            thread_id="held-read",
+                            team_preset="preset",
+                            workspace_root=str(workspace),
+                            recursion_limit=25,
+                            model_assignment=_assignment("current"),
+                        )
+                    )
+            finally:
+                saver.lock.release()
+
+            assert manager.thread_binding_count == 0
+            assert manager.compile_flight_count == 0
+
+    @pytest.mark.asyncio
     async def test_fresh_worker_refuses_a_digest_that_disagrees_with_checkpoint(
         self, workspace: Path
     ) -> None:
@@ -802,5 +943,6 @@ class TestOneWorkspaceOneGraphEntry:
         )
         with pytest.raises(GraphCompilationError, match="controlled compile failure"):
             await manager.get_or_compile_graph(req)
+        assert manager.compile_flight_count == 0
         assert await manager.get_or_compile_graph(req) is not None
         assert manager.calls == 2

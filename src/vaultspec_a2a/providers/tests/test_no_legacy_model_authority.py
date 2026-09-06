@@ -72,7 +72,7 @@ def test_retired_stored_key_is_only_a_fail_closed_detection_sentinel() -> None:
             continue
         if "model_profile" in path.read_text(encoding="utf-8"):
             hits.append(path.relative_to(source_root).as_posix())
-    assert hits == ["control/dispatch.py"]
+    assert hits == ["control/execution_authority.py"]
 
 
 def test_retired_provider_and_discovery_authorities_are_absent() -> None:

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:fc3efe376f0eb41ed196172e777d2013aae8cf6bb263901650061c16e758dfaf'
+body_hash: 'sha256:038f316431bd2ecd0376b38ed76b2308529bf7ff38498dc887f697dc2d455364'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -574,7 +574,7 @@ It now returns the matching accepted action once request identity and canonical
 resolution fingerprint agree. The real loopback worker test proves six concurrent
 same-id replays remain accepted while the single graph resume completes.
 
-### p01-s11-retired-root-authority-can-accompany-current-freeze | high | open
+### p01-s11-retired-root-authority-can-accompany-current-freeze | high | resolved pending formal review
 
 Type: compatibility removal and execution-authority validation. The shared
 `resolve_execution_authority` seam closes and validates the nested schema-v1
@@ -594,7 +594,7 @@ bounded `retired` incompatibility reason. Never reflect its value or contact a
 worker/provider. Add current-valid-freeze-plus-retired-root-key controls for every
 key and a real redispatch zero-contact discriminator.
 
-### p01-s11-precompile-checkpoint-read-bypasses-worker-capacity | high | open
+### p01-s11-precompile-checkpoint-read-bypasses-worker-capacity | high | resolved pending formal review
 
 Type: bounded concurrency and degraded-storage handling. `/dispatch` admits and
 schedules work while capacity is measured only by `_active_ingests`. The Executor
@@ -614,7 +614,7 @@ exception and cancellation. Concurrent admission tests must hold the real
 checkpointer read, exceed the limit, observe bounded task/lock state and 429 or
 typed refusal, then prove cancellation and timeout return capacity.
 
-### p01-s11-terminal-thread-bindings-are-unbounded | high | open
+### p01-s11-terminal-thread-bindings-are-unbounded | high | resolved pending formal review
 
 Type: bounded resource lifecycle and identity isolation. Every compiled run adds
 entries to `_thread_assignment_digests` and `_thread_to_cache_key`; neither map
@@ -634,7 +634,7 @@ terminal traffic leaves the maps bounded, every terminal class releases, parked
 interrupts retain binding, and any late terminal re-entry is rejected from
 authoritative durable terminal state rather than an immortal in-memory mapping.
 
-### p01-s11-cache-key-compilation-is-not-single-flight-across-threads | medium | open
+### p01-s11-cache-key-compilation-is-not-single-flight-across-threads | medium | resolved pending formal review
 
 Type: concurrency and provider construction. The new lock correctly serializes
 compilation for one thread, but locks are keyed only by thread id. Concurrent
@@ -675,3 +675,35 @@ real clarification controls. The committed 462-control, 121-worker, 80-focused,
 consistent with the corrected positive paths, but cannot establish boundedness
 or the missing retired-root boundary. S11 stays open; this review changes no
 runtime or plan row.
+
+### p01-s11-bounded-authority-lifecycle-correction | high | resolved pending formal review
+
+Type: implementation review queue disposition. The shared resolver now checks
+the complete six-key retired root set before reading the current freeze and
+returns only the bounded `retired` reason. Resolver and real database redispatch
+controls pair every key with an otherwise exact current selection, prove its
+value is neither interpreted nor reflected, and trap any worker contact.
+
+`/dispatch` atomically reserves configured ingest/resume capacity before
+dispatch-ID admission or task scheduling. Direct executor entry reserves through
+the same seam before preflight, checkpoint or graph-lock work. Preflight and
+assignment-binding reads share one configured total checkpoint deadline; all
+success, refusal, timeout, exception and cancellation exits release capacity.
+Real held-`AsyncSqliteSaver` controls exceed the cap, observe only the configured
+number active, receive endpoint 429 before dispatch-ID admission, and prove
+timeout and cancellation leave zero capacity and compile-lock state.
+
+Completed, failed and cancelled settlement removes the thread assignment digest,
+cache-key association and aggregator metadata without evicting a graph shared by
+other threads; interrupted settlement retains it. High-volume and all-terminal
+controls drive retained identity to zero, and late dispatch is refused again from
+durable failed-checkpoint evidence after in-memory identity release. A ref-counted
+exact-`GraphCacheKey` flight now compiles once across different threads sharing a
+complete key, while different assignment digests compile concurrently; success,
+failure and cancellation clean flight state.
+
+The focused exact-authority, redispatch, cache-identity, endpoint-admission,
+executor and state-projection suite passes 145 tests; its new concurrency and
+lifecycle subset passes 32 tests. The only warning is the already queued
+Starlette `BlockingPortal` alias deprecation. P01.S11 remains open for independent
+formal review.

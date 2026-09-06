@@ -123,6 +123,7 @@ class RegisteredCompiledGraph(StreamableGraph, Protocol):
         config: RunnableConfig,
     ) -> object: ...
 
+
 def assert_armed_authoring_attachable(
     team_config: Any,
     agent_configs: dict[str, AgentConfig],
@@ -214,6 +215,7 @@ class GraphLifecycleManager:
         aggregator: EventAggregator,
         token_store: RunTokenStore,
         catalog_store: RunCatalogStore,
+        checkpoint_read_timeout_seconds: float | None = None,
     ) -> None:
         from ..database import get_session_factory
         from ..providers.factory import ProviderFactory
@@ -221,6 +223,11 @@ class GraphLifecycleManager:
         from .task_queue_port import SqlTaskQueuePort
 
         self._checkpointer = checkpointer
+        self._checkpoint_read_timeout_seconds = (
+            checkpoint_read_timeout_seconds
+            if checkpoint_read_timeout_seconds is not None
+            else domain_config.aget_state_timeout_seconds
+        )
         self._bridge = bridge
         self._aggregator = aggregator
         # The worker lifecycle is the single site that constructs the
@@ -247,6 +254,11 @@ class GraphLifecycleManager:
         self._thread_assignment_digests: dict[str, str] = {}
         self._thread_compile_locks: dict[str, asyncio.Lock] = {}
         self._thread_compile_lock_users: dict[str, int] = {}
+        # Threads bind their durable assignment before joining this second,
+        # exact-key flight. This prevents equivalent first dispatches for
+        # different threads from compiling the same provider graph in parallel.
+        self._cache_key_compile_locks: dict[GraphCacheKey, asyncio.Lock] = {}
+        self._cache_key_compile_lock_users: dict[GraphCacheKey, int] = {}
 
     # ------------------------------------------------------------------
     # Public accessors
@@ -265,6 +277,26 @@ class GraphLifecycleManager:
         """Return the cache key known for *thread_id*, if the worker has one."""
         return self._thread_to_cache_key.get(thread_id)
 
+    @property
+    def thread_binding_count(self) -> int:
+        """Number of non-terminal thread identities retained by this worker."""
+        return len(self._thread_assignment_digests)
+
+    @property
+    def compile_flight_count(self) -> int:
+        """Number of exact cache keys with compilation callers in flight."""
+        return len(self._cache_key_compile_locks)
+
+    @property
+    def thread_compile_lock_count(self) -> int:
+        """Number of thread-scoped first-dispatch callers in flight."""
+        return len(self._thread_compile_locks)
+
+    def release_thread(self, thread_id: str) -> None:
+        """Release terminal thread identity without evicting a shared graph."""
+        self._thread_to_cache_key.pop(thread_id, None)
+        self._thread_assignment_digests.pop(thread_id, None)
+
     def clear(self) -> None:
         """Clear all cached graphs and thread mappings."""
         self._graph_cache.clear()
@@ -272,6 +304,8 @@ class GraphLifecycleManager:
         self._thread_assignment_digests.clear()
         self._thread_compile_locks.clear()
         self._thread_compile_lock_users.clear()
+        self._cache_key_compile_locks.clear()
+        self._cache_key_compile_lock_users.clear()
 
     def evict_cached_graphs(self) -> None:
         """Evict compiled graphs while retaining immutable thread bindings."""
@@ -316,6 +350,8 @@ class GraphLifecycleManager:
     async def get_or_compile_graph(
         self,
         req: DispatchRequest,
+        *,
+        checkpoint_deadline: float | None = None,
     ) -> RegisteredCompiledGraph | None:
         """Return a compiled graph for *req*, using the LRU cache.
 
@@ -330,7 +366,9 @@ class GraphLifecycleManager:
         )
         try:
             async with lock:
-                return await self._get_or_compile_graph_locked(req)
+                return await self._get_or_compile_graph_locked(
+                    req, checkpoint_deadline=checkpoint_deadline
+                )
         finally:
             users = self._thread_compile_lock_users[req.thread_id] - 1
             if users == 0:
@@ -340,7 +378,10 @@ class GraphLifecycleManager:
                 self._thread_compile_lock_users[req.thread_id] = users
 
     async def _get_or_compile_graph_locked(
-        self, req: DispatchRequest
+        self,
+        req: DispatchRequest,
+        *,
+        checkpoint_deadline: float | None,
     ) -> RegisteredCompiledGraph | None:
         """Resolve one graph while holding the thread's first-dispatch lock."""
         if not req.model_assignment:
@@ -350,7 +391,9 @@ class GraphLifecycleManager:
         assignment_digest = model_assignment_digest(req.model_assignment)
         bound = self._thread_assignment_digests.get(req.thread_id)
         if bound is None:
-            checkpoint_digest = await self._checkpoint_assignment_digest(req.thread_id)
+            checkpoint_digest = await self._checkpoint_assignment_digest(
+                req.thread_id, checkpoint_deadline=checkpoint_deadline
+            )
             if checkpoint_digest is not None and checkpoint_digest != assignment_digest:
                 raise GraphCompilationError(
                     "dispatch model assignment does not match the durable run"
@@ -391,36 +434,7 @@ class GraphLifecycleManager:
             assignment_digest,
         )
 
-        # Check if another thread already compiled for this key.
-        if new_key in self._graph_cache:
-            self._graph_cache.move_to_end(new_key)
-            self._thread_to_cache_key[req.thread_id] = new_key
-            graph = self._graph_cache[new_key]
-            self._aggregator.register_graph(req.thread_id, graph)
-            await self._send_graph_registered(req.thread_id, graph)
-            return graph
-
-        # Compile fresh.
-        async with ws_span("executor.compile_graph", thread_id=req.thread_id) as span:
-            span.set_attribute("team_preset", team_preset)
-            try:
-                graph = await self._compile_graph(req)
-                span.add_event("graph_compiled")
-            except Exception as exc:
-                logger.exception(
-                    "Failed to compile graph for thread %s (preset=%s)",
-                    req.thread_id,
-                    team_preset,
-                )
-                span.record_exception(exc)
-                span.set_attribute("error", True)
-                raise GraphCompilationError(str(exc)) from exc
-
-        # Evict LRU if at capacity.
-        while len(self._graph_cache) >= domain_config.max_cached_graphs:
-            self._graph_cache.popitem(last=False)
-
-        self._graph_cache[new_key] = graph
+        graph = await self._get_or_compile_cache_key(req, new_key, team_preset)
         self._thread_to_cache_key[req.thread_id] = new_key
         self._aggregator.register_graph(req.thread_id, graph)
         # Relay node metadata to the control-surface aggregator so
@@ -428,11 +442,73 @@ class GraphLifecycleManager:
         await self._send_graph_registered(req.thread_id, graph)
         return graph
 
-    async def _checkpoint_assignment_digest(self, thread_id: str) -> str | None:
-        """Read and validate the current assignment binding from checkpoint state."""
-        checkpoint_tuple = await self._checkpointer.aget_tuple(
-            {"configurable": {"thread_id": thread_id}}
+    async def _get_or_compile_cache_key(
+        self,
+        req: DispatchRequest,
+        cache_key: GraphCacheKey,
+        team_preset: str,
+    ) -> RegisteredCompiledGraph:
+        """Compile one exact graph key once across all concurrent threads."""
+        lock = self._cache_key_compile_locks.setdefault(cache_key, asyncio.Lock())
+        self._cache_key_compile_lock_users[cache_key] = (
+            self._cache_key_compile_lock_users.get(cache_key, 0) + 1
         )
+        try:
+            async with lock:
+                cached = self._graph_cache.get(cache_key)
+                if cached is not None:
+                    self._graph_cache.move_to_end(cache_key)
+                    return cached
+
+                async with ws_span(
+                    "executor.compile_graph", thread_id=req.thread_id
+                ) as span:
+                    span.set_attribute("team_preset", team_preset)
+                    try:
+                        graph = await self._compile_graph(req)
+                        span.add_event("graph_compiled")
+                    except Exception as exc:
+                        logger.exception(
+                            "Failed to compile graph for thread %s (preset=%s)",
+                            req.thread_id,
+                            team_preset,
+                        )
+                        span.record_exception(exc)
+                        span.set_attribute("error", True)
+                        raise GraphCompilationError(str(exc)) from exc
+
+                while len(self._graph_cache) >= domain_config.max_cached_graphs:
+                    self._graph_cache.popitem(last=False)
+                self._graph_cache[cache_key] = graph
+                return graph
+        finally:
+            users = self._cache_key_compile_lock_users[cache_key] - 1
+            if users == 0:
+                self._cache_key_compile_lock_users.pop(cache_key, None)
+                self._cache_key_compile_locks.pop(cache_key, None)
+            else:
+                self._cache_key_compile_lock_users[cache_key] = users
+
+    async def _checkpoint_assignment_digest(
+        self, thread_id: str, *, checkpoint_deadline: float | None
+    ) -> str | None:
+        """Read and validate the current assignment binding from checkpoint state."""
+        timeout = self._checkpoint_read_timeout_seconds
+        if checkpoint_deadline is not None:
+            timeout = min(
+                timeout, checkpoint_deadline - asyncio.get_running_loop().time()
+            )
+        if timeout <= 0:
+            raise GraphCompilationError("durable checkpoint read timed out")
+        try:
+            checkpoint_tuple = await asyncio.wait_for(
+                self._checkpointer.aget_tuple(
+                    {"configurable": {"thread_id": thread_id}}
+                ),
+                timeout=timeout,
+            )
+        except TimeoutError as exc:
+            raise GraphCompilationError("durable checkpoint read timed out") from exc
         if checkpoint_tuple is None:
             return None
         checkpoint = getattr(checkpoint_tuple, "checkpoint", None)

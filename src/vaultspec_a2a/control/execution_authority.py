@@ -21,6 +21,18 @@ __all__ = [
 ]
 
 
+_RETIRED_ROOT_AUTHORITY_KEYS = frozenset(
+    {
+        "MODEL_MAP",
+        "default_profile",
+        "default_profile_id",
+        "model_profile",
+        "profile",
+        "profile_id",
+    }
+)
+
+
 class ExecutionAuthorityFailure(StrEnum):
     """Bounded reasons a stored run cannot re-enter execution."""
 
@@ -56,7 +68,7 @@ def resolve_execution_authority(metadata_json: str | None) -> ExecutionAuthority
     metadata = coerce_object_mapping(raw)
     if metadata is None:
         raise ExecutionAuthorityError(ExecutionAuthorityFailure.CORRUPT)
-    if "model_profile" in metadata:
+    if _RETIRED_ROOT_AUTHORITY_KEYS.intersection(metadata):
         raise ExecutionAuthorityError(ExecutionAuthorityFailure.RETIRED)
     record = metadata.get("provider_catalog_selection")
     if record is None:

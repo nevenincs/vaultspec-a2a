@@ -68,6 +68,32 @@ def test_absent_corrupt_and_retired_authority_fail_with_one_bounded_reason(
     assert "profile_id" not in str(raised.value)
 
 
+@pytest.mark.parametrize(
+    "retired_key",
+    [
+        "MODEL_MAP",
+        "default_profile",
+        "default_profile_id",
+        "model_profile",
+        "profile",
+        "profile_id",
+    ],
+)
+def test_every_retired_root_authority_refuses_an_exact_current_freeze(
+    tmp_path: Path, retired_key: str
+) -> None:
+    metadata = json.loads(current_execution_metadata(tmp_path))
+    metadata[retired_key] = {"secret-retired-value": "must-not-reflect"}
+
+    with pytest.raises(ExecutionAuthorityError) as raised:
+        resolve_execution_authority(json.dumps(metadata))
+
+    assert raised.value.reason is ExecutionAuthorityFailure.RETIRED
+    assert str(raised.value) == "stored execution authority is incompatible (retired)"
+    assert retired_key not in str(raised.value)
+    assert "secret-retired-value" not in str(raised.value)
+
+
 def test_every_graph_reentry_constructor_supplies_the_exact_authority() -> None:
     control_root = Path(__file__).resolve().parents[1]
     omissions: list[str] = []

@@ -29,6 +29,9 @@ Wires the declaration vocabulary into pytest so that:
 from __future__ import annotations
 
 import contextlib
+import os
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -60,6 +63,33 @@ _GROUP_PREFIX = "res:"
 # config attributes so ty sees real types; one plugin instance per process.
 _SESSION_LEASE: object | None = None
 _ADMISSION_LINE: str = ""
+
+
+def _write_completion_receipt(exitstatus: int) -> None:
+    """Notify the containing runner that pytest has produced its result."""
+    from .runner import COMPLETION_OWNER_PID_ENV, COMPLETION_RECEIPT_ENV
+
+    destination = os.environ.get(COMPLETION_RECEIPT_ENV)
+    owner_pid = os.environ.get(COMPLETION_OWNER_PID_ENV)
+    if not destination or owner_pid != str(os.getpid()):
+        return
+    target = Path(destination)
+    with target.open("x", encoding="ascii") as stream:
+        stream.write(f"exitstatus={exitstatus}\n")
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Publish completion independently of interpreter/process teardown."""
+    del session
+    try:
+        _write_completion_receipt(exitstatus)
+    except OSError as exc:
+        print(
+            f"resource-aware completion receipt failed: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 @pytest.hookimpl(trylast=True)

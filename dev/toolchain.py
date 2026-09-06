@@ -180,6 +180,17 @@ def _verb(verb: str, target: str) -> Cmd:
     return uv_run("python", "-m", "dev", verb, target)
 
 
+def _pytest(*argv: str) -> Cmd:
+    """Run pytest beneath the repository's result-to-exit process owner."""
+    return uv_run(
+        "python",
+        "-m",
+        "vaultspec_a2a.testing.runner",
+        "--",
+        *argv,
+    )
+
+
 # ---------------------------------------------------------------------------
 #  deps
 # ---------------------------------------------------------------------------
@@ -604,7 +615,7 @@ TEST = Verb(
         Target(
             "unit",
             "The unit gate, explicitly excluding service tests.",
-            (uv_run("pytest", "-m", "not service"),),
+            (_pytest("-m", "not service"),),
         ),
         Target(
             "parallel",
@@ -612,8 +623,7 @@ TEST = Verb(
             "requested at the core count, then admitted against live peer "
             "sessions and machine capacity by the resource plugin.",
             (
-                uv_run(
-                    "pytest",
+                _pytest(
                     "-m",
                     "not service",
                     "-n",
@@ -625,19 +635,18 @@ TEST = Verb(
         Target(
             "service",
             "Deterministic service tests against real local services.",
-            (uv_run("pytest", *ADDOPTS_OVERRIDE, "-m", "service"),),
+            (_pytest(*ADDOPTS_OVERRIDE, "-m", "service"),),
         ),
         Target(
             "all",
             "Every collected test, without the default marker exclusion.",
-            (uv_run("pytest", *ADDOPTS_OVERRIDE),),
+            (_pytest(*ADDOPTS_OVERRIDE),),
         ),
         Target(
             "coverage",
             "The unit gate with a terminal coverage report.",
             (
-                uv_run(
-                    "pytest",
+                _pytest(
                     "-m",
                     "not service",
                     f"--cov={PACKAGE}",
@@ -648,7 +657,7 @@ TEST = Verb(
         Target(
             "harness",
             "The development harness's own guards.",
-            (uv_run("pytest", "dev"),),
+            (_pytest("dev"),),
         ),
     ),
 )

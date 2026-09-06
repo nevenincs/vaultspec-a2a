@@ -78,6 +78,23 @@ def test_ci_contract() -> None:
     assert test is not None
     assert ci is CI
 
+    for target in test.targets:
+        commands = [step for step in target.steps if isinstance(step, Cmd)]
+        assert commands
+        for command in commands:
+            assert command.argv[7:10] == (
+                "python",
+                "-m",
+                "vaultspec_a2a.testing.runner",
+            )
+
+    just_test_commands = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (ROOT / "dev" / "just").glob("*.just")
+    )
+    assert " python -m pytest " not in just_test_commands
+    assert " pytest " not in just_test_commands
+
     steps = _test_job_steps()
     assert len(_run_steps(steps, "just ci")) == 1
     # Bind the run text rather than re-indexing: an isinstance check on

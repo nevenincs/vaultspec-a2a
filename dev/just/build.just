@@ -11,7 +11,7 @@ package:
 
 # Run documentation tests and build strict Sphinx HTML.
 docs:
-    uv run --isolated --locked --group docs --group dev python -m pytest docs/tests -q
+    uv run --isolated --locked --group docs --group dev python -m vaultspec_a2a.testing.runner -- docs/tests -q
     uv run --isolated --locked --group docs sphinx-build -n -W --keep-going -b html docs docs/_build/html
 
 # Build local development container images.

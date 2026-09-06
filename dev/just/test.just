@@ -7,7 +7,7 @@ help:
 
 # Run the unit gate, explicitly excluding service tests.
 unit *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling pytest -m "not service" {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "not service" {{ ARGS }}
 
 # Report the lanes, models, and controls this host's provider CLIs serve.
 # `--exports claude=haiku --option effort=low` renders the VAULTSPEC_LIVE_*
@@ -18,7 +18,7 @@ lanes *ARGS:
 
 # Run deterministic service tests against real local services.
 service *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" -m service {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" -m service {{ ARGS }}
 
 # The durable-replay proof lives in the service tier, which the default gate
 # excludes, so a default run never executed it and a bare service run could
@@ -28,7 +28,7 @@ service *ARGS:
 #
 # Prove durable replay and lost-ack recovery across repositories (never skips).
 cross-repo *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --require-prerequisite=dashboard-engine src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --require-prerequisite=dashboard-engine src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py {{ ARGS }}
 
 # These need the Codex and Claude CLIs on PATH and no credential whatsoever, so
 # a certification job can provision them. Selected by explicit node id and run
@@ -38,11 +38,11 @@ cross-repo *ARGS:
 #
 # Run the provider gates whose prerequisite is an installable CLI (never skips).
 provider-gates *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --require-prerequisite=codex-cli --require-prerequisite=claude-cli --require-prerequisite=mcp-streamable-http src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_classify_provider_command_resolves_codex src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_codex_readiness_ready_when_installed src/vaultspec_a2a/providers/tests/test_codex_config_home.py::TestCodexEntrypointAcceptsEmittedMcpConfig::test_codex_mcp_list_accepts_the_built_config_home src/vaultspec_a2a/providers/tests/test_acp_project_mcp.py::TestAcpEntrypointAcceptsProjectedMcpConfig::test_claude_mcp_list_accepts_the_projected_config {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --require-prerequisite=codex-cli --require-prerequisite=claude-cli --require-prerequisite=mcp-streamable-http src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_classify_provider_command_resolves_codex src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_codex_readiness_ready_when_installed src/vaultspec_a2a/providers/tests/test_codex_config_home.py::TestCodexEntrypointAcceptsEmittedMcpConfig::test_codex_mcp_list_accepts_the_built_config_home src/vaultspec_a2a/providers/tests/test_acp_project_mcp.py::TestAcpEntrypointAcceptsProjectedMcpConfig::test_claude_mcp_list_accepts_the_projected_config {{ ARGS }}
 
 # Run every collected test, removing the project default marker exclusion.
 all *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" {{ ARGS }}
 
 # Prove gateway and worker telemetry start in a base-only installation.
 #
@@ -56,16 +56,16 @@ clean-base:
 
 # Run the unit gate with terminal coverage.
 coverage *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling pytest -m "not service" --cov=src/vaultspec_a2a --cov-report=term-missing {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "not service" --cov=src/vaultspec_a2a --cov-report=term-missing {{ ARGS }}
 
 # Collect the unit gate without executing tests.
 collect-unit *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling pytest --collect-only -m "not service" {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --collect-only -m "not service" {{ ARGS }}
 
 # Collect the service gate without executing tests.
 collect-service *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --collect-only -m service {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --collect-only -m service {{ ARGS }}
 
 # Collect every test without the project default marker exclusion.
 collect-all *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --collect-only {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --collect-only {{ ARGS }}

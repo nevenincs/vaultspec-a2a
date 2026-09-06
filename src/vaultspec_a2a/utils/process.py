@@ -1328,6 +1328,26 @@ class ProcessContainment:
         """Whether a root pid is bound to this containment."""
         return self._assigned
 
+    def is_quiescent(self) -> bool | None:
+        """Return whether the owned tree is empty, or ``None`` if unknowable.
+
+        This is an observation only: it neither releases containment nor
+        changes ownership. Callers use it before accepting a root-process exit
+        as proof that the complete owned tree has exited.
+        """
+        if self._pid is None:
+            return True
+        if not self._assigned:
+            return None
+        if sys.platform == "win32":
+            if self._job is None:
+                return None
+            return self._win_active_processes(_win_kernel32()) == 0
+        pgid = self._pgid
+        if pgid is None:
+            return None
+        return not _posix_group_is_live(pgid)
+
     async def terminate(
         self, *, term_timeout: float = 10.0, kill_timeout: float = 5.0
     ) -> bool:

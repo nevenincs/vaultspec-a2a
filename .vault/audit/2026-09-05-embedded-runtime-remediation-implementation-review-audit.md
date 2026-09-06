@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6afcceec99f2bbf9d18ca9e7672d29ee44bf1bbe71b57bb99ff43b96c3b165ff'
+body_hash: 'sha256:435a77b4be9c415de4f80d4e29115db1d3214e48aa5c008e0814fe3779904bdf'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1133,13 +1133,13 @@ ER22 alone closes with S08. The unreleased Starlette tree remains MEDIUM/open pe
 
 Type: runtime lifecycle ownership. The authenticated administrative stop previously closed admission and then used process-directed `SIGINT`; on Windows that did not establish a cooperative Uvicorn-owned transition. The production gateway entry point now owns the current Uvicorn server instance and injects its `should_exit` callback. The route refuses 503 before closing admission when that owner is absent or malformed, leaving admission OPEN; otherwise a real authenticated HTTP request observes 202 before the serving task exits, followed by `should_exit` and bounded Uvicorn completion. Formal PASS `2279eb52d529ee338661006779a0143095003ce7` accepts the correction. This closes S47 and the ER15 trigger defect without adding compatibility behavior. S49 separately owns the total shutdown deadline, stream drain, owned-child cleanup and forced escalation; S48 discovery remains unchanged.
 
-### w04-p10-s49-total-shutdown-deadline | high | corrected-pending-review
+### w04-p10-s49-total-shutdown-deadline | high | closed
 
-Type: runtime lifecycle and boundedness. Gateway connection drain, active work, background tasks, owned worker/descendants, bridge delivery, clients, database and telemetry previously had separate or absent bounds. S49 starts one absolute monotonic deadline before Uvicorn drains open connections, closes admission before active-run drain and passes remaining time through every teardown owner. Parked real-socket SSE reaches lifespan in 1.25-1.32 seconds against a 3.0-second total. The bridge's confirmed 7.1849-second wall / 3.6920-second loop stall is corrected by joined cancellation and deadline-capped request/backoff; the real accepted-but-unanswered socket case completes below 0.6 seconds for a 0.5-second budget plus 0.1-second Windows scheduler tolerance, with loop gap below 0.1 seconds. Contained and uncontained real process tests complete in 1.47 and 2.30 seconds inside a 4.0-second deadline with zero surviving descendants. S47 supplies the separately committed server-owner trigger; S48 is unchanged. S49 remains open for formal review.
+Type: runtime lifecycle and boundedness. Gateway connection drain, active work, background tasks, owned worker/descendants, bridge delivery, clients, database and telemetry previously had separate or absent bounds. S49 starts one absolute monotonic deadline before Uvicorn drains open connections, closes admission before active-run drain and passes remaining time through every teardown owner. Parked real-socket SSE reaches lifespan in 1.25-1.32 seconds against a 3.0-second total. The bridge's confirmed 7.1849-second wall / 3.6920-second loop stall is corrected by joined cancellation and deadline-capped request/backoff; the real accepted-but-unanswered socket case completes below 0.6 seconds for a 0.5-second budget plus 0.1-second Windows scheduler tolerance, with loop gap below 0.1 seconds. Contained and uncontained real process tests complete in 1.47 and 2.30 seconds inside a 4.0-second deadline with zero surviving descendants. S47 supplies the separately committed server-owner trigger; S48 is unchanged. Final formal PASS `4b2e0a61` accepts the complete correction.
 
-### w04-p10-s49-uncontained-cooperative-root-race | high | corrected-pending-review
+### w04-p10-s49-uncontained-cooperative-root-race | high | closed
 
-Type: Windows process-tree lifecycle. The first new uncontained discriminator failed: after authenticated cooperative shutdown, the root exited before Windows `taskkill /T` enumerated its child and the child survived. The spawner now retains descendant process identities with creation-time reuse guards before requesting cooperative exit and reaps only those exact identities within the original absolute deadline. The exact contained/uncontained rerun passes two tests in 4.31 seconds, with the uncontained case at 2.30 seconds and no survivor. This finding is corrected in S49 and awaits the same formal review.
+Type: Windows process-tree lifecycle. The first new uncontained discriminator failed: after authenticated cooperative shutdown, the root exited before Windows `taskkill /T` enumerated its child and the child survived. The spawner now retains descendant process identities with creation-time reuse guards before requesting cooperative exit and reaps only those exact identities within the original absolute deadline. The exact contained/uncontained rerun passes two tests in 4.31 seconds, with the uncontained case at 2.30 seconds and no survivor. Formal PASS `4b2e0a61` accepts this correction together with the later assignment-before-authority fix.
 
 ### w02-p03-s14-bridge-terminal-only-in-memory | high | open under W02.P03.S14
 
@@ -1163,30 +1163,36 @@ Type: lifecycle traceability. Vaultspec Core closed only `W04.P10.S47`; plan sta
 
 S47 closes the ER15 cooperative-trigger defect only. ER15 remains HIGH/open for S49's one total deadline, real-socket stream drain, owned-child cleanup and bounded forced escalation. S48 retains discovery identity and liveness ownership. Historical findings and evidence remain in place, and lifecycle closure adds no runtime path, compatibility behavior, legacy route or deprecated mechanism.
 
-### w04-p10-s49-worker-owner-shape | medium | corrected-pending-review
+### w04-p10-s49-worker-owner-shape | medium | closed
 
 Type: lifecycle correctness. Final implementation review applied the same fail-closed shape rule to the worker: a non-callable `request_server_shutdown` now receives 503 instead of reaching invocation. Authenticated callable-owner and malformed-owner tests pass in the actual worker app module. Full frozen-worker proof remains S50.
 
-### w04-p10-s49-active-bridge-flush-deadline | high | corrected-pending-review
+### w04-p10-s49-active-bridge-flush-deadline | high | closed
 
 Type: shutdown boundedness and in-memory state preservation. Final implementation review found that `WorkerBridge.close()` joined a cancelled in-progress deferred flush without consulting its absolute deadline, and cancellation during HTTP or retry backoff could leave the extracted batch outside the in-memory buffer. The pending-task join now uses only remaining time; both cancellation sites restore the batch before propagation. The shared shutdown gate passes 48 tests in 41.39 seconds, and the worker app/IPC gate passes 35 tests in 12.76 seconds. This corrects S49 boundedness but does not promote volatile buffering to durable delivery; S14 remains HIGH/open.
 
-### s49-late-uncontained-descendant-correction | high | corrected-pending-rereview
+### s49-late-uncontained-descendant-correction | high | closed
 
 Type: lifecycle correctness, process containment and shutdown boundedness. Formal FAIL `dcac3b27` proved the pre-request identity snapshot could not see a child created inside `/admin/shutdown` after the request began and orphaned when its root exited. Every gateway-spawned worker now requires OS containment independent of profile; assignment failure aborts and reaps the spawn. A live owned handle restored without retained authority is seated before cooperative shutdown into a temporary Job Object or existing isolated process group. If seating fails, no cooperative request is issued and tree escalation starts while the exact root remains live. Cleanup is cancellation-safe and releases both retained and temporary authorities.
 
-The new real discriminator creates no child before shutdown, spawns its only 300-second child in the handler, returns 202 and lets the root exit. Both initially uncontained/then-seated and precontained variants complete inside the original four-second deadline with no root or child survivor; observed calls were 1.65 and 1.60 seconds. The combined containment/reap gate passes 16 tests in 18.75 seconds, including prior children, cancellation and handle-release paths. No host-wide scan or bare-pid action after root exit is used. The HIGH finding is corrected pending separate S49 rereview; S49 and ER15/ER16 remain open.
+The new real discriminator creates no child before shutdown, spawns its only 300-second child in the handler, returns 202 and lets the root exit. Both initially uncontained/then-seated and precontained variants complete inside the original four-second deadline with no root or child survivor; observed calls were 1.65 and 1.60 seconds. The combined containment/reap gate passes 16 tests in 18.75 seconds, including prior children, cancellation and handle-release paths. No host-wide scan or bare-pid action after root exit is used. Formal PASS `4b2e0a61` accepts the HIGH correction after the subsequent assignment correction.
 
 The complete post-correction S49 focused gate passed 67 tests in 56.64 seconds; Ruff and Ty passed on every changed Python path.
 
 Windows seating uses the exact retained Popen OS handle rather than reopening a numeric pid, so exit and pid reuse cannot redirect containment to an unrelated process. POSIX retains the isolated process-group authority established at spawn. The late-child variants plus containment utility coverage pass 15 tests in 27.60 seconds.
 
-### s49-failed-assignment-exact-popen-reap | high | corrected-pending-rereview
+### s49-failed-assignment-exact-popen-reap | high | closed
 
 Type: lifecycle correctness, process containment and admission safety. Formal FAIL `91c882fe` proved that a Windows Job assignment failure left `ProcessContainment` empty, so cleanup reported false success, waited 5.0086 seconds and raised `TimeoutExpired` while the exact root remained live. Cleanup now treats only successfully assigned containment as authority. Otherwise it retains the live `Popen` root as a psutil creation-time identity, suspends it while collecting scoped descendants, terminates those exact identities, waits the retained process handle and releases containment before re-raising the original assignment error. It does not scan the host, reopen a bare pid after exit or admit the failed worker.
 
-The real Windows proof uses a closed Job assignment capability and an actual root with two 300-second descendants. The production `_await_worker_ready` seam propagates `ProcessContainmentError` in 0.59 seconds with root and descendants absent. The 24-test containment gate passes in 12.09 seconds and the complete S49 gate passes 68 tests in 50.17 seconds; Ruff and Ty pass. The HIGH finding is corrected pending independent rereview. S49 and ER15/ER16 remain open.
+The real Windows proof uses a closed Job assignment capability and an actual root with two 300-second descendants. The production `_await_worker_ready` seam propagates `ProcessContainmentError` in 0.59 seconds with root and descendants absent. The 24-test containment gate passes in 12.09 seconds and the complete S49 gate passes 68 tests in 50.17 seconds; Ruff and Ty pass. Formal PASS `4b2e0a61` accepts the HIGH correction.
 
 ### s49-assignment-proof-uv-redirector-hang | medium | resolved measurement-integrity
 
 Type: verification harness and developer-time blocker. The first new assignment-failure proof used the uv Windows virtual-environment redirector as the retained worker `Popen`, so it measured the wrong process identity and exceeded 60 seconds. The owned pytest tree was interrupted after its bound, its workspace-scoped descendants were reaped and an exact scan found no survivor. The fixture now starts `sys._base_executable`, consistent with the existing real-process probes and the production root-identity contract. The corrected proof completes in 0.59 seconds. The invalid run supports no runtime pass claim.
+
+### w04-p10-s49-core-lifecycle-closure | low | closed pending closure-record review
+
+Type: lifecycle traceability. Formal PASS `4b2e0a61` accepts the complete S49 chain: implementation `8f79c919`, formal FAIL `dcac3b27`, correction `84ba2a2b`, formal FAIL `91c882fe`, correction `d8453cf0` and final PASS. Core closes only `W04.P10.S49`, ER15 and ER16. The record preserves one total deadline, parked SSE, bridge/worker cleanup, late-child and assignment-failure proofs, exact retained-handle/PID-reuse safety, both harness hangs and the final 68-pass gate.
+
+Volatile terminal delivery remains HIGH/open under W02.P03.S14. The 90-second recovery polling hang remains HIGH/open under served-capability W04.P08.S56 with remediation W02.P03.S11 verification. Trace-only provider-owner commit `141147db` leaves W04.P11.S60 reopened. S48 and S50 remain separate. Closure adds no runtime, compatibility, legacy or deprecated behavior.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:bec93fd47454ab7881a0c33c0c52ea8e198af7653c5a1528d8edf314eca74e52'
+body_hash: 'sha256:83cbc63587fd09679baf9ca3ea005a5546d12e42a7944a97485cb8b682a91aa0'
 step_id: 'S49'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -20,7 +20,12 @@ related:
 
 - `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
 - `M` `.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md`
+- `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-w04-p10-s49-cooperative-shutdown-review-audit.md`
+- `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-w04-p10-s49-containment-rereview-audit.md`
+- `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-w04-p10-s49-assignment-failure-rereview-audit.md`
+- `M` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W04-P10-S49.md`
 - `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
 - `M` `.vault/research/2026-09-05-embedded-runtime-remediation-research.md`
 - `M` `src/vaultspec_a2a/api/app.py`
 - `M` `src/vaultspec_a2a/control/config.py`
@@ -61,5 +66,9 @@ The real Windows discriminator starts a root plus two 300-second descendants, cl
 - `verify:` `.venv/Scripts/python.exe -m pytest <complete S49 focused modules> -q` -> `pass` (68 passed in 50.17s)
 - `verify:` `.venv/Scripts/python.exe -m ruff check <correction paths>` -> `pass`
 - `verify:` `.venv/Scripts/python.exe -m ty check <correction production paths>` -> `pass`
+- `verify:` implementation/review chain `8f79c919` -> `dcac3b27` FAIL -> `84ba2a2b` -> `91c882fe` FAIL -> `d8453cf0` -> `4b2e0a61` PASS
+- `verify:` final formal rereview -> `pass` (assignment discriminator call 0.36 seconds; 24-test gate passed with zero survivors)
+- `verify:` trace-only provider-owner reopen `141147db` -> `pass` (no S49 runtime or remediation-plan mutation; W04.P11.S60 remains open)
+- `verify:` remediation, desktop-product-profile and codebase-health Core checks -> `pass` (zero diagnostics)
 
-S49 stays open for independent rereview. S48 remains untouched, S50 retains frozen-worker execution proof, durable terminal recovery remains under W02.P03.S14, and the post-catalog polling hang remains HIGH under served-capability W04.P08.S56 with W02.P03.S11 integration ownership.
+Formal rereview `4b2e0a61` accepts the assignment-before-authority correction and the complete S49 chain. Core closes S49, ER15 and ER16 after preserving both formal failures, the 7.1849-second bridge-close / 3.6920-second loop stall, parked SSE evidence, late-child race, 5.0086-second assignment-failure leak, invalid 60-second uv-redirector harness hang, exact-handle/PID-reuse safety and the final 68-pass gate. S48 and S50 remain separate. Volatile terminal recovery remains HIGH/open under W02.P03.S14; the 90-second recovery polling hang remains HIGH/open under served-capability W04.P08.S56 with W02.P03.S11 integration ownership; provider containment W04.P11.S60 remains reopened by trace-only `141147db`.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:117734ee66453563b06132683d0d08519f4234a234ae5605224d93b9b1092f8e'
+body_hash: 'sha256:ac2df0860b75131dd9dd396da3d8add1b9575285241e75e1809bbc85774c8ef0'
 step_id: 'S84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -44,3 +44,14 @@ Migrate each retained scenario to explicit prepare/finalize acceptance with a re
 - `verify:` focused Ruff initially reported import grouping after deletion; corrected before commit.
 
 S84 remains open for the six recorded control-test modules and the complete conditions matrix.
+## Event settlement fixture migration
+
+- `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`.
+- Replaced the removed implicit claim helper with explicit current journal creation and lease acquisition for the exact state consumed by event settlement.
+- Did not create accepted-action payloads: the event consumer does not validate them, which preserves the existing S13 high-severity receipt-consumer finding instead of manufacturing false authority.
+- `verify:` focused event-handler suite -> 12 passed in 15.44 seconds, natural exit 0.
+- `verify:` focused Ruff and Ty -> pass.
+- `verify:` canonical control collection -> 452 collected with five import errors, natural exit 1.
+- Remaining collection failures: `test_direct_control_leases.py`, `test_direct_control_recovery.py`, `test_verdict_loop_live.py` through its live-subscriber import, `test_verdict_subscriber.py`, and `test_verdict_subscriber_live.py`.
+
+S84 remains open. The collection blocker count fell from six modules to five; S13 still owns durable receipt validation by terminal event consumers.

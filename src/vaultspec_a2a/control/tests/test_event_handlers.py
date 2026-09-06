@@ -1,7 +1,7 @@
 """Focused replay/idempotency tests for worker->gateway event handlers."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,7 +19,6 @@ from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
 from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
-from ...control.action_lease import claim_control_action
 from ...control.drain import DrainGate
 from ...control.event_handlers import (
     _handle_permission_event,
@@ -29,6 +28,7 @@ from ...control.event_handlers import (
 from ...control.permission_service import permission_response_action_key
 from ...database import (
     ThreadStatusElectionOutcome,
+    acquire_control_action_lease,
     create_control_action,
     create_thread,
     elect_thread_status,
@@ -46,6 +46,32 @@ from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionType, ThreadStatus
 
 
+async def _seed_unapplied_leased_action(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    action_type: ControlActionType,
+    idempotency_key: str,
+    request_id: str | None = None,
+) -> ControlActionModel:
+    """Create only the journal and lease state consumed by event settlement."""
+    action = await create_control_action(
+        session,
+        thread_id=thread_id,
+        action_type=action_type,
+        idempotency_key=idempotency_key,
+        request_id=request_id,
+    )
+    acquired = await acquire_control_action_lease(
+        session,
+        action.id,
+        claim_token=f"test-claim:{action.id}",
+        claim_expires_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
+    assert acquired
+    return action
+
+
 @pytest.mark.asyncio
 async def test_dispatch_application_receipt_settles_exact_message_action(
     session_factory: async_sessionmaker[AsyncSession],
@@ -58,19 +84,17 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
             thread_id="message-receipt-thread",
             status="running",
         )
-        expected = await claim_control_action(
+        expected = await _seed_unapplied_leased_action(
             session,
             thread_id=thread.id,
             action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
             idempotency_key="message:expected",
-            payload={"content": "continue", "agent_id": "supervisor"},
         )
-        other = await claim_control_action(
+        other = await _seed_unapplied_leased_action(
             session,
             thread_id=thread.id,
             action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
             idempotency_key="message:other",
-            payload={"content": "different", "agent_id": "supervisor"},
         )
         await session.commit()
 
@@ -85,8 +109,8 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
     )
 
     async with session_factory() as session:
-        expected_row = await session.get(ControlActionModel, expected.action_id)
-        other_row = await session.get(ControlActionModel, other.action_id)
+        expected_row = await session.get(ControlActionModel, expected.id)
+        other_row = await session.get(ControlActionModel, other.id)
         stored_thread = await session.get(ThreadModel, thread.id)
 
     assert expected_row is not None
@@ -150,13 +174,12 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
             option_id="allow_once",
             idempotency_key="response-1",
         )
-        submitted = await claim_control_action(
+        submitted = await _seed_unapplied_leased_action(
             session,
             thread_id=thread.id,
             action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
             idempotency_key=permission_response_action_key(request_id),
             request_id=request_id,
-            payload={"option_id": "allow_once", "notes": None},
         )
         await session.commit()
 
@@ -190,7 +213,7 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
         assert actions[0].idempotency_key == (
             f"permission-response-applied:{request_id}"
         )
-        submitted_action = await session.get(ControlActionModel, submitted.action_id)
+        submitted_action = await session.get(ControlActionModel, submitted.id)
         assert submitted_action is not None
         assert submitted_action.applied_at is not None
         assert submitted_action.claim_token is None
@@ -501,13 +524,12 @@ async def _answered_rejection(
             option_id="reject",
             idempotency_key="response-reject-1",
         )
-        submitted = await claim_control_action(
+        submitted = await _seed_unapplied_leased_action(
             session,
             thread_id=thread.id,
             action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
             idempotency_key=permission_response_action_key(request_id),
             request_id=request_id,
-            payload={"option_id": "reject", "notes": None},
         )
         if stamp_thread_rejected:
             await set_thread_approval_state(
@@ -519,6 +541,8 @@ async def _answered_rejection(
             )
         await session.commit()
         thread_id = thread.id
+        dispatch_id = submitted.dispatch_id
+        assert dispatch_id is not None
 
     async with session_factory() as session:
         permission = await get_permission_request(session, request_id)
@@ -526,7 +550,7 @@ async def _answered_rejection(
         assert permission.request_status == "answered_pending_apply"
         assert permission.response_option_id == "reject"
 
-    return thread_id, request_id, submitted.dispatch_id
+    return thread_id, request_id, dispatch_id
 
 
 _PLAN_OPTIONS: list[dict[str, object]] = [

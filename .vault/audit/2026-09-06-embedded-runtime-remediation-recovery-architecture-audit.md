@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:43f96566c13a21c74749b3c30485ac5d6d6cd299bd6fc107a4edea70831d51fb'
+body_hash: 'sha256:65213182ea9daba695e89151fc4905e992e439f7e0800d4934f78a5edda97299'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -192,3 +192,8 @@ Integrity: binding a valid stored receipt without comparing the actual outgoing 
 Verification/contract: compiler callers must now provide an explicit positive step timeout; worker checkpoints require graph and provider digests; accepted graph actions require the complete v2 snapshot. Historical compiler, worker and service fixtures using omitted timeout, four-element cache keys or partial dispatch envelopes must migrate to the current contract in S84. No compatibility shim is supplied. The initial 4-case graph battery failed one case because its fixture selected the coder key instead of the declared mock-coder-success worker; the real catalog fixture now accepts explicit required identities. This failure is retained. Subsequent 11-case graph/acceptance/delivery and 11-case recovery/HTTP batteries exited normally, passing in 7.45 and 4.53 seconds respectively.
 
 Architecture follow-up: S12 remains open for durable cancellation cessation/no-op evidence and complete authority-consumer qualification. Later-action provider/project metadata must be audited against initial accepted authority. S11/S13 worker preflight and raw terminal/application event handling remain open; S83 durable retry storage, leased drain, deadline/elapsed-time derivation and quarantine election remain open. A step timeout alone is never completion or cancellation proof.
+### event-settlement-fixture-current-state | medium | resolved for S84 collection; S13 authority finding remains open
+
+The event-handler tests no longer import or reproduce the retired implicit claim API. Their setup now creates the journal row and acquires the durable lease through the current database primitives, which are the only state the event consumer presently reads. All twelve focused cases pass. The complete control collection now reaches 452 cases and stops on five remaining retired imports instead of six.
+
+The setup deliberately carries no accepted-action-v2 payload or graph receipt. This is evidence for the existing high-severity `receipt-consumer-boundary` finding: the current event handler settles a leased action from dispatch identity alone. S13 remains responsible for requiring and validating durable receipt evidence. S84 must not invent valid acceptance evidence merely to keep that older consumer test green.

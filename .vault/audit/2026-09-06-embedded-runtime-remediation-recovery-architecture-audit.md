@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:f3dcb6ceec903e1369aa8a930477303029c995c04a77b1f60b8df9cf34a2c86a'
+body_hash: 'sha256:80e10be0523a3f3fae25d22c6cbc72cd047cb14169ace808e5e5d47a5cf3b06b'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -302,3 +302,8 @@ A new closed `graph-failure-v1` evidence object binds the complete accepted grap
 The final generic unconditional terminal writer is deleted. Completion uses immutable checkpoint completion, cancellation uses action-specific cessation/no-active evidence, and failure uses action-specific classified failure evidence. None of the three terminal outcomes can mutate lifecycle state or release the drain from a bare notification.
 
 Formal review resolves HIGH stale-failure overwrite, unbound classification and unconditional-writer findings. MEDIUM S14/S83 durable delivery remains because evidence is durable only after gateway commit. HIGH S84 producer qualification remains: three historical executor failure tests use partial pre-current dispatches, with one also carrying the previously queued four-member compiled-graph key. They failed naturally in 0.89 seconds and require replacement from complete accepted input and frozen graph authority, not compatibility reconstruction. Exact consumer/producer-selection tests passed six cases in 7.87 seconds; the complete event-handler and state-projection modules passed 25 cases in 3.56 seconds; focused Ruff and Ty pass.
+### current-executor-failure-evidence-proof | high | runtime and backstop resolved; checkpoint replay open
+
+Three executor failure fixtures now carry complete accepted-action-input-v2, the frozen `mock-success-single` graph definition and a graph receipt fingerprint derived from that exact payload. Ordinary runtime failure and both unhandled-settlement backstops emit action-specific failure evidence with the accepted dispatch identity. Two cases passed naturally in 0.37 seconds and the third in 0.32 seconds; focused Ruff passes.
+
+The failed-checkpoint replay discriminator remains HIGH S84 work because it still injects an arbitrary graph under the retired four-member cache authority. Full executor-test Ty continues to report that case and five other known four-member cache fixtures. They require actual frozen compiler provenance, not a constant digest or compatibility cache shape.

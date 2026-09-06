@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:27476f7673f14c8ae77cec61cadae399c0dfea2d3accbb0e26cc456bcf6e1c31'
+body_hash: 'sha256:96cb79a4117d25fc995a76235da275ca3c4056e85125ad40542a3d96263e5a73'
 step_id: 'S13'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -119,3 +119,16 @@ Formal review findings:
 - MEDIUM / delivery durability: failure evidence becomes durable only when the gateway commits it; relay exhaustion still belongs to S14/S83.
 
 The three failing historical cases exited naturally in 0.89 seconds. They are not qualification evidence and must not be restored through partial request support. S13 implementation is complete, but its plan checkbox remains open until the current executor producer proof is added.
+## Current executor failure producer proof
+
+- `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `verify:` `current runtime failure and empty-stash backstop, two cases in 0.37 seconds` -> `pass`
+- `verify:` `current dispatch-dies-before-settle backstop, one case in 0.32 seconds` -> `pass`
+- `verify:` `focused Ruff` -> `pass`
+- `verify:` `full executor-test Ty` -> `fail`
+
+## Notes
+
+The migrated executor cases construct accepted-action-input-v2 from a frozen `mock-success-single` graph, derive the receipt fingerprint from that exact accepted payload, and pass the complete receipt to the worker. Runtime failure and both unhandled-settlement paths emit `graph-failure-v1` with the same dispatch identity. No test-only partial dispatch or inferred graph authority remains in these three cases.
+
+Formal review resolves the HIGH executor-wiring proof gap for ordinary runtime failure and the unhandled-settlement backstop. The failed-checkpoint replay case remains HIGH S84 work because it still registers an arbitrary graph under a retired four-member cache identity. Full executor-test Ty reports that case and five other existing four-member cache fixtures; this increment does not claim them or add a placeholder digest.

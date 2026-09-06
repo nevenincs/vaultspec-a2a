@@ -29,6 +29,7 @@ from opentelemetry.sdk.trace import ReadableSpan, Span, TracerProvider
 from pydantic import ValidationError
 
 from ...api.tests.clarification_harness import new_state_graph
+from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...domain_config import domain_config
@@ -37,12 +38,14 @@ from ...providers import ProviderCondition
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
 from ...providers.team_selection import model_assignment_digest
+from ...team.team_config import load_team_config
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ..executor import _INGEST_GUARDS, _RESUME_GUARDS, Executor
 from ..graph_lifecycle import (
     GraphCacheKey,
@@ -136,6 +139,37 @@ _TEST_CACHE_KEY = (
 # Every dispatch names an active project, as a real one does. This package's own
 # directory is real, absolute, and present on either platform.
 _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
+
+
+def _current_ingest_dispatch(thread_id: str) -> DispatchRequest:
+    workspace = pathlib.Path(_WORKSPACE)
+    definition = freeze_graph_definition(
+        load_team_config("mock-success-single", workspace_root=workspace),
+        workspace_root=workspace,
+    )
+    request = DispatchRequest(
+        dispatch_id=f"{thread_id}-dispatch",
+        action="ingest",
+        thread_id=thread_id,
+        content="build it",
+        workspace_root=_WORKSPACE,
+        team_preset="mock-success-single",
+        graph_definition=definition,
+        recursion_limit=10,
+        model_assignment=_current_assignment(),
+    )
+    accepted = freeze_accepted_input(request, intent={"content": "build it"})
+    receipt = GraphActionReceipt(
+        schema_version="graph-action-v1",
+        thread_id=thread_id,
+        action_id=f"{thread_id}-action",
+        action_type=ControlActionType.INGEST,
+        payload_fingerprint=control_action_payload_fingerprint(accepted),
+        dispatch_id=request.dispatch_id,
+        run_revision=0,
+        writer_generation=1,
+    )
+    return request.model_copy(update={"graph_action_receipt": receipt})
 
 
 def _inject_graph(
@@ -1900,13 +1934,7 @@ class TestPreRunRefusalsCarryTheirReason:
                 config = {"configurable": {"thread_id": thread_id}}
 
                 await executor._settle_run(
-                    DispatchRequest(
-                        action="ingest",
-                        workspace_root=_WORKSPACE,
-                        thread_id=thread_id,
-                        content="build it",
-                        recursion_limit=10,
-                    ),
+                    _current_ingest_dispatch(thread_id),
                     graph,
                     config,
                     ThreadStatus.FAILED,
@@ -1919,6 +1947,10 @@ class TestPreRunRefusalsCarryTheirReason:
                 assert terminals[0]["status"] == ThreadStatus.FAILED
                 assert terminals[0]["error_detail"] == (
                     "Graph execution failed unexpectedly"
+                )
+                assert (
+                    terminals[0]["failure_evidence"]["action"]["dispatch_id"]
+                    == f"{thread_id}-dispatch"
                 )
 
                 # Both channels, not one: a consumer keying on the frame's code
@@ -2198,13 +2230,7 @@ class TestTheFailureStashCannotOutliveItsRun:
                 # that case is this backstop, reached from handle_dispatch's own
                 # handler with whatever killed the settle.
                 await executor._fail_unhandled_dispatch(
-                    DispatchRequest(
-                        action="ingest",
-                        workspace_root=_WORKSPACE,
-                        thread_id=thread_id,
-                        content="build it",
-                        recursion_limit=10,
-                    ),
+                    _current_ingest_dispatch(thread_id),
                     RuntimeError("execution-state projection died"),
                 )
                 await bridge.flush_events()
@@ -2270,13 +2296,7 @@ class TestTheFailureStashCannotOutliveItsRun:
             executor = Executor(checkpointer=cp, bridge=bridge)
             try:
                 await executor._fail_unhandled_dispatch(
-                    DispatchRequest(
-                        action="ingest",
-                        workspace_root=_WORKSPACE,
-                        thread_id=thread_id,
-                        content="build it",
-                        recursion_limit=10,
-                    ),
+                    _current_ingest_dispatch(thread_id),
                     _wrapped_failure(),
                 )
                 await bridge.flush_events()
@@ -2289,6 +2309,10 @@ class TestTheFailureStashCannotOutliveItsRun:
                 )
                 assert terminals[0]["provider_condition"] == (
                     ProviderCondition.UNKNOWN.value
+                )
+                assert (
+                    terminals[0]["failure_evidence"]["action"]["dispatch_id"]
+                    == f"{thread_id}-dispatch"
                 )
             finally:
                 await bridge.close()

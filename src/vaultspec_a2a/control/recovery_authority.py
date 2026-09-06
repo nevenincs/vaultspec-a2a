@@ -61,6 +61,7 @@ async def reconcile_run_checkpoint(
     *,
     trigger: RecoveryTrigger,
     checkpoint_timeout_seconds: float,
+    last_sequence: int | None = None,
 ) -> RecoveryObservation:
     """Settle completion only from current durable action and checkpoint evidence."""
     thread = await db.scalar(
@@ -142,6 +143,8 @@ async def reconcile_run_checkpoint(
         ),
     )
     if election.outcome is ThreadStatusElectionOutcome.WON:
+        if last_sequence is not None:
+            thread.last_sequence = last_sequence
         await mark_control_action_applied(db, action_id)
         await expire_pending_permission_requests(db, thread_id=thread_id)
         await set_thread_approval_state(

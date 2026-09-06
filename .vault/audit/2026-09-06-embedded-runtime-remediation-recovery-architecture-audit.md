@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:b6e3a64b56707bbb3e696ed0114cfb632d80dd6127e567a85310e3049db7f199'
+body_hash: 'sha256:dab9725c96d45cc30aeeba3281ef47241ebf586c6399e2b4e119005f0456e834'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -288,3 +288,10 @@ The private `dispatch_applied` consumer no longer settles from a bare dispatch i
 Formal review resolves HIGH bare-identity settlement, invented incorporation and concurrent newer-writer overwrite. It retains MEDIUM durable retry ownership: checkpoint unavailability leaves the accepted action leased and unapplied for S14/S83 rather than inventing success. It also retains the HIGH generic terminal finding because completed, failed and evidence-free cancelled notifications still reach the unconditional lifecycle writer.
 
 Static Ruff and Ty pass all six changed files. Natural evidence includes 16 event-handler cases in 39.01 seconds, seven direct-receipt/recovery cases in 14.96 seconds, and the two exact checkpoint discriminators in 8.72 seconds. Verification instability is retained as MEDIUM: the API module was reaped after 60 seconds, its isolated first case after 30 seconds, a combined event/direct/recovery gate after 60 seconds, and a final repeat of the two discriminators after 30 seconds. Each produced no pytest session result and remains FAIL evidence rather than being counted from emitted progress.
+### checkpoint-proven-completion-consumer | high | completion and evidence-free cancellation resolved; failure open
+
+A completed worker event is now only a trigger for the shared checkpoint recovery coordinator. Current accepted graph authority and its immutable completion receipt elect the terminal writer; action settlement, pending-permission expiry, approval cleanup, repair projection and the captured stream sequence commit with that election. Completion notification timing no longer needs a prior RUNNING projection, and a stale notification cannot substitute for the current checkpoint.
+
+Evidence-free cancellation is refused before lifecycle mutation, admission release or aggregation cleanup. Cancellation evidence attached to a non-cancelled terminal is also refused before completion reconciliation. The retired database-failure test that required cleanup from an unproven terminal was deleted rather than retained as compatibility behavior.
+
+Formal review resolves HIGH notification-as-completion, evidence-free cancellation and contradictory terminal-evidence findings. HIGH failed-terminal authority remains: failed events still reach the unconditional writer and require exact checkpoint/task failure evidence plus classified failure ownership. MEDIUM S14/S83 delivery retry also remains when the checkpoint is unavailable. Three exact terminal cases passed naturally in 3.29 seconds; focused Ruff and Ty pass.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:0edfd52d7f35d029675c932060c64b8ce54c53746c874bd80c3588d17b6ba18b'
+body_hash: 'sha256:f5d786933ebb542199597c12a3983e6d64767cb368c2bc9dc6d95e536b0f1af5'
 step_id: 'S13'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -68,3 +68,26 @@ Formal review findings:
 - HIGH / generic terminal authority: completed, failed and evidence-free cancelled terminals still use the unconditional lifecycle writer -> open in S13.
 
 No compatibility parser, partial-payload fallback, alias, backfill or inferred receipt was added. S13 remains open.
+## Checkpoint-proven terminal checkpoint
+
+- `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `M` `src/vaultspec_a2a/control/recovery_authority.py`
+- `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `verify:` `checkpoint completion plus missing/mismatched cancellation evidence, three cases in 3.29 seconds` -> `pass`
+- `verify:` `focused Ruff and Ty` -> `pass`
+
+## Notes
+
+A completed worker notification now triggers the shared checkpoint recovery coordinator. The coordinator validates the current accepted receipt and immutable graph-completion receipt, elects the exact writer, and commits action, permission, approval, repair and captured stream-sequence effects together. Completion may therefore arrive before a RUNNING projection without being lost or overriding newer authority. The notification itself proves nothing.
+
+A cancelled notification without `cancellation-evidence-v1` is refused without lifecycle mutation, drain release or aggregator cleanup. The former test requiring cleanup after an unproven terminal/database failure was deleted because it encoded the unsafe contract that observation alone ends admitted work.
+
+Formal review findings:
+
+- HIGH / notification-as-completion: raw completed events previously wrote terminal state unconditionally -> resolved through checkpoint-first reconciliation.
+- HIGH / evidence-free cancellation: raw cancelled events previously changed lifecycle state despite lacking cessation/no-active proof -> resolved by refusal.
+- HIGH / contradictory evidence: cancellation evidence on a non-cancelled event could have entered completion reconciliation -> resolved by validating evidence/status before any terminal branch.
+- HIGH / failed-terminal authority: failed events still use the unconditional lifecycle writer and can overwrite newer authority -> open in S13.
+- MEDIUM / terminal delivery: checkpoint-unavailable completion remains active and visible but still needs S14/S83 durable retry scheduling.
+
+S13 remains open for exact failed-task settlement and removal of the final generic terminal writer.

@@ -323,6 +323,7 @@ async def _handle_terminal_event(
     *,
     aggregator: EventAggregator | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    checkpointer: Checkpointer | None = None,
     drain_gate: DrainGate | None = None,
 ) -> None:
     """Update thread DB status when a ``thread_terminal`` event arrives.
@@ -360,14 +361,63 @@ async def _handle_terminal_event(
     )
     if not status_str:
         return
+    terminal_status = ThreadStatus(status_str)
+    factory = _session_factory(session_factory)
     raw_cancellation_evidence = payload.get("cancellation_evidence")
-    if raw_cancellation_evidence is not None:
-        if ThreadStatus(status_str) is not ThreadStatus.CANCELLED:
+    if (
+        raw_cancellation_evidence is not None
+        and terminal_status is not ThreadStatus.CANCELLED
+    ):
+        logger.warning(
+            "Refusing cancellation evidence on non-cancelled terminal for %s",
+            thread_id,
+        )
+        return
+    if terminal_status is ThreadStatus.COMPLETED:
+        if factory is None:
+            _skip_without_database("the completion reconciliation", thread_id)
+            return
+        if checkpointer is None:
             logger.warning(
-                "Refusing cancellation evidence on non-cancelled terminal for %s",
+                "Refusing completion for %s: no checkpointer is available",
                 thread_id,
+                extra={
+                    "thread_id": thread_id,
+                    "action": "completion_proof_unavailable",
+                },
             )
             return
+        from ..domain_config import domain_config
+        from .recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
+
+        async with factory() as db:
+            observation = await reconcile_run_checkpoint(
+                db,
+                checkpointer,
+                thread_id,
+                trigger=RecoveryTrigger.WORKER_EVENT,
+                checkpoint_timeout_seconds=domain_config.aget_state_timeout_seconds,
+                last_sequence=last_sequence,
+            )
+        if observation.status is not ThreadStatus.COMPLETED:
+            logger.warning(
+                "Refusing unproven completion for %s: %s",
+                thread_id,
+                observation.condition,
+                extra={
+                    "thread_id": thread_id,
+                    "condition": observation.condition,
+                    "action": "unproven_completion",
+                },
+            )
+            return
+        _schedule_terminal_settlement(thread_id, terminal_status, factory)
+        if drain_gate is not None:
+            await drain_gate.release(thread_id)
+        if aggregator is not None:
+            aggregator.clear_thread_state(thread_id)
+        return
+    if raw_cancellation_evidence is not None:
         try:
             cancellation_evidence = CancellationEvidence.model_validate(
                 raw_cancellation_evidence
@@ -410,6 +460,13 @@ async def _handle_terminal_event(
             await drain_gate.release(thread_id)
         if aggregator is not None:
             aggregator.clear_thread_state(thread_id)
+        return
+    if terminal_status is ThreadStatus.CANCELLED:
+        logger.warning(
+            "Refusing cancellation without exact cessation evidence for %s",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "missing_cancellation_evidence"},
+        )
         return
     try:
         from ..database import (
@@ -1023,5 +1080,6 @@ async def relay_event(
         payload,
         aggregator=aggregator,
         session_factory=session_factory,
+        checkpointer=checkpointer,
         drain_gate=drain_gate,
     )

@@ -10,7 +10,6 @@ import pytest_asyncio
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -24,7 +23,6 @@ from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.drain import DrainGate
 from ...control.event_handlers import (
     _handle_permission_event,
     _handle_progress_event,
@@ -47,9 +45,8 @@ from ...database import (
 from ...database.models import ControlActionModel, RunWriteAuthority, ThreadModel
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
-from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
-from ...thread.action_receipts import GraphActionReceipt
+from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -63,6 +60,7 @@ async def _seed_unapplied_leased_action(
     action_type: ControlActionType,
     idempotency_key: str,
     request_id: str | None = None,
+    completed: bool = False,
 ) -> tuple[ControlActionModel, GraphActionReceipt, str]:
     """Create current accepted graph authority and its unapplied lease."""
     dispatch_id = uuid4().hex
@@ -135,10 +133,21 @@ async def _seed_unapplied_leased_action(
         "active_graph_action_receipt": receipt.model_dump(mode="json"),
         "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
     }
+    if completed:
+        completion = GraphCompletionReceipt(
+            schema_version="graph-completion-v1",
+            action=receipt,
+            outcome="completed",
+        )
+        checkpoint["channel_values"]["graph_completion_receipts"] = {
+            receipt.dispatch_id: completion.model_dump(mode="json")
+        }
     checkpoint["channel_versions"] = {
         "active_graph_action_receipt": 1,
         "graph_action_receipts": 1,
     }
+    if completed:
+        checkpoint["channel_versions"]["graph_completion_receipts"] = 1
     await checkpointer.aput(
         {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
         checkpoint,
@@ -374,7 +383,7 @@ async def test_exact_cancellation_evidence_settles_current_action(
 @pytest.mark.parametrize(
     ("evidence_dispatch_id", "expected_thread_status"),
     [
-        (None, ThreadStatus.CANCELLED),
+        (None, ThreadStatus.CANCELLING),
         ("different-dispatch", ThreadStatus.CANCELLING),
     ],
 )
@@ -668,40 +677,55 @@ async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
 @pytest.mark.asyncio
 async def test_terminal_event_expires_pending_plan_approval_projection(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: InMemorySaver,
 ) -> None:
-    """Terminal relay settles a parked plan approval without residue."""
+    """Checkpoint completion atomically expires pending approval residue."""
     async with session_factory() as session:
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
             title="Terminal plan approval",
+            status=ThreadStatus.RUNNING,
         )
-        await session.commit()
         thread_id = thread.id
-
-    request_id = f"{thread_id}:plan-approval-terminal"
-    await _handle_permission_event(
-        thread_id,
-        {
-            "type": "plan_approval_request",
-            "request_id": request_id,
-            "description": "Approve the plan before completion",
-            "options": [
+        request_id = f"{thread_id}:plan-approval-terminal"
+        await record_permission_request(
+            session,
+            request_id=request_id,
+            thread_id=thread_id,
+            pause_reason_type="plan_approval_request",
+            description="Approve the plan before completion",
+            allowed_options=[
                 {
                     "option_id": "approve",
                     "name": "Approve Plan",
                     "kind": "allow_once",
                 }
             ],
-            "tool_call": "plan_approval",
-        },
-        session_factory=session_factory,
-    )
+            tool_call="plan_approval",
+        )
+        await set_thread_approval_state(
+            session,
+            thread_id,
+            approval_status="pending",
+            approval_request_id=request_id,
+            approval_reason="Approve the plan before completion",
+        )
+        action, _receipt, _checkpoint = await _seed_unapplied_leased_action(
+            session,
+            checkpointer,
+            thread_id=thread_id,
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            idempotency_key="message:terminal-proof",
+            completed=True,
+        )
+        await session.commit()
 
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:
@@ -716,6 +740,9 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
         assert thread.approval_request_id is None
         assert thread.approval_reason is None
         assert thread.approval_response_action_id is None
+        stored_action = await session.get(ControlActionModel, action.id)
+        assert stored_action is not None
+        assert stored_action.applied_at is not None
 
 
 @pytest.mark.asyncio
@@ -1045,47 +1072,6 @@ async def test_permission_resolution_for_unknown_request_is_a_clean_noop(
     async with session_factory() as session:
         actions = (await session.execute(select(ControlActionModel))).scalars().all()
         assert actions == []
-
-
-@pytest.mark.asyncio
-async def test_terminal_db_failure_releases_and_clears_public_state() -> None:
-    """Terminal persistence failures must still release all live in-memory state.
-
-    A schema-less real SQLite session causes the real status write to fail. The
-    handler must surface that database fault, after releasing the admitted run
-    and removing its publicly observable aggregator state.
-    """
-    engine = create_async_engine("sqlite+aiosqlite://")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    aggregator = EventAggregator()
-    drain_gate = DrainGate()
-    thread_id = "terminal-db-error"
-    client_id = "terminal-db-error-subscriber"
-    aggregator.add_subscriber(client_id)
-    aggregator.subscribe(client_id, [thread_id])
-    aggregator.advance_sequence(thread_id)
-    admission = await drain_gate.admit(thread_id)
-    assert admission.admitted
-
-    try:
-        with pytest.raises(OperationalError, match="no such table"):
-            await _handle_terminal_event(
-                thread_id,
-                {"event_type": "thread_terminal", "status": "completed"},
-                aggregator=aggregator,
-                session_factory=session_factory,
-                drain_gate=drain_gate,
-            )
-
-        assert drain_gate.active_run_count == 0
-        assert not drain_gate.is_active(thread_id)
-        assert aggregator.sequence_count() == 0
-        assert aggregator.get_active_thread_ids() == []
-        assert aggregator.get_subscriptions(client_id) == frozenset()
-    finally:
-        await engine.dispose()
 
 
 @pytest.mark.asyncio

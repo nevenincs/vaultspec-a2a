@@ -11,7 +11,6 @@ import asyncio
 import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from langgraph.types import Command
@@ -23,7 +22,6 @@ from ..providers import ProviderCondition
 from ..providers.team_selection import model_assignment_digest
 from ..streaming.aggregator import EventAggregator
 from ..streaming.node_metadata import node_metadata_from_graph
-from ..team.team_config import load_team_config
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
@@ -915,9 +913,7 @@ class Executor:
 
             config = {
                 "configurable": {"thread_id": req.thread_id},
-                "recursion_limit": (
-                    req.recursion_limit or domain_config.graph_recursion_limit
-                ),
+                "recursion_limit": req.recursion_limit,
             }
             self._bridge.track_thread(req.thread_id)
             # Hold the run's per-role tokens for this active window only.
@@ -1000,37 +996,9 @@ class Executor:
             # A resumed turn re-provisions the run's tokens for its window.
             self._token_store.register(req.thread_id, req.actor_tokens)
 
-            # Resolve recursion_limit: explicit request > team TOML > global default.
-            cache_key = self._graph_lifecycle.cache_key_for_thread(req.thread_id)
-            team_preset = cache_key[0] if cache_key else req.team_preset
-
-            # Resolve workspace_root from cache or request.
-            ws_root_path = cache_key[1] if cache_key else req.workspace_root
-            ws_root = Path(ws_root_path).resolve() if ws_root_path else None
-
-            team_recursion_limit: int | None = None
-            if team_preset:
-                try:
-                    team_cfg = load_team_config(team_preset, workspace_root=ws_root)
-                    team_recursion_limit = team_cfg.graph.recursion_limit
-                except Exception:
-                    logger.debug(
-                        "Could not load team config for recursion_limit fallback",
-                        exc_info=True,
-                        extra=self._dispatch_log_extra(
-                            req,
-                            action="team_config_fallback",
-                            runtime_mode="resume",
-                        ),
-                    )
-            effective_recursion_limit = (
-                req.recursion_limit
-                or team_recursion_limit
-                or domain_config.graph_recursion_limit
-            )
             config = {
                 "configurable": {"thread_id": req.thread_id},
-                "recursion_limit": effective_recursion_limit,
+                "recursion_limit": req.recursion_limit,
             }
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
@@ -1056,6 +1024,9 @@ class Executor:
                                 mode="json"
                             ),
                             "agent_descriptors": node_metadata_from_graph(graph),
+                            "graph_definition_digest": (
+                                req.require_graph_definition().digest()
+                            ),
                             "model_assignment_digest": model_assignment_digest(
                                 req.model_assignment
                             ),

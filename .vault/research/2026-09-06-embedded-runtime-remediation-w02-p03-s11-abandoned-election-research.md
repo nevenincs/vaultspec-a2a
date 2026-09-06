@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:5afc11874ef1e99c1551a4ea90b480e036e3cddab0be132b6e3d82dfef89e4b3'
+body_hash: 'sha256:c0fe2bb6714d37faf8475a59746742990f52db606cf3ae68146c44fdedca476e'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-audit]]"
@@ -104,3 +104,11 @@ Initial admission can prepare the graph receipt inside the same transaction as i
 The current accepted envelope retains complete non-secret transport input and semantic intention separately from stable journal dispatch identity. Recovery therefore reproduces accepted controls without reading current preset metadata or permission definitions. A real HTTP redrive discriminator changed those current values and still received the original preset, recursion limit, decision and provider assignment; retired partial input was refused. Actor credentials remain ephemeral and their required renewal is explicit.
 
 This closes omission of effective DispatchRequest fields. It does not freeze the executable graph behind a preset or its sanctioned step timeout. That is the next deadline prerequisite. Durable cancellation proof, typed permanent-refusal election, independent leased retries and checkpoint-first worker/event consumers remain unfinished. The complete next-action handoff is in the S12 execution record; the latest recovery-direct invocation is failed process-lifecycle evidence with zero surviving owned processes.
+
+## Frozen compiler-input checkpoint
+
+Source review found that accepted dispatch fields still named a mutable team: worker compilation reread current team and agent TOML, ignored unavailable agent configuration, substituted a supervisor, and resume reconstructed recursion from request/team/global values. A complete transport envelope therefore did not freeze the executable program or its sanctioned step limit.
+
+S12 now captures the expanded compiler models and explicit positive step timeout at initial admission, includes them in accepted-action-input-v2, and validates the initial receipt before later actions reuse the definition. Worker compilation uses only that definition. Cache and checkpoint binding include its digest alongside the provider assignment digest. Missing nested model fields are refused instead of inheriting model defaults. The actual worker compiler successfully compiled after the team and agent files were corrupted, retained the accepted 60-second step timeout, and refused a changed definition for the same run.
+
+This establishes compiler/step-limit authority, not the elapsed execution deadline. S12 cancellation proof remains open. S11/S13 still need checkpoint-first worker preflight and terminal-event application; S83 still needs durable classified retry leasing, deadline derivation from accepted limits and execution evidence, and quarantine election. Later-action provider/project metadata resolution remains a separate authority review item: this checkpoint freezes the graph, but does not certify that every input consumer has moved behind the durable coordinator.

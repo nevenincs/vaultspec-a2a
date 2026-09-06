@@ -19,14 +19,17 @@ from ...graph.nodes.action_completion import (
     record_graph_completion,
 )
 from ...ipc.schemas import DispatchRequest
+from ...team.team_config import load_team_config
 from ...thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
     read_checkpoint_evidence,
 )
 from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ...thread.state import TeamState
 from ..accepted_input import freeze_accepted_input
 from ..dispatch_receipts import prepare_graph_action_receipt
+from ..graph_definition import read_accepted_graph_definition
 from ..recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
 from ..run_discovery_service import discover_active_runs
 
@@ -54,7 +57,7 @@ async def durable_run(tmp_path, request):
             db,
             thread_id="run",
             action_type=ControlActionType.INGEST,
-            idempotency_key="accepted",
+            idempotency_key="thread-create:run",
             dispatch_id="accepted",
             payload=freeze_accepted_input(
                 DispatchRequest(
@@ -63,6 +66,13 @@ async def durable_run(tmp_path, request):
                     content="work",
                     workspace_root=str(tmp_path),
                     recursion_limit=25,
+                    team_preset="mock-success-single",
+                    graph_definition=freeze_graph_definition(
+                        load_team_config(
+                            "mock-success-single", workspace_root=tmp_path
+                        ),
+                        workspace_root=tmp_path,
+                    ),
                 ),
                 intent={"content": "work"},
             ),
@@ -75,6 +85,17 @@ async def durable_run(tmp_path, request):
     async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "graph.db")) as saver:
         yield sessions, saver, receipt
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_initial_graph_authority_is_bound_to_its_durable_receipt(durable_run):
+    sessions, _, _ = durable_run
+    async with sessions() as db:
+        definition = await read_accepted_graph_definition(db, "run")
+        assert definition.team_id == "mock-success-single"
+        assert definition.step_timeout_seconds == 60
+        with pytest.raises(ValueError, match="no current initial graph authority"):
+            await read_accepted_graph_definition(db, "another-run")
 
 
 def _work(state: TeamState) -> dict[str, object]:

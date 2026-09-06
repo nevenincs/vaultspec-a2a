@@ -23,7 +23,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def current_execution_metadata(workspace: Path) -> str:
+def current_execution_metadata(
+    workspace: Path, *, required_roles: tuple[str, ...] = ("coder",)
+) -> str:
     key = ProviderCatalogKey("deterministic", "in-process-deterministic")
     discovered = discover_in_process_catalog(key)
     record = ProviderRecord(
@@ -51,7 +53,7 @@ def current_execution_metadata(workspace: Path) -> str:
         selection=selection,
         overrides={},
         fallbacks=(),
-        required_roles=("coder",),
+        required_roles=required_roles,
         records=(record,),
     )
     return json.dumps(

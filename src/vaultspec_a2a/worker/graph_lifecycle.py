@@ -24,15 +24,10 @@ from ..streaming import StreamableGraph, node_metadata_from_graph
 from ..team.team_config import (
     AgentConfig,
     TopologyType,
-    load_agent_config,
-    load_team_config,
 )
 from ..telemetry import ws_span
-from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.errors import (
-    AgentConfigNotFoundError,
     ConfigError,
-    TeamConfigNotFoundError,
 )
 
 if TYPE_CHECKING:
@@ -69,7 +64,7 @@ logger = logging.getLogger(__name__)
 # Public type for the graph cache key.  The explicit registration seam lets
 # real-behavior tests install a pre-compiled graph without reaching mutable
 # cache dictionaries.
-type GraphCacheKey = tuple[str, str | None, bool, str]
+type GraphCacheKey = tuple[str, str | None, bool, str, str]
 
 
 def graph_cache_key(
@@ -77,6 +72,7 @@ def graph_cache_key(
     workspace_root: str | None,
     autonomous: bool,
     assignment_digest: str,
+    graph_definition_digest: str,
 ) -> GraphCacheKey:
     """Form the cache key for a compiled team graph.
 
@@ -96,6 +92,7 @@ def graph_cache_key(
         canonical_project_root(workspace_root) if workspace_root else None,
         autonomous,
         assignment_digest,
+        graph_definition_digest,
     )
 
 
@@ -251,7 +248,7 @@ class GraphLifecycleManager:
         self._thread_to_cache_key: dict[str, GraphCacheKey] = {}
         # Assignment identity outlives LRU entries. Per-thread locks make the
         # first binding atomic across duplicate/concurrent dispatch delivery.
-        self._thread_assignment_digests: dict[str, str] = {}
+        self._thread_compilation_digests: dict[str, tuple[str, str]] = {}
         self._thread_compile_locks: dict[str, asyncio.Lock] = {}
         self._thread_compile_lock_users: dict[str, int] = {}
         # Threads bind their durable assignment before joining this second,
@@ -280,7 +277,7 @@ class GraphLifecycleManager:
     @property
     def thread_binding_count(self) -> int:
         """Number of non-terminal thread identities retained by this worker."""
-        return len(self._thread_assignment_digests)
+        return len(self._thread_compilation_digests)
 
     @property
     def compile_flight_count(self) -> int:
@@ -295,13 +292,13 @@ class GraphLifecycleManager:
     def release_thread(self, thread_id: str) -> None:
         """Release terminal thread identity without evicting a shared graph."""
         self._thread_to_cache_key.pop(thread_id, None)
-        self._thread_assignment_digests.pop(thread_id, None)
+        self._thread_compilation_digests.pop(thread_id, None)
 
     def clear(self) -> None:
         """Clear all cached graphs and thread mappings."""
         self._graph_cache.clear()
         self._thread_to_cache_key.clear()
-        self._thread_assignment_digests.clear()
+        self._thread_compilation_digests.clear()
         self._thread_compile_locks.clear()
         self._thread_compile_lock_users.clear()
         self._cache_key_compile_locks.clear()
@@ -327,12 +324,12 @@ class GraphLifecycleManager:
         for the same workspace would find, rather than shadowing it.
         """
         cache_key = graph_cache_key(*cache_key)
-        bound = self._thread_assignment_digests.get(thread_id)
-        if bound is not None and bound != cache_key[3]:
+        bound = self._thread_compilation_digests.get(thread_id)
+        if bound is not None and bound != (cache_key[3], cache_key[4]):
             raise GraphCompilationError(
-                "dispatch model assignment does not match the bound run"
+                "dispatch compilation authority does not match the bound run"
             )
-        self._thread_assignment_digests[thread_id] = cache_key[3]
+        self._thread_compilation_digests[thread_id] = (cache_key[3], cache_key[4])
         while (
             cache_key not in self._graph_cache
             and len(self._graph_cache) >= domain_config.max_cached_graphs
@@ -358,7 +355,7 @@ class GraphLifecycleManager:
         If the thread already maps to a cached graph, return it (LRU touch).
         If the preset is known but no graph is cached (eviction or first use),
         compile a new one, cache it, and register with the aggregator.
-        Returns ``None`` if no preset is available.
+        Missing accepted graph authority is a compilation refusal.
         """
         lock = self._thread_compile_locks.setdefault(req.thread_id, asyncio.Lock())
         self._thread_compile_lock_users[req.thread_id] = (
@@ -388,20 +385,29 @@ class GraphLifecycleManager:
             raise GraphCompilationError(
                 "graph execution requires an exact current model assignment"
             )
+        try:
+            definition = req.require_graph_definition()
+        except ValueError as exc:
+            raise GraphCompilationError(str(exc)) from exc
+        definition_digest = definition.digest()
         assignment_digest = model_assignment_digest(req.model_assignment)
-        bound = self._thread_assignment_digests.get(req.thread_id)
+        compilation_digests = (assignment_digest, definition_digest)
+        bound = self._thread_compilation_digests.get(req.thread_id)
         if bound is None:
-            checkpoint_digest = await self._checkpoint_assignment_digest(
+            checkpoint_digest = await self._checkpoint_compilation_digests(
                 req.thread_id, checkpoint_deadline=checkpoint_deadline
             )
-            if checkpoint_digest is not None and checkpoint_digest != assignment_digest:
+            if (
+                checkpoint_digest is not None
+                and checkpoint_digest != compilation_digests
+            ):
                 raise GraphCompilationError(
-                    "dispatch model assignment does not match the durable run"
+                    "dispatch compilation authority does not match the durable run"
                 )
-            self._thread_assignment_digests[req.thread_id] = assignment_digest
-        elif bound != assignment_digest:
+            self._thread_compilation_digests[req.thread_id] = compilation_digests
+        elif bound != compilation_digests:
             raise GraphCompilationError(
-                "dispatch model assignment does not match the bound run"
+                "dispatch compilation authority does not match the bound run"
             )
 
         # Check if thread already has a cached graph. A thread's accepted
@@ -409,29 +415,22 @@ class GraphLifecycleManager:
         # structural dispatch error, never a reason to reuse or replace a graph.
         cache_key = self._thread_to_cache_key.get(req.thread_id)
         if cache_key and cache_key in self._graph_cache:
-            if cache_key[3] != assignment_digest:
+            if (cache_key[3], cache_key[4]) != compilation_digests:
                 raise GraphCompilationError(
-                    "dispatch model assignment does not match the compiled run"
+                    "dispatch compilation authority does not match the compiled run"
                 )
             self._graph_cache.move_to_end(cache_key)
             return self._graph_cache[cache_key]
 
-        # Resolve preset -- from request or previously stored mapping.
-        team_preset = req.team_preset
+        team_preset = definition.team_id
         workspace_root = req.workspace_root
         autonomous = req.autonomous
-        if not team_preset and cache_key:
-            team_preset = cache_key[0]
-            workspace_root = cache_key[1]
-            autonomous = cache_key[2]
-        if not team_preset:
-            return None
-
         new_key = graph_cache_key(
             team_preset,
             workspace_root,
             autonomous,
             assignment_digest,
+            definition_digest,
         )
 
         graph = await self._get_or_compile_cache_key(req, new_key, team_preset)
@@ -489,9 +488,9 @@ class GraphLifecycleManager:
             else:
                 self._cache_key_compile_lock_users[cache_key] = users
 
-    async def _checkpoint_assignment_digest(
+    async def _checkpoint_compilation_digests(
         self, thread_id: str, *, checkpoint_deadline: float | None
-    ) -> str | None:
+    ) -> tuple[str, str] | None:
         """Read and validate the current assignment binding from checkpoint state."""
         timeout = self._checkpoint_read_timeout_seconds
         if checkpoint_deadline is not None:
@@ -517,16 +516,19 @@ class GraphLifecycleManager:
         values = checkpoint.get("channel_values")
         if not isinstance(values, dict):
             raise GraphCompilationError("durable checkpoint state is incompatible")
-        digest = values.get("model_assignment_digest")
-        if digest is None:
-            return None
-        if (
-            not isinstance(digest, str)
-            or len(digest) != 64
-            or any(char not in "0123456789abcdef" for char in digest)
-        ):
-            raise GraphCompilationError("durable assignment digest is incompatible")
-        return digest
+        digests: list[str] = []
+        for field in ("model_assignment_digest", "graph_definition_digest"):
+            digest = values.get(field)
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(char not in "0123456789abcdef" for char in digest)
+            ):
+                raise GraphCompilationError(
+                    "durable compilation authority is incompatible"
+                )
+            digests.append(digest)
+        return digests[0], digests[1]
 
     async def _send_graph_registered(
         self, thread_id: str, graph: RegisteredCompiledGraph
@@ -549,64 +551,18 @@ class GraphLifecycleManager:
     # ------------------------------------------------------------------
 
     async def _compile_graph(self, req: DispatchRequest) -> RegisteredCompiledGraph:
-        """Load team/agent configs and compile a LangGraph ``StateGraph``.
+        """Compile the accepted program without rereading team or agent files.
 
-        Uses the same two-level config discovery order as the monolith:
-        workspace override then bundled preset. The awaits below are all
-        offloads, not I/O of this coroutine's own:
-        ``_build_proposal_submitter``/``_build_authoring_binding_provider`` move
-        the engine-discovery retry loop off this event loop, and
-        ``warm_model_imports`` moves the model stack's multi-second first import
-        off it. Everything else here is synchronous config/compile work, and it
-        runs on the loop by design - it is fast, but only once the imports it
-        triggers have already been paid for elsewhere.
+        Provider imports and authoring-service discovery are offloaded before
+        synchronous compilation. Neither operation supplies compiler authority.
         """
         # No re-resolution here: the project was minted when the dispatch was
         # validated, and re-deriving it is what let compilation disagree with
         # the cache key it was compiled under.
         ws_root = Path(req.workspace_root) if req.workspace_root else None
 
-        try:
-            team_config = load_team_config(
-                cast("str", req.team_preset), workspace_root=ws_root
-            )
-        except TeamConfigNotFoundError as exc:
-            raise ValueError(f"Team preset not found: {req.team_preset!r}") from exc
-
-        agent_configs: dict[str, AgentConfig] = {}
-        for worker_ref in team_config.workers:
-            try:
-                agent_configs[worker_ref.agent_id] = load_agent_config(
-                    worker_ref.agent_id, workspace_root=ws_root
-                )
-            except AgentConfigNotFoundError:
-                logger.warning(
-                    "Agent config not found for %s",
-                    worker_ref.agent_id,
-                    extra={
-                        "agent_id": worker_ref.agent_id,
-                        "team_preset": req.team_preset,
-                        "workspace_root": str(ws_root) if ws_root else None,
-                        "action": "agent_config_missing",
-                    },
-                )
-
-        supervisor_config: AgentConfig | None = None
-        if team_config.topology.type in ("star", "pipeline_loop"):
-            try:
-                supervisor_config = load_agent_config(
-                    DEFAULT_SUPERVISOR_ID, workspace_root=ws_root
-                )
-            except AgentConfigNotFoundError:
-                logger.debug(
-                    "No supervisor config; using defaults",
-                    extra={
-                        "agent_id": DEFAULT_SUPERVISOR_ID,
-                        "team_preset": req.team_preset,
-                        "workspace_root": str(ws_root) if ws_root else None,
-                        "action": "supervisor_config_defaulted",
-                    },
-                )
+        definition = req.require_graph_definition()
+        team_config, agent_configs, supervisor_config = definition.compiler_inputs()
 
         # Everything below reaches ``ProviderFactory.create``, which loads the
         # LangChain and ACP model stack on first use - seconds of pure import
@@ -685,8 +641,7 @@ class GraphLifecycleManager:
                 supervisor_agent_config=supervisor_config,
                 workspace_root=ws_root,
                 autonomous=req.autonomous,
-                # Let compile_team_graph use team_config.graph.step_timeout_seconds
-                step_timeout=None,
+                step_timeout=definition.step_timeout_seconds,
                 # Thread feature_tag so vault indexing works in worker
                 feature_tag=req.active_feature,
                 task_queue_port=self._task_queue_port,
@@ -897,6 +852,7 @@ class GraphLifecycleManager:
             "thread_id": req.thread_id,
             "workspace_root": req.workspace_root,
             "model_assignment_digest": model_assignment_digest(req.model_assignment),
+            "graph_definition_digest": req.require_graph_definition().digest(),
         }
         if is_first_ingest:
             graph_input.update(

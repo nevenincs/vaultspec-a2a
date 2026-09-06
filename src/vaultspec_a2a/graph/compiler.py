@@ -804,7 +804,7 @@ def compile_team_graph(
     supervisor_agent_config: Any | None = None,
     workspace_root: Path | None = None,
     autonomous: bool = False,
-    step_timeout: float | None = None,
+    step_timeout: float,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
     cost_port: CostPort | None = None,
@@ -836,9 +836,7 @@ def compile_team_graph(
         autonomous:              When True, skip permission_callback wiring so
                                  ACP models auto-approve tool calls (headless
                                  MCP-launched runs).
-        step_timeout:            Per-step timeout in seconds.  When None the
-                                 team TOML ``step_timeout_seconds`` value is
-                                 used as fallback.
+        step_timeout:            Positive timeout from accepted graph authority.
         feature_tag:             Optional feature tag for task-queue scoping.
         task_queue_port:         Optional database-backed task-queue port
                                  injected into worker and mount nodes.
@@ -855,6 +853,11 @@ def compile_team_graph(
         ValueError:  If an unknown topology type is encountered.
     """
     from ..team.team_config import TopologyType
+
+    if step_timeout <= 0:
+        raise ConfigError(
+            "compiled execution requires an explicit positive step timeout"
+        )
 
     _validate_frozen_assignment_inventory(model_assignment)
 
@@ -964,26 +967,8 @@ def compile_team_graph(
     )
 
     # Apply per-preset graph settings.
-    # step_timeout: explicit caller param wins; fall back to team TOML value.
-    effective_timeout = (
-        step_timeout
-        if step_timeout is not None
-        else (
-            float(team_config.graph.step_timeout_seconds)
-            if team_config.graph.step_timeout_seconds is not None
-            else None
-        )
-    )
-    if effective_timeout is not None:
-        # step_timeout is an internal Pregel attribute, not in public docs.
-        # Pin to LangGraph >=0.2.60 if relying on this.
-        graph.step_timeout = effective_timeout
+    graph.step_timeout = step_timeout
 
-    # The builder was constructed through a cast (TeamState is a TypedDict), so the
-    # compiled graph's own ainvoke is typed Unknown and does not structurally match
-    # the protocol. Asserting the shape HERE is the honest place: this function is
-    # what built the graph, so it is the one caller that knows the state type its
-    # ainvoke returns. Callers get the protocol and need no cast of their own.
     return cast("CompiledTeamGraph", graph)
 
 

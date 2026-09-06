@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:fb9956996b32e7f132230941d26ff38f55301464df07716fab230c73147c49cd'
+body_hash: 'sha256:43f96566c13a21c74749b3c30485ac5d6d6cd299bd6fc107a4edea70831d51fb'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -178,3 +178,17 @@ A canonical collection-only run after deletion collected 439 current control tes
 The migration test required a pre-0012 populated action to receive a synthetic dispatch identity and remain claimable through the removed implicit-commit API. That is legacy backfill behavior and conflicts with the current rule that populated pre-current stores are refused rather than interpreted. The test and its obsolete control-action imports are removed. The migration chain remains usable to construct a fresh schema; no populated historical action is accepted by this change.
 
 After removal, canonical collection of the database test directory completed naturally with 385 tests and no collection error. The broader S84 control-test queue remains open.
+
+### mutable-executable-program | high | corrected in partial S12
+
+Architecture/input: worker compilation previously reread current TOML and could omit a missing worker or substitute supervisor configuration. Resume also reconstructed recursion from current team/global defaults. S12 now accepts a complete executable-graph-v1 snapshot with an explicit positive step timeout, upgrades the closed envelope to accepted-action-input-v2 without a v1 adapter, reads the receipt-bound initial definition for later graph actions, and binds cache/checkpoint reuse to its digest. Worker compilation consumes the snapshot and accepted recursion directly.
+
+### delivery-payload-divergence | high | corrected in S12 review
+
+Integrity: binding a valid stored receipt without comparing the actual outgoing effective input could authorize a changed graph or control value. Binding now requires exact equality of all non-secret accepted request fields and the credential requirement. Initial graph-definition reads also validate action type, identities and payload fingerprint against the immutable receipt.
+
+### graph-authority-qualification | medium | S84 migration and S12 consumers remain open
+
+Verification/contract: compiler callers must now provide an explicit positive step timeout; worker checkpoints require graph and provider digests; accepted graph actions require the complete v2 snapshot. Historical compiler, worker and service fixtures using omitted timeout, four-element cache keys or partial dispatch envelopes must migrate to the current contract in S84. No compatibility shim is supplied. The initial 4-case graph battery failed one case because its fixture selected the coder key instead of the declared mock-coder-success worker; the real catalog fixture now accepts explicit required identities. This failure is retained. Subsequent 11-case graph/acceptance/delivery and 11-case recovery/HTTP batteries exited normally, passing in 7.45 and 4.53 seconds respectively.
+
+Architecture follow-up: S12 remains open for durable cancellation cessation/no-op evidence and complete authority-consumer qualification. Later-action provider/project metadata must be audited against initial accepted authority. S11/S13 worker preflight and raw terminal/application event handling remain open; S83 durable retry storage, leased drain, deadline/elapsed-time derivation and quarantine election remain open. A step timeout alone is never completion or cancellation proof.

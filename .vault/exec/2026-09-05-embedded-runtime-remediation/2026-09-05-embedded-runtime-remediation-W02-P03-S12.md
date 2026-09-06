@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6ce6f3e010a0fa7ed04726fc1375dc042a31e0deebe34dd490652e4e673f2f9f'
+body_hash: 'sha256:e96fcbf7d080a481a59e8d98e60d5599be829237c506d380c09a5f49b6c141aa'
 step_id: 'S12'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -110,3 +110,29 @@ S12 remains OPEN. Complete non-secret dispatch fields and preclaim follow-up/res
 Next command: `.venv/Scripts/python.exe -m vaultspec_a2a.testing.runner --run-timeout 60 --exit-timeout 5 -- src/vaultspec_a2a/control/tests/test_recovery_authority.py -q -k direct`. This is an unresolved discriminator, not permission to repeat until green. If it fails or hangs, retain FAIL and inspect only the exact owned process tree. Read the recovery architecture audit before extending the implementation. The next source focus is frozen graph/runtime deadline authority, followed by durable scheduler storage and checkpoint-first worker/event consumers.
 
 The failed owned run reported no pytest session result within 60 seconds and tree_reaped=true. Its exact process census ended with zero survivors (45060, 7524, 38412, 67312, 2504, 50768, 64392). The guarded cleanup found that tree already gone. There are no active owned verification sessions to resume at handoff. Parent-owned provider files are outside this checkpoint.
+
+## Frozen executable-program checkpoint
+
+- `A` `src/vaultspec_a2a/thread/executable_graph.py`
+- `A` `src/vaultspec_a2a/control/graph_definition.py`
+- `A` `src/vaultspec_a2a/worker/tests/test_frozen_graph_authority.py`
+- `M` `src/vaultspec_a2a/control/accepted_input.py`
+- `M` `src/vaultspec_a2a/graph/compiler.py`
+- `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `M` `src/vaultspec_a2a/worker/executor.py`
+- `M` `src/vaultspec_a2a/ipc/schemas.py`
+- `M` `src/vaultspec_a2a/thread/state.py`
+- `verify:` `bounded frozen graph battery, first attempt` -> `fail`
+- `verify:` `bounded frozen graph, accepted redrive and receipt battery, 11 cases in 7.45 seconds` -> `pass`
+- `verify:` `bounded recovery authority and initial HTTP battery, 11 cases in 4.53 seconds` -> `pass`
+- `verify:` `focused changed source Ty` -> `pass`
+
+Accepted-action-input-v2 now carries the complete executable-graph-v1 team/agent/supervisor definition and a declared positive step timeout. Worker graph compilation and resume consume accepted authority without reloading team files or deriving recursion defaults. Cache/checkpoint identity includes the definition digest. Later actions read the initial receipt-bound graph definition; delivery validates full request equality before attaching its stored receipt. The failed first attempt was an exact fixture identity mismatch (coder versus mock-coder-success), not a production fallback; the fixture now freezes the declared worker through the real catalog.
+
+S12 remains OPEN. Next architecture work: durable cancellation cessation/no-op proof; review later-action provider/project metadata against the initial accepted authority; then S11/S13 checkpoint-first worker/event consumers and S83 durable retry owner/deadline derivation. S84 must migrate explicit compiler timeout, current accepted-input and checkpoint/cache fixtures. Do not infer a run deadline from this step limit alone. Do not restore aliases or defaults to make historical tests pass.
+
+Final review discriminator: bounded recovery-authority and dispatch-receipt battery passed 11 cases in 6.97 seconds after adding the receipt-bound initial definition read and changed outgoing recursion refusal. All three passing batteries exited with code zero. Exact census found zero survivors for observed PIDs 62052, 68868, 39532, 52724, 66928, 20648, 66876 and 42156; no test session remains active.
+
+Commands: `.venv/Scripts/python.exe -m vaultspec_a2a.testing.runner --run-timeout 60 --exit-timeout 5 -- src/vaultspec_a2a/worker/tests/test_frozen_graph_authority.py src/vaultspec_a2a/control/tests/test_accepted_input_recovery.py src/vaultspec_a2a/control/tests/test_dispatch_receipts.py -q -o addopts=`; the second substituted `test_recovery_authority.py` and `test_thread_service_tokens.py`; the final substituted `test_recovery_authority.py` and `test_dispatch_receipts.py`.
+
+Next command: inspect `src/vaultspec_a2a/control/cancel_service.py` and `src/vaultspec_a2a/worker/executor.py` cancellation handling against the durable cessation/no-op contract before extending S12. The earlier direct-recovery owned-run failure remains preserved above; these later completed runs do not erase it.

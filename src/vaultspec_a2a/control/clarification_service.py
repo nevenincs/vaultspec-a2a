@@ -48,6 +48,7 @@ from .action_lease import (
 from .dispatch import safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
+from .graph_definition import read_accepted_graph_definition
 from .repair_transitions import record_undelivered_dispatch
 from .thread_state_service import read_run_snapshot
 
@@ -323,8 +324,10 @@ async def respond_to_clarification(
             failure_type=FailureType.NO_ACTIVE_PROJECT,
         )
     try:
+        graph_definition = await read_accepted_graph_definition(db, thread_id)
+        team_preset = graph_definition.team_id
         execution_authority = resolve_execution_authority(thread.thread_metadata)
-    except ExecutionAuthorityError as exc:
+    except (ExecutionAuthorityError, ValueError) as exc:
         return ClarificationResult(
             request_id=request_id,
             thread_id=thread_id,
@@ -341,6 +344,7 @@ async def respond_to_clarification(
         thread_id=thread_id,
         option_id=payload,
         team_preset=team_preset,
+        graph_definition=graph_definition,
         workspace_root=workspace_root,
         recursion_limit=recursion_limit,
         model_assignment=execution_authority.model_assignment,

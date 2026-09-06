@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:30b640ee1ce39b5aee6e65436adf0017551a80e953c1822a9efa934d0ca9709d'
+body_hash: 'sha256:4c23b131d2f12e830ea4e861fb89e49e46b2812a5f3d2131d7f30e3f621104fa'
 related:
   - "[[2026-08-02-control-action-leases-research]]"
   - "[[2026-08-02-control-action-leases-reference]]"
@@ -114,3 +114,9 @@ Lease preparation does not commit. The accepting service owns the complete trans
 ## Closed accepted dispatch input
 
 Every accepted dispatch, including follow-up, permission, clarification, verdict and cancellation, retains its complete effective non-secret dispatch fields in one current versioned envelope. The semantic intention and whether fresh actor credentials are required are explicit fields. Stable dispatch identity belongs to the action journal, outside replay payload comparison. Recovery reads this envelope without reloading preset, permission or routing defaults. Missing, partial and retired envelopes receive typed refusal without translation. Graph receipt authority validates the current envelope before dispatch or checkpoint settlement. The frozen executable graph and sanctioned execution deadline remain governed by the state-truthfulness contract; a preset name does not freeze those facts.
+
+## Frozen executable graph authority
+
+The current accepted dispatch envelope carries the complete resolved team, worker and required supervisor compiler inputs under one executable-graph version, including a declared positive graph step timeout. Admission resolves these inputs before reserving the action. A preset identifier alone is not executable authority. Later graph actions read the initial accepted definition and its immutable receipt; they do not reload team or agent files. The graph-definition digest and catalog-assignment digest bind the worker cache and durable checkpoint to the same program. Missing fields, missing declared limits, changed definitions and retired envelope versions receive bounded refusal without defaults, translation or backfill.
+
+The accepted request explicitly supplies the recursion budget. Worker execution and resume consume it without team or global fallback. Delivery may attach the existing receipt only when every effective non-secret request field matches the accepted envelope. A positive step timeout is one prerequisite of the run-derived execution deadline; it does not itself define elapsed run time, retry eligibility or a client observation deadline.

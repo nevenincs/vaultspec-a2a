@@ -23,7 +23,7 @@ from ..thread.action_receipts import (
     control_action_payload_fingerprint,
 )
 from ..thread.enums import NON_ACTIVE_STATUSES, ControlActionType
-from .accepted_input import AcceptedActionInput
+from .accepted_input import AcceptedActionInput, dispatch_matches_accepted_input
 
 if TYPE_CHECKING:
     from ..database.models import ControlActionModel
@@ -187,6 +187,14 @@ async def bind_graph_action_receipt(
             if thread is not None and thread.status not in NON_ACTIVE_STATUSES
             else None
         )
+        if (
+            receipt is not None
+            and action is not None
+            and action.payload_json is not None
+        ):
+            accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+            if not dispatch_matches_accepted_input(dispatch, accepted):
+                receipt = None
     if receipt is not None and _GRAPH_ACTIONS[receipt.action_type] != dispatch.action:
         receipt = None
     return dispatch.model_copy(update={"graph_action_receipt": receipt})

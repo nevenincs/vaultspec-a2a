@@ -12,7 +12,9 @@ from ...database import create_control_action, create_thread
 from ...database.models import Base, RunWriteAuthority
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
+from ...team.team_config import load_team_config
 from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ..accepted_input import freeze_accepted_input
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..direct_control_recovery import redrive_direct_control_actions
@@ -38,7 +40,11 @@ async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
         thread_id="run",
         workspace_root=str(tmp_path),
         option_id={"decision": "approved"},
-        team_preset="accepted-preset",
+        team_preset="mock-success-single",
+        graph_definition=freeze_graph_definition(
+            load_team_config("mock-success-single", workspace_root=tmp_path),
+            workspace_root=tmp_path,
+        ),
         recursion_limit=37,
         model_assignment=resolve_execution_authority(
             current_execution_metadata(tmp_path)
@@ -103,7 +109,7 @@ async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
             delivered = DispatchRequest.model_validate(received[0])
             assert delivered.dispatch_id == "accepted"
             assert delivered.recursion_limit == 37
-            assert delivered.team_preset == "accepted-preset"
+            assert delivered.team_preset == "mock-success-single"
             assert delivered.option_id == {"decision": "approved"}
             assert delivered.model_assignment == accepted_dispatch.model_assignment
             assert delivered.require_graph_action_receipt() == receipt

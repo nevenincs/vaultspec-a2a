@@ -59,6 +59,7 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
+from ..thread.executable_graph import freeze_graph_definition
 from ..thread.lifecycle_guards import can_archive, can_delete
 from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES, project_checkpoint_tuple
 from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
@@ -475,15 +476,16 @@ def _initial_dispatch(
             if isinstance(preamble_msg.content, str)
             else str(preamble_msg.content)
         )
-    team_config = None
-    if req.team_preset:
-        with contextlib.suppress(ConfigError, TeamConfigNotFoundError):
-            team_config = load_team_config(
-                req.team_preset, workspace_root=req.workspace_root
-            )
+    if req.team_preset is None:
+        raise ValueError("initial graph admission requires an explicit preset")
+    team_config = load_team_config(req.team_preset, workspace_root=req.workspace_root)
+    graph_definition = freeze_graph_definition(
+        team_config, workspace_root=req.workspace_root
+    )
     feature_tag = req.metadata.feature_tag if req.metadata else None
     return DispatchRequest(
         dispatch_id=dispatch_id,
+        graph_definition=graph_definition,
         action=to_dispatch_action(ControlActionType.INGEST),
         thread_id=req.thread_id,
         team_preset=req.team_preset,

@@ -190,6 +190,7 @@ class TeamState(TypedDict):
     agent_descriptors: NotRequired[dict[str, dict[str, str]]]
     messages: Annotated[list[BaseMessage], add_messages]
     model_assignment_digest: NotRequired[str]
+    graph_definition_digest: NotRequired[str]
     graph_action_receipts: NotRequired[
         Annotated[dict[str, dict[str, object]], merge_graph_action_receipts]
     ]

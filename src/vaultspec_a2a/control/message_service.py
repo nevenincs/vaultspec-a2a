@@ -36,6 +36,7 @@ from ..thread.message_policy import can_send_followup
 from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import freeze_accepted_input
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
+from .graph_definition import read_accepted_graph_definition
 
 if TYPE_CHECKING:
     import httpx
@@ -124,8 +125,10 @@ async def send_followup_message(
     team_preset = thread.team_preset
     thread_metadata = thread.thread_metadata
     try:
+        graph_definition = await read_accepted_graph_definition(db, thread_id)
+        team_preset = graph_definition.team_id
         execution_authority = resolve_execution_authority(thread_metadata)
-    except ExecutionAuthorityError as exc:
+    except (ExecutionAuthorityError, ValueError) as exc:
         return MessageResult(
             action_id="",
             thread_id=thread_id,
@@ -162,6 +165,7 @@ async def send_followup_message(
         agent_id=agent_id,
         content=content,
         team_preset=team_preset,
+        graph_definition=graph_definition,
         workspace_root=workspace_root,
         recursion_limit=recursion_limit,
         model_assignment=execution_authority.model_assignment,

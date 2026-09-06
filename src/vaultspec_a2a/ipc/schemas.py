@@ -24,6 +24,7 @@ from ..thread.action_receipts import GraphActionReceipt
 from ..thread.actor_tokens import ActorTokenBundle
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import ControlActionType
+from ..thread.executable_graph import FrozenGraphDefinition
 
 __all__ = [
     "ActiveProjectRoot",
@@ -113,6 +114,7 @@ class DispatchRequest(BaseModel):
     )
     thread_id: str
     graph_action_receipt: GraphActionReceipt | None = None
+    graph_definition: FrozenGraphDefinition | None = None
     agent_id: str = DEFAULT_SUPERVISOR_ID
     # For ingest: user message content
     content: str | None = None
@@ -129,7 +131,7 @@ class DispatchRequest(BaseModel):
     autonomous: bool = False
     metadata_json: str | None = None
     context_preamble: str | None = None
-    recursion_limit: int
+    recursion_limit: int = Field(ge=1, le=500)
     # SDD blackboard fields
     active_feature: str | None = None
     # feedback-loop: the OPAQUE engine feedback-batch id for a revision run,
@@ -152,6 +154,7 @@ class DispatchRequest(BaseModel):
 
     def require_graph_action_receipt(self) -> GraphActionReceipt:
         """Require a matching current receipt before graph execution admission."""
+        self.require_graph_definition()
         receipt = self.graph_action_receipt
         if (
             receipt is None
@@ -159,14 +162,16 @@ class DispatchRequest(BaseModel):
             or receipt.dispatch_id != self.dispatch_id
             or (
                 self.action == "ingest"
-                and receipt.action_type not in {
+                and receipt.action_type
+                not in {
                     ControlActionType.INGEST,
                     ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
                 }
             )
             or (
                 self.action == "resume"
-                and receipt.action_type not in {
+                and receipt.action_type
+                not in {
                     ControlActionType.RESUME,
                     ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
                 }
@@ -175,6 +180,17 @@ class DispatchRequest(BaseModel):
         ):
             raise ValueError("incompatible graph dispatch authority")
         return receipt
+
+    def require_graph_definition(self) -> FrozenGraphDefinition:
+        """Require the accepted executable program before compiling or running."""
+        if self.action == "cancel" or self.graph_definition is None:
+            raise ValueError("graph execution requires its accepted definition")
+        definition = FrozenGraphDefinition.model_validate(
+            self.graph_definition.model_dump(mode="json")
+        )
+        if definition.team["id"] != self.team_preset:
+            raise ValueError("accepted graph definition does not match the run preset")
+        return definition
 
     @field_validator("model_assignment")
     @classmethod

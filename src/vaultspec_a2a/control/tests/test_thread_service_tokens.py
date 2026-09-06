@@ -82,7 +82,7 @@ def _capturing_worker(
             assert action is not None
             assert action.payload_json is not None
             stored = json.loads(action.payload_json)
-            assert stored["schema_version"] == "accepted-action-input-v1"
+            assert stored["schema_version"] == "accepted-action-input-v2"
             assert stored["dispatch"] == {
                 key: value
                 for key, value in body.items()

@@ -68,6 +68,7 @@ from .action_lease import (
 from .dispatch import safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
+from .graph_definition import read_accepted_graph_definition
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -632,8 +633,10 @@ class VerdictSubscriber:
                 )
                 return
             try:
+                graph_definition = await read_accepted_graph_definition(db, thread_id)
+                team_preset = graph_definition.team_id
                 execution_authority = resolve_execution_authority(thread_metadata)
-            except ExecutionAuthorityError as exc:
+            except (ExecutionAuthorityError, ValueError) as exc:
                 logger.warning(
                     "Refusing verdict resume for thread %s: %s", thread_id, exc
                 )
@@ -658,6 +661,7 @@ class VerdictSubscriber:
             thread_id=thread_id,
             option_id=resume_value,
             team_preset=team_preset,
+            graph_definition=graph_definition,
             workspace_root=workspace_root,
             recursion_limit=self._recursion_limit,
             model_assignment=execution_authority.model_assignment,

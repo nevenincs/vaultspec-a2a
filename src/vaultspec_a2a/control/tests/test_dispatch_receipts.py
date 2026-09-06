@@ -18,7 +18,9 @@ from ...database import (
 from ...database.models import Base, RunWriteAuthority
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
+from ...team.team_config import load_team_config
 from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ..accepted_input import freeze_accepted_input
 from ..action_lease import (
     finalize_control_action_acceptance,
@@ -73,6 +75,11 @@ async def test_delivery_cannot_create_missing_acceptance_evidence(sessions, tmp_
                 content="first",
                 workspace_root=str(tmp_path),
                 recursion_limit=25,
+                team_preset="mock-success-single",
+                graph_definition=freeze_graph_definition(
+                    load_team_config("mock-success-single", workspace_root=tmp_path),
+                    workspace_root=tmp_path,
+                ),
             ),
         )
         assert bound.graph_action_receipt is None
@@ -88,7 +95,9 @@ async def test_delivery_cannot_create_missing_acceptance_evidence(sessions, tmp_
 
 
 @pytest.mark.asyncio
-async def test_retry_preserves_original_receipt_after_state_revision(sessions):
+async def test_retry_preserves_original_receipt_after_state_revision(
+    sessions, tmp_path
+):
     witness = await _seed(sessions)
     async with sessions() as db:
         claim = await prepare_control_action_claim(
@@ -102,6 +111,13 @@ async def test_retry_preserves_original_receipt_after_state_revision(sessions):
                     thread_id="run",
                     option_id="yes",
                     recursion_limit=25,
+                    team_preset="mock-success-single",
+                    graph_definition=freeze_graph_definition(
+                        load_team_config(
+                            "mock-success-single", workspace_root=tmp_path
+                        ),
+                        workspace_root=tmp_path,
+                    ),
                 ),
                 intent={"option_id": "yes"},
             ),
@@ -125,10 +141,19 @@ async def test_retry_preserves_original_receipt_after_state_revision(sessions):
         thread_id="run",
         option_id="yes",
         recursion_limit=25,
+        team_preset="mock-success-single",
+        graph_definition=freeze_graph_definition(
+            load_team_config("mock-success-single", workspace_root=tmp_path),
+            workspace_root=tmp_path,
+        ),
     )
     async with sessions() as db:
         bound = await bind_graph_action_receipt(db, request)
     receipt = bound.require_graph_action_receipt()
+    changed = request.model_copy(update={"recursion_limit": 26})
+    async with sessions() as db:
+        refused = await bind_graph_action_receipt(db, changed)
+    assert refused.graph_action_receipt is None
     assert receipt.run_revision == 1
     assert receipt.writer_generation == 2
     async with sessions() as db:
@@ -153,7 +178,9 @@ async def test_retry_preserves_original_receipt_after_state_revision(sessions):
 
 
 @pytest.mark.asyncio
-async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(sessions):
+async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
+    sessions, tmp_path
+):
     witness = await _seed(sessions)
     request = DispatchRequest(
         dispatch_id="resume",
@@ -161,6 +188,11 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(sessio
         thread_id="run",
         option_id="yes",
         recursion_limit=25,
+        team_preset="mock-success-single",
+        graph_definition=freeze_graph_definition(
+            load_team_config("mock-success-single", workspace_root=tmp_path),
+            workspace_root=tmp_path,
+        ),
     )
     async with sessions() as db:
         refused = await bind_graph_action_receipt(db, request)
@@ -189,6 +221,13 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(sessio
                     thread_id="run",
                     option_id="yes",
                     recursion_limit=25,
+                    team_preset="mock-success-single",
+                    graph_definition=freeze_graph_definition(
+                        load_team_config(
+                            "mock-success-single", workspace_root=tmp_path
+                        ),
+                        workspace_root=tmp_path,
+                    ),
                 ),
                 intent={"option_id": "yes"},
             ),
@@ -214,7 +253,7 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(sessio
 @pytest.mark.asyncio
 @pytest.mark.parametrize("finalize", [False, True])
 async def test_requested_projection_and_receipt_share_acceptance_commit(
-    sessions, finalize
+    sessions, tmp_path, finalize
 ):
     witness = await _seed(sessions)
     async with sessions() as db:
@@ -229,6 +268,13 @@ async def test_requested_projection_and_receipt_share_acceptance_commit(
                     thread_id="run",
                     option_id="yes",
                     recursion_limit=25,
+                    team_preset="mock-success-single",
+                    graph_definition=freeze_graph_definition(
+                        load_team_config(
+                            "mock-success-single", workspace_root=tmp_path
+                        ),
+                        workspace_root=tmp_path,
+                    ),
                 ),
                 intent={"option_id": "yes"},
             ),
@@ -247,6 +293,11 @@ async def test_requested_projection_and_receipt_share_acceptance_commit(
                 thread_id="run",
                 option_id="yes",
                 recursion_limit=25,
+                team_preset="mock-success-single",
+                graph_definition=freeze_graph_definition(
+                    load_team_config("mock-success-single", workspace_root=tmp_path),
+                    workspace_root=tmp_path,
+                ),
             ),
         )
         assert before_commit.graph_action_receipt is None

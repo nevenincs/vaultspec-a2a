@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:199bc52ed7162608d4e69c8a557b745e1c11f66f4436cc93b5a140a9c049a776'
+body_hash: 'sha256:954122d40e7439626fb970bd7b50da04f12b1065dfb6bbf5fa2469cfd6ebfb6e'
 related:
   - "[[2026-08-02-provider-model-catalog-adr]]"
   - "[[2026-08-02-provider-model-catalog-plan]]"
@@ -429,3 +429,31 @@ queued environment, desktop, hook, process-record, provider-directory, Starlette
 and closed-pipe findings retain their recorded owners and do not restore retired
 runtime authority. P01.S11 and remediation S05 remain open on their independent
 evidence boundaries.
+
+## Formal review of P01.S10 lifecycle closure
+
+### p01-s10-lifecycle-closure-review | low | PASS
+
+Type: lifecycle and formal review disposition. Status: resolved at
+`0c47e4c5758995d7bc55ef924b6547c11c07fa08`, whose exact parent is the passing
+runtime review `039eea81fcb48d94daeadd369a442f41e7ebe6cb`. The closure changes only the
+P01.S10 audit, Step Record, feature index, and plan. Only P01.S10 transitions to
+checked; P01.S11 remains the next open catalog step and remediation W01.P02.S05
+remains open.
+
+The Step Record's 125 source/OpenAPI paths exactly equal the name-status diff
+from pre-runtime base `45a0a0093cfc38d7595583b8289d2c744429bd7a` through final correction
+`6e7015a6c55fdf8633dbd35e4d8f40caa13425ed`, with no missing or extra path. Its
+implementation and review identities, 139 focused tests, 1,378-test domain run
+with 38 deselected and zero failures, six OpenAPI artifact tests, and Ruff,
+format, Ty, diff, and feature Core claims agree with the reviewed evidence. The
+six-part deletion replacement map accounts for all seven deleted legacy source
+or test groups and preserves current admission, restart, confinement, topology,
+schema, factory, and fallback coverage. The index resolves the new Step Record.
+
+Independent Core checks report zero diagnostics for both
+`provider-model-catalog` and `embedded-runtime-remediation`. Catalog plan status
+is 15 of 21 with P01.S11 next and only historical S08 lacking a Step Record;
+remediation status is 4 of 81 with W01.P02.S05 next and no missing Step Record.
+No critical, high, medium, or low lifecycle defect remains. P01.S10 closure
+passes formal review.

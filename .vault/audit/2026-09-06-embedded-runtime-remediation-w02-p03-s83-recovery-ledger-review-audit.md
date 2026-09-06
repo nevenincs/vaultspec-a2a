@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:f4355403c2952040e8ec518cfca53daa8be624691568ad7662c00f4451e29e28'
+body_hash: 'sha256:5e26a90f7cf0ec64bb20082cdcbe6c613eb2c7a4083ec5aa147a80bd719b3168'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-adr]]"
@@ -46,6 +46,7 @@ The increment establishes a durable retry owner and closes the crash window betw
 | PASS | exact-lease typed settlement repository proof | 5 passed in 36.12s |
 | PASS | selected typed message and cancel settlement proofs | 3 passed, 5 deselected in 68.93s |
 | PASS | applied-action versus deadline quarantine proofs | 2 passed, 6 deselected in 4.13s |
+| PASS | recovery-owner service degradation proof | 1 passed in 3.03s |
 | PASS | live message definite/ambiguous classification proof | 1 passed in 25.65s |
 | PASS | full direct-control lease suite | 8 passed in 71.82s |
 | FAIL | dispatch-failure transition suite | 3 non-current fixtures refused for missing initial action/receipt authority; 3 passed in 43.98s |
@@ -70,7 +71,7 @@ The increment establishes a durable retry owner and closes the crash window betw
 | RESOLVED HIGH | Correctness | Closed | Corrupt payloads and inconsistent deadlines now atomically reject the exact action, move its thread to reconciling, block execution readiness, and settle the retry as incompatible. A missing or type-corrupt action receipt preserves the last proven lifecycle state while atomically blocking readiness and settling the exact retry; no replacement authority is fabricated. | this increment |
 | MEDIUM | Architecture | Open | Clarification has a separate startup redriver while the direct recovery coordinator also admits RESUME, producing fragmented ownership even though action leases prevent duplicate dispatch. Consolidate recovery ownership. | S11/S14 |
 | RESOLVED HIGH | Concurrency | Closed | Live failure settlement now returns a closed disposition for definite non-delivery, ambiguous delivery, lost authority, expired deadline, or application victory. It verifies the exact action lease token before changing the retry ledger, so a stale dispatcher cannot overwrite a newer owner condition. | this increment |
-| MEDIUM | Observability | Open | Periodic recovery exceptions are retained only as `app.state.direct_control_recovery_error` and logs; health/readiness does not disclose degraded recovery ownership. | condition matrix follow-up |
+| RESOLVED HIGH | Observability | Closed | A periodic recovery-owner failure now uses the closed `recovery_pass_failed` token, degrades the authenticated service health check, keeps process liveness true, and blocks new run admission until a successful pass clears the condition. | this increment |
 | RESOLVED MEDIUM | Operations | Closed | Lease contention now persists next eligibility at the known action-lease boundary, bounded by the accepted deadline, instead of waking every two seconds. | this increment |
 | MEDIUM | Data lifecycle | Open | Settled recovery rows have no bounded retention or archival policy. | later persistence step |
 | MEDIUM | Contract drift | Open | `RecoveryCondition` duplicates most of `FailureType`; mapping completeness can drift without an exhaustive current-contract assertion or one shared closed vocabulary. | S84 |
@@ -81,8 +82,8 @@ The increment establishes a durable retry owner and closes the crash window betw
 
 ## Recommendations
 
-Continue S83 by defining application-receipt precedence at the deadline, then expose recovery-owner degradation through health. Preserve current-only refusal semantics throughout.
+Continue S83 by defining application-receipt precedence at the deadline and enforcing the recoverable-action deadline invariant at the repository/schema boundary. Preserve current-only refusal semantics throughout.
 
 ## Handoff state
 
-S83 is open. The reviewed runtime increment and migration 0020 are checkpointed in commit `a7ba047c`. Next work should define deadline-versus-application precedence, then expose recovery-owner degradation through health. Do not add compatibility behavior, aliases, inferred deadlines, or legacy-store backfill.
+S83 is open. The reviewed runtime increment and migration 0020 are checkpointed in commit `a7ba047c`. Next work should define deadline-versus-application precedence and enforce the recoverable-action deadline invariant at the repository/schema boundary. Do not add compatibility behavior, aliases, inferred deadlines, or legacy-store backfill.

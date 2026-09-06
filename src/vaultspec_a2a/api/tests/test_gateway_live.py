@@ -668,6 +668,30 @@ async def test_service_state_degrades_when_circuit_breaker_opens(
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_service_state_degrades_when_recovery_owner_fails(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    app.state.direct_control_recovery_error = "recovery_pass_failed"
+
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.get("/v1/service")
+        assert resp.status_code == 200
+        body = resp.json()
+
+    assert body["alive"] is True
+    assert body["can_accept_run"] is False
+    assert body["status"] == "degraded"
+    assert body["readiness"]["gateway_readiness"] == "ready"
+    assert body["readiness"]["run_admission"] == "blocked"
+    assert any("recovery_owner" in reason for reason in body["degraded_reasons"])
+    assert "recovery owner failed" in body["readiness"]["reasons"]
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_run_status_carries_reconnect_cursor(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:

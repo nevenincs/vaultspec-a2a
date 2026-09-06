@@ -405,6 +405,15 @@ def assemble_health_status(
     dispatch_pairing_warning: object = getattr(
         app_state, "dispatch_pairing_warning", None
     )
+    recovery_owner_error_value: object = getattr(
+        app_state, "direct_control_recovery_error", None
+    )
+    recovery_owner_error = (
+        recovery_owner_error_value
+        if isinstance(recovery_owner_error_value, str)
+        and recovery_owner_error_value
+        else None
+    )
 
     return {
         "circuit_breaker": cb_state,
@@ -429,6 +438,7 @@ def assemble_health_status(
         "sqlite_fallback": sqlite_fallback_diagnostics,
         "storage": storage_diagnostics,
         "dispatch_pairing_warning": dispatch_pairing_warning,
+        "recovery_owner_error": recovery_owner_error,
     }
 
 
@@ -499,6 +509,9 @@ def assemble_desktop_readiness(
 
     shared = assemble_health_status(app_state=app_state)
     reasons: list[str] = []
+    recovery_owner_error = shared["recovery_owner_error"]
+    if recovery_owner_error is not None:
+        reasons.append("recovery owner failed")
 
     # --- Gateway readiness: a valid database, worker state notwithstanding. ---
     # Every readiness surface passes in a live probe verdict (``database_ready``);
@@ -594,7 +607,10 @@ def assemble_desktop_readiness(
         reasons.append("no subprocess provider is installed and credentialed here")
 
     # --- Run admission: execution readiness, distinct from gateway readiness. ---
-    if gateway_readiness is not GatewayReadiness.READY:
+    if (
+        gateway_readiness is not GatewayReadiness.READY
+        or recovery_owner_error is not None
+    ):
         run_admission = RunAdmission.BLOCKED
     elif (
         worker_state is WorkerLifecycleState.READY
@@ -763,6 +779,15 @@ async def build_full_health(
     # --- Circuit breaker & spawner ---
     checks["circuit_breaker"] = {"status": circuit_breaker.state}
     checks["worker_spawned"] = {"status": "yes" if worker_spawner.spawned else "no"}
+    recovery_owner_error = shared["recovery_owner_error"]
+    checks["recovery_owner"] = (
+        {
+            "status": "error",
+            "detail": "periodic recovery owner failed",
+        }
+        if recovery_owner_error is not None
+        else {"status": "ok"}
+    )
     if shared["worker_stderr_log_path"] is not None:
         checks["worker_stderr_log"] = {"status": "configured"}
 
@@ -773,6 +798,7 @@ async def build_full_health(
         and checks["checkpoint"]["status"] == "ok"
         and checks["worker"]["status"] == "ok"
         and checks["circuit_breaker"]["status"] == "closed"
+        and checks["recovery_owner"]["status"] == "ok"
     )
     return {
         "status": "ok" if ready else "degraded",

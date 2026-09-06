@@ -410,8 +410,8 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 app.state.direct_control_recovery_error = None
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
-                app.state.direct_control_recovery_error = type(exc).__name__
+            except Exception:
+                app.state.direct_control_recovery_error = "recovery_pass_failed"
                 logger.exception("Direct recovery pass failed; the owner will retry")
 
         async def _redispatch_recovery() -> None:

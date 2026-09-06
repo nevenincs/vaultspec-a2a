@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:e8c9062c88feac191774b3de0296a0dc25bc092a62a59ee3ba3a027d5e7d1edf'
+body_hash: 'sha256:bec2f270365daad783ce9930d3bf99b9d653a0c6032feac263c3c179c89b965f'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -161,3 +161,5 @@ The Dashboard migration owner already runs the packaged migration entrypoint und
 Formal S77 review showed that schema-object names alone are not identity. A same-name `CHECK (1)` and a same-name unique index over `threads.id` could pass the initial validators. The correction gives ordinary compatibility and migration preflight one current fingerprint for required column shapes, normalized named predicates and the exact unique receipt-index column sequence. SQLite compatibility extracts balanced named CHECK expressions from the read-only `CREATE TABLE` text and reads index columns through parameterized pragma queries. Alembic preflight uses dialect inspection and applies structural validation to empty stores already at 0017 or a descendant as well as every populated store. Empty pre-0017 stores remain eligible for 0017 installation, and valid populated 0017 stores remain eligible for later current migrations.
 
 PostgreSQL inspection commonly renders equivalent checks with text casts, `btrim`, redundant parentheses and `ARRAY`/`ANY`; the shared fingerprint normalizes those dialect forms and has a deterministic rendered-expression proof. No locked PostgreSQL service or connection environment was available for this correction pass, so live PostgreSQL catalog output remains a MEDIUM evidence gap. This does not weaken the SQLite Dashboard contract or silently declare PostgreSQL unsupported.
+
+Formal rereview `e52bd82e` found that the first SQLite extractor still searched raw `CREATE TABLE` text and could count a complete required constraint hidden in a block comment. The correction replaces raw regular-expression discovery with one SQLite lexical scan. It skips line and block comments, string literals and SQLite quoted identifiers while discovering constraint declarations and while balancing each real `CHECK` predicate; the extracted predicate slice retains its literals for exact normalization. Unterminated comments, strings or quoted identifiers, unbalanced predicates and duplicate constraint names fail closed. Both ordinary compatibility and SQLite migration preflight consume this same extractor, while non-SQLite dialects retain catalog inspection and the open PostgreSQL evidence obligation.

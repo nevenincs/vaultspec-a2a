@@ -33,6 +33,8 @@ from ..compatibility import (
 from ..migrate import run_migrations
 from ..session import init_db
 from ._write_authority_schema_cases import (
+    CheckTextCarrier,
+    hide_authority_checks_in_non_code,
     point_receipt_index_at_thread_id,
     replace_authority_checks_with_true,
 )
@@ -109,6 +111,24 @@ class TestCompatibleStoresValidateWithoutMutation:
 
 
 class TestIncompatibleStoresFailLoud:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "carrier", ["block-comment", "line-comment", "string-literal"]
+    )
+    async def test_required_check_text_outside_sql_code_is_refused_read_only(
+        self, runtime_dir: Path, carrier: CheckTextCarrier
+    ) -> None:
+        primary, checkpoint = await _make_compatible_stores(runtime_dir)
+        hide_authority_checks_in_non_code(primary, carrier)
+        before = _schema_dump(primary)
+
+        with pytest.raises(SchemaCompatibilityError, match=r"required current.*checks"):
+            await validate_desktop_schema(
+                database_url=_url(primary), checkpoint_path=checkpoint
+            )
+
+        assert _schema_dump(primary) == before
+
     @pytest.mark.asyncio
     async def test_same_named_permissive_checks_are_refused_read_only(
         self, runtime_dir: Path

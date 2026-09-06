@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:868d2bba16fedf18e7a816fc15630a95290fde8ab6c3c28cc5b9e5fa7bfa8dff'
+body_hash: 'sha256:d34d2d1b58f629bdd708099d28517a3119d07c2ff4c1a1a0e7ab244647da3c7a'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1232,6 +1232,10 @@ Type: schema integrity and admission safety. Formal FAIL `da7cd035` proved that 
 ### w02-p03-s77-postgresql-fingerprint-evidence | medium | open
 
 Type: dialect validation evidence. PostgreSQL remains a locked server dependency profile. The correction normalizes the catalog forms PostgreSQL uses for equivalent VARCHAR checks, including casts, `btrim`, redundant parentheses and `ARRAY`/`ANY`, and the deterministic rendered-expression proof passes. No locked PostgreSQL service or connection environment was available during this bounded correction, so real catalog introspection and a live future-migration admission proof remain open. The Dashboard SQLite product path has real-store proof.
+
+### w02-p03-s77-sqlite-check-lexer-formal-rereview-fail | high | resolved pending formal rereview
+
+Type: schema integrity and admission safety. Formal rereview FAIL `e52bd82e` proved that the first SQLite extractor could count a complete required `CONSTRAINT ... CHECK (...)` sequence hidden in raw `CREATE TABLE` comments. The correction replaces regex discovery with a fail-closed SQLite lexical scan shared by ordinary compatibility and SQLite migration preflight. It ignores block comments, line comments, string literals and quoted identifiers during discovery and parenthesis balancing, preserves literals inside actual predicates, and rejects unterminated lexemes, unbalanced predicates and duplicate constraint names. The 16-case lexical gate passes in 0.11 seconds; three real-SQLite comment/string forgeries are refused read-only in 11.60 seconds; five migration-preflight forgeries are refused in 7.12 seconds; canonical populated current migration admission passes in 1.12 seconds. The exact receipt-index correction remains intact, the PostgreSQL evidence gap remains MEDIUM/open, and formal rereview is still required.
 
 ### w02-p03-s77-correction-module-teardown | medium | open under resource-aware-test-execution
 

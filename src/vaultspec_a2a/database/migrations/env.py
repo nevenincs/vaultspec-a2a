@@ -29,6 +29,7 @@ from vaultspec_a2a.database.models import (  # absolute-import-ok
 from vaultspec_a2a.database.write_authority_schema import (  # absolute-import-ok
     WRITE_ACTION_SQL_VALUES,
     WRITE_AUTHORITY_COLUMNS,
+    extract_named_check_predicates,
     write_authority_checks_match,
     write_authority_receipt_index_matches,
 )
@@ -165,11 +166,22 @@ def do_run_migrations(connection: Connection) -> None:
             has_structure = all(
                 actual.get(name) == shape for name, shape in expected.items()
             )
-            checks = {
-                str(check["name"]): str(check["sqltext"])
-                for check in inspector.get_check_constraints("threads")
-                if check.get("name") is not None
-            }
+            if connection.dialect.name == "sqlite":
+                create_table_sql = connection.exec_driver_sql(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'threads'"
+                ).scalar_one_or_none()
+                checks = (
+                    extract_named_check_predicates(str(create_table_sql))
+                    if create_table_sql is not None
+                    else {}
+                )
+            else:
+                checks = {
+                    str(check["name"]): str(check["sqltext"])
+                    for check in inspector.get_check_constraints("threads")
+                    if check.get("name") is not None
+                }
             if (
                 not has_structure
                 or not write_authority_receipt_index_matches(

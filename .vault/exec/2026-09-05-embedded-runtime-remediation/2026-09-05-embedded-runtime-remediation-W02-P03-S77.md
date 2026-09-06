@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:9d98f21fc3c83fdf3911b719171d577f8de077364488c0c0db2f0f0894401751'
+body_hash: 'sha256:b91788caa31f319cf59ce7da2f11320fc7800c828f7da6d8a169a7ccab1384ae'
 step_id: 'S77'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -108,7 +108,19 @@ related:
 - `verify:` `pytest` exact forged-schema read-only compatibility discriminator -> `pass` (2 tests in 2.39 seconds)
 - `verify:` `pytest` canonical read-only compatibility discriminator -> `pass` (1 test in 1.14 seconds)
 - `verify:` `pytest src/vaultspec_a2a/database/tests/test_write_authority_schema.py -q` -> `pass` (3 tests in 0.07 seconds)
+- `M` `src/vaultspec_a2a/database/write_authority_schema.py`
+- `M` `src/vaultspec_a2a/database/migrations/env.py`
+- `M` `src/vaultspec_a2a/database/tests/_write_authority_schema_cases.py`
+- `M` `src/vaultspec_a2a/database/tests/test_write_authority_schema.py`
+- `M` `src/vaultspec_a2a/database/tests/test_compatibility.py`
+- `M` `src/vaultspec_a2a/database/tests/test_thread_write_authority_migration.py`
+- `verify:` `pytest src/vaultspec_a2a/database/tests/test_write_authority_schema.py -q` -> `pass` (16 tests in 0.11 seconds)
+- `verify:` exact real-SQLite comment/string compatibility discriminator -> `pass` (3 tests in 11.60 seconds)
+- `verify:` exact forged-schema migration-preflight discriminator -> `pass` (5 tests in 7.12 seconds)
+- `verify:` exact populated-current migration discriminator -> `pass` (1 test in 1.12 seconds)
 
 ## Notes
 
 The compatibility rerun reached all 15 passing nodes and 100% before the separately queued pytest teardown stall. Session `62322` was interrupted immediately; its exact command-line process was absent. The completed four-case discriminator is the terminal pytest pass for S77.
+
+Formal rereview `e52bd82e` found that the initial balanced extractor could count required constraint text hidden in SQLite comments. The correction lexes SQLite table DDL, excludes comments, literals and quoted identifiers from discovery and balancing, preserves actual predicate literals, and fails closed on malformed or duplicate declarations. S77 remains open for another formal rereview; the live PostgreSQL catalog evidence and test teardown findings remain open.

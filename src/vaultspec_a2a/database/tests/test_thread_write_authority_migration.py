@@ -19,6 +19,7 @@ from ..models import RunWriteAuthority
 from ..permission_repository import create_control_action
 from ..thread_repository import create_thread
 from ._write_authority_schema_cases import (
+    hide_authority_checks_in_non_code,
     point_receipt_index_at_thread_id,
     replace_authority_checks_with_true,
 )
@@ -164,6 +165,18 @@ async def test_runtime_runner_refuses_older_populated_store_before_any_revision(
     [
         ("permissive-checks", replace_authority_checks_with_true),
         ("wrong-index-column", point_receipt_index_at_thread_id),
+        (
+            "checks-hidden-in-block-comments",
+            lambda path: hide_authority_checks_in_non_code(path, "block-comment"),
+        ),
+        (
+            "checks-hidden-in-line-comments",
+            lambda path: hide_authority_checks_in_non_code(path, "line-comment"),
+        ),
+        (
+            "checks-hidden-in-string-literals",
+            lambda path: hide_authority_checks_in_non_code(path, "string-literal"),
+        ),
     ],
 )
 async def test_runtime_runner_refuses_forged_empty_current_schema(

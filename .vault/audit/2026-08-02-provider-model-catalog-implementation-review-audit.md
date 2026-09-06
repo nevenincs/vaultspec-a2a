@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:3ba4aa20f9e0f1b85a40b297788ee06e104c43dfeb082bb90eed67a7939428d8'
+body_hash: 'sha256:1e3ca1e44bf104b8975e732d9e130e7250596dc82accc75539ff5a5b20f61ab7'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -708,7 +708,7 @@ lifecycle subset passes 32 tests. The only warning is the already queued
 Starlette `BlockingPortal` alias deprecation. P01.S11 remains open for independent
 formal review.
 
-### p01-s11-capacity-release-has-a-thread-id-aba-race | high | open
+### p01-s11-capacity-release-has-a-thread-id-aba-race | high | resolved pending formal review
 
 Type: concurrency admission and reservation ownership. Endpoint and direct
 entry now reserve capacity before checkpoint or compile work, but the reservation
@@ -758,3 +758,20 @@ The committed 145 focused and 585 expanded results, eight known server-profile
 environment failures, six OpenAPI checks and static/Core evidence are consistent
 with the reviewed positive paths. S11 stays open; this review changes no runtime
 or plan row.
+
+### p01-s11-capacity-generation-ownership-correction | high | resolved pending formal review
+
+Type: concurrency admission and reservation ownership. Each admitted ingest or
+resume now receives an opaque process-local reservation object with a monotonic
+generation. The active map retains that exact object, and cleanup removes a slot
+only when object identity still matches. Endpoint duplicate/schedule-error paths,
+direct dispatch, terminal settlement, pre-run refusal, timeout and cancellation
+all carry or recover the owning token; their outer finalizers may repeat release
+safely because a stale token cannot remove a newer generation.
+
+The orchestrated ABA control queues A's release and B's same-thread reservation
+on the production lock, proves B acquires a different generation before A's stale
+final release, fills the remaining configured slots, and proves a third dispatch
+is refused while B remains counted. Existing real endpoint, completion, failure,
+held-SQLite timeout and task-cancellation controls exercise every cleanup class.
+P01.S11 remains open for independent formal re-review.

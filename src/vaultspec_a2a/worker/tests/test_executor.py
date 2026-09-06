@@ -189,7 +189,7 @@ class TestIngestGating:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 result = await executor.reserve_dispatch_capacity("t-1")
-                assert result is True
+                assert result is not None
             finally:
                 await bridge.close()
 
@@ -202,7 +202,57 @@ class TestIngestGating:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 await executor.reserve_dispatch_capacity("t-1")
                 result = await executor.reserve_dispatch_capacity("t-1")
-                assert result is False
+                assert result is None
+            finally:
+                await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_stale_dispatch_release_cannot_remove_a_new_generation(
+        self,
+    ) -> None:
+        """A's late cleanup cannot erase B after B acquires the same thread."""
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                executor = Executor(checkpointer=cp, bridge=bridge)
+                first = await executor.reserve_dispatch_capacity("aba-thread")
+                assert first is not None
+
+                # Queue A's terminal release and B's reserve on the production
+                # lock in that order. Once A frees its generation, B becomes the
+                # current owner before A's outer-finally release arrives.
+                await executor._ingest_lock.acquire()
+                release_first = asyncio.create_task(
+                    executor.release_dispatch_capacity(first)
+                )
+                reserve_second = asyncio.create_task(
+                    executor.reserve_dispatch_capacity("aba-thread")
+                )
+                executor._ingest_lock.release()
+                assert await release_first is True
+                second = await reserve_second
+                assert second is not None
+                assert second != first
+
+                # The stale finalizer is ownership checked. Fill every remaining
+                # slot to prove B remains counted and an additional dispatch is
+                # refused at the configured process bound.
+                assert await executor.release_dispatch_capacity(first) is False
+                others = []
+                for index in range(domain_config.max_concurrent_threads - 1):
+                    owned = await executor.reserve_dispatch_capacity(f"other-{index}")
+                    assert owned is not None
+                    others.append(owned)
+                assert (
+                    executor.active_ingest_count == domain_config.max_concurrent_threads
+                )
+                assert await executor.reserve_dispatch_capacity("over-capacity") is None
+
+                assert await executor.release_dispatch_capacity(second) is True
+                for owned in others:
+                    assert await executor.release_dispatch_capacity(owned) is True
+                assert executor.active_ingest_count == 0
             finally:
                 await bridge.close()
 
@@ -213,8 +263,8 @@ class TestIngestGating:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                assert await executor.reserve_dispatch_capacity("t-1") is True
-                assert await executor.reserve_dispatch_capacity("t-2") is True
+                assert await executor.reserve_dispatch_capacity("t-1") is not None
+                assert await executor.reserve_dispatch_capacity("t-2") is not None
             finally:
                 await bridge.close()
 
@@ -225,11 +275,14 @@ class TestIngestGating:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                await executor.reserve_dispatch_capacity("t-1")
-                await executor._mark_ingest_done("t-1", ThreadStatus.COMPLETED)
+                reservation = await executor.reserve_dispatch_capacity("t-1")
+                assert reservation is not None
+                await executor._mark_ingest_done(
+                    "t-1", ThreadStatus.COMPLETED, reservation
+                )
                 # Slot is now free -- can re-acquire
                 result = await executor.reserve_dispatch_capacity("t-1")
-                assert result is True
+                assert result is not None
             finally:
                 await bridge.close()
 
@@ -1609,7 +1662,8 @@ class TestUnhandledDispatchTerminal:
             try:
                 # The slot the ingest took before it died, taken through the
                 # executor's own gate rather than by reaching into its state.
-                assert await executor.reserve_dispatch_capacity(thread_id) is True
+                reservation = await executor.reserve_dispatch_capacity(thread_id)
+                assert reservation is not None
                 await executor._fail_unhandled_dispatch(
                     DispatchRequest(
                         action="ingest",
@@ -1620,6 +1674,7 @@ class TestUnhandledDispatchTerminal:
                         model_assignment=_current_assignment(),
                     ),
                     _wrapped_failure(),
+                    reservation,
                 )
                 await bridge.flush_events()
 
@@ -1664,7 +1719,7 @@ class TestUnhandledDispatchTerminal:
             try:
                 # The slot a live ingest would hold, taken through the executor's
                 # own gate rather than by reaching into its state.
-                assert await executor.reserve_dispatch_capacity(thread_id) is True
+                assert await executor.reserve_dispatch_capacity(thread_id) is not None
                 await executor._fail_unhandled_dispatch(
                     DispatchRequest(
                         action="cancel",

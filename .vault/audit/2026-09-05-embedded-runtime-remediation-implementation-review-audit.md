@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:28c1bbf2b14a51369165205c7ddf1e839effa4bcab35a49774b97076307556c8'
+body_hash: 'sha256:6a26ca320e5d95af10fc6b019b27f0c2e668b0d85f0fe43c3a538e8c23cfa543'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -660,3 +660,15 @@ thread-id reservation in `_mark_ingest_done` and again in the outer handler
 old owner. Require one owned/tokenized or single-site release invariant and an
 orchestrated A-terminal/B-reserve/A-finally discriminator across endpoint and
 direct paths. No remediation row is closed by this audit update.
+
+### p01-s11-capacity-generation-ownership-correction | high | resolved pending formal review
+
+Type: remediation prerequisite and concurrency integrity. Worker capacity is now
+owned by an opaque per-dispatch generation token rather than a bare thread-id set.
+Every release is identity checked, so an older terminal or outer-finally cleanup
+cannot erase a new dispatch's reservation after same-thread reuse. The
+orchestrated A-release/B-reserve/A-finally control proves B remains counted and
+holds the configured bound against a third dispatch; endpoint and direct
+completion, failure, timeout and cancellation controls retain their release
+coverage. Owner remains P01.S11; S11 and remediation W01.P02.S05 stay open for
+formal re-review.

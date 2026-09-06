@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -127,6 +128,14 @@ class ConcurrentCapError(RuntimeError):
     """Raised when the worker concurrent thread cap is reached."""
 
 
+@dataclass(frozen=True, slots=True)
+class DispatchCapacityReservation:
+    """Opaque ownership proof for one admitted ingest or resume dispatch."""
+
+    thread_id: str
+    generation: int
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -190,8 +199,12 @@ class Executor:
 
         self._aggregator.add_broadcast_hook(_relay_event)
 
-        self._active_ingests: set[str] = set()
+        self._active_ingests: dict[str, DispatchCapacityReservation] = {}
         self._ingest_lock = asyncio.Lock()
+        self._next_capacity_generation = 0
+        self._dispatch_reservation: ContextVar[DispatchCapacityReservation | None] = (
+            ContextVar("dispatch_capacity_reservation", default=None)
+        )
 
     @property
     def aggregator(self) -> EventAggregator:
@@ -277,26 +290,46 @@ class Executor:
                 ),
             )
 
-    async def reserve_dispatch_capacity(self, thread_id: str) -> bool:
+    async def reserve_dispatch_capacity(
+        self, thread_id: str
+    ) -> DispatchCapacityReservation | None:
         """Atomically reserve pre-compile capacity for one thread dispatch."""
-        return await self._reserve_dispatch_capacity(thread_id) == _CAPACITY_ACCEPTED
+        reservation, _reason = await self._reserve_dispatch_capacity(thread_id)
+        return reservation
 
-    async def _reserve_dispatch_capacity(self, thread_id: str) -> str:
+    async def _reserve_dispatch_capacity(
+        self, thread_id: str
+    ) -> tuple[DispatchCapacityReservation | None, str]:
         """Return the bounded reason for one atomic capacity decision."""
         async with self._ingest_lock:
             if thread_id in self._active_ingests:
-                return _CAPACITY_THREAD_ACTIVE
+                return None, _CAPACITY_THREAD_ACTIVE
             if len(self._active_ingests) >= domain_config.max_concurrent_threads:
-                return _CAPACITY_FULL
-            self._active_ingests.add(thread_id)
-            return _CAPACITY_ACCEPTED
+                return None, _CAPACITY_FULL
+            self._next_capacity_generation += 1
+            reservation = DispatchCapacityReservation(
+                thread_id=thread_id,
+                generation=self._next_capacity_generation,
+            )
+            self._active_ingests[thread_id] = reservation
+            return reservation, _CAPACITY_ACCEPTED
 
-    async def release_dispatch_capacity(self, thread_id: str) -> None:
-        """Release a pre-compile capacity reservation idempotently."""
+    async def release_dispatch_capacity(
+        self, reservation: DispatchCapacityReservation
+    ) -> bool:
+        """Release only the exact dispatch reservation supplied by its owner."""
         async with self._ingest_lock:
-            self._active_ingests.discard(thread_id)
+            if self._active_ingests.get(reservation.thread_id) is not reservation:
+                return False
+            self._active_ingests.pop(reservation.thread_id)
+            return True
 
-    async def _mark_ingest_done(self, thread_id: str, outcome: str) -> None:
+    async def _mark_ingest_done(
+        self,
+        thread_id: str,
+        outcome: str,
+        reservation: DispatchCapacityReservation | None = None,
+    ) -> None:
         """Release the ingest slot, untrack thread, prune aggregator.
 
         Drops the run's actor tokens only on a TERMINAL *outcome*. An
@@ -308,8 +341,7 @@ class Executor:
         interrupt-park).
         """
         async with self._ingest_lock:
-            self._active_ingests.discard(thread_id)
-            active_snapshot = set(self._active_ingests)
+            active_snapshot = set(self._active_ingests).difference({thread_id})
         # Drop the run's actor tokens when its active window truly closes,
         # i.e. a terminal outcome - never on an interrupt-park that will resume.
         if outcome in TERMINAL_STATUSES:
@@ -322,6 +354,9 @@ class Executor:
         self._aggregator.prune_sequences(active_snapshot)
         # Prune permissions older than 5 minutes regardless of thread state.
         self._aggregator.prune_stale_permissions()
+        reservation = reservation or self._dispatch_reservation.get()
+        if reservation is not None:
+            await self.release_dispatch_capacity(reservation)
 
     async def _close_authoring_session_best_effort(
         self, thread_id: str, graph: StreamableGraph, config: dict[str, Any]
@@ -448,6 +483,9 @@ class Executor:
         )
         self._graph_lifecycle.release_thread(req.thread_id)
         self._aggregator.remove_node_metadata(req.thread_id)
+        reservation = self._dispatch_reservation.get()
+        if reservation is not None:
+            await self.release_dispatch_capacity(reservation)
 
     async def _reject_missing_graph(
         self,
@@ -575,12 +613,12 @@ class Executor:
     async def handle_dispatch(self, req: DispatchRequest) -> None:
         """Reserve capacity and route a direct ``DispatchRequest`` call."""
         owns_slot = req.action in _SLOT_OWNING_ACTIONS
-        reservation = (
+        reservation, refusal_reason = (
             await self._reserve_dispatch_capacity(req.thread_id)
             if owns_slot
-            else _CAPACITY_ACCEPTED
+            else (None, _CAPACITY_ACCEPTED)
         )
-        if reservation != _CAPACITY_ACCEPTED:
+        if refusal_reason != _CAPACITY_ACCEPTED:
             guards = (
                 _INGEST_GUARDS
                 if req.action == ControlActionType.INGEST
@@ -588,12 +626,12 @@ class Executor:
             )
             action = (
                 guards.slot_held_action
-                if reservation == _CAPACITY_THREAD_ACTIVE
+                if refusal_reason == _CAPACITY_THREAD_ACTIVE
                 else "dispatch_capacity_refused"
             )
             logger.warning(
                 guards.slot_held
-                if reservation == _CAPACITY_THREAD_ACTIVE
+                if refusal_reason == _CAPACITY_THREAD_ACTIVE
                 else "Worker capacity refused dispatch for thread %s",
                 req.thread_id,
                 extra=self._dispatch_log_extra(
@@ -601,12 +639,15 @@ class Executor:
                 ),
             )
             return
-        await self.handle_reserved_dispatch(req, capacity_reserved=owns_slot)
+        await self.handle_reserved_dispatch(req, reservation)
 
     async def handle_reserved_dispatch(
-        self, req: DispatchRequest, *, capacity_reserved: bool = True
+        self,
+        req: DispatchRequest,
+        reservation: DispatchCapacityReservation | None,
     ) -> None:
         """Route an endpoint-admitted dispatch and always release its reservation."""
+        reservation_context = self._dispatch_reservation.set(reservation)
         try:
             async with ws_span(
                 f"executor.{req.action}",
@@ -664,13 +705,19 @@ class Executor:
                     action="dispatch_unhandled_exception",
                 ),
             )
-            await self._fail_unhandled_dispatch(req, exc)
+            await self._fail_unhandled_dispatch(req, exc, reservation)
         finally:
-            if capacity_reserved:
-                await self.release_dispatch_capacity(req.thread_id)
+            try:
+                if reservation is not None:
+                    await self.release_dispatch_capacity(reservation)
+            finally:
+                self._dispatch_reservation.reset(reservation_context)
 
     async def _fail_unhandled_dispatch(
-        self, req: DispatchRequest, exc: BaseException
+        self,
+        req: DispatchRequest,
+        exc: BaseException,
+        reservation: DispatchCapacityReservation | None = None,
     ) -> None:
         """Terminate a run whose dispatch died outside every inner handler.
 
@@ -739,7 +786,9 @@ class Executor:
                 provider_condition=condition,
             )
             if owns_slot:
-                await self._mark_ingest_done(req.thread_id, ThreadStatus.FAILED)
+                await self._mark_ingest_done(
+                    req.thread_id, ThreadStatus.FAILED, reservation
+                )
         except Exception:
             # This runs from the handler that keeps one bad run from taking the
             # worker's task group down with it, so it may not raise in turn - a
@@ -791,6 +840,9 @@ class Executor:
                 )
                 self._graph_lifecycle.release_thread(req.thread_id)
                 self._aggregator.remove_node_metadata(req.thread_id)
+                reservation = self._dispatch_reservation.get()
+                if reservation is not None:
+                    await self.release_dispatch_capacity(reservation)
                 return
             if pre_flight_outcome == ThreadStatus.FAILED:
                 logger.warning(

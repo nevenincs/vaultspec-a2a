@@ -309,9 +309,12 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
             return DispatchResponse(status="dispatched", thread_id=req.thread_id)
 
         owns_capacity = req.action in {"ingest", "resume"}
-        if owns_capacity and not await executor.reserve_dispatch_capacity(
-            req.thread_id
-        ):
+        reservation = (
+            await executor.reserve_dispatch_capacity(req.thread_id)
+            if owns_capacity
+            else None
+        )
+        if owns_capacity and reservation is None:
             raise HTTPException(
                 status_code=429,
                 detail="Worker at capacity — too many concurrent threads",
@@ -321,19 +324,22 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         # the worker's synchronous duplicate-dispatch boundary.
         if not dispatch_ids.admit(req.dispatch_id):
             if owns_capacity:
-                await executor.release_dispatch_capacity(req.thread_id)
+                assert reservation is not None
+                await executor.release_dispatch_capacity(reservation)
             return DispatchResponse(status="dispatched", thread_id=req.thread_id)
 
         # Fire-and-forget: the task group keeps the task alive even after
         # this endpoint handler returns.
         try:
             if owns_capacity:
-                tg.start_soon(executor.handle_reserved_dispatch, req)
+                assert reservation is not None
+                tg.start_soon(executor.handle_reserved_dispatch, req, reservation)
             else:
                 tg.start_soon(executor.handle_dispatch, req)
         except BaseException:
             if owns_capacity:
-                await executor.release_dispatch_capacity(req.thread_id)
+                assert reservation is not None
+                await executor.release_dispatch_capacity(reservation)
             raise
         logger.info(
             "Worker dispatch accepted",

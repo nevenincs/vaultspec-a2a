@@ -41,6 +41,7 @@ from ..thread.enums import (
 from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import AcceptedActionInput, freeze_accepted_input
 from .action_lease import (
+    DispatchFailureDisposition,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
     record_dispatch_failure,
@@ -423,9 +424,10 @@ async def respond_to_clarification(
         detail = outcome.detail or "Worker dispatch failed"
         if failure_type is None:
             raise RuntimeError("failed dispatch carries no failure type")
-        if await record_dispatch_failure(
+        settlement = await record_dispatch_failure(
             db, claim, failure_type, detail=detail
-        ):
+        )
+        if settlement is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
             # A released claim means the worker certainly scheduled no task, so
             # the answer demonstrably did not reach the parked node. The run is
             # untouched by that - it is still parked on the same questionnaire,

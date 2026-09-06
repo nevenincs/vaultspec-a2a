@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CONTROL_ACTION_LEASE_TTL",
     "ControlActionClaim",
+    "DispatchFailureDisposition",
     "finalize_control_action_acceptance",
     "prepare_control_action_claim",
     "record_dispatch_failure",
@@ -56,6 +58,16 @@ class ControlActionClaim:
     applied: bool
     result_status: str
     claim_token: str | None
+
+
+class DispatchFailureDisposition(StrEnum):
+    """Exact durable result of settling one failed dispatch attempt."""
+
+    DEFINITE_NON_DELIVERY = "definite_non_delivery"
+    AMBIGUOUS_DELIVERY = "ambiguous_delivery"
+    AUTHORITY_LOST = "authority_lost"
+    DEADLINE_EXPIRED = "deadline_expired"
+    APPLICATION_WON = "application_won"
 
 
 async def prepare_control_action_claim(
@@ -183,35 +195,40 @@ async def record_dispatch_failure(
     *,
     detail: str | None,
     observed_at: datetime | None = None,
-) -> bool:
+) -> DispatchFailureDisposition:
     """Persist the typed outcome and release only proven non-delivery leases."""
     instant = observed_at or datetime.now(UTC)
     action = await db.get(ControlActionModel, claim.action_id, with_for_update=True)
+    if action is None or action.dispatch_id != claim.dispatch_id:
+        return DispatchFailureDisposition.AUTHORITY_LOST
+    if action.applied_at is not None:
+        return DispatchFailureDisposition.APPLICATION_WON
     if (
-        action is None
-        or action.dispatch_id != claim.dispatch_id
-        or action.applied_at is not None
-        or action.recovery_deadline_at is None
+        action.recovery_deadline_at is None
         or action.recovery_deadline_at <= instant
     ):
-        return False
+        return DispatchFailureDisposition.DEADLINE_EXPIRED
+    if claim.claim_token is None or action.claim_token != claim.claim_token:
+        return DispatchFailureDisposition.AUTHORITY_LOST
     thread = await db.get(ThreadModel, action.thread_id, with_for_update=True)
     if thread is None:
-        return False
+        return DispatchFailureDisposition.AUTHORITY_LOST
     authority = thread_write_expectation(thread).authority
     if (
         authority.action_type.value != action.action_type
         or authority.action_receipt_id != action.dispatch_id
     ):
-        return False
+        return DispatchFailureDisposition.AUTHORITY_LOST
 
-    released = False
-    if claim.claim_token is not None and failure_type in _DEFINITE_NON_DELIVERY:
-        released = await release_control_action_lease(
+    disposition = DispatchFailureDisposition.AMBIGUOUS_DELIVERY
+    if failure_type in _DEFINITE_NON_DELIVERY:
+        if not await release_control_action_lease(
             db,
             claim.action_id,
             claim_token=claim.claim_token,
-        )
+        ):
+            return DispatchFailureDisposition.AUTHORITY_LOST
+        disposition = DispatchFailureDisposition.DEFINITE_NON_DELIVERY
     await record_recovery_failure(
         db,
         thread_id=action.thread_id,
@@ -225,4 +242,4 @@ async def record_dispatch_failure(
         deadline_at=action.recovery_deadline_at,
         detail=detail,
     )
-    return released
+    return disposition

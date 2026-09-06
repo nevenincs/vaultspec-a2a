@@ -16,7 +16,11 @@ from ...database.session import configure_sqlite_transactions
 from ...database.thread_repository import create_thread
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, RecoveryCondition
-from ..action_lease import ControlActionClaim, record_dispatch_failure
+from ..action_lease import (
+    ControlActionClaim,
+    DispatchFailureDisposition,
+    record_dispatch_failure,
+)
 from ..recovery import (
     acquire_due_recovery_attempts,
     record_recovery_failure,
@@ -140,12 +144,15 @@ async def test_live_dispatch_failure_persists_condition_and_releases_known_non_d
         claim_token="live-owner",
     )
     async with sessions() as db:
-        assert await record_dispatch_failure(
-            db,
-            claim,
-            FailureType.AT_CAPACITY,
-            detail="worker capacity reached",
-            observed_at=now,
+        assert (
+            await record_dispatch_failure(
+                db,
+                claim,
+                FailureType.AT_CAPACITY,
+                detail="worker capacity reached",
+                observed_at=now,
+            )
+            is DispatchFailureDisposition.DEFINITE_NON_DELIVERY
         )
         await db.commit()
 
@@ -164,6 +171,35 @@ async def test_live_dispatch_failure_persists_condition_and_releases_known_non_d
     assert attempt.attempt_count == 1
     assert attempt.detail == "worker capacity reached"
     assert attempt.settled_at is None
+
+    async with sessions() as db:
+        current_action = await db.get(type(action), action.id)
+        assert current_action is not None
+        current_action.claim_token = "replacement-owner"
+        current_action.claim_expires_at = now + timedelta(seconds=90)
+        await db.commit()
+    async with sessions() as db:
+        assert (
+            await record_dispatch_failure(
+                db,
+                claim,
+                FailureType.UNREACHABLE,
+                detail="stale caller",
+                observed_at=now + timedelta(seconds=1),
+            )
+            is DispatchFailureDisposition.AUTHORITY_LOST
+        )
+        await db.commit()
+    async with sessions() as db:
+        unchanged = await db.scalar(
+            select(RecoveryAttemptModel).where(
+                RecoveryAttemptModel.thread_id == "cancel-run"
+            )
+        )
+    assert unchanged is not None
+    assert unchanged.condition == RecoveryCondition.AT_CAPACITY.value
+    assert unchanged.attempt_count == 1
+    assert unchanged.detail == "worker capacity reached"
 
 
 @pytest.mark.asyncio

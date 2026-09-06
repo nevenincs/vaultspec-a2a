@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..control.action_lease import (
+    DispatchFailureDisposition,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
     record_dispatch_failure,
@@ -243,10 +244,10 @@ async def send_followup_message(
         detail = outcome.detail or "Worker dispatch failed"
         if typed_failure is None:
             raise RuntimeError("failed dispatch carries no failure type")
-        released = await record_dispatch_failure(
+        settlement = await record_dispatch_failure(
             db, claim, typed_failure, detail=detail
         )
-        if released:
+        if settlement is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
             # The lease is released only where the worker certainly scheduled no
             # task, so this is the one arm that KNOWS the message never arrived,
             # and the only one entitled to say so durably. An ambiguous failure

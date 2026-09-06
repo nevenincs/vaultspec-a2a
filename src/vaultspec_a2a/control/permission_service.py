@@ -45,6 +45,7 @@ from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import AcceptedActionInput, freeze_accepted_input
 from .action_lease import (
     ControlActionClaim,
+    DispatchFailureDisposition,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
     record_dispatch_failure,
@@ -960,12 +961,15 @@ async def _dispatch_permission_resume(
         policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
         if typed_failure is None:
             raise RuntimeError("failed dispatch carries no failure type")
-        released = await record_dispatch_failure(
+        settlement = await record_dispatch_failure(
             db, claim, typed_failure, detail=outcome.detail
         )
-        if released:
+        if settlement is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
             await reset_permission_response_submission(db, request_id=request_id)
-        if policy.should_mark_failed:
+        if policy.should_mark_failed and settlement in {
+            DispatchFailureDisposition.DEFINITE_NON_DELIVERY,
+            DispatchFailureDisposition.AMBIGUOUS_DELIVERY,
+        }:
             await apply_dispatch_failure(
                 db,
                 thread_id,

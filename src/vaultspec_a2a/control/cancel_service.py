@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
+    DispatchFailureDisposition,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
     record_dispatch_failure,
@@ -377,10 +378,10 @@ async def cancel_thread(
         _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
         if typed_failure is None:
             raise RuntimeError("failed dispatch carries no failure type")
-        released = await record_dispatch_failure(
+        settlement = await record_dispatch_failure(
             db, claim, typed_failure, detail=outcome.detail
         )
-        if not released:
+        if settlement is DispatchFailureDisposition.AMBIGUOUS_DELIVERY:
             # UNREACHABLE is ambiguous: the worker may have scheduled the
             # cancellation before the acknowledgement was lost.  Keep both the
             # durable lease and the cancelling projection so restart/TTL
@@ -397,6 +398,45 @@ async def cancel_thread(
                 applied=False,
                 action_status=ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value,
                 idempotency_key=response_idempotency_key,
+            )
+        if settlement is DispatchFailureDisposition.APPLICATION_WON:
+            await db.refresh(thread)
+            await db.commit()
+            return CancelResult(
+                action_id=claim.action_id,
+                thread_id=thread_id,
+                cancelled=True,
+                thread_status=thread.status,
+                accepted=True,
+                applied=True,
+                action_status=ControlActionResultStatus.APPLIED.value,
+                idempotency_key=response_idempotency_key,
+            )
+        if settlement in {
+            DispatchFailureDisposition.AUTHORITY_LOST,
+            DispatchFailureDisposition.DEADLINE_EXPIRED,
+        }:
+            await db.refresh(thread)
+            await db.commit()
+            return CancelResult(
+                action_id=claim.action_id,
+                thread_id=thread_id,
+                cancelled=False,
+                thread_status=thread.status,
+                accepted=False,
+                applied=False,
+                action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+                idempotency_key=response_idempotency_key,
+                error_detail=(
+                    "Cancellation authority changed before failure settlement"
+                    if settlement is DispatchFailureDisposition.AUTHORITY_LOST
+                    else "The accepted run deadline expired"
+                ),
+                failure_type=(
+                    FailureType.INCOMPATIBLE_STATE
+                    if settlement is DispatchFailureDisposition.AUTHORITY_LOST
+                    else FailureType.DEADLINE_EXCEEDED
+                ),
             )
         logger.warning(
             "Cancel dispatch failed for thread %s after durable cancellation election",

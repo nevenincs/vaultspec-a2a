@@ -6,7 +6,7 @@ tags:
 date: '2026-08-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:f3197c1d55b4c1c9556a12dfab50501f7a27bde31365306d2efd21cb58acaf81'
+body_hash: 'sha256:bf8a96b4fe03dababa53ab29ebe8d7e559a13f78bbdf8a0aaa0d1f5ccb169574'
 related:
   - '[[2026-08-02-provider-model-catalog-P01-S10]]'
   - '[[2026-08-02-provider-model-catalog-P01-S11]]'
@@ -62,7 +62,7 @@ Auto-generated index of all documents tagged with `#provider-model-catalog`.
 
 - `2026-08-02-provider-model-catalog-ledger` - `provider-model-catalog` ledger
 - `2026-08-02-provider-model-catalog-P01-S10` - Remove every product provider/model/profile authority, static external model map, deprecated provider alias, legacy reader/writer/DTO and legacy restart or redispatch branch; remove the ACP `models.availableModels` compatibility fallback and retire the complete `gemini/gemini-cli-acp` provider, execution-mode, settings, auth, provisioning, permission, preset, factory, catalog and wire surface; reject retired input and stored state with a typed unsupported/incompatible outcome before construction or dispatch, without translation, migration or substitution
-- `2026-08-02-provider-model-catalog-P01-S11` - Prove catalog discovery, stale refusal, health separation, served validation, replay, frozen restart and legacy restart with real behavior; correct ER19 by asserting observed availability rather than a hardcoded unavailable state
+- `2026-08-02-provider-model-catalog-P01-S11` - Prove current provider catalog behavior, exact frozen restart and typed retirement refusal
 
 ### plan
 

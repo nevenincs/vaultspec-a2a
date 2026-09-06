@@ -10,7 +10,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-reference]]'
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
 modified: '2026-09-06'
-body_hash: 'sha256:601f1e644ffcf1ce6e04d79bbcd0ffc78fe46ecd7364b98aacd7bf43f144c886'
+body_hash: 'sha256:a6d59403b394165278879e50d11f473df01e2cab5a432ed9631b38b057515d61'
 ---
 
 <!-- RETIRED: S14, S18 -->
@@ -41,7 +41,7 @@ Build the provider-owned catalog, structured health, provider-native controls, f
 - [x] `P01.S08` - Replace new-run profile admission with required served selection, bounded overrides, explicit fallbacks, controls, validation, and replay identity; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [x] `P01.S09` - Freeze catalog provenance, exact model values, controls, fallbacks, execution modes, and schema version through compilation; `src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/graph/compiler.py`.
 - [x] `P01.S10` - Remove every product provider/model/profile authority, static external model map, deprecated provider alias, legacy reader/writer/DTO and legacy restart or redispatch branch; remove the ACP `models.availableModels` compatibility fallback and retire the complete `gemini/gemini-cli-acp` provider, execution-mode, settings, auth, provisioning, permission, preset, factory, catalog and wire surface; reject retired input and stored state with a typed unsupported/incompatible outcome before construction or dispatch, without translation, migration or substitution; `src/vaultspec_a2a/team/, src/vaultspec_a2a/graph/enums.py, src/vaultspec_a2a/providers/, src/vaultspec_a2a/control/, src/vaultspec_a2a/api/`.
-- [ ] `P01.S11` - Prove configOptions-only ACP catalog discovery, stale refusal, health separation, served validation, same-id replay and current-schema frozen restart with real behavior; prove `models.availableModels`, the retired Gemini provider/mode/configuration surface, and every other legacy provider/model/profile input or durable state are typed refused before construction or dispatch with no disclosure, translation, migration, substitution or redispatch; assert the supported-provider and exact-mode inventories contain no Gemini lane; retain the ER19 observed-availability correction and exact-mode admission assertions; `src/vaultspec_a2a/providers/tests/, src/vaultspec_a2a/api/tests/, src/vaultspec_a2a/service_tests/`.
+- [x] `P01.S11` - Prove configOptions-only ACP catalog discovery, stale refusal, health separation, served validation, same-id replay and current-schema frozen restart with real behavior; prove `models.availableModels`, the retired Gemini provider/mode/configuration surface, and every other legacy provider/model/profile input or durable state are typed refused before construction or dispatch with no disclosure, translation, migration, substitution or redispatch; assert the supported-provider and exact-mode inventories contain no Gemini lane; retain the ER19 observed-availability correction and exact-mode admission assertions; `src/vaultspec_a2a/providers/tests/, src/vaultspec_a2a/api/tests/, src/vaultspec_a2a/service_tests/`.
 
 ### Phase `P02` - Implement Dashboard and engine selection surfaces
 

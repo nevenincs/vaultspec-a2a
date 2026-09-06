@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:4aa0a7bcef21a06535ddc0058484a24fb441513c06c2f234da23eaba08df5df0'
+body_hash: 'sha256:cd801d108335cb4d37f98a7b8895d3f3a96e486ef96f97121d82e519fd88d03b'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -59,3 +59,11 @@ FAIL for the amended architecture as an immediately implementable S11-only chang
 Formal self-review of `thread/action_receipts.py`, its `TeamState` reducer and the real checkpoint test passes the declaration boundary. The version, journal action, fingerprint, dispatch and ownership fields are required, bounded and immutable. Cancellation cannot masquerade as graph incorporation. Receipt reuse with different evidence raises instead of replacing the prior fact. Existing clarification and permission state are unchanged. This is an incorporation declaration, explicitly not proof of terminal completion. S12 still owns production receipt creation and validation; S11/S83 and every runtime recovery finding remain open.
 
 Verification: the two focused tests passed in 0.31 seconds. The exact subprocess exited naturally with code 0 and an empty descendant census under a 60-second owner deadline. Ruff and Ty passed on the three changed source/test paths. No legacy interpretation, translation or inferred receipt is present.
+
+### initial-dispatch-authority | high | resolved at admission by S86; recovery consumption open
+
+Formal self-review of `control/thread_service.py` and `control/tests/test_thread_service_tokens.py` passes the initial admission boundary. The effective dispatch is built before the run INSERT; the run, stable action identity and versioned non-secret input record commit in one transaction before HTTP. An independent database session inside the receiving HTTP handler reads the same non-secret input and dispatch id. An invalid project fails before any durable reservation; even an explicit caller commit leaves no run or action. Actor-token values are absent from the journal while their required-presence flag is retained. Concurrent completion, deletion and a different cancellation writer preserve their existing election behavior.
+
+The initial admission part of incomplete-durable-dispatch is corrected. Recovery decoding and refusal, other action admission, frozen deadline authority and production incorporation remain open under S11/S12/S83; none is inferred from this result.
+
+Verification: the first five-case battery exited naturally with five passes in 19.12 seconds and zero survivors. After adding the invalid-input discriminator, one six-case command printed six dots but exceeded its 60-second owner deadline before producing a summary; it was terminated with zero survivors and is classified FAIL. The same six-case battery then completed through the resource-aware runner with run timeout 60 seconds and exit timeout 5 seconds: six passed in 3.54 seconds, process exit 0. Ruff and Ty passed on both changed paths. The earlier timeout is retained as verification-lifecycle evidence for S85, not relabelled as a pass.

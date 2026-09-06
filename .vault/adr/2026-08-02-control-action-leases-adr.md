@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:fee6515d06eca1d4185e92f869bd279cd610679300024526341b0f70a715811c'
+body_hash: 'sha256:ab00524e9550bade31439bd10235db490b932d9d1d33af80d8a3dc4c291699b5'
 related:
   - "[[2026-08-02-control-action-leases-research]]"
   - "[[2026-08-02-control-action-leases-reference]]"
@@ -95,3 +95,9 @@ Permanent current-schema refusal settles atomically and is never retried. Circui
 Checkpoint terminal truth takes precedence over timeout classification. A receipt mismatch is a current-schema integrity refusal, not a reason to leave accepted work pending. Startup and ordinary operation drain the same durable recovery owner. API reads may request an immediate coordinator pass but cannot create a second lease policy or report a pre-election projection.
 
 No retired action, provider or ownership representation is supported. Recovery never translates, backfills, aliases, substitutes or dispatches it.
+
+### Complete input precedes durable acceptance
+
+An initial graph action is accepted only when its run row, stable action receipt and complete effective non-secret dispatch input are committed together. Resolve local configuration and project inputs before acquiring the database write lock. The initial message, frozen assignment, effective controls and context belong to the accepted input; title and preset identifiers alone cannot authorize recovery of them.
+
+Ephemeral actor tokens never enter the journal or checkpoint. The durable record states whether the accepted dispatch requires those credentials. Recovery must obtain credentials through their existing authorized owner or return a typed refusal; it may not silently omit required tokens, store them durably, or substitute ambient authority. Missing or retired dispatch records are refused without reconstruction, translation or backfill. General checkpoint incorporation receipts identify the exact accepted journal action and payload; they do not certify terminal completion.

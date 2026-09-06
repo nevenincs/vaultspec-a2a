@@ -20,6 +20,7 @@ import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -61,16 +62,83 @@ async def session_factory(tmp_path_factory: pytest.TempPathFactory):
     await engine.dispose()
 
 
-def _capturing_worker(captured: dict[str, Any]) -> FastAPI:
+def _capturing_worker(
+    captured: dict[str, Any], session_factory: async_sessionmaker[AsyncSession]
+) -> FastAPI:
     """A real ASGI worker that records the dispatch body and acknowledges it."""
     app = FastAPI()
 
     @app.post("/dispatch")
     async def _dispatch(request: Request) -> JSONResponse:
-        captured["body"] = await request.json()
+        body = await request.json()
+        captured["body"] = body
+        async with session_factory() as session:
+            action = await session.scalar(
+                select(ControlActionModel).where(
+                    ControlActionModel.thread_id == body["thread_id"],
+                    ControlActionModel.dispatch_id == body["dispatch_id"],
+                )
+            )
+            assert action is not None
+            assert action.payload_json is not None
+            stored = json.loads(action.payload_json)
+            assert stored["schema"] == "initial-dispatch-v1"
+            assert stored["dispatch"] == {
+                key: value for key, value in body.items() if key != "actor_tokens"
+            }
+            assert stored["actor_tokens_required"] is (body["actor_tokens"] is not None)
+            captured["accepted_before_dispatch"] = stored
         return JSONResponse({"status": "dispatched", "thread_id": "x"})
 
     return app
+
+
+@pytest.mark.asyncio
+async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    thread_id = generate_thread_id()
+    captured: dict[str, Any] = {}
+    async with (
+        httpx.AsyncClient(
+            transport=ASGITransport(app=_capturing_worker(captured, session_factory)),
+            base_url="http://worker",
+        ) as client,
+        session_factory() as session,
+    ):
+        with pytest.raises(ValidationError):
+            await create_and_dispatch_thread(
+                session,
+                ThreadCreationRequest(
+                    thread_id=thread_id,
+                    title="invalid project",
+                    initial_message="must not be accepted",
+                    team_preset=_PRESET,
+                    autonomous=True,
+                    nickname=None,
+                    metadata=None,
+                    metadata_json=None,
+                    workspace_root=Path("relative-project"),
+                ),
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=1, recovery_timeout=1.0
+                ),
+                worker_spawner=LazyWorkerSpawner(
+                    worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+                ),
+                worker_client=client,
+                recursion_limit=20,
+                trace_headers=None,
+            )
+        await session.commit()
+    async with session_factory() as session:
+        assert await get_thread(session, thread_id) is None
+        assert await session.scalar(
+            select(ControlActionModel.id).where(
+                ControlActionModel.thread_id == thread_id
+            )
+        ) is None
+    assert captured == {}
 
 
 def _early_terminal_worker(
@@ -186,7 +254,7 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
 
     async with (
         httpx.AsyncClient(
-            transport=ASGITransport(app=_capturing_worker(captured)),
+            transport=ASGITransport(app=_capturing_worker(captured, session_factory)),
             base_url="http://worker",
         ) as worker_client,
         session_factory() as session,

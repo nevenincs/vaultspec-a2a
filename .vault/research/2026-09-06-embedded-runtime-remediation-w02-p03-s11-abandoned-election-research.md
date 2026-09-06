@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:e52fa75857afce9537da37c95d91c59a323332207530687f2860d822b417019f'
+body_hash: 'sha256:fac383b067e78a09b56bd09d3c1bdd8274d90595f49a90d7b4faebe7a673b7b1'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-audit]]"
@@ -58,3 +58,9 @@ A test result and process completion are separate obligations. The resource-awar
 - `src/vaultspec_a2a/control/run_discovery_service.py`
 - `src/vaultspec_a2a/database/thread_repository.py`
 - `src/vaultspec_a2a/testing`
+
+## Architecture review follow-up
+
+The production review in `2026-09-06-embedded-runtime-remediation-recovery-architecture-audit` identifies missing prerequisites beneath the proposed coordinator. General immutable checkpoint action receipts were absent; startup still used unconditional lifecycle writes; and worker preflight equated empty pending writes with completion. The initial action journal retained title, preset and autonomous input but omitted initial message content and effective dispatch arguments. The graph-action receipt declaration is now implemented; production evidence still depends on durable admission retaining the input it is supposed to certify.
+
+The initial dispatch can be constructed before the database write transaction because `ThreadCreationRequest` already carries the allocated run id. Persisting its non-secret serialized input together with the run removes the crash window without holding the SQLite write lock during project/configuration reads. Actor-token values remain transport-only; recovery needs an explicit fact stating whether such credentials are required. The audit retains the remaining coordinator, checkpoint, integrity-quarantine, deadline and demand-gate findings.

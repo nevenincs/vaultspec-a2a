@@ -458,6 +458,52 @@ def process_metadata(
     return ws_root, nickname, metadata.model_dump_json()
 
 
+def _initial_dispatch(
+    req: ThreadCreationRequest, *, dispatch_id: str, recursion_limit: int
+) -> DispatchRequest:
+    """Resolve the accepted graph input before acquiring a database write lock."""
+    context_preamble: str | None = None
+    if req.metadata is not None:
+        preamble_msg = build_context_preamble(req.metadata)
+        context_preamble = (
+            preamble_msg.content
+            if isinstance(preamble_msg.content, str)
+            else str(preamble_msg.content)
+        )
+    team_config = None
+    if req.team_preset:
+        with contextlib.suppress(ConfigError, TeamConfigNotFoundError):
+            team_config = load_team_config(
+                req.team_preset, workspace_root=req.workspace_root
+            )
+    feature_tag = req.metadata.feature_tag if req.metadata else None
+    return DispatchRequest(
+        dispatch_id=dispatch_id,
+        action=to_dispatch_action(ControlActionType.INGEST),
+        thread_id=req.thread_id,
+        team_preset=req.team_preset,
+        workspace_root=str(req.workspace_root),
+        autonomous=resolve_autonomous(req.autonomous, team_config),
+        metadata_json=req.metadata_json,
+        content=req.initial_message,
+        context_preamble=context_preamble,
+        recursion_limit=recursion_limit,
+        active_feature=feature_tag,
+        feedback_batch_id=(
+            (req.metadata.feedback_batch_id or None) if req.metadata else None
+        ),
+        pipeline_phase=None,
+        vault_index=(
+            build_initial_vault_index(req.workspace_root, req.metadata.feature_tag)
+            if (req.metadata and req.metadata.feature_tag)
+            else {}
+        ),
+        validation_errors=[],
+        actor_tokens=req.actor_tokens,
+        model_assignment=req.model_assignment,
+    )
+
+
 async def create_and_dispatch_thread(
     db: AsyncSession,
     req: ThreadCreationRequest,
@@ -479,6 +525,15 @@ async def create_and_dispatch_thread(
         NicknameConflictError: If the requested nickname is already taken.
     """
     action_receipt_id = uuid4().hex
+    if not req.thread_id.strip():
+        raise ValueError("run admission requires an allocated thread identity")
+    dispatch = (
+        _initial_dispatch(
+            req, dispatch_id=action_receipt_id, recursion_limit=recursion_limit
+        )
+        if requires_dispatch(req.team_preset)
+        else None
+    )
     thread = await create_thread(
         db,
         write_authority=RunWriteAuthority(
@@ -510,28 +565,17 @@ async def create_and_dispatch_thread(
         },
     )
 
-    await create_control_action(
-        db,
-        thread_id=thread.id,
-        action_type=ControlActionType.INGEST,
-        dispatch_id=action_receipt_id,
-        idempotency_key=f"thread-create:{thread.id}",
-        payload={
-            "title": req.title,
-            "team_preset": req.team_preset,
-            "autonomous": req.autonomous,
-        },
-    )
-    await mark_ingest_requested(db, thread.id)
-
-    # The client-supplied id is the dispatch idempotency boundary. Commit the
-    # SUBMITTED row and requested control action before crossing the worker HTTP
-    # boundary: status confirmation after a lost POST acknowledgement can now
-    # always observe the reservation, and a concurrent same-id start loses the
-    # primary-key race before either request can dispatch twice.
-    await db.commit()
-
-    if not requires_dispatch(req.team_preset):
+    if dispatch is None:
+        await create_control_action(
+            db,
+            thread_id=thread.id,
+            action_type=ControlActionType.INGEST,
+            dispatch_id=action_receipt_id,
+            idempotency_key=f"thread-create:{thread.id}",
+            payload={"dispatch_required": False},
+        )
+        await mark_ingest_requested(db, thread.id)
+        await db.commit()
         return ThreadCreationResult(
             thread_id=thread.id,
             status=thread.status,
@@ -540,58 +584,23 @@ async def create_and_dispatch_thread(
             error_detail=None,
         )
 
-    # -- Build context preamble ------------------------------------------------
-    context_preamble: str | None = None
-    if req.metadata is not None:
-        preamble_msg = build_context_preamble(req.metadata)
-        context_preamble = (
-            preamble_msg.content
-            if isinstance(preamble_msg.content, str)
-            else str(preamble_msg.content)
-        )
-
-    # -- Resolve autonomous flag -----------------------------------------------
-    team_config = None
-    if req.team_preset:
-        with contextlib.suppress(ConfigError, TeamConfigNotFoundError):
-            team_config = load_team_config(
-                req.team_preset, workspace_root=req.workspace_root
-            )
-    effective_autonomous = resolve_autonomous(req.autonomous, team_config)
-
-    # -- Build vault index -----------------------------------------------------
-    feature_tag = req.metadata.feature_tag if req.metadata else None
-    # feedback-loop: the opaque batch id rides to the worker the same way as the
-    # active feature; empty metadata means a non-feedback run (None).
-    feedback_batch_id = (
-        (req.metadata.feedback_batch_id or None) if req.metadata else None
-    )
-    vault_index = (
-        build_initial_vault_index(req.workspace_root, req.metadata.feature_tag)
-        if (req.metadata and req.metadata.feature_tag)
-        else {}
-    )
-
-    # -- Construct dispatch request --------------------------------------------
-    dispatch = DispatchRequest(
-        dispatch_id=action_receipt_id,
-        action=to_dispatch_action(ControlActionType.INGEST),
+    # Durable acceptance includes the actual graph input. Recovery cannot
+    # reconstruct a user's message from title/preset metadata after a crash.
+    # Tokens remain ephemeral; their required presence is an explicit fact.
+    await create_control_action(
+        db,
         thread_id=thread.id,
-        team_preset=req.team_preset,
-        workspace_root=str(req.workspace_root),
-        autonomous=effective_autonomous,
-        metadata_json=req.metadata_json,
-        content=req.initial_message,
-        context_preamble=context_preamble,
-        recursion_limit=recursion_limit,
-        active_feature=feature_tag,
-        feedback_batch_id=feedback_batch_id,
-        pipeline_phase=None,
-        vault_index=vault_index,
-        validation_errors=[],
-        actor_tokens=req.actor_tokens,
-        model_assignment=req.model_assignment,
+        action_type=ControlActionType.INGEST,
+        dispatch_id=action_receipt_id,
+        idempotency_key=f"thread-create:{thread.id}",
+        payload={
+            "schema": "initial-dispatch-v1",
+            "dispatch": dispatch.model_dump(mode="json", exclude={"actor_tokens"}),
+            "actor_tokens_required": req.actor_tokens is not None,
+        },
     )
+    await mark_ingest_requested(db, thread.id)
+    await db.commit()
 
     logger.info(
         "Dispatching ingest dispatch_id=%s for thread %s",

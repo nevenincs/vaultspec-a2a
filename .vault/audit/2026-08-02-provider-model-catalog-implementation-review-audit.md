@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:869fc4bd53829797250e47cd80ca89d92de68402f297b1293684d0fe20c5e9b3'
+body_hash: 'sha256:496a6772d5eade4fc33caf2113ea58bf01ee1b790268018aaa19ccb2a04db548'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -370,3 +370,162 @@ prefers that durable thread-scoped authority. A real child gateway/worker recove
 with concurrent equal and distinct assignments proves each run retains its own
 provider, model and digest, and a direct relay test proves one thread cannot
 overwrite another. Owner: P01.S11; formal re-review is required before closure.
+
+### p01-s11-execution-reentry-omits-frozen-assignment | high | open
+
+Type: messaging, resume and restart integrity. Status: review-blocking. The new
+worker cache correctly compares a mapped thread's complete assignment digest,
+but the production dispatch constructors for message follow-up, permission
+response, clarification response, verdict resume and direct-control recovery do
+not carry `model_assignment`. The closed IPC model therefore supplies `{}`. A
+current-schema run with a non-empty accepted assignment is rejected before its
+next graph turn because the empty digest does not match the graph it already
+compiled. Independent review reproduced that exact production-shape refusal
+against a cached graph. Startup redispatch carries the frozen map, so the
+three-run restart test does not exercise the broken follow-up and resume paths.
+
+Ownership: introduce one shared current-schema execution re-entry resolver that
+loads and validates the exact authoritative frozen selection, produces its
+compiler map, and supplies it to every ingest/resume constructor. Message,
+permission, clarification, verdict and direct-control recovery must all use that
+single seam so a new route cannot omit the authority again. Absence, corruption,
+retired keys or an old schema must produce a bounded typed incompatible refusal
+before dispatch, with no translation, repair or disclosure. Add real current-run
+message, permission, clarification, verdict and recovered-action tests proving
+the same complete digest reaches the worker and the graph turn executes.
+
+### p01-s11-thread-assignment-binding-depends-on-cache-residency | high | open
+
+Type: concurrency and execution authority isolation. Status: review-blocking.
+`get_or_compile_graph` compares the mapped thread's digest only when its graph is
+still resident in the bounded LRU. Normal graph eviction leaves the thread-to-key
+mapping but skips the comparison, allowing a changed assignment to compile and
+replace the mapping. A fresh worker has no in-memory thread mapping at all, and
+checkpoint preflight never compares the checkpoint's assignment digest with the
+incoming current freeze, so restart has the same bypass. Two first dispatches
+for one thread can also cross the compile await with different assignments before
+either installs a mapping; both construct graphs, and the later cache write wins.
+The committed refusal test covers only the cache-resident sequential case. Thus
+assignment immutability is not guaranteed independently of cache lifetime,
+worker lifetime or concurrent delivery.
+
+Ownership: atomically bind each thread to its accepted digest before compilation
+and compare every later dispatch against that binding whether or not the graph
+is resident. On a fresh worker, compare the incoming exact current-schema digest
+with checkpoint and durable frozen authority before construction. Serialize
+same-thread compilation or reserve one in-flight compile so concurrent equal
+dispatches share it and concurrent different assignments receive the same typed
+mismatch before any provider construction or graph execution. Preserve
+cross-thread reuse only for exact four-element key equality. Add eviction, fresh
+worker, concurrent first-dispatch, equal duplicate, changed duplicate and
+compile-failure cleanup discriminators.
+
+### p01-s11-current-checkpoint-evidence-is-not-reconciled | medium | open
+
+Type: durable evidence continuity. The safe agent descriptors and complete
+assignment digest are written only when checkpoint preflight calls an ingest
+`is_first_ingest`. A current-schema run whose checkpoint already existed before
+this correction can restart from its exact database freeze, but its checkpoint
+never gains these fields; once live metadata is pruned, history can return no
+assignment digest or agents. The production restart discriminator seeds database
+rows with no existing checkpoints, so it exercises first ingest rather than this
+upgrade boundary.
+
+Ownership: when a checkpoint lacks the evidence fields, reconcile them only from
+the exact validated current-schema authoritative frozen assignment and the graph
+compiled from it. Never accept, repair, translate or migrate missing/old provider
+schema state. If no exact current freeze exists, return the existing typed
+incompatible outcome before provider contact. Add a fresh-worker test with a
+pre-existing current checkpoint and exact freeze, plus corrupt, absent and
+retired frozen-authority negative controls.
+
+### p01-s11-full-assignment-isolation-positive-controls | low | verified
+
+Type: architecture and compatibility. The cache key is now exactly preset,
+canonical project, autonomous posture and SHA-256 of canonical JSON for the
+complete closed compiler assignment; no three-tuple constructor or alias remains.
+The digest covers nested role, provider, mode, catalog revision, entry, model,
+controls, fallback and provenance values. Equal assignments reuse a graph and
+distinct assignments partition it. Live node metadata is keyed by thread and
+node across registration, worker relay, team status and history fallback, while
+checkpoint descriptors take precedence. The API exposes only the bounded
+64-character digest and existing safe agent projection. No global node fallback,
+retired provider/profile authority or deprecated compatibility path was found in
+the 28-path correction.
+
+Independent verification reproduced the omitted-assignment failure and passed
+63 focused cache, node-metadata and snapshot-schema tests. The committed evidence
+reports the broader 53- and 77-test selections, six OpenAPI checks, Ruff, format,
+Ty, diff and feature Core green. The production three-run test compares the full
+frozen disclosure/digest, differentiates a non-empty controlled fallback, and
+observes distinct checkpoint digests through a real child gateway and worker;
+it does not cover the re-entry, eviction or existing-checkpoint cases above.
+
+### p01-s11-full-assignment-correction-formal-review | high | FAIL
+
+Type: formal implementation review disposition. Commit
+`aae2ac389ddb63a891b90c77b9236b6bb6e7db29`, exact parent
+`d8c7668fc9c860ea3f7140cc45b4d3be66db9d59`, fixes cross-thread cache identity
+and live metadata scoping, but does not preserve frozen authority across normal
+message/resume dispatches or independently of LRU residency and concurrent first
+delivery. The two HIGH findings block P01.S11 and remediation W01.P02.S05. Keep
+S11 open, correct the shared re-entry and atomic thread-binding seams, add the
+specified evidence, and obtain formal re-review. This review changes no runtime
+or plan row.
+
+### p01-s11-checkpoint-assignment-evidence-is-not-validated | medium | open
+
+Type: persisted-state integrity and bounded failure. Snapshot enrichment accepts
+any string as `model_assignment_digest`; the public schema later requires exact
+lowercase 64-hex, so malformed checkpoint state can turn history serialization
+into a server error instead of a typed degraded/incompatible result. A
+well-shaped but incorrect digest is also never reconciled with the exact durable
+current-schema frozen authority. The public frozen-selection digest and compiler
+map digest cover different canonical objects, so clients cannot establish this
+equality themselves.
+
+Ownership: derive the expected compiler-map digest server-side from the exact
+validated current-schema freeze and compare it with checkpoint state. Missing,
+malformed or mismatched evidence must degrade or refuse with a bounded typed
+state outcome; absent, old or retired provider authority remains incompatible
+and is never translated or repaired. Test malformed and valid-but-wrong digests
+through the real history route.
+
+### p01-s11-checkpoint-descriptors-are-not-closed-at-read | medium | open
+
+Type: persisted-state validation. Snapshot enrichment accepts every descriptor
+dict and spreads its fields after the checkpoint-owned node name, allowing a
+corrupt descriptor to overwrite `node_name` and `agent_id` and pass arbitrary
+values toward the response model. The write path emits a safe projection, but
+restart reads must treat checkpoint state as fallible rather than relying on that
+provenance forever.
+
+Ownership: validate exact allowed descriptor keys, bounded string values and
+command-bound node identity at checkpoint projection. Reject overrides of node
+or agent identity and surface malformed state as a bounded degraded snapshot.
+Add corrupt descriptor and safe current descriptor controls at the history
+route.
+
+### p01-s11-team-status-drops-thread-association | medium | open
+
+Type: concurrent state projection. Team status now performs correct thread-scoped
+metadata lookups, then flattens every active thread's agents into `AgentData`,
+which carries no thread id. Two active runs with the same role names therefore
+produce indistinguishable duplicate agents that a consumer cannot associate with
+the separately served active-thread list. This does not restore cross-thread
+metadata lookup, but leaves the combined projection ambiguous.
+
+Ownership: add the originating thread identity to each team-status agent or
+define one deterministic per-thread aggregation that preserves association.
+Exercise two live threads with identical agent ids and distinct assignments.
+
+### p01-s11-optional-cross-thread-agent-state-accessor-remains | low | open
+
+Type: API hardening. The emitter's agent-state accessor still permits an omitted
+thread id and deliberately returns a historical cross-thread aggregate. Current
+production callers pass a thread, so no present leakage was reproduced, but the
+optional compatibility seam can reintroduce one silently.
+
+Ownership: require thread identity in the accessor and move any deliberate
+process-wide diagnostic to an explicitly named bounded method with no role in
+run or team projections.

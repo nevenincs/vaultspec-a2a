@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:ac41088d08795f492849942c841459863844bd46e982b028a934ee65154cb102'
+body_hash: 'sha256:6ae070a74b41210ca76851df2e4119c622053ae547533e60901708452ac405cb'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -535,3 +535,65 @@ prefers that durable thread-scoped authority. A real child gateway/worker recove
 with concurrent equal and distinct assignments proves each run retains its own
 provider, model and digest, and a direct relay test proves one thread cannot
 overwrite another. Owner: P01.S11; formal re-review is required before closure.
+
+### p01-s11-execution-reentry-omits-frozen-assignment | high | open
+
+Type: remediation prerequisite and message/resume integrity. The S11 correction
+keys worker graphs by complete assignment digest, but message, permission,
+clarification, verdict and direct-control recovery dispatch constructors omit
+`model_assignment` and therefore send `{}`. Current-schema runs with non-empty
+frozen assignments are refused instead of executing their next turn. Owner:
+P01.S11. Route every execution re-entry through one shared resolver for the
+exact validated current-schema frozen compiler map; absent, corrupt, retired or
+old-schema authority must fail typed incompatible before dispatch with no repair
+or migration. Cover every re-entry surface with a real current-run test.
+
+### p01-s11-thread-assignment-binding-depends-on-cache-residency | high | open
+
+Type: remediation prerequisite, concurrency and cache safety. Assignment mismatch
+is checked only while the mapped graph remains in the LRU. After normal eviction,
+a changed assignment recompiles; concurrent first dispatches can also compile
+different assignments before either mapping lands. Owner: P01.S11. Atomically
+bind thread identity to digest before compile, compare independent of graph
+residency, serialize in-flight same-thread compilation, and test eviction plus
+concurrent equal/different deliveries with zero provider construction on mismatch.
+
+### p01-s11-current-checkpoint-evidence-is-not-reconciled | medium | open
+
+Type: durable evidence continuity. Descriptor and full-assignment digest fields
+are written only on first ingest, so a pre-existing current-schema checkpoint is
+not populated during fresh-worker recovery and can lose agent/digest history
+after live metadata pruning. Owner: P01.S11. Reconcile missing evidence only from
+an exact validated current-schema frozen authority; never repair or migrate an
+absent/old provider schema, which remains typed incompatible before contact.
+
+### p01-s11-full-assignment-correction-review | high | FAIL
+
+Type: prerequisite implementation review disposition. Exact correction
+`aae2ac389ddb63a891b90c77b9236b6bb6e7db29` resolves cross-thread cache-key and
+node-metadata contamination, and independent focused checks pass, but the two
+HIGH execution-authority gaps above block catalog P01.S11 and remediation
+W01.P02.S05. S11 remains open; no remediation row is closed by this review.
+
+### p01-s11-checkpoint-projection-validation | medium | open
+
+Type: persisted-state robustness. History accepts malformed or valid-but-wrong
+checkpoint assignment digests without reconciling them to exact current-schema
+frozen authority, and open descriptor dicts can override node/agent identity.
+Owner: P01.S11. Close and bound checkpoint evidence at read, compare the compiler
+digest server-side, and return typed degraded/incompatible state; never repair or
+translate missing, old or retired provider authority.
+
+### p01-s11-team-status-thread-association | medium | open
+
+Type: concurrent projection integrity. Thread-scoped metadata lookup is fixed,
+but team status flattens agents from multiple active threads without retaining
+their thread ids, leaving equal role names ambiguous. Owner: P01.S11 or the team
+status contract workstream; preserve run association and prove two concurrent
+same-role runs.
+
+### p01-s11-cross-thread-agent-accessor | low | open
+
+Type: hardening. An optional no-thread agent-state accessor remains, although no
+current production caller uses it. Require thread identity so future code cannot
+silently recreate the retired global fallback.

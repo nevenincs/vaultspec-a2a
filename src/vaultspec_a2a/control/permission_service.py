@@ -47,7 +47,7 @@ from .action_lease import (
     ControlActionClaim,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
-    release_definite_non_delivery,
+    record_dispatch_failure,
 )
 from .dispatch import safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
@@ -958,7 +958,11 @@ async def _dispatch_permission_resume(
 
     if not outcome.success:
         policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-        released = await release_definite_non_delivery(db, claim, typed_failure)
+        if typed_failure is None:
+            raise RuntimeError("failed dispatch carries no failure type")
+        released = await record_dispatch_failure(
+            db, claim, typed_failure, detail=outcome.detail
+        )
         if released:
             await reset_permission_response_submission(db, request_id=request_id)
         if policy.should_mark_failed:

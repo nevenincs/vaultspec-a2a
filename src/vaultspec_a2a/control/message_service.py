@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from ..control.action_lease import (
     finalize_control_action_acceptance,
     prepare_control_action_claim,
-    release_definite_non_delivery,
+    record_dispatch_failure,
 )
 from ..control.dispatch import safe_dispatch
 from ..control.dispatch_receipts import bind_graph_action_receipt
@@ -241,7 +241,11 @@ async def send_followup_message(
     if not outcome.success:
         policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
         detail = outcome.detail or "Worker dispatch failed"
-        released = await release_definite_non_delivery(db, claim, typed_failure)
+        if typed_failure is None:
+            raise RuntimeError("failed dispatch carries no failure type")
+        released = await record_dispatch_failure(
+            db, claim, typed_failure, detail=detail
+        )
         if released:
             # The lease is released only where the worker certainly scheduled no
             # task, so this is the one arm that KNOWS the message never arrived,

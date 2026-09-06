@@ -14,7 +14,9 @@ from ...database.models import Base, RecoveryAttemptModel, RunWriteAuthority
 from ...database.permission_repository import create_control_action
 from ...database.session import configure_sqlite_transactions
 from ...database.thread_repository import create_thread
+from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, RecoveryCondition
+from ..action_lease import ControlActionClaim, record_dispatch_failure
 from ..recovery import (
     acquire_due_recovery_attempts,
     record_recovery_failure,
@@ -97,6 +99,71 @@ async def test_failure_updates_one_exact_schedule(
         assert second.condition == RecoveryCondition.AT_CAPACITY.value
         count = await db.scalar(select(func.count()).select_from(RecoveryAttemptModel))
         assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_live_dispatch_failure_persists_condition_and_releases_known_non_delivery(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    now = datetime(2026, 9, 7, 0, tzinfo=UTC)
+    deadline = now + timedelta(minutes=10)
+    authority = RunWriteAuthority(
+        3,
+        2,
+        ControlActionType.CANCEL,
+        "cancel-current",
+    )
+    async with sessions() as db:
+        await create_thread(db, thread_id="cancel-run", write_authority=authority)
+        action = await create_control_action(
+            db,
+            thread_id="cancel-run",
+            action_type=authority.action_type,
+            idempotency_key="cancel:current",
+            dispatch_id=authority.action_receipt_id,
+            payload={"schema_version": "test-current"},
+            recovery_deadline_at=deadline,
+        )
+        action.claim_token = "live-owner"
+        action.claim_expires_at = now + timedelta(seconds=90)
+        await db.commit()
+
+    claim = ControlActionClaim(
+        action_id=action.id,
+        dispatch_id=authority.action_receipt_id,
+        created=True,
+        payload_matches=True,
+        acquired=True,
+        authority_matches=True,
+        applied=False,
+        result_status=action.result_status,
+        claim_token="live-owner",
+    )
+    async with sessions() as db:
+        assert await record_dispatch_failure(
+            db,
+            claim,
+            FailureType.AT_CAPACITY,
+            detail="worker capacity reached",
+            observed_at=now,
+        )
+        await db.commit()
+
+    async with sessions() as db:
+        stored_action = await db.get(type(action), action.id)
+        attempt = await db.scalar(
+            select(RecoveryAttemptModel).where(
+                RecoveryAttemptModel.thread_id == "cancel-run"
+            )
+        )
+    assert stored_action is not None
+    assert stored_action.claim_token is None
+    assert stored_action.claim_expires_at is None
+    assert attempt is not None
+    assert attempt.condition == RecoveryCondition.AT_CAPACITY.value
+    assert attempt.attempt_count == 1
+    assert attempt.detail == "worker capacity reached"
+    assert attempt.settled_at is None
 
 
 @pytest.mark.asyncio

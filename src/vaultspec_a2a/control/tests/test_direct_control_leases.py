@@ -23,6 +23,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from vaultspec_a2a.tests._write_authority import make_test_write_authority
@@ -49,7 +50,7 @@ from ...database import (
     get_thread,
     record_permission_request,
 )
-from ...database.models import Base
+from ...database.models import Base, RecoveryAttemptModel
 from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
@@ -577,12 +578,29 @@ async def test_message_definite_failure_releases_and_ambiguous_failure_retains(
         ambiguous_action = await get_control_action_by_idempotency_key(
             db, thread_id=ambiguous_thread, idempotency_key="ambiguous-key"
         )
+        attempts = (
+            (
+                await db.execute(
+                    select(RecoveryAttemptModel).where(
+                        RecoveryAttemptModel.thread_id.in_(
+                            {definite_thread, ambiguous_thread}
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
     assert definite_action is not None
     assert definite_action.claim_token is None
     assert definite_action.claim_expires_at is None
     assert ambiguous_action is not None
     assert ambiguous_action.claim_token is not None
     assert ambiguous_action.claim_expires_at is not None
+    assert {attempt.thread_id: attempt.condition for attempt in attempts} == {
+        definite_thread: "circuit_open",
+        ambiguous_thread: "unreachable",
+    }
 
 
 @pytest.mark.asyncio

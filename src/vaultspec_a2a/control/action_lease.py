@@ -8,14 +8,18 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ..database import (
+    ControlActionModel,
+    ThreadModel,
     acquire_control_action_lease,
     commit_control_action_lease,
     release_control_action_lease,
     reserve_control_action,
+    thread_write_expectation,
 )
 from ..thread.dispatch_policy import FailureType
-from ..thread.enums import RECOVERY_ACTION_TYPES, ControlActionType
+from ..thread.enums import RECOVERY_ACTION_TYPES, ControlActionType, RecoveryCondition
 from .dispatch_receipts import prepare_graph_action_receipt
+from .recovery import record_recovery_failure
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +31,7 @@ __all__ = [
     "ControlActionClaim",
     "finalize_control_action_acceptance",
     "prepare_control_action_claim",
-    "release_definite_non_delivery",
+    "record_dispatch_failure",
 ]
 
 
@@ -172,18 +176,53 @@ async def finalize_control_action_acceptance(
     )
 
 
-async def release_definite_non_delivery(
+async def record_dispatch_failure(
     db: AsyncSession,
     claim: ControlActionClaim,
-    failure_type: FailureType | None,
+    failure_type: FailureType,
+    *,
+    detail: str | None,
+    observed_at: datetime | None = None,
 ) -> bool:
-    """Release a lease only when the worker certainly scheduled no task."""
-    if claim.claim_token is None or failure_type not in _DEFINITE_NON_DELIVERY:
+    """Persist the typed outcome and release only proven non-delivery leases."""
+    instant = observed_at or datetime.now(UTC)
+    action = await db.get(ControlActionModel, claim.action_id, with_for_update=True)
+    if (
+        action is None
+        or action.dispatch_id != claim.dispatch_id
+        or action.applied_at is not None
+        or action.recovery_deadline_at is None
+        or action.recovery_deadline_at <= instant
+    ):
         return False
-    released = await release_control_action_lease(
+    thread = await db.get(ThreadModel, action.thread_id, with_for_update=True)
+    if thread is None:
+        return False
+    authority = thread_write_expectation(thread).authority
+    if (
+        authority.action_type.value != action.action_type
+        or authority.action_receipt_id != action.dispatch_id
+    ):
+        return False
+
+    released = False
+    if claim.claim_token is not None and failure_type in _DEFINITE_NON_DELIVERY:
+        released = await release_control_action_lease(
+            db,
+            claim.action_id,
+            claim_token=claim.claim_token,
+        )
+    await record_recovery_failure(
         db,
-        claim.action_id,
-        claim_token=claim.claim_token,
+        thread_id=action.thread_id,
+        authority=authority,
+        condition=RecoveryCondition(failure_type.value),
+        observed_at=instant,
+        next_eligible_at=min(
+            instant + timedelta(seconds=2),
+            action.recovery_deadline_at,
+        ),
+        deadline_at=action.recovery_deadline_at,
+        detail=detail,
     )
-    await db.commit()
     return released

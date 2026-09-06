@@ -43,7 +43,7 @@ from .accepted_input import AcceptedActionInput, freeze_accepted_input
 from .action_lease import (
     finalize_control_action_acceptance,
     prepare_control_action_claim,
-    release_definite_non_delivery,
+    record_dispatch_failure,
 )
 from .dispatch import safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
@@ -421,7 +421,11 @@ async def respond_to_clarification(
     if not outcome.success:
         _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
         detail = outcome.detail or "Worker dispatch failed"
-        if await release_definite_non_delivery(db, claim, failure_type):
+        if failure_type is None:
+            raise RuntimeError("failed dispatch carries no failure type")
+        if await record_dispatch_failure(
+            db, claim, failure_type, detail=detail
+        ):
             # A released claim means the worker certainly scheduled no task, so
             # the answer demonstrably did not reach the parked node. The run is
             # untouched by that - it is still parked on the same questionnaire,
@@ -434,7 +438,7 @@ async def respond_to_clarification(
                 thread_id,
                 reason=f"Clarification resume not delivered: {detail}",
             )
-            await db.commit()
+        await db.commit()
         return _result(
             action,
             error_detail=detail,

@@ -63,7 +63,7 @@ from .accepted_input import freeze_accepted_input
 from .action_lease import (
     finalize_control_action_acceptance,
     prepare_control_action_claim,
-    release_definite_non_delivery,
+    record_dispatch_failure,
 )
 from .dispatch import safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
@@ -722,7 +722,12 @@ class VerdictSubscriber:
         if not outcome.success:
             _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
             async with self._session_factory() as db:
-                await release_definite_non_delivery(db, claim, failure_type)
+                if failure_type is None:
+                    raise RuntimeError("failed dispatch carries no failure type")
+                await record_dispatch_failure(
+                    db, claim, failure_type, detail=outcome.detail
+                )
+                await db.commit()
             logger.warning(
                 "Verdict resume dispatch failed for thread %s: %s",
                 thread_id,

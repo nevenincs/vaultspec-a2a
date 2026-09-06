@@ -16,7 +16,7 @@ from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
     finalize_control_action_acceptance,
     prepare_control_action_claim,
-    release_definite_non_delivery,
+    record_dispatch_failure,
 )
 from ..control.dispatch import safe_dispatch
 from ..control.repair_transitions import (
@@ -375,7 +375,11 @@ async def cancel_thread(
 
     if not outcome.success:
         _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-        released = await release_definite_non_delivery(db, claim, typed_failure)
+        if typed_failure is None:
+            raise RuntimeError("failed dispatch carries no failure type")
+        released = await record_dispatch_failure(
+            db, claim, typed_failure, detail=outcome.detail
+        )
         if not released:
             # UNREACHABLE is ambiguous: the worker may have scheduled the
             # cancellation before the acknowledgement was lost.  Keep both the

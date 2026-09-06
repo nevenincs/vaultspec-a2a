@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:f06a38e55b6dc0c12f274988792e51de9ef58b8b9544e3f13deffca84c40847c'
+body_hash: 'sha256:ef11cbdc660bab70617701057afa6af6243b5448ed7b9bcbd1c60aeccd836684'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -776,7 +776,7 @@ is refused while B remains counted. Existing real endpoint, completion, failure,
 held-SQLite timeout and task-cancellation controls exercise every cleanup class.
 P01.S11 remains open for independent formal re-review.
 
-### p01-s11-concurrent-duplicate-can-report-a-false-capacity-refusal | medium | open
+### p01-s11-concurrent-duplicate-can-report-a-false-capacity-refusal | medium | resolved pending formal review
 
 Type: idempotency response and worker admission ordering. The worker endpoint
 checks dispatch-ID membership, then awaits thread-capacity reservation, then
@@ -825,3 +825,19 @@ report a false capacity refusal even though execution remains single and bounded
 P01.S11 and remediation W01.P02.S05 remain blocked pending atomic dispatch-ID and
 capacity admission plus concurrent ingest/resume replay evidence. This review
 changes no runtime or plan row.
+
+### p01-s11-concurrent-duplicate-admission-correction | medium | resolved pending formal review
+
+Type: idempotency response and worker admission ordering. After awaiting the
+capacity lock, the endpoint now rechecks the exact dispatch ID before returning
+429. An identical request admitted during that wait receives the established
+`dispatched` response, while a different ID for the same active thread and true
+process capacity exhaustion retain the bounded 429 response. The check does not
+release another request's generation token or admit the duplicate again.
+
+Real concurrent endpoint controls hold the production admission lock until two
+identical ingest or resume requests are queued, then prove two equal 200 bodies,
+one retained ID, one generated capacity owner and no leaked owner. A distinct-ID
+same-thread control proves exactly one 200 and one typed 429, and the existing
+full-capacity control remains green. P01.S11 remains open for final formal
+re-review.

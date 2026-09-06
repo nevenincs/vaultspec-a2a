@@ -296,7 +296,8 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         tg = app.state.task_group
 
         dispatch_ids: DispatchIdAdmission = app.state.dispatch_ids
-        if req.dispatch_id in dispatch_ids:
+
+        def duplicate_response() -> DispatchResponse:
             logger.info(
                 "Worker duplicate dispatch suppressed",
                 extra={
@@ -308,6 +309,9 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
             )
             return DispatchResponse(status="dispatched", thread_id=req.thread_id)
 
+        if req.dispatch_id in dispatch_ids:
+            return duplicate_response()
+
         owns_capacity = req.action in {"ingest", "resume"}
         reservation = (
             await executor.reserve_dispatch_capacity(req.thread_id)
@@ -315,6 +319,12 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
             else None
         )
         if owns_capacity and reservation is None:
+            # Capacity reservation awaits the executor's admission lock. An
+            # identical request can be admitted while this request is queued.
+            # Recheck that exact ID before reporting capacity; a different ID
+            # for the same busy thread remains a real refusal.
+            if req.dispatch_id in dispatch_ids:
+                return duplicate_response()
             raise HTTPException(
                 status_code=429,
                 detail="Worker at capacity — too many concurrent threads",

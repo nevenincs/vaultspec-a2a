@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:ab4c140f63d1867a8875916730801cafaf60c92542c12aacd63d7f37bd291e40'
+body_hash: 'sha256:660f2c789b56dd5784ce05cf1c52adb7fa6e6cd218df902160716c65ba8f9f8d'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -688,3 +688,14 @@ P01.S11 contract: execution stays single and bounded, yet the duplicate can
 receive 429 instead of the required idempotent success response. P01.S11 and
 remediation W01.P02.S05 remain blocked pending atomic ID/capacity admission and
 concurrent endpoint evidence. This audit update closes no row.
+
+### p01-s11-concurrent-duplicate-admission-correction | medium | resolved pending formal review
+
+Type: remediation prerequisite and idempotency ordering. The worker endpoint now
+rechecks the exact stable dispatch ID after an awaited capacity refusal and
+before emitting 429. Concurrent identical ingest and resume requests therefore
+reuse the admitted 200 response without a second schedule or reservation, while
+a different same-thread ID and real process-cap exhaustion remain typed 429.
+Production-lock endpoint controls prove one retained ID, one generation, equal
+replay bodies and complete token release. Owner remains P01.S11; S11 and
+remediation W01.P02.S05 stay open for final formal re-review.

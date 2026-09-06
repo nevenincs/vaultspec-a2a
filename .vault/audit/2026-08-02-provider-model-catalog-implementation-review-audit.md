@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:1e3ca1e44bf104b8975e732d9e130e7250596dc82accc75539ff5a5b20f61ab7'
+body_hash: 'sha256:f06a38e55b6dc0c12f274988792e51de9ef58b8b9544e3f13deffca84c40847c'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -775,3 +775,53 @@ final release, fills the remaining configured slots, and proves a third dispatch
 is refused while B remains counted. Existing real endpoint, completion, failure,
 held-SQLite timeout and task-cancellation controls exercise every cleanup class.
 P01.S11 remains open for independent formal re-review.
+
+### p01-s11-concurrent-duplicate-can-report-a-false-capacity-refusal | medium | open
+
+Type: idempotency response and worker admission ordering. The worker endpoint
+checks dispatch-ID membership, then awaits thread-capacity reservation, then
+admits the ID. Concurrent identical ingest or resume requests can both observe
+the ID absent. The first reserves, admits and schedules; the second then sees the
+same thread's capacity token and returns 429 without rechecking that its exact
+dispatch ID is now admitted. The original request still executes once, but an
+identical replay or ambiguity reconciliation can receive a false capacity failure
+rather than the established idempotent `dispatched` response. The committed
+worker duplicate test uses `cancel`, which owns no capacity, so it cannot
+exercise this ordering.
+
+Ownership: P01.S11; correction is required before closure. Make the
+dispatch-ID and capacity decision one atomic endpoint admission operation or
+recheck exact admitted identity before returning 429, without admitting a
+different same-thread dispatch. Add concurrent identical ingest and resume
+endpoint controls that hold the admission lock, prove one scheduled task, two
+successful identical responses and no permit leak; retain 429 for different
+same-thread IDs and true process-cap exhaustion.
+
+### p01-s11-capacity-generation-final-formal-rereview | high | FAIL
+
+Type: formal implementation review disposition. Exact correction
+`bded79c79ba3437fc9f34bcbf82ab1d8d395797c`, parent
+`fdd23ce18b8086e5de206bcbb2e4616a6`, resolves the final review-blocking ABA
+race. Each accepted ingest/resume receives one frozen monotonic reservation
+object. The active map retains that exact object, release succeeds only on object
+identity, and a stale generation cannot remove a newer owner for the same thread.
+Endpoint admission passes the token into the scheduled task; direct entry creates
+one through the same atomic seam; settlement, refusal, timeout, exception,
+cancellation and the outer finalizer can offer repeated cleanup safely. Terminal
+identity cleanup still precedes the owning token's release and follows terminal
+emission, while interrupted runs preserve identity. The orchestrated A-release,
+B-reserve, stale-A-finalizer and third-dispatch control proves B remains counted,
+full capacity refuses the third dispatch, and all tokens can be drained.
+
+The full six-key retired sentinel, total checkpoint deadline, bounded terminal
+identity lifecycle and exact-key cross-thread compile flight remain intact. No
+legacy provider/profile/default, translation, migration, compatibility or
+deprecated authority was restored. Independent review passed 139 worker,
+endpoint, authority, redispatch and cache tests in 25.41 seconds; the committed
+61-executor, 130-worker, 12 OpenAPI/zero-retired and static/Core evidence agrees.
+The MEDIUM duplicate-response ordering issue is review-blocking because
+same-ID replay is an explicit P01.S11 contract: an accepted duplicate must not
+report a false capacity refusal even though execution remains single and bounded.
+P01.S11 and remediation W01.P02.S05 remain blocked pending atomic dispatch-ID and
+capacity admission plus concurrent ingest/resume replay evidence. This review
+changes no runtime or plan row.

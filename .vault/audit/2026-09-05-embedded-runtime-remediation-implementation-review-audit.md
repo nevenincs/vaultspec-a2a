@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6a26ca320e5d95af10fc6b019b27f0c2e668b0d85f0fe43c3a538e8c23cfa543'
+body_hash: 'sha256:ab4c140f63d1867a8875916730801cafaf60c92542c12aacd63d7f37bd291e40'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -672,3 +672,19 @@ holds the configured bound against a third dispatch; endpoint and direct
 completion, failure, timeout and cancellation controls retain their release
 coverage. Owner remains P01.S11; S11 and remediation W01.P02.S05 stay open for
 formal re-review.
+
+### p01-s11-capacity-generation-final-formal-rereview | high | FAIL
+
+Type: remediation prerequisite review disposition. Exact catalog correction
+`bded79c79ba3437fc9f34bcbf82ab1d8d395797c` replaces thread-id-only release with
+opaque monotonic per-dispatch ownership. Every endpoint and direct ingest/resume
+path carries the exact reservation object, repeated cleanup is safe, and an old
+finalizer cannot remove a newer same-thread permit. Independent focused checks
+and an orchestrated A/B/stale-finalizer/full-cap control pass. All earlier S11
+retired-authority, checkpoint deadline, identity lifecycle, cache-flight,
+checkpoint projection and messaging corrections remain intact. The ABA defect is resolved, but the MEDIUM concurrent identical ingest/resume
+response-ordering issue is review-blocking because same-ID replay is an explicit
+P01.S11 contract: execution stays single and bounded, yet the duplicate can
+receive 429 instead of the required idempotent success response. P01.S11 and
+remediation W01.P02.S05 remain blocked pending atomic ID/capacity admission and
+concurrent endpoint evidence. This audit update closes no row.

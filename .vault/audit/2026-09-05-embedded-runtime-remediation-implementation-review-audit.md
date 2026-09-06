@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:fbfc105ab8caf0db607b020b4c1d1e3477054dd4c06b2848b6b20c13848dc70b'
+body_hash: 'sha256:f33e4b96f72b1cc31a62265afef9a004fba11373b0f3883c13cb10f2d3b065b9'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -986,3 +986,11 @@ A deterministic filesystem wrapper successfully creates the exact locked `uvx --
 ### w01-p02-s06-nonzero-control-exit-exception-mismatch | medium | resolved
 
 Type: test subprocess lifecycle and error contract. The first hung-stop discriminator surfaced that `_run_rag_cli` represented a real nonzero control-process exit with `AssertionError`, while degraded cleanup accepts the helper's operational `RuntimeError` contract. That mismatch could bypass retained-owner fallback after a launched stop control failed normally. The helper now raises bounded `RuntimeError` with capped captured output for every nonzero exit; start failures still propagate, while cleanup can execute its exact-owner fallback. The focused and complete reruns above prove terminal cleanup. The failed exploratory run also exposed a Windows wrapper constant mistake before the exact suspended child was created; the wrapper now uses the documented Windows creation flag value and the passing test asserts the recorded exact command and PID.
+
+### w01-p02-s06-fallback-budget-final-formal-rereview | low | PASS
+
+Type: formal correction review disposition. Correction `79c01caa9b8e7330778a8c6f698b16dcf081617d` resolves the remaining stop-timeout budget finding inside the existing single operation deadline. Cleanup derives an earlier stop-control absolute subdeadline from the final operation deadline and leaves at least eight seconds for exact retained-owner process-tree termination plus process/listener absence verification. No phase resets the clock. Nonzero control exit now raises typed `RuntimeError` carrying at most the already capped output, so degraded cleanup reaches fallback; only terminal `psutil.NoSuchProcess` and `ProcessLookupError` races are accepted while all other identity/control failures remain visible.
+
+The real filesystem wrapper launches the exact locked `uvx --from vaultspec-rag[mcp]==0.4.23 vaultspec-rag server stop --port <private> --json` child, records its PID and argv, suspends it, and holds the parent until the earlier stop slice expires. It asserts the private port differs from the recorded shared port, then proves fallback use, exact private process absence, listener closure and unchanged shared digest inside the original 120-second deadline. Independent review reran the focused case (`1 passed` in 52.96 seconds; 51.59-second body); the recorded final module result is 36 passes. Ruff format/check, Ty, diff, secret scans and all 19 remediation Core checks pass.
+
+All prior S06 credential redaction/rotation, shared-service isolation, cancellation cleanup, bounded start/output/late-record behavior and ER20-only ownership remain intact. The distinct cold catalog/Uvicorn finding remains S07/S49, and no compatibility, legacy or deprecated surface was added. No finding remains. S06 is review-passed and ready for separate Core lifecycle closure; this review leaves it open.

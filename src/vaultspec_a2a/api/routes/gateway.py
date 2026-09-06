@@ -1510,6 +1510,7 @@ async def active_runs_endpoint(
 
     result = await discover_active_runs(
         db,
+        checkpointer=request.app.state.checkpointer,
         workspace_root=workspace,
         feature_tag=feature_tag,
         limit=limit,

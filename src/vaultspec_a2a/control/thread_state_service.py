@@ -24,13 +24,14 @@ from ..control.projection import (
     enrich_snapshot_from_execution_state,
     reconcile_checkpoint_permissions_with_durable_state,
 )
-from ..control.run_discovery_service import reconcile_abandoned_reconciling_thread
+from ..control.recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
 from ..control.snapshot import (
     MinimalState,
     enrich_snapshot_from_state,
     load_checkpoint_history_depth,
 )
-from ..database import get_thread
+from ..database import ThreadModel, get_thread
+from ..domain_config import domain_config
 from ..graph.enums import SemanticPhase, research_adr_semantic_phase
 from ..team.team_config import load_agent_config, load_team_config
 from ..thread.enums import (
@@ -289,14 +290,17 @@ async def capture_thread_state(
         # Product run lookups must not surface it; the cleanup coordinator reads
         # it directly instead. Report it as absent so the route answers 404.
         return None
-    if thread.status == ThreadStatus.RECONCILING.value:
-        # T3's reconciler backstop (see run_discovery_service), reused here so
-        # a direct single-run status read resolves an abandoned reconciling
-        # thread too, not only the active-run list. `thread` is the same
-        # SQLAlchemy identity-mapped row `update_thread_status` would mutate
-        # (same session, same primary key), so a reconciliation performed here
-        # is already reflected on `thread` below with no re-fetch needed.
-        await reconcile_abandoned_reconciling_thread(db, thread_id)
+    await reconcile_run_checkpoint(
+        db,
+        checkpointer,
+        thread_id,
+        checkpoint_timeout_seconds=domain_config.aget_state_timeout_seconds,
+        trigger=RecoveryTrigger.READ,
+    )
+    await db.commit()
+    thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+    if thread is None or thread.status == ThreadStatus.DELETING.value:
+        return None
     # The durable column wins once it exists (captured at terminal settle,
     # control/event_handlers.py::_handle_terminal_event, before the aggregator
     # prunes its in-memory copy - F19). The live aggregator read is the

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:5741d062cf7db7531f49d002267108bb3193565e1abb30301b0b691d50e4a8fa'
+body_hash: 'sha256:8995f8df6efa6fa993d29ac8793937e449e03b5a06473268a5cfa29b75f024e7'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -107,3 +107,23 @@ S87 provides successful completion evidence only. S11 must consume it before any
 ### administrative-process-timeout | low | resolved; verification lifecycle
 
 The S87 Core exec-record set-body process exceeded a 30-second parent subprocess bound, then emitted its successful mutation result after the parent timed out. The administrative invocation is recorded as a timeout, not a clean process pass. The exact command-body-file process census subsequently found zero matching survivors and the stored exec body was verified. The graph tests above completed naturally through the bounded verification runner.
+
+### shared-checkpoint-settlement | high | corrected partial S11 architecture
+
+Formal self-review of the actual implementation finds startup, active discovery and served state capture now call one exact accepted-action checkpoint authority. Durable completion is elected before abandonment or replay. Empty pending writes never imply completion. The coordinator releases its database read snapshot before the checkpoint await, then compares the saved complete writer witness. Only the winner applies terminal action/permission/repair effects in the same database transaction. Discovery re-queries all projected fields after recovery. Startup runs before worker demand and demotes unfinished execution through the same election; a read trigger does not demote live work.
+
+### remaining-recovery-authorities | high | S11 and S13 remain open
+
+Architecture/contract: the worker still has the older empty-pending-writes and unreadable-checkpoint behavior, event consumers still trust terminal notifications, and deferred network recovery is not yet owned by this coordinator. Missing or invalid durable action receipts return an incompatible observation but lack the constrained exact-row quarantine election required for retired state. No legacy state is synthesized or dispatched by the new authority. These existing gaps remain required follow-up work, not completion claims.
+
+### recovery-scheduling-and-retired-tests | high | S83 and S84 remain open
+
+Architecture/liveness: removal of mutable-preset, updated-at and global-floor abandonment removes false deadline authority, but frozen accepted execution deadlines and durable leased retries are still absent. Startup's bounded pass may leave unvisited rows for the future scheduler. Atomic complete noninitial inputs, cancellation evidence and database contention classification remain open. Verification/contract: tests importing the retired pure startup helpers or abandonment helper must be replaced against current architecture in S84; this pass does not claim whole-suite compatibility or success.
+
+### recovery-verification-lifecycle | high | combined battery failure retained
+
+Two combined four-case invocations reached four dots but produced no pytest session result within 60 seconds. Both bounded runners reported tree_reaped=true and are FAIL. After explicit trigger integration, isolated startup demotion passed one case in 1.50 seconds, direct completion plus empty-pending evidence passed two cases in 4.29 seconds, and startup/discovery/demotion passed three cases in 4.91 seconds; these runs exited naturally with code zero and whole-containment quiescence. This does not erase the combined invocation failures. Parent owns condition 17 investigation.
+
+### s87-test-protocol-typing | medium | correction owned by S34
+
+Verification/type: parent full-file Ty found two S87 topology tests calling get_graph through a protocol that does not declare it. Parent corrected those test inspections with explicit Any casts while owning the same file for S34. Earlier S87 focused Ty evidence did not cover those full-file diagnostics; retain this correction in the audit trail.

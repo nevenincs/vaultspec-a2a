@@ -44,7 +44,6 @@ from .procs_config import (
     load_procs_config,
     procs_config_path,
 )
-from .reconciliation import ReconciliationAction, compute_reconciliation_actions
 from .registration import deregister_serve, refresh_registration, register_serve
 from .registry import (
     PortReservation,
@@ -75,7 +74,6 @@ __all__ = [
     "ProcVerdict",
     "ProcsConfig",
     "ProcsConfigError",
-    "ReconciliationAction",
     "RegistryOwnershipError",
     "RoleConfig",
     "StalenessState",
@@ -83,7 +81,6 @@ __all__ = [
     "attach",
     "classify_record",
     "commit_reservation",
-    "compute_reconciliation_actions",
     "default_procs_owner",
     "deregister_serve",
     "endpoint_for",

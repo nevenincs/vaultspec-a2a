@@ -333,22 +333,12 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             settings.resolved_checkpoint_backend,
         )
 
-        if settings.repair_on_startup:
-            session_factory = get_session_factory()
-            async with session_factory() as db:
-                app.state.repair_summary = await reconcile_threads_on_startup(
-                    db,
-                    checkpointer,
-                    strategy=settings.repair_strategy,
-                    retain_repair_boots=settings.repair_journal_retention_boots,
-                )
-                await db.commit()
-        else:
-            app.state.repair_summary = {
-                "repair_backlog": 0,
-                "paused_resumable": 0,
-                "checkpoint_unavailable": 0,
-            }
+        session_factory = get_session_factory()
+        async with session_factory() as db:
+            app.state.repair_summary = await reconcile_threads_on_startup(
+                db, checkpointer
+            )
+            await db.commit()
 
         aggregator = EventAggregator(telemetry=OTelAggregatorHook())
         app.state.aggregator = aggregator

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6f37291dd09cd58dc5810824da0f05057c66cfdbb3b96a24620ee322dfacc696'
+body_hash: 'sha256:58c2487b73188273fdac7ab843a9e7d0e529469e5b2929b2c4f0f2585abecfbe'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-audit]]"
@@ -82,3 +82,9 @@ The production application engine now owns BEGIN through SQLAlchemy's begin even
 The served compiler has explicit successful terminal routes in star, pipeline, pipeline-loop and research/ADR topologies. Routing each through one finalizer makes successful completion a durable graph output associated with the explicitly active accepted action. Recovery can inspect this committed receipt directly without recompiling mutable provider or graph configuration. The finalizer checks incorporation identity before recording completion, and immutable receipt maps retain prior actions without confusing them with a newly accepted action.
 
 A real checkpointer test completes one action, interrupts a second, reopens the checkpoint and resumes under a third accepted receipt. The first completion remains present while the second is pending; after resume, only the first and third actions carry completion. Production topology inspection verifies END has only the finalizer as predecessor. Failure and cancellation are separate outcomes; their absence must not be converted into successful completion.
+
+## Partial shared recovery consumer
+
+The gateway can settle an exact successful graph completion without provider reconstruction. One reader validates current action incorporation and completion, classifies unavailable, incompatible, prior, pending, interrupted and failed evidence, and never infers completion from empty pending writes. Startup and served reads use the same database election and fresh post-election projection. An explicit startup trigger distinguishes abandoned process ownership from live execution observed by a read.
+
+This removes mutable configuration and wall-clock row age as deadline authority. It does not supply the missing frozen execution deadline or retry lease: those require durable accepted control inputs and scheduling ownership. Worker preflight, notification settlement and deferred replay must consume the same authority before the recovery architecture is complete.

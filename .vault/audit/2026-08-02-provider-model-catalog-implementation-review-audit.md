@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:53ce729e38f3a89a44a91b2d583b1d2ff3bd90d9bf095eba5277ed1b34687c88'
+body_hash: 'sha256:b597d841c3b4c1725739c940232bc866eec5be6cff0d78dcc7c8929bea3ea94e'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -883,3 +883,42 @@ Record carries the full implementation/review chain, exact validation evidence
 and disposition of every implementation finding. Core closed only provider-model
 catalog `P01.S11`; P03 integration/review rows and remediation `W01.P02.S05`
 remain open. No runtime or compatibility surface changes in this lifecycle entry.
+
+### p01-s11-step-record-omits-the-original-implementation-review-and-reopen | high | open
+
+Type: lifecycle traceability and evidence integrity. The completed S11 Step
+Record says it carries the full implementation/review chain, but begins at
+`ba9f70bd4d280ca95a3f31131443949317a0ae9d`. It omits the original S11
+implementation `7d8c04df06299dc58ae8fd1a5f4092291f3042ab`, its formal FAIL review
+`16066b83983a90a6a7dc067f98510e3fc5c040fc`, and the Core-managed reopen
+`194f4fa6`. The rewritten verification section also drops that pass's 49-test
+result and records the expanded result as 585 passes plus eight environment
+failures without its nine deselections. Its findings summary does not disposition
+the original `legacy-restart-proof-absent` and `premature-plan-closure` HIGHs,
+whose resolution depends on the later approved no-legacy supersession and the
+explicit reopen rather than on an inferred current result.
+
+The rolling audit retains those historical facts, so no history was destroyed,
+but the Step Record is the closure's reproducible evidence ledger and its claim
+of completeness is false. Ownership: P01.S11 lifecycle correction. Reopen S11
+through Core, add the three missing hashes in order, retain the 49-test evidence,
+record the expanded result as 585 passed, nine deselected and eight classified
+server-profile environment failures, and explicitly disposition both original
+HIGH findings under the superseding no-legacy architecture. Then close through
+Core again and repeat formal lifecycle review.
+
+### p01-s11-core-lifecycle-closure-formal-review | high | FAIL
+
+Type: formal lifecycle review disposition. Commit
+`2d29d5c980e9e80bc48391fd8596746361d913de` changes exactly the five expected
+Core lifecycle paths: provider catalog Step Record, plan, index, catalog audit and
+remediation audit. It checks only `P01.S11`. Catalog `P03.S19` through `P03.S23`
+and remediation `W01.P02.S05` remain open, and no runtime path changes. The
+current title/result correctly describe the accepted current-only behavior, the
+final implementation and PASS review hashes are accurate, and Core exec mapping,
+feature, frontmatter, modified-stamp and markdown checks report no diagnostics.
+
+The incomplete Step Record finding above blocks this closure despite correct row
+mechanics. Reopen S11, repair the historical implementation/review/reopen,
+evidence-count and finding-disposition chain through Core, then re-close and
+review. This review changes no runtime or plan row.

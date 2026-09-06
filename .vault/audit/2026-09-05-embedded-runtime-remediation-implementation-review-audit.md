@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:f1eca1958042c790e000065c9b066fb099e41e9100f8af91c553ebb9b19a94f3'
+body_hash: 'sha256:076dc5330b728ac2f6245141ae364b8bed203413a322b122338fc9576b055b27'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -722,3 +722,17 @@ current-only implementation chain, exact behavior evidence and finding
 classifications. This supplies a completed prerequisite to remediation without
 closing remediation `W01.P02.S05`; that row remains open for its own assembled
 qualification and review.
+
+### p01-s11-core-lifecycle-closure-formal-review | high | FAIL
+
+Type: remediation prerequisite lifecycle review. Catalog closure
+`2d29d5c980e9e80bc48391fd8596746361d913de` changes the expected five lifecycle
+paths, toggles only P01.S11, and correctly leaves catalog P03.S19-P03.S23 and
+remediation W01.P02.S05 open. Scoped Core checks are clean. The closure remains
+blocked because its Step Record omits the original S11 implementation
+`7d8c04df`, FAIL review `16066b83`, Core reopen `194f4fa6`, 49-test evidence,
+nine expanded-suite deselections and explicit disposition of the original
+legacy-restart/premature-closure HIGH findings under the superseding no-legacy
+architecture. Reopen, complete that evidence chain, re-close through Core and
+repeat lifecycle review before remediation consumes the prerequisite. This audit
+update closes no remediation row.

@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-09-05'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:452cc8fd0e0d1cde3818fccef59bd7d3ba4e2ba05f7ebdabdcd4623b16abea58'
+body_hash: 'sha256:3b9bac6f7218f91b44030095ac3da76c0824d1fef4e73dd058135aad71782608'
 related:
   - "[[2026-07-19-codebase-health-plan]]"
   - "[[2026-09-05-codebase-health-process-resource-lifetimes-research]]"
@@ -180,3 +180,9 @@ Repair the confirmed ownership violations within the current design, run real su
 - Native macOS execution was unavailable. Platform type checks cover the POSIX/Darwin branch; runtime certification there remains outstanding.
 
 - Final required pre-commit checks passed for the scoped files: Ruff lint/format, whole-source ty, Markdown lint, Vault Doctor, and provider artifact validation. The feature-scoped vault check also passes every check.
+
+### provider-empty-containment-false-success | high | reopened under desktop-product-profile W04.P11.S60
+
+Type: provider lifecycle correctness, process containment and developer-time blocker. Status: reopened/current. Review of the S49 worker assignment-failure correction exposed the same already-shipped contract drift in `providers/_subprocess.py`: `spawn_acp_process` catches `ProcessContainment.assign(pid)` failure and returns the live provider with an unassigned containment, while `_kill_process_tree` later calls that empty containment's `terminate()`. Empty containment has no process identity and returns success, so provider cleanup can report success while the retained ACP/Codex root and descendants remain live. This is distinct from the S49 worker fix and from S50 packaging.
+
+Canonical correction owner is reopened `2026-07-18-desktop-product-profile-plan W04.P11.S60`, whose accepted row requires OS containment for every ACP/Codex provider root before descendant work. Correction must fail admission on assignment failure, reap through the exact retained provider process identity under one bound, avoid a host-wide scan or post-exit bare-pid action, preserve the original assignment error, and prove real root/descendant absence. The earlier `launch-containment-window` finding remains related architectural evidence; its vague process-launcher owner is superseded by this exact reopened Step.

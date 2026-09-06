@@ -25,7 +25,12 @@ class _RunnerResult(NamedTuple):
     stderr: str
 
 
-def _run_runner(probe: Path, tmp_path: Path) -> _RunnerResult:
+def _run_runner(
+    probe: Path,
+    tmp_path: Path,
+    *,
+    runner_args: tuple[str, ...] = (),
+) -> _RunnerResult:
     stdout_path = tmp_path / "runner.stdout"
     stderr_path = tmp_path / "runner.stderr"
     with (
@@ -41,6 +46,7 @@ def _run_runner(probe: Path, tmp_path: Path) -> _RunnerResult:
                 "30",
                 "--exit-timeout",
                 "1",
+                *runner_args,
                 "--",
                 str(probe),
                 "-q",
@@ -111,3 +117,18 @@ def test_runner_reaps_descendants_left_after_pytest_exits(tmp_path: Path) -> Non
     assert "1 passed" in completed.stdout
     assert "contained descendants" in completed.stderr
     assert "tree_reaped=true" in completed.stderr
+
+
+def test_runner_reports_progress_before_a_session_result(tmp_path: Path) -> None:
+    probe = Path(__file__).with_name("_runner_progress_probe.py")
+
+    completed = _run_runner(
+        probe,
+        tmp_path,
+        runner_args=("--progress-interval", "0.1"),
+    )
+
+    assert completed.returncode == 0
+    assert "pytest owner started:" in completed.stderr
+    assert "phase=awaiting_session_result" in completed.stderr
+    assert "pytest owner progress:" in completed.stderr

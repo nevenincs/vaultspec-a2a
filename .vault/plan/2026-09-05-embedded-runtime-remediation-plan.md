@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:eb4433e26e551c610d6da5ad68b35d12f53ed28980c4497ea2e3567e3f5f2f33'
+body_hash: 'sha256:31625e198319e140ee037030b29f204d3a2654c07f9c78cc5ea82fc2161487b6'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -87,6 +87,7 @@ Remove stale-write and early-completion races while retaining existing state obl
 - [ ] `W02.P03.S14` - Give durable terminal delivery an independent bounded retry/reconciliation owner so a failed relay cannot strand an otherwise completed run; `src/vaultspec_a2a/control/direct_control_recovery.py`.
 - [ ] `W02.P03.S82` - After recovery, checkpoint incorporation, terminal settlement and durable retry have migrated the remaining writers, prove zero callers and delete the unconditional lifecycle setter plus its export; `src/vaultspec_a2a/database/thread_repository.py, src/vaultspec_a2a/database/__init__.py`.
 - [x] `W02.P03.S88` - Replace the filesystem completion marker with an authenticated loopback receipt so Windows file locks cannot overwrite the owned pytest exit outcome after tree reaping; `src/vaultspec_a2a/testing/runner.py, src/vaultspec_a2a/testing/plugin.py, src/vaultspec_a2a/testing/tests/test_runner.py`.
+- [x] `W02.P03.S89` - Emit bounded pre-result owner progress with the exact process id, phase and declared deadlines so a silent collection or execution stall remains observable; `src/vaultspec_a2a/testing/runner.py, src/vaultspec_a2a/testing/tests/test_runner.py`.
 
 ### Phase `W02.P04` - Drain ordered accepted work
 

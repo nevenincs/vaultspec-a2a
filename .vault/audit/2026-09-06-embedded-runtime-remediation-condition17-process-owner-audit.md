@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:bfafa36b4d27682e9bda5cc8cd2e2ea2f18abe13554cb2656ff5e31ed06d6e4b'
+body_hash: 'sha256:5075de6e6a03e0583f2cba40c217b340cec2c76eadf1b7400313bd05a33035f7'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
 ---
@@ -56,3 +56,12 @@ Accepted command boundary. Repository-owned toolchain and Just entrypoints are c
 - Keep inner runner diagnostics on bounded files so failed descendant ownership cannot hold the test harness open.
 - Profile the observed pre-result delay and add phase-specific progress evidence before choosing any default whole-suite deadline.
 - Require canonical runner commands in audit and certification instructions; treat raw pytest output as assertion evidence only.
+## Pre-result progress checkpoint
+
+### condition-17-silent-pre-result | medium | resolved in W02.P03.S89
+
+The owner previously exposed no evidence between process creation and `pytest_sessionfinish`. Slow startup, collection, test execution and fixture teardown could therefore appear identical to a dead shell until the optional run deadline expired. The runner now emits an immediate ownership record containing the exact child PID, `awaiting_session_result` phase, run deadline and teardown deadline. It repeats a bounded progress record every 30 seconds until the session result arrives. The interval is configurable for focused diagnostics and must be positive.
+
+The signal is observational and does not invent a universal whole-suite deadline. Callers still choose a run deadline appropriate to the lane, while every canonical invocation now proves that the owner loop is alive and identifies the process to inspect. The existing open item for selecting lane-specific pre-result deadlines remains open.
+
+Verification: the canonical self-test suite emitted the immediate owner record, emitted the 30-second progress record during the nested suite, passed four cases in 32.14 seconds, and exited naturally. The focused progress probe also requires an interim record before its delayed session result. Ruff and Ty passed all changed files.

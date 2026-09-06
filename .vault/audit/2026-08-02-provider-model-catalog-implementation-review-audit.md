@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:561d7c1afe4b3aee41b2644bf07a73e0f3a21c0097d3efbdcbef982716ad3371'
+body_hash: 'sha256:fc3efe376f0eb41ed196172e777d2013aae8cf6bb263901650061c16e758dfaf'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -573,3 +573,105 @@ treated the vanished questionnaire as a new invalid request and returned 409.
 It now returns the matching accepted action once request identity and canonical
 resolution fingerprint agree. The real loopback worker test proves six concurrent
 same-id replays remain accepted while the single graph resume completes.
+
+### p01-s11-retired-root-authority-can-accompany-current-freeze | high | open
+
+Type: compatibility removal and execution-authority validation. The shared
+`resolve_execution_authority` seam closes and validates the nested schema-v1
+`provider_catalog_selection`, but it checks only the top-level `model_profile`
+sentinel before accepting that selection. Independent execution added each of
+`profile_id`, `default_profile_id`, `profile`, `default_profile` and `MODEL_MAP`
+to otherwise exact current metadata; all five records resolved and produced the
+same executable compiler digest. Thus retired durable authority can coexist with
+and pass the supposedly closed current execution envelope. The existing restart
+matrix labels root-profile cases but inserts those keys into the nested selection,
+where exact-key validation already catches them, so it does not discriminate this
+boundary.
+
+Ownership: P01.S11. Before parsing the current selection, refuse the complete
+ADR/S10 retired root-authority key set, including documented aliases, with the
+bounded `retired` incompatibility reason. Never reflect its value or contact a
+worker/provider. Add current-valid-freeze-plus-retired-root-key controls for every
+key and a real redispatch zero-contact discriminator.
+
+### p01-s11-precompile-checkpoint-read-bypasses-worker-capacity | high | open
+
+Type: bounded concurrency and degraded-storage handling. `/dispatch` admits and
+schedules work while capacity is measured only by `_active_ingests`. The Executor
+does not acquire that slot until after graph acquisition. The correction's
+`get_or_compile_graph` creates a distinct thread lock/user entry and awaits
+`checkpointer.aget_tuple` with no deadline before reaching that slot. Under a
+hung or degraded checkpoint backend, authenticated distinct-thread dispatches
+therefore remain accepted and can accumulate scheduled tasks, locks and user
+entries without the configured concurrent-thread bound. Cancellation cleans an
+individual lock user, but it does not bound the number admitted while reads are
+stalled.
+
+Ownership: P01.S11. Reserve bounded worker execution/compile capacity atomically
+before scheduling or checkpoint lookup, apply the configured bounded checkpoint
+read deadline, and release the reservation on success, refusal, timeout,
+exception and cancellation. Concurrent admission tests must hold the real
+checkpointer read, exceed the limit, observe bounded task/lock state and 429 or
+typed refusal, then prove cancellation and timeout return capacity.
+
+### p01-s11-terminal-thread-bindings-are-unbounded | high | open
+
+Type: bounded resource lifecycle and identity isolation. Every compiled run adds
+entries to `_thread_assignment_digests` and `_thread_to_cache_key`; neither map
+has a per-thread retirement path. Terminal `_mark_ingest_done` drops token,
+catalog and node metadata only, and `GraphLifecycleManager.clear` releases the
+identity maps only when the whole worker stops. A long-lived worker therefore
+grows permanent state with every completed, failed or cancelled run. Reusing a
+deleted thread identity can also inherit the stale digest. The compile lock/user
+maps themselves are correctly reference-counted and cleaned after ordinary,
+failed and cancelled callers.
+
+Ownership: P01.S11. Add one terminal-only lifecycle release invoked for every
+completed, failed, cancelled and error settlement while retaining interrupted or
+reconciling runs. Remove only the thread mapping/digest and aggregator association;
+do not evict a graph cache entry shared by other threads. Prove high-volume
+terminal traffic leaves the maps bounded, every terminal class releases, parked
+interrupts retain binding, and any late terminal re-entry is rejected from
+authoritative durable terminal state rather than an immortal in-memory mapping.
+
+### p01-s11-cache-key-compilation-is-not-single-flight-across-threads | medium | open
+
+Type: concurrency and provider construction. The new lock correctly serializes
+compilation for one thread, but locks are keyed only by thread id. Concurrent
+first dispatches for different threads with the exact same four-element
+`GraphCacheKey` can all miss the cache, compile equivalent graphs concurrently,
+and overwrite the same cache entry. This amplifies provider and authoring graph
+construction during bursts; the unreserved precompile path above makes the herd
+unbounded until that HIGH is corrected.
+
+Ownership: P01.S11. Add a bounded key-scoped compilation future or equivalent
+single-flight after each thread's immutable digest binding. Exact-key callers
+must share one compile result, failures/cancellation must wake callers and clean
+the flight, and distinct keys must remain independent.
+
+### p01-s11-reentry-authority-correction-formal-rereview | high | FAIL
+
+Type: formal implementation review disposition. Exact correction
+`3ee6529d2eb533ba7088e871b90169560bbb4880`, parent
+`454a3db6d475d77a644129076aed4d43c3e8aa8e`, resolves the prior omitted re-entry,
+cache-residency binding, resume checkpoint mutation, clarification replay,
+checkpoint projection and thread-association defects. All non-cancel production
+graph re-entry constructors use the shared resolver; cancel remains correctly
+outside graph compilation. Current-schema checkpoints missing the new evidence
+are reconciled only after exact durable current authority resolves, while absent,
+corrupt or retired nested authority refuses. Resume uses `Command.update`, and
+real clarification message, new-prompt, decline and redrive behavior remains
+intact. Closed descriptors and exact expected digest degrade safely at read, and
+history/team/SSE retain explicit thread association with no global accessor.
+
+The three open HIGH findings above block P01.S11 and remediation W01.P02.S05:
+retired root authority is accepted beside a current freeze, checkpoint lookup can
+bypass capacity without a deadline, and terminal thread identity state is
+unbounded. The cross-thread exact-key compilation herd is MEDIUM and remains
+queued. Independent review passed 115 authority/cache/snapshot/executor/live
+clarification tests in 27.82 seconds plus the specialist's 18 focused and two
+real clarification controls. The committed 462-control, 121-worker, 80-focused,
+60-production, 183-projection and 13-final evidence and static/Core results are
+consistent with the corrected positive paths, but cannot establish boundedness
+or the missing retired-root boundary. S11 stays open; this review changes no
+runtime or plan row.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:7983931a935b853cee01185d70d6f400845562a8c902e9378f09f961397b7e77'
+body_hash: 'sha256:3ab100442c509a500ad2f92c7e39ee204b508e0aade5c83a4f254e799d2fe7d9'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -616,3 +616,20 @@ identical clarification replays read it and those replays returned 409 despite a
 matching accepted durable action; matching request and resolution identity now
 returns that action. Real loopback worker tests cover both paths. Owner: P01.S11;
 formal re-review remains required before S11 or remediation S05 can close.
+
+### p01-s11-final-correction-formal-rereview | high | FAIL
+
+Type: remediation prerequisite review disposition. Exact catalog correction
+`3ee6529d2eb533ba7088e871b90169560bbb4880` fixes shared current-schema re-entry,
+per-thread digest comparison across cache/restart/races, atomic resume evidence,
+clarification replay, checkpoint projection and explicit history/team/SSE thread
+association. Independent focused and real-worker checks pass. Three HIGH catalog
+findings still block P01.S11 and remediation W01.P02.S05: otherwise current
+metadata accepts retired root profile/model-map authority; checkpoint lookup is
+scheduled before capacity reservation and has no deadline, allowing unbounded
+stalled tasks and locks during backend degradation; and terminal runs retain
+per-thread cache/digest identity for the worker lifetime. A MEDIUM exact-cache-key
+cross-thread compilation herd also remains queued. Correct these through catalog
+P01.S11, retain interrupted/reconciling identity, prove bounded cleanup and
+zero-contact retired refusal, then obtain another formal review. No remediation
+row is closed by this audit update.

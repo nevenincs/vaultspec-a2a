@@ -6,7 +6,7 @@ tags:
 date: '2026-07-22'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6a9970aeabb319de34fd0c82995e172849e345a5d93b7243a006cef8a60409b2'
+body_hash: 'sha256:ae0d13a621dd27c815504b335b802046e50256857242972b8e5675d32c5969b7'
 related:
   - '[[2026-07-18-desktop-product-profile-W01-P01-summary]]'
   - '[[2026-07-18-desktop-product-profile-W01-P02-summary]]'
@@ -34,6 +34,7 @@ related:
   - '[[2026-07-20-desktop-product-profile-s101-lost-ack-audit]]'
   - '[[2026-09-06-desktop-product-profile-s60-atomic-provider-containment-rereview-audit]]'
   - '[[2026-09-06-desktop-product-profile-s60-atomic-provider-containment-review-audit]]'
+  - '[[2026-09-06-desktop-product-profile-s60-lifecycle-closure-review-audit]]'
 ---
 
 # `desktop-product-profile` feature index
@@ -55,6 +56,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-07-20-desktop-product-profile-s101-lost-ack-audit` - `desktop-product-profile` audit: `S101 retained inputs and lost-ack hardening`
 - `2026-09-06-desktop-product-profile-s60-atomic-provider-containment-rereview-audit` - `desktop-product-profile` audit: `S60 atomic provider containment rereview`
 - `2026-09-06-desktop-product-profile-s60-atomic-provider-containment-review-audit` - `desktop-product-profile` audit: `S60 atomic provider containment formal review`
+- `2026-09-06-desktop-product-profile-s60-lifecycle-closure-review-audit` - `desktop-product-profile` audit: `S60 lifecycle closure review`
 
 ### exec
 

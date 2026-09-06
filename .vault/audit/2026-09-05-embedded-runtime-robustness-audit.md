@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:66bd6a52077846d52c65348d19ec628a7e50ef1b21f452104de26994f2a81b52'
+body_hash: 'sha256:fbf54e7d1129d1b197b22f627d58a7f51acdc3b4abeeaf01264ff553b194d669'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -656,3 +656,15 @@ the new digest unchanged (`changed=false`) and the shared service healthy.
 Private cleanup is shielded and total-bounded, retains exact process identity,
 uses an owned-tree fallback and requires process/listener absence. The complete
 pinning module passes 34 tests; formal re-review remains required.
+
+
+**S06 readiness-envelope correction:** follow-up review `02edd63c` found an
+unbounded second output-drain wait after initial service-control timeout. The
+current helper uses owned temporary output files capped at 64 KiB, reserves
+reap time inside one launch/control deadline, kills and waits for the exact
+control tree, then performs bounded late-record discovery and shielded private
+daemon cleanup. A real exact-version service published its record before the
+control wrapper held inherited handles; the timeout returned in 49.77 seconds
+inside the asserted combined bound, and the complete 35-test module passed in
+143.04 seconds. Private process and listener were absent; shared digest remained
+`changed=false`. Formal S06 re-review remains required.

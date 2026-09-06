@@ -24,6 +24,7 @@ import io
 import json
 import os
 import socket
+import sys
 import tempfile
 import tomllib
 from contextlib import asynccontextmanager
@@ -60,8 +61,17 @@ from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from typing import Protocol
 
     from .._json_contract import FrozenJsonObject, JsonObject, JsonValue
+
+    class _BinaryCapture(Protocol):
+        def flush(self) -> None: ...
+
+        def seek(self, offset: int) -> int: ...
+
+        def read(self, size: int = -1, /) -> bytes: ...
+
 
 RAG = "vaultspec-rag"
 RAG_PIN_VARIABLE = "VAULTSPEC_RAG_ROOT"
@@ -73,6 +83,8 @@ _LIVE_PROBE_TIMEOUT_SECONDS = 120.0
 _SERVICE_CONTROL_TIMEOUT_SECONDS = 120.0
 _SERVICE_STOP_ATTEMPT_SECONDS = 10.0
 _SERVICE_CLEANUP_TIMEOUT_SECONDS = 30.0
+_SERVICE_LATE_RECORD_RESERVE_SECONDS = 10.0
+_CONTROL_OUTPUT_LIMIT_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +93,7 @@ class _OwnedRagService:
 
     process: psutil.Process = field(repr=False)
     port: int
-    service_token: str = field(repr=False)
+    service_token_sha256: str
     record_path: Path
 
 
@@ -90,6 +102,7 @@ class _CleanupReceipt:
     """Non-secret evidence that every private-service cleanup obligation ran."""
 
     fallback_used: bool = False
+    late_service_record_observed: bool = False
     process_absent: bool = False
     port_absent: bool = False
 
@@ -123,28 +136,75 @@ async def _run_rag_cli(
     *args: str,
     env: dict[str, str],
     timeout_seconds: float = _SERVICE_CONTROL_TIMEOUT_SECONDS,
+    command_prefix: tuple[str, ...] = (),
 ) -> dict[str, object]:
-    """Run one bounded exact-version service command and decode its JSON result."""
-    process = await asyncio.create_subprocess_exec(
-        "uvx",
-        "--from",
-        requirement,
-        "vaultspec-rag",
-        *args,
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=timeout_seconds
+    """Run one exact-version command inside one launch/reap/output deadline."""
+    loop = asyncio.get_running_loop()
+    total_deadline = loop.time() + timeout_seconds
+    reap_reserve = min(5.0, max(1.0, timeout_seconds * 0.4))
+    operation_deadline = total_deadline - reap_reserve
+    process: asyncio.subprocess.Process | None = None
+    control_owner: psutil.Process | None = None
+
+    def read_capped(handle: _BinaryCapture) -> str:
+        handle.flush()
+        handle.seek(0)
+        captured = handle.read(_CONTROL_OUTPUT_LIMIT_BYTES + 1)
+        truncated = len(captured) > _CONTROL_OUTPUT_LIMIT_BYTES
+        rendered = captured[:_CONTROL_OUTPUT_LIMIT_BYTES].decode(
+            "utf-8", errors="replace"
         )
-    except TimeoutError:
-        process.kill()
-        await process.communicate()
-        raise
-    rendered_stdout = stdout.decode("utf-8", errors="replace")
-    rendered_stderr = stderr.decode("utf-8", errors="replace")
+        return f"{rendered}\n[output truncated]" if truncated else rendered
+
+    with (
+        tempfile.TemporaryFile() as stdout_handle,
+        tempfile.TemporaryFile() as stderr_handle,
+    ):
+        try:
+            async with asyncio.timeout_at(operation_deadline):
+                process = await asyncio.create_subprocess_exec(
+                    *command_prefix,
+                    "uvx",
+                    "--from",
+                    requirement,
+                    "vaultspec-rag",
+                    *args,
+                    env=env,
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                )
+                control_owner = psutil.Process(process.pid)
+                await process.wait()
+        except TimeoutError:
+            if process is not None and control_owner is not None:
+                try:
+                    owned_tree = [
+                        *control_owner.children(recursive=True),
+                        control_owner,
+                    ]
+                except psutil.NoSuchProcess:
+                    owned_tree = []
+                for owned in reversed(owned_tree):
+                    if owned.is_running():
+                        owned.kill()
+                if process.returncode is None:
+                    process.kill()
+                remaining = max(0.0, total_deadline - loop.time())
+                async with asyncio.timeout(remaining):
+                    await process.wait()
+                    if owned_tree:
+                        remaining = max(0.0, total_deadline - loop.time())
+                        async with asyncio.timeout_at(total_deadline):
+                            _, alive = await asyncio.to_thread(
+                                psutil.wait_procs, owned_tree, timeout=remaining
+                            )
+                        assert not alive, (
+                            "the exact RAG control process tree survived its deadline"
+                        )
+            raise
+        rendered_stdout = read_capped(stdout_handle)
+        rendered_stderr = read_capped(stderr_handle)
+    assert process is not None
     assert process.returncode == 0, rendered_stderr or rendered_stdout
     payload = json.loads(rendered_stdout)
     assert isinstance(payload, dict), payload
@@ -178,6 +238,7 @@ async def _terminate_owned_process_tree(owner: psutil.Process) -> None:
 
 async def _private_endpoint_matches(owner: _OwnedRagService) -> bool:
     """Confirm the retained daemon still owns its private health endpoint."""
+    __tracebackhide__ = True
     if not owner.process.is_running():
         return False
     try:
@@ -186,12 +247,16 @@ async def _private_endpoint_matches(owner: _OwnedRagService) -> bool:
         payload = response.json()
     except (httpx.HTTPError, json.JSONDecodeError):
         return False
+    token = payload.get("service_token") if isinstance(payload, dict) else None
+    token_digest = (
+        hashlib.sha256(token.encode()).hexdigest() if isinstance(token, str) else None
+    )
     return (
         response.status_code == 200
         and isinstance(payload, dict)
         and payload.get("pid") == owner.process.pid
         and payload.get("port") == owner.port
-        and payload.get("service_token") == owner.service_token
+        and token_digest == owner.service_token_sha256
     )
 
 
@@ -277,12 +342,48 @@ def _shared_service_digest() -> tuple[int, int, str] | None:
     return pid, port, hashlib.sha256(token.encode()).hexdigest()
 
 
+def _read_private_service_owner(
+    record_path: Path, *, expected_port: int, expected_version: str
+) -> _OwnedRagService | None:
+    """Read one private identity without allowing its credential to escape."""
+    __tracebackhide__ = True
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    pid = record.get("pid")
+    port = record.get("port")
+    version = record.get("package_version")
+    token = record.get("service_token")
+    if (
+        type(pid) is not int
+        or port != expected_port
+        or version != expected_version
+        or not isinstance(token, str)
+    ):
+        raise RuntimeError("the private RAG service record has invalid identity")
+    token_digest = hashlib.sha256(token.encode()).hexdigest()
+    try:
+        process = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        return None
+    return _OwnedRagService(
+        process=process,
+        port=expected_port,
+        service_token_sha256=token_digest,
+        record_path=record_path,
+    )
+
+
 @asynccontextmanager
 async def _isolated_rag_service(
-    *, project_root: Path, sandbox: Path
+    *,
+    project_root: Path,
+    sandbox: Path,
+    start_timeout_seconds: float = _SERVICE_CONTROL_TIMEOUT_SECONDS,
+    cleanup_receipt: _CleanupReceipt | None = None,
+    start_control_prefix: tuple[str, ...] = (),
 ) -> AsyncIterator[tuple[str, dict[str, str], _CleanupReceipt]]:
     """Run the lockfile-selected RAG service behind owned state and cleanup."""
     requirement = _locked_rag_requirement(project_root)
+    locked_version = requirement.rsplit("==", maxsplit=1)[1]
     port = _reserve_loopback_port()
     status_dir = sandbox / "service-status"
     data_dir = sandbox / "service-data"
@@ -304,7 +405,11 @@ async def _isolated_rag_service(
     start_attempted = False
     service_record_path = status_dir / "service.json"
     owner: _OwnedRagService | None = None
-    receipt = _CleanupReceipt()
+    receipt = cleanup_receipt or _CleanupReceipt()
+    readiness_deadline = asyncio.get_running_loop().time() + start_timeout_seconds
+    control_timeout = max(
+        1.0, start_timeout_seconds - _SERVICE_LATE_RECORD_RESERVE_SECONDS
+    )
     try:
         start_attempted = True
         start = await _run_rag_cli(
@@ -319,25 +424,20 @@ async def _isolated_rag_service(
             "--no-updates",
             "--json",
             env=env,
+            timeout_seconds=control_timeout,
+            command_prefix=start_control_prefix,
         )
         assert start.get("ok") is True, start
         start_data = start.get("data")
         assert isinstance(start_data, dict) and start_data.get("port") == port, start
         started = True
 
-        service_record = json.loads(service_record_path.read_text(encoding="utf-8"))
-        locked_version = requirement.rsplit("==", maxsplit=1)[1]
-        assert service_record["package_version"] == locked_version
-        assert service_record["port"] == port
-        pid = service_record["pid"]
-        service_token = service_record["service_token"]
-        assert type(pid) is int and isinstance(service_token, str)
-        owner = _OwnedRagService(
-            process=psutil.Process(pid),
-            port=port,
-            service_token=service_token,
-            record_path=service_record_path,
+        owner = _read_private_service_owner(
+            service_record_path,
+            expected_port=port,
+            expected_version=locked_version,
         )
+        assert owner is not None, "the private RAG service exited before use"
         assert await _private_endpoint_matches(owner), (
             "the private RAG health identity does not match its service record"
         )
@@ -351,23 +451,22 @@ async def _isolated_rag_service(
             # The CLI control process can time out just before its detached
             # daemon atomically publishes identity. Fund a bounded discovery
             # window so that late-owned service is still reaped.
-            deadline = asyncio.get_running_loop().time() + 10.0
             while (
                 not service_record_path.exists()
-                and asyncio.get_running_loop().time() < deadline
+                and asyncio.get_running_loop().time() < readiness_deadline
             ):
                 await asyncio.sleep(0.05)
         if owner is None and (started or service_record_path.exists()):
-            service_record = json.loads(service_record_path.read_text(encoding="utf-8"))
-            pid = service_record["pid"]
-            service_token = service_record["service_token"]
-            assert type(pid) is int and isinstance(service_token, str)
-            owner = _OwnedRagService(
-                process=psutil.Process(pid),
-                port=port,
-                service_token=service_token,
-                record_path=service_record_path,
+            receipt.late_service_record_observed = True
+            owner = _read_private_service_owner(
+                service_record_path,
+                expected_port=port,
+                expected_version=locked_version,
             )
+            if owner is None:
+                receipt.process_absent = True
+                receipt.port_absent = _loopback_port_is_closed(port)
+                service_record_path.unlink(missing_ok=True)
         if owner is not None:
             cleanup = asyncio.create_task(
                 _cleanup_private_rag_service(
@@ -853,6 +952,64 @@ async def test_cancelled_probe_reaps_private_service_when_stop_command_fails(
     assert len(receipts) == 1
     receipt = receipts[0]
     assert receipt.fallback_used
+    assert receipt.process_absent
+    assert receipt.port_absent
+    assert _shared_service_digest() == shared_before
+
+
+@pytest.mark.asyncio
+async def test_timed_out_start_reaps_a_late_published_private_service(
+    tmp_path: Path,
+) -> None:
+    """The readiness deadline includes control-tree and late-daemon cleanup."""
+    launch_root = Path(__file__).resolve().parents[4]
+    sandbox = tmp_path / "timed-out-rag-service"
+    service_record_path = sandbox / "service-status" / "service.json"
+    publication_marker = tmp_path / "wrapper-observed-service-record"
+    wrapper = tmp_path / "hold-real-rag-control.py"
+    wrapper.write_text(
+        """from pathlib import Path
+import subprocess
+import sys
+import time
+
+marker = Path(sys.argv[1])
+service_record = Path(sys.argv[2])
+child = subprocess.Popen(sys.argv[3:])
+deadline = time.monotonic() + 120.0
+while time.monotonic() < deadline and child.poll() is None:
+    if service_record.exists():
+        marker.write_text("observed", encoding="utf-8")
+        break
+    time.sleep(0.05)
+while True:
+    time.sleep(1.0)
+""",
+        encoding="utf-8",
+    )
+    receipt = _CleanupReceipt()
+    shared_before = _shared_service_digest()
+    started_at = asyncio.get_running_loop().time()
+
+    with pytest.raises(TimeoutError):
+        async with _isolated_rag_service(
+            project_root=launch_root,
+            sandbox=sandbox,
+            start_timeout_seconds=60.0,
+            cleanup_receipt=receipt,
+            start_control_prefix=(
+                sys.executable,
+                str(wrapper),
+                str(publication_marker),
+                str(service_record_path),
+            ),
+        ):
+            pytest.fail("the deliberately short readiness budget was not enforced")
+
+    elapsed = asyncio.get_running_loop().time() - started_at
+    assert elapsed < 90.0, "readiness and cleanup exceeded their combined bounds"
+    assert publication_marker.read_text(encoding="utf-8") == "observed"
+    assert receipt.late_service_record_observed
     assert receipt.process_absent
     assert receipt.port_absent
     assert _shared_service_digest() == shared_before

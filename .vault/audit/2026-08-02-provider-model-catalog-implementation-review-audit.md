@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:ad5d4d1e3515d261f6d5f470e3e7d24bcac015f548da4a5c898519e5ac2b44f6'
+body_hash: 'sha256:1939a0717f9fbb8af59ed8b2b96afa4ca56a3da4c20cf726793b41889e7ed5ff'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -997,3 +997,14 @@ so rotation comparison was `changed=true`. After the corrected isolated test,
 the shared service remained healthy at PID 58992, port 8766, version 0.4.23 and
 the post-rotation digest comparison was `changed=false`. The S06 test itself
 still has no shared-service control path.
+
+### w01-p02-s06-bounded-rag-readiness-follow-up | medium | resolved pending formal review
+
+Type: test-environment resource lifecycle. Review `02edd63c` found the first
+isolated RAG control timeout could await pipe drainage indefinitely. The S06
+follow-up gives launch, exact control-tree reap and capped output one total
+deadline, reserves bounded late-record discovery, and reuses shielded
+private-service cleanup. A real exact-version service publishes its owned record
+before a filesystem control wrapper holds the handles; the timeout returns and
+proves process/port absence without changing the shared-service digest. The
+final pinning module passes 35 tests. Remediation S06 remains open for review.

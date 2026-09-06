@@ -40,7 +40,9 @@ if TYPE_CHECKING:
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
+from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import (
     VerdictSubscriber,
@@ -53,13 +55,17 @@ from ...control.verdict_subscriber import (
 )
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
+    create_control_action,
     create_thread,
     get_authoring_cursor,
     get_control_action_by_idempotency_key,
     get_thread,
     update_thread_status,
 )
+from ...ipc.schemas import DispatchRequest
+from ...team.team_config import load_team_config
 from ...thread.enums import ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -113,15 +119,21 @@ def _install_receipt_graph(
     builder.add_node("worker", complete)
     builder.add_edge("__start__", "worker")
     builder.add_edge("worker", "__end__")
+    workspace = Path.cwd()
+    definition = freeze_graph_definition(
+        load_team_config("mock-success-single", workspace_root=workspace),
+        workspace_root=workspace,
+    )
     executor.register_compiled_graph(
         thread_id,
         (
-            "verdict-receipt-preset",
-            None,
+            "mock-success-single",
+            str(workspace),
             False,
             resolve_execution_authority(
-                current_execution_metadata(Path.cwd())
+                current_execution_metadata(workspace)
             ).model_assignment_digest,
+            definition.digest(),
         ),
         builder.compile(checkpointer=checkpointer),
     )
@@ -162,6 +174,17 @@ async def _seed_parked_thread(
     team_preset: str | None = None,
 ) -> None:
     """Create an INPUT_REQUIRED thread with a checkpoint carrying authoring ids."""
+    workspace = Path.cwd()
+    metadata = current_execution_metadata(workspace)
+    execution_authority = resolve_execution_authority(metadata)
+    definition = (
+        freeze_graph_definition(
+            load_team_config(team_preset, workspace_root=workspace),
+            workspace_root=workspace,
+        )
+        if team_preset is not None
+        else None
+    )
     await checkpointer.setup()
     checkpoint = empty_checkpoint()
     checkpoint["id"] = f"cp-{thread_id}"
@@ -169,6 +192,11 @@ async def _seed_parked_thread(
     checkpoint["channel_values"]["authoring_changeset_ids"] = changeset_ids
     if gate_pending is not None:
         checkpoint["channel_values"]["gate_pending_proposal_id"] = gate_pending
+    if definition is not None:
+        checkpoint["channel_values"]["model_assignment_digest"] = (
+            execution_authority.model_assignment_digest
+        )
+        checkpoint["channel_values"]["graph_definition_digest"] = definition.digest()
     await checkpointer.aput(
         {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
         checkpoint,
@@ -176,13 +204,42 @@ async def _seed_parked_thread(
         {},
     )
     async with session_factory() as session:
+        authority = make_test_write_authority()
         await create_thread(
             session,
-            write_authority=make_test_write_authority(),
+            write_authority=authority,
             thread_id=thread_id,
             team_preset=team_preset,
-            metadata=current_execution_metadata(Path.cwd()),
+            metadata=metadata,
         )
+        if team_preset is not None and definition is not None:
+            dispatch = DispatchRequest(
+                dispatch_id=authority.action_receipt_id,
+                action="ingest",
+                thread_id=thread_id,
+                content="seed accepted graph authority",
+                team_preset=team_preset,
+                graph_definition=definition,
+                workspace_root=str(workspace),
+                recursion_limit=25,
+                model_assignment=execution_authority.model_assignment,
+            )
+            await create_control_action(
+                session,
+                thread_id=thread_id,
+                action_type=authority.action_type,
+                idempotency_key=f"thread-create:{thread_id}",
+                dispatch_id=authority.action_receipt_id,
+                payload=freeze_accepted_input(
+                    dispatch, intent={"content": "seed accepted graph authority"}
+                ),
+            )
+            receipt = await prepare_graph_action_receipt(
+                session,
+                thread_id=thread_id,
+                dispatch_id=authority.action_receipt_id,
+            )
+            assert receipt is not None
         await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
         await session.commit()
 
@@ -776,7 +833,7 @@ async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
             proposal_ids=["proposal:research"],
             changeset_ids=["cs:research"],
             gate_pending="proposal:research",
-            team_preset="verdict-receipt-preset",
+            team_preset="mock-success-single",
         )
         async with _worker_runtime(
             checkpointer,
@@ -817,7 +874,7 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
             proposal_ids=["proposal:research"],
             changeset_ids=["cs:research"],
             gate_pending="proposal:research",
-            team_preset="verdict-receipt-preset",
+            team_preset="mock-success-single",
         )
         async with _worker_runtime(
             checkpointer,

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:35c03d00933e64118161098ab8c8a9d306dc85c64abd06be934d3ef5f6551670'
+body_hash: 'sha256:53c5e4464a7113df5732a51c7b16e10a8372e682718563d757d4c101d5a55bc3'
 step_id: 'S84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -104,3 +104,20 @@ Open review queue:
 - Existing HIGH graph-cache identity, receipt-consumer, cancellation-proof and recovery scheduler findings remain open.
 
 All retired `claim_control_action` imports are gone from control tests. S84 remains open because collection health is only a prerequisite to the complete conditions 1-16 matrix, not qualification.
+## Verdict subscriber frozen-graph migration
+
+- `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber.py`.
+- Parked resume fixtures now persist an accepted initial action with accepted-action-input-v2, its immutable receipt, the exact frozen graph definition, and current model assignment.
+- Checkpoint state and the injected compiled-graph cache key now carry the matching model-assignment and graph-definition digests.
+- Replaced the invented `verdict-receipt-preset` identity with the real `mock-success-single` definition.
+- `verify:` focused Ruff and Ty -> pass.
+- `verify:` subscriber suite -> 20 passed and two failed in 14.28 seconds, natural exit 1.
+- `verify:` the two migrated dispatch cases -> two failed in 9.69 seconds, natural exit 1.
+
+Open review queue:
+
+- HIGH: both current-authority dispatches now reach the ASGI worker but receive HTTP 500 before dispatch admission; align the worker fixture with the current dispatch-auth contract and preserve exact credential behavior.
+- HIGH: apply the same accepted initial authority and exact cache-key migration to the live subscriber and verdict-loop fixtures.
+- The prior graph-cache identity finding is resolved only for `test_verdict_subscriber.py`.
+
+S84 remains open.

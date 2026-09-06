@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:75a2cd9cce1028c2a281727637da64643b33dd75a4bff2b53ac5ff6f39b38e42'
+body_hash: 'sha256:8ec76d6d4f5ff0becb3ee7686687d0a744ee3ce962ddc63925b14487ebf68cbf'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -227,3 +227,8 @@ The clean collection enumerated `test_ensure_worker_adopts_legacy_missing_or_bla
 ### legacy-worker-adoption-surface-resolution | high | resolved by S90
 
 The production comparison now treats missing and blank gateway targets as absent authority. Non-spawning attachment refuses them, and auto-spawn refuses to evict an incumbent whose target cannot be proven. Exact current target attachment remains admitted; explicit foreign targets retain their separately tested refusal and controlled eviction path. Three focused cases passed naturally, with Ruff and Ty clean. The full-file timeout remains recorded as failed verification.
+### verdict-unit-frozen-graph-authority | high | current authority installed; dispatch-auth fixture blocks completion
+
+The verdict subscriber unit fixture now persists the complete initial accepted input, immutable receipt and frozen executable graph, writes both compilation digests to its checkpoint, and registers its real graph under the matching five-member cache identity. Focused Ruff and Ty pass, resolving the unit fixture's stale cache shape without a placeholder digest.
+
+The suite reaches 20 passes. Its two real dispatch cases now fail later: the ASGI worker returns HTTP 500 before adding either dispatch identity to its admission set. The fixture must satisfy the current gateway-to-worker dispatch-auth contract before these concurrency behaviors can qualify. Live subscriber and verdict-loop fixtures still require the same frozen graph migration.

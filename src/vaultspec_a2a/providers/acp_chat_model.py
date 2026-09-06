@@ -19,6 +19,7 @@ import logging
 import shutil
 import sys
 from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 from typing import Any, Never, override
 
 from langchain_core.callbacks import (
@@ -65,10 +66,14 @@ from ._acp_rpc_handlers import (
 )
 from ._acp_session import initialize_session, setup_prompt, setup_session
 from ._acp_types import (
+    MAX_NATIVE_COMMAND_NAME_LENGTH,
     AcpModelConfig,
     AcpResponseFuture,
     AcpResponseFutures,
     AcpSessionContext,
+    NativeCommandDisposition,
+    NativeCommandOutcome,
+    NativeCommandResult,
     PermissionCallback,
     RpcHandlerMap,
     require_workspace_root,
@@ -97,6 +102,27 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+_COMMAND_ADVERTISEMENT_TIMEOUT_SECONDS = 5.0
+_MAX_NATIVE_COMMAND_ARGUMENT_LENGTH = 8192
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeCommandRequest:
+    name: str
+    arguments: str | None
+
+
+class _NativeCommandUnavailableError(RuntimeError):
+    def __init__(
+        self, name: str, disposition: NativeCommandDisposition, reason: str
+    ) -> None:
+        super().__init__(reason)
+        self.name = name
+        self.disposition = disposition
+
+
+class _AcpSessionBusyError(RuntimeError):
+    """The model already owns an in-flight provider session."""
 
 
 # The spawned CLI writes its own session transcript into the OPERATOR's real
@@ -356,6 +382,7 @@ class AcpChatModel(BaseChatModel):
     _response_futures: AcpResponseFutures | None = PrivateAttr(default=None)
     _auth_methods: list[JsonObject] = PrivateAttr(default_factory=list)
     _session_config_options: list[JsonObject] = PrivateAttr(default_factory=list)
+    _session_busy: bool = PrivateAttr(default=False)
 
     @override
     def model_post_init(self, __context: object) -> None:
@@ -421,6 +448,47 @@ class AcpChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Streams responses from the ACP subprocess."""
+        async for chunk in self._stream_request(
+            messages,
+            stop=stop,
+            run_manager=run_manager,
+            native_command=None,
+            **kwargs,
+        ):
+            yield chunk
+
+    async def _stream_request(
+        self,
+        messages: list[BaseMessage],
+        *,
+        stop: list[str] | None,
+        run_manager: AsyncCallbackManagerForLLMRun | None,
+        native_command: _NativeCommandRequest | None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        """Own one provider session and refuse concurrent use explicitly."""
+        del stop, kwargs
+        if self._session_busy:
+            raise _AcpSessionBusyError("the provider session is already busy")
+        self._session_busy = True
+        try:
+            async for chunk in self._astream_session(
+                messages,
+                run_manager=run_manager,
+                native_command=native_command,
+            ):
+                yield chunk
+        finally:
+            self._session_busy = False
+
+    async def _astream_session(
+        self,
+        messages: list[BaseMessage],
+        *,
+        run_manager: AsyncCallbackManagerForLLMRun | None,
+        native_command: _NativeCommandRequest | None,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        """Run one ordinary prompt or one negotiated native command."""
         prompt_blocks: list[JsonObject] = []
         for msg in messages:
             if isinstance(
@@ -579,6 +647,35 @@ class AcpChatModel(BaseChatModel):
             self._stdin = ctx.stdin
             self._stdin_lock = ctx.stdin_lock
             self._response_futures = ctx.response_futures
+            if native_command is not None:
+                catalog = ctx.native_commands_for(self._active_session_id)
+                if not catalog.received:
+                    try:
+                        await asyncio.wait_for(
+                            catalog.updated.wait(),
+                            timeout=_COMMAND_ADVERTISEMENT_TIMEOUT_SECONDS,
+                        )
+                    except TimeoutError:
+                        raise _NativeCommandUnavailableError(
+                            native_command.name,
+                            NativeCommandDisposition.BLOCKED,
+                            (
+                                "the provider did not advertise commands before "
+                                "the deadline"
+                            ),
+                        ) from None
+                availability = catalog.resolve(native_command.name)
+                if availability.disposition is not NativeCommandDisposition.SUPPORTED:
+                    raise _NativeCommandUnavailableError(
+                        native_command.name,
+                        availability.disposition,
+                        availability.reason or "native command is unavailable",
+                    )
+                text = f"/{native_command.name}"
+                if native_command.arguments:
+                    text = f"{text} {native_command.arguments}"
+                prompt_blocks = [{"type": "text", "text": text}]
+                ctx.effects_may_have_occurred = True
             prompt_future = await setup_prompt(
                 ctx,
                 self._config,
@@ -616,6 +713,76 @@ class AcpChatModel(BaseChatModel):
                     )
                 )
             await run_independent_cleanups(*cleanup_steps)
+
+    async def execute_native_command(
+        self, name: str, arguments: str | None = None
+    ) -> NativeCommandResult:
+        """Execute one exactly advertised command through ACP prompt syntax."""
+        if (
+            not name
+            or name != name.strip()
+            or not name.isprintable()
+            or any(character.isspace() for character in name)
+            or name.startswith("/")
+            or len(name) > MAX_NATIVE_COMMAND_NAME_LENGTH
+        ):
+            raise ValueError("native command name is not an executable exact identity")
+        if arguments is not None and (
+            len(arguments) > _MAX_NATIVE_COMMAND_ARGUMENT_LENGTH
+            or not arguments.isprintable()
+        ):
+            raise ValueError("native command arguments are invalid")
+
+        output: list[str] = []
+        try:
+            async for chunk in self._stream_request(
+                [],
+                stop=None,
+                run_manager=None,
+                native_command=_NativeCommandRequest(name, arguments),
+            ):
+                content = chunk.message.content
+                if isinstance(content, str):
+                    output.append(content)
+        except _AcpSessionBusyError as exc:
+            return NativeCommandResult(
+                name=name, outcome=NativeCommandOutcome.BUSY, reason=str(exc)
+            )
+        except _NativeCommandUnavailableError as exc:
+            outcome = (
+                NativeCommandOutcome.UNSUPPORTED
+                if exc.disposition is NativeCommandDisposition.UNSUPPORTED
+                else NativeCommandOutcome.BLOCKED
+            )
+            return NativeCommandResult(name=name, outcome=outcome, reason=str(exc))
+        except AcpPromptCancelledError as exc:
+            return NativeCommandResult(
+                name=name,
+                outcome=NativeCommandOutcome.CANCELLED,
+                reason=str(exc),
+                effects_may_have_occurred=exc.effects_may_have_occurred,
+            )
+        except AcpError as exc:
+            return NativeCommandResult(
+                name=name,
+                outcome=NativeCommandOutcome.FAILED,
+                reason=str(exc),
+                effects_may_have_occurred=exc.effects_may_have_occurred,
+            )
+        except Exception as exc:
+            logger.error("ACP native command failed", exc_info=exc)
+            return NativeCommandResult(
+                name=name,
+                outcome=NativeCommandOutcome.FAILED,
+                reason=f"provider command failed ({type(exc).__name__})",
+                effects_may_have_occurred=True,
+            )
+        return NativeCommandResult(
+            name=name,
+            outcome=NativeCommandOutcome.COMPLETED,
+            output="".join(output),
+            effects_may_have_occurred=True,
+        )
 
     def _enforce_turn_deadline(self, ctx: AcpSessionContext) -> None:
         """Fail the turn once the subprocess has gone silent for too long.

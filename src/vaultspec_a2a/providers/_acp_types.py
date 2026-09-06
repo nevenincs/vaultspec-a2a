@@ -38,6 +38,17 @@ class NativeCommandDisposition(StrEnum):
     UNSUPPORTED = "unsupported"
 
 
+class NativeCommandOutcome(StrEnum):
+    """Terminal result of one intentional native-command invocation."""
+
+    COMPLETED = "completed"
+    BUSY = "busy"
+    BLOCKED = "blocked"
+    UNSUPPORTED = "unsupported"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True, slots=True)
 class NativeCommandAvailability:
     """One exact command's session-scoped availability and input contract."""
@@ -49,6 +60,17 @@ class NativeCommandAvailability:
     reason: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class NativeCommandResult:
+    """Bounded observable result returned by the native-command executor."""
+
+    name: str
+    outcome: NativeCommandOutcome
+    output: str = ""
+    reason: str | None = None
+    effects_may_have_occurred: bool = False
+
+
 @dataclass(slots=True)
 class AcpNativeCommandCatalog:
     """Validated replacement snapshots from ACP available-command updates."""
@@ -56,6 +78,7 @@ class AcpNativeCommandCatalog:
     commands: dict[str, NativeCommandAvailability] = field(default_factory=dict)
     received: bool = False
     blocked_reason: str | None = None
+    updated: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
     def replace(
         self,
@@ -67,6 +90,7 @@ class AcpNativeCommandCatalog:
         self.commands = dict(commands)
         self.received = True
         self.blocked_reason = blocked_reason
+        self.updated.set()
 
     def resolve(self, name: str) -> NativeCommandAvailability:
         """Resolve one exact command without inventing aliases or default support."""

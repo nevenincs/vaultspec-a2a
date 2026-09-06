@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:b92064fc9e18b422af40b7d256a10c3803bcb43b1df2c766d7e9011686f19b68'
+body_hash: 'sha256:96c5a7b7fe2c35fe650383ec87a99170cd6f6d192d4f47d3d7fa8ee2c837d192'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -679,3 +679,7 @@ degraded case requests sixty seconds and returns in 35.52 seconds in the final
 rerun and was resolved by accepting only exact terminal
 `NoSuchProcess`/`ProcessLookupError` outcomes. Shared digest remained
 `changed=false`; formal S06 re-review remains required.
+
+### W01.P02.S06 stop-control fallback reservation correction
+
+Formal review `47f541201bb601aa8f20b1668f8e8c21c87c70b3` identified that the normal private RAG stop attempt could exhaust the total operation deadline before exact-owner fallback. The S06 test environment now gives stop an earlier absolute slice and retains eight seconds inside the same original deadline for process-tree termination and listener-absence proof. The real exact-command hung-stop discriminator passed, the full module passed 36 tests, and the shared service fingerprint was unchanged. A related nonzero control-exit exception mismatch was classified MEDIUM and resolved with the helper's typed `RuntimeError` path. S06 remains open for formal re-review.

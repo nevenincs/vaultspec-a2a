@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:aa557078a47ba6de878aed2303208b547131a34440c745ff63539436bddbebff'
+body_hash: 'sha256:fbfc105ab8caf0db607b020b4c1d1e3477054dd4c06b2848b6b20c13848dc70b'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -965,7 +965,7 @@ and unchanged shared digest. No new product, deprecated/legacy, compatibility,
 mock, monkeypatch, fake transport or warning-suppression path was added. S06
 remains open for formal re-review.
 
-### w01-p02-s06-stop-timeout-consumes-fallback-budget | medium | open
+### w01-p02-s06-stop-timeout-consumes-fallback-budget | medium | resolved pending formal re-review
 
 Type: degraded cleanup and deadline partition. Correction `785029d5e81e512958d561e68f4493fece6735f2` now mints one operation deadline, but `_cleanup_private_rag_service` passes that final deadline unchanged to `_run_rag_cli` for the normal stop attempt at `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py:296-311`. When an absolute deadline is present, `_run_rag_cli` derives its wait and reap reservations from the full remaining interval and does not apply `timeout_seconds` as an earlier stop-attempt boundary. A stop command that launches successfully and hangs can therefore spend the remaining cleanup interval on its own wait and control-tree reap; the catch at lines 314-315 then has no time left for the exact owned-daemon fallback or process/port absence proof. The existing degraded cleanup test forces stop-process creation to fail immediately, so it does not discriminate this path.
 
@@ -976,3 +976,13 @@ S06 remains review-blocked. Reserve an earlier absolute stop-control deadline in
 Type: formal correction review disposition. The correction changes the same four intended paths and resolves the prior split envelope: one monotonic operation deadline is minted before launch; control reap, capped file output, late-record discovery and cleanup receive deadlines derived from it; the real degraded-start proof now requires completion inside its requested sixty seconds and independently passed in 36.85 seconds. Terminal PID races catch only `psutil.NoSuchProcess` or `ProcessLookupError`; exact retained process identity, changed-listener refusal and process/port absence remain required. The prior credential redaction and operator-owned rotation evidence, read-only shared fingerprint comparison, cancellation cleanup, exact locked RAG version, ER20-only scope, S07/S49 cold-catalog ownership and zero legacy/deprecated surface remain intact. The recorded module result is 35 passes, and Ruff format/check, Ty, diff and all 19 remediation Core checks pass.
 
 The normal stop-timeout path still consumes the fallback reservation, so CLI stop, fallback and verified absence are not all guaranteed inside the one deadline. S06 does not pass formal review and remains open for correction and re-review.
+
+### w01-p02-s06-stop-slice-preserves-fallback-budget | medium | corrected pending formal re-review
+
+Type: degraded cleanup and deadline partition. Formal review `47f541201bb601aa8f20b1668f8e8c21c87c70b3` found that the normal exact-version stop control received the final operation deadline and could consume the time required for retained-owner fallback and absence proof. The cleanup now derives an earlier stop-control deadline and reserves eight seconds inside the original absolute operation deadline for exact-owner process-tree termination and process/listener absence verification. No phase resets or extends the original bound.
+
+A deterministic filesystem wrapper successfully creates the exact locked `uvx --from vaultspec-rag[mcp]==0.4.23 vaultspec-rag server stop` child with its real arguments, records the child PID and command, suspends it, and holds the control process. The stop slice expires while the private daemon remains owned; cleanup records fallback use and proves the retained process and private port absent before the explicit 120-second total deadline. The focused proof passed in 53.24 seconds with a 51.57-second test body. After the final exact-command assertions, the authoritative exact-source module passed 36 tests in 215.98 seconds; the same case took 63.65 seconds. The shared-service digest remained unchanged. No product fault hook, mock, monkeypatch, compatibility path, deprecated/legacy behavior, or warning suppression was added. S06 remains open for formal re-review.
+
+### w01-p02-s06-nonzero-control-exit-exception-mismatch | medium | resolved
+
+Type: test subprocess lifecycle and error contract. The first hung-stop discriminator surfaced that `_run_rag_cli` represented a real nonzero control-process exit with `AssertionError`, while degraded cleanup accepts the helper's operational `RuntimeError` contract. That mismatch could bypass retained-owner fallback after a launched stop control failed normally. The helper now raises bounded `RuntimeError` with capped captured output for every nonzero exit; start failures still propagate, while cleanup can execute its exact-owner fallback. The focused and complete reruns above prove terminal cleanup. The failed exploratory run also exposed a Windows wrapper constant mistake before the exact suspended child was created; the wrapper now uses the documented Windows creation flag value and the passing test asserts the recorded exact command and PID.

@@ -84,6 +84,7 @@ _SERVICE_CONTROL_TIMEOUT_SECONDS = 120.0
 _SERVICE_STOP_ATTEMPT_SECONDS = 10.0
 _SERVICE_CLEANUP_RESERVE_SECONDS = 15.0
 _SERVICE_LATE_RECORD_RESERVE_SECONDS = 5.0
+_SERVICE_FALLBACK_RESERVE_SECONDS = 8.0
 _CONTROL_OUTPUT_LIMIT_BYTES = 64 * 1024
 
 
@@ -211,7 +212,8 @@ async def _run_rag_cli(
         rendered_stdout = read_capped(stdout_handle)
         rendered_stderr = read_capped(stderr_handle)
     assert process is not None
-    assert process.returncode == 0, rendered_stderr or rendered_stdout
+    if process.returncode != 0:
+        raise RuntimeError(rendered_stderr or rendered_stdout)
     payload = json.loads(rendered_stdout)
     assert isinstance(payload, dict), payload
     return payload
@@ -291,10 +293,18 @@ async def _cleanup_private_rag_service(
     env: dict[str, str],
     receipt: _CleanupReceipt,
     absolute_deadline: float,
+    stop_control_prefix: tuple[str, ...] = (),
 ) -> None:
     """Stop the private daemon, falling back only through its retained identity."""
     async with asyncio.timeout_at(absolute_deadline):
         try:
+            loop = asyncio.get_running_loop()
+            stop_deadline = min(
+                loop.time() + _SERVICE_STOP_ATTEMPT_SECONDS,
+                absolute_deadline - _SERVICE_FALLBACK_RESERVE_SECONDS,
+            )
+            if stop_deadline <= loop.time():
+                raise TimeoutError("no stop-control budget remains before fallback")
             stopped = await _run_rag_cli(
                 requirement,
                 "server",
@@ -303,11 +313,8 @@ async def _cleanup_private_rag_service(
                 str(owner.port),
                 "--json",
                 env=env,
-                timeout_seconds=min(
-                    _SERVICE_STOP_ATTEMPT_SECONDS,
-                    max(0.0, absolute_deadline - asyncio.get_running_loop().time()),
-                ),
-                absolute_deadline=absolute_deadline,
+                command_prefix=stop_control_prefix,
+                absolute_deadline=stop_deadline,
             )
             if stopped.get("ok") is not True:
                 raise RuntimeError("the private RAG stop command refused cleanup")
@@ -398,6 +405,7 @@ async def _isolated_rag_service(
     start_timeout_seconds: float = _SERVICE_CONTROL_TIMEOUT_SECONDS,
     cleanup_receipt: _CleanupReceipt | None = None,
     start_control_prefix: tuple[str, ...] = (),
+    stop_control_prefix: tuple[str, ...] = (),
 ) -> AsyncIterator[tuple[str, dict[str, str], _CleanupReceipt]]:
     """Run the lockfile-selected RAG service behind owned state and cleanup."""
     requirement = _locked_rag_requirement(project_root)
@@ -492,6 +500,7 @@ async def _isolated_rag_service(
                     env=env,
                     receipt=receipt,
                     absolute_deadline=operation_deadline,
+                    stop_control_prefix=stop_control_prefix,
                 )
             )
             await _shield_private_cleanup(cleanup)
@@ -972,6 +981,68 @@ async def test_cancelled_probe_reaps_private_service_when_stop_command_fails(
 
     assert len(receipts) == 1
     receipt = receipts[0]
+    assert receipt.fallback_used
+    assert receipt.process_absent
+    assert receipt.port_absent
+    assert _shared_service_digest() == shared_before
+
+
+@pytest.mark.asyncio
+async def test_hung_real_stop_preserves_fallback_and_absence_budget(
+    tmp_path: Path,
+) -> None:
+    """A launched but hung exact stop control cannot consume fallback time."""
+    launch_root = Path(__file__).resolve().parents[4]
+    marker = tmp_path / "hung-stop-control.json"
+    wrapper = tmp_path / "hold-exact-rag-stop.py"
+    wrapper.write_text(
+        """import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+marker = Path(sys.argv[1])
+command = sys.argv[2:]
+creationflags = 0x00000004 if os.name == "nt" else 0
+child = subprocess.Popen(command, creationflags=creationflags)
+if creationflags == 0:
+    os.kill(child.pid, signal.SIGSTOP)
+marker.write_text(
+    json.dumps({"pid": child.pid, "command": command}), encoding="utf-8"
+)
+while True:
+    time.sleep(1.0)
+""",
+        encoding="utf-8",
+    )
+    receipt = _CleanupReceipt()
+    shared_before = _shared_service_digest()
+    started_at = asyncio.get_running_loop().time()
+
+    async with _isolated_rag_service(
+        project_root=launch_root,
+        sandbox=tmp_path / "hung-stop-service",
+        start_timeout_seconds=120.0,
+        cleanup_receipt=receipt,
+        stop_control_prefix=(sys.executable, str(wrapper), str(marker)),
+    ):
+        pass
+
+    elapsed = asyncio.get_running_loop().time() - started_at
+    assert elapsed < 120.0, "hung stop and fallback exceeded one total bound"
+    launched = json.loads(marker.read_text(encoding="utf-8"))
+    command = launched["command"]
+    assert command[:3] == ["uvx", "--from", _locked_rag_requirement(launch_root)]
+    assert command[3:6] == ["vaultspec-rag", "server", "stop"]
+    assert command[6] == "--port"
+    assert int(command[7]) > 0
+    assert command[8:] == ["--json"]
+    if shared_before is not None:
+        assert int(command[7]) != shared_before[1]
+    assert isinstance(launched["pid"], int)
     assert receipt.fallback_used
     assert receipt.process_absent
     assert receipt.port_absent

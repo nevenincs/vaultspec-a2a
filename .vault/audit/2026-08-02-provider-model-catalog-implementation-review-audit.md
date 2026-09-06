@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:a4ca8ae01d62de8ca2ded42a96671c1bcff5de862378132e9073294b70c8cc2e'
+body_hash: 'sha256:3bbfcb8ef72be145c08b0e230394a89bca811cfec1df465b2bfc18f339796970'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -1018,3 +1018,7 @@ real degraded sixty-second proof returns in 35.52 seconds in the passing
 35-test module. An exact child-exit signal race surfaced and is resolved by
 accepting only terminal `NoSuchProcess`/`ProcessLookupError`; all other errors
 remain visible. Shared-service digest remained unchanged. S06 review is open.
+
+### w01-p02-s06-stop-fallback-budget-follow-up | medium | corrected pending formal re-review
+
+Remediation review `47f541201bb601aa8f20b1668f8e8c21c87c70b3` found that an exact-version RAG stop control could consume the final cleanup deadline. S06 now caps that control at an earlier slice and preserves eight seconds of the same original absolute deadline for retained-owner fallback and process/port absence. A real suspended exact stop child proves the path; the complete pinning module passes 36 tests, and the shared daemon's digest remains unchanged. The surfaced nonzero-control exception mismatch is also resolved through the helper's bounded `RuntimeError` contract. ER20 remains corrected pending formal re-review; S06 stays open.

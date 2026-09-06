@@ -6,6 +6,7 @@ Data carriers live in ``_acp_types``, auth logic in ``_acp_auth``.
 
 import logging
 from pathlib import Path
+from typing import cast
 
 from ..control.config import settings
 from ..utils.enums import AcpRequestId
@@ -33,6 +34,8 @@ from .acp_exceptions import AcpErrorCode, AcpSessionError
 __all__: list[str] = []
 
 logger = logging.getLogger(__name__)
+
+_ACP_PROTOCOL_VERSION = 1
 
 
 def is_strict_claude_session(config: AcpModelConfig) -> bool:
@@ -327,7 +330,7 @@ async def initialize_session(
         rpc_id=rpc_id,
         method="initialize",
         params={
-            "protocolVersion": 1,
+            "protocolVersion": _ACP_PROTOCOL_VERSION,
             "clientCapabilities": {
                 "fs": {
                     "readTextFile": (
@@ -389,15 +392,47 @@ async def initialize_session(
             f"ACP initialize failed: {resp['error']}",
             code=_error_code(resp.get("error")),
         )
-    res = resp.get("result")
-    result = lenient_json_object(res)
-    capabilities = result.get("agentCapabilities")
-    auth_methods = result.get("authMethods")
+    result = resp.get("result")
+    if not isinstance(result, dict):
+        raise AcpSessionError(
+            "ACP initialize succeeded without an object result",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    protocol_version = result.get("protocolVersion")
+    if not isinstance(protocol_version, int) or isinstance(protocol_version, bool):
+        raise AcpSessionError(
+            "ACP initialize returned a missing or malformed protocolVersion",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    if protocol_version != _ACP_PROTOCOL_VERSION:
+        raise AcpSessionError(
+            "ACP initialize negotiated unsupported protocol version "
+            f"{protocol_version}; required {_ACP_PROTOCOL_VERSION}",
+            code=AcpErrorCode.INVALID_PARAMS,
+        )
+    capabilities = result.get("agentCapabilities", {})
+    if not isinstance(capabilities, dict):
+        raise AcpSessionError(
+            "ACP initialize returned malformed agentCapabilities",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    if config.session_id and capabilities.get("loadSession") is not True:
+        raise AcpSessionError(
+            "ACP session resume was requested but the agent does not advertise "
+            "loadSession support",
+            code=AcpErrorCode.INVALID_PARAMS,
+        )
+    auth_methods = result.get("authMethods", [])
+    if not isinstance(auth_methods, list) or not all(
+        isinstance(method, dict) for method in auth_methods
+    ):
+        raise AcpSessionError(
+            "ACP initialize returned malformed authMethods",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
     return InitializeResult(
-        agent_capabilities=lenient_json_object(capabilities),
-        auth_methods=[method for method in auth_methods if isinstance(method, dict)]
-        if isinstance(auth_methods, list)
-        else [],
+        agent_capabilities=capabilities,
+        auth_methods=cast("list[JsonObject]", auth_methods),
     )
 
 

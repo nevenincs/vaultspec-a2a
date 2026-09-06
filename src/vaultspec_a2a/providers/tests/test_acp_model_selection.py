@@ -18,9 +18,13 @@ import pytest
 import pytest_asyncio
 
 from ...utils.enums import AcpRequestId
-from .._acp_session import _select_desired_config_options, _select_desired_model
-from .._acp_types import AcpModelConfig, AcpSessionContext
-from .._json_contract import JsonObject
+from .._acp_session import (
+    _select_desired_config_options,
+    _select_desired_model,
+    initialize_session,
+)
+from .._acp_types import AcpModelConfig, AcpSessionContext, InitializeResult
+from .._json_contract import JsonObject, JsonValue
 from ..acp_exceptions import AcpErrorCode, AcpSessionError
 from ._acp_frames import read_acp_frame
 
@@ -79,7 +83,9 @@ async def echo_context() -> AsyncIterator[AcpSessionContext]:
             await process.wait()
 
 
-def _config(desired_model: str | None) -> AcpModelConfig:
+def _config(
+    desired_model: str | None, *, session_id: str | None = None
+) -> AcpModelConfig:
     """Build the minimal real config the selection seam reads."""
     return AcpModelConfig(
         agent_config=None,
@@ -87,7 +93,7 @@ def _config(desired_model: str | None) -> AcpModelConfig:
         workspace_root=None,
         command=["echo"],
         env_vars={},
-        session_id=None,
+        session_id=session_id,
         mcp_servers=[],
         use_exec=False,
         provider=None,
@@ -164,6 +170,91 @@ def _confirmation(value: str, config_id: str = _CONFIG_ID) -> JsonObject:
 def _resolve(ctx: AcpSessionContext, payload: JsonObject) -> None:
     """Complete the pending selection future the way the stdout loop would."""
     ctx.response_futures[AcpRequestId.SESSION_SET_CONFIG_OPTION].set_result(payload)
+
+
+async def _initialize(
+    ctx: AcpSessionContext, config: AcpModelConfig, result: JsonValue
+) -> InitializeResult:
+    """Drive one real initialize frame and deliver the supplied peer result."""
+    task = asyncio.create_task(initialize_session(ctx, config))
+    frame = await read_acp_frame(ctx.stdout, AcpRequestId.INITIALIZE, timeout=_TIMEOUT)
+    assert frame["method"] == "initialize"
+    params = frame.get("params")
+    assert isinstance(params, dict) and params.get("protocolVersion") == 1
+    ctx.response_futures[AcpRequestId.INITIALIZE].set_result({"result": result})
+    return await task
+
+
+@pytest.mark.asyncio
+async def test_initialize_accepts_only_the_requested_protocol_version(
+    echo_context: AcpSessionContext,
+) -> None:
+    accepted = await _initialize(
+        echo_context,
+        _config(None),
+        {"protocolVersion": 1, "agentCapabilities": {}, "authMethods": []},
+    )
+    assert accepted.agent_capabilities == {}
+
+    with pytest.raises(AcpSessionError, match="unsupported protocol version") as caught:
+        await _initialize(
+            echo_context,
+            _config(None),
+            {"protocolVersion": 2, "agentCapabilities": {}, "authMethods": []},
+        )
+    assert caught.value.code == AcpErrorCode.INVALID_PARAMS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protocol_version", [None, "1", True])
+async def test_initialize_rejects_missing_or_malformed_protocol_version(
+    echo_context: AcpSessionContext, protocol_version: JsonValue
+) -> None:
+    with pytest.raises(AcpSessionError, match="malformed protocolVersion"):
+        await _initialize(
+            echo_context,
+            _config(None),
+            {
+                "protocolVersion": protocol_version,
+                "agentCapabilities": {},
+                "authMethods": [],
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_initialize_refuses_resume_without_negotiated_support(
+    echo_context: AcpSessionContext,
+) -> None:
+    config = _config(None, session_id="existing-session")
+    with pytest.raises(AcpSessionError, match="does not advertise loadSession"):
+        await _initialize(
+            echo_context,
+            config,
+            {"protocolVersion": 1, "agentCapabilities": {}, "authMethods": []},
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("result", "message"),
+    [
+        ([], "without an object result"),
+        (
+            {"protocolVersion": 1, "agentCapabilities": [], "authMethods": []},
+            "malformed agentCapabilities",
+        ),
+        (
+            {"protocolVersion": 1, "agentCapabilities": {}, "authMethods": [1]},
+            "malformed authMethods",
+        ),
+    ],
+)
+async def test_initialize_rejects_malformed_negotiated_surface(
+    echo_context: AcpSessionContext, result: JsonValue, message: str
+) -> None:
+    with pytest.raises(AcpSessionError, match=message):
+        await _initialize(echo_context, _config(None), result)
 
 
 @pytest.mark.asyncio

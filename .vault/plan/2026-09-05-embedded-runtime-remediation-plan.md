@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:7ec5c786e5f5c3091b936d87121ebf6942ec73616f82629b93e9d82521bbd1b3'
+body_hash: 'sha256:365ca08df3781749881f818a36ba6d440707a49276ff824f85da506853e01fe4'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -77,7 +77,7 @@ Remove stale-write and early-completion races while retaining existing state obl
 - [x] `W02.P03.S10` - Adopt the atomic election for lifecycle writers that already carry a durable applicable receipt, including initial dispatch, cancellation, direct-control recovery, permission-request projection, archive and atomic deletion-saga entry, with side effects only after the winner; `src/vaultspec_a2a/control, src/vaultspec_a2a/database`.
 - [x] `W02.P03.S78` - Declare immutable current-schema checkpointed graph-action receipts binding journal action, accepted payload fingerprint, dispatch identity and run ownership; reject conflicting receipt reuse and prove persistence through a real checkpoint reopen before coordinator implementation; `src/vaultspec_a2a/thread/state.py, src/vaultspec_a2a/thread/action_receipts.py, src/vaultspec_a2a/thread/tests/test_action_receipts.py`.
 - [x] `W02.P03.S86` - Commit the complete non-secret initial dispatch input and stable receipt atomically with run acceptance before network delivery; build configuration and workspace inputs before taking the database write lock, retain actor-token requirement without secrets, and reject invalid input without a partial durable reservation; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/control/tests/test_thread_service_tokens.py`.
-- [ ] `W02.P03.S12` - Persist request-scoped checkpoint incorporation evidence for graph actions before reporting application, retaining dispatch identity and winning payload fingerprint; use durable cessation or no-op evidence for cancellation without graph incorporation; `src/vaultspec_a2a/worker/executor.py`.
+- [ ] `W02.P03.S12` - Persist request-scoped checkpoint incorporation evidence for graph actions before reporting application, retaining dispatch identity and winning payload fingerprint; use durable cessation or no-op evidence for cancellation without graph incorporation; `src/vaultspec_a2a/{control,database,thread,ipc,worker} graph-action receipt admission, persistence and incorporation`.
 - [ ] `W02.P03.S11` - Replace fragmented startup redispatch, read-time abandonment and pre-election projection with one durable recovery coordinator covering conditions 1-16: permanent current-schema refusal, checkpoint-first terminal settlement, atomic newer-writer/deletion handling, typed retry scheduling, fresh served projection and client-observable recovery state; absorb implementation formerly assigned to served-capability W04.P08.S56 without legacy interpretation; `src/vaultspec_a2a/control/recovery.py, src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/run_discovery_service.py, src/vaultspec_a2a/control/thread_state_service.py`.
 - [ ] `W02.P03.S83` - Persist one leased recovery attempt per run revision and action receipt with classified condition, attempt count, next eligible attempt and run-derived deadline; drain it during startup and ordinary operation so circuit-open, capacity, typed rejection and transport loss cannot strand accepted work or depend on client polling; `src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/database/migrations, src/vaultspec_a2a/control/recovery.py`.
 - [ ] `W02.P03.S84` - Verify the recovery architecture against the complete conditions 1-16 matrix using real durable receipts and fresh projections: refuse absent, corrupt, retired or mismatched authority and unusable projects; retain and schedule retryable worker conditions; honor newer terminal and deletion winners; settle checkpoint truth before abandonment; and disclose recovery before the client observation deadline; `src/vaultspec_a2a/control/tests, src/vaultspec_a2a/api/tests/test_catalog_restart_redispatch.py`.
@@ -126,7 +126,7 @@ Budget actual input and commit compaction without replacing durable transcript a
 
 Preserve supplied meaning through initialization, streaming and retry decisions.
 
-- [ ] `W03.P07.S31` - Validate returned ACP version before session creation and reject malformed/incompatible initialization or absent required optional support; `src/vaultspec_a2a/providers/_acp_session.py`.
+- [x] `W03.P07.S31` - Validate returned ACP version before session creation and reject malformed/incompatible initialization or absent required optional support; `src/vaultspec_a2a/providers/_acp_session.py`.
 - [ ] `W03.P07.S32` - Settle every supplied ACP stop reason promptly and preserve refusal, cancellation and budget-exhaustion meaning through the stream consumer; `src/vaultspec_a2a/providers/_acp_protocol.py`.
 - [ ] `W03.P07.S80` - Propagate retained ACP stop meaning through the chat-model stream consumer and authoritative outcome path so resolved futures, partial output and transport success cannot become false completed work; `src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [ ] `W03.P07.S33` - Carry known setup/authentication/model-configuration wire conditions through AcpSessionError with truthful unknown/coarse fallback; `src/vaultspec_a2a/providers/_acp_session.py`.

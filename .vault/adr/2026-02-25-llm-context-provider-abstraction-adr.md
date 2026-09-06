@@ -3,13 +3,14 @@ tags:
 - '#adr'
 - '#llm-context-provider-abstraction'
 date: 2026-02-25
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_hash: 'sha256:9dcc7c2d35ea043657e95d9dd2a1ac430c34ab64be07cd1e61777dbe2d3a9a29'
 related:
   - '[[2026-03-31-docs-vault-migration-research]]'
   - '[[2026-07-14-orchestration-capabilities-research]]'
   - '[[2026-07-14-orchestration-capabilities-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
+  - '[[2026-09-06-embedded-runtime-remediation-acp-initialize-negotiation-research]]'
 ---
 
 # `llm-context-provider-abstraction` adr: `subscription-first provider harness over ACP` | (**status:** `accepted`)

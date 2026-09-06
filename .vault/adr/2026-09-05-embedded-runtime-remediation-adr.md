@@ -21,6 +21,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]'
   - '[[2026-09-06-embedded-runtime-remediation-condition17-process-owner-research]]'
+  - '[[2026-09-06-embedded-runtime-remediation-acp-initialize-negotiation-research]]'
 ---
 # `embedded-runtime-remediation` adr: `qualification and single-owner remediation of the embedded runtime` | (**status:** `accepted`)
 

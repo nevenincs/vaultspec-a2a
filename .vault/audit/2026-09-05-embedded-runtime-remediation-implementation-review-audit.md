@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:4fc4449e0fc4677a39b179344184dc36084d29de14e8be4ed60f9c7587a151f3'
+body_hash: 'sha256:8bd3030ae8454580a0fa3270bc6daf8b16ae9dae0333f80072bba5fc77584bc6'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -435,3 +435,44 @@ validation counts, and complete deletion replacement map. Feature Core checks
 are clean. Catalog P01.S11 and remediation W01.P02.S05 remain open, so this
 closure introduces no false remediation completion. Formal lifecycle review
 passes with no remaining finding.
+### p01-s11-rag-data-plane-version-drift | medium | open
+
+Type: test environment and repository tooling. Status: open and nonblocking for
+P01.S11 runtime behavior. The S11 broad provider, gateway, redispatch, IPC and
+compiler run passed 964 tests with 36 deselected and one environment failure:
+`test_the_declared_channel_is_the_servers_own_root_authority`. Its real MCP
+subprocess reached the shared vaultspec-rag endpoint at PID 56028 on
+`127.0.0.1:8766`, but the service did not report a version compatible with the
+0.4.23 client, so `search_vault` returned the typed service-down error before
+the test could inspect project confinement. A read-only `vaultspec-rag server
+start` probe confirmed the running service cannot be attached and requires an
+operator-owned restart. Owner: embedded-runtime-remediation `W01.P02.S06` and
+vaultspec-rag service lifecycle. The shared process was not stopped or restarted
+inside P01.S11.
+### p01-s11-cold-catalog-shutdown-timeout | medium | open
+
+Type: provider-degradation test stability and resource lifecycle. Status: open
+and nonblocking for the reviewed S11 test changes. A post-broad focused rerun
+observed one existing restart evidence test spend 91.79 seconds in a cold
+provider-catalog refresh, log a Claude discovery `TimeoutError`, and then exceed
+its five-second Uvicorn shutdown wait while the cancelled request and SQLite
+connection unwound. The same test passed in the preceding 71-test focused run
+and the 964-pass broad run, and the final changed-path discriminator run passed
+20 tests, so this is intermittent host/provider degradation rather than a
+repeatable selection-authority failure. Owner: embedded-runtime-remediation
+`W01.P02.S06` and provider catalog resource-lifecycle tests. Preserve the
+failure for a bounded cold-refresh/shutdown discriminator; do not widen S11's
+test timeout as a substitute.
+### p01-s11-test-only-formal-review | high | FAIL - fresh production worker proof is absent
+
+Type: prerequisite implementation review disposition. Catalog test commit
+`ba9f70bd4d280ca95a3f31131443949317a0ae9d` preserves the current-only runtime
+contract and its focused/static checks pass, but its positive restart case calls
+redispatch directly against the minimal `ASGITransport` recording worker. It
+does not boot fresh production gateway/worker instances or prove that the
+production worker consumes the exact frozen selection. The retired request
+matrix also checks only generic non-empty 422 detail rather than the expected
+typed, non-disclosing refusal. These evidence findings are owned by catalog
+P01.S11; remediation W01.P02.S05 remains blocked. The separately queued RAG
+version drift and cold-catalog shutdown timeout remain correctly classified
+MEDIUM under W01.P02.S06.

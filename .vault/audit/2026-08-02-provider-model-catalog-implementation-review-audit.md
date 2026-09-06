@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#provider-model-catalog'
 date: '2026-08-02'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:582fc5a9995495681c1485e448126f3e27c6e20cb33c067df573810601e103d1'
+body_hash: 'sha256:35c8bbe9bcdb96b425b75ab49426b7aca2368bb6a1462e4211754b11960f6966'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -192,3 +192,78 @@ critical, high, medium, or low S01/S02/S12/S13 finding remains after remediation
 
 - For `p01-s11-legacy-restart-proof-absent`, seed a real pre-migration frozen profile in durable stores, restart fresh gateway and worker instances, and prove redispatch constructs the exact persisted legacy assignment without catalog re-resolution.
 - For `p01-s11-premature-plan-closure`, reopen S11 and preserve the valid ER19 route correction while P01.S10 and the missing real-behavior proof are completed.
+### p01-s11-rag-data-plane-version-drift | medium | open
+
+Type: test environment and repository tooling. Status: open and nonblocking for
+P01.S11 runtime behavior. The S11 broad provider, gateway, redispatch, IPC and
+compiler run passed 964 tests with 36 deselected and one environment failure:
+`test_the_declared_channel_is_the_servers_own_root_authority`. Its real MCP
+subprocess reached the shared vaultspec-rag endpoint at PID 56028 on
+`127.0.0.1:8766`, but the service did not report a version compatible with the
+0.4.23 client, so `search_vault` returned the typed service-down error before
+the test could inspect project confinement. A read-only `vaultspec-rag server
+start` probe confirmed the running service cannot be attached and requires an
+operator-owned restart. Owner: embedded-runtime-remediation `W01.P02.S06` and
+vaultspec-rag service lifecycle. The shared process was not stopped or restarted
+inside P01.S11.
+### p01-s11-cold-catalog-shutdown-timeout | medium | open
+
+Type: provider-degradation test stability and resource lifecycle. Status: open
+and nonblocking for the reviewed S11 test changes. A post-broad focused rerun
+observed one existing restart evidence test spend 91.79 seconds in a cold
+provider-catalog refresh, log a Claude discovery `TimeoutError`, and then exceed
+its five-second Uvicorn shutdown wait while the cancelled request and SQLite
+connection unwound. The same test passed in the preceding 71-test focused run
+and the 964-pass broad run, and the final changed-path discriminator run passed
+20 tests, so this is intermittent host/provider degradation rather than a
+repeatable selection-authority failure. Owner: embedded-runtime-remediation
+`W01.P02.S06` and provider catalog resource-lifecycle tests. Preserve the
+failure for a bounded cold-refresh/shutdown discriminator; do not widen S11's
+test timeout as a substitute.
+### p01-s11-restart-proof-bypasses-production-worker | high | open
+
+Type: behavioral evidence completeness. Status: review-blocking for P01.S11 at
+`ba9f70bd4d280ca95a3f31131443949317a0ae9d`. The positive current-schema
+restart test uses a real SQLite record and production
+`redispatch_reconciling_threads`, but invokes that function directly and sends
+the request to `_InProcessWorker`, the shared minimal FastAPI recorder reached
+through `httpx.ASGITransport`. It does not boot a fresh gateway, cross a real TCP
+worker boundary, enter `create_worker_app` or its Executor, or prove the exact
+frozen assignment is accepted and consumed by a fresh production worker. This
+contradicts the plan's explicit real-behavior and no-fake/no-mock acceptance
+boundary. Owner: P01.S11. Seed the schema-v1 selection in real durable stores,
+boot fresh production gateway and worker instances over their real transport,
+drive startup recovery, and prove the production worker consumes the exact
+provider, execution mode, model and controls without catalog re-resolution.
+
+### p01-s11-wire-refusal-type-is-not-asserted | medium | open
+
+Type: test precision. The retired-input matrix proves HTTP 422 and zero recorded
+dispatch, but accepts any non-empty `detail`; it never verifies that each refusal
+is the expected typed field or stale-membership outcome, nor that the retired
+value is absent from the response. The source currently returns closed-schema
+validation or bounded selection errors, so this is an evidence defect rather
+than a confirmed runtime bypass. Owner: P01.S11. Assert the exact error type and
+field location for forbidden schema keys, the bounded domain reason for stale
+catalog identity, and absence of each retired value from the rendered response.
+
+### p01-s11-test-only-formal-review | high | FAIL - production restart evidence is incomplete
+
+Type: formal implementation review disposition. The reviewed test-only commit
+has exact parent `bc0d59984946789e8eaf6fcbd4ec40708fa79d67` and exactly five test
+paths. ConfigOptions wins over or exclusively refuses
+`models.availableModels`; existing live ACP process coverage exercises the
+production discovery boundary. The assembled source and tests preserve stale
+refusal, independent health axes, served-entry validation and freeze, same-id
+replay/conflict/race, exact current provider/mode validation, zero-contact
+retired-state refusal, ER19's provider-keyed observed availability, and the
+seven external plus conditionally armed deterministic/mock inventories without
+a Gemini lane. No runtime contract defect was found.
+
+Independent changed-path verification passes 51 tests in 53.19 seconds; Ruff,
+format, Ty and diff checks pass. The recorded 964-pass broad run's one RAG
+service-version failure and the intermittent cold-catalog shutdown timeout are
+correctly classified as MEDIUM, owned by remediation W01.P02.S06, and do not
+invalidate the passing S11 behavior subset. The HIGH production-restart gap and
+MEDIUM refusal-typing assertion gap prevent P01.S11 closure. Keep S11 and
+remediation W01.P02.S05 open pending correction and formal re-review.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d2ba900a7a2f3fc91f262c000ccbcacb418b5c04999c44ce606abecc2fafa243'
+body_hash: 'sha256:0269bf85e7a1036eee7b9b4e8de64906c94887a4b51685b63442170c7ecf3727'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -246,3 +246,8 @@ The unit fixture is current. The live subscriber and verdict-loop fixtures remai
 The receipt-bearing live subscriber fixtures now start from `accepted-action-input-v2`, its immutable initial graph receipt, the exact frozen `mock-success-single` graph and current provider assignment. Their checkpoints and compiled-graph cache keys carry matching graph and provider digests. Exact worker dispatch uses the current bearer credential. Invented preset identity, four-member cache authority, synthetic non-hex checkpoint ids and unauthenticated dispatch are removed without adapters.
 
 Focused Ruff and Ty pass. The default invocation deselected all five service cases and exited 1, so it is not pass evidence. The explicit service profile exited naturally with five skips in 2.47 seconds because no healthy external engine discovery record resolved. Static contract drift is resolved; runtime qualification remains open until the declared service stack is available. The verdict-loop fixture remains the final known verdict graph-identity migration in S84.
+### verdict-loop-acceptance-order | high | ordering corrected; compiler provenance open
+
+The verdict-loop service fixture no longer dispatches an ingest before durable authority exists. It commits the thread, complete v2 accepted request, stable dispatch identity and immutable graph receipt first, then sends that exact frozen request through the authenticated real worker route. Its cache identity carries preset, workspace, mode, provider digest and graph digest; the gate permission projection occurs only after the graph actually parks. Focused Ruff and Ty pass. The service case exited naturally with one skip in 1.76 seconds because no healthy engine discovery record resolved.
+
+A HIGH proof-integrity finding remains: the test injects a custom phase-gate compiled object under a cache identity derived from the catalog `mock-success-single` frozen definition. This verifies current acceptance and identity plumbing but not that the compiled executable was produced from the receipt-bound definition. The unit and live subscriber receipt fixtures use the same injection pattern. S84 must replace arbitrary graph injection with compilation from durable declarative authority, or qualify the actual frozen compiler topology. Digest-shaped cache keys alone are insufficient evidence of executable provenance.

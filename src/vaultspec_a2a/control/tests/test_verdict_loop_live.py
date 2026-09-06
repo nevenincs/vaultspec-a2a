@@ -70,7 +70,12 @@ from ...authoring import (
     mint_actor_token,
 )
 from ...conftest import materialize_schema
+from ...control.accepted_input import freeze_accepted_input
+from ...control.config import settings
+from ...control.dispatch_receipts import prepare_graph_action_receipt
+from ...control.execution_authority import resolve_execution_authority
 from ...database import (
+    create_control_action,
     create_thread,
     get_permission_request,
     get_thread,
@@ -79,14 +84,17 @@ from ...database import (
 )
 from ...graph.nodes.phase_gate import create_phase_gate_node
 from ...ipc.schemas import DispatchRequest
+from ...team.team_config import load_team_config
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
+from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..verdict_subscriber import VerdictSubscriber
 from ..worker_management import LazyWorkerSpawner
+from ._catalog_authority import current_execution_metadata
 from .test_verdict_subscriber_live import _decide, _submit_proposal
 
 if TYPE_CHECKING:
@@ -95,16 +103,16 @@ if TYPE_CHECKING:
     from ...thread.state import TeamState
     from ...worker.graph_lifecycle import RegisteredCompiledGraph
 
-_CACHE_KEY = (
-    "verdict-loop-live",
-    None,
-    False,
-    "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-)
-
 # Every dispatch names an active project, as a real one does. This package's own
-# directory is real, absolute, and present on either platform.
-_WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
+# repository is real, absolute, and present on either platform.
+_WORKSPACE = str(pathlib.Path.cwd())
+_TEST_INTERNAL_TOKEN = "verdict-loop-live-test-token"
+
+
+@pytest.fixture(autouse=True)
+def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give both sides of real worker dispatch the current IPC credential."""
+    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
 
 
 @pytest_asyncio.fixture
@@ -145,7 +153,12 @@ def _bridge_stub() -> WorkerBridge:
 
 
 def _install_verdict_loop_graph(
-    executor: Executor, thread_id: str, proposal_id: str
+    executor: Executor,
+    thread_id: str,
+    proposal_id: str,
+    *,
+    definition: FrozenGraphDefinition,
+    model_assignment_digest: str,
 ) -> RegisteredCompiledGraph:
     """Compile+cache a real, minimal seed -> phase-gate -> finish graph.
 
@@ -183,7 +196,17 @@ def _install_verdict_loop_graph(
         checkpointer=executor._checkpointer
     )
 
-    executor.register_compiled_graph(thread_id, _CACHE_KEY, graph)
+    executor.register_compiled_graph(
+        thread_id,
+        (
+            "mock-success-single",
+            _WORKSPACE,
+            False,
+            model_assignment_digest,
+            definition.digest(),
+        ),
+        graph,
+    )
     return graph
 
 
@@ -246,7 +269,20 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
         await checkpointer.setup()
         bridge = _bridge_stub()
         executor = Executor(checkpointer=checkpointer, bridge=bridge)
-        graph = _install_verdict_loop_graph(executor, thread_id, info["proposal_id"])
+        workspace = Path(_WORKSPACE)
+        metadata = current_execution_metadata(workspace)
+        execution_authority = resolve_execution_authority(metadata)
+        definition = freeze_graph_definition(
+            load_team_config("mock-success-single", workspace_root=workspace),
+            workspace_root=workspace,
+        )
+        graph = _install_verdict_loop_graph(
+            executor,
+            thread_id,
+            info["proposal_id"],
+            definition=definition,
+            model_assignment_digest=execution_authority.model_assignment_digest,
+        )
 
         worker_app = create_worker_app(lifespan=_worker_test_lifespan)
         worker_app.state.executor = executor
@@ -255,6 +291,7 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
             httpx.AsyncClient(
                 transport=ASGITransport(app=worker_app),
                 base_url="http://worker",
+                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
             ) as worker_client,
             anyio.create_task_group() as tg,
         ):
@@ -265,18 +302,47 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
             worker_app.state.task_group = tg
 
             # --- real ingest through the real worker HTTP route ---
+            authority = make_test_write_authority()
             ingest = DispatchRequest(
+                dispatch_id=authority.action_receipt_id,
                 action="ingest",
                 workspace_root=_WORKSPACE,
                 thread_id=thread_id,
                 content="drive to the gate",
-                team_preset="verdict-loop-live",
+                team_preset="mock-success-single",
+                graph_definition=definition,
                 recursion_limit=10,
+                model_assignment=execution_authority.model_assignment,
                 actor_tokens=ActorTokenBundle(
                     tokens={"vaultspec-synthesist": "vl-token"},
                     engine_bearer="vl-bearer",
                 ),
             )
+            async with session_factory() as db:
+                await create_thread(
+                    db,
+                    write_authority=authority,
+                    thread_id=thread_id,
+                    team_preset="mock-success-single",
+                    metadata=metadata,
+                )
+                await create_control_action(
+                    db,
+                    thread_id=thread_id,
+                    action_type=authority.action_type,
+                    idempotency_key=f"thread-create:{thread_id}",
+                    dispatch_id=authority.action_receipt_id,
+                    payload=freeze_accepted_input(
+                        ingest, intent={"content": "drive to the gate"}
+                    ),
+                )
+                receipt = await prepare_graph_action_receipt(
+                    db,
+                    thread_id=thread_id,
+                    dispatch_id=authority.action_receipt_id,
+                )
+                assert receipt is not None
+                await db.commit()
             resp = await worker_client.post(
                 "/dispatch", json=ingest.model_dump(mode="json")
             )
@@ -299,12 +365,6 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
             # the same shape the engine-side reconcile tests seed, now
             # AFTER a genuine interrupt (not a hand-typed checkpoint).
             async with session_factory() as db:
-                await create_thread(
-                    db,
-                    write_authority=make_test_write_authority(),
-                    thread_id=thread_id,
-                    team_preset="verdict-loop-live",
-                )
                 await update_thread_status(db, thread_id, ThreadStatus.INPUT_REQUIRED)
                 await record_permission_request(
                     db,

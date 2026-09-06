@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:48e38701aaf508e14d2d0b6bc1d896040bf1f613215de4c668dec2f195100a7f'
+body_hash: 'sha256:03cbc2d8f26b5d8311ef0d1b544b177c21c4faab7190776a8b2de640d1e0cfdf'
 step_id: 'S84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -158,3 +158,18 @@ The unit subscriber fixture's dispatch-auth and graph-cache findings are resolve
 - `verify:` explicit service profile -> five skips in 2.47 seconds, natural exit 0, because no healthy engine discovery record resolved. Runtime behavior is unqualified rather than blocked or inferred.
 
 S84 remains open. The live subscriber's static current-contract migration is complete; verdict-loop migration and live service execution remain queued.
+## Verdict-loop acceptance-order migration
+
+- `M` `src/vaultspec_a2a/control/tests/test_verdict_loop_live.py`.
+- Initial ingest is now accepted durably before worker delivery: the thread, complete accepted-action-input-v2, stable dispatch id, immutable graph receipt, current provider assignment, frozen graph definition and metadata commit before the exact request crosses `/dispatch`.
+- Worker dispatch uses explicit current bearer authentication. The cache identity has all five current members and binds the frozen graph digest; the invented `verdict-loop-live` preset and constant four-member key are removed.
+- The permission row and INPUT_REQUIRED projection remain after the real graph parks, preserving their actual temporal role.
+- `verify:` focused Ruff and Ty -> pass.
+- `verify:` explicit service profile -> one skip in 1.76 seconds, natural exit 0, because no healthy engine discovery record resolved. Runtime behavior remains unqualified.
+
+Formal review queue:
+
+- HIGH / proof integrity: this service test deliberately injects a purpose-built phase-gate compiled graph, while the frozen executable definition names the catalog `mock-success-single` program. The five-member identity and accepted-delivery ordering are current, but the test does not prove that the cached compiled object was produced from the receipt-bound definition. Resolve by compiling the test graph from durable declarative authority or by running the actual receipt-bound compiler topology; do not bless arbitrary injected graphs through a digest-only fixture.
+- HIGH / scope: the same injected-graph limitation applies to the unit and live subscriber receipt fixtures migrated earlier. Their identity plumbing is current, but semantic compiler provenance remains unqualified.
+
+S84 remains open for semantic compiled-graph provenance, live service execution, current action-recovery replacements and the complete conditions matrix.

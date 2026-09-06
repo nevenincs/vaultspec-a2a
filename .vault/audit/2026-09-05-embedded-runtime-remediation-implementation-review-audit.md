@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:9f59c8049de1edd4f17eef0e43aaea5491b90ed5c67ce269829e3df80492bbdd'
+body_hash: 'sha256:25bef913a233d199b64c9fa554fa1c7e50d5b7d69c40406171a679f0ad9cb0a9'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -391,3 +391,35 @@ the remaining HIGH control/error-typing gap violates the same no-substitution
 contract. Focused exact-commit verification passes 136 tests and Ruff/format/diff
 checks pass. Keep provider-model-catalog `P01.S10` and remediation
 `W01.P02.S05` open pending correction and formal re-review.
+
+### s10-native-control-fallback-correction | high | resolved
+
+Type: safety and fail-closed behavior. Final A2A correction `6e7015a6` validates
+provider-specific controls across the complete frozen assignment before any
+construction and makes compiler fallback catch only the dedicated production
+`ProviderRuntimeUnavailableError`. Structural control, auth and configuration
+errors cannot select a fallback. Primary, later-role and fallback corruption
+prove zero contact; a real missing optional ACP runtime and a composed compiler
+case prove the sole allowed typed fallback path. The remaining S10 HIGH is
+resolved.
+
+### s10-production-unavailability-monkeypatch-proof | medium | resolved
+
+Type: test integrity. Superseded `98b61322` used a forbidden monkeypatch to
+manufacture the production runtime condition. Final `6e7015a6` removes it and
+uses the real absent optional ACP binary boundary; the production factory emits
+the typed runtime-unavailable result without patching, faking or suppressing a
+failure.
+
+### s10-final-runtime-rereview | low | PASS
+
+Type: formal implementation review disposition. Status: resolved through A2A
+`6e7015a6c55fdf8633dbd35e4d8f40caa13425ed`. All nested-schema,
+provider/mode, native-control, fallback and restored-coverage findings from both
+prior reviews are resolved. Exact-commit factory verification passes 46 tests;
+the final broad exact-commit suite passes 1,378 with 38 deselected and zero
+failures in 270.47 seconds; Ruff, format, Ty, diff and feature Core checks pass.
+No critical, high or medium S10 runtime defect remains. Provider-model-catalog
+plan closure and its uncommitted Step Record remain executor-owned; remediation
+`W01.P02.S05` may consume S10 only after that lifecycle closure and the separate
+S11 prerequisite.

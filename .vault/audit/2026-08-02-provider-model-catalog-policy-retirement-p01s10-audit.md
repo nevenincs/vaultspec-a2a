@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:20052475561593729910199263ddd5210eab16dced9f4e03bdb7facb2a5a3fb8'
+body_hash: 'sha256:7ecde793a55e042fdf8523099c89424e1d798122fdd658ada3331dd77ede6655'
 related:
   - "[[2026-08-02-provider-model-catalog-adr]]"
   - "[[2026-08-02-provider-model-catalog-plan]]"
@@ -323,3 +323,64 @@ Ruff lint/format for all thirteen retained paths and `git diff --check` pass.
 The independent broad-suite terminal result is recorded separately when its
 running exact-commit invocation completes. Do not close `P01.S10` until the HIGH
 finding is corrected and formally re-reviewed.
+
+## Final formal re-review through `6e7015a6`
+
+### structural-native-control-fallback-gap | high | resolved
+
+Type: safety and fail-closed behavior. Final correction
+`6e7015a6c55fdf8633dbd35e4d8f40caa13425ed` retains whole-assignment
+provider/mode and provider-specific native-control validation for every primary,
+override and fallback before any provider construction. Unsupported,
+duplicate-normalized and provider-inapplicable controls raise structural
+`ValueError`; missing API authentication also remains structural. The compiler
+catches only `ProviderRuntimeUnavailableError`, a dedicated `ConfigError`
+subtype emitted by the production factory when a structurally valid ACP lane's
+required runtime executable is absent. No broad `ValueError` can enter fallback.
+Later-role, primary and fallback-control tests prove zero factory contact, while
+a valid typed runtime outage alone reaches an exact frozen fallback. The
+remaining HIGH from the preceding correction review is resolved.
+
+### production-runtime-unavailability-proof-used-monkeypatch | medium | resolved
+
+Type: test integrity. Superseded correction `98b61322` briefly used pytest
+monkeypatching to replace `_classify_acp_command`, contrary to the repository's
+real-behavior test rule. Final correction `6e7015a6` removes that test and uses
+the real repository filesystem boundary: when the optional binary ACP artifact
+is absent, production `ProviderFactory.create()` classifies the missing
+executable as `ProviderRuntimeUnavailableError`. On the reviewed checkout the
+artifact is absent and the discriminator runs and passes. The composed compiler
+test separately proves that this typed condition, and only this condition,
+selects the next structurally valid frozen lane.
+
+### p01-s10-final-correction-rereview | low | PASS
+
+Type: formal implementation review disposition. Status: resolved through
+`6e7015a6c55fdf8633dbd35e4d8f40caa13425ed`. Final review confirms closed
+exact-key validation at persisted root, replay, lane, override, fallback,
+control, provenance and nested IPC layers; valid-digest retired or unknown keys
+fail terminally without contact; every role and fallback is prevalidated against
+the current provider/mode and native-control inventory; structural corruption
+cannot reach fallback; and only a typed, structurally valid runtime outage can
+select an exact frozen fallback. The restored admission suite covers every provider, deny-by-default, live and
+rotten citations, declaration immutability and web-proof-implies-turn. The
+anti-vacuous preset scan covers real topology descriptions and forbids unearned
+web claims.
+
+The full original review surface remains conformant: exactly seven external and
+two explicit in-process modes; current-schema restart and terminal refusal of
+absent, corrupt or retired state; required exact factory model values and
+production call sites; contracted API, IPC, OpenAPI and streaming snapshots;
+complete Gemini removal with Antigravity vendor data preserved; ACP
+configOptions-only discovery; ignored Kimi aliases; retired Codex additional
+speed tiers; retained project confinement; and a complete deletion replacement
+map. The two stale fixture edits use the current exact Codex mode and required
+provenance and do not weaken their bounds.
+
+Independent exact-commit factory verification passes 46 tests. The final broad
+exact-commit provider, team, graph, IPC, redispatch and catalog-restart suite
+passes 1,378 tests with 38 deselected and zero failures in 270.47 seconds. Ruff,
+format, Ty and diff checks pass. Feature Core validation is clean at the final
+audit commit. No critical, high or medium runtime defect remains. This review
+passes, while Core plan closure and the uncommitted S10 Step Record remain owned
+by the executor.

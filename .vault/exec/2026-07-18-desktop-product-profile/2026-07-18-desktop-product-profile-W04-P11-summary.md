@@ -4,7 +4,7 @@ tags:
   - '#desktop-product-profile'
 date: '2026-07-19'
 modified: '2026-09-06'
-body_hash: 'sha256:be43bad5dc8bef6988ac392ddcea2e389c4f39115e9fa1471b3cf17760a053df'
+body_hash: 'sha256:2dc12112586ab71cc7dfc1510705d084ae029a2148e25e160f20cf62f97cede7'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
@@ -68,4 +68,4 @@ phase together with its certification.
 
 ## Reopening note — 2026-09-06
 
-The original S60 closure remains historical evidence. S49 review later proved its Windows assignment-failure downgrade could return an uncontained provider and let empty containment report false cleanup success, so Core reopened S60 in `141147db`. The current correction is implemented and awaits formal review: provider roots start suspended on Windows, enter the Job through the retained process handle before their first instruction, and fail admission only after exact-identity cleanup when seating cannot complete. The Phase is not re-closed by this implementation commit.
+The original S60 closure remains historical evidence. S49 review later proved its Windows assignment-failure downgrade could return an uncontained provider and let empty containment report false cleanup success, so Core reopened S60 in `141147db`. The corrected implementation starts provider roots suspended on Windows, enters the Job through the retained process handle before their first instruction, and fails admission only after exact-handle cleanup when seating cannot complete. Formal FAIL `b931b804` exposed a machine-wide psutil scan and hidden unassigned-containment fallback; correction `b5e6a25f` removed both, and formal PASS `fa653cf6` accepted the result. Core has re-closed S60 while retaining the separate queued test-delay, fixture-drift, and POSIX supervision findings.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:c2adf6dbb92c6c4ce6c22c2bc4572cc0ed093d13bf1afb2b49b6032d90ed5c32'
+body_hash: 'sha256:123c830a9405cbcbddaed2363a73751d2ade82ecee351f3aa646cde53a0c426d'
 related:
   - "[[2026-07-19-codebase-health-plan]]"
   - "[[2026-09-05-codebase-health-process-resource-lifetimes-research]]"
@@ -160,7 +160,7 @@ Type: resource leak / native handle ownership. Status: fixed and verified. `Proc
 
 ### launch-containment-window | medium | Assignment after Windows startup cannot guarantee containment of early children
 
-Type: architectural limitation / portability. Status: corrected in reopened desktop-product-profile W04.P11.S60, pending formal rereview. Windows provider roots now start with `CREATE_SUSPENDED`; the exact retained `Popen` handle is assigned to the Job before the single initial thread is resumed through documented Tool Help and thread APIs. POSIX remains seated by `start_new_session` at exec. Native Windows shell and exec launches, a child created after a delay, and a child retained after root exit all prove the provider tree stays under the owned containment.
+Type: architectural limitation / portability. Status: corrected, formally reviewed in `fa653cf6`, and closed with desktop-product-profile W04.P11.S60. Windows provider roots now start with `CREATE_SUSPENDED`; the exact retained `Popen` handle is assigned to the Job before the single initial thread is resumed through documented Tool Help and thread APIs. POSIX remains seated by `start_new_session` at exec. Native Windows shell and exec launches, a child created after a delay, and a child retained after root exit all prove the provider tree stays under the owned containment.
 
 ### posix-owner-crash-and-escape | medium | POSIX groups cannot enforce automatic owner-crash or setsid cleanup
 
@@ -182,7 +182,7 @@ Repair the confirmed ownership violations within the current design, run real su
 
 ### provider-empty-containment-false-success | high | reopened under desktop-product-profile W04.P11.S60
 
-Type: provider lifecycle correctness, process containment and developer-time blocker. Status: corrected in reopened desktop-product-profile W04.P11.S60, pending formal review. Review of the S49 worker assignment-failure correction exposed the same already-shipped contract drift in `providers/_subprocess.py`: `spawn_acp_process` caught `ProcessContainment.assign(pid)` failure and returned the live provider with an unassigned containment, while `_kill_process_tree` later called that empty containment's `terminate()`. Empty containment had no process identity and returned success, so provider cleanup could report success while the retained ACP/Codex root and descendants remained live.
+Type: provider lifecycle correctness, process containment and developer-time blocker. Status: corrected, formally reviewed in `fa653cf6`, and closed with desktop-product-profile W04.P11.S60. Review of the S49 worker assignment-failure correction exposed the same already-shipped contract drift in `providers/_subprocess.py`: `spawn_acp_process` caught `ProcessContainment.assign(pid)` failure and returned the live provider with an unassigned containment, while `_kill_process_tree` later called that empty containment's `terminate()`. Empty containment had no process identity and returned success, so provider cleanup could report success while the retained ACP/Codex root and descendants remained live.
 
 The provider spawn now fails before returning whenever atomic seating or resume fails. Assigned Jobs reap through Job authority. When assignment itself fails, `CREATE_SUSPENDED` proves the provider executed zero instructions and therefore has no descendants; cleanup kills and waits only the exact retained root handle, performs no process-table discovery, and preserves the original assignment error. The full production closed-Job proof completes in 0.01 seconds, confirms the first-instruction marker was never created, extracts the exact root PID from the preserved error, and proves it dead. The five-case provider module covers shell and exec roots, late children, root exit, assignment failure, bounded cleanup, and zero survivors.
 
@@ -200,8 +200,12 @@ Type: test contract drift. Status: open; owners are the desktop owned-process-tr
 
 ### exact-popen-cleanup-scans-host | high | First S60 correction used machine-wide descendant discovery
 
-Type: process ownership architecture. Status: corrected after formal FAIL `b931b804`, pending rereview. The first correction moved S49's psutil-based exact-tree helper into the shared process module, but locked psutil implements `children(recursive=True)` by constructing a machine-wide parent map. That violated S60's no-host-scan criterion even though creation-time guards prevented PID reuse. The correction restores the reviewed S49 worker implementation unchanged and removes psutil from the provider path. Failed provider assignment now relies on the stronger suspended-root invariant and kills only its exact retained handle; resume failure occurs after assignment and therefore reaps through the Job.
+Type: process ownership architecture. Status: corrected and verified by formal PASS `fa653cf6`. The first correction moved S49's psutil-based exact-tree helper into the shared process module, but locked psutil implements `children(recursive=True)` by constructing a machine-wide parent map. That violated S60's no-host-scan criterion even though creation-time guards prevented PID reuse. The correction restores the reviewed S49 worker implementation unchanged and removes psutil from the provider path. Failed provider assignment now relies on the stronger suspended-root invariant and kills only its exact retained handle; resume failure occurs after assignment and therefore reaps through the Job.
 
 ### unassigned-containment-pid-fallback-retained | medium | Containment retained an unreachable PID-tree downgrade
 
-Type: fail-closed lifecycle contract. Status: corrected after formal FAIL `b931b804`, pending rereview. `ProcessContainment._terminate_owned` still carried a `_pid`-present but unassigned fallback to `kill_pid_tree_async`. Assignment writes `_pid` only together with `_assigned`, so the branch was unreachable hidden behavior. It now raises `ProcessContainmentError`. The separate explicit direct-subprocess cleanup contract remains current for direct owners and cannot be reached by failed provider admission.
+Type: fail-closed lifecycle contract. Status: corrected and verified by formal PASS `fa653cf6`. `ProcessContainment._terminate_owned` still carried a `_pid`-present but unassigned fallback to `kill_pid_tree_async`. Assignment writes `_pid` only together with `_assigned`, so the branch was unreachable hidden behavior. It now raises `ProcessContainmentError`. The separate explicit direct-subprocess cleanup contract remains current for direct owners and cannot be reached by failed provider admission.
+
+### s60-lifecycle-closure | low | Preserve implementation and review provenance
+
+Type: lifecycle traceability. Status: complete pending closure review. The S60 chain is initial implementation `412c5532`, formal FAIL `b931b804`, correction `b5e6a25f`, and formal PASS `fa653cf6`. Core closes only `W04.P11.S60`. The zero-peer pytest startup delay, both current-context integrated fixture failures, and POSIX owner-crash or deliberate-group-escape limitation remain open under their recorded owners. Closure adds no runtime, legacy, deprecated, translation, fallback, or compatibility behavior.

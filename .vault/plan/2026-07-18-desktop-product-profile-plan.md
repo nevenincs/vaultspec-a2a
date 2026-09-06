@@ -3,14 +3,14 @@ tags:
   - '#plan'
   - '#desktop-product-profile'
 date: '2026-07-18'
-modified: '2026-09-06'
-body_hash: 'sha256:4168045387d056d323e597ad9ed1a23d3eaedb0236f62d8b9474a0a23a9b0915'
 tier: L3
 related:
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-research]]'
   - '[[2026-07-18-desktop-product-profile-reference]]'
   - '[[2026-07-24-dashboard-bundled-runtime-adr]]'
+modified: '2026-09-06'
+body_hash: 'sha256:7ef4085a4eda47f4f03aaa7f703a1cf01c1409a98f685782bc64d1f2f561b15f'
 ---
 
 <!-- RETIRED: P15, S88 -->
@@ -250,7 +250,7 @@ ahead of the integrated real-descendant proof.
 - [x] `W04.P11.S57` - Apply the drain gate to run start cancellation and administrative stop paths; `src/vaultspec_a2a/api/routes/gateway.py`.
 - [x] `W04.P11.S58` - Retain actor tokens through INPUT_REQUIRED and release active-run ownership tokens and child handles only on terminal outcomes; `src/vaultspec_a2a/worker/executor.py`.
 - [x] `W04.P11.S59` - Spawn the desktop worker in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work and retain containment for bounded shutdown; `src/vaultspec_a2a/control/worker_management.py`.
-- [ ] `W04.P11.S60` - Spawn each run-owned ACP or Codex provider root in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work; correct empty-containment false success and prove assignment-failure cleanup through the exact retained provider identity before returning the spawn; `src/vaultspec_a2a/providers/_subprocess.py`.
+- [x] `W04.P11.S60` - Spawn each run-owned ACP or Codex provider root in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work; correct empty-containment false success and prove assignment-failure cleanup through the exact retained provider identity before returning the spawn; `src/vaultspec_a2a/providers/_subprocess.py`.
 - [x] `W04.P11.S61` - Terminate owned POSIX process groups with bounded killpg SIGTERM-to-SIGKILL escalation and assigned Windows Job Objects or equivalently proven OS-owned jobs or trees without recursive process discovery; `src/vaultspec_a2a/utils/process.py`.
 - [x] `W04.P11.S89` - Audit and harden ACP terminal children to inherit the owning run containment and bounded reaper; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
 - [x] `W04.P11.S90` - Audit and harden per-run authoring MCP launch specifications to remain descendants of the owning provider group; `src/vaultspec_a2a/providers/_acp_authoring.py`.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:90cf83f4cd1f2c2b7a80cef87cf16933062a41804c46d480b53fe41bf4cfc084'
+body_hash: 'sha256:19501b8d334ee7664b1a9abadd773ba9f9595b147cbc036d852121f9e7fcf509'
 step_id: 'S60'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -35,3 +35,5 @@ related:
 ## Notes
 
 Formal review `b931b804` failed the initial correction because psutil recursive child discovery builds a machine-wide parent map, and because `ProcessContainment` retained an unreachable unassigned-PID fallback. The correction restores the S49 worker implementation unchanged, removes the shared psutil path, and proves failed provider assignment reaps only the exact suspended root before its first instruction. The broad integrated owned-tree run surfaced two persistent test-fixture failures outside S60: `test_terminal_child_tree_contained_and_reaped` omits the current `AcpSessionContext.closing` field, and `test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown` launches a gateway without binding the current lifecycle owner. Both remain queued for their current-contract test owners. An invalid first root-exit proof awaited pipe drain while a descendant intentionally retained stdout; it timed out after 10 seconds despite root return code 0 and was corrected to observe root exit before production containment closes the descendant and transport. Pytest startup also spent about 23 seconds before collection with zero peer sessions; this separate developer-time delay is queued under resource-aware test execution.
+
+Formal rereview `fa653cf6` passes correction `b5e6a25f` after preserving initial implementation `412c5532` and formal FAIL `b931b804`. Core closes only S60. The zero-peer pytest startup delay, both current-context integrated fixture failures, and POSIX supervision limitation remain open under their recorded owners. Closure adds no runtime or compatibility behavior.

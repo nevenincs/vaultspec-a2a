@@ -95,6 +95,94 @@ def _session_factory(
     return configured
 
 
+async def _persist_proven_cancellation(
+    factory: async_sessionmaker[AsyncSession],
+    *,
+    thread_id: str,
+    evidence: CancellationEvidence,
+    last_sequence: int | None,
+) -> bool:
+    """Elect and settle one exact current cancellation terminal."""
+    from ..database import (
+        ThreadStatusElectionOutcome,
+        elect_thread_status,
+        expire_pending_permission_requests,
+        get_control_action_by_dispatch_id,
+        get_thread,
+        mark_control_action_applied,
+        set_thread_approval_state,
+        set_thread_repair_state,
+        successor_thread_write_authority,
+        thread_write_expectation,
+    )
+    from ..thread.enums import ControlActionResultStatus, ControlActionType
+
+    async with factory() as db:
+        thread = await get_thread(db, thread_id)
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id=thread_id, dispatch_id=evidence.dispatch_id
+        )
+        if (
+            thread is None
+            or action is None
+            or action.action_type != ControlActionType.CANCEL.value
+            or thread.status != ThreadStatus.CANCELLING.value
+            or thread.writer_action_type != ControlActionType.CANCEL.value
+            or thread.writer_action_receipt_id != evidence.dispatch_id
+        ):
+            await db.rollback()
+            return False
+        expectation = thread_write_expectation(thread)
+        election = await elect_thread_status(
+            db,
+            thread_id,
+            expectation=expectation,
+            status=ThreadStatus.CANCELLED,
+            successor=successor_thread_write_authority(
+                expectation,
+                action_type=ControlActionType.CANCEL,
+                action_receipt_id=evidence.dispatch_id,
+            ),
+        )
+        if election.outcome is not ThreadStatusElectionOutcome.WON:
+            await db.rollback()
+            return False
+        if last_sequence is not None:
+            thread.last_sequence = last_sequence
+        await expire_pending_permission_requests(db, thread_id=thread_id)
+        await set_thread_approval_state(
+            db,
+            thread_id,
+            approval_status=None,
+            approval_request_id=None,
+            approval_reason=None,
+            approval_response_action_id=None,
+        )
+        await mark_control_action_applied(
+            db,
+            action.id,
+            applied_at=_time_now_utc(),
+            result_status=(
+                ControlActionResultStatus.CANCELLED_CEASED
+                if evidence.outcome == "ceased"
+                else ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK
+            ),
+        )
+        effects = compute_terminal_effects(
+            ThreadStatus.CANCELLED, has_cancel_action=True
+        )
+        await set_thread_repair_state(
+            db,
+            thread_id,
+            repair_status=effects.repair_status,
+            repair_reason=effects.repair_reason,
+            execution_readiness=effects.repair_status.value,
+            last_applied_action=effects.last_applied_action,
+        )
+        await db.commit()
+        return True
+
+
 def _skip_without_database(what: str, thread_id: str) -> None:
     """Record a durable write skipped because this process has no database.
 
@@ -268,16 +356,64 @@ async def _handle_terminal_event(
     )
     if not status_str:
         return
+    raw_cancellation_evidence = payload.get("cancellation_evidence")
+    if raw_cancellation_evidence is not None:
+        if ThreadStatus(status_str) is not ThreadStatus.CANCELLED:
+            logger.warning(
+                "Refusing cancellation evidence on non-cancelled terminal for %s",
+                thread_id,
+            )
+            return
+        try:
+            cancellation_evidence = CancellationEvidence.model_validate(
+                raw_cancellation_evidence
+            )
+        except ValidationError:
+            logger.warning(
+                "Refusing invalid cancellation evidence for thread %s",
+                thread_id,
+                extra={
+                    "thread_id": thread_id,
+                    "action": "invalid_cancellation_evidence",
+                },
+            )
+            return
+        cancellation_factory = _session_factory(session_factory)
+        if cancellation_factory is None:
+            _skip_without_database("the cancellation terminal election", thread_id)
+            return
+        accepted = await _persist_proven_cancellation(
+            cancellation_factory,
+            thread_id=thread_id,
+            evidence=cancellation_evidence,
+            last_sequence=last_sequence,
+        )
+        if not accepted:
+            logger.warning(
+                "Refusing stale cancellation evidence for thread %s",
+                thread_id,
+                extra={
+                    "thread_id": thread_id,
+                    "dispatch_id": cancellation_evidence.dispatch_id,
+                    "action": "stale_cancellation_evidence",
+                },
+            )
+            return
+        _schedule_terminal_settlement(
+            thread_id, ThreadStatus.CANCELLED, cancellation_factory
+        )
+        if drain_gate is not None:
+            await drain_gate.release(thread_id)
+        if aggregator is not None:
+            aggregator.clear_thread_state(thread_id)
+        return
     try:
         from ..database import (
             expire_pending_permission_requests,
-            get_latest_control_action,
-            mark_control_action_applied,
             set_thread_approval_state,
             set_thread_repair_state,
             update_thread_status,
         )
-        from ..thread.enums import ControlActionResultStatus, ControlActionType
 
         factory = _session_factory(session_factory)
         if factory is None:
@@ -330,51 +466,10 @@ async def _handle_terminal_event(
                     approval_reason=None,
                     approval_response_action_id=None,
                 )
-            latest_cancel = await get_latest_control_action(
-                db, thread_id=thread_id, action_type=ControlActionType.CANCEL
-            )
-            cancellation_evidence = None
-            raw_cancellation_evidence = payload.get("cancellation_evidence")
-            if raw_cancellation_evidence is not None:
-                try:
-                    cancellation_evidence = CancellationEvidence.model_validate(
-                        raw_cancellation_evidence
-                    )
-                except ValidationError:
-                    logger.warning(
-                        "Ignoring invalid cancellation evidence for thread %s",
-                        thread_id,
-                        extra={
-                            "thread_id": thread_id,
-                            "action": "invalid_cancellation_evidence",
-                        },
-                    )
-            cancellation_evidence_matches = (
-                ThreadStatus(status_str) is ThreadStatus.CANCELLED
-                and latest_cancel is not None
-                and thread is not None
-                and cancellation_evidence is not None
-                and latest_cancel.dispatch_id == cancellation_evidence.dispatch_id
-                and thread.writer_action_type == ControlActionType.CANCEL.value
-                and thread.writer_action_receipt_id
-                == cancellation_evidence.dispatch_id
-            )
             effects = compute_terminal_effects(
                 ThreadStatus(status_str),
-                has_cancel_action=cancellation_evidence_matches,
+                has_cancel_action=False,
             )
-            if effects.should_finalize_cancel and latest_cancel is not None:
-                assert cancellation_evidence is not None
-                await mark_control_action_applied(
-                    db,
-                    latest_cancel.id,
-                    applied_at=_time_now_utc(),
-                    result_status=(
-                        ControlActionResultStatus.CANCELLED_CEASED
-                        if cancellation_evidence.outcome == "ceased"
-                        else ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK
-                    ),
-                )
             await set_thread_repair_state(
                 db,
                 thread_id,

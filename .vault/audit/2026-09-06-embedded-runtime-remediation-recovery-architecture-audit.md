@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:66cf2bda75b46e740a62e050f084084c9fcafb4228064b5aa7e276f2efd0d233'
+body_hash: 'sha256:464dea65958a0cebd0f24bbf35ab37da1368a49251521e82c2cf2bc9fef624b1'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -274,3 +274,10 @@ The gateway applies a cancel action only when the evidence validates, names the 
 Formal review retains three HIGH boundaries. S13 still owns atomic terminal writer election because the generic terminal consumer writes lifecycle status before this cancellation-specific validation. S14/S83 still own durable event-delivery recovery when the worker cannot get evidence committed. S20-S22/S54 still own the completion-versus-cancel wakeup and cleanup races for live graph/provider awaits. The worker's pending identity is intentionally volatile; losing it cannot settle cancellation and therefore leaves a visible recovery obligation instead of manufacturing proof.
 
 Four gateway discriminators passed in 16.77 seconds; the combined producer/transport/consumer gate passed eight in 6.99 seconds; and the full event-handler plus state-projection modules passed 24 in 8.77 seconds. All exited naturally. Ruff passes all changed files, and Ty passes the production/event/projector set. Full executor-test Ty remains blocked by its previously queued four-member cache fixtures and is not claimed.
+### exact-cancellation-terminal-election | high | evidence-bearing cancellation resolved; generic terminals open
+
+The cancellation consumer now treats durable cessation evidence as an authority-bearing terminal input. It loads the exact cancel action, requires the thread to remain CANCELLING under the same writer receipt, and elects CANCELLED with an exact-row compare. Only the election winner commits terminal sequence, permission and approval cleanup, the action-specific ceased or no-active disposition, and repair projection. Stale or mismatched evidence rolls back without releasing the drain gate or clearing aggregation state.
+
+Formal review resolves the prior HIGH stale-overwrite and split-settlement findings for evidence-bearing cancellation. It retains HIGH S13 findings for every terminal without cancellation evidence: cancelled, completed and failed events still enter the generic unconditional lifecycle writer. Progress-event action settlement also still trusts a dispatch identity without complete receipt validation. A MEDIUM replay finding remains because duplicate exact cancellation evidence after the committed win is classified as stale rather than an idempotent already-applied observation; coordinate its final contract with S14/S83 durable delivery.
+
+Four focused cancellation cases passed naturally in 5.85 seconds. The complete event-handler and state-projection modules then passed 24 cases naturally in 3.22 seconds. Focused Ruff and Ty passed. S13 remains open.

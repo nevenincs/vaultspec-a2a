@@ -233,10 +233,17 @@ async def test_exact_cancellation_evidence_settles_current_action(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("evidence_dispatch_id", [None, "different-dispatch"])
+@pytest.mark.parametrize(
+    ("evidence_dispatch_id", "expected_thread_status"),
+    [
+        (None, ThreadStatus.CANCELLED),
+        ("different-dispatch", ThreadStatus.CANCELLING),
+    ],
+)
 async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
     session_factory: async_sessionmaker[AsyncSession],
     evidence_dispatch_id: str | None,
+    expected_thread_status: ThreadStatus,
 ) -> None:
     thread_id = f"unproven-cancel-{evidence_dispatch_id or 'absent'}"
     dispatch_id = f"dispatch-{thread_id}"
@@ -268,7 +275,7 @@ async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
     assert action.result_status == ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value
     assert action.claim_token is not None
     assert thread is not None
-    assert thread.status == ThreadStatus.CANCELLED.value
+    assert thread.status == expected_thread_status.value
     assert thread.last_applied_action is None
 
 

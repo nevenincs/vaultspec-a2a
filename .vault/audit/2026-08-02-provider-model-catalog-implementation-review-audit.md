@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:b597d841c3b4c1725739c940232bc866eec5be6cff0d78dcc7c8929bea3ea94e'
+body_hash: 'sha256:0d8fe2367a9e13564e17fb905a24eef29dcb3aefadbd576e698dd3705b3a753d'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -884,7 +884,7 @@ and disposition of every implementation finding. Core closed only provider-model
 catalog `P01.S11`; P03 integration/review rows and remediation `W01.P02.S05`
 remain open. No runtime or compatibility surface changes in this lifecycle entry.
 
-### p01-s11-step-record-omits-the-original-implementation-review-and-reopen | high | open
+### p01-s11-step-record-omits-the-original-implementation-review-and-reopen | high | resolved pending formal re-review
 
 Type: lifecycle traceability and evidence integrity. The completed S11 Step
 Record says it carries the full implementation/review chain, but begins at
@@ -922,3 +922,21 @@ The incomplete Step Record finding above blocks this closure despite correct row
 mechanics. Reopen S11, repair the historical implementation/review/reopen,
 evidence-count and finding-disposition chain through Core, then re-close and
 review. This review changes no runtime or plan row.
+
+### p01-s11-lifecycle-provenance-correction | high | resolved pending formal re-review
+
+Type: lifecycle traceability and evidence integrity. Core reopened P01.S11,
+then the Step Record was corrected to begin with original implementation
+`7d8c04df06299dc58ae8fd1a5f4092291f3042ab`, its 49-test result, formal FAIL
+review `16066b83983a90a6a7dc067f98510e3fc5c040fc`, and Core reopen
+`194f4fa6e469a9d849719f3ff8a2e8adaa604712`. It now records the expanded result
+exactly as 585 passed, nine deselected and eight classified server-profile
+environment failures, while retaining the complete later correction/review chain.
+
+The original missing-legacy-restart HIGH is explicitly resolved by the approved
+no-legacy architectural supersession at `41519f11` and curation PASS `45a0a009`:
+S10 removes legacy execution and S11 proves bounded zero-contact refusal; no
+legacy restart was implemented or claimed. The premature-closure HIGH is
+resolved by the recorded Core reopen, prior S10 completion and lifecycle PASS,
+and this post-review re-close. Core re-closed only P01.S11. P03.S19-P03.S23 and
+remediation W01.P02.S05 remain open. Formal lifecycle re-review is required.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:076dc5330b728ac2f6245141ae364b8bed203413a322b122338fc9576b055b27'
+body_hash: 'sha256:24e3f9b6eab5c6ce3693a97ae7410329acba21292916c7c9e111ab6adfeb6e34'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -736,3 +736,15 @@ legacy-restart/premature-closure HIGH findings under the superseding no-legacy
 architecture. Reopen, complete that evidence chain, re-close through Core and
 repeat lifecycle review before remediation consumes the prerequisite. This audit
 update closes no remediation row.
+
+### p01-s11-lifecycle-provenance-correction | high | resolved pending formal re-review
+
+Type: remediation prerequisite traceability. Catalog P01.S11 was reopened and
+its Step Record now includes original implementation `7d8c04df`, the 49-test
+result, FAIL review `16066b83`, Core reopen `194f4fa6`, exact expanded count of
+585 passed with nine deselected and eight classified environment failures, and
+the complete later correction chain. It explicitly resolves the original legacy
+restart gap through the approved no-legacy supersession and zero-contact refusal,
+and the premature closure through reopen plus prior S10 completion. Core
+re-closed only P01.S11. Remediation W01.P02.S05 remains open pending its own work
+and may not consume this prerequisite until lifecycle re-review passes.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:54591924733ec7fa2dc7d99cc215f8d766e23dbee63b2380b9889bf57306ba57'
+body_hash: 'sha256:ea4af383ee545ac72126290464d14a6c1ddeeda683d0d2b35d096115d38daca1'
 step_id: 'S11'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
@@ -27,6 +27,11 @@ related:
 
 ### Implementation and review chain
 
+- `7d8c04df06299dc58ae8fd1a5f4092291f3042ab` was the original S11 implementation. It corrected ER19 by asserting each host's observed OpenAI and Z.AI catalog availability while retaining independent health, exact-mode admission and selectability checks. Its original focused behavior set passed 49 tests.
+- `16066b83983a90a6a7dc067f98510e3fc5c040fc` was the original formal FAIL review. It found two HIGH lifecycle/evidence defects: the then-required legacy restart was not exercised through production, and S11 had closed before prerequisite S10.
+- `194f4fa6e469a9d849719f3ff8a2e8adaa604712` reopened P01.S11 through Core and preserved the valid 49-test ER19/current behavior subset while the architecture and prerequisite were corrected.
+- `41519f11bd093311cebedc0f34bd575a845eac30` amended the governing architecture under the user's approved strict no-legacy direction: retired provider/model/profile state must be refused and must never restart, redispatch, translate, migrate or substitute. Expanded curation passed at `45a0a0093cfc38d7595583b8289d2c744429bd7a`.
+- S10 then implemented the superseding current-only boundary and closed at `0c47e4c5758995d7bc55ef924b6547c11c07fa08`; lifecycle review `bc0d59984946789e8eaf6fcbd4ec40708fa79d67` passed before S11 resumed.
 - `ba9f70bd4d280ca95a3f31131443949317a0ae9d` added the current-only behavior proofs: ACP discovery consumes `configOptions` only; retired provider/model/profile input and durable state fail closed; provider health remains separate from admission; served selection validates and freezes exact values; same-ID replay is stable; current schema-v1 restart is exercised.
 - `a93ab85292667e5c170df20914059d8790434f8c` found that the restart test bypassed the production worker and that retired-input assertions did not prove the bounded typed refusal.
 - `550f26fc944182eca92d5afe007f925dd3e9d388` drove restart through a fresh production gateway and production worker over real loopback transport, bound the full canonical assignment and digest to durable/checkpoint/worker evidence, and bounded request-validation responses without reflecting rejected input.
@@ -55,6 +60,8 @@ related:
 
 ## Findings and disposition
 
+- Resolved by approved architectural supersession: `p01-s11-legacy-restart-proof-absent`. The original contract required supported legacy redispatch; the user's strict no-legacy decision and amended architecture instead require typed zero-contact refusal. S10 removed the compatibility path, and the final S11 production tests prove refusal with no translation, migration, substitution or restart. The historical HIGH remains valid for the superseded contract and is not recast as if a legacy restart was implemented.
+- Resolved by lifecycle sequencing: `p01-s11-premature-plan-closure`. Core reopened S11 at `194f4fa6e469a9d849719f3ff8a2e8adaa604712`, S10 completed and passed lifecycle review first, and S11 closed only after the full current-only implementation chain and final PASS review.
 - Resolved HIGH: production restart bypass; incomplete full frozen-assignment proof; graph cache omitted assignment digest; node metadata was global by node name; execution re-entry omitted frozen authority; durable thread binding depended on cache residency; pre-resume state update could invalidate interrupts; clarification fast replay could lose the accepted result; retired root sentinels were checked too late; checkpoint reads bypassed capacity; terminal identity was unbounded; and capacity cleanup had an ABA ownership race.
 - Resolved MEDIUM: refusal typing; validation-error input reflection; checkpoint authority/digest validation; descriptor closure at read; current checkpoint reconciliation; team-status thread association; exact-key compile single-flight; and concurrent duplicate false-429 ordering.
 - Resolved LOW: obsolete cross-thread agent metadata access. Full-assignment isolation positive controls were independently verified.
@@ -63,8 +70,9 @@ related:
 
 ## Verification
 
+- Original `7d8c04df` focused catalog behavior set -> `49 passed`; this remains evidence for the ER19 observed-availability correction and the then-current subset, while its legacy assertions are historical rather than supported authority.
 - `pytest` focused exact-authority, redispatch, cache-identity, endpoint-admission, executor and state-projection set -> `145 passed`.
-- `pytest` expanded provider/control/worker behavior set -> `585 passed` with `8` classified server-profile environment failures outside the S11 implementation boundary.
+- `pytest` expanded provider/control/worker behavior set -> `585 passed, 9 deselected`, with `8` classified server-profile environment failures outside the S11 implementation boundary.
 - `pytest src/vaultspec_a2a/worker/tests` on the final correction -> `133 passed, 2 deselected`.
 - `pytest` final dispatch-admission plus full Executor review selection -> `64 passed`.
 - `pytest src/vaultspec_a2a/api/tests/test_openapi_artifact.py src/vaultspec_a2a/providers/tests/test_no_legacy_model_authority.py` -> `12 passed`.

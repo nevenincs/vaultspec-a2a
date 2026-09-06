@@ -4,15 +4,16 @@ tags:
   - '#index'
   - '#embedded-runtime-remediation'
 date: '2026-09-05'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:e3c0d8fa8060bf5063f113d6e0566995c17059f30ef1d302459d2941f0514eb6'
+body_hash: 'sha256:d76f87e0d800edfdeeda230d7a6947dc79fd3000b2d52de84afeef5fcbf456c7'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S03]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-summary]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S04]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S05]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
@@ -44,6 +45,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P01-S03` - Record prerequisite status and exact evidence needed from catalog plan P03.S19 and P03.S20; allow independent local remediation while missing provider or Dashboard qualification blocks only its dependent proof
 - `2026-09-05-embedded-runtime-remediation-W01-P01-summary` - `embedded-runtime-remediation` `W01.P01` summary
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S04` - Run PostgreSQL URL checks under the locked server dependency profile and make that profile explicit while preserving the SQLite binary profile
+- `2026-09-05-embedded-runtime-remediation-W01-P02-S05` - Verify catalog availability-test correction under owner P01.S11 in 2026-08-02-provider-model-catalog-plan, preserving exact-mode admission assertions
 
 ### plan
 

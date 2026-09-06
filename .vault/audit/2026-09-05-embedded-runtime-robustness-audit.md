@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:ceb523b377259187c6962e65ad85abdada5ff8c082f62944c97e730c24e0123a'
+body_hash: 'sha256:e691064912b5790a6c6676b793701b7c7cf3106714ba9c10e7d0072e63bba271'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -620,3 +620,13 @@ current-lane/no-retired guards passed. Static checks passed. This removes ER19's
 stale host-state assumption without turning discovery into execution proof. No
 new finding surfaced; W01.P02.S05 remains open for formal review and later
 Dashboard/external qualification remains with W05.P12.S57.
+
+### ER19 W01.P02.S05 lifecycle closure | low | closed
+
+Formal evidence review `3ed2ccdc0342f34e623cb507b914b68dba5f2f8c`
+passed the exact ER19 owner verification recorded at `1daa2ea9`: observed catalog
+availability is host-relative, health agrees with catalog state, and both exact
+OpenAI/Z.AI modes remain not admitted and nonselectable. Core closed only
+W01.P02.S05 and created its evidence Step Record. S06-S08 and later assembled
+Dashboard/external qualification remain open. This lifecycle entry adds no
+runtime, test, legacy or deprecated behavior; closure-record review is pending.

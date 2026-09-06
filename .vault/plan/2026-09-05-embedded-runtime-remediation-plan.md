@@ -22,10 +22,11 @@ related:
   - '[[2026-08-05-served-capability-contract-plan]]'
   - '[[2026-08-02-llm-context-provider-abstraction-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:de3e9e102844fa4958045c6cc59530cc2d0c61ffebf9abe28535bc123f4f3590'
+body_hash: 'sha256:45d7c275a98f19267f2ac60970aa99ff2fa6e414b30c59c168f90067539e2d62'
 ---
+
 # `embedded-runtime-remediation` plan
 
 ## Description
@@ -57,7 +58,7 @@ Freeze intended revisions, supported operations, limits and evidence prerequisit
 Restore meaningful prerequisite-dependent checks without weakening runtime claims.
 
 - [x] `W01.P02.S04` - Run PostgreSQL URL checks under the locked server dependency profile and make that profile explicit while preserving the SQLite binary profile; `pyproject.toml`.
-- [ ] `W01.P02.S05` - Verify catalog availability-test correction under owner P01.S11 in 2026-08-02-provider-model-catalog-plan, preserving exact-mode admission assertions; `src/vaultspec_a2a/api/tests/test_provider_catalog_route.py`.
+- [x] `W01.P02.S05` - Verify catalog availability-test correction under owner P01.S11 in 2026-08-02-provider-model-catalog-plan, preserving exact-mode admission assertions; `src/vaultspec_a2a/api/tests/test_provider_catalog_route.py`.
 - [ ] `W01.P02.S06` - Align an isolated RAG client/service test environment and rerun the real project-pinning discriminator without altering an unrelated shared daemon; `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`.
 - [ ] `W01.P02.S07` - Diagnose the intermittent compilation loop-gap measurement on the named representative host/load and correct the owning warmup path if required without relaxing its existing budget; `src/vaultspec_a2a/providers/warmup.py`.
 - [ ] `W01.P02.S08` - Apply a reviewed locked dependency correction for the Starlette BlockingPortal deprecation and verify the warning disappears without suppression; `uv.lock`.

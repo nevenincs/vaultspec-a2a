@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:00fc0616d539d78089e085b85791b5b117cf0c1f6af47f32cff1f14a2f3c7708'
+body_hash: 'sha256:936a2383fc3323e2a7e9d211731d23061c5a770279a50b319aeaa1ada01b8f72'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -787,3 +787,14 @@ qualification ownership.
 Type: formal evidence review disposition. Evidence-only commit `1daa2ea9e1b2d5aeb726c3f818fc689cee508ecd` has exact parent `c1da77cdcdaa16846be96c76fdaea2cb7206035d`, changes only the two owning audit documents, and passes `git diff --check`. The production ASGI route test keys the parsed response by provider identity, accepts only observed `available` or `unavailable` catalog state for OpenAI and Z.AI, requires catalog/health equality, and validates the corresponding closed payload shape. The v1 DTO bounds reason text, identifiers, entries, controls and provider collections. Both exact registered modes remain independently `not_admitted` and nonselectable regardless of discovery outcome; the current exact-mode inventory and zero-retired-authority guards pass, so no deprecated provider/profile/model authority is restored.
 
 Independent review reran the exact discriminator (one pass), the complete route file (11 passes), and the current-lane plus zero-retired-authority guard set (10 passes); Ruff format/check and Ty pass for the route test. The recorded 34-pass surrounding catalog/selection result is consistent with the already reviewed and closed P01.S11 prerequisite. Full Core reports all 19 checks clean for `embedded-runtime-remediation`. No runtime or test correction is required and no new finding surfaced. S05 is review-passed but remains open for its separate Core lifecycle closure; downstream external and Dashboard qualification remains owned by W05.P12.S57.
+
+### w01-p02-s05-core-lifecycle-closure | low | closed
+
+Type: dependency-verification lifecycle. Formal PASS review
+`3ed2ccdc0342f34e623cb507b914b68dba5f2f8c` independently reproduced the
+host-relative route semantics, exact-mode non-admission, current-lane inventory,
+zero-retired-authority guards and static evidence at implementation commit
+`1daa2ea9e1b2d5aeb726c3f818fc689cee508ecd`. Core created the L3 Step Record and
+closed only W01.P02.S05. S06-S08 remain open; downstream Dashboard/external
+qualification remains W05.P12.S57. No runtime or test path changes in this
+lifecycle closure. Mandatory closure-record review remains pending.

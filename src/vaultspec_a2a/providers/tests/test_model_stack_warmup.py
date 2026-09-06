@@ -18,11 +18,15 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
+from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any
 
+import psutil
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 #: The control must block the loop by at least this much for the comparison to
@@ -34,6 +38,13 @@ _BLOCKED_LOOP_FLOOR_SECONDS = 1.0
 #: heartbeat so ordinary scheduler jitter never reads as a stall, and far below
 #: the multi-second block the control demonstrates.
 _RESPONSIVE_LOOP_CEILING_SECONDS = 0.5
+
+# The remediation campaign froze worker execution concurrency C at five before
+# measurement. Five independent CPU-bound processes make that load real and
+# observable without changing the production ceiling or relying on whatever
+# unrelated work happens to share the host during a test run.
+_REPRESENTATIVE_BUSY_PROCESSES = 5
+_REPRESENTATIVE_COMPILE_TRIALS = 5
 
 pytestmark = pytest.mark.middleware
 
@@ -59,6 +70,45 @@ def _probe(mode: str, workspace: Path) -> dict[str, Any]:
             f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
         )
     return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+@contextmanager
+def _representative_cpu_load() -> Iterator[list[psutil.Process]]:
+    """Occupy the campaign's five worker slots with owned CPU-bound processes."""
+    # On Windows a venv's ``sys.executable`` is a redirector that parents the
+    # real interpreter. Measuring that idle redirector would make the load proof
+    # vacuous, and signalling it would not identify the process burning CPU.
+    python = getattr(sys, "_base_executable", sys.executable)
+    processes = [
+        subprocess.Popen(
+            [python, "-c", "value = 1\nwhile True: value = value * 3 % 97"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        for _ in range(_REPRESENTATIVE_BUSY_PROCESSES)
+    ]
+    owners = [psutil.Process(process.pid) for process in processes]
+    try:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if all(owner.cpu_times().user > 0.05 for owner in owners):
+                break
+            time.sleep(0.05)
+        assert all(owner.cpu_times().user > 0.05 for owner in owners), (
+            "the representative CPU load never became non-vacuous"
+        )
+        yield owners
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                with suppress(ProcessLookupError):
+                    process.terminate()
+        for process in processes:
+            try:
+                process.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5.0)
 
 
 @pytest.fixture(scope="module")
@@ -118,3 +168,36 @@ def test_compiling_a_graph_keeps_the_loop_serving(
     assert (
         compiled["max_loop_gap_seconds"] < blocked_loop_control["max_loop_gap_seconds"]
     ), f"compile is no better than importing on the loop: {compiled}"
+
+
+def test_repeated_cold_compiles_keep_serving_under_five_slot_cpu_load(
+    blocked_loop_control: dict[str, Any], tmp_path: Path
+) -> None:
+    """The fixed loop-gap ceiling holds repeatedly under named campaign load."""
+    with _representative_cpu_load() as owners:
+        before = [owner.cpu_times().user for owner in owners]
+        scheduler = _probe("idle", tmp_path / "scheduler-control")
+        compiled = [
+            _probe("compile", tmp_path / f"trial-{trial}")
+            for trial in range(_REPRESENTATIVE_COMPILE_TRIALS)
+        ]
+        after = [owner.cpu_times().user for owner in owners]
+
+    assert all(end - start > 0.25 for start, end in zip(before, after, strict=True)), (
+        "the five-slot CPU load did not remain active across the compile trials"
+    )
+    assert all(not owner.is_running() for owner in owners), (
+        "an owned representative-load process survived the measurement"
+    )
+    assert scheduler["max_loop_gap_seconds"] < _RESPONSIVE_LOOP_CEILING_SECONDS, (
+        "representative-load measurement is inconclusive: the idle event loop "
+        f"already exceeded the fixed ceiling: {scheduler}"
+    )
+    assert all(
+        result["max_loop_gap_seconds"] < _RESPONSIVE_LOOP_CEILING_SECONDS
+        for result in compiled
+    ), f"a compile exceeded the fixed loop responsiveness ceiling: {compiled}"
+    assert all(
+        result["max_loop_gap_seconds"] < blocked_loop_control["max_loop_gap_seconds"]
+        for result in compiled
+    ), f"loaded compile was no better than the on-loop control: {compiled}"

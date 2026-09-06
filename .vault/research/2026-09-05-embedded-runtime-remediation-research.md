@@ -3,16 +3,15 @@ tags:
   - '#research'
   - '#embedded-runtime-remediation'
 date: '2026-09-05'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6e12cf642d4252a544a30380654fd6279f6bb4633842fe6012c511d1753e85b4'
+body_hash: 'sha256:8b58feb7cc8fcaf6970385dc640b5e253911dbcf9b4f3a9b296a009f2bd8f28a'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-reference]]"
   - "[[2026-08-01-dashboard-bundled-runtime-consumer-record-correction-reference]]"
 ---
-
 # `embedded-runtime-remediation` research: `remediation choices and implementation ownership`
 
 The question is how to remediate the completed embedded-runtime audit without creating competing runtime designs or duplicate implementation queues. The evidence favors refinements to the existing decision owners, one release-qualification ADR, and one remediation plan that verifies active upstream work and implements the uncovered corrections. The measured baseline, ER01-ER28, and A01-A34 remain in the related audit and criteria research; they are not reproduced here.
@@ -80,3 +79,13 @@ Source regression, local deterministic execution, external provider work and Das
 - A2A source `9438cf0bc1465a13892cb7fad197c44bd72c0360`; Dashboard comparison `330b2efe294c8ab134fff2142f9fae98afd14fec`; installed/locked versions recorded in the audit.
 
 Additional control mapping locators: `src/vaultspec_a2a/providers/codex_chat_model.py:642`, :1015.
+
+## W01.P02.S07 loop-gap and cold-catalog diagnosis
+
+The production compile path at current HEAD retains the same required mechanism inspected at the original audit baseline: `GraphLifecycleManager._compile_graph` awaits `asyncio.to_thread(warm_model_imports)` before synchronous provider construction, while worker startup also starts a background offloaded warmup. Fresh separation on the named Windows 10 Pro / Ryzen 9 5900X / locked Python 3.13.11 host measured an on-loop import at 3.5687 seconds with a 3.5688-second gap, the same imports offloaded at 2.8176 seconds with a 0.0851-second gap, and one production compile at 1.5716 seconds with a 0.0552-second gap. This proves both that the meter detects the cold stall and that the current offload prevents it; it does not erase ER21's original 25.312691-second work / 0.6182457-second gap or the unchanged M15 pass.
+
+The repeatability gate now establishes a named load rather than inheriting incidental machine contention. Five owned base-interpreter processes represent the campaign's frozen worker capacity `C=5`; each must accrue CPU before the measurement and throughout five fresh cold production compile subprocesses. An idle event-loop subprocess runs under the same load first and must remain below the unchanged 0.5-second ceiling, otherwise the measurement fails as inconclusive due to scheduler starvation. The final capture measured idle at 0.0191561 seconds, compile gaps 0.0464355, 0.0701506, 0.0609854, 0.0792614 and 0.0816821 seconds, compile work 2.2656-2.8778 seconds, and 43.34-48.55 CPU seconds for every load owner. The owning warmup path therefore needs no production correction.
+
+The first load-harness run failed before compile measurement because Windows virtual-environment `python.exe` is an idle redirector whose child is the executing interpreter. Measuring the redirector reported zero CPU and correctly refused the run as vacuous. The corrected harness launches the current base interpreter directly, keeps its exact process identities, verifies real CPU accrual, and reaps them in `finally`; a process scan after the failed diagnostic found no owned burner. This is a measurement-harness finding resolved inside S07, not evidence of a warmup failure.
+
+The separately reassigned provider-catalog/Uvicorn observation has no demonstrated warmup coupling. The exact current-schema production restart test passed once in 21.42 seconds and then five fresh repetitions in 17.10-19.03 pytest seconds (20.56-23.61 wall seconds), with no shutdown failure. The authoritative final combined exact-source run passed the warmup module and restart case, five tests in 89.00 seconds; the loaded compile case took 52.90 seconds and the restart case took 16.65 seconds. The historical 91.79-second cold discovery included an external Claude timeout, while process-tree and graceful gateway shutdown remain lifecycle concerns. S07 records the non-reproduction and leaves the runtime lifecycle finding open under `W04.P10.S49`; it does not claim to close it.

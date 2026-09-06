@@ -15,6 +15,10 @@ modes share one heartbeat meter so their numbers are directly comparable:
     The production seam - ``GraphLifecycleManager.get_or_compile_graph`` for a
     real bundled preset - which triggers the same import from inside
     ``ProviderFactory.create``.
+``idle``
+    A two-second scheduler calibration with no model work. A loaded-host proof
+    must establish this control below the fixed ceiling before attributing a
+    missed heartbeat to graph compilation.
 
 Prints one JSON object: the wall time of the measured work and the largest gap
 between heartbeat ticks while it ran.
@@ -136,13 +140,16 @@ async def _measure(mode: str, workspace: Path) -> dict[str, float | str]:
         elapsed = time.monotonic() - started
     elif mode == "compile":
         elapsed = await _run_compile(workspace, heartbeat)
+    elif mode == "idle":
+        await asyncio.sleep(2.0)
+        elapsed = time.monotonic() - started
     else:
         raise SystemExit(f"unknown mode {mode!r}")
 
     heartbeat.stop()
     await ticker
 
-    if "langchain_openai" not in sys.modules:
+    if mode != "idle" and "langchain_openai" not in sys.modules:
         raise RuntimeError("the measured work did not load the model stack")
 
     return {

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:901f612d9d29323255a9604f9dc4f65c0655099ff689379113309f62083529af'
+body_hash: 'sha256:aa7014c2d7c83461466084444f504861404a9638cda3c0e20d3f9f68118e62ad'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -463,7 +463,7 @@ retained PID 56028, port 8766 and package 0.4.23 across the run; the
 service-token SHA-256 was
 `6a1967743b274c05f778759a1c70141f8717d70308bea34beb69df994c9ded5a`
 and the digest comparison was `changed=false`. Ruff, format and Ty pass.
-### p01-s11-cold-catalog-shutdown-timeout | medium | open
+### p01-s11-cold-catalog-shutdown-timeout | medium | open under W04.P10.S49 after S07 diagnosis
 
 Type: provider-degradation test stability and resource lifecycle. Status: open
 and nonblocking for the reviewed S11 test changes. A post-broad focused rerun
@@ -1008,3 +1008,21 @@ Type: lifecycle-record review disposition. Closure commit `b4700b752fb87e1b00bdc
 The Step Record retains the complete `9d56e23e` through `613d23e2` implementation/FAIL-correction/PASS chain, the authoritative 36-test module result, all four real-process discriminators, exact 120-second hung-stop evidence, static/diff/secret scans, rotated shared-fingerprint stability and final formal review identity. The linked PASS review supplies the clean 19-check remediation Core result, and both remediation and provider-model-catalog feature checks independently return zero diagnostics at closure. Historical FAIL/PASS entries remain in place; only their current finding statuses move to closed. ER20 is closed, while the distinct cold catalog/Uvicorn finding remains open under S07/S49.
 
 Current-tree scans find no disclosed raw credential or restored legacy/deprecated claim. Index, audits, Step Record and plan agree. No finding surfaced; the S06 lifecycle closure passes mandatory review.
+
+### w01-p02-s07-compile-loop-gap-diagnosis | medium | corrected pending formal review
+
+Type: performance evidence and measurement integrity. S07 retains ER21's original failed 25.312691-second compile with a 0.6182457-second maximum loop gap and the unchanged M15 success. Current source still offloads the cold model stack before provider construction. Fresh controls on the named Windows/Ryzen host measured a 3.5688-second on-loop gap, 0.0851-second offloaded gap and 0.0552-second production compile gap. The new gate drives five fresh production compile subprocesses under five owned CPU-bound processes, matching frozen execution capacity `C=5`, while an idle event-loop control under the same load terminally refuses an inconclusive scheduler-starved sample. Final idle gap was 0.0191561 seconds; compile gaps were 0.0464355-0.0816821 seconds; every load owner accrued 43.34-48.55 CPU seconds. The 0.5-second ceiling is unchanged. The warmup module passed 4 tests in 66.85 seconds and requires no production correction.
+
+### w01-p02-s07-venv-load-owner-redirector | medium | resolved
+
+Type: measurement-harness process ownership. The first new load run reported 3 passed and 1 failed before compile sampling because every Windows venv `python.exe` handle referred to an idle redirector while its child performed the CPU work. The gate correctly refused zero measured CPU rather than treating it as representative load. S07 now launches the current base interpreter directly, retains those exact process handles, requires CPU accrual before and across all trials, and terminates/waits or kills each in `finally`. The focused loaded gate passed in 55.82 seconds; a post-failure process scan found zero matching owned burners.
+
+### p01-s11-cold-catalog-shutdown-timeout-s07-reassessment | medium | open under W04.P10.S49
+
+Type: provider degradation and gateway lifecycle. S07 reran the exact production restart/catalog case six fresh times: one 21.42-second pass, then five passes at 17.10-19.03 pytest seconds (20.56-23.61 wall seconds). The authoritative final exact-source combined gate passed five tests in 89.00 seconds, with the loaded compile case at 52.90 seconds and the restart case at 16.65 seconds. No shutdown timeout reproduced. The historical 91.79-second observation included a real Claude discovery timeout; current catalog discovery is independently bounded and shielded, while process-tree/graceful shutdown remains owned by `W04.P10.S49`. No evidence couples it to model warmup, so S07 records diagnosis only and does not close or reassign the lifecycle finding.
+
+No runtime authority, provider surface, compatibility path, deprecated option or threshold changed. S07 remains open for formal review.
+
+### w01-p02-s07-load-cleanup-terminal-race | low | resolved
+
+Type: measurement-harness resource cleanup. Final review of the owned CPU-load helper found a process could exit between `poll()` and `terminate()`. Cleanup now accepts only terminal `ProcessLookupError`, still waits each exact process and escalates its same handle on timeout, and the test asserts every retained `psutil.Process` identity is absent after the load context. The authoritative combined run passes and an independent command-line scan reports zero matching burner processes.

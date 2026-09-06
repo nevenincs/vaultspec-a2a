@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:95cee7851251211805823fecf562b49ca64cde45f4504dfa4afd77091e4cfaa8'
+body_hash: 'sha256:015953fd2802d9105fb1fa4db1b33c5212e2af924236248d823de8cbfe49a1f0'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -44,6 +44,8 @@ Evidence levels: S = inspected source/schema; L = actual local production functi
 - M12: Fresh source binary build **passed**, including version/help and disallowed-module smoke. Invoked with `uv run --no-sync python scripts/build_binary.py --dist tmp/embedded-runtime-audit-binary`; local log `tmp/embedded-runtime-audit-build.log`. Fresh executable SHA256 `EDE9B961F7D52952FD1522DB23295AE810490D01C029ADEF869C37EB6354E688`, version **0.3.0**. Positive dispatch `run-module vaultspec_core -- --help` reached the bundled Core CLI, exit 0. The separator is required to pass help through the outer Click command.
 - M14: Fresh binary migrated disposable stores successfully (primary head `0016`, checkpoint schema `1.0.0`) and served `/health` plus authenticated `/v1/service`, both HTTP 200. Ran `serve` from an external temporary working directory with PATH restricted to Windows System32 and PYTHONHOME/PYTHONPATH/VIRTUAL_ENV/UV_PROJECT_ENVIRONMENT removed. Service reported version 0.3.0, database/checkpoint ready. Worker was `pending`, connected=false, ready=false: **no frozen worker execution proof**. The probe used production credential/port-allocation/reaping helpers and reaped its own tree. Temporary script `tmp/embedded_runtime_binary_probe.py`; outputs `tmp/embedded-runtime-audit-binary-probe.log` and `tmp/embedded-runtime-audit-binary-probe-worker.log`. This is a direct binary L probe, not a dashboard D test.
 - M15: Focused recheck: `uv run --no-sync pytest src/vaultspec_a2a/providers/tests/test_model_stack_warmup.py::test_compiling_a_graph_keeps_the_loop_serving src/vaultspec_a2a/api/tests/test_provider_catalog_route.py::test_authenticated_route_serves_all_registered_lanes_in_order -q --tb=short --no-showlocals -o log_cli=false --junitxml=tmp/embedded-runtime-audit-recheck.xml`. **1 passed, 1 failed in 65.98 seconds**, exit 1. Compile responsiveness passed without changes; catalog's unavailable-versus-available assertion failed again. ER21 remains an intermittent measured failure pending cause/representative-load analysis. Raw local log: `tmp/embedded-runtime-audit-recheck.log`.
+
+- M16: W01.P02.S07 named-host/load diagnosis under current HEAD and locked Python 3.13.11. The control/import separation measured on-loop work/gap 3.5687/3.5688 seconds, offloaded work 2.8176 seconds with gap 0.0851, and production compile gap 0.0552. The final non-vacuous `C=5` capture required five owned CPU-bound base interpreters plus an idle scheduler control: idle gap 0.0191561 seconds; five cold compile gaps 0.0464355-0.0816821 seconds; every load owner accrued 43.34-48.55 CPU seconds. The unchanged 0.5-second ceiling passed. The exact warmup module passed 4 tests in 66.85 seconds; the authoritative final exact-source combined warmup/restart run passed 5 in 89.00 seconds, with the loaded compile case at 52.90 seconds and restart case at 16.65 seconds. The original ER21 failure and M15 pass remain historical evidence.
 - M13: `uv run --no-sync vaultspec-core vault check all --feature embedded-runtime-robustness --json --limit 20` completed **19 checks, zero diagnostics**. Independent document review corrected the criterion count and narrowed A12's verdict; scaffold residue was removed through Core set-body. No runtime source changed, no unrelated documents were repaired, and no implementation plan was marked complete.
 
 Raw XML/log/build outputs are local temporary evidence and are not committed. The measurements, commands, identities and reproductions in this record are the durable audit trail. Source test counts do not become full-criterion passes.
@@ -222,7 +224,7 @@ service. Shared PID 56028 and port 8766 stayed unchanged; service-token SHA-256
 compared `changed=false`. Formal
 S06 review remains required.
 
-### ER21-compile-loop-budget | medium | Graph compilation exceeded its existing loop responsiveness ceiling
+### ER21-compile-loop-budget | medium | corrected pending W01.P02.S07 formal review
 
 **OPEN; performance; M02; separate from A29's unmeasured HTTP percentiles.** `providers/tests/test_model_stack_warmup.py:114` measures a cold production graph-compilation subprocess. Observed work 25.312691 seconds, max loop gap **0.6182457 seconds**, 1557 ticks, versus its existing **0.5-second** ceiling. This is a measured threshold failure, not proof of the test message's asserted import-causality diagnosis. M15 passed on the targeted recheck without code or threshold changes. Host contention and repeatability require separation; this is retained as an intermittent observation, not declared fixed. **Owner:** worker warmup/performance tests. **Close when:** the gap is explained and the fixed budget holds on the named representative host/load; retain both failed and successful rechecks.
 
@@ -683,3 +685,9 @@ Formal review `47f541201bb601aa8f20b1668f8e8c21c87c70b3` identified that the nor
 ### W01.P02.S06 lifecycle closure
 
 Formal PASS review `613d23e2b5e73eaa948cc49c745743d328c074ea` accepted the exact-version isolated RAG proof and its bounded owned-process lifecycle. Core closed `W01.P02.S06` and ER20. The separate cold provider-catalog/Uvicorn shutdown issue remains open under `W01.P02.S07` and `W04.P10.S49`.
+
+### ER21 W01.P02.S07 resolution evidence
+
+The current compile seam still offloads the same cold model imports and requires no production change. S07 adds an ambient idle-loop calibration and five repeated cold compiles under five proven CPU-bound process owners. It fails rather than passing when either the load is not established or the idle scheduler itself exceeds 0.5 seconds. All measured current compile gaps remained at most 0.0816821 seconds. The first harness run's zero-CPU refusal exposed the Windows venv redirector rather than a load process; switching only the test load launcher to the current base interpreter made CPU ownership measurable and retained exact cleanup. Classified as MEDIUM measurement-harness integrity, resolved pending formal review.
+
+The historical cold-catalog/Uvicorn observation did not reproduce across six fresh production gateway runs or the final combined gate. Its provider discovery latency and gateway shutdown ownership remain distinct from model-stack warmup. S07 does not close the lifecycle issue; `W04.P10.S49` remains its runtime owner.

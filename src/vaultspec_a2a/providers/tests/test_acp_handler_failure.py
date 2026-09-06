@@ -23,8 +23,9 @@ from typing import Any, cast
 
 import pytest
 
-from .._acp_protocol import handle_server_rpc
+from .._acp_protocol import handle_client_response, handle_server_rpc
 from .._acp_types import AcpModelConfig, AcpSessionContext
+from ..acp_exceptions import AcpPromptError
 
 
 class _CapturingStdin:
@@ -99,6 +100,57 @@ def _config() -> AcpModelConfig:
 def _sent(stdin: _CapturingStdin) -> dict[str, Any]:
     assert stdin.frames, "the agent received no reply at all"
     return json.loads(stdin.frames[-1].decode("utf-8").strip())
+
+
+@pytest.mark.parametrize(
+    "stop_reason",
+    ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"],
+)
+def test_every_valid_prompt_stop_reason_settles_and_is_preserved(
+    stop_reason: str,
+) -> None:
+    async def _run() -> None:
+        ctx = _context(_CapturingStdin())
+        ctx.prompt_id_ref[:] = [17]
+        await handle_client_response(
+            {"id": 17, "result": {"stopReason": stop_reason}}, ctx
+        )
+        assert ctx.prompt_done.is_set()
+        assert ctx.prompt_stop_reason == stop_reason
+        assert ctx.interrupt_exc == []
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize("result", [{}, {"stopReason": "future_reason"}, []])
+def test_invalid_prompt_terminal_result_fails_prompt_without_hanging(
+    result: Any,
+) -> None:
+    async def _run() -> None:
+        ctx = _context(_CapturingStdin())
+        ctx.prompt_id_ref[:] = [17]
+        await handle_client_response({"id": 17, "result": result}, ctx)
+        assert ctx.prompt_done.is_set()
+        assert ctx.prompt_stop_reason is None
+        assert len(ctx.interrupt_exc) == 1
+        assert isinstance(ctx.interrupt_exc[0], AcpPromptError)
+
+    asyncio.run(_run())
+
+
+def test_first_prompt_terminal_reason_is_immutable() -> None:
+    async def _run() -> None:
+        ctx = _context(_CapturingStdin())
+        ctx.prompt_id_ref[:] = [17]
+        await handle_client_response(
+            {"id": 17, "result": {"stopReason": "refusal"}}, ctx
+        )
+        await handle_client_response(
+            {"id": 17, "result": {"stopReason": "end_turn"}}, ctx
+        )
+        assert ctx.prompt_stop_reason == "refusal"
+
+    asyncio.run(_run())
 
 
 def test_a_raising_handler_still_answers_with_a_protocol_error() -> None:

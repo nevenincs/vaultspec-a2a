@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:365ca08df3781749881f818a36ba6d440707a49276ff824f85da506853e01fe4'
+body_hash: 'sha256:e1e6d78113028c10f6cfc9b2c5f5524a6957020b7a8203b9cbe357bc7eb293bf'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -127,7 +127,7 @@ Budget actual input and commit compaction without replacing durable transcript a
 Preserve supplied meaning through initialization, streaming and retry decisions.
 
 - [x] `W03.P07.S31` - Validate returned ACP version before session creation and reject malformed/incompatible initialization or absent required optional support; `src/vaultspec_a2a/providers/_acp_session.py`.
-- [ ] `W03.P07.S32` - Settle every supplied ACP stop reason promptly and preserve refusal, cancellation and budget-exhaustion meaning through the stream consumer; `src/vaultspec_a2a/providers/_acp_protocol.py`.
+- [x] `W03.P07.S32` - Settle every supplied ACP stop reason promptly and preserve refusal, cancellation and budget-exhaustion meaning through the stream consumer; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/_acp_types.py, src/vaultspec_a2a/providers/tests/test_acp_handler_failure.py`.
 - [ ] `W03.P07.S80` - Propagate retained ACP stop meaning through the chat-model stream consumer and authoritative outcome path so resolved futures, partial output and transport success cannot become false completed work; `src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [ ] `W03.P07.S33` - Carry known setup/authentication/model-configuration wire conditions through AcpSessionError with truthful unknown/coarse fallback; `src/vaultspec_a2a/providers/_acp_session.py`.
 - [ ] `W03.P07.S34` - Verify condition-derived retry attempts, supplied delays and elapsed bounds while refusing blind replay of uncertain external effects; `src/vaultspec_a2a/providers/conditions.py`.

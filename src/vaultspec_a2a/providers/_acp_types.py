@@ -185,6 +185,7 @@ class AcpSessionContext:
     prompt_done: asyncio.Event
     prompt_id_ref: list[int]
     interrupt_exc: list[BaseException]
+    prompt_stop_reason: str | None = None
     background_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     terminals: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)
     closing: bool = False

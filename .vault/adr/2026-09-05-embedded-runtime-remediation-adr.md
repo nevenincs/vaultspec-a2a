@@ -22,6 +22,7 @@ related:
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]'
   - '[[2026-09-06-embedded-runtime-remediation-condition17-process-owner-research]]'
   - '[[2026-09-06-embedded-runtime-remediation-acp-initialize-negotiation-research]]'
+  - '[[2026-09-06-embedded-runtime-remediation-acp-stop-reason-settlement-research]]'
 ---
 # `embedded-runtime-remediation` adr: `qualification and single-owner remediation of the embedded runtime` | (**status:** `accepted`)
 

@@ -19,11 +19,15 @@ from pydantic import TypeAdapter, ValidationError
 from ._acp_auth import runtime_log_extra
 from ._acp_types import AcpModelConfig, AcpRpcId, AcpSessionContext, RpcHandlerMap
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
+from .acp_exceptions import AcpErrorCode, AcpPromptError
 
 __all__: list[str] = []
 
 logger = logging.getLogger(__name__)
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_TERMINAL_STOP_REASONS = frozenset(
+    {"end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"}
+)
 
 # Map RPC method -> AgentCapabilities attribute name.
 # Used for defense-in-depth capability checks at dispatch time
@@ -156,14 +160,41 @@ async def handle_client_response(
                     "Response for rpc_id=%r arrived after timeout; discarding", rid
                 )
 
-    result = lenient_json_object(data.get("result"))
-    if result.get("stopReason") == "end_turn":
-        ctx.prompt_done.set()
-    elif "error" in data and ctx.prompt_id_ref and rid == ctx.prompt_id_ref[0]:
+    is_prompt_response = bool(ctx.prompt_id_ref) and rid == ctx.prompt_id_ref[0]
+    if is_prompt_response and ctx.prompt_done.is_set():
+        logger.warning("Duplicate ACP session/prompt terminal response ignored")
+        return
+    if "error" in data and is_prompt_response:
         try:
             ctx.chunk_queue.put_nowait(None)
         except asyncio.QueueFull:
             logger.warning("Chunk queue full — dropping error sentinel")
+        return
+    if not is_prompt_response or "result" not in data:
+        return
+    result = data.get("result")
+    if not isinstance(result, dict):
+        ctx.interrupt_exc.append(
+            AcpPromptError(
+                "ACP session/prompt succeeded without an object result",
+                code=AcpErrorCode.INTERNAL_ERROR,
+            )
+        )
+        ctx.prompt_done.set()
+        return
+    stop_reason = result.get("stopReason")
+    if not isinstance(stop_reason, str) or stop_reason not in _TERMINAL_STOP_REASONS:
+        ctx.interrupt_exc.append(
+            AcpPromptError(
+                f"ACP session/prompt returned unsupported stopReason {stop_reason!r}",
+                code=AcpErrorCode.INVALID_PARAMS,
+                data={"acp_stop_reason": stop_reason},
+            )
+        )
+        ctx.prompt_done.set()
+        return
+    ctx.prompt_stop_reason = stop_reason
+    ctx.prompt_done.set()
 
 
 async def handle_server_rpc(

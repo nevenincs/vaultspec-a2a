@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:02e1d033fa388814804ad5ea6e40210cb6515c6975d05fedd06d8ea0b2ac7461'
+body_hash: 'sha256:66bd6a52077846d52c65348d19ec628a7e50ef1b21f452104de26994f2a81b52'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -218,7 +218,9 @@ roots. The service record proves the version/port match before the real tool
 call. The pinned non-workspace path appeared in the refusal while the valid
 launch workspace did not; the isolated case passed in 46.46 seconds and all 33
 pinning tests passed in 47.93 seconds. Owned cleanup stopped only the isolated
-service. Shared PID 56028, port 8766 and service token stayed unchanged. Formal
+service. Shared PID 56028 and port 8766 stayed unchanged; service-token SHA-256
+`6a1967743b274c05f778759a1c70141f8717d70308bea34beb69df994c9ded5a`
+compared `changed=false`. Formal
 S06 review remains required.
 
 ### ER21-compile-loop-budget | medium | Graph compilation exceeded its existing loop responsiveness ceiling
@@ -642,3 +644,15 @@ OpenAI/Z.AI modes remain not admitted and nonselectable. Core closed only
 W01.P02.S05 and created its evidence Step Record. S06-S08 and later assembled
 Dashboard/external qualification remain open. This lifecycle entry adds no
 runtime, test, legacy or deprecated behavior; closure-record review is pending.
+
+
+**S06 formal-review correction:** review `14ae6ddf` found the first evidence
+commit disclosed the shared credential and did not prove degraded cleanup. The
+current audit corpus contains no raw copy. Operator-owned rotation changed its
+SHA-256 digest from `6a1967743b274c05f778759a1c70141f8717d70308bea34beb69df994c9ded5a`
+to `ef678ba14829aacf0285d936238812284235a2a7cf7ff3899f8fab3e1ecb45dd`.
+The post-rotation isolated project-pin and cancellation/failed-stop runs left
+the new digest unchanged (`changed=false`) and the shared service healthy.
+Private cleanup is shielded and total-bounded, retains exact process identity,
+uses an owned-tree fallback and requires process/listener absence. The complete
+pinning module passes 34 tests; formal re-review remains required.

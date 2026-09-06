@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:3821c00667579426db4a12b120c54b71acef432df5ce699f48c06e1ffb43165c'
+body_hash: 'sha256:ad5d4d1e3515d261f6d5f470e3e7d24bcac015f548da4a5c898519e5ac2b44f6'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -216,8 +216,10 @@ data and Qdrant-storage directories; it uses the current `--local-only` and
 version and private port before the MCP call runs. The project-pin discriminator
 passed against that private data plane, the complete pinning module passed 33
 tests, and owned cleanup stopped the private service. The unrelated service
-retained PID 56028, port 8766, package 0.4.23 and service token
-`0f9ddb72112d4571aa474a8ca2140375` across the run. Ruff, format and Ty pass.
+retained PID 56028, port 8766 and package 0.4.23 across the run; the
+service-token SHA-256 was
+`6a1967743b274c05f778759a1c70141f8717d70308bea34beb69df994c9ded5a`
+and the digest comparison was `changed=false`. Ruff, format and Ty pass.
 ### p01-s11-cold-catalog-shutdown-timeout | medium | open
 
 Type: provider-degradation test stability and resource lifecycle. Status: open
@@ -979,3 +981,19 @@ P03.S19 through P03.S23 and remediation W01.P02.S05 remain open, and no runtime
 path changes. Full Core reports a clean vault; plan status reports only the known
 checked S08 missing Step Record and names P03.S19 as next. No missing S11 record,
 incorrect count or unresolved closure finding remains. Lifecycle review passes.
+
+### w01-p02-s06-evidence-credential-correction | high | resolved pending formal re-review
+
+Type: security and evidence handling. Formal review `14ae6ddf` found that the
+first S06 evidence commit persisted the shared service credential in current
+audit prose. All three current durable copies were removed and a full repository
+scan found no remaining occurrence. Historical evidence now carries only the
+one-way SHA-256 digest and `changed=false` result. The exposed credential was
+rotated through the operator-owned RAG stop/start lifecycle: pre-rotation digest
+`6a1967743b274c05f778759a1c70141f8717d70308bea34beb69df994c9ded5a`,
+post-rotation digest
+`ef678ba14829aacf0285d936238812284235a2a7cf7ff3899f8fab3e1ecb45dd`,
+so rotation comparison was `changed=true`. After the corrected isolated test,
+the shared service remained healthy at PID 58992, port 8766, version 0.4.23 and
+the post-rotation digest comparison was `changed=false`. The S06 test itself
+still has no shared-service control path.

@@ -19,6 +19,7 @@ asserting it from inside would prove nothing about the run.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import os
@@ -26,10 +27,13 @@ import socket
 import tempfile
 import tomllib
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+import httpx
+import psutil
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -67,6 +71,27 @@ RAG_PIN_VARIABLE = "VAULTSPEC_RAG_ROOT"
 # letting a wedged handshake hang the suite.
 _LIVE_PROBE_TIMEOUT_SECONDS = 120.0
 _SERVICE_CONTROL_TIMEOUT_SECONDS = 120.0
+_SERVICE_STOP_ATTEMPT_SECONDS = 10.0
+_SERVICE_CLEANUP_TIMEOUT_SECONDS = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class _OwnedRagService:
+    """Exact private daemon identity retained before cleanup can degrade."""
+
+    process: psutil.Process = field(repr=False)
+    port: int
+    service_token: str = field(repr=False)
+    record_path: Path
+
+
+@dataclass(slots=True)
+class _CleanupReceipt:
+    """Non-secret evidence that every private-service cleanup obligation ran."""
+
+    fallback_used: bool = False
+    process_absent: bool = False
+    port_absent: bool = False
 
 
 def _locked_rag_requirement(project_root: Path) -> str:
@@ -97,6 +122,7 @@ async def _run_rag_cli(
     requirement: str,
     *args: str,
     env: dict[str, str],
+    timeout_seconds: float = _SERVICE_CONTROL_TIMEOUT_SECONDS,
 ) -> dict[str, object]:
     """Run one bounded exact-version service command and decode its JSON result."""
     process = await asyncio.create_subprocess_exec(
@@ -111,7 +137,7 @@ async def _run_rag_cli(
     )
     try:
         stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=_SERVICE_CONTROL_TIMEOUT_SECONDS
+            process.communicate(), timeout=timeout_seconds
         )
     except TimeoutError:
         process.kill()
@@ -125,10 +151,136 @@ async def _run_rag_cli(
     return payload
 
 
+def _loopback_port_is_closed(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.1)
+        return probe.connect_ex(("127.0.0.1", port)) != 0
+
+
+async def _terminate_owned_process_tree(owner: psutil.Process) -> None:
+    """Terminate only the retained process identity and its observed children."""
+    if not owner.is_running():
+        return
+    descendants = owner.children(recursive=True)
+    for process in [*reversed(descendants), owner]:
+        if process.is_running():
+            process.terminate()
+    _, alive = await asyncio.to_thread(
+        psutil.wait_procs, [*descendants, owner], timeout=5.0
+    )
+    for process in alive:
+        if process.is_running():
+            process.kill()
+    if alive:
+        _, alive = await asyncio.to_thread(psutil.wait_procs, alive, timeout=5.0)
+    assert not alive, "the exact owned private RAG process tree survived cleanup"
+
+
+async def _private_endpoint_matches(owner: _OwnedRagService) -> bool:
+    """Confirm the retained daemon still owns its private health endpoint."""
+    if not owner.process.is_running():
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(f"http://127.0.0.1:{owner.port}/health")
+        payload = response.json()
+    except (httpx.HTTPError, json.JSONDecodeError):
+        return False
+    return (
+        response.status_code == 200
+        and isinstance(payload, dict)
+        and payload.get("pid") == owner.process.pid
+        and payload.get("port") == owner.port
+        and payload.get("service_token") == owner.service_token
+    )
+
+
+async def _await_private_service_absent(owner: _OwnedRagService) -> None:
+    """Prove both the retained process identity and private listener are gone."""
+    deadline = asyncio.get_running_loop().time() + 10.0
+    while asyncio.get_running_loop().time() < deadline:
+        if not owner.process.is_running() and _loopback_port_is_closed(owner.port):
+            return
+        await asyncio.sleep(0.05)
+    assert not owner.process.is_running(), "the owned private RAG process is alive"
+    assert _loopback_port_is_closed(owner.port), "the private RAG port is still open"
+
+
+async def _cleanup_private_rag_service(
+    *,
+    owner: _OwnedRagService,
+    requirement: str,
+    env: dict[str, str],
+    receipt: _CleanupReceipt,
+) -> None:
+    """Stop the private daemon, falling back only through its retained identity."""
+    async with asyncio.timeout(_SERVICE_CLEANUP_TIMEOUT_SECONDS):
+        try:
+            stopped = await _run_rag_cli(
+                requirement,
+                "server",
+                "stop",
+                "--port",
+                str(owner.port),
+                "--json",
+                env=env,
+                timeout_seconds=_SERVICE_STOP_ATTEMPT_SECONDS,
+            )
+            if stopped.get("ok") is not True:
+                raise RuntimeError("the private RAG stop command refused cleanup")
+        except (OSError, RuntimeError, TimeoutError, json.JSONDecodeError):
+            receipt.fallback_used = True
+
+        if owner.process.is_running():
+            # A matching private health identity provides a fresh confirmation.
+            # If stop already removed the endpoint, the retained psutil Process
+            # object still protects against PID reuse through its creation time.
+            endpoint_matches = await _private_endpoint_matches(owner)
+            if not endpoint_matches and not _loopback_port_is_closed(owner.port):
+                raise RuntimeError(
+                    "refusing fallback because the private port changed identity"
+                )
+            receipt.fallback_used = True
+            await _terminate_owned_process_tree(owner.process)
+
+        await _await_private_service_absent(owner)
+        receipt.process_absent = not owner.process.is_running()
+        receipt.port_absent = _loopback_port_is_closed(owner.port)
+        owner.record_path.unlink(missing_ok=True)
+
+
+async def _shield_private_cleanup(cleanup: asyncio.Task[None]) -> None:
+    """Finish owned cleanup even when its caller is concurrently cancelled."""
+    cancellation: asyncio.CancelledError | None = None
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError as exc:
+            cancellation = exc
+    cleanup.result()
+    if cancellation is not None:
+        raise cancellation
+
+
+def _shared_service_digest() -> tuple[int, int, str] | None:
+    """Read a comparison-safe fingerprint without returning credential material."""
+    record_path = Path.home() / ".vaultspec-rag" / "service.json"
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        token = record["service_token"]
+        pid = record["pid"]
+        port = record["port"]
+    except (OSError, KeyError, json.JSONDecodeError):
+        return None
+    if not isinstance(token, str) or type(pid) is not int or type(port) is not int:
+        return None
+    return pid, port, hashlib.sha256(token.encode()).hexdigest()
+
+
 @asynccontextmanager
 async def _isolated_rag_service(
     *, project_root: Path, sandbox: Path
-) -> AsyncIterator[tuple[str, dict[str, str]]]:
+) -> AsyncIterator[tuple[str, dict[str, str], _CleanupReceipt]]:
     """Run the lockfile-selected RAG service behind owned state and cleanup."""
     requirement = _locked_rag_requirement(project_root)
     port = _reserve_loopback_port()
@@ -149,8 +301,12 @@ async def _isolated_rag_service(
         }
     )
     started = False
+    start_attempted = False
     service_record_path = status_dir / "service.json"
+    owner: _OwnedRagService | None = None
+    receipt = _CleanupReceipt()
     try:
+        start_attempted = True
         start = await _run_rag_cli(
             requirement,
             "--target",
@@ -173,26 +329,52 @@ async def _isolated_rag_service(
         locked_version = requirement.rsplit("==", maxsplit=1)[1]
         assert service_record["package_version"] == locked_version
         assert service_record["port"] == port
-        yield requirement, env
+        pid = service_record["pid"]
+        service_token = service_record["service_token"]
+        assert type(pid) is int and isinstance(service_token, str)
+        owner = _OwnedRagService(
+            process=psutil.Process(pid),
+            port=port,
+            service_token=service_token,
+            record_path=service_record_path,
+        )
+        assert await _private_endpoint_matches(owner), (
+            "the private RAG health identity does not match its service record"
+        )
+        yield requirement, env, receipt
     finally:
         # A bounded start may time out after the daemon has published its owned
         # identity. The private status record is the authority to clean that
         # process up; without it, never issue a stop against a merely reserved
         # port that another process could have acquired.
-        if started or service_record_path.exists():
-            stopped = await _run_rag_cli(
-                requirement,
-                "server",
-                "stop",
-                "--port",
-                str(port),
-                "--json",
-                env=env,
+        if owner is None and start_attempted and not service_record_path.exists():
+            # The CLI control process can time out just before its detached
+            # daemon atomically publishes identity. Fund a bounded discovery
+            # window so that late-owned service is still reaped.
+            deadline = asyncio.get_running_loop().time() + 10.0
+            while (
+                not service_record_path.exists()
+                and asyncio.get_running_loop().time() < deadline
+            ):
+                await asyncio.sleep(0.05)
+        if owner is None and (started or service_record_path.exists()):
+            service_record = json.loads(service_record_path.read_text(encoding="utf-8"))
+            pid = service_record["pid"]
+            service_token = service_record["service_token"]
+            assert type(pid) is int and isinstance(service_token, str)
+            owner = _OwnedRagService(
+                process=psutil.Process(pid),
+                port=port,
+                service_token=service_token,
+                record_path=service_record_path,
             )
-            assert stopped.get("ok") is True, stopped
-            stop_data = stopped.get("data")
-            assert isinstance(stop_data, dict)
-            assert stop_data.get("status") in {"stopped", "already_stopped"}
+        if owner is not None:
+            cleanup = asyncio.create_task(
+                _cleanup_private_rag_service(
+                    owner=owner, requirement=requirement, env=env, receipt=receipt
+                )
+            )
+            await _shield_private_cleanup(cleanup)
 
 
 def _declared_entry(name: str, root_pin: str | None) -> FrozenJsonObject:
@@ -565,7 +747,7 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
 
     async with _isolated_rag_service(
         project_root=launch_root, sandbox=tmp_path / "rag-service"
-    ) as (rag_requirement, env):
+    ) as (rag_requirement, env, cleanup_receipt):
         [spec] = pin_harness_mcp_servers(
             resolve_harness_mcp_servers([RAG]), project_root=project
         )
@@ -618,6 +800,8 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
                     )
             captured_stderr.seek(0)
             server_stderr = captured_stderr.read()
+    assert cleanup_receipt.process_absent
+    assert cleanup_receipt.port_absent
     reported = "\n".join(
         text
         for block in result.content
@@ -635,6 +819,43 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
     diagnosis = "\n".join((reported, server_stderr))
     assert project in diagnosis, diagnosis
     assert str(launch_root) not in diagnosis, diagnosis
+
+
+@pytest.mark.asyncio
+async def test_cancelled_probe_reaps_private_service_when_stop_command_fails(
+    tmp_path: Path,
+) -> None:
+    """Cancellation and a failed control launch cannot leak the private daemon."""
+    launch_root = Path(__file__).resolve().parents[4]
+    entered = asyncio.Event()
+    receipts: list[_CleanupReceipt] = []
+    shared_before = _shared_service_digest()
+
+    async def cancelled_probe() -> None:
+        async with _isolated_rag_service(
+            project_root=launch_root, sandbox=tmp_path / "cancelled-rag-service"
+        ) as (_requirement, env, receipt):
+            receipts.append(receipt)
+            # The service is already running. Removing executable lookup from
+            # this private environment makes its normal stop-control launch fail
+            # through a real process boundary and drives the retained-owner
+            # fallback without changing production code or replacing a call.
+            env["PATH"] = ""
+            entered.set()
+            await asyncio.Future()
+
+    probe = asyncio.create_task(cancelled_probe())
+    await asyncio.wait_for(entered.wait(), timeout=_SERVICE_CONTROL_TIMEOUT_SECONDS)
+    probe.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await probe
+
+    assert len(receipts) == 1
+    receipt = receipts[0]
+    assert receipt.fallback_used
+    assert receipt.process_absent
+    assert receipt.port_absent
+    assert _shared_service_digest() == shared_before
 
 
 def _strict_config(specs: list[JsonObject]) -> AcpModelConfig:

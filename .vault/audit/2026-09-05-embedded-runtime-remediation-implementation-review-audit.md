@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:17b19f0b42249a1fd0e1ef32d6b967d5c245f93d34521a2146ac39d54e380766'
+body_hash: 'sha256:2986be7c1f78c2dcce2ccc775d81c57a8fb6d345359ac583150b1897aa5a0ca3'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -459,8 +459,10 @@ data and Qdrant-storage directories; it uses the current `--local-only` and
 version and private port before the MCP call runs. The project-pin discriminator
 passed against that private data plane, the complete pinning module passed 33
 tests, and owned cleanup stopped the private service. The unrelated service
-retained PID 56028, port 8766, package 0.4.23 and service token
-`0f9ddb72112d4571aa474a8ca2140375` across the run. Ruff, format and Ty pass.
+retained PID 56028, port 8766 and package 0.4.23 across the run; the
+service-token SHA-256 was
+`6a1967743b274c05f778759a1c70141f8717d70308bea34beb69df994c9ded5a`
+and the digest comparison was `changed=false`. Ruff, format and Ty pass.
 ### p01-s11-cold-catalog-shutdown-timeout | medium | open
 
 Type: provider-degradation test stability and resource lifecycle. Status: open
@@ -835,19 +837,20 @@ and never issues a stop for a merely reserved port.
 The isolated discriminator passed in 46.46 seconds and the complete pinning
 module passed 33 tests in 47.93 seconds. Ruff check, Ruff format and Ty pass for
 the changed test; `git diff --check` passes. The shared service identity remained
-PID 56028, port 8766, package 0.4.23 and token
-`0f9ddb72112d4571aa474a8ca2140375`. No deprecated or legacy API, option,
+PID 56028, port 8766 and package 0.4.23; service-token SHA-256
+`6a1967743b274c05f778759a1c70141f8717d70308bea34beb69df994c9ded5a`
+compared `changed=false`. No deprecated or legacy API, option,
 translation, warning suppression or product registry pin was added. No new
 implementation finding surfaced. The distinct cold provider-catalog/Uvicorn
 shutdown observation was not exercised by this RAG test and remains open under
 W01.P02.S07 diagnosis and W04.P10.S49 runtime ownership. W01.P02.S06 remains
 open for formal implementation review.
 
-### w01-p02-s06-shared-rag-token-disclosure | high | open
+### w01-p02-s06-shared-rag-token-disclosure | high | resolved pending formal re-review
 
 Type: security and evidence handling. Commit `9d56e23e40e46e9cb754cfb3512365d96d524948` persists the live shared RAG service token verbatim in `.vault/audit/2026-08-02-provider-model-catalog-implementation-review-audit.md:220` and `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md:463,839`. The token is credential material, not a safe durable fingerprint. This blocks S06 closure even though the test did not stop or otherwise mutate the shared daemon. Remove the raw value from all current documents, retain only a one-way digest/equality result, and rotate the exposed token through the operator-owned RAG lifecycle before re-review. Do not rewrite historical commits or make the S06 test control the shared daemon.
 
-### w01-p02-s06-private-service-cleanup-incomplete | medium | open
+### w01-p02-s06-private-service-cleanup-incomplete | medium | resolved pending formal re-review
 
 Type: test resource lifecycle and degraded cleanup. `_run_rag_cli` at `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py:96-122` bounds a control subprocess and kills that subprocess on timeout. During context cleanup at lines 182-198, however, a timed-out or cancelled `server stop` can leave the already detached private service alive because no terminal owned-process fallback or post-stop absence check runs. The normal-path stop passed, but S06 explicitly owns bounded isolated cleanup and must remain review-blocked until cancellation/stop degradation cannot leak its daemon. Use the private service record's exact ownership identity for a bounded fallback, shield cleanup from caller cancellation within a total deadline, verify the owned process/port is gone, and add a discriminator that exercises cancellation or failed stop without touching any shared service.
 
@@ -856,3 +859,30 @@ Type: test resource lifecycle and degraded cleanup. `_run_rag_cli` at `src/vault
 Type: formal implementation review disposition. The four-path commit has the intended test/audit scope and `git diff --check` passes. `uv.lock` selects exactly one RAG version and the helper applies that exact `vaultspec-rag[mcp]` requirement to both a private local-only service and the production-registry `vaultspec-search-mcp` stdio entry point. Status, data and Qdrant roots are test-owned; the published version and loopback port are checked before the MCP call. The real non-vacuous discriminator names the pinned non-workspace and excludes the valid launch workspace. Independent review reran it once (`1 passed` in 55.66 seconds), the entire module (`33 passed` in 62.88 seconds), Ruff format/check and Ty; all pass. Full remediation Core reports 19 clean checks. No legacy/deprecated product surface was added, ER20 alone is marked resolved pending review, and the separate cold catalog/Uvicorn finding remains open under S07/S49.
 
 The plaintext shared credential is a HIGH security defect, and degraded cleanup is a MEDIUM resource-lifecycle defect in S06 itself. S06 does not pass formal review and must remain open pending both corrections and re-review.
+
+### w01-p02-s06-review-corrections | high | corrected pending formal re-review
+
+Type: security evidence and isolated process lifecycle. The raw shared-service
+credential identified by formal FAIL review `14ae6ddf` was removed from all
+three current durable locations; a full repository scan finds no remaining
+occurrence. Audit evidence now uses only SHA-256 digests and explicit comparison
+results. The operator lifecycle rotated digest
+`6a1967743b274c05f778759a1c70141f8717d70308bea34beb69df994c9ded5a`
+to `ef678ba14829aacf0285d936238812284235a2a7cf7ff3899f8fab3e1ecb45dd`
+(`changed=true`). After all corrected S06 tests, the shared service was healthy
+at PID 58992, port 8766, version 0.4.23 with the post-rotation digest unchanged
+(`changed=false`). The test never controls that shared lifecycle.
+
+Private cleanup now retains the exact `psutil.Process` identity obtained from
+the private service record, validates its private health identity without
+rendering the credential, shields cleanup from caller cancellation, gives the
+normal service stop ten seconds inside a thirty-second total cleanup deadline,
+and falls back to terminating only the retained private process tree. Completion
+requires both that exact process identity and its loopback listener to be absent.
+A real discriminator starts the private service, removes executable lookup only
+after readiness so the actual stop-control launch fails, cancels the owner task,
+and proves fallback use, process absence, port closure and unchanged shared
+digest. On the final exact source, the complete module passed 34 tests in
+112.39 seconds: the real project-pin case took 66.37 seconds and the
+cancellation/failed-stop case took 43.88 seconds. No mock, monkeypatch, fake transport, deprecated/legacy surface
+or warning suppression was added. S06 remains open for formal re-review.

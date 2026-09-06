@@ -45,6 +45,11 @@ _RESPONSIVE_LOOP_CEILING_SECONDS = 0.5
 # unrelated work happens to share the host during a test run.
 _REPRESENTATIVE_BUSY_PROCESSES = 5
 _REPRESENTATIVE_COMPILE_TRIALS = 5
+_TEARDOWN_PHASE_FIELDS = (
+    ("bridge_close_seconds", "bridge_close_max_loop_gap_seconds"),
+    ("checkpointer_exit_seconds", "checkpointer_exit_max_loop_gap_seconds"),
+    ("ambient_scheduler_seconds", "ambient_scheduler_max_loop_gap_seconds"),
+)
 
 pytestmark = pytest.mark.middleware
 
@@ -170,6 +175,31 @@ def test_compiling_a_graph_keeps_the_loop_serving(
     ), f"compile is no better than importing on the loop: {compiled}"
 
 
+def test_compile_probe_reports_distinct_teardown_windows(tmp_path: Path) -> None:
+    """Compile cleanup phases have independent, internally bounded samples.
+
+    This discriminator establishes the measurement boundary. The serving
+    threshold for worker shutdown belongs to the separately tracked lifecycle
+    qualification; an intermittent bridge-close violation must remain visible
+    there without invalidating the compile-only sample.
+    """
+    compiled = _probe("compile", tmp_path)
+
+    for duration_field, gap_field in _TEARDOWN_PHASE_FIELDS:
+        assert duration_field in compiled, (
+            f"compile probe omitted teardown field {duration_field}"
+        )
+        assert gap_field in compiled, (
+            f"compile probe omitted teardown field {gap_field}"
+        )
+        assert 0.0 <= compiled[gap_field] <= compiled[duration_field], (
+            f"teardown phase boundaries disagree at {gap_field}: {compiled}"
+        )
+    assert compiled["bridge_close_seconds"] > 1.0, (
+        "the unreachable-gateway retry cleanup was not exercised"
+    )
+
+
 def test_repeated_cold_compiles_keep_serving_under_five_slot_cpu_load(
     blocked_loop_control: dict[str, Any], tmp_path: Path
 ) -> None:
@@ -201,3 +231,8 @@ def test_repeated_cold_compiles_keep_serving_under_five_slot_cpu_load(
         result["max_loop_gap_seconds"] < blocked_loop_control["max_loop_gap_seconds"]
         for result in compiled
     ), f"loaded compile was no better than the on-loop control: {compiled}"
+    assert all(
+        0.0 <= result[gap_field] <= result[duration_field]
+        for result in compiled
+        for duration_field, gap_field in _TEARDOWN_PHASE_FIELDS
+    ), f"loaded compile teardown phase boundaries disagree: {compiled}"

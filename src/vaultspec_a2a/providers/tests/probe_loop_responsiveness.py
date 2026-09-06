@@ -20,8 +20,9 @@ modes share one heartbeat meter so their numbers are directly comparable:
     must establish this control below the fixed ceiling before attributing a
     missed heartbeat to graph compilation.
 
-Prints one JSON object: the wall time of the measured work and the largest gap
-between heartbeat ticks while it ran.
+Prints one JSON object. Every reported duration and maximum heartbeat gap share
+the same exact interval. Compile mode also reports bridge close, checkpointer
+exit, and an ambient post-cleanup scheduler window independently.
 """
 
 from __future__ import annotations
@@ -42,27 +43,40 @@ class _Heartbeat:
         self.max_gap = 0.0
         self.ticks = 0
         self._stop = False
+        self._last_tick_at = time.monotonic()
 
     async def run(self) -> None:
-        previous = time.monotonic()
         while not self._stop:
             await asyncio.sleep(TICK_SECONDS)
             now = time.monotonic()
-            self.max_gap = max(self.max_gap, now - previous)
-            previous = now
+            self.max_gap = max(self.max_gap, now - self._last_tick_at)
+            self._last_tick_at = now
             self.ticks += 1
+
+    def begin_window(self) -> float:
+        """Start a new measurement window at an exact loop timestamp."""
+        now = time.monotonic()
+        self.max_gap = 0.0
+        self._last_tick_at = now
+        return now
+
+    def finish_window(self, finished_at: float) -> float:
+        """Freeze the largest gap at the exact end of the measured work."""
+        return max(self.max_gap, finished_at - self._last_tick_at)
 
     def stop(self) -> None:
         self._stop = True
 
 
-async def _run_compile(workspace: Path, heartbeat: _Heartbeat) -> float:
-    """Compile a bundled preset and return how long the compile call took.
+async def _run_compile(
+    workspace: Path, heartbeat: _Heartbeat
+) -> dict[str, float | str]:
+    """Compile a bundled preset and report exact compile and teardown windows.
 
-    Opening the checkpointer materializes a database, and closing the bridge
-    retries a relay against an unreachable gateway; both are harness costs no
-    dispatch repeats, so the meter is zeroed once the manager is built and the
-    returned duration covers the compile call alone.
+    Opening the checkpointer materializes a database before measurement. The
+    compile snapshot is frozen before cleanup begins. Bridge close,
+    checkpointer exit, and an ambient scheduler tail are then measured as
+    separate windows so none can contaminate or disappear from the result.
     """
     from uuid import uuid4
 
@@ -74,8 +88,10 @@ async def _run_compile(workspace: Path, heartbeat: _Heartbeat) -> float:
     from ...worker.ipc import WorkerBridge
     from ...worker.token_store import RunTokenStore
 
-    async with open_checkpointer() as checkpointer:
-        bridge = WorkerBridge("http://127.0.0.1:9", uuid4().hex[:8], None)
+    checkpointer_context = open_checkpointer()
+    checkpointer = await checkpointer_context.__aenter__()
+    bridge = WorkerBridge("http://127.0.0.1:9", uuid4().hex[:8], None)
+    try:
         try:
             lifecycle = GraphLifecycleManager(
                 checkpointer=checkpointer,
@@ -85,8 +101,7 @@ async def _run_compile(workspace: Path, heartbeat: _Heartbeat) -> float:
                 catalog_store=RunCatalogStore(),
             )
             await asyncio.sleep(0.1)
-            heartbeat.max_gap = 0.0
-            started = time.monotonic()
+            started = heartbeat.begin_window()
             graph = await lifecycle.get_or_compile_graph(
                 DispatchRequest(
                     action="ingest",
@@ -111,12 +126,40 @@ async def _run_compile(workspace: Path, heartbeat: _Heartbeat) -> float:
                     },
                 )
             )
-            compile_seconds = time.monotonic() - started
+            compile_finished = time.monotonic()
+            compile_seconds = compile_finished - started
+            compile_gap = heartbeat.finish_window(compile_finished)
             if graph is None:
                 raise RuntimeError("preset compiled to no graph")
-            return compile_seconds
         finally:
+            started = heartbeat.begin_window()
             await bridge.close()
+            bridge_finished = time.monotonic()
+            bridge_seconds = bridge_finished - started
+            bridge_gap = heartbeat.finish_window(bridge_finished)
+    finally:
+        started = heartbeat.begin_window()
+        await checkpointer_context.__aexit__(None, None, None)
+        checkpointer_finished = time.monotonic()
+        checkpointer_seconds = checkpointer_finished - started
+        checkpointer_gap = heartbeat.finish_window(checkpointer_finished)
+
+    started = heartbeat.begin_window()
+    await asyncio.sleep(0.1)
+    ambient_finished = time.monotonic()
+    return {
+        "mode": "compile",
+        "work_seconds": compile_seconds,
+        "max_loop_gap_seconds": compile_gap,
+        "bridge_close_seconds": bridge_seconds,
+        "bridge_close_max_loop_gap_seconds": bridge_gap,
+        "checkpointer_exit_seconds": checkpointer_seconds,
+        "checkpointer_exit_max_loop_gap_seconds": checkpointer_gap,
+        "ambient_scheduler_seconds": ambient_finished - started,
+        "ambient_scheduler_max_loop_gap_seconds": heartbeat.finish_window(
+            ambient_finished
+        ),
+    }
 
 
 async def _measure(mode: str, workspace: Path) -> dict[str, float | str]:
@@ -129,22 +172,25 @@ async def _measure(mode: str, workspace: Path) -> dict[str, float | str]:
     heartbeat = _Heartbeat()
     ticker = asyncio.create_task(heartbeat.run())
     await asyncio.sleep(0.1)
-    heartbeat.max_gap = 0.0
-
-    started = time.monotonic()
+    started = heartbeat.begin_window()
     if mode == "on-loop":
         warm_model_imports()
-        elapsed = time.monotonic() - started
     elif mode == "offloaded":
         await asyncio.to_thread(warm_model_imports)
-        elapsed = time.monotonic() - started
     elif mode == "compile":
-        elapsed = await _run_compile(workspace, heartbeat)
+        result = await _run_compile(workspace, heartbeat)
     elif mode == "idle":
         await asyncio.sleep(2.0)
-        elapsed = time.monotonic() - started
     else:
         raise SystemExit(f"unknown mode {mode!r}")
+
+    if mode != "compile":
+        finished = time.monotonic()
+        result = {
+            "mode": mode,
+            "work_seconds": finished - started,
+            "max_loop_gap_seconds": heartbeat.finish_window(finished),
+        }
 
     heartbeat.stop()
     await ticker
@@ -152,12 +198,8 @@ async def _measure(mode: str, workspace: Path) -> dict[str, float | str]:
     if mode != "idle" and "langchain_openai" not in sys.modules:
         raise RuntimeError("the measured work did not load the model stack")
 
-    return {
-        "mode": mode,
-        "work_seconds": elapsed,
-        "max_loop_gap_seconds": heartbeat.max_gap,
-        "ticks": heartbeat.ticks,
-    }
+    result["ticks"] = heartbeat.ticks
+    return result
 
 
 def main() -> int:

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:8b58feb7cc8fcaf6970385dc640b5e253911dbcf9b4f3a9b296a009f2bd8f28a'
+body_hash: 'sha256:37096b46081e3de86c1e659a81f5ac12f442bfa8bf5290e9d4f5cc1b310c2bed'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -88,4 +88,12 @@ The repeatability gate now establishes a named load rather than inheriting incid
 
 The first load-harness run failed before compile measurement because Windows virtual-environment `python.exe` is an idle redirector whose child is the executing interpreter. Measuring the redirector reported zero CPU and correctly refused the run as vacuous. The corrected harness launches the current base interpreter directly, keeps its exact process identities, verifies real CPU accrual, and reaps them in `finally`; a process scan after the failed diagnostic found no owned burner. This is a measurement-harness finding resolved inside S07, not evidence of a warmup failure.
 
-The separately reassigned provider-catalog/Uvicorn observation has no demonstrated warmup coupling. The exact current-schema production restart test passed once in 21.42 seconds and then five fresh repetitions in 17.10-19.03 pytest seconds (20.56-23.61 wall seconds), with no shutdown failure. The authoritative final combined exact-source run passed the warmup module and restart case, five tests in 89.00 seconds; the loaded compile case took 52.90 seconds and the restart case took 16.65 seconds. The historical 91.79-second cold discovery included an external Claude timeout, while process-tree and graceful gateway shutdown remain lifecycle concerns. S07 records the non-reproduction and leaves the runtime lifecycle finding open under `W04.P10.S49`; it does not claim to close it.
+The separately reassigned provider-catalog/Uvicorn observation has no demonstrated warmup coupling. The exact current-schema production restart test passed once in 21.42 seconds and then five fresh repetitions in 17.10-19.03 pytest seconds (20.56-23.61 wall seconds), with no shutdown failure. The pre-review combined exact-source run passed the warmup module and restart case, five tests in 89.00 seconds; the loaded compile case took 52.90 seconds and the restart case took 16.65 seconds. The historical 91.79-second cold discovery included an external Claude timeout, while process-tree and graceful gateway shutdown remain lifecycle concerns. S07 records the non-reproduction and leaves the runtime lifecycle finding open under `W04.P10.S49`; it does not claim to close it.
+
+## W01.P02.S07 exact timing-boundary correction
+
+Formal review found the initial compile result mixed two intervals: graph duration ended immediately after `get_or_compile_graph`, but the heartbeat remained live through bridge close and checkpointer exit. The reproduced 2.3452-second work / 11.0947-second gap pair proved that mismatch. The corrected meter owns one shared last-tick timestamp and freezes the partial final heartbeat interval synchronously at the exact timestamp used to end each duration. It resets before measuring bridge close, checkpointer exit and a post-cleanup ambient scheduler tail separately.
+
+This separation changed the diagnosis. Under the same non-vacuous five-owner load, all five compile gaps passed the unchanged 0.5-second ceiling at 0.0546-0.1796 seconds. One independent bridge-close phase took 7.1849 seconds and blocked the loop for 3.6920 seconds; its sibling bridge samples stayed at 0.0272-0.0769 seconds, while checkpointer exit and ambient scheduling stayed below 0.018 seconds. The bridge path was real: graph compilation buffered an event and close exhausted asynchronous delivery retries against the unreachable test gateway. The finding therefore belongs to worker/gateway shutdown qualification `W04.P10.S49`. S07 retains the phase evidence and does not treat that lifecycle threshold as passed.
+
+The corrected warmup module passed five tests in 139.74 seconds. Its stable assertions cover exact compile-window responsiveness and non-vacuous phase separation; they do not waive the open S49 defect. The current-schema restart/catalog path separately passed in 51.63 seconds, with no shutdown failure despite its 50.79-second cold call.

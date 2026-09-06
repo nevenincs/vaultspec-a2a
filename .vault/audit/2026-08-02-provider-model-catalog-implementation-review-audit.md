@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:0d8fe2367a9e13564e17fb905a24eef29dcb3aefadbd576e698dd3705b3a753d'
+body_hash: 'sha256:e6582c421aa7ac629d0a1586ae5891c288f3b0d62b769f83f0bc37a69fce3f3d'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -940,3 +940,28 @@ legacy restart was implemented or claimed. The premature-closure HIGH is
 resolved by the recorded Core reopen, prior S10 completion and lifecycle PASS,
 and this post-review re-close. Core re-closed only P01.S11. P03.S19-P03.S23 and
 remediation W01.P02.S05 remain open. Formal lifecycle re-review is required.
+
+### p01-s11-lifecycle-provenance-final-formal-rereview | low | PASS
+
+Type: formal lifecycle review disposition. Correction
+`b5841a766badf9b7dd8f7b887d943cbd5d0fa8ba`, parent
+`c2ce6b4fa70604aa3a14b018a6aa345b24dceac0`, changes only the catalog Step Record and
+the two rolling audits after a Core reopen/reclose of P01.S11. The Step Record
+now begins with original implementation `7d8c04df06299dc58ae8fd1a5f4092291f3042ab`,
+its 49-test evidence, formal FAIL review
+`16066b83983a90a6a7dc067f98510e3fc5c040fc`, and Core reopen
+`194f4fa6e469a9d849719f3ff8a2e8adaa604712`. It retains the complete later
+implementation/review chain through final PASS `3578151f`, and records the
+expanded result exactly as 585 passed, nine deselected and eight classified
+server-profile environment failures.
+
+The original legacy-restart gap is explicitly preserved as valid historical
+review under its then-current contract and resolved by the approved strict
+no-legacy supersession, S10 removal and S11 typed zero-contact refusal evidence;
+it is not falsely described as an implemented legacy restart. The premature
+closure is explicitly resolved by Core reopen, prerequisite S10 lifecycle PASS,
+full S11 correction/review and post-review re-close. Only P01.S11 is closed.
+P03.S19 through P03.S23 and remediation W01.P02.S05 remain open, and no runtime
+path changes. Full Core reports a clean vault; plan status reports only the known
+checked S08 missing Step Record and names P03.S19 as next. No missing S11 record,
+incorrect count or unresolved closure finding remains. Lifecycle review passes.

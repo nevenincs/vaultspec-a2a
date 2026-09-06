@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:24e3f9b6eab5c6ce3693a97ae7410329acba21292916c7c9e111ab6adfeb6e34'
+body_hash: 'sha256:694e7e3ec9b199f3dd5717f8c58054fbbd531c1d0a14d23e8602d9a2d4933237'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -748,3 +748,15 @@ restart gap through the approved no-legacy supersession and zero-contact refusal
 and the premature closure through reopen plus prior S10 completion. Core
 re-closed only P01.S11. Remediation W01.P02.S05 remains open pending its own work
 and may not consume this prerequisite until lifecycle re-review passes.
+
+### p01-s11-lifecycle-provenance-final-formal-rereview | low | PASS
+
+Type: remediation prerequisite lifecycle review. Correction
+`b5841a766badf9b7dd8f7b887d943cbd5d0fa8ba` restores the complete catalog S11
+implementation, review and Core reopen chain; the original 49-test evidence;
+exact 585-pass, nine-deselection, eight-environment-failure count; and explicit
+supersession/resolution of both historical closure HIGH findings. Only catalog
+P01.S11 is re-closed. Catalog P03.S19-P03.S23 and remediation W01.P02.S05 remain
+open, no runtime changes, and full Core is clean apart from plan status's known
+S08 missing Step Record. The catalog prerequisite lifecycle review passes and
+remediation may now consume the closed S11 input without closing S05 by inference.

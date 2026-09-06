@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:f5912974a0cbb7be60ec10d13bf191d2970b4f96ecaa97a20375a4caaa5ce0f3'
+body_hash: 'sha256:2f1085f7e11199a44ba5e86304d5f8601af57bfcf70015c71c8313cbcfb09022'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -184,9 +184,9 @@ FAIL means at least one specified requirement is contradicted; it does not imply
 
 **OPEN; contract; A15; source-established component gap.** `providers/_acp_protocol.py:296` stores availableCommands in session-local agent_modes. No production reader or gateway command-discovery/control integration was found, nor native compaction completion/status integration. ACP commands can legitimately travel as prompt content; the missing proof is discovery, disposition and actual effect, not a mandatory separate transport. **Owner:** provider control/gateway. **Close when:** every claimed command is discoverable and its busy/unsupported/success/failure outcomes are measurable per lane. Optional provider non-support must remain distinct from this component gap.
 
-### ER15-windows-shutdown | high | Administrative shutdown terminates Windows Python before cleanup
+### ER15-windows-shutdown | high | Cooperative trigger corrected; total cleanup proof remains open
 
-**OPEN; correctness/portability; A26; measured M09.** `api/routes/admin.py:22` uses os.kill with SIGINT. Windows uses TerminateProcess for this value, confirmed by the production-function sentinel probe and Python 3.13 documentation. Lifespan work at `api/app.py:590`, `:610`, and `:627` is bypassed. Existing drain test discards the deferred callback at `api/tests/test_gateway_drain.py:118`, so it does not certify this path. **Owner:** API lifecycle. **Close when:** actual Windows HTTP shutdown performs bounded drain and cleanup with an owned-child census. Source: https://docs.python.org/3.13/library/os.html#os.kill
+**OPEN for S49 total lifecycle closure; correctness/portability; A26; measured M09. S47 trigger CLOSED.** The original administrative route used process-directed `SIGINT`, which maps to immediate termination on Windows and bypassed cleanup. S47 removed that product path. The production entry point now binds the current Uvicorn server's callable `should_exit` owner; absent or malformed owners return 503 before admission changes, and a real authenticated loopback HTTP test observes 202 while the server remains live, followed by `should_exit` and bounded exit. Formal PASS `2279eb52d529ee338661006779a0143095003ce7` accepts the trigger correction. S47 is lifecycle-closed without retaining a signal fallback, legacy route or compatibility translation. **Remaining owner:** W04.P10.S49. **Close ER15 when:** one total deadline covers real-socket connection/stream drain, active work, worker descendants and bounded forced escalation, with an owned-child census. S48 discovery ownership is unchanged.
 
 ### ER16-unbounded-graceful-stream-wait | high | An open stream can block entry into the application's bounded drain
 

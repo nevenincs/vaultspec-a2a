@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:e112b01de0d2c82ca4a4722384ab30e4bd64aaad40cc9f1366b4ef7c27b966a7'
+body_hash: 'sha256:4e304efa04859553ffc7b5c1224b77dd2327aeb4125379d1e54a1c9906b2a6ab'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -158,7 +158,7 @@ Preserve targeted delivery and expose the required control operations through th
 
 Make discovery, readiness and shutdown satisfy one identified consumer contract.
 
-- [ ] `W04.P10.S47` - Conform readiness/drain/shutdown routes and ownership capability handling to the intended consumer generation with fail-closed incompatible attachment; `src/vaultspec_a2a/api/routes/admin.py`.
+- [x] `W04.P10.S47` - Conform readiness/drain/shutdown routes and ownership capability handling to the intended consumer generation with fail-closed incompatible attachment; `src/vaultspec_a2a/api/routes/admin.py`.
 - [ ] `W04.P10.S48` - Emit the intended generation's discovery filename, schema, identity and liveness fields and reject stale or foreign-service substitution; `src/vaultspec_a2a/lifecycle/discovery.py`.
 - [ ] `W04.P10.S49` - Use cooperative server shutdown with admission closed first and one total deadline covering active work, streams and bounded forced escalation; `src/vaultspec_a2a/api/app.py`.
 - [ ] `W04.P10.S50` - After A2A publishes fixed per-target versioned archives and SHA-256 sidecars, replace Dashboard source checkout/build/commit pinning with version-only fetch-verify-bundle, then qualify the released worker and positive module/MCP paths through the receipt-matched Dashboard launch; `A2A release workflow, Dashboard component lock and scripts/prove_artifact_lifecycle.sh`.

@@ -33,6 +33,7 @@ from ...control.thread_service import (
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     ThreadStatusElectionOutcome,
+    create_control_action,
     delete_thread,
     elect_thread_status,
     get_thread,
@@ -43,7 +44,7 @@ from ...database.models import ControlActionModel, ThreadModel
 from ...domain_config import domain_config
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import ThreadStatus
+from ...thread.enums import ControlActionType, ThreadStatus
 
 _CODER_TOKEN = "secret-coder-xyz"
 _REVIEWER_TOKEN = "secret-reviewer-xyz"
@@ -123,6 +124,45 @@ def _deleting_worker(
             assert await delete_thread(session, body["thread_id"])
             await session.commit()
         return JSONResponse({"status": "dispatched", "thread_id": body["thread_id"]})
+
+    return app
+
+
+def _cancelling_capacity_worker(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> FastAPI:
+    """Elect a different action, then definitely reject the initial dispatch."""
+    app = FastAPI()
+
+    @app.post("/dispatch")
+    async def _dispatch(request: Request) -> JSONResponse:
+        body = await request.json()
+        async with session_factory() as session:
+            thread = await get_thread(session, body["thread_id"])
+            assert thread is not None
+            cancel = await create_control_action(
+                session,
+                thread_id=thread.id,
+                action_type=ControlActionType.CANCEL,
+                idempotency_key=f"review-cancel:{thread.id}",
+                payload={"cancel": True},
+            )
+            assert cancel.dispatch_id is not None
+            expectation = thread_write_expectation(thread)
+            result = await elect_thread_status(
+                session,
+                thread.id,
+                expectation=expectation,
+                status=ThreadStatus.CANCELLING,
+                successor=successor_thread_write_authority(
+                    expectation,
+                    action_type=ControlActionType.CANCEL,
+                    action_receipt_id=cancel.dispatch_id,
+                ),
+            )
+            assert result.outcome is ThreadStatusElectionOutcome.WON
+            await session.commit()
+        return JSONResponse({"detail": "worker at capacity"}, status_code=429)
 
     return app
 
@@ -350,3 +390,53 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
     assert result.dispatched is True
     assert result.error_detail is None
     assert result.failure_type is None
+
+
+@pytest.mark.asyncio
+async def test_definite_initial_rejection_survives_a_different_winning_action(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    spawner = LazyWorkerSpawner(
+        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+    )
+    spawner.replace_process(None)
+    thread_id = generate_thread_id()
+    async with (
+        httpx.AsyncClient(
+            transport=ASGITransport(app=_cancelling_capacity_worker(session_factory)),
+            base_url="http://worker",
+        ) as worker_client,
+        session_factory() as session,
+    ):
+        result = await create_and_dispatch_thread(
+            session,
+            ThreadCreationRequest(
+                thread_id=thread_id,
+                title="cancel wins before capacity response",
+                initial_message="start",
+                team_preset=_PRESET,
+                autonomous=True,
+                nickname=None,
+                metadata=None,
+                metadata_json=None,
+                workspace_root=tmp_path,
+            ),
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=1, recovery_timeout=1.0
+            ),
+            worker_spawner=spawner,
+            worker_client=worker_client,
+            recursion_limit=domain_config.graph_recursion_limit,
+            trace_headers=None,
+        )
+
+    assert result.status == ThreadStatus.CANCELLING.value
+    assert result.dispatched is False
+    assert result.failure_type is FailureType.AT_CAPACITY
+    assert result.error_detail is not None
+    assert "Worker at capacity" in result.error_detail
+    async with session_factory() as session:
+        thread = await get_thread(session, thread_id)
+    assert thread is not None
+    assert thread.writer_action_type == ControlActionType.CANCEL.value

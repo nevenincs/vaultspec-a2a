@@ -29,11 +29,16 @@ from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.direct_control_recovery import redrive_direct_control_actions
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
+    ThreadStatusElectionOutcome,
+    create_control_action,
     create_thread,
+    elect_thread_status,
     get_control_action_by_idempotency_key,
     get_thread,
     record_permission_request,
     record_permission_response_submission,
+    successor_thread_write_authority,
+    thread_write_expectation,
 )
 from ...database.models import Base, ControlActionModel
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -127,12 +132,21 @@ async def _seed_unapplied_actions(
             (_CANCEL_THREAD, ThreadStatus.CANCELLING),
             (_PERMISSION_THREAD, ThreadStatus.INPUT_REQUIRED),
         ):
+            authority = make_test_write_authority()
             await create_thread(
                 db,
-                write_authority=make_test_write_authority(),
+                write_authority=authority,
                 thread_id=thread_id,
                 status=status,
                 metadata=metadata,
+            )
+            await create_control_action(
+                db,
+                thread_id=thread_id,
+                action_type=authority.action_type,
+                dispatch_id=authority.action_receipt_id,
+                idempotency_key=f"initial-ingest:{thread_id}",
+                payload={"initial": True},
             )
         await record_permission_request(
             db,
@@ -313,6 +327,88 @@ async def test_recovery_dispatches_every_action_when_the_project_is_named(
                 assert thread is not None
                 assert thread.run_revision == 1
                 assert thread.writer_action_receipt_id == receipt
+
+
+@pytest.mark.asyncio
+async def test_recovery_refuses_an_old_action_after_newer_authority_wins(
+    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace = tmp_path / "stale-action-project"
+    workspace.mkdir()
+    thread_id = "recovery-stale-message"
+    expired = datetime.now(UTC) - timedelta(minutes=5)
+    async with session_factory() as db:
+        authority = make_test_write_authority()
+        thread = await create_thread(
+            db,
+            write_authority=authority,
+            thread_id=thread_id,
+            status=ThreadStatus.RUNNING,
+            metadata=current_execution_metadata(workspace),
+        )
+        await create_control_action(
+            db,
+            thread_id=thread_id,
+            action_type=authority.action_type,
+            dispatch_id=authority.action_receipt_id,
+            idempotency_key=f"initial-ingest:{thread_id}",
+            payload={"initial": True},
+        )
+        stale = await claim_control_action(
+            db,
+            thread_id=thread_id,
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            idempotency_key="stale-message",
+            payload={"content": "old", "agent_id": "supervisor"},
+            now=expired,
+            lease_ttl=timedelta(seconds=1),
+        )
+        newer = await create_control_action(
+            db,
+            thread_id=thread_id,
+            action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
+            idempotency_key="newer-permission",
+            payload={"description": "newer"},
+        )
+        assert newer.dispatch_id is not None
+        expectation = thread_write_expectation(thread)
+        election = await elect_thread_status(
+            db,
+            thread_id,
+            expectation=expectation,
+            status=ThreadStatus.INPUT_REQUIRED,
+            successor=successor_thread_write_authority(
+                expectation,
+                action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
+                action_receipt_id=newer.dispatch_id,
+            ),
+        )
+        assert election.outcome is ThreadStatusElectionOutcome.WON
+        await db.commit()
+
+    async with _worker_runtime(tmp_path / "stale-action-checkpoints.db") as (
+        worker_client,
+        worker_app,
+    ):
+        summary = await redrive_direct_control_actions(
+            session_factory,
+            worker_client=worker_client,
+            circuit_breaker=_circuit_breaker(),
+            worker_spawner=_spawner(),
+            recursion_limit=25,
+            trace_headers=None,
+        )
+
+    assert summary.dispatched == 0
+    assert summary.conflicted == 1
+    assert stale.dispatch_id not in worker_app.state.dispatch_ids
+    async with session_factory() as db:
+        thread = await get_thread(db, thread_id)
+    assert thread is not None
+    assert thread.status == ThreadStatus.INPUT_REQUIRED.value
+    assert thread.run_revision == 1
+    assert thread.writer_action_receipt_id == newer.dispatch_id
 
 
 @pytest.mark.asyncio

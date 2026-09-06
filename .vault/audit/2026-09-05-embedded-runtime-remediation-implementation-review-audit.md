@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d25d4e42df4fc66bd5b1b04fc30b99040fdcbb00ae5cd31e03d2470923f5d9fb'
+body_hash: 'sha256:16c6f2995e62e28a36450e1c10496f93a4bfe3d3d1cd3ff9f8eebafcb062ec0a'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1333,3 +1333,26 @@ Type: production-dialect verification. SQLite race and replay coverage proves th
 ### w02-p03-s10-focused-test-process-exit | low | resolved measurement-integrity
 
 Type: verification harness. The parent could not recover output from one earlier nine-node pytest invocation after context compaction, but an exact process scan found no matching Python, pytest or uv process. The three regressions covering the two parent-discovered HIGH defects were rerun separately and exited normally: 3 passed in 3.49 seconds. No completed result is claimed for the unrecoverable invocation and no broad rerun was used.
+### w02-p03-s10-formal-review | high | FAIL
+
+Type: formal implementation review. Commit `6c5f5384` fails on three reproduced HIGH authority defects and one reachable MEDIUM API race. A fresh CANCEL lease after crash-before-election was reported accepted while the thread remained RUNNING under INGEST authority. Recovery could elect and dispatch an older expired message action over newer permission authority. Initial dispatch could erase a definite 429 when a different CANCEL action won. Archive and delete loser paths could refresh a row removed by concurrent deletion instead of returning a typed result. Six unaffected focused checks passed in 4.74 seconds and the exact definite-cancel check passed.
+
+### w02-p03-s10-fresh-cancel-lease-without-authority | high | resolved pending formal rereview
+
+Type: durable state truth. A non-acquired fresh CANCEL lease is no longer treated as CANCELLING authority. After the claim rollback, cancellation refreshes durable thread state and reports accepted only when status, action type and receipt exactly name that CANCEL action. A lease without authority returns typed conflict with the actual status and dispatches nothing. The real crash-before-election SQLite/ASGI regression passed in 1.69 seconds; the concurrent retry case passed in 6.47 seconds with one worker dispatch.
+
+### w02-p03-s10-stale-direct-action-recovery | high | resolved pending formal rereview
+
+Type: replay ordering and external side-effect safety. Recovery no longer treats every unapplied stored action as a valid successor. Exact-current receipt replay remains eligible; another candidate must have a strictly later durable request timestamp than the action named by current authority. Missing, equal or older ordering evidence is refused before worker contact. Real current-receipt fixtures prove legitimate newer recovery and stale older refusal: 2 passed in 16.02 seconds, with the stale permission authority unchanged and no stale dispatch.
+
+### w02-p03-s10-different-winner-erases-definite-dispatch-failure | high | resolved pending formal rereview
+
+Type: distributed acknowledgement classification. A LOST initial-failure election reports dispatch success only when current durable authority still names the exact INGEST receipt. A concurrent different action no longer proves initial worker acceptance. A real ASGI worker electing CANCEL and then returning 429 preserves CANCELLING authority while returning `dispatched=False` and typed AT_CAPACITY; the focused regression passed in 1.62 seconds. Existing early terminal same-INGEST receipt behavior remains intact.
+
+### w02-p03-s10-post-rollback-removed-row-refresh | medium | resolved pending formal rereview
+
+Type: typed API race handling. Archive and deletion loser paths now re-read by primary key with populate-existing after rollback. If concurrent teardown finalized the row, each returns its typed not-found shape; no retained ORM refresh can raise for the removed row. Existing deletion-refusal and archive-contention nodes passed in 0.71 seconds.
+
+### w02-p03-s10-runtime-test-process-hangs | medium | open under resource-aware-test-execution
+
+Type: developer-time blocker and measurement integrity. Formal review's full deletion module exceeded its bound and the reviewer terminated only exact owned PIDs, verifying no survivor and claiming no module pass. A later paired cancel command reached 100 percent but did not exit after an additional 10 seconds; its exact PTY session was interrupted. Both cancel nodes subsequently passed in separate normal-exit runs. Broad/module reruns remain prohibited until the test-lifecycle owner diagnoses the shutdown leak.

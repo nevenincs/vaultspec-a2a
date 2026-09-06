@@ -200,6 +200,27 @@ async def cancel_thread(
             failure_type=FailureType.CONFLICT,
         )
     if not claim.acquired:
+        await db.refresh(thread)
+        claim_owns_thread = (
+            thread.status == ThreadStatus.CANCELLING.value
+            and thread.writer_action_type == ControlActionType.CANCEL.value
+            and thread.writer_action_receipt_id == claim.dispatch_id
+        )
+        if not claim_owns_thread:
+            return CancelResult(
+                action_id=claim.action_id,
+                thread_id=thread_id,
+                cancelled=thread.status == ThreadStatus.CANCELLED.value,
+                thread_status=thread.status,
+                error_detail=(
+                    "Cancellation action is leased but does not own thread authority"
+                ),
+                accepted=False,
+                applied=thread.status == ThreadStatus.CANCELLED.value,
+                action_status=claim.result_status,
+                idempotency_key=response_idempotency_key,
+                failure_type=FailureType.CONFLICT,
+            )
         return CancelResult(
             action_id=claim.action_id,
             thread_id=thread_id,

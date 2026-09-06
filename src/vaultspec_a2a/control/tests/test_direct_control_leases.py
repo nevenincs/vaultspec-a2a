@@ -405,10 +405,12 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
         assert first.action_id == second.action_id
         assert first.idempotency_key == "desktop-retry"
         assert second.idempotency_key == "dashboard-retry"
-        assert (
-            sum(result.accepted and not result.applied for result in (first, second))
-            == 2
-        )
+        accepted = [result for result in (first, second) if result.accepted]
+        assert len(accepted) >= 1
+        for result in (first, second):
+            if not result.accepted:
+                assert result.failure_type is FailureType.CONFLICT
+                assert result.thread_status == ThreadStatus.RUNNING.value
         assert len(worker_app.state.dispatch_ids) == 1
 
         async with session_factory() as db:
@@ -419,6 +421,52 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
             )
         assert action is not None
         assert action.dispatch_id in worker_app.state.dispatch_ids
+
+
+@pytest.mark.asyncio
+async def test_fresh_cancel_lease_without_thread_authority_is_not_reported_accepted(
+    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    thread_id = "cancel-lease-before-election"
+    await _running_thread(session_factory, thread_id)
+
+    async with session_factory() as interrupted:
+        claim = await claim_control_action(
+            interrupted,
+            thread_id=thread_id,
+            action_type=ControlActionType.CANCEL,
+            idempotency_key=default_cancel_key(thread_id),
+            payload={"cancel": True},
+        )
+        assert claim.acquired is True
+
+    async with (
+        _worker_runtime(tmp_path / "cancel-lease-before-election.db") as runtime,
+        session_factory() as retry,
+    ):
+        worker_client, worker_app, _bridge = runtime
+        result = await cancel_thread(
+            retry,
+            thread_id=thread_id,
+            idempotency_key="retry-after-interrupted-owner",
+            circuit_breaker=_circuit_breaker(),
+            worker_spawner=_spawner(),
+            worker_client=worker_client,
+            recursion_limit=25,
+        )
+
+    assert result.cancelled is False
+    assert result.accepted is False
+    assert result.thread_status == ThreadStatus.RUNNING.value
+    assert result.failure_type is FailureType.CONFLICT
+    assert len(worker_app.state.dispatch_ids) == 0
+    async with session_factory() as verify:
+        thread = await get_thread(verify, thread_id)
+    assert thread is not None
+    assert thread.status == ThreadStatus.RUNNING.value
+    assert thread.run_revision == 0
+    assert thread.writer_action_type == ControlActionType.INGEST.value
 
 
 @pytest.mark.asyncio

@@ -665,6 +665,8 @@ async def create_and_dispatch_thread(
         if (
             election is not None
             and election.outcome is ThreadStatusElectionOutcome.LOST
+            and current_thread.writer_action_type == ControlActionType.INGEST.value
+            and current_thread.writer_action_receipt_id == action_receipt_id
         ):
             return ThreadCreationResult(
                 thread_id=thread.id,
@@ -795,8 +797,12 @@ async def delete_thread_service(
             manifest=manifest,
         )
         if saga is None:
-            await db.refresh(thread)
-            if thread.status != ThreadStatus.DELETING.value:
+            current_thread = await db.get(
+                ThreadModel, thread_id, populate_existing=True
+            )
+            if current_thread is None:
+                return DeleteResult(deleted=False, not_found=True)
+            if current_thread.status != ThreadStatus.DELETING.value:
                 return DeleteResult(
                     deleted=False,
                     error_detail="Thread state changed before deletion could begin",
@@ -894,8 +900,10 @@ async def archive_thread(db: AsyncSession, thread_id: str) -> ArchiveResult:
     )
     if election.outcome is not ThreadStatusElectionOutcome.WON:
         await db.rollback()
-        await db.refresh(thread)
-        refreshed = can_archive(thread.status)
+        current_thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+        if current_thread is None:
+            return ArchiveResult(archived=False, not_found=True)
+        refreshed = can_archive(current_thread.status)
         if refreshed.already_archived:
             return ArchiveResult(archived=True, already_archived=True)
         return ArchiveResult(

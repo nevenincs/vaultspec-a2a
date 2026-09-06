@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:3994ab67fec54b2576dd82b3d8bd2675989ade0fade8cf6947a335a33bc120fd'
+body_hash: 'sha256:b5eba3723671bbfa1d3c26974114462caa6f744850e90bc4fcc3b4e19fe4f82d'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -183,3 +183,8 @@ Implementation sharpened four receipt-ordering rules. A persisted action receipt
 Cancellation must establish CANCELLING authority before worker dispatch. If delivery definitively fails, repair evidence may describe non-delivery but must not restore the earlier status or action witness; reconciliation owns the accepted cancellation intent. Direct-control recovery follows the same elect-before-dispatch rule and may redrive only an exact already-owned receipt.
 
 Deletion has no new control-action receipt, so its narrow sink election retains the current exact action identity and increments only run revision. Eligibility validation, saga insertion and DELETING entry form one transaction; a losing or invalid election rolls back saga creation. This supports current deletion without creating a general bypass into or out of the sink state.
+Formal S10 review established that a durable action reservation and even a fresh lease do not themselves own lifecycle state. A replay may report acceptance only after re-reading a thread whose current status, action type and receipt exactly name that action. A lease committed before process death is an in-flight claim with no lifecycle conclusion; another caller must return typed conflict until ownership becomes durable or the lease expires.
+
+Recovery also needs ordering evidence before installing a stored receipt over current authority. Exact-current replay is safe. For a different receipt, the candidate request must be strictly later than the journal action named by the thread; missing current-action evidence, equal timestamps and older timestamps are ambiguous or stale and are refused before worker contact. This closes the reproduced old-message-over-new-permission replay without manufacturing sequence or treating unapplied as newer.
+
+A lost status election never proves transport success by itself. For initial INGEST, only current ownership by the exact INGEST receipt supports an accepted result. A different winning action preserves its durable status but leaves the definite initial-dispatch failure intact. Post-rollback service branches similarly re-read by identity because a retained ORM object can disappear during concurrent deletion.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:555cfb5b0023e6de5b977fd9aab914f56e270d24eb85eedf3fc4c8e3f09891eb'
+body_hash: 'sha256:6244b7c6c918ee6d02dcc7300dfa996b644eca37315352ee306dfe63a31023b1'
 step_id: 'S10'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -34,3 +34,10 @@ related:
 - `verify:` `uv run --no-sync python -m pytest <focused S10 nodes> -q --timeout=30` -> `pass`
 - `verify:` `uv run --no-sync ruff check <S10 paths>` -> `pass`
 - `verify:` `uv run --no-sync ty check <S10 paths>` -> `pass`
+- `verify:` `uv run --no-sync python -m pytest <three S10 formal-review correction nodes> -q --timeout=30` -> `pass`
+- `verify:` `uv run --no-sync python -m pytest <valid-newer and stale-older recovery nodes> -q --timeout=30` -> `pass`
+- `verify:` `uv run --no-sync python -m pytest <deletion refusal and archive contention nodes> -q --timeout=30` -> `pass`
+
+## Notes
+
+The full deletion module reached its bound without process exit during formal review. The reviewer terminated only its exact owned process tree and verified no survivor; no full-module pass is claimed. A paired cancel test command also reached 100 percent before hanging after suite completion; its exact session was interrupted, and both nodes later passed as separate normal-exit runs.

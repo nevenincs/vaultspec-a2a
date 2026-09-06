@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
@@ -90,6 +91,7 @@ class _StoredAction:
     idempotency_key: str
     payload: dict[str, object]
     worker_generation: int
+    requested_at: datetime
 
 
 def _decode_payload(encoded: str | None) -> dict[str, object] | None:
@@ -225,6 +227,24 @@ async def _restore_requested_state(
         and action_receipt_id == expectation.authority.action_receipt_id
     ):
         return True
+    current_action_requested_at = await db.scalar(
+        select(ControlActionModel.requested_at).where(
+            ControlActionModel.thread_id == action.thread_id,
+            ControlActionModel.action_type == expectation.authority.action_type.value,
+            ControlActionModel.dispatch_id
+            == expectation.authority.action_receipt_id,
+        )
+    )
+    if current_action_requested_at is None:
+        return False
+    current_requested_at = current_action_requested_at
+    candidate_requested_at = action.requested_at
+    if current_requested_at.tzinfo is None:
+        current_requested_at = current_requested_at.replace(tzinfo=UTC)
+    if candidate_requested_at.tzinfo is None:
+        candidate_requested_at = candidate_requested_at.replace(tzinfo=UTC)
+    if candidate_requested_at <= current_requested_at:
+        return False
     try:
         election = await elect_thread_status(
             db,
@@ -281,6 +301,7 @@ async def redrive_direct_control_actions(
                 idempotency_key=row.idempotency_key,
                 payload=payload,
                 worker_generation=row.worker_generation,
+                requested_at=row.requested_at,
             )
             for row in rows
             if (payload := _decode_payload(row.payload_json)) is not None

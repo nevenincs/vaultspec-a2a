@@ -85,9 +85,10 @@ from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import (
     AcpError,
     AcpErrorCode,
+    AcpPromptCancelledError,
     AcpPromptError,
 )
-from .conditions import condition_from_acp_error
+from .conditions import ProviderCondition, condition_from_acp_error
 
 __all__ = [
     "ACP_SESSION_TRANSCRIPT_DECLARATION",
@@ -189,6 +190,40 @@ def _raise_prompt_error(response: JsonObject) -> Never:
         code=code,
         data=error.get("data"),
         condition=condition_from_acp_error(error),
+    )
+
+
+def _raise_for_prompt_stop_reason(stop_reason: str | None) -> None:
+    """Preserve every non-success ACP terminal outcome as a typed result."""
+    if stop_reason == "end_turn":
+        return
+    data = {"acp_stop_reason": stop_reason}
+    if stop_reason == "cancelled":
+        raise AcpPromptCancelledError(
+            "ACP prompt was cancelled by the agent",
+            data=data,
+        )
+    if stop_reason == "max_turn_requests":
+        raise AcpPromptError(
+            "ACP prompt exhausted its turn-request budget",
+            data=data,
+            condition=ProviderCondition.BUDGET_EXHAUSTED,
+        )
+    if stop_reason == "max_tokens":
+        raise AcpPromptError(
+            "ACP prompt reached its output token limit",
+            data=data,
+            condition=ProviderCondition.INVALID_REQUEST,
+        )
+    if stop_reason == "refusal":
+        raise AcpPromptError(
+            "ACP agent refused the prompt",
+            data=data,
+            condition=ProviderCondition.INVALID_REQUEST,
+        )
+    raise AcpPromptError(
+        f"ACP prompt ended without a supported stop reason: {stop_reason!r}",
+        data=data,
     )
 
 
@@ -660,6 +695,7 @@ class AcpChatModel(BaseChatModel):
         # Propagate any interrupt that raced with end_turn
         if ctx.interrupt_exc:
             raise ctx.interrupt_exc[0]
+        _raise_for_prompt_stop_reason(ctx.prompt_stop_reason)
 
     async def _cleanup_session(
         self,

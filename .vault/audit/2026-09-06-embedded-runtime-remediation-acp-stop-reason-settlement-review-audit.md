@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:5c29b0cc2b7ba4230ebed816abe332272a1a8167a6b3b29fd32300a05588295f'
+body_hash: 'sha256:0bd2928f3584a147f2662e06681d7cc47d299617303b4e1f48d2f84c3c395a08'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
 ---
@@ -33,12 +33,12 @@ Resolved during review. The first settled prompt result is immutable; later term
 
 Resolved during review. Non-object results, missing reasons, malformed reasons and unknown reasons now settle promptly with `AcpPromptError`.
 
-### acp-stop-reason-settlement | high | Downstream outcome mapping is still incomplete
+### acp-stop-reason-settlement | high | Downstream outcome mapping was incomplete
 
-Open and already queued as S80. The protocol context preserves the exact valid reason, but `AcpChatModel` must still map refusal, cancellation and exhaustion into authoritative outcomes so partial output plus transport success cannot be reported as completed work.
+Resolved by W03.P07.S80. The chat-model consumer now returns successfully only for `end_turn`, preserves all other terminal meanings as typed outcomes, and maps provider cancellation to the authoritative cancelled lifecycle path. Evidence is recorded in `2026-09-06-embedded-runtime-remediation-acp-stop-meaning-propagation-review-audit`.
 
 ## Recommendations
 
 - Keep the five accepted version-1 reasons as a closed set at the protocol boundary.
 - Preserve first-writer terminal identity and the active prompt request correlation.
-- Complete S80 before claiming end-to-end stop-meaning preservation.
+- Keep provider-supplied cancellation distinct from task-group cancellation ownership queued as S21.

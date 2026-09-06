@@ -11,6 +11,7 @@ __all__ = [
     "AcpAuthError",
     "AcpError",
     "AcpErrorCode",
+    "AcpPromptCancelledError",
     "AcpPromptError",
     "AcpSessionError",
 ]
@@ -84,6 +85,12 @@ class AcpSessionError(AcpError):
 
 class AcpPromptError(AcpError):
     """Raised when session/prompt fails (e.g. quota, refusal)."""
+
+    __slots__ = ()
+
+
+class AcpPromptCancelledError(AcpPromptError):
+    """Raised when the ACP agent reports a cancelled prompt outcome."""
 
     __slots__ = ()
 

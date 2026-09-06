@@ -31,7 +31,8 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
-from ...providers import AcpPromptError, ProviderCondition
+from ...providers import AcpPromptCancelledError, AcpPromptError, ProviderCondition
+from ...thread.enums import ThreadStatus
 from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
@@ -1837,6 +1838,38 @@ class _FailingGraph:
 
 
 assert issubclass(_FailingGraph, StreamableGraph)  # protocol drift guard
+
+
+class _ProviderCancelledGraph(_FailingGraph):
+    async def astream_events(
+        self, graph_input: object, config: object, *, version: str
+    ):
+        raise AcpPromptCancelledError(
+            "ACP prompt was cancelled by the agent",
+            data={"acp_stop_reason": "cancelled"},
+        )
+        yield
+
+
+@pytest.mark.asyncio
+async def test_provider_cancelled_prompt_settles_as_cancelled(
+    aggregator: EventAggregator,
+) -> None:
+    queue = aggregator.add_subscriber("provider-cancel-client")
+    aggregator.subscribe("provider-cancel-client", ["provider-cancel-thread"])
+    outcome = await _ingest(
+        aggregator,
+        thread_id="provider-cancel-thread",
+        agent_id="supervisor",
+        graph=_ProviderCancelledGraph(),
+        graph_input={"messages": []},
+        config={"configurable": {"thread_id": "provider-cancel-thread"}},
+    )
+    assert outcome == ThreadStatus.CANCELLED
+    events = [queue.get_nowait().event for _ in range(queue.qsize())]
+    cancelled = [event for event in events if isinstance(event, AgentStatus)]
+    assert cancelled[-1].state is AgentLifecycleState.CANCELLED
+    assert cancelled[-1].detail == "Provider cancelled the turn"
 
 
 class TestGenericIngestExceptionDetection:

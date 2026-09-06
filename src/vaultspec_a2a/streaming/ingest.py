@@ -17,6 +17,7 @@ from ..domain_config import domain_config
 from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..providers import ProviderCondition
+from ..providers.acp_exceptions import AcpPromptCancelledError
 from ..providers.conditions import condition_is_retryable
 from ..thread.enums import ThreadStatus
 from ..thread.errors import describe_exception_chain
@@ -349,6 +350,7 @@ class IngestManager:
                     and isinstance(exc, _GraphRecursionError)
                 ) or exc.__class__.__name__ == "GraphRecursionError"
                 _is_ingest_stall = isinstance(exc, IngestStallTimeoutError)
+                _is_provider_cancelled = isinstance(exc, AcpPromptCancelledError)
                 # Checked after the more specific IngestStallTimeoutError above:
                 # LangGraph's own step_timeout is also a bare TimeoutError, and
                 # the stall watchdog is deliberately a TimeoutError subclass so
@@ -359,7 +361,19 @@ class IngestManager:
                     exc, TimeoutError
                 )
                 _reason: str | None = None
-                if _is_interrupt:
+                if _is_provider_cancelled:
+                    _outcome = ThreadStatus.CANCELLED
+                    logger.info("Provider cancelled the turn for thread %s", thread_id)
+                    span.set_attribute("cancelled", True)
+                    span.set_attribute("cancelled.by", "provider")
+                    await self._emitters.emit_agent_status(
+                        thread_id=thread_id,
+                        agent_id=agent_id,
+                        node_name="supervisor",
+                        state=AgentLifecycleState.CANCELLED,
+                        detail="Provider cancelled the turn",
+                    )
+                elif _is_interrupt:
                     _outcome = "interrupted"
                     logger.info(
                         "Graph interrupted for thread %s (awaiting approval)",

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from .acp_exceptions import AcpAuthError as AcpAuthError
 from .acp_exceptions import AcpError as AcpError
 from .acp_exceptions import AcpErrorCode as AcpErrorCode
+from .acp_exceptions import AcpPromptCancelledError as AcpPromptCancelledError
 from .acp_exceptions import AcpPromptError as AcpPromptError
 from .acp_exceptions import AcpSessionError as AcpSessionError
 from .conditions import ProviderCondition as ProviderCondition
@@ -54,6 +55,7 @@ __all__ = [
     "AcpChatModel",
     "AcpError",
     "AcpErrorCode",
+    "AcpPromptCancelledError",
     "AcpPromptError",
     "AcpSessionError",
     "MockChatModel",

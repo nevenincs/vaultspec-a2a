@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:435a77b4be9c415de4f80d4e29115db1d3214e48aa5c008e0814fe3779904bdf'
+body_hash: 'sha256:f897cd405ba65f165a804b163a089d2e94c69b5703b14924dd6ab064553a323e'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1196,3 +1196,10 @@ Type: verification harness and developer-time blocker. The first new assignment-
 Type: lifecycle traceability. Formal PASS `4b2e0a61` accepts the complete S49 chain: implementation `8f79c919`, formal FAIL `dcac3b27`, correction `84ba2a2b`, formal FAIL `91c882fe`, correction `d8453cf0` and final PASS. Core closes only `W04.P10.S49`, ER15 and ER16. The record preserves one total deadline, parked SSE, bridge/worker cleanup, late-child and assignment-failure proofs, exact retained-handle/PID-reuse safety, both harness hangs and the final 68-pass gate.
 
 Volatile terminal delivery remains HIGH/open under W02.P03.S14. The 90-second recovery polling hang remains HIGH/open under served-capability W04.P08.S56 with remediation W02.P03.S11 verification. Trace-only provider-owner commit `141147db` leaves W04.P11.S60 reopened. S48 and S50 remain separate. Closure adds no runtime, compatibility, legacy or deprecated behavior.
+### w02-p03-s76-current-authority-declaration | low | implemented pending formal review
+
+Type: state-ownership model declaration. S76 adds one frozen, slotted `RunWriteAuthority` value containing durable run revision, writer generation, typed action and action-specific receipt identity. Construction has no missing-value defaults and refuses negative revision, non-positive generation, non-enum action and empty, oversized or non-string receipt identity. The value carries no credential, checkpoint state or transcript content. Focused real-SQLite coverage proves 14 cases, including that current schema 0016 remains readable and writable before S77 installs persistence. Formal review remains required; S76 is not lifecycle-closed.
+
+### w02-p03-s76-schema-installation-dependency | high | open under W02.P03.S77
+
+Type: migration ordering and current-schema integrity. Required ownership columns cannot be mapped onto `ThreadModel` before their physical migration: doing so makes every mapped SELECT and existing `create_thread` insert fail against schema 0016. Nullable columns or defaults would accept missing authority and manufacture history, violating the current-only contract. S76 therefore keeps the strict authority declaration separate from ORM persistence. S77 must atomically install and map all four required fields, validate the resulting schema, and refuse populated pre-current or unknown stores. It may not backfill, translate, alias, default or retain rows without complete authority.

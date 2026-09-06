@@ -5,6 +5,7 @@ and cost tracking. Uses ``DeclarativeBase`` with ``Mapped`` / ``mapped_column``
 for full type-safety.
 """
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, override
@@ -29,6 +30,7 @@ from sqlalchemy.types import TypeEngine
 from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import (
     ControlActionResultStatus,
+    ControlActionType,
     PermissionRequestStatus,
     RepairStatus,
     TaskQueueStatus,
@@ -46,6 +48,7 @@ __all__ = [
     "MoneyAmount",
     "PermissionLogModel",
     "PermissionRequestModel",
+    "RunWriteAuthority",
     "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",
     "ThreadExecutionStateModel",
@@ -236,6 +239,55 @@ class Base(DeclarativeBase):
     schema change, and ``database/tests/test_schema_integrity.py`` proves it
     works against a real migrated database rather than leaving it asserted here.
     """
+
+
+_MAX_ACTION_RECEIPT_ID_LENGTH = 64
+
+
+@dataclass(frozen=True, slots=True)
+class RunWriteAuthority:
+    """Complete identity required to elect one durable run-state writer.
+
+    This value is deliberately separate from :class:`ThreadModel` until the
+    current-only migration installs all four columns atomically. Mapping the
+    fields ahead of that migration would make the current schema unreadable;
+    making them nullable or defaulted would instead manufacture authority for
+    rows that never carried it. The value contains only concurrency and receipt
+    identity. Checkpoint state and transcript content remain in their existing
+    stores, and credentials have no field here.
+    """
+
+    run_revision: int
+    writer_generation: int
+    action_type: ControlActionType
+    action_receipt_id: str
+
+    def __post_init__(self) -> None:
+        """Reject incomplete or structurally invalid current authority."""
+        if (
+            isinstance(self.run_revision, bool)
+            or not isinstance(self.run_revision, int)
+            or self.run_revision < 0
+        ):
+            raise ValueError("run_revision must be a non-negative integer")
+        if (
+            isinstance(self.writer_generation, bool)
+            or not isinstance(self.writer_generation, int)
+            or self.writer_generation < 1
+        ):
+            raise ValueError("writer_generation must be a positive integer")
+        if not isinstance(self.action_type, ControlActionType):
+            raise TypeError("action_type must be a ControlActionType")
+        if not isinstance(self.action_receipt_id, str):
+            raise TypeError("action_receipt_id must be a string")
+        if (
+            not self.action_receipt_id.strip()
+            or len(self.action_receipt_id) > _MAX_ACTION_RECEIPT_ID_LENGTH
+        ):
+            raise ValueError(
+                "action_receipt_id cannot be blank and must contain at most "
+                f"{_MAX_ACTION_RECEIPT_ID_LENGTH} characters"
+            )
 
 
 class ThreadModel(Base):

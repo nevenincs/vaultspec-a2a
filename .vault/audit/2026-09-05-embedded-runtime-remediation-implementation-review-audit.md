@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:660f2c789b56dd5784ce05cf1c52adb7fa6e6cd218df902160716c65ba8f9f8d'
+body_hash: 'sha256:9328cccc9b15d477e631c55e33299cd7ea0ee7003157547a11dfded3b0db75cc'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -699,3 +699,17 @@ a different same-thread ID and real process-cap exhaustion remain typed 429.
 Production-lock endpoint controls prove one retained ID, one generation, equal
 replay bodies and complete token release. Owner remains P01.S11; S11 and
 remediation W01.P02.S05 stay open for final formal re-review.
+
+### p01-s11-concurrent-duplicate-final-formal-rereview | low | PASS
+
+Type: remediation prerequisite review disposition. Exact catalog correction
+`6db8cd3b384872b8cdb8b5b731fa4495fd4d7bbd` rechecks stable dispatch identity
+after an awaited capacity refusal. Concurrent identical ingest and resume calls
+now receive equal idempotent 200 responses with one scheduled task, one retained
+ID and one fully released generation token; different IDs and real capacity
+exhaustion remain typed 429. The opaque ownership/ABA fix and every earlier S11
+execution-authority, checkpoint, terminal-lifecycle, graph-flight, projection and
+messaging correction remain intact. Independent worker/Executor checks pass, and
+no review-blocking finding remains. P01.S11 is ready for its separate Core
+lifecycle closure; remediation W01.P02.S05 must wait for that closure. This audit
+update closes no row.

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:ef11cbdc660bab70617701057afa6af6243b5448ed7b9bcbd1c60aeccd836684'
+body_hash: 'sha256:7a107a2cb7557d13575b7ddbcdb819c7678dd5ac58518af0e0e305b5edfaf421'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -841,3 +841,35 @@ one retained ID, one generated capacity owner and no leaked owner. A distinct-ID
 same-thread control proves exactly one 200 and one typed 429, and the existing
 full-capacity control remains green. P01.S11 remains open for final formal
 re-review.
+
+### p01-s11-concurrent-duplicate-final-formal-rereview | low | PASS
+
+Type: formal implementation review disposition. Exact correction
+`6db8cd3b384872b8cdb8b5b731fa4495fd4d7bbd`, parent
+`c13e5a1feac160c0fc3c9468e0c2bfab54dceac0`, resolves the last review-blocking
+same-ID replay ordering defect. The endpoint rechecks the exact dispatch ID after
+an awaited capacity refusal. A concurrent identical ingest or resume admitted
+during that wait returns the same bounded `dispatched` response without creating
+a second reservation, admitting the ID twice or scheduling another task. A
+different dispatch ID on the active thread and true process-cap exhaustion still
+return the typed 429 response.
+
+Real endpoint controls queue two requests on the production capacity lock and
+prove identical ingest and resume each return two equal 200 bodies, retain one
+ID, generate one capacity token and drain it. The distinct-ID control returns
+exactly one 200 and one 429, and full-capacity admission remains before ID
+retention or scheduling. The recheck cannot release or replace the first request's
+opaque frozen generation; all settlement, refusal, timeout, cancellation and
+stale-finalizer ownership invariants from the preceding correction remain intact.
+
+Independent review passed all 64 dispatch-admission and full Executor tests in
+28.54 seconds. The committed 133-worker, 12 OpenAPI/retired-state and static/Core
+results agree. The known Starlette `BlockingPortal` alias warning remains in its
+existing queue. The six-key retired root sentinel, exact current-schema re-entry,
+checkpoint digest/descriptor projection, bounded total checkpoint deadline,
+terminal identity cleanup, interrupt retention, exact-key compile flight and
+clarification replay remain unchanged. No legacy provider/profile/default,
+translation, migration, compatibility or deprecated execution authority was
+restored. No CRITICAL, HIGH or review-blocking MEDIUM finding remains. P01.S11
+formal implementation review passes and is ready for its separate Core lifecycle
+closure; this review changes no runtime or plan row.

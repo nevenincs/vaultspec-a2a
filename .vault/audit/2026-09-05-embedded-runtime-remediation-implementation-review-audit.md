@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:1ab30a8a7d87172c2b1a931a207784e926e0140df9ce2a3dde7eaa0bd5715b1a'
+body_hash: 'sha256:d19679af23d3ee790133568207c84605beb279c0900e2ec4ca5a5529eecdf0bb'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1133,6 +1133,34 @@ ER22 alone closes with S08. The unreleased Starlette tree remains MEDIUM/open pe
 
 Type: runtime lifecycle ownership. The authenticated administrative stop previously closed admission and then used process-directed `SIGINT`; on Windows that did not establish a cooperative Uvicorn-owned transition. The production gateway entry point now owns the current Uvicorn server instance and injects its `should_exit` callback. The route refuses 503 before closing admission when that owner is absent, and otherwise invokes it after the 202 response grace interval. This removes the Windows process-signal trigger without adding compatibility behavior. It is the prerequisite for S49's total shutdown deadline, does not touch S48 discovery, and awaits a separate S47 formal review.
 
+### w04-p10-s49-total-shutdown-deadline | high | corrected-pending-review
+
+Type: runtime lifecycle and boundedness. Gateway connection drain, active work, background tasks, owned worker/descendants, bridge delivery, clients, database and telemetry previously had separate or absent bounds. S49 starts one absolute monotonic deadline before Uvicorn drains open connections, closes admission before active-run drain and passes remaining time through every teardown owner. Parked real-socket SSE reaches lifespan in 1.25-1.32 seconds against a 3.0-second total. The bridge's confirmed 7.1849-second wall / 3.6920-second loop stall is corrected by joined cancellation and deadline-capped request/backoff; the real accepted-but-unanswered socket case completes below 0.6 seconds for a 0.5-second budget plus 0.1-second Windows scheduler tolerance, with loop gap below 0.1 seconds. Contained and uncontained real process tests complete in 1.47 and 2.30 seconds inside a 4.0-second deadline with zero surviving descendants. S47 supplies the separately committed server-owner trigger; S48 is unchanged. S49 remains open for formal review.
+
+### w04-p10-s49-uncontained-cooperative-root-race | high | corrected-pending-review
+
+Type: Windows process-tree lifecycle. The first new uncontained discriminator failed: after authenticated cooperative shutdown, the root exited before Windows `taskkill /T` enumerated its child and the child survived. The spawner now retains descendant process identities with creation-time reuse guards before requesting cooperative exit and reaps only those exact identities within the original absolute deadline. The exact contained/uncontained rerun passes two tests in 4.31 seconds, with the uncontained case at 2.30 seconds and no survivor. This finding is corrected in S49 and awaits the same formal review.
+
+### w02-p03-s14-bridge-terminal-only-in-memory | high | open under W02.P03.S14
+
+Type: terminal delivery durability. When the gateway accepts the connection but never answers the event request, bounded bridge close returns false and retains the undelivered terminal event in its in-memory buffer. This proves no event is silently discarded by the close call, but process memory is not durable delivery, incorporation or settlement and is lost at worker exit. `W02.P03.S14` remains the correction owner for an independent durable retry/reconciliation path. S49 makes no settlement claim.
+
+### w04-p10-s49-full-worker-probe-harness-deadlock | medium | resolved measurement-integrity
+
+Type: verification harness. Two full A2A worker probes exceeded their 60-second readiness bounds under the saturated shared host. The first then blocked by reading stderr from a still-live child before cleanup and initially targeted the uv environment redirector. The owned sessions were terminated, exact scans found zero worker survivors and the invalid test was removed. The corrected base-interpreter stdlib worker is retained only as production-spawner seam evidence; it is not full A2A or frozen-worker proof. S50 retains that proof obligation.
+
+### current-schema-restart-post-catalog-run-poll-hang | high | open under served-capability W04.P08.S56; verification W02.P03.S11
+
+Type: runtime recovery and developer-time blocker. One instrumented production restart reached completed ACP catalog subprocesses and OpenAI `/v1/models` HTTP 200, then continued successful 200 polling of `/v1/runs/current-schema-restart` until the 90-second external deadline. Cleanup preceded output inspection and left zero gateway/catalog survivors. The last durable state was three runs (`current-schema-restart`, `same-assignment-restart`, `other-assignment-restart`) in `reconciling` and `restart-demand` in `running`, all without failure reason or condition. Product shutdown never began, so this is separate from S49 and cannot be attributed only to host saturation after catalog completed. The currently open correction owner is `2026-08-05-served-capability-contract-plan W04.P08.S56`; this remediation plan's open `W02.P03.S11` verifies abandoned-run reconciliation and integrates atomic election. Prioritize it immediately after S47/S49 review.
+
 ### w04-p10-s47-formal-fail-correction | medium | corrected-pending-rereview
 
 Type: lifecycle correctness, test integrity and traceability. Formal review `b80e843b` found a malformed non-callable owner could return 202 and close admission before a deferred `TypeError`; the test substituted a lambda instead of exercising production Uvicorn ownership; two comments retained the removed process-signal language; and the shared `api/app.py` ownership boundary plus feature index were incomplete. The route now validates callable shape before closing admission. Absent and malformed owners both return 503 with admission demonstrably OPEN. The production serve path calls a named `_bind_server_shutdown_owner`, and a real Uvicorn HTTP test proves the 202 response reaches its client before the serving task exits, then observes `should_exit` and bounded completion. Current source describes only cooperative owner behavior. The S47 record assigns that construction/injection seam to S47 and reserves total deadlines, stream drain and escalation for S49. The corrected focused gate passes 15 tests in 35.79 seconds; Ruff and Ty pass. Feature indexing and Core validation are part of the correction commit. All five review findings are corrected pending separate rereview; S47 remains open.
+
+### w04-p10-s49-worker-owner-shape | medium | corrected-pending-review
+
+Type: lifecycle correctness. Final implementation review applied the same fail-closed shape rule to the worker: a non-callable `request_server_shutdown` now receives 503 instead of reaching invocation. Authenticated callable-owner and malformed-owner tests pass in the actual worker app module. Full frozen-worker proof remains S50.
+
+### w04-p10-s49-active-bridge-flush-deadline | high | corrected-pending-review
+
+Type: shutdown boundedness and in-memory state preservation. Final implementation review found that `WorkerBridge.close()` joined a cancelled in-progress deferred flush without consulting its absolute deadline, and cancellation during HTTP or retry backoff could leave the extracted batch outside the in-memory buffer. The pending-task join now uses only remaining time; both cancellation sites restore the batch before propagation. The shared shutdown gate passes 48 tests in 41.39 seconds, and the worker app/IPC gate passes 35 tests in 12.76 seconds. This corrects S49 boundedness but does not promote volatile buffering to durable delivery; S14 remains HIGH/open.

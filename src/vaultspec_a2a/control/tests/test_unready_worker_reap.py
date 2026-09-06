@@ -20,11 +20,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import socket
 import subprocess
 import sys
 import time
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from ...control.worker_management import (
     LazyWorkerSpawner,
@@ -32,6 +37,7 @@ from ...control.worker_management import (
     _shutdown_worker_process,
 )
 from ...lifecycle.discovery import is_pid_alive
+from ...lifecycle.shutdown import ShutdownDeadline
 from ...utils import kill_pid_tree_async
 from ...utils.process import ProcessContainment
 
@@ -49,6 +55,31 @@ _WORKER_WITH_CHILDREN = (
     "print(' '.join(str(k.pid) for k in kids), flush=True)\n"
     "time.sleep(300)\n"
 )
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def _cooperative_worker_script(port: int, marker: Path) -> str:
+    """Return a stdlib HTTP worker that exits cooperatively but leaves a child."""
+    return (
+        "import http.server, pathlib, subprocess, sys, threading\n"
+        "kid=subprocess.Popen([sys.executable,'-c','import time; time.sleep(300)'])\n"
+        f"path=pathlib.Path({str(marker)!r})\n"
+        "class H(http.server.BaseHTTPRequestHandler):\n"
+        " def log_message(self,*args): pass\n"
+        " def do_POST(self):\n"
+        "  if self.path != '/admin/shutdown':\n"
+        "   self.send_response(404); self.end_headers(); return\n"
+        "  path.write_text(str(kid.pid), encoding='utf-8')\n"
+        "  self.send_response(202); self.end_headers()\n"
+        "  threading.Thread(target=server.shutdown, daemon=True).start()\n"
+        f"server=http.server.ThreadingHTTPServer(('127.0.0.1',{port}),H)\n"
+        "server.serve_forever(); server.server_close()\n"
+    )
 
 
 def _spawn_tree(
@@ -204,3 +235,104 @@ async def test_cancelled_shutdown_joins_worker_reap() -> None:
         containment.close()
         if process.stdout is not None:
             process.stdout.close()
+
+
+@pytest.mark.asyncio
+async def test_spawner_cooperates_then_reaps_the_remaining_owned_tree(
+    tmp_path: Path,
+) -> None:
+    """A real 202 stop precedes bounded containment escalation for descendants."""
+    port = _free_port()
+    marker = tmp_path / "cooperative-stop.txt"
+    containment = ProcessContainment.create()
+    base_interpreter = getattr(sys, "_base_executable", sys.executable)
+    process = subprocess.Popen(
+        [base_interpreter, "-c", _cooperative_worker_script(port, marker)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    containment.assign(process.pid)
+    spawner = LazyWorkerSpawner(
+        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
+    )
+    spawner.replace_process(process, containment)
+    ready_deadline = time.monotonic() + 5.0
+    while time.monotonic() < ready_deadline:
+        try:
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        except OSError:
+            await asyncio.sleep(0.02)
+            continue
+        writer.close()
+        await writer.wait_closed()
+        break
+    else:
+        await _force_cleanup([process.pid])
+        raise AssertionError("cooperative worker socket did not become ready")
+
+    started = asyncio.get_running_loop().time()
+    deadline = ShutdownDeadline.start(4.0)
+    try:
+        await spawner.shutdown(deadline=deadline)
+        elapsed = asyncio.get_running_loop().time() - started
+        assert marker.exists(), "the cooperative shutdown route was not reached"
+        child_pid = int(marker.read_text(encoding="utf-8"))
+        assert elapsed < 4.2, f"owned worker teardown took {elapsed:.4f}s"
+        assert process.poll() is not None
+        assert not is_pid_alive(child_pid), "owned descendant survived escalation"
+        assert spawner.process is None and spawner.containment is None
+    finally:
+        child_pids = []
+        if marker.exists():
+            child_pids.append(int(marker.read_text(encoding="utf-8")))
+        await _force_cleanup([process.pid, *child_pids])
+        containment.close()
+
+
+@pytest.mark.asyncio
+async def test_spawner_snapshots_uncontained_tree_before_root_exits(
+    tmp_path: Path,
+) -> None:
+    """The Windows/dev fallback cannot lose children after cooperative exit."""
+    port = _free_port()
+    marker = tmp_path / "uncontained-cooperative-stop.txt"
+    base_interpreter = getattr(sys, "_base_executable", sys.executable)
+    process = subprocess.Popen(
+        [base_interpreter, "-c", _cooperative_worker_script(port, marker)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    spawner = LazyWorkerSpawner(
+        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
+    )
+    spawner.replace_process(process)
+    ready_deadline = time.monotonic() + 5.0
+    while time.monotonic() < ready_deadline:
+        try:
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        except OSError:
+            await asyncio.sleep(0.02)
+            continue
+        writer.close()
+        await writer.wait_closed()
+        break
+    else:
+        await _force_cleanup([process.pid])
+        raise AssertionError(
+            "uncontained cooperative worker socket did not become ready"
+        )
+
+    deadline = ShutdownDeadline.start(4.0)
+    try:
+        await spawner.shutdown(deadline=deadline)
+        assert marker.exists(), "the cooperative shutdown route was not reached"
+        child_pid = int(marker.read_text(encoding="utf-8"))
+        assert process.poll() is not None
+        assert not is_pid_alive(child_pid), "uncontained descendant survived teardown"
+    finally:
+        child_pids = []
+        if marker.exists():
+            child_pids.append(int(marker.read_text(encoding="utf-8")))
+        await _force_cleanup([process.pid, *child_pids])

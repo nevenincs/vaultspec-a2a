@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import psutil
 from pydantic import TypeAdapter, ValidationError
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from ..lifecycle.shutdown import ShutdownDeadline
     from .circuit_breaker import WorkerCircuitBreaker
 
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
@@ -1003,27 +1005,30 @@ async def _stop_worker_tree(
     containment: ProcessContainment | None,
     *,
     term_timeout: float,
+    kill_timeout: float = 5.0,
 ) -> None:
     try:
         if containment is not None:
             reaped = await containment.terminate(
-                term_timeout=term_timeout, kill_timeout=5.0
+                term_timeout=term_timeout, kill_timeout=kill_timeout
             )
         else:
             reaped = await kill_pid_tree_async(
-                process.pid, term_timeout=term_timeout, kill_timeout=5.0
+                process.pid, term_timeout=term_timeout, kill_timeout=kill_timeout
             )
         if not reaped:
             raise ProcessContainmentError(
                 f"Worker process tree {process.pid} did not terminate"
             )
     finally:
-        await asyncio.to_thread(process.wait, 5.0)
+        await asyncio.to_thread(process.wait, max(kill_timeout, 0.1))
 
 
 async def _shutdown_worker_process(
     process: subprocess.Popen[bytes],
     containment: ProcessContainment | None = None,
+    *,
+    deadline: ShutdownDeadline | None = None,
 ) -> None:
     """Shut down the worker child process and its whole tree.
 
@@ -1039,8 +1044,52 @@ async def _shutdown_worker_process(
         "Shutting down worker process (PID %d)",
         process.pid,
     )
-    await complete_cleanup(_stop_worker_tree(process, containment, term_timeout=10.0))
+    if deadline is None:
+        term_timeout = 10.0
+        kill_timeout = 5.0
+    else:
+        remaining = deadline.remaining()
+        term_timeout = max((remaining - 0.5) / 2.0, 0.0)
+        kill_timeout = max(remaining - term_timeout, 0.1)
+    await complete_cleanup(
+        _stop_worker_tree(
+            process,
+            containment,
+            term_timeout=term_timeout,
+            kill_timeout=kill_timeout,
+        )
+    )
     logger.info("Worker process stopped")
+
+
+async def _reap_retained_processes(
+    processes: list[psutil.Process], *, deadline: ShutdownDeadline | None
+) -> None:
+    """Reap retained process identities without acting on a reused pid."""
+    if not processes:
+        return
+    remaining = deadline.remaining() if deadline is not None else 5.0
+    term_timeout = max((remaining - 0.1) / 2.0, 0.0)
+    for process in reversed(processes):
+        try:
+            if process.is_running():
+                process.terminate()
+        except psutil.NoSuchProcess:
+            pass
+    _, alive = await asyncio.to_thread(
+        psutil.wait_procs, processes, timeout=term_timeout
+    )
+    for process in alive:
+        try:
+            if process.is_running():
+                process.kill()
+        except psutil.NoSuchProcess:
+            pass
+    if alive:
+        remaining = deadline.remaining() if deadline is not None else 2.5
+        _, alive = await asyncio.to_thread(psutil.wait_procs, alive, timeout=remaining)
+    if alive:
+        raise ProcessContainmentError("Retained worker descendants did not terminate")
 
 
 # ---------------------------------------------------------------------------
@@ -1254,11 +1303,68 @@ class LazyWorkerSpawner:
         """The OS containment owning the worker tree, if this gateway spawned it."""
         return self._containment
 
-    async def shutdown(self) -> None:
-        """Shut down the worker process (and its whole tree) if we spawned it."""
+    async def shutdown(self, *, deadline: ShutdownDeadline | None = None) -> None:
+        """Cooperatively stop the owned worker, then reap its tree by deadline."""
         if self._process is not None:
-            await _shutdown_worker_process(self._process, self._containment)
+            process = self._process
+            uncontained_descendants: list[psutil.Process] = []
+            if self._containment is None and process.poll() is None:
+                try:
+                    owner = psutil.Process(process.pid)
+                    uncontained_descendants = [
+                        child
+                        for child in owner.children(recursive=True)
+                        if child.is_running()
+                    ]
+                except psutil.NoSuchProcess:
+                    pass
+            if deadline is not None and process.poll() is None:
+                cooperative_budget = min(deadline.remaining(reserve=3.0), 1.0)
+                if cooperative_budget > 0:
+                    import httpx
+
+                    try:
+                        async with httpx.AsyncClient(
+                            headers=_internal_auth_headers(),
+                            timeout=cooperative_budget,
+                        ) as client:
+                            response = await client.post(
+                                f"{self._worker_url}/admin/shutdown"
+                            )
+                            if response.status_code != 202:
+                                logger.warning(
+                                    "Worker cooperative shutdown refused with HTTP %d",
+                                    response.status_code,
+                                )
+                    except httpx.HTTPError:
+                        logger.warning(
+                            "Worker cooperative shutdown request failed; escalating",
+                            exc_info=True,
+                        )
+                # A containment keeps descendants reachable after the root exits,
+                # so it is safe to grant the worker a cooperative grace period.
+                # The per-pid fallback must snapshot/terminate while the root is
+                # still alive; otherwise a cooperatively exited parent can leave
+                # descendants that no longer have a discoverable relationship.
+                wait_budget = min(deadline.remaining(reserve=2.0), 5.0)
+                if (
+                    self._containment is not None
+                    and wait_budget > 0
+                    and process.poll() is None
+                ):
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        await asyncio.to_thread(process.wait, wait_budget)
+            if process.poll() is None or self._containment is not None:
+                await _shutdown_worker_process(
+                    process, self._containment, deadline=deadline
+                )
+            if uncontained_descendants:
+                await _reap_retained_processes(
+                    uncontained_descendants, deadline=deadline
+                )
             self._process = None
+            if self._containment is not None:
+                self._containment.close()
             self._containment = None
 
 

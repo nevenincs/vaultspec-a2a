@@ -71,6 +71,7 @@ from ..lifecycle.registration import (
     refresh_registration,
     register_serve,
 )
+from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
 from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..telemetry.aggregator_hook import OTelAggregatorHook
@@ -600,10 +601,23 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # designed escape for a worker that died emitting nothing.
         from .routes.gateway import admission_gate
 
+        deadline = getattr(app.state, "shutdown_deadline", None)
+        if deadline is None:
+            deadline = ShutdownDeadline.start(settings.shutdown_total_timeout_seconds)
+            app.state.shutdown_deadline = deadline
         gate = admission_gate(app)
         await gate.close_admission()
-        drain_result = await gate.wait_quiescent(_DRAIN_QUIESCENCE_TIMEOUT_SECONDS)
-        if not drain_result.quiescent:
+        drain_budget = min(
+            _DRAIN_QUIESCENCE_TIMEOUT_SECONDS,
+            deadline.remaining(reserve=5.0),
+        )
+        drained, drain_result = await finish_before(
+            gate.wait_quiescent(drain_budget),
+            deadline,
+            phase="active-run drain",
+            reserve=5.0,
+        )
+        if drained and drain_result is not None and not drain_result.quiescent:
             logger.warning(
                 "Gateway drain did not quiesce in %.1fs; %d run(s) still active "
                 "and left to shutdown cancellation and reaping",
@@ -613,15 +627,30 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         if verdict_subscriber_task is not None:
             verdict_subscriber_task.cancel()
-            await asyncio.gather(verdict_subscriber_task, return_exceptions=True)
+            await finish_before(
+                asyncio.gather(verdict_subscriber_task, return_exceptions=True),
+                deadline,
+                phase="verdict subscriber",
+                reserve=4.0,
+            )
 
         reconcile_task.cancel()
-        await asyncio.gather(reconcile_task, return_exceptions=True)
+        await finish_before(
+            asyncio.gather(reconcile_task, return_exceptions=True),
+            deadline,
+            phase="reconciliation task",
+            reserve=4.0,
+        )
 
         # Stop heartbeating and drop our own discovery record so the next
         # start sees Absent, not a stale record it must treat as Crashed.
         discovery_task.cancel()
-        await asyncio.gather(discovery_task, return_exceptions=True)
+        await finish_before(
+            asyncio.gather(discovery_task, return_exceptions=True),
+            deadline,
+            phase="discovery heartbeat",
+            reserve=4.0,
+        )
         try:
             remove_service_json_if_owned(discovery_path, discovery_pid)
         except OSError:
@@ -637,19 +666,36 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.info("Shutting down gateway")
 
         watchdog_task.cancel()
-        await asyncio.gather(watchdog_task, return_exceptions=True)
+        await finish_before(
+            asyncio.gather(watchdog_task, return_exceptions=True),
+            deadline,
+            phase="worker watchdog",
+            reserve=4.0,
+        )
 
-        await worker_spawner.shutdown()
-        await worker_client.aclose()
-        await aggregator.shutdown()
-        await close_db()
+        await finish_before(
+            worker_spawner.shutdown(deadline=deadline),
+            deadline,
+            phase="owned worker tree",
+        )
+        await finish_before(
+            worker_client.aclose(), deadline, phase="worker HTTP client"
+        )
+        await finish_before(aggregator.shutdown(), deadline, phase="event aggregator")
+        await finish_before(close_db(), deadline, phase="database")
 
         provider = trace.get_tracer_provider()
         if isinstance(provider, SdkTracerProvider):
-            await asyncio.to_thread(provider.shutdown)
+            await finish_before(
+                asyncio.to_thread(provider.shutdown), deadline, phase="trace provider"
+            )
         meter_provider = metrics.get_meter_provider()
         if isinstance(meter_provider, SdkMeterProvider):
-            await asyncio.to_thread(meter_provider.shutdown)
+            await finish_before(
+                asyncio.to_thread(meter_provider.shutdown),
+                deadline,
+                phase="meter provider",
+            )
 
         logger.info("Gateway shutdown complete")
 
@@ -680,8 +726,13 @@ def main() -> None:
         log_level=settings.log_level.value,
         access_log=settings.access_log,
         loop="auto",
+        timeout_graceful_shutdown=settings.shutdown_stream_grace_seconds,
     )
-    server = uvicorn.Server(config)
+    server = ShutdownServer(
+        config,
+        app=app,
+        total_seconds=settings.shutdown_total_timeout_seconds,
+    )
     _bind_server_shutdown_owner(app, server)
     server.run()
 

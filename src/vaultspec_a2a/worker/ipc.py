@@ -77,12 +77,60 @@ class WorkerBridge:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def close(self) -> None:
-        """Flush pending events and shut down the underlying HTTP client."""
-        if self._flush_task and not self._flush_task.done():
-            self._flush_task.cancel()
-        await self.flush_events()
-        await self._client.aclose()
+    async def close(self, *, deadline: float | None = None) -> bool:
+        """Flush and close within *deadline*, returning whether every event relayed.
+
+        The deadline is an absolute event-loop timestamp shared with the worker's
+        other shutdown phases.  An unreachable gateway therefore cannot spend a
+        fresh client timeout on every retry or keep the worker alive after its
+        owner has moved to forced process-tree cleanup.
+        """
+        pending = self._flush_task
+        pending_joined = True
+        if pending is not None and not pending.done():
+            pending.cancel()
+            remaining = self._remaining(deadline)
+            if remaining is None:
+                await asyncio.gather(pending, return_exceptions=True)
+            elif remaining > 0:
+                done, _ = await asyncio.wait({pending}, timeout=remaining)
+                pending_joined = pending in done
+            else:
+                pending_joined = False
+        self._flush_task = None
+
+        flush_deadline = deadline
+        if deadline is not None:
+            flush_deadline = max(
+                asyncio.get_running_loop().time(),
+                deadline - 0.1,
+            )
+        delivered = pending_joined and await self.flush_events(deadline=flush_deadline)
+        remaining = self._remaining(deadline)
+        if remaining is None:
+            await self._client.aclose()
+        elif remaining > 0:
+            try:
+                async with asyncio.timeout(remaining):
+                    await self._client.aclose()
+            except TimeoutError:
+                logger.error(
+                    "Worker bridge client close exceeded the shared shutdown deadline",
+                    extra={
+                        "worker_id": self._worker_id,
+                        "action": "bridge_close_timeout",
+                    },
+                )
+                delivered = False
+        else:
+            delivered = False
+        return delivered
+
+    @staticmethod
+    def _remaining(deadline: float | None) -> float | None:
+        if deadline is None:
+            return None
+        return max(deadline - asyncio.get_running_loop().time(), 0.0)
 
     # ------------------------------------------------------------------
     # Thread tracking
@@ -150,7 +198,7 @@ class WorkerBridge:
         await asyncio.sleep(settings.ipc_flush_interval_seconds)
         await self.flush_events()
 
-    async def flush_events(self) -> None:
+    async def flush_events(self, *, deadline: float | None = None) -> bool:
         """Immediately send all buffered events as a single batch POST.
 
         Retries up to ``_MAX_FLUSH_RETRIES`` times with exponential
@@ -161,20 +209,31 @@ class WorkerBridge:
         must not crash because the gateway is temporarily unavailable.
         """
         if not self._event_buffer:
-            return
+            return True
 
         batch = self._event_buffer[:]
         self._event_buffer.clear()
 
         for attempt in range(settings.ipc_max_flush_retries):
+            remaining = self._remaining(deadline)
+            if remaining is not None and remaining <= 0:
+                break
             try:
-                resp = await self._client.post(
-                    "/internal/events/batch",
-                    json={"events": batch},
-                    headers=self._trace_headers(),
+                request_timeout: httpx.Timeout | float | None = (
+                    self._client.timeout if remaining is None else remaining
                 )
+                try:
+                    resp = await self._client.post(
+                        "/internal/events/batch",
+                        json={"events": batch},
+                        headers=self._trace_headers(),
+                        timeout=request_timeout,
+                    )
+                except asyncio.CancelledError:
+                    self._event_buffer[0:0] = batch
+                    raise
                 if resp.status_code == 200:
-                    return  # success
+                    return True
                 logger.warning(
                     "Batch event relay failed (HTTP %d), attempt %d/%d",
                     resp.status_code,
@@ -207,9 +266,17 @@ class WorkerBridge:
 
             # Exponential backoff before retry.
             if attempt < settings.ipc_max_flush_retries - 1:
-                await asyncio.sleep(
-                    settings.ipc_retry_backoff_base_seconds * (2**attempt)
-                )
+                delay = settings.ipc_retry_backoff_base_seconds * (2**attempt)
+                remaining = self._remaining(deadline)
+                if remaining is not None:
+                    delay = min(delay, remaining)
+                if delay <= 0:
+                    break
+                try:
+                    await asyncio.sleep(delay)
+                except asyncio.CancelledError:
+                    self._event_buffer[0:0] = batch
+                    raise
 
         # All retries exhausted — events could not reach the gateway.
         # Escalate to ERROR so operators notice IPC breakdown.
@@ -247,6 +314,7 @@ class WorkerBridge:
                     "event_buffer_size": len(self._event_buffer),
                 },
             )
+        return False
 
     # ------------------------------------------------------------------
     # Heartbeat

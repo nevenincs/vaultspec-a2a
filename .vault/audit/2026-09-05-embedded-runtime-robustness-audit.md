@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:a9d3827b363ba13f1a11f6a1a056feda44ee8fe25ffe7dcfb96a65a8cc8cffbc'
+body_hash: 'sha256:971f3cbf30e369e28709fe576f791d9e7505f07e15f54835e2bfa722565fa44a'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -697,3 +697,14 @@ The historical cold-catalog/Uvicorn observation did not reproduce across six fre
 Formal review `691f62cc60260e30a82ef5c8c1682276bbe8aba7` invalidated M16's five-trial compile-only conclusion because `work_seconds` stopped at graph completion while the heartbeat continued through bridge and checkpointer cleanup. Its independent load run preserved the contaminated failure: one result combined 2.3452 seconds of compile work with an impossible 11.0947-second supposed compile gap.
 
 The corrected probe freezes duration and gap at one exact timestamp for each independent phase. Its first five-trial `C=5` rerun found compile gaps 0.0546-0.1796 seconds, all below the unchanged 0.5-second ER21 ceiling. The same run separately found a 3.6920-second loop gap during a 7.1849-second `WorkerBridge.close()` in trial four; checkpointer and ambient scheduler windows remained below 0.018 seconds. This is a confirmed production lifecycle observation owned by `W04.P10.S49`, not compile evidence. The corrected S07 module passed 5 tests in 139.74 seconds. A separate current-schema restart/catalog run passed in 51.63 seconds without shutdown failure. Formal PASS `6c742790f42b21d433c371ed6db738c866d0fcd7` accepted the compile-window contract. Core closes ER21 and S07 while the teardown finding remains visible and open under S49.
+
+## S49 implementation evidence (pending formal review)
+
+`W04.P10.S49` now owns one monotonic shutdown deadline spanning Uvicorn connection drain and application lifespan. Admission closes first. Active work, verdict/reconciliation/discovery/watchdog tasks, worker and descendant teardown, HTTP/bridge resources, aggregation, database and telemetry consume only the remaining clock. A real parked SSE socket reached lifespan and exited in 1.25-1.32 seconds against a 3.0-second total with a 1.0-second stream grace. A real unreachable-gateway bridge discriminator corrects the historical 7.1849-second wall / 3.6920-second loop stall: close returns below 0.6 seconds for a 0.5-second absolute budget plus a 0.1-second Windows scheduler tolerance, and the measured loop gap stays below 0.1 seconds.
+
+The bridge retains an undelivered terminal event only in memory and returns false. This is not durable delivery or settlement; HIGH correction remains open at `W02.P03.S14`. Real process tests cover Job Object containment and the Windows/development per-pid fallback. The first uncontained run exposed a surviving child after cooperative root exit; descendant process identity, including its creation-time reuse guard, is retained before the stop request and the same deadline covers reaping that exact identity. Corrected contained/uncontained observations were 1.47 and 2.30 seconds inside 4.0 seconds, with no survivor. S50 still owns full frozen-worker proof. S47's cooperative server trigger is separately committed and pending review; S48 discovery is unchanged. ER15 and ER16 remain open until their formal review and lifecycle closure.
+
+A separate HIGH recovery hang remains open. The instrumented current-schema restart completed ACP and OpenAI catalog discovery, then spent the rest of a 90-second external bound receiving HTTP 200 while polling the run. At cleanup, three current-schema runs remained `reconciling` and the demand run remained `running`, with no failure reason or condition. Shutdown was never requested and zero owned process survived forced cleanup. The active correction owner is `2026-08-05-served-capability-contract-plan W04.P08.S56`; `W02.P03.S11` in the remediation plan owns the post-correction abandoned-run verification and atomic-election integration. This hang is the next priority after S47/S49 review.
+
+
+S49's final implementation review additionally bounds cancellation/join of an already-running bridge flush and restores its extracted batch on cancellation during HTTP or retry backoff. A malformed worker lifecycle owner now fails 503. The final shared gate passes 48 tests in 41.39 seconds; worker app/IPC coverage passes 35 tests in 12.76 seconds. These are corrected pending formal review and do not alter the open S14 durability boundary.

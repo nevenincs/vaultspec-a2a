@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import os
-import signal
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
@@ -45,6 +44,7 @@ from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..lifecycle.pairing import DispatchPairingStatus, resolve_worker_gateway_target
 from ..lifecycle.registration import deregister_serve, register_serve
+from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
 from ..providers.warmup import warm_model_imports
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..utils import (
@@ -84,7 +84,7 @@ async def _warm_model_imports() -> None:
     warm-up.
     """
     try:
-        await run_sync(warm_model_imports)
+        await run_sync(warm_model_imports, abandon_on_cancel=True)
     except Exception:
         logger.warning(
             "Model stack warm-up failed; the first run will load it inline",
@@ -247,15 +247,35 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             deregister_serve(worker_record)
             tg.cancel_scope.cancel()
 
-        await executor.shutdown()
-        await bridge.close()
+        deadline = getattr(app.state, "shutdown_deadline", None)
+        if not isinstance(deadline, ShutdownDeadline):
+            deadline = ShutdownDeadline.start(settings.shutdown_total_timeout_seconds)
+            app.state.shutdown_deadline = deadline
+
+        await finish_before(
+            executor.shutdown(), deadline, phase="worker executor", reserve=2.0
+        )
+        await finish_before(
+            bridge.close(deadline=deadline.expires_at),
+            deadline,
+            phase="worker bridge",
+            reserve=1.0,
+        )
 
         provider = trace.get_tracer_provider()
         if isinstance(provider, SdkTracerProvider):
-            await run_sync(provider.shutdown)
+            await finish_before(
+                run_sync(provider.shutdown, abandon_on_cancel=True),
+                deadline,
+                phase="worker tracer provider",
+            )
         meter_provider = metrics.get_meter_provider()
         if isinstance(meter_provider, SdkMeterProvider):
-            await run_sync(meter_provider.shutdown)
+            await finish_before(
+                run_sync(meter_provider.shutdown, abandon_on_cancel=True),
+                deadline,
+                phase="worker meter provider",
+            )
 
 
 def create_worker_app(lifespan: Any | None = None) -> FastAPI:
@@ -421,10 +441,13 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         Bearer-authenticated with the same internal token as ``/dispatch``: this
         endpoint is load-bearing in the gateway's stale-orphan eviction path, so an
         unauthenticated loopback process must not be able to hard-kill the worker.
-        ``os.kill(SIGTERM)`` maps to ``TerminateProcess`` on Windows - an immediate
-        stop with no run draining, not a graceful drain.
+        The serve entry point injects a cooperative Uvicorn stop callback. A
+        process without that owner is not eligible for this lifecycle operation.
         """
-        os.kill(os.getpid(), signal.SIGTERM)
+        request_shutdown = getattr(app.state, "request_server_shutdown", None)
+        if not callable(request_shutdown):
+            raise HTTPException(status_code=503, detail="Worker lifecycle owner absent")
+        request_shutdown()
         return {"detail": "shutdown initiated"}
 
     return app
@@ -443,15 +466,23 @@ def main() -> None:
         settings.worker_port,
         settings.worker_url,
     )
-    uvicorn.run(
-        "vaultspec_a2a.worker.app:create_worker_app",
-        factory=True,
+    app = create_worker_app()
+    config = uvicorn.Config(
+        app,
         host=settings.worker_host,
         port=settings.worker_port,
         log_level=settings.log_level.value,
         access_log=settings.access_log,
         loop="auto",
+        timeout_graceful_shutdown=settings.shutdown_stream_grace_seconds,
     )
+    server = ShutdownServer(
+        config,
+        app=app,
+        total_seconds=settings.shutdown_total_timeout_seconds,
+    )
+    app.state.request_server_shutdown = lambda: setattr(server, "should_exit", True)
+    server.run()
 
 
 if __name__ == "__main__":

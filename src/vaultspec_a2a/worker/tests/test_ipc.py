@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -395,6 +396,78 @@ class TestClose:
 
         # After close, the client should be closed
         assert bridge._client.is_closed
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_unreachable_buffered_event_obeys_one_deadline_without_loop_stall(
+        self,
+    ) -> None:
+        """A real accepted socket that never responds cannot multiply close time."""
+        accepted = asyncio.Event()
+        release = asyncio.Event()
+        handlers: set[asyncio.Task[None]] = set()
+
+        async def stall(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            task = asyncio.current_task()
+            assert task is not None
+            handlers.add(task)
+            try:
+                await reader.readuntil(b"\r\n\r\n")
+                accepted.set()
+                await release.wait()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+                handlers.discard(task)
+
+        server = await asyncio.start_server(stall, "127.0.0.1", 0)
+        address = server.sockets[0].getsockname()
+        bridge = WorkerBridge(
+            api_url=f"http://127.0.0.1:{address[1]}", worker_id="deadline"
+        )
+        await bridge.send_event("run-buffered", {"type": "thread_terminal"})
+        deferred = bridge._flush_task
+        assert deferred is not None
+        deferred.cancel()
+        await asyncio.gather(deferred, return_exceptions=True)
+        bridge._flush_task = asyncio.create_task(bridge.flush_events())
+        await asyncio.wait_for(accepted.wait(), timeout=1.0)
+
+        loop = asyncio.get_running_loop()
+        ticks: list[float] = [loop.time()]
+
+        async def heartbeat() -> None:
+            while True:
+                await asyncio.sleep(0.01)
+                ticks.append(loop.time())
+
+        pulse = asyncio.create_task(heartbeat())
+        started = loop.time()
+        try:
+            delivered = await bridge.close(deadline=started + 0.5)
+            close_elapsed = loop.time() - started
+        finally:
+            pulse.cancel()
+            await asyncio.gather(pulse, return_exceptions=True)
+            release.set()
+            server.close()
+            await server.wait_closed()
+            await asyncio.gather(*handlers, return_exceptions=True)
+
+        gaps = [later - earlier for earlier, later in itertools.pairwise(ticks)]
+        assert accepted.is_set(), "the real socket never received the bridge request"
+        assert delivered is False
+        assert len(bridge._event_buffer) == 1, (
+            "undelivered terminal state was discarded"
+        )
+        assert bridge._client.is_closed
+        assert close_elapsed < 0.6, (
+            f"bridge close exceeded its 0.5s deadline: {close_elapsed:.4f}s"
+        )
+        assert gaps and max(gaps) < 0.1, (
+            f"bridge close stalled the loop: {max(gaps):.4f}s"
+        )
 
 
 # ---------------------------------------------------------------------------

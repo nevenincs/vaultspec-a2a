@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:cd70065f16cdf5dfcfc3a6abf12dde31294ec714f5b44b346bfee54a122efc4f'
+body_hash: 'sha256:491c65f4599872f4e8a28863887cf9db13d825a26f30c122c36696571b5ac566'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -18,6 +18,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S07]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S08]]'
   - '[[2026-09-05-embedded-runtime-remediation-W04-P10-S47]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W04-P10-S49]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
@@ -59,6 +60,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S07` - Diagnose the intermittent compilation loop-gap measurement on the named representative host/load and correct the owning warmup path if required without relaxing its existing budget
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S08` - Apply a reviewed locked dependency correction for the Starlette BlockingPortal deprecation and verify the warning disappears without suppression
 - `2026-09-05-embedded-runtime-remediation-W04-P10-S47` - Conform readiness/drain/shutdown routes and ownership capability handling to the intended consumer generation with fail-closed incompatible attachment
+- `2026-09-05-embedded-runtime-remediation-W04-P10-S49` - Use cooperative server shutdown with admission closed first and one total deadline covering active work, streams and bounded forced escalation
 
 ### plan
 

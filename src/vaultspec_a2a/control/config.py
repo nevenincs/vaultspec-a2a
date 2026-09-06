@@ -703,6 +703,21 @@ class InfraConfig(BaseSettings):
             " import on a cold filesystem, a contended host) need headroom here."
         ),
     )
+    shutdown_total_timeout_seconds: float = Field(
+        default=15.0,
+        gt=0.0,
+        le=600.0,
+        description=(
+            "One absolute budget for connection drain, active work, worker/bridge "
+            "teardown, persistence close, and forced process-tree escalation."
+        ),
+    )
+    shutdown_stream_grace_seconds: int = Field(
+        default=2,
+        gt=0,
+        le=30,
+        description="Maximum part of shutdown spent waiting for open HTTP streams.",
+    )
 
     # Worker watchdog
     watchdog_poll_interval_seconds: float = Field(

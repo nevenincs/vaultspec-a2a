@@ -92,10 +92,10 @@ def test_dispatch_rejects_invalid_internal_token() -> None:
 
 
 def test_admin_shutdown_rejects_missing_internal_token() -> None:
-    """The eviction-path kill endpoint must not be callable without the token.
+    """The cooperative stop endpoint must not be callable without the token.
 
     A 401 is raised by the auth dependency BEFORE the handler runs, so the
-    ``os.kill`` never fires - the endpoint is safe to probe here.
+    lifecycle owner is never invoked.
     """
     app = _make_app_without_lifespan()
     with (
@@ -111,7 +111,7 @@ def test_admin_shutdown_rejects_missing_internal_token() -> None:
 
 
 def test_admin_shutdown_rejects_invalid_internal_token() -> None:
-    """The eviction-path kill endpoint must reject a wrong bearer token."""
+    """The cooperative stop endpoint must reject a wrong bearer token."""
     app = _make_app_without_lifespan()
     with (
         _settings_override(
@@ -126,6 +126,42 @@ def test_admin_shutdown_rejects_invalid_internal_token() -> None:
 
     assert resp.status_code == 401
     assert resp.json()["detail"] == "Invalid internal token"
+
+
+def test_admin_shutdown_invokes_callable_lifecycle_owner() -> None:
+    app = _make_app_without_lifespan()
+    requested: list[bool] = []
+    app.state.request_server_shutdown = lambda: requested.append(True)
+    with (
+        _settings_override(
+            environment=Environment.TESTING, internal_token="secret-token"
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        resp = client.post(
+            "/admin/shutdown",
+            headers={"Authorization": "Bearer secret-token"},
+        )
+
+    assert resp.status_code == 202
+    assert requested == [True]
+
+
+def test_admin_shutdown_refuses_malformed_lifecycle_owner() -> None:
+    app = _make_app_without_lifespan()
+    app.state.request_server_shutdown = object()
+    with (
+        _settings_override(
+            environment=Environment.TESTING, internal_token="secret-token"
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        resp = client.post(
+            "/admin/shutdown",
+            headers={"Authorization": "Bearer secret-token"},
+        )
+
+    assert resp.status_code == 503
 
 
 def test_health_rejects_missing_internal_token() -> None:

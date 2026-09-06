@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:8e49aba32139aa2434f25cb69d72189e967a6206e80851695ae3d5aae9574c46'
+body_hash: 'sha256:9eea97cd0f9c9691defa55dd556088f2bb5e81478b941692620a2098e39af18e'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1054,3 +1054,11 @@ The first corrected `C=5` five-trial run intentionally kept the teardown ceiling
 Type: production resource lifecycle and serving responsiveness. Under five proven CPU-bound owners, the real `WorkerBridge.close()` path retried its buffered event against the intentionally unreachable gateway. One of five correction trials blocked the event loop for 3.6920 seconds during 7.1849 seconds of bridge close; the other bridge gaps were 0.0272-0.0769 seconds. The retry path is non-vacuous, and the exact phase windows exclude graph compile, checkpointer exit and ambient scheduling as the owner in that sample. S07 neither suppresses nor marks this teardown threshold green. The stable S07 regression asserts only the owning compile window's fixed 0.5-second contract while retaining teardown duration/gap fields and an independently exercised retry discriminator. Runtime lifecycle diagnosis and correction remain open under `W04.P10.S49`.
 
 After this ownership split, the exact warmup module passed 5 tests in 139.74 seconds. The current-schema production restart/catalog test separately passed in 51.63 seconds (50.79-second call) without shutdown failure. Ruff, format, Ty and diff checks pass. Both remediation and robustness Core checks complete all 19 checks; their only initial diagnostics were final-newline hygiene warnings corrected through Core. The current-only source scan finds no retired or deprecated token, and the owned-load process scan is empty. S07 stays open for formal re-review.
+
+### w01-p02-s07-phase-boundary-correction-formal-rereview | low | PASS
+
+Type: formal correction review disposition. Correction `82c8e5181453e2c3a6f7712c2f9d8a6048342876` has exact parent `691f62cc60260e30a82ef5c8c1682276bbe8aba7` and changes the same five S07 test, research and audit paths as the original evidence pass. The heartbeat now resets each phase at an exact monotonic boundary and freezes its maximum gap synchronously at the identical endpoint used for duration. Compile, `WorkerBridge.close()`, checkpointer exit and ambient scheduling therefore have independent, internally consistent windows. The stable discriminator requires every reported teardown gap to fall within its own duration and proves the unreachable-gateway bridge retry is non-vacuous, while the five-owner load gate applies the unchanged 0.5-second ceiling only to S07-owned compile windows.
+
+The historical 25.312691-second/0.6182457-second ER21 failure, the formal-review contaminated 2.3452-second/11.0947-second sample, and the correction's first intentionally failing diagnostic remain preserved. That diagnostic measured all five compile gaps at 0.0546-0.1796 seconds, bridge close at 7.1849 seconds with a 3.6920-second gap, checkpointer exit at no more than 0.0032 seconds and ambient scheduling at no more than 0.0175 seconds. The distinct bridge lifecycle finding remains MEDIUM and open under `W04.P10.S49`; there is no xfail, suppression or lifecycle-pass claim in S07.
+
+Independent re-review passed the full warmup module, 5 tests in 113.80 seconds, and the current-schema restart/catalog discriminator, 1 test in 42.34 seconds. Ruff format/check, Ty and diff checks pass. Both remediation and robustness Core checks report all 19 checks clean; the current-only scan finds no retired/deprecated surface and the owned-load process scan is empty. No new finding surfaced. S07 is review-passed and ready for separate lifecycle closure; this review leaves it open.

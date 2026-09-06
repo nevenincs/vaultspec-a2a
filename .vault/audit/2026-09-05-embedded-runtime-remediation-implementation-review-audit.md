@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:fdf95433708fe22ab830a27a2a4ed6b6d61aa2ca83873f452d281e45324b6093'
+body_hash: 'sha256:901f612d9d29323255a9604f9dc4f65c0655099ff689379113309f62083529af'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1000,3 +1000,11 @@ All prior S06 credential redaction/rotation, shared-service isolation, cancellat
 Type: dependency-verification lifecycle. Formal PASS review `613d23e2b5e73eaa948cc49c745743d328c074ea` independently accepted the exact locked client/service pinning boundary, private service isolation, credential redaction and rotation evidence, single absolute launch/readiness/cleanup deadline, exact-owner fallback, terminal PID-race handling and typed nonzero control failures. The authoritative exact-source module passed 36 tests in 215.98 seconds, including the real suspended exact stop command in 63.65 seconds inside its explicit 120-second total deadline. Ruff, format, Ty, diff, secret scans and both feature Core checks passed; the shared service remained healthy with its rotated digest unchanged.
 
 Core closed only `W01.P02.S06`. Every historical FAIL and PASS review remains above. ER20 and all S06-owned correction findings are closed. The distinct cold provider-catalog/Uvicorn shutdown finding remains open under `W01.P02.S07` and `W04.P10.S49`; S07 is the next open remediation step.
+
+### w01-p02-s06-core-lifecycle-closure-formal-review | low | PASS
+
+Type: lifecycle-record review disposition. Closure commit `b4700b752fb87e1b00bdc2cbdd4c588e0e0c2ae7` has exact parent `613d23e2b5e73eaa948cc49c745743d328c074ea` and changes exactly six Core-managed Vault paths: the three owning audits, new S06 Step Record, remediation index and remediation plan. It closes only `W01.P02.S06`; Core reports six of 81 Steps complete, no missing execution records and `W01.P02.S07` next. No runtime or test path changed.
+
+The Step Record retains the complete `9d56e23e` through `613d23e2` implementation/FAIL-correction/PASS chain, the authoritative 36-test module result, all four real-process discriminators, exact 120-second hung-stop evidence, static/diff/secret scans, rotated shared-fingerprint stability and final formal review identity. The linked PASS review supplies the clean 19-check remediation Core result, and both remediation and provider-model-catalog feature checks independently return zero diagnostics at closure. Historical FAIL/PASS entries remain in place; only their current finding statuses move to closed. ER20 is closed, while the distinct cold catalog/Uvicorn finding remains open under S07/S49.
+
+Current-tree scans find no disclosed raw credential or restored legacy/deprecated claim. Index, audits, Step Record and plan agree. No finding surfaced; the S06 lifecycle closure passes mandatory review.

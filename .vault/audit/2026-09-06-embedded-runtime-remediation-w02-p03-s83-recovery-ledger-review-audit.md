@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:2f3d2a5d438ba99aed6f72aa7283d3458cd0fd5eb8238ccfc3a3cf2e1d6df56d'
+body_hash: 'sha256:6c668e414b672dc791e42d8dd0ce2708321dab44aae18d33ffc5b6e65e286a43'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-adr]]"
@@ -40,6 +40,9 @@ The increment establishes a durable retry owner and closes the crash window betw
 | --- | --- | --- |
 | PASS | thread service token and terminal-race suite | 6 passed in 12.73s |
 | PASS | recovery repository, direct recovery, and direct lease suite | 17 passed in 62.73s |
+| PASS | corrupt accepted-input quarantine proof | 1 passed in 3.57s |
+| PASS | missing accepted-action quarantine proof | 1 passed in 3.56s |
+| FAIL | three-test quarantine lane | no session result within 60s; owned tree reaped |
 | PASS | earlier combined focused recovery/cancel/receipt suite | 20 passed, 4 deselected in 34.70s |
 | PASS | earlier team config, frozen graph, and schema parity suite | 163 passed in 49.06s |
 | PASS | Ruff over all changed production and migration modules | all checks passed |
@@ -57,10 +60,10 @@ The increment establishes a durable retry owner and closes the crash window betw
 | HIGH | Architecture | Open | Live message, permission, clarification, cancel, and verdict dispatch failures rely on the periodic crash-window seeder, so the first persisted condition is `dispatch_pending` rather than the observed typed failure. Centralize failure recording at the acceptance/dispatch boundary without reconstructing authority. | S83 |
 | HIGH | Correctness | Open | Deadline expiry can race a worker application receipt. The coordinator can quarantine at the deadline before reading or incorporating concurrent exact checkpoint evidence. Establish one transactional precedence rule between application evidence and deadline settlement. | S83/S84 |
 | HIGH | Invariant | Open | The nullable action deadline is enforced by service code rather than a schema-local discriminator. A recoverable accepted action can still be inserted without a deadline through lower-level repository APIs. Add a current-only dispatch-required invariant or narrow the repository surface. | S83 |
-| HIGH | Correctness | Open | A corrupt or mismatched accepted payload currently closes its recovery attempt as conflicted without always quarantining the owning active thread/action, which can leave accepted work active and unapplied. Make incompatible-input settlement atomic across action, thread repair state, and recovery row. | S83 |
+| RESOLVED HIGH | Correctness | Closed | Corrupt payloads and inconsistent deadlines now atomically reject the exact action, move its thread to reconciling, block execution readiness, and settle the retry as incompatible. A missing or type-corrupt action receipt preserves the last proven lifecycle state while atomically blocking readiness and settling the exact retry; no replacement authority is fabricated. | this increment |
 | MEDIUM | Architecture | Open | Clarification has a separate startup redriver while the direct recovery coordinator also admits RESUME, producing fragmented ownership even though action leases prevent duplicate dispatch. Consolidate recovery ownership. | S11/S14 |
 | MEDIUM | Observability | Open | Periodic recovery exceptions are retained only as `app.state.direct_control_recovery_error` and logs; health/readiness does not disclose degraded recovery ownership. | condition matrix follow-up |
-| MEDIUM | Operations | Open | When another action owner holds a lease, the periodic recovery owner releases its claim and rechecks every two seconds instead of sleeping until the known action lease boundary. Persist the next eligible time to the lease boundary. | S83 |
+| RESOLVED MEDIUM | Operations | Closed | Lease contention now persists next eligibility at the known action-lease boundary, bounded by the accepted deadline, instead of waking every two seconds. | this increment |
 | MEDIUM | Data lifecycle | Open | Settled recovery rows have no bounded retention or archival policy. | later persistence step |
 | MEDIUM | Contract drift | Open | `RecoveryCondition` duplicates most of `FailureType`; mapping completeness can drift without an exhaustive current-contract assertion or one shared closed vocabulary. | S84 |
 | MEDIUM | Test infrastructure | Open | Broad combined pytest lanes can pass many tests but exceed their bounded session deadline on this host; retain smaller authoritative lanes and investigate teardown/startup latency separately. | audit harness queue |
@@ -69,8 +72,8 @@ The increment establishes a durable retry owner and closes the crash window betw
 
 ## Recommendations
 
-Continue S83 in this order: atomically quarantine corrupt accepted input; persist the observed typed failure in each live producer; define application-receipt precedence at the deadline; expose recovery-owner degradation through health. Preserve current-only refusal semantics throughout.
+Continue S83 in this order: persist the observed typed failure in each live producer; define application-receipt precedence at the deadline; expose recovery-owner degradation through health. Preserve current-only refusal semantics throughout.
 
 ## Handoff state
 
-S83 is open. The reviewed runtime increment and migration 0020 are checkpointed in commit `a7ba047c`. Next work should first make corrupt-input quarantine atomic, then persist the observed failure condition in every live producer path, then define deadline-versus-application precedence. Do not add compatibility behavior, aliases, inferred deadlines, or legacy-store backfill.
+S83 is open. The reviewed runtime increment and migration 0020 are checkpointed in commit `a7ba047c`. Next work should persist the observed failure condition in every live producer path, then define deadline-versus-application precedence. Do not add compatibility behavior, aliases, inferred deadlines, or legacy-store backfill.

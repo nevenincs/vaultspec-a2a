@@ -311,6 +311,52 @@ async def _settle_permanent_refusal(
     return True
 
 
+async def _settle_orphaned_refusal(
+    db: AsyncSession,
+    *,
+    thread_id: str,
+    authority: RunWriteAuthority,
+    refusal: _Refusal,
+) -> bool:
+    """Quarantine exact authority whose accepted action row disappeared."""
+    thread = await db.scalar(
+        select(ThreadModel)
+        .where(ThreadModel.id == thread_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if thread is None or ThreadStatus(thread.status) in NON_ACTIVE_STATUSES:
+        return False
+    expectation = thread_write_expectation(thread)
+    if expectation.authority != authority:
+        return False
+    if expectation.status is not ThreadStatus.RECONCILING:
+        election = await elect_thread_status(
+            db,
+            thread_id,
+            expectation=expectation,
+            status=ThreadStatus.RECONCILING,
+            successor=successor_thread_write_authority(
+                expectation,
+                action_type=authority.action_type,
+                action_receipt_id=authority.action_receipt_id,
+            ),
+        )
+        if election.outcome not in {
+            ThreadStatusElectionOutcome.WON,
+            ThreadStatusElectionOutcome.RECEIPT_MISMATCH,
+        }:
+            return False
+    await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+        repair_reason=f"{refusal.failure_type.value}: {refusal.reason}",
+        execution_readiness=RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    )
+    return True
+
+
 async def redrive_direct_control_actions(
     session_factory: async_sessionmaker[AsyncSession],
     *,
@@ -353,15 +399,50 @@ async def redrive_direct_control_actions(
                 or payload is None
                 or row.recovery_deadline_at != recovery_claim.deadline_at
             ):
-                await settle_recovery_attempt(
-                    db,
-                    recovery_claim,
-                    settled_at=datetime.now(UTC),
-                    condition=RecoveryCondition.INCOMPATIBLE_STATE,
-                    detail="accepted recovery input is absent or inconsistent",
+                refusal = _Refusal(
+                    FailureType.INCOMPATIBLE_STATE,
+                    "accepted recovery input is absent or inconsistent",
                 )
-                await db.commit()
-                conflicted += 1
+                quarantined = (
+                    await _settle_permanent_refusal(
+                        db,
+                        _StoredAction(
+                            dispatch_id=recovery_claim.authority.action_receipt_id,
+                            thread_id=recovery_claim.thread_id,
+                            action_type=recovery_claim.authority.action_type.value,
+                            request_id=row.request_id,
+                            idempotency_key=row.idempotency_key,
+                            payload=payload or {},
+                            worker_generation=row.worker_generation,
+                            recovery_deadline_at=recovery_claim.deadline_at,
+                        ),
+                        refusal,
+                    )
+                    if (
+                        row is not None
+                        and row.action_type
+                        == recovery_claim.authority.action_type.value
+                    )
+                    else await _settle_orphaned_refusal(
+                        db,
+                        thread_id=recovery_claim.thread_id,
+                        authority=recovery_claim.authority,
+                        refusal=refusal,
+                    )
+                )
+                if quarantined:
+                    await settle_recovery_attempt(
+                        db,
+                        recovery_claim,
+                        settled_at=datetime.now(UTC),
+                        condition=RecoveryCondition.INCOMPATIBLE_STATE,
+                        detail=refusal.reason,
+                    )
+                    await db.commit()
+                    refused += 1
+                else:
+                    await db.rollback()
+                    conflicted += 1
                 continue
             if row.applied_at is not None:
                 await settle_recovery_attempt(
@@ -379,6 +460,7 @@ async def redrive_direct_control_actions(
                 worker_generation=row.worker_generation,
                 recovery_deadline_at=recovery_claim.deadline_at,
             )
+            action_claim_expires_at = row.claim_expires_at
             claim_started = datetime.now(UTC)
             claim = await prepare_control_action_claim(
                 db,
@@ -393,23 +475,56 @@ async def redrive_direct_control_actions(
                 now=claim_started,
             )
             if not claim.authority_matches:
-                await settle_recovery_attempt(
-                    db, recovery_claim, settled_at=datetime.now(UTC)
-                )
+                authority_checked_at = datetime.now(UTC)
+                if authority_checked_at >= recovery_claim.deadline_at:
+                    await release_recovery_attempt(
+                        db, recovery_claim, released_at=authority_checked_at
+                    )
+                    deferred += 1
+                else:
+                    await settle_recovery_attempt(
+                        db, recovery_claim, settled_at=authority_checked_at
+                    )
+                    conflicted += 1
                 await db.commit()
-                conflicted += 1
                 continue
             if not claim.payload_matches:
-                await settle_recovery_attempt(
-                    db, recovery_claim, settled_at=datetime.now(UTC)
+                refusal = _Refusal(
+                    FailureType.INCOMPATIBLE_STATE,
+                    "accepted recovery payload changed after acceptance",
                 )
-                await db.commit()
-                conflicted += 1
+                if await _settle_permanent_refusal(db, action, refusal):
+                    await settle_recovery_attempt(
+                        db,
+                        recovery_claim,
+                        settled_at=datetime.now(UTC),
+                        condition=RecoveryCondition.INCOMPATIBLE_STATE,
+                        detail=refusal.reason,
+                    )
+                    await db.commit()
+                    refused += 1
+                else:
+                    await db.rollback()
+                    conflicted += 1
                 continue
             if not claim.acquired:
-                await release_recovery_attempt(
-                    db, recovery_claim, released_at=datetime.now(UTC)
-                )
+                deferred_at = datetime.now(UTC)
+                if deferred_at >= recovery_claim.deadline_at:
+                    await release_recovery_attempt(
+                        db, recovery_claim, released_at=deferred_at
+                    )
+                else:
+                    await reschedule_recovery_attempt(
+                        db,
+                        recovery_claim,
+                        condition=recovery_claim.condition,
+                        observed_at=deferred_at,
+                        next_eligible_at=min(
+                            max(deferred_at, action_claim_expires_at or deferred_at),
+                            recovery_claim.deadline_at,
+                        ),
+                        detail="accepted action lease remains owned",
+                    )
                 await db.commit()
                 deferred += 1
                 continue

@@ -45,6 +45,7 @@ from ..direct_control_recovery import (
 )
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..execution_authority import resolve_execution_authority
+from ..recovery import seed_recovery_attempts
 from ..worker_management import LazyWorkerSpawner
 from ._catalog_authority import current_execution_metadata
 
@@ -384,6 +385,98 @@ async def test_expired_run_is_quarantined_without_dispatch(
     assert thread.repair_reason.startswith("deadline_exceeded:")
     assert attempt is not None
     assert attempt.condition == RecoveryCondition.DEADLINE_EXCEEDED.value
+    assert attempt.settled_at is not None
+
+
+@pytest.mark.asyncio
+async def test_corrupt_accepted_input_is_atomically_quarantined(
+    tmp_path: Path,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    case = _accepted_cases(tmp_path)[0]
+    async with sessions() as db:
+        await _persist_case(db, case)
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
+        )
+        assert action is not None
+        action.payload_json = "{not-json"
+        await db.commit()
+
+    summary, received = await _run_recovery(sessions)
+
+    assert not received
+    assert summary.examined == 1
+    assert summary.refused == 1
+    assert summary.conflicted == 0
+    async with sessions() as db:
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
+        )
+        thread = await get_thread(db, case.thread_id)
+        attempt = await db.scalar(
+            select(RecoveryAttemptModel).where(
+                RecoveryAttemptModel.thread_id == case.thread_id
+            )
+        )
+    assert action is not None
+    assert action.applied_at is not None
+    assert (
+        action.result_status
+        == ControlActionResultStatus.REJECTED_INVALID_STATE.value
+    )
+    assert thread is not None
+    assert thread.status == ThreadStatus.RECONCILING.value
+    assert thread.repair_reason is not None
+    assert thread.repair_reason.startswith("incompatible_state:")
+    assert attempt is not None
+    assert attempt.condition == RecoveryCondition.INCOMPATIBLE_STATE.value
+    assert attempt.settled_at is not None
+
+
+@pytest.mark.asyncio
+async def test_missing_accepted_action_quarantines_its_exact_run(
+    tmp_path: Path,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    case = _accepted_cases(tmp_path)[0]
+    async with sessions() as db:
+        await _persist_case(db, case)
+        now = datetime.now(UTC)
+        await db.commit()
+    async with sessions() as db:
+        assert await seed_recovery_attempts(db, observed_at=now, limit=1) == 1
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
+        )
+        assert action is not None
+        await db.delete(action)
+        await db.commit()
+
+    summary, received = await _run_recovery(sessions)
+
+    assert not received
+    assert summary.examined == 1
+    assert summary.refused == 1
+    async with sessions() as db:
+        thread = await get_thread(db, case.thread_id)
+        attempt = await db.scalar(
+            select(RecoveryAttemptModel).where(
+                RecoveryAttemptModel.thread_id == case.thread_id
+            )
+        )
+    assert thread is not None
+    # With the receipt absent there is no lawful evidence for a lifecycle
+    # election. The last proven status remains while readiness blocks execution.
+    assert thread.status == ThreadStatus.RUNNING.value
+    assert (
+        thread.execution_readiness
+        == RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+    )
+    assert thread.repair_reason is not None
+    assert thread.repair_reason.startswith("incompatible_state:")
+    assert attempt is not None
+    assert attempt.condition == RecoveryCondition.INCOMPATIBLE_STATE.value
     assert attempt.settled_at is not None
 
 

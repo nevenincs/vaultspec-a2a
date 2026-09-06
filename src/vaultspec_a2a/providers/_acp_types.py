@@ -9,6 +9,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 from langchain_core.outputs import ChatGenerationChunk
@@ -24,6 +25,78 @@ type AcpResponseFuture = asyncio.Future[JsonObject]
 type AcpResponseFutures = dict[int, AcpResponseFuture]
 
 PermissionCallback = Callable[[str, JsonObject, list[JsonObject]], Awaitable[str]]
+MAX_ACP_SESSION_ID_LENGTH = 512
+MAX_NATIVE_COMMAND_NAME_LENGTH = 128
+MAX_SESSION_COMMAND_CATALOGS = 16
+
+
+class NativeCommandDisposition(StrEnum):
+    """Whether one command can be invoked in the current provider session."""
+
+    SUPPORTED = "supported"
+    BLOCKED = "blocked"
+    UNSUPPORTED = "unsupported"
+
+
+@dataclass(frozen=True, slots=True)
+class NativeCommandAvailability:
+    """One exact command's session-scoped availability and input contract."""
+
+    name: str
+    disposition: NativeCommandDisposition
+    description: str | None = None
+    input_hint: str | None = None
+    reason: str | None = None
+
+
+@dataclass(slots=True)
+class AcpNativeCommandCatalog:
+    """Validated replacement snapshots from ACP available-command updates."""
+
+    commands: dict[str, NativeCommandAvailability] = field(default_factory=dict)
+    received: bool = False
+    blocked_reason: str | None = None
+
+    def replace(
+        self,
+        commands: dict[str, NativeCommandAvailability],
+        *,
+        blocked_reason: str | None = None,
+    ) -> None:
+        """Replace the session snapshot atomically, including its validity state."""
+        self.commands = dict(commands)
+        self.received = True
+        self.blocked_reason = blocked_reason
+
+    def resolve(self, name: str) -> NativeCommandAvailability:
+        """Resolve one exact command without inventing aliases or default support."""
+        if (
+            not name
+            or name != name.strip()
+            or not name.isprintable()
+            or len(name) > MAX_NATIVE_COMMAND_NAME_LENGTH
+        ):
+            raise ValueError("native command name must be non-empty, trimmed text")
+        if self.blocked_reason is not None:
+            return NativeCommandAvailability(
+                name=name,
+                disposition=NativeCommandDisposition.BLOCKED,
+                reason=self.blocked_reason,
+            )
+        if not self.received:
+            return NativeCommandAvailability(
+                name=name,
+                disposition=NativeCommandDisposition.BLOCKED,
+                reason="the provider has not advertised commands for this session",
+            )
+        advertised = self.commands.get(name)
+        if advertised is not None:
+            return advertised
+        return NativeCommandAvailability(
+            name=name,
+            disposition=NativeCommandDisposition.UNSUPPORTED,
+            reason="the provider did not advertise this command for the session",
+        )
 
 
 def require_workspace_root(value: str | None, *, surface: str) -> Path:
@@ -199,6 +272,9 @@ class AcpSessionContext:
     # Session-scoped mutables (moved from AcpChatModel PrivateAttrs)
     tool_calls: dict[str, JsonObject] = field(default_factory=dict)
     agent_modes: JsonObject = field(default_factory=dict)
+    native_command_catalogs: dict[str, AcpNativeCommandCatalog] = field(
+        default_factory=dict
+    )
     config_options: list[JsonObject] = field(default_factory=list)
     last_auth_url: str | None = None
     # Monotonic stamp of the last frame read from the subprocess. The turn loop
@@ -210,6 +286,23 @@ class AcpSessionContext:
     def mark_activity(self) -> None:
         """Record that the subprocess just produced a protocol frame."""
         self.last_activity_monotonic = time.monotonic()
+
+    def native_commands_for(self, session_id: str) -> AcpNativeCommandCatalog:
+        """Return the command authority for one exact protocol session."""
+        if (
+            not session_id
+            or session_id != session_id.strip()
+            or not session_id.isprintable()
+            or len(session_id) > MAX_ACP_SESSION_ID_LENGTH
+        ):
+            raise ValueError("ACP session id must be non-empty, trimmed text")
+        catalog = self.native_command_catalogs.get(session_id)
+        if catalog is None:
+            if len(self.native_command_catalogs) >= MAX_SESSION_COMMAND_CATALOGS:
+                raise ValueError("ACP session command catalog limit reached")
+            catalog = AcpNativeCommandCatalog()
+            self.native_command_catalogs[session_id] = catalog
+        return catalog
 
     def seconds_since_activity(self) -> float:
         """Return seconds elapsed since the last observed protocol frame."""

@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:ece7116de26a1fe1b19925a777ed874a78ddfa35d600596996bb7c8f7083a3a9'
+body_hash: 'sha256:c825636a28928d5c4741c88729126e599dfef22d60f0da00798b92e66a7c3b8f'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -139,7 +139,7 @@ Join session command discovery to intentional execution without a generic shell 
 
 - [ ] `W03.P08.S35` - Verify capability composition/served integration under 2026-08-02-provider-capability-evidence-plan P01.S01-S02 against actual constructors and production consumers; `capability composition dependency`.
 - [ ] `W03.P08.S36` - Verify existing exact-capability evidence and invalidation under owner P02.S03-S04; retain new command and compaction claims as blocked until their later effect qualification; `capability proof dependency`.
-- [ ] `W03.P08.S37` - Expose session-scoped command advertisements with explicit supported, blocked and unsupported dispositions; `src/vaultspec_a2a/providers/_acp_protocol.py`.
+- [x] `W03.P08.S37` - Expose session-scoped command advertisements with explicit supported, blocked and unsupported dispositions; `src/vaultspec_a2a/providers/_acp_protocol.py`.
 - [ ] `W03.P08.S38` - Execute negotiated native commands with validated arguments, busy disposition and observable outcomes; require independent native-compaction effects before claiming support; `src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [ ] `W03.P08.S81` - Implement the admitted Codex app-server lane's native-control mapping against its verified protocol and session identity, with explicit absent-control refusal, bounded outcomes and no arbitrary RPC escape; keep new claims blocked until effect proof; `src/vaultspec_a2a/providers/codex_chat_model.py`.
 

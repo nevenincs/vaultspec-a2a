@@ -17,7 +17,16 @@ from langchain_core.outputs import ChatGenerationChunk
 from pydantic import TypeAdapter, ValidationError
 
 from ._acp_auth import runtime_log_extra
-from ._acp_types import AcpModelConfig, AcpRpcId, AcpSessionContext, RpcHandlerMap
+from ._acp_types import (
+    MAX_ACP_SESSION_ID_LENGTH,
+    MAX_NATIVE_COMMAND_NAME_LENGTH,
+    AcpModelConfig,
+    AcpRpcId,
+    AcpSessionContext,
+    NativeCommandAvailability,
+    NativeCommandDisposition,
+    RpcHandlerMap,
+)
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpErrorCode, AcpPromptError
 
@@ -48,6 +57,9 @@ _CAPABILITY_REQUIREMENTS: dict[str, str] = {
 _EFFECTFUL_SERVER_METHODS = frozenset(
     {"fs/write_text_file", "terminal/create", "terminal/kill"}
 )
+_MAX_COMMAND_DESCRIPTION_LENGTH = 1024
+_MAX_COMMAND_INPUT_HINT_LENGTH = 512
+_MAX_AVAILABLE_COMMANDS = 256
 
 
 def _json_string(value: JsonValue | None, *, default: str = "") -> str:
@@ -62,6 +74,74 @@ def _rpc_id(value: JsonValue | None) -> AcpRpcId | None:
     ):
         return value
     return None
+
+
+def _bounded_command_text(
+    value: JsonValue | None, *, field: str, maximum: int
+) -> str:
+    """Return one required bounded command field or raise on a bad snapshot."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or not value.isprintable()
+        or len(value) > maximum
+    ):
+        raise ValueError(f"available command {field} is invalid")
+    return value
+
+
+def _bounded_command_display_text(
+    value: JsonValue | None, *, field: str, maximum: int
+) -> str:
+    """Return one protocol display string without applying identity rules."""
+    if not isinstance(value, str) or len(value) > maximum:
+        raise ValueError(f"available command {field} is invalid")
+    return value
+
+
+def _native_command_snapshot(
+    update: JsonObject,
+) -> dict[str, NativeCommandAvailability]:
+    """Validate one ACP command advertisement as an all-or-nothing snapshot."""
+    raw_commands = update.get("availableCommands")
+    if not isinstance(raw_commands, list):
+        raise ValueError("availableCommands must be an array")
+    if len(raw_commands) > _MAX_AVAILABLE_COMMANDS:
+        raise ValueError("availableCommands exceeds the session limit")
+
+    snapshot: dict[str, NativeCommandAvailability] = {}
+    for raw_command in raw_commands:
+        if not isinstance(raw_command, dict):
+            raise ValueError("availableCommands entries must be objects")
+        command = lenient_json_object(raw_command)
+        name = _bounded_command_text(
+            command.get("name"), field="name", maximum=MAX_NATIVE_COMMAND_NAME_LENGTH
+        )
+        if name in snapshot:
+            raise ValueError("availableCommands contains a duplicate command name")
+        description = _bounded_command_display_text(
+            command.get("description"),
+            field="description",
+            maximum=_MAX_COMMAND_DESCRIPTION_LENGTH,
+        )
+        raw_input = command.get("input")
+        input_hint: str | None = None
+        if raw_input is not None:
+            if not isinstance(raw_input, dict):
+                raise ValueError("available command input must be an object")
+            input_hint = _bounded_command_display_text(
+                lenient_json_object(raw_input).get("hint"),
+                field="input hint",
+                maximum=_MAX_COMMAND_INPUT_HINT_LENGTH,
+            )
+        snapshot[name] = NativeCommandAvailability(
+            name=name,
+            disposition=NativeCommandDisposition.SUPPORTED,
+            description=description,
+            input_hint=input_hint,
+        )
+    return snapshot
 
 
 def _log_task_exception(task: asyncio.Task[None]) -> None:
@@ -333,7 +413,29 @@ async def handle_session_update(
     elif u_type == "current_mode_update":
         ctx.agent_modes["currentModeId"] = update.get("currentModeId")
     elif u_type == "available_commands_update":
-        ctx.agent_modes["availableCommands"] = update.get("commands", [])
+        session_id = params.get("sessionId")
+        if (
+            not isinstance(session_id, str)
+            or not session_id
+            or session_id != session_id.strip()
+            or not session_id.isprintable()
+            or len(session_id) > MAX_ACP_SESSION_ID_LENGTH
+        ):
+            logger.warning("ACP command advertisement omitted a valid sessionId")
+            return
+        try:
+            catalog = ctx.native_commands_for(session_id)
+        except ValueError as exc:
+            logger.warning("ACP command advertisement blocked: %s", exc)
+            return
+        try:
+            snapshot = _native_command_snapshot(update)
+        except ValueError as exc:
+            reason = str(exc)
+            catalog.replace({}, blocked_reason=reason)
+            logger.warning("ACP command advertisement blocked: %s", reason)
+        else:
+            catalog.replace(snapshot)
     elif u_type == "plan":
         # Plan updates are metadata; log receipt and let graph-level plan
         # handling in the supervisor/aggregator layer process them.

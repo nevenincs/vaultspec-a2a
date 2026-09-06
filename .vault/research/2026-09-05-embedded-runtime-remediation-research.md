@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:53cbc91face1d7a918103dd370de0ba2a9a0ed006d09040a96aafb1a5d3472e4'
+body_hash: 'sha256:5c6b25466d1908fbaebbbf2290cd683d2ae154947400d5cb5f68b89ac722c4db'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -191,3 +191,6 @@ A lost status election never proves transport success by itself. For initial ING
 Correction rereview disproved durable request time as causal authority. `requested_at` comes from application wall time and can move backward or be assigned inconsistently with commit order; a greater timestamp therefore cannot prove that an action succeeds the receipt currently named by the thread. Equal, missing and older timestamps failing closed does not repair that unsound positive branch.
 
 S10 recovery consequently admits only exact-current action identity. A durable action and expired lease that were never elected remain visible for reconciliation but cannot be dispatched or installed over another receipt. Later checkpoint incorporation and settlement work may add causal evidence for those rows; recovery cannot anticipate it. This removes both clock dependence and the ability of any historical unapplied action to reclaim current authority.
+### ACP command advertisements are replacement snapshots keyed by session
+
+The pinned ACP 1 schema and the installed adapter use `availableCommands` inside `available_commands_update`; the implementation had read a nonprotocol `commands` key and therefore erased every real advertisement. The corrected authority validates the complete snapshot, keys it by the exact bounded notification `sessionId`, replaces rather than merges it, bounds command and session counts, and resolves each exact name as supported, blocked or unsupported. The nonprotocol key is deliberately refused rather than retained as compatibility behavior. This proves advertisement handling only. Execution, compaction effects and product capability claims remain gated by their separate plan Steps.

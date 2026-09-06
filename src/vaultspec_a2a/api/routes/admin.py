@@ -1,8 +1,6 @@
 """POST /admin/shutdown -- Graceful shutdown (BE-G)."""
 
 import asyncio
-import os
-import signal
 
 from fastapi import APIRouter, Depends, Request
 
@@ -15,11 +13,6 @@ router = APIRouter()
 # Brief delay before the in-process stop so this 202 response flushes to the
 # caller before the SIGINT-driven graceful shutdown tears the listener down.
 _STOP_DELAY_SECONDS = 0.25
-
-
-def _stop_this_process() -> None:
-    """Send this process the graceful-shutdown signal."""
-    os.kill(os.getpid(), signal.SIGINT)
 
 
 @router.post(
@@ -53,9 +46,16 @@ async def shutdown_endpoint(request: Request) -> dict[str, str]:
 
     Run admission is closed first, so the gateway admits no new run while it
     drains; the in-process stop is then deferred briefly so this 202 flushes
-    before the SIGINT-driven graceful shutdown - which drains and reaps the owned
-    worker and run descendants in the lifespan - begins.
+    before the owning Uvicorn server begins its deadline-bound connection drain
+    and application lifespan teardown.
     """
+    request_shutdown = getattr(request.app.state, "request_server_shutdown", None)
+    if request_shutdown is None:
+        # A route mounted without the owning serve entry point cannot promise a
+        # lifecycle transition. Refuse before closing admission permanently.
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=503, detail="Gateway lifecycle owner absent")
     await admission_gate(request.app).close_admission()
-    asyncio.get_running_loop().call_later(_STOP_DELAY_SECONDS, _stop_this_process)
+    asyncio.get_running_loop().call_later(_STOP_DELAY_SECONDS, request_shutdown)
     return {"status": "shutting_down"}

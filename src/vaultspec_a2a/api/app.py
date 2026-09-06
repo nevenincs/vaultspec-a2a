@@ -663,15 +663,18 @@ def main() -> None:
     reconfigure_console_utf8()
     configure_logging("service", service_name="gateway")
     configure_asyncio_runtime()
-    uvicorn.run(
-        "vaultspec_a2a.api.app:create_app",
-        factory=True,
+    app = create_app()
+    config = uvicorn.Config(
+        app,
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level.value,
         access_log=settings.access_log,
         loop="auto",
     )
+    server = uvicorn.Server(config)
+    app.state.request_server_shutdown = lambda: setattr(server, "should_exit", True)
+    server.run()
 
 
 def create_app(

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:f0df95b3ded5fb1d4defadbc55026122063329644e5c34d5bc97285e0f793fad'
+body_hash: 'sha256:e57f74f347862109f606aa3b9dca6ca9c13ed5a6550da41792d541514aba4cf6'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1129,3 +1129,6 @@ Vaultspec Core closed only `W01.P02.S08`; plan status is 8 of 81 Steps complete 
 Type: lifecycle closure review. Commit `c865f0ea47de681a214159e69c6d2eb64c6d27eb` has exact parent `333080e4a351b9450158c8b8375d9beb301a98a1` and changes exactly five Vault artifacts. Its plan delta closes only `W01.P02.S08`; independent row and Core status counts report 8 of 81 Steps complete with `W02.P03.S76` next. The execution record maps to S08 and preserves the complete `17095d27ca7e8727ec205155a7a209de5b58d0b5` implementation to `333080e4a351b9450158c8b8375d9beb301a98a1` PASS-review chain, exact Starlette source revision, locked dependency and installed-distribution counts, real warning-as-error TestClient proof, canonical/deprecated access discriminator, representative and broad regression results, changed-Starlette-surface coverage, static checks and supported-product boundary.
 
 ER22 alone closes with S08. The unreleased Starlette tree remains MEDIUM/open pending an official release, and independently pip-resolved wheels remain outside the supported Dashboard-embedded binary contract. The team-status projection failure remains MEDIUM/open under `W05.P13.S67`, the plan-approval fixture remains MEDIUM/open under `W02.P03.S78`/`W02.P03.S13`, and the five unchanged Ty diagnostics remain LOW/open under `W06.P14.S72`. Historical evidence is retained, all five changed documents are valid UTF-8 without replacement or NUL characters, and the closure adds no filter, downgrade, shim, old runtime option, legacy/deprecated support claim, runtime source or test source. Both affected features pass all 19 Vaultspec Core checks with zero diagnostics. No new finding surfaced; the S08 lifecycle closure passes mandatory review.
+### w04-p10-s47-cooperative-server-owner | high | corrected-pending-review
+
+Type: runtime lifecycle ownership. The authenticated administrative stop previously closed admission and then used process-directed `SIGINT`; on Windows that did not establish a cooperative Uvicorn-owned transition. The production gateway entry point now owns the current Uvicorn server instance and injects its `should_exit` callback. The route refuses 503 before closing admission when that owner is absent, and otherwise invokes it after the 202 response grace interval. This removes the Windows process-signal trigger without adding compatibility behavior. It is the prerequisite for S49's total shutdown deadline, does not touch S48 discovery, and awaits a separate S47 formal review.

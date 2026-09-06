@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d14347d6e95101f61a3c3b1b7e4e7843201ccbb1bd4c7faf034247e116beabbb'
+body_hash: 'sha256:c45a1796536f353e6b30beb903b1a414faa90a6cc34c64f18c4f5b2485c444f3'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -105,3 +105,6 @@ The locked baseline was already current at AnyIO 4.15.1, FastAPI 0.141.1 and Sta
 No released Starlette contains the correction. PyPI's latest 1.6.0 tag predates official PR 3498, merged as immutable commit `bbee894422c6cc1306327335ae385b901ccfec13`. The PR replaces the three TestClient accesses with `anyio.from_thread.BlockingPortal`. S08 therefore uses that exact official source through `tool.uv.sources` and regenerates the lock. The 211-package graph and compatible AnyIO/FastAPI constraints remain unchanged; the Starlette source changes from registry 1.6.0 to Git metadata 1.6.0 at `bbee8944`.
 
 This immediate correction has a wider provenance boundary than its three-line target patch: the source tree is 27 commits and 54 files beyond tag 1.6.0. Broad TestClient regression is therefore required. The warnings-as-errors consumer run passed 197 tests and failed two; both failures reproduced unchanged after controlled reinstall of registry 1.6.0, which also restored the BlockingPortal warning. Representative pinned coverage passed 28 tests. The frozen build invocation resolves the exact Git commit through the same uv-locked interpreter. Independent wheel resolution does not consume `tool.uv.sources`, but wheels are outside the ADR's supported Dashboard-embedded binary product boundary until Starlette publishes the fix.
+## W04.P10.S47 cooperative server ownership prerequisite
+
+The existing gateway administrative shutdown route closed run admission and then sent `SIGINT` to its own process. On Windows that process-signal path did not provide a Uvicorn-owned cooperative transition and could terminate before the response and lifespan ownership contract completed. S47 now makes the production serve entry point instantiate the current Uvicorn server directly and inject its `should_exit` transition into application state. The authenticated, receipt-bound route refuses with 503 when that owner is absent, before closing admission, and otherwise invokes the owner only after its 202 response grace interval. This is the lifecycle ownership prerequisite for S49's total-deadline implementation; S47 remains open for separate formal review and its broader readiness/drain consumer-generation contract. S48 discovery is unchanged.

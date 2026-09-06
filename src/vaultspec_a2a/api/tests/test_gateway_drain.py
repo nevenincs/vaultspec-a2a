@@ -9,6 +9,7 @@ still quiesce.
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 
 import httpx
@@ -124,6 +125,8 @@ async def test_admin_stop_closes_admission_and_refuses_new_runs(
     loop closes, so it never stops the test runner.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    stop_requested: list[bool] = []
+    app.state.request_server_shutdown = lambda: stop_requested.append(True)
     capability = "ownership-capability-drain-0011223344556677"
     app.state.lifecycle_capability = capability
     transport = ASGITransport(app=app)
@@ -148,6 +151,8 @@ async def test_admin_stop_closes_admission_and_refuses_new_runs(
         assert len(worker.dispatches) == dispatched, (
             "a run refused after admin stop must not reach the worker"
         )
+        await asyncio.sleep(0.3)
+        assert stop_requested == [True]
 
 
 @pytest.mark.asyncio(loop_scope="function")

@@ -20,10 +20,13 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from ..database import (
+    ThreadStatusElectionOutcome,
+    elect_thread_status,
     get_thread,
     list_active_thread_page,
     normalize_workspace_identity,
-    update_thread_status,
+    successor_thread_write_authority,
+    thread_write_expectation,
 )
 from ..team.team_config import load_team_config
 from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
@@ -141,16 +144,32 @@ async def reconcile_abandoned_reconciling_thread(
     if elapsed_seconds <= bound_seconds:
         return False
 
-    await update_thread_status(
+    expectation = thread_write_expectation(thread)
+    election = await elect_thread_status(
         db,
         thread_id,
-        ThreadStatus.FAILED,
+        expectation=expectation,
+        status=ThreadStatus.FAILED,
+        successor=successor_thread_write_authority(
+            expectation,
+            action_type=expectation.authority.action_type,
+            action_receipt_id=expectation.authority.action_receipt_id,
+        ),
         failure_reason=(
             "Reconciliation abandoned: no redispatch observed within "
             f"{bound_seconds:.0f}s of entering 'reconciling' "
             f"(last touched {elapsed_seconds:.0f}s ago)"
         ),
     )
+    if election.outcome is not ThreadStatusElectionOutcome.WON:
+        await db.commit()
+        await db.get(type(thread), thread_id, populate_existing=True)
+        logger.info(
+            "Skipped stale abandoned-run reconciliation for %s: %s",
+            thread_id,
+            election.outcome.value,
+        )
+        return False
     await db.commit()
     logger.warning(
         "Reconciled abandoned thread %s out of 'reconciling' after %.0fs (bound %.0fs)",

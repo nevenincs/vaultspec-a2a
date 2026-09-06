@@ -27,9 +27,20 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
 from ...conftest import materialize_schema
-from ...control.run_discovery_service import discover_active_runs
+from ...control.run_discovery_service import (
+    discover_active_runs,
+    reconcile_abandoned_reconciling_thread,
+)
 from ...control.thread_state_service import build_thread_state
-from ...database import create_thread, get_thread
+from ...database import (
+    ThreadStatusElectionOutcome,
+    create_control_action,
+    create_thread,
+    elect_thread_status,
+    get_thread,
+    successor_thread_write_authority,
+    thread_write_expectation,
+)
 from ...database.models import ThreadModel
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ThreadStatus
@@ -58,12 +69,20 @@ async def _seed_reconciling_thread(
     ``create_thread`` write, never a direct field assignment.
     """
     async with session_factory() as session:
+        authority = make_test_write_authority()
         await create_thread(
             session,
-            write_authority=make_test_write_authority(),
+            write_authority=authority,
             thread_id=thread_id,
             status=ThreadStatus.RECONCILING,
             team_preset=team_preset,
+        )
+        await create_control_action(
+            session,
+            thread_id=thread_id,
+            action_type=authority.action_type,
+            idempotency_key=f"{thread_id}-ingest",
+            dispatch_id=authority.action_receipt_id,
         )
         await session.commit()
     async with session_factory() as session:
@@ -203,3 +222,51 @@ async def test_a_direct_run_status_read_also_reconciles_an_abandoned_thread(
     assert snapshot.status == ThreadStatus.FAILED.value
     assert snapshot.failure_reason is not None
     assert "abandoned" in snapshot.failure_reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_abandonment_loses_to_a_newer_terminal_writer(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A stale discovery session cannot overwrite a newer terminal outcome."""
+    stale = datetime.now(UTC) - timedelta(seconds=400)
+    await _seed_reconciling_thread(
+        session_factory,
+        thread_id="stale-abandonment-reader",
+        team_preset="mock-success-single",
+        updated_at=stale,
+    )
+
+    async with session_factory() as stale_session:
+        stale_thread = await get_thread(stale_session, "stale-abandonment-reader")
+        assert stale_thread is not None
+        await stale_session.commit()
+
+        async with session_factory() as winning_session:
+            current = await get_thread(winning_session, "stale-abandonment-reader")
+            assert current is not None
+            expectation = thread_write_expectation(current)
+            election = await elect_thread_status(
+                winning_session,
+                current.id,
+                expectation=expectation,
+                status=ThreadStatus.COMPLETED,
+                successor=successor_thread_write_authority(
+                    expectation,
+                    action_type=expectation.authority.action_type,
+                    action_receipt_id=expectation.authority.action_receipt_id,
+                ),
+            )
+            assert election.outcome is ThreadStatusElectionOutcome.WON
+            await winning_session.commit()
+
+        reconciled = await reconcile_abandoned_reconciling_thread(
+            stale_session, "stale-abandonment-reader"
+        )
+        assert reconciled is False
+
+    async with session_factory() as verification_session:
+        final = await get_thread(verification_session, "stale-abandonment-reader")
+    assert final is not None
+    assert final.status == ThreadStatus.COMPLETED.value
+    assert final.failure_reason is None

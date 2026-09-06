@@ -24,13 +24,17 @@ from vaultspec_a2a.tests._write_authority import make_test_write_authority
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from ...database.models import ThreadModel
+
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.dispatch import (
     _REDISPATCH_LOG_EVERY_N,
     redispatch_reconciling_threads,
 )
 from ...control.worker_management import LazyWorkerSpawner
-from ...database import create_thread, get_thread
+from ...database import create_control_action, create_thread, get_thread
 from ...database.session import close_db, get_session_factory, init_db
 from ...providers.provider_catalog import (
     AdmissionState,
@@ -49,6 +53,33 @@ from ...providers.team_selection import freeze_team_selection
 from ...thread.enums import ThreadStatus
 
 _LOGGER_NAME = "vaultspec_a2a.control.dispatch"
+
+
+async def _create_reconciling_thread_with_receipt(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    team_preset: str,
+    metadata: str,
+) -> ThreadModel:
+    """Seed a current-schema reconciling row and its real action receipt."""
+    authority = make_test_write_authority()
+    thread = await create_thread(
+        session,
+        write_authority=authority,
+        thread_id=thread_id,
+        status=ThreadStatus.RECONCILING,
+        team_preset=team_preset,
+        metadata=metadata,
+    )
+    await create_control_action(
+        session,
+        thread_id=thread_id,
+        action_type=authority.action_type,
+        idempotency_key=f"{thread_id}-ingest",
+        dispatch_id=authority.action_receipt_id,
+    )
+    return thread
 
 
 def _current_metadata(workspace_root: str | None) -> dict[str, object]:
@@ -126,11 +157,9 @@ async def test_retired_stored_authority_fails_closed_without_redispatch(
     try:
         session_factory = get_session_factory()
         async with session_factory() as session:
-            await create_thread(
+            await _create_reconciling_thread_with_receipt(
                 session,
-                write_authority=make_test_write_authority(),
                 thread_id="retired-authority",
-                status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
                 metadata=json.dumps(
                     {
@@ -198,29 +227,23 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             frozen_record = valid_with_extra["provider_catalog_selection"]
             assert isinstance(frozen_record, dict)
             frozen_record["profile_id"] = "retired"
-            await create_thread(
+            await _create_reconciling_thread_with_receipt(
                 session,
-                write_authority=make_test_write_authority(),
                 thread_id="unchanged-digest-extra-field",
-                status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
                 metadata=json.dumps(valid_with_extra),
             )
             # list_threads orders newest first, so create the absent thread before
             # the corrupt one to prove a malformed first item does not abort.
-            await create_thread(
+            await _create_reconciling_thread_with_receipt(
                 session,
-                write_authority=make_test_write_authority(),
                 thread_id="absent-after-corrupt",
-                status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
                 metadata=json.dumps({"workspace_root": str(tmp_path)}),
             )
-            await create_thread(
+            await _create_reconciling_thread_with_receipt(
                 session,
-                write_authority=make_test_write_authority(),
                 thread_id="corrupt-modern-freeze",
-                status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
                 metadata=json.dumps(
                     {
@@ -308,19 +331,15 @@ async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continu
         async with session_factory() as session:
             # Newest first, so the healthy thread is created first and the
             # projectless one is reached before it.
-            await create_thread(
+            await _create_reconciling_thread_with_receipt(
                 session,
-                write_authority=make_test_write_authority(),
                 thread_id="healthy-after-projectless",
-                status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
                 metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
-            await create_thread(
+            await _create_reconciling_thread_with_receipt(
                 session,
-                write_authority=make_test_write_authority(),
                 thread_id="projectless",
-                status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
                 metadata=json.dumps(
                     {**_current_metadata(None), "feature_tag": "no-project-here"}
@@ -391,19 +410,15 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
     try:
         session_factory = get_session_factory()
         async with session_factory() as session:
-            await create_thread(
+            await _create_reconciling_thread_with_receipt(
                 session,
-                write_authority=make_test_write_authority(),
                 thread_id="healthy-after-relative",
-                status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
                 metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
-            await create_thread(
+            await _create_reconciling_thread_with_receipt(
                 session,
-                write_authority=make_test_write_authority(),
                 thread_id="relative-project",
-                status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
                 metadata=json.dumps(_current_metadata("workspaces/project")),
             )

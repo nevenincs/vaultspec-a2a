@@ -3,7 +3,7 @@ tags:
   - '#adr'
   - '#embedded-runtime-remediation'
 date: '2026-09-05'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v2'
 body_hash: 'sha256:d53f5b17413dcd9ea18ae348d5ee33abdc614b7466ac4e8cdc3cfca35fcefcfc'
 related:
@@ -19,6 +19,7 @@ related:
   - '[[2026-08-02-provider-capability-evidence-adr]]'
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
+  - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]'
 ---
 # `embedded-runtime-remediation` adr: `qualification and single-owner remediation of the embedded runtime` | (**status:** `accepted`)
 

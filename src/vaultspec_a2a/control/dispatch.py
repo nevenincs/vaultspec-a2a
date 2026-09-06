@@ -19,7 +19,14 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from ..database import get_session_factory, list_threads, update_thread_status
+from ..database import (
+    ThreadStatusElectionOutcome,
+    elect_thread_status,
+    get_session_factory,
+    list_threads,
+    successor_thread_write_authority,
+    thread_write_expectation,
+)
 from ..domain_config import domain_config
 from ..ipc.schemas import (
     DispatchRequest,
@@ -302,15 +309,32 @@ async def redispatch_reconciling_threads(
                         thread.thread_metadata
                     ).model_assignment
                 except ExecutionAuthorityError as exc:
-                    await update_thread_status(
+                    expectation = thread_write_expectation(thread)
+                    election = await elect_thread_status(
                         db,
                         thread.id,
-                        ThreadStatus.FAILED,
+                        expectation=expectation,
+                        status=ThreadStatus.FAILED,
+                        successor=successor_thread_write_authority(
+                            expectation,
+                            action_type=expectation.authority.action_type,
+                            action_receipt_id=(
+                                expectation.authority.action_receipt_id
+                            ),
+                        ),
                         failure_reason=(
                             "stored execution authority is incompatible "
                             f"({exc.reason.value})"
                         ),
                     )
+                    if election.outcome is not ThreadStatusElectionOutcome.WON:
+                        await db.commit()
+                        logger.warning(
+                            "Skipped stale reconciliation refusal for thread %s: %s",
+                            thread.id,
+                            election.outcome.value,
+                        )
+                        continue
                     await db.commit()
                     _log_redispatch_failure_ladder(
                         failure_counts,
@@ -330,15 +354,32 @@ async def redispatch_reconciling_threads(
                 # every healthy one behind it.
                 workspace_root = workspace_root_from_metadata(meta)
                 if workspace_root is None:
-                    await update_thread_status(
+                    expectation = thread_write_expectation(thread)
+                    election = await elect_thread_status(
                         db,
                         thread.id,
-                        ThreadStatus.FAILED,
+                        expectation=expectation,
+                        status=ThreadStatus.FAILED,
+                        successor=successor_thread_write_authority(
+                            expectation,
+                            action_type=expectation.authority.action_type,
+                            action_receipt_id=(
+                                expectation.authority.action_receipt_id
+                            ),
+                        ),
                         failure_reason=(
                             "run carries no active project: its stored metadata "
                             "names no workspace_root, so it cannot be re-sited"
                         ),
                     )
+                    if election.outcome is not ThreadStatusElectionOutcome.WON:
+                        await db.commit()
+                        logger.warning(
+                            "Skipped stale project refusal for thread %s: %s",
+                            thread.id,
+                            election.outcome.value,
+                        )
+                        continue
                     await db.commit()
                     _log_redispatch_failure_ladder(
                         failure_counts,

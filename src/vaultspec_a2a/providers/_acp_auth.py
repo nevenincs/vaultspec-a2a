@@ -20,6 +20,7 @@ from ._acp_types import (
 )
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpAuthError, AcpErrorCode
+from .conditions import ProviderCondition
 
 __all__: list[str] = []
 
@@ -167,12 +168,14 @@ def raise_auth_outcome_error(
     auth_outcome: str,
     auth_url: str | None = None,
     last_auth_url: str | None = None,
+    condition: ProviderCondition = ProviderCondition.UNKNOWN,
 ) -> Never:
     """Raise AcpAuthError with a bounded machine-readable auth outcome."""
     raise AcpAuthError(
         f"{message}{auth_url_hint(auth_url, last_auth_url)}",
         code=code,
         data={"auth_outcome": auth_outcome},
+        condition=condition,
     )
 
 
@@ -303,6 +306,7 @@ async def authenticate_rpc(
                 auth_outcome="auth_rejected",
                 auth_url=auth_url,
                 last_auth_url=last_auth_url,
+                condition=ProviderCondition.UNAUTHENTICATED,
             )
         raise_auth_outcome_error(
             message=f"Authentication failed: {err_msg}",
@@ -310,6 +314,7 @@ async def authenticate_rpc(
             auth_outcome="auth_failed",
             auth_url=auth_url,
             last_auth_url=last_auth_url,
+            condition=ProviderCondition.UNAUTHENTICATED,
         )
     result = resp.get("result")
     return lenient_json_object(result)

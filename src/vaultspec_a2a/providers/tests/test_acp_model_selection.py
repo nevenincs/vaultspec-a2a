@@ -21,11 +21,13 @@ from ...utils.enums import AcpRequestId
 from .._acp_session import (
     _select_desired_config_options,
     _select_desired_model,
+    _session_wire_error,
     initialize_session,
 )
 from .._acp_types import AcpModelConfig, AcpSessionContext, InitializeResult
 from .._json_contract import JsonObject, JsonValue
 from ..acp_exceptions import AcpErrorCode, AcpSessionError
+from ..conditions import ProviderCondition
 from ._acp_frames import read_acp_frame
 
 # An opaque model identifier standing for the value frozen into a run's role
@@ -84,7 +86,9 @@ async def echo_context() -> AsyncIterator[AcpSessionContext]:
 
 
 def _config(
-    desired_model: str | None, *, session_id: str | None = None
+    desired_model: str | None,
+    *,
+    session_id: str | None = None,
 ) -> AcpModelConfig:
     """Build the minimal real config the selection seam reads."""
     return AcpModelConfig(
@@ -206,6 +210,39 @@ async def test_initialize_accepts_only_the_requested_protocol_version(
 
 
 @pytest.mark.asyncio
+async def test_initialize_wire_condition_survives_session_error(
+    echo_context: AcpSessionContext,
+) -> None:
+    task = asyncio.create_task(initialize_session(echo_context, _config(None)))
+    await read_acp_frame(echo_context.stdout, AcpRequestId.INITIALIZE, timeout=_TIMEOUT)
+    wire_data: JsonObject = {"errorKind": "authentication_failed"}
+    echo_context.response_futures[AcpRequestId.INITIALIZE].set_result(
+        {
+            "error": {
+                "code": AcpErrorCode.INTERNAL_ERROR,
+                "message": "credential rejected",
+                "data": wire_data,
+            }
+        }
+    )
+    with pytest.raises(AcpSessionError) as caught:
+        await task
+    assert caught.value.condition is ProviderCondition.UNAUTHENTICATED
+    assert caught.value.data == wire_data
+
+
+def test_session_authentication_code_is_not_reported_unknown() -> None:
+    error = _session_wire_error(
+        "ACP session/new failed",
+        {
+            "code": AcpErrorCode.UNAUTHENTICATED,
+            "message": "authentication required",
+        },
+    )
+    assert error.condition is ProviderCondition.UNAUTHENTICATED
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("protocol_version", [None, "1", True])
 async def test_initialize_rejects_missing_or_malformed_protocol_version(
     echo_context: AcpSessionContext, protocol_version: JsonValue
@@ -306,13 +343,14 @@ async def test_session_without_a_model_option_fails_closed(
     echo_context: AcpSessionContext,
 ) -> None:
     """An adapter that advertises no model option cannot honour the profile."""
-    with pytest.raises(AcpSessionError, match="does not advertise"):
+    with pytest.raises(AcpSessionError, match="does not advertise") as caught:
         await _select_desired_model(
             echo_context,
             _config(_DESIRED),
             _SESSION_ID,
             [{"id": "thinking-budget", "category": "thinking"}],
         )
+    assert caught.value.condition is ProviderCondition.INVALID_REQUEST
     assert AcpRequestId.SESSION_SET_CONFIG_OPTION not in echo_context.response_futures
 
 
@@ -337,6 +375,7 @@ async def test_rejected_selection_fails_closed(
     with pytest.raises(AcpSessionError, match="unknown model") as caught:
         await task
     assert caught.value.code == AcpErrorCode.INVALID_PARAMS
+    assert caught.value.condition is ProviderCondition.INVALID_REQUEST
 
 
 @pytest.mark.asyncio
@@ -358,8 +397,11 @@ async def test_unconfirmed_selection_fails_closed(
     )
     _resolve(echo_context, {"result": _confirmation("a-much-larger-model")})
 
-    with pytest.raises(AcpSessionError, match="did not select the requested model"):
+    with pytest.raises(
+        AcpSessionError, match="did not select the requested model"
+    ) as caught:
         await task
+    assert caught.value.condition is ProviderCondition.INVALID_REQUEST
 
 
 @pytest.mark.asyncio

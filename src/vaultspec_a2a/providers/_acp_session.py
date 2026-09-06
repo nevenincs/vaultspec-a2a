@@ -30,6 +30,7 @@ from ._acp_types import (
 )
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpErrorCode, AcpSessionError
+from .conditions import ProviderCondition, condition_from_acp_error
 
 __all__: list[str] = []
 
@@ -176,6 +177,7 @@ def _model_config_id(config_options: list[JsonObject]) -> str:
     raise AcpSessionError(
         "ACP session does not advertise a selectable model configuration option",
         code=AcpErrorCode.INVALID_PARAMS,
+        condition=ProviderCondition.INVALID_REQUEST,
     )
 
 
@@ -234,6 +236,7 @@ async def _select_config_option(
         raise AcpSessionError(
             f"ACP session does not advertise requested {label} configuration option",
             code=AcpErrorCode.INVALID_PARAMS,
+            condition=ProviderCondition.INVALID_REQUEST,
         )
     rpc_id = AcpRequestId.SESSION_SET_CONFIG_OPTION
     future = await issue_request(
@@ -254,9 +257,8 @@ async def _select_config_option(
     if "error" in response:
         error = lenient_json_object(response["error"])
         message = str(error.get("message", response["error"]))
-        raise AcpSessionError(
-            f"ACP session/set_config_option failed: {message}",
-            code=_error_code(response["error"]),
+        raise _session_wire_error(
+            f"ACP session/set_config_option failed: {message}", response["error"]
         )
     result = response.get("result")
     if not isinstance(result, dict):
@@ -283,6 +285,7 @@ async def _select_config_option(
             f"ACP session/set_config_option did not select the requested {label} "
             f"{desired_value!r}; adapter reported {selected_value!r}",
             code=AcpErrorCode.INVALID_PARAMS,
+            condition=ProviderCondition.INVALID_REQUEST,
         )
     return confirmed_options
 
@@ -314,6 +317,24 @@ def _error_code(value: JsonValue | None) -> int:
         code
         if isinstance(code, int) and not isinstance(code, bool)
         else AcpErrorCode.INTERNAL_ERROR
+    )
+
+
+def _session_wire_error(
+    message: str,
+    error: JsonValue,
+    *,
+    condition: ProviderCondition | None = None,
+) -> AcpSessionError:
+    """Build a session failure from the discriminator carried by the wire."""
+    payload = lenient_json_object(error)
+    return AcpSessionError(
+        message,
+        code=_error_code(error),
+        data=payload.get("data"),
+        condition=(
+            condition if condition is not None else condition_from_acp_error(payload)
+        ),
     )
 
 
@@ -388,9 +409,8 @@ async def initialize_session(
                 stderr_event_count=ctx.stderr_event_count,
             ),
         )
-        raise AcpSessionError(
-            f"ACP initialize failed: {resp['error']}",
-            code=_error_code(resp.get("error")),
+        raise _session_wire_error(
+            f"ACP initialize failed: {resp['error']}", resp["error"]
         )
     result = resp.get("result")
     if not isinstance(result, dict):
@@ -522,7 +542,6 @@ async def setup_session(
         if "error" not in resp:
             break
         err = resp["error"]
-        err_code = _error_code(err)
         error = lenient_json_object(err)
         err_msg = str(error.get("message", err)) if error else str(err)
         if not attempted_auth and auth_methods and is_auth_required_error(err):
@@ -551,9 +570,10 @@ async def setup_session(
                 ),
             )
             hint = auth_hint()
-            raise AcpSessionError(
+            raise _session_wire_error(
                 f"ACP {method} failed — authentication required. {hint}",
-                code=err_code,
+                err,
+                condition=ProviderCondition.UNAUTHENTICATED,
             )
         logger.error(
             "ACP session setup returned an error",
@@ -565,10 +585,7 @@ async def setup_session(
                 stderr_event_count=ctx.stderr_event_count,
             ),
         )
-        raise AcpSessionError(
-            f"ACP {method} failed: {err_msg}",
-            code=err_code,
-        )
+        raise _session_wire_error(f"ACP {method} failed: {err_msg}", err)
     result = resp.get("result")
     if not isinstance(result, dict):
         raise AcpSessionError(

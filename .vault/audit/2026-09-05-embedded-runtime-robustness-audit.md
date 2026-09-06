@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:b7186ea84bbf8c751f45ee1f4c0b9f97025fc16960a266840343bd508557679f'
+body_hash: 'sha256:de2614325f34ea05e2c187464e1ec3c25e6e26af6b1b59f92ce11946739f93a2'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -174,7 +174,7 @@ FAIL means at least one specified requirement is contradicted; it does not imply
 
 ### ER12-setup-condition-loss | medium | Known session authentication conditions collapse to unknown
 
-**OPEN; contract/observability; A19; measured M08.** `providers/_acp_session.py:390`, `:524`, and `:540` construct AcpSessionError without the available condition mapping; `providers/acp_exceptions.py:50` defaults UNKNOWN. Prompt errors alone invoke the mapper at `providers/acp_chat_model.py:194`. **Owner:** provider conditions/session setup. **Close when:** known setup, auth, model/config and initialization discriminators survive to durable run status with truthful coarse fallback for unknown wire information.
+**RESOLVED; contract/observability; A19; measured M08; W03.P07.S33.** Initialization, session setup and configuration RPC failures now preserve structured wire data and use the canonical ACP condition mapper. Authentication-required and explicit authentication failures retain `UNAUTHENTICATED`; locally proven model/config mismatches retain `INVALID_REQUEST`; malformed or ambiguous provider responses retain `UNKNOWN`. Evidence: `2026-09-06-embedded-runtime-remediation-acp-session-condition-propagation-review-audit`.
 
 ### ER13-unserved-capability-matrix | high | Capability evidence contracts have no production composition or consumer
 

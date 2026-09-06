@@ -4,8 +4,14 @@ Exercises the AcpErrorCode enum, AcpError base class formatting,
 subclass hierarchy, and attribute preservation through raise/except.
 """
 
+import asyncio
+from typing import cast
+
 import pytest
 
+from ...utils.enums import AcpRequestId
+from .._acp_auth import authenticate_rpc
+from .._acp_types import AcpModelConfig
 from ..acp_exceptions import (
     AcpAuthError,
     AcpError,
@@ -13,6 +19,61 @@ from ..acp_exceptions import (
     AcpPromptError,
     AcpSessionError,
 )
+from ..conditions import ProviderCondition
+
+
+class _AuthWriter:
+    def write(self, data: bytes) -> None:
+        self.frame = data
+
+    async def drain(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_explicit_auth_failure_carries_credential_condition() -> None:
+    config = AcpModelConfig(
+        agent_config=None,
+        permission_callback=None,
+        workspace_root=None,
+        command=["unused"],
+        env_vars={},
+        session_id=None,
+        mcp_servers=[],
+        use_exec=False,
+        provider=None,
+        runtime_authority=None,
+        acp_backend=None,
+        command_origin=None,
+        command_kind=None,
+        command_executable=None,
+        command_target=None,
+        auth_mode=None,
+    )
+    futures = {}
+    task = asyncio.create_task(
+        authenticate_rpc(
+            ctx=None,
+            config=config,
+            auth_methods=[{"id": "oauth"}],
+            stdin=cast("asyncio.StreamWriter", _AuthWriter()),
+            stdin_lock=asyncio.Lock(),
+            response_futures=futures,
+        )
+    )
+    await asyncio.sleep(0)
+    futures[AcpRequestId.AUTHENTICATE].set_result(
+        {
+            "error": {
+                "code": AcpErrorCode.UNAUTHENTICATED,
+                "message": "access denied",
+            }
+        }
+    )
+    with pytest.raises(AcpAuthError) as caught:
+        await task
+    assert caught.value.condition is ProviderCondition.UNAUTHENTICATED
+
 
 # ---------------------------------------------------------------------------
 # AcpErrorCode enum

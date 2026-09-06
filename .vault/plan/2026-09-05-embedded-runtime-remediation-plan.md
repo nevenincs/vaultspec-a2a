@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:3672cddfae1d4a39c2e5d4521dfd5cba9a1b3140109f4edd5bf60654235cd6a2'
+body_hash: 'sha256:622028eee50cdc20d4fa0456a49f7a2c7f8d03a82d44b6d47a8e473c793352a1'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -130,7 +130,7 @@ Preserve supplied meaning through initialization, streaming and retry decisions.
 - [x] `W03.P07.S31` - Validate returned ACP version before session creation and reject malformed/incompatible initialization or absent required optional support; `src/vaultspec_a2a/providers/_acp_session.py`.
 - [x] `W03.P07.S32` - Settle every supplied ACP stop reason promptly and preserve refusal, cancellation and budget-exhaustion meaning through the stream consumer; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/_acp_types.py, src/vaultspec_a2a/providers/tests/test_acp_handler_failure.py`.
 - [x] `W03.P07.S80` - Propagate retained ACP stop meaning through the chat-model stream consumer and authoritative outcome path so resolved futures, partial output and transport success cannot become false completed work; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/acp_exceptions.py, src/vaultspec_a2a/providers/__init__.py, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/providers/tests/test_acp_stop_outcomes.py, src/vaultspec_a2a/streaming/tests/test_aggregator.py`.
-- [ ] `W03.P07.S33` - Carry known setup/authentication/model-configuration wire conditions through AcpSessionError with truthful unknown/coarse fallback; `src/vaultspec_a2a/providers/_acp_session.py`.
+- [x] `W03.P07.S33` - Carry known setup/authentication/model-configuration wire conditions through AcpSessionError with truthful unknown/coarse fallback; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/_acp_auth.py, src/vaultspec_a2a/providers/tests/test_acp_model_selection.py, src/vaultspec_a2a/providers/tests/test_acp_exceptions.py`.
 - [ ] `W03.P07.S34` - Verify condition-derived retry attempts, supplied delays and elapsed bounds while refusing blind replay of uncertain external effects; `src/vaultspec_a2a/providers/conditions.py`.
 
 ### Phase `W03.P08` - Expose proven native controls

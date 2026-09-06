@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#embedded-runtime-remediation'
 date: '2026-09-05'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:167f54856f8d6306881eb5a5abb20e86f97fa3be0184525ebf6a3033c53fb0f6'
+body_hash: 'sha256:1c39a3705ad43b154d3b0a4b2132282a80cdf8977f6adf5375e65e38cf7ff537'
 related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
@@ -292,3 +292,6 @@ The correction changes exactly three accepted ADRs, the tool-cores plan, and two
 - Treat any later implementation finding that reintroduces a migration,
   substitute default, tolerant reader, alias, or redispatch path as a new audit
   finding under the same decision.
+### missing-worker-target-adoption | high | open
+
+Control-test collection exposes `test_ensure_worker_adopts_legacy_missing_or_blank_target`, which explicitly approves attachment to a worker whose provenance target is missing or blank. Missing ownership evidence cannot imply compatibility with the current gateway. Remove the production adoption branch and the approving test; retain exact matching-target attachment and foreign or absent-target refusal proofs.

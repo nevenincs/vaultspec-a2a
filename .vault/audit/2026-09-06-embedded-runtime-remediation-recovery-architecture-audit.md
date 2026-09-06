@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:efbef149d3bd545997609d92b1745b1074d4f41bec68d7644ce269e5c6c7392e'
+body_hash: 'sha256:c8c80d894d590d9bb7564da983f6dd260cb62a6e8cfd54d67838dfef580a44dc'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -215,3 +215,12 @@ The retained eight lease tests collect through the current schema. Runtime quali
 ### parallel-cold-control-verification | medium | bounded resource contention classified
 
 Running the direct-lease suite and full control collection concurrently produced no pytest session result within either 90-second deadline. Both owners reaped their trees and are failures. A subsequent isolated collection naturally exited with eight cases in 20.16 seconds. Continue these cold database and graph checks serially on this host.
+### direct-control-recovery-retired-fixture | high | collection blocker resolved; behavioral replacements open
+
+The final control-test import blocker was a recovery file whose message, cancellation and permission rows all used partial payloads and whose fixture committed action authority separately from lease acceptance. That state cannot be interpreted by accepted-action-input-v2 and cannot be made current by adding missing defaults. The file is deleted. Canonical control collection now completes naturally with 482 of 488 cases collected and six service deselections.
+
+Three obligations remain open for current-schema replacement: unavailable active-project refusal must prevent graph dispatch while permitting cancellation; complete accepted message, cancellation and permission inputs must redrive their stable identities; and an older accepted action must lose after newer exact authority wins. These require real frozen graph definitions, receipts and atomic writer state.
+
+### legacy-worker-adoption-surface | high | open no-legacy violation discovered during collection
+
+The clean collection enumerated `test_ensure_worker_adopts_legacy_missing_or_blank_target`. A supported worker attachment path must not accept missing provenance as an older implied shape. Review the production worker-provenance branch and delete both the adoption behavior and its approving test under the existing no-legacy campaign before qualification.

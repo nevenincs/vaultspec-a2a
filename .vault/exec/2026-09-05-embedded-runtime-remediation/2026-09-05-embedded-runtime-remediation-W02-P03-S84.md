@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:f35b81af318e67a804650aa2fce282b95824ddedf275208661c73d35f910775f'
+body_hash: 'sha256:35c03d00933e64118161098ab8c8a9d306dc85c64abd06be934d3ef5f6551670'
 step_id: 'S84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -91,3 +91,16 @@ Open review queue:
 - MEDIUM: do not run two cold control suites concurrently on this host; the bounded owners prevented hangs but resource contention consumed both deadlines.
 
 S84 remains open.
+## Final retired-import removal
+
+- `D` `src/vaultspec_a2a/control/tests/test_direct_control_recovery.py`.
+- Deleted the fixture because every recovery row carried a partial pre-current payload and installed thread authority in a later manual election, contradicting accepted-action-input-v2 and atomic acceptance.
+- `verify:` canonical control collection -> 482 of 488 tests collected, six service deselections, no collection errors, 1.94 seconds, natural exit 0.
+
+Open review queue:
+
+- HIGH: replace active-project refusal, complete three-action stable-ID redrive, and stale-action refusal with accepted-action-input-v2 plus exact receipts and frozen graph definitions.
+- HIGH: collection surfaced `test_ensure_worker_adopts_legacy_missing_or_blank_target`; the no-legacy audit must remove both that expectation and any corresponding production adoption path.
+- Existing HIGH graph-cache identity, receipt-consumer, cancellation-proof and recovery scheduler findings remain open.
+
+All retired `claim_control_action` imports are gone from control tests. S84 remains open because collection health is only a prerequisite to the complete conditions 1-16 matrix, not qualification.

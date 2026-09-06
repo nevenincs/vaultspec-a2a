@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:e6582c421aa7ac629d0a1586ae5891c288f3b0d62b769f83f0bc37a69fce3f3d'
+body_hash: 'sha256:3821c00667579426db4a12b120c54b71acef432df5ce699f48c06e1ffb43165c'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -192,9 +192,10 @@ critical, high, medium, or low S01/S02/S12/S13 finding remains after remediation
 
 - For `p01-s11-legacy-restart-proof-absent`, seed a real pre-migration frozen profile in durable stores, restart fresh gateway and worker instances, and prove redispatch constructs the exact persisted legacy assignment without catalog re-resolution.
 - For `p01-s11-premature-plan-closure`, reopen S11 and preserve the valid ER19 route correction while P01.S10 and the missing real-behavior proof are completed.
-### p01-s11-rag-data-plane-version-drift | medium | open
+### p01-s11-rag-data-plane-version-drift | medium | resolved pending W01.P02.S06 formal review
 
-Type: test environment and repository tooling. Status: open and nonblocking for
+Type: test environment and repository tooling. Historical status: open and
+nonblocking for
 P01.S11 runtime behavior. The S11 broad provider, gateway, redispatch, IPC and
 compiler run passed 964 tests with 36 deselected and one environment failure:
 `test_the_declared_channel_is_the_servers_own_root_authority`. Its real MCP
@@ -206,6 +207,17 @@ start` probe confirmed the running service cannot be attached and requires an
 operator-owned restart. Owner: embedded-runtime-remediation `W01.P02.S06` and
 vaultspec-rag service lifecycle. The shared process was not stopped or restarted
 inside P01.S11.
+
+Resolution evidence (W01.P02.S06): the real production-registry stdio MCP
+entry point and a real RAG service now run from the same exact version selected
+by `uv.lock`. The service owns a private loopback port and isolated status,
+data and Qdrant-storage directories; it uses the current `--local-only` and
+`--no-updates` controls. Its published service record must match the locked
+version and private port before the MCP call runs. The project-pin discriminator
+passed against that private data plane, the complete pinning module passed 33
+tests, and owned cleanup stopped the private service. The unrelated service
+retained PID 56028, port 8766, package 0.4.23 and service token
+`0f9ddb72112d4571aa474a8ca2140375` across the run. Ruff, format and Ty pass.
 ### p01-s11-cold-catalog-shutdown-timeout | medium | open
 
 Type: provider-degradation test stability and resource lifecycle. Status: open
@@ -216,10 +228,12 @@ its five-second Uvicorn shutdown wait while the cancelled request and SQLite
 connection unwound. The same test passed in the preceding 71-test focused run
 and the 964-pass broad run, and the final changed-path discriminator run passed
 20 tests, so this is intermittent host/provider degradation rather than a
-repeatable selection-authority failure. Owner: embedded-runtime-remediation
-`W01.P02.S06` and provider catalog resource-lifecycle tests. Preserve the
-failure for a bounded cold-refresh/shutdown discriminator; do not widen S11's
-test timeout as a substitute.
+repeatable selection-authority failure. Owner: embedded-runtime-remediation `W01.P02.S07` for representative-host
+diagnosis and `W04.P10.S49` if the shutdown path requires runtime correction.
+W01.P02.S06 did not execute a provider-catalog refresh or Uvicorn shutdown and
+therefore does not claim this distinct finding. Preserve the failure for a
+bounded cold-refresh/shutdown discriminator; do not widen a timeout as a
+substitute.
 ### p01-s11-restart-proof-bypasses-production-worker | high | open
 
 Type: behavioral evidence completeness. Status: review-blocking for P01.S11 at

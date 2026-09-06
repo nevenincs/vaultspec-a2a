@@ -20,8 +20,12 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
+import socket
 import tempfile
+import tomllib
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -51,6 +55,8 @@ from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from .._json_contract import FrozenJsonObject, JsonObject, JsonValue
 
 RAG = "vaultspec-rag"
@@ -60,6 +66,133 @@ RAG_PIN_VARIABLE = "VAULTSPEC_RAG_ROOT"
 # server. Warm it is seconds; the ceiling covers a cold `uvx` acquisition without
 # letting a wedged handshake hang the suite.
 _LIVE_PROBE_TIMEOUT_SECONDS = 120.0
+_SERVICE_CONTROL_TIMEOUT_SECONDS = 120.0
+
+
+def _locked_rag_requirement(project_root: Path) -> str:
+    """Return the exact RAG distribution selected by this checkout's lockfile."""
+    with (project_root / "uv.lock").open("rb") as lock_file:
+        lock = tomllib.load(lock_file)
+    versions = [
+        package.get("version")
+        for package in lock.get("package", [])
+        if package.get("name") == RAG
+    ]
+    assert len(versions) == 1 and isinstance(versions[0], str), (
+        "uv.lock must select exactly one vaultspec-rag version"
+    )
+    return f"vaultspec-rag[mcp]=={versions[0]}"
+
+
+def _reserve_loopback_port() -> int:
+    """Ask the OS for a currently-free loopback port for an owned test service."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    assert isinstance(port, int)
+    return port
+
+
+async def _run_rag_cli(
+    requirement: str,
+    *args: str,
+    env: dict[str, str],
+) -> dict[str, object]:
+    """Run one bounded exact-version service command and decode its JSON result."""
+    process = await asyncio.create_subprocess_exec(
+        "uvx",
+        "--from",
+        requirement,
+        "vaultspec-rag",
+        *args,
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=_SERVICE_CONTROL_TIMEOUT_SECONDS
+        )
+    except TimeoutError:
+        process.kill()
+        await process.communicate()
+        raise
+    rendered_stdout = stdout.decode("utf-8", errors="replace")
+    rendered_stderr = stderr.decode("utf-8", errors="replace")
+    assert process.returncode == 0, rendered_stderr or rendered_stdout
+    payload = json.loads(rendered_stdout)
+    assert isinstance(payload, dict), payload
+    return payload
+
+
+@asynccontextmanager
+async def _isolated_rag_service(
+    *, project_root: Path, sandbox: Path
+) -> AsyncIterator[tuple[str, dict[str, str]]]:
+    """Run the lockfile-selected RAG service behind owned state and cleanup."""
+    requirement = _locked_rag_requirement(project_root)
+    port = _reserve_loopback_port()
+    status_dir = sandbox / "service-status"
+    data_dir = sandbox / "service-data"
+    qdrant_storage_dir = sandbox / "qdrant-storage"
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PYTEST_") and key != RAG_PIN_VARIABLE
+    }
+    env.update(
+        {
+            "VAULTSPEC_RAG_STATUS_DIR": str(status_dir),
+            "VAULTSPEC_RAG_DATA_DIR": str(data_dir),
+            "VAULTSPEC_RAG_QDRANT_STORAGE_DIR": str(qdrant_storage_dir),
+            "VAULTSPEC_RAG_PORT": str(port),
+        }
+    )
+    started = False
+    service_record_path = status_dir / "service.json"
+    try:
+        start = await _run_rag_cli(
+            requirement,
+            "--target",
+            str(project_root),
+            "server",
+            "start",
+            "--port",
+            str(port),
+            "--local-only",
+            "--no-updates",
+            "--json",
+            env=env,
+        )
+        assert start.get("ok") is True, start
+        start_data = start.get("data")
+        assert isinstance(start_data, dict) and start_data.get("port") == port, start
+        started = True
+
+        service_record = json.loads(service_record_path.read_text(encoding="utf-8"))
+        locked_version = requirement.rsplit("==", maxsplit=1)[1]
+        assert service_record["package_version"] == locked_version
+        assert service_record["port"] == port
+        yield requirement, env
+    finally:
+        # A bounded start may time out after the daemon has published its owned
+        # identity. The private status record is the authority to clean that
+        # process up; without it, never issue a stop against a merely reserved
+        # port that another process could have acquired.
+        if started or service_record_path.exists():
+            stopped = await _run_rag_cli(
+                requirement,
+                "server",
+                "stop",
+                "--port",
+                str(port),
+                "--json",
+                env=env,
+            )
+            assert stopped.get("ok") is True, stopped
+            stop_data = stopped.get("data")
+            assert isinstance(stop_data, dict)
+            assert stop_data.get("status") in {"stopped", "already_stopped"}
 
 
 def _declared_entry(name: str, root_pin: str | None) -> FrozenJsonObject:
@@ -430,57 +563,61 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
     project = str(tmp_path)
     assert not (tmp_path / ".vaultspec").exists()
 
-    [spec] = pin_harness_mcp_servers(
-        resolve_harness_mcp_servers([RAG]), project_root=project
-    )
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("PYTEST_") and key != RAG_PIN_VARIABLE
-    }
-    spec_env = spec["env"]
-    assert isinstance(spec_env, list)
-    for item in spec_env:
-        assert isinstance(item, dict)
-        name = item["name"]
-        value = item["value"]
-        assert isinstance(name, str) and isinstance(value, str)
-        env[name] = value
-    assert env[RAG_PIN_VARIABLE] == project
-    # The server renders its traceback with rich, which wraps to a default
-    # width off a pipe and would break the pinned path across lines before the
-    # assertion below could match it. Widening the child's notion of the
-    # terminal keeps the one string this test reads intact.
-    env["COLUMNS"] = "300"
+    async with _isolated_rag_service(
+        project_root=launch_root, sandbox=tmp_path / "rag-service"
+    ) as (rag_requirement, env):
+        [spec] = pin_harness_mcp_servers(
+            resolve_harness_mcp_servers([RAG]), project_root=project
+        )
+        # Preserve the production registry command and entry point, but acquire
+        # the exact distribution selected by this checkout so the stdio client
+        # and its private data-plane service cannot drift independently.
+        spec_args = spec["args"]
+        assert spec_args == ["--from", "vaultspec-rag[mcp]", "vaultspec-search-mcp"]
+        spec["args"] = ["--from", rag_requirement, "vaultspec-search-mcp"]
+        spec_env = spec["env"]
+        assert isinstance(spec_env, list)
+        for item in spec_env:
+            assert isinstance(item, dict)
+            name = item["name"]
+            value = item["value"]
+            assert isinstance(name, str) and isinstance(value, str)
+            env[name] = value
+        assert env[RAG_PIN_VARIABLE] == project
+        # The server renders its traceback with rich, which wraps to a default
+        # width off a pipe and would break the pinned path across lines before the
+        # assertion below could match it. Widening the child's notion of the
+        # terminal keeps the one string this test reads intact.
+        env["COLUMNS"] = "300"
 
-    command = spec["command"]
-    args = spec["args"]
-    assert isinstance(command, str)
-    assert isinstance(args, list)
-    params = StdioServerParameters(
-        command=command,
-        args=[arg for arg in args if isinstance(arg, str)],
-        env=env,
-        cwd=launch_root,
-    )
-    # A real on-disk temporary file, text-wrapped: the stdio client hands the
-    # handle to the OS as the child's stderr, so it needs a true file descriptor
-    # (the runner's captured stderr has none), and a wedged launch stays
-    # diagnosable rather than silent.
-    with io.TextIOWrapper(
-        tempfile.TemporaryFile(), encoding="utf-8", errors="replace"
-    ) as captured_stderr:
-        async with asyncio.timeout(_LIVE_PROBE_TIMEOUT_SECONDS):
-            async with (
-                stdio_client(params, errlog=captured_stderr) as (read, write),
-                ClientSession(read, write) as session,
-            ):
-                await session.initialize()
-                result = await session.call_tool(
-                    "search_vault", {"query": "project binding"}
-                )
-        captured_stderr.seek(0)
-        server_stderr = captured_stderr.read()
+        command = spec["command"]
+        args = spec["args"]
+        assert isinstance(command, str)
+        assert isinstance(args, list)
+        params = StdioServerParameters(
+            command=command,
+            args=[arg for arg in args if isinstance(arg, str)],
+            env=env,
+            cwd=launch_root,
+        )
+        # A real on-disk temporary file, text-wrapped: the stdio client hands the
+        # handle to the OS as the child's stderr, so it needs a true file descriptor
+        # (the runner's captured stderr has none), and a wedged launch stays
+        # diagnosable rather than silent.
+        with io.TextIOWrapper(
+            tempfile.TemporaryFile(), encoding="utf-8", errors="replace"
+        ) as captured_stderr:
+            async with asyncio.timeout(_LIVE_PROBE_TIMEOUT_SECONDS):
+                async with (
+                    stdio_client(params, errlog=captured_stderr) as (read, write),
+                    ClientSession(read, write) as session,
+                ):
+                    await session.initialize()
+                    result = await session.call_tool(
+                        "search_vault", {"query": "project binding"}
+                    )
+            captured_stderr.seek(0)
+            server_stderr = captured_stderr.read()
     reported = "\n".join(
         text
         for block in result.content

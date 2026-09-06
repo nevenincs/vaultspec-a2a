@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:09e29c8983ccbebea8a41c88a86fc1534612bc7dcb44d44b1c05585ba58c5884'
+body_hash: 'sha256:dc0904073bdba94a3158d0d9ba6485026a535d3a8cb73205ee5313564bb3f281'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -435,9 +435,10 @@ validation counts, and complete deletion replacement map. Feature Core checks
 are clean. Catalog P01.S11 and remediation W01.P02.S05 remain open, so this
 closure introduces no false remediation completion. Formal lifecycle review
 passes with no remaining finding.
-### p01-s11-rag-data-plane-version-drift | medium | open
+### p01-s11-rag-data-plane-version-drift | medium | resolved pending W01.P02.S06 formal review
 
-Type: test environment and repository tooling. Status: open and nonblocking for
+Type: test environment and repository tooling. Historical status: open and
+nonblocking for
 P01.S11 runtime behavior. The S11 broad provider, gateway, redispatch, IPC and
 compiler run passed 964 tests with 36 deselected and one environment failure:
 `test_the_declared_channel_is_the_servers_own_root_authority`. Its real MCP
@@ -449,6 +450,17 @@ start` probe confirmed the running service cannot be attached and requires an
 operator-owned restart. Owner: embedded-runtime-remediation `W01.P02.S06` and
 vaultspec-rag service lifecycle. The shared process was not stopped or restarted
 inside P01.S11.
+
+Resolution evidence (W01.P02.S06): the real production-registry stdio MCP
+entry point and a real RAG service now run from the same exact version selected
+by `uv.lock`. The service owns a private loopback port and isolated status,
+data and Qdrant-storage directories; it uses the current `--local-only` and
+`--no-updates` controls. Its published service record must match the locked
+version and private port before the MCP call runs. The project-pin discriminator
+passed against that private data plane, the complete pinning module passed 33
+tests, and owned cleanup stopped the private service. The unrelated service
+retained PID 56028, port 8766, package 0.4.23 and service token
+`0f9ddb72112d4571aa474a8ca2140375` across the run. Ruff, format and Ty pass.
 ### p01-s11-cold-catalog-shutdown-timeout | medium | open
 
 Type: provider-degradation test stability and resource lifecycle. Status: open
@@ -459,10 +471,12 @@ its five-second Uvicorn shutdown wait while the cancelled request and SQLite
 connection unwound. The same test passed in the preceding 71-test focused run
 and the 964-pass broad run, and the final changed-path discriminator run passed
 20 tests, so this is intermittent host/provider degradation rather than a
-repeatable selection-authority failure. Owner: embedded-runtime-remediation
-`W01.P02.S06` and provider catalog resource-lifecycle tests. Preserve the
-failure for a bounded cold-refresh/shutdown discriminator; do not widen S11's
-test timeout as a substitute.
+repeatable selection-authority failure. Owner: embedded-runtime-remediation `W01.P02.S07` for representative-host
+diagnosis and `W04.P10.S49` if the shutdown path requires runtime correction.
+W01.P02.S06 did not execute a provider-catalog refresh or Uvicorn shutdown and
+therefore does not claim this distinct finding. Preserve the failure for a
+bounded cold-refresh/shutdown discriminator; do not widen a timeout as a
+substitute.
 ### p01-s11-test-only-formal-review | high | FAIL - fresh production worker proof is absent
 
 Type: prerequisite implementation review disposition. Catalog test commit
@@ -804,3 +818,27 @@ lifecycle closure. Mandatory closure-record review remains pending.
 Type: lifecycle-record review disposition. Closure commit `b77cb4212754048a27c2b10a1f439e8e87728fb0` has exact parent `3ed2ccdc0342f34e623cb507b914b68dba5f2f8c` and changes exactly the five expected Core lifecycle paths: two owning audits, the new S05 Step Record, feature index and remediation plan. It closes only W01.P02.S05; S06-S08 remain open and Core identifies S06 as the next open Step. The Step Record accurately preserves the 11-test route-file, 34-test surrounding catalog/selection, 10-test current-lane/zero-retired and static evidence counts plus formal PASS review identity. The rolling audit binds that review to evidence commit `1daa2ea9e1b2d5aeb726c3f818fc689cee508ecd`.
 
 No runtime or test path changed, index and audit lifecycle state agree with the plan, `git diff --check` passes, and all 19 feature Core checks report zero diagnostics with no missing execution records. No finding surfaced. S05 lifecycle closure passes; later external and Dashboard qualification remains open under W05.P12.S57.
+
+### w01-p02-s06-isolated-rag-pinning-evidence | medium | corrected pending formal review
+
+Type: test-environment isolation and real MCP behavior evidence. The S06 change
+keeps the shipped registry surface unchanged while deriving an exact current
+`vaultspec-rag[mcp]` requirement from this checkout's `uv.lock`. The live test
+starts a real local-only service with owned status, data and Qdrant-storage
+directories and an OS-selected loopback port, verifies the published version
+and port, then launches the production `vaultspec-search-mcp` stdio entry point
+from that same exact distribution. A non-workspace project pin outranks the
+valid repository launch directory over the real MCP tool boundary. Cleanup is
+bounded, uses the private service record as stop authority after partial start,
+and never issues a stop for a merely reserved port.
+
+The isolated discriminator passed in 46.46 seconds and the complete pinning
+module passed 33 tests in 47.93 seconds. Ruff check, Ruff format and Ty pass for
+the changed test; `git diff --check` passes. The shared service identity remained
+PID 56028, port 8766, package 0.4.23 and token
+`0f9ddb72112d4571aa474a8ca2140375`. No deprecated or legacy API, option,
+translation, warning suppression or product registry pin was added. No new
+implementation finding surfaced. The distinct cold provider-catalog/Uvicorn
+shutdown observation was not exercised by this RAG test and remains open under
+W01.P02.S07 diagnosis and W04.P10.S49 runtime ownership. W01.P02.S06 remains
+open for formal implementation review.

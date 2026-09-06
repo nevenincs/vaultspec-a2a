@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:e691064912b5790a6c6676b793701b7c7cf3106714ba9c10e7d0072e63bba271'
+body_hash: 'sha256:02e1d033fa388814804ad5ea6e40210cb6515c6975d05fedd06d8ea0b2ac7461'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -205,9 +205,21 @@ FAIL means at least one specified requirement is contradicted; it does not imply
 **OPEN; test contract drift; M02.** `api/tests/test_provider_catalog_route.py:150` expects the OpenAI catalog to be unavailable; the actual route returns available after its preceding HTTP/status/order/schema assertions pass. The production OpenAI registration in `providers/factory.py:1180` calls real prompt-free discovery, and `providers/openai_catalog.py` owns GET/models enumeration. An available catalog is not execution admission or completed-work proof. **Owner:** provider catalog tests. **Close when:** the test distinguishes declared catalog behavior from environment-dependent availability without weakening admission assertions or hiding a real discovery failure.
 **Resolution evidence (provider-model-catalog P01.S11, 2026-09-05): ER19 CORRECTED; owning step pending.** The route test now parses the v1 response, keys records by provider identity, and validates OpenAI and Z.AI against their observed available or unavailable state. Available results require entries, revision, expiry, and authenticated evidence; unavailable results require no entries and a bounded reason. Health catalog state must equal the catalog state in either case. Exact-mode admission remains independently `not_admitted` and `selectable=false`, so successful prompt-free discovery is not promoted to completed-turn evidence. The former failing test and assembled 49-test catalog behavior set pass on the credentialed host. Formal review `16066b83983a90a6a7dc067f98510e3fc5c040fc` reopened P01.S11 because P01.S10 remains open and the battery does not yet drive a real persisted legacy assignment through fresh gateway/worker startup redispatch. Those blockers prevent S11 and remediation S05 closure without invalidating the ER19 route correction.
 
-### ER20-rag-version-mismatch | medium | MCP project-pinning proof is blocked before it reaches the pin assertion
+### ER20-rag-version-mismatch | medium | RESOLVED pending W01.P02.S06 formal review
 
-**OPEN; evidence/environment; A04/A32; M02.** `providers/tests/test_harness_mcp_pinning.py:408` invokes the real server; its failure is `service_version_mismatch`: client 0.4.23 versus service 0.4.21, raised by the RAG service-port check. The expected pinned workspace never appears in the diagnosis. This proves a dependency mismatch, not that the server ignored the workspace pin. It is the same mismatch that blocked semantic discovery at audit orientation. **Owner:** RAG/test environment. **Close when:** the intended locked runtime/service identities agree and the real pin proof reaches and verifies its discriminator. Shared service lifecycle was left untouched.
+**HISTORICAL FINDING; evidence/environment; A04/A32; M02.** `providers/tests/test_harness_mcp_pinning.py:408` invokes the real server; its failure is `service_version_mismatch`: client 0.4.23 versus service 0.4.21, raised by the RAG service-port check. The expected pinned workspace never appears in the diagnosis. This proves a dependency mismatch, not that the server ignored the workspace pin. It is the same mismatch that blocked semantic discovery at audit orientation. **Owner:** RAG/test environment. **Close when:** the intended locked runtime/service identities agree and the real pin proof reaches and verifies its discriminator. Shared service lifecycle was left untouched.
+
+
+**Resolution evidence (W01.P02.S06):** the discriminator now reads the single
+locked RAG version from `uv.lock`, runs both the production stdio MCP entry point
+and a real local-only service from that exact distribution, and gives the
+service an owned loopback port plus isolated status, data and Qdrant-storage
+roots. The service record proves the version/port match before the real tool
+call. The pinned non-workspace path appeared in the refusal while the valid
+launch workspace did not; the isolated case passed in 46.46 seconds and all 33
+pinning tests passed in 47.93 seconds. Owned cleanup stopped only the isolated
+service. Shared PID 56028, port 8766 and service token stayed unchanged. Formal
+S06 review remains required.
 
 ### ER21-compile-loop-budget | medium | Graph compilation exceeded its existing loop responsiveness ceiling
 

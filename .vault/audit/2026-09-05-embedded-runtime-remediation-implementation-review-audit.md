@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:694e7e3ec9b199f3dd5717f8c58054fbbd531c1d0a14d23e8602d9a2d4933237'
+body_hash: 'sha256:05803ce9dfaea03eb6ab5ba795ebc5ff5c5d551d5cf9096a2d92537645039151'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -760,3 +760,24 @@ P01.S11 is re-closed. Catalog P03.S19-P03.S23 and remediation W01.P02.S05 remain
 open, no runtime changes, and full Core is clean apart from plan status's known
 S08 missing Step Record. The catalog prerequisite lifecycle review passes and
 remediation may now consume the closed S11 input without closing S05 by inference.
+
+### w01-p02-s05-er19-owner-verification | medium | corrected pending formal review
+
+Type: dependency verification and host-relative catalog evidence. Closed owner
+provider-model-catalog P01.S11 was verified against the live
+`test_authenticated_route_serves_all_registered_lanes_in_order` production ASGI
+route at A2A `c1da77cd`. The observed compact result was OpenAI `available`, 129
+models, authenticated, revision and expiry present; Z.AI `unavailable`, zero
+models, bounded reason present. For both providers catalog health equalled the
+catalog state, exact-mode admission remained `not_admitted`, and `selectable`
+remained false. Enumeration therefore did not inherit or create completed-turn
+admission.
+
+The exact route discriminator passed once in 3.34 seconds and the full route file
+passed 11 tests in 6.03 seconds. The surrounding current selection/catalog set
+passed 34 tests; current-lane plus zero-retired-authority guards passed 10. Ruff,
+format and Ty passed for the route file. No runtime or test correction is needed,
+no deprecated/legacy path was restored, and no new implementation finding was
+surfaced. W01.P02.S05 remains open for formal review; downstream catalog
+P03.S19-P03.S20 and remediation W05.P12.S57 retain assembled external/consumer
+qualification ownership.

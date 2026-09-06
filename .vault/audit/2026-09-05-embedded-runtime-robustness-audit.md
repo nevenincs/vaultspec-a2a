@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#embedded-runtime-robustness'
 date: '2026-09-05'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:410c17d8b4d490d24b2b52ab46a9e15dd36c3b0e90611f5ddf347ac6d78290b5'
+body_hash: 'sha256:ceb523b377259187c6962e65ad85abdada5ff8c082f62944c97e730c24e0123a'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -606,3 +606,17 @@ Planning review classified and resolved three document issues: PR01 medium/contr
 Planning review also resolved PR04 medium/implementation completeness by adding explicit ownership-schema migration and checkpoint-receipt declarations, PR05 medium/contract completeness by adding typed storage-admission HTTP projection, and PR06 medium/dependency ordering by moving final external qualification behind local corrections. Core's PLAN022 identifier-order notice is an intentional consequence of canonical insertions, not an untracked renumbering. These changes remain plan-only; runtime findings remain open.
 
 Final plan review resolved PR07 medium/provider correctness by adding explicit ACP stream-consumer outcome propagation; PR08 medium/dependency ordering by qualifying new command effects after implementation and before claim activation; PR09 medium/scheduling by permitting independent local work while optional environment proofs remain open; and PR10 medium/provider coverage by adding the distinct admitted Codex native-control mapping. The saved plan has 81 open Steps in six Waves, with all ER01-ER28 mapped to implementation/dependency and closing-evidence Steps. No operational finding was closed and no implementation Step was executed.
+
+### ER19 W01.P02.S05 owner verification | medium | corrected pending formal review
+
+The now-closed P01.S11 owner result was rerun at A2A `c1da77cd` without changing
+runtime or tests. The authenticated real route observed OpenAI available with
+129 models and complete authenticated revision/expiry evidence, and Z.AI
+unavailable with no models and a bounded reason. Each provider's health catalog
+axis matched its catalog status while exact-mode admission stayed
+`not_admitted` and selectability stayed false. The exact route test passed, the
+11-test route file passed, 34 surrounding selection/catalog tests passed, and 10
+current-lane/no-retired guards passed. Static checks passed. This removes ER19's
+stale host-state assumption without turning discovery into execution proof. No
+new finding surfaced; W01.P02.S05 remains open for formal review and later
+Dashboard/external qualification remains with W05.P12.S57.

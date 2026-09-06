@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:6607f099cb52629f8061cc69c429fb37e53df817324db2dd366b6f6fc3461481'
+body_hash: 'sha256:e112b01de0d2c82ca4a4722384ab30e4bd64aaad40cc9f1366b4ef7c27b966a7'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -61,7 +61,7 @@ Restore meaningful prerequisite-dependent checks without weakening runtime claim
 - [x] `W01.P02.S05` - Verify catalog availability-test correction under owner P01.S11 in 2026-08-02-provider-model-catalog-plan, preserving exact-mode admission assertions; `src/vaultspec_a2a/api/tests/test_provider_catalog_route.py`.
 - [x] `W01.P02.S06` - Align an isolated RAG client/service test environment and rerun the real project-pinning discriminator without altering an unrelated shared daemon; `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`.
 - [x] `W01.P02.S07` - Diagnose the intermittent compilation loop-gap measurement on the named representative host/load and correct the owning warmup path if required without relaxing its existing budget; `src/vaultspec_a2a/providers/warmup.py`.
-- [ ] `W01.P02.S08` - Apply a reviewed locked dependency correction for the Starlette BlockingPortal deprecation and verify the warning disappears without suppression; `uv.lock`.
+- [x] `W01.P02.S08` - Apply a reviewed locked dependency correction for the Starlette BlockingPortal deprecation and verify the warning disappears without suppression; `uv.lock`.
 
 ## Wave `W02` - Repair durable control and lifecycle
 

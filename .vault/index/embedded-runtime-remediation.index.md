@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:509ae4026f859577124087231a224a995c29739fb27eb301a43737ec5098dd92'
+body_hash: 'sha256:2b79c9c997280c7af13cd534c35d1107fda4416fc9cd24d9fa39a0e253aa9780'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -16,6 +16,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S05]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S06]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S07]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S08]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
@@ -51,6 +52,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S05` - Verify catalog availability-test correction under owner P01.S11 in 2026-08-02-provider-model-catalog-plan, preserving exact-mode admission assertions
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S06` - Align an isolated RAG client/service test environment and rerun the real project-pinning discriminator without altering an unrelated shared daemon
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S07` - Diagnose the intermittent compilation loop-gap measurement on the named representative host/load and correct the owning warmup path if required without relaxing its existing budget
+- `2026-09-05-embedded-runtime-remediation-W01-P02-S08` - Apply a reviewed locked dependency correction for the Starlette BlockingPortal deprecation and verify the warning disappears without suppression
 
 ### plan
 

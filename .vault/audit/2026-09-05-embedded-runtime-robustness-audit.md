@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:04af2f2d15c204689c541279ad77282fa9ff266fc5d3fc2c20d16dbe42a51201'
+body_hash: 'sha256:a9d3827b363ba13f1a11f6a1a056feda44ee8fe25ffe7dcfb96a65a8cc8cffbc'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -228,9 +228,9 @@ S06 review remains required.
 
 **CLOSED by W01.P02.S07; performance; M02; separate from A29's unmeasured HTTP percentiles.** The original cold production graph-compilation subprocess took 25.312691 seconds and recorded a 0.6182457-second maximum loop gap across 1557 ticks against the unchanged 0.5-second ceiling. M15 later passed without source or threshold changes. S07 named the Windows/Ryzen host and established five exact CPU-bound owners matching frozen capacity `C=5`; after formal review corrected a contaminated compile/teardown timing boundary, all five exact compile gaps measured 0.0546-0.1796 seconds. Formal PASS `6c742790f42b21d433c371ed6db738c866d0fcd7` accepts the diagnosis and fixed-budget proof. The phase-isolated 7.1849-second `WorkerBridge.close()` / 3.6920-second loop stall is a distinct MEDIUM production lifecycle finding and remains open under `W04.P10.S49`; closing ER21 does not close or weaken that finding.
 
-### ER22-upstream-testclient-deprecation | low | corrected pending W01.P02.S08 formal review
+### ER22-upstream-testclient-deprecation | low | CLOSED
 
-**CORRECTED PENDING REVIEW; upstream maintenance; M02 warning.** The locked baseline Starlette 1.6.0 emits DeprecationWarning at `testclient.py:53` for `anyio.abc.BlockingPortal`; the exact warning-as-error import fails. PyPI has no later release containing the fix. S08 locks official merged Starlette commit `bbee894422c6cc1306327335ae385b901ccfec13`, whose TestClient uses `anyio.from_thread.BlockingPortal` at all three annotation sites. After sync, the warning-as-error import and real GET pass, the deprecated access scan is empty, and the canonical scan finds exactly three accesses. No filter, downgrade, shim or old API remains in the supported locked binary lane. Formal review remains required; the expanded unreleased-tree and independent-wheel boundaries stay explicit in the remediation audit and reference.
+**CLOSED by W01.P02.S08; upstream maintenance; M02 warning.** The locked baseline Starlette 1.6.0 emits DeprecationWarning at `testclient.py:53` for `anyio.abc.BlockingPortal`; the exact warning-as-error import fails. PyPI has no later release containing the fix. S08 locks official merged Starlette commit `bbee894422c6cc1306327335ae385b901ccfec13`, whose TestClient uses `anyio.from_thread.BlockingPortal` at all three annotation sites. After sync, the warning-as-error import and real GET pass, the deprecated access scan is empty, and the canonical scan finds exactly three accesses. No filter, downgrade, shim or old API remains in the supported locked binary lane. Formal PASS `333080e4a351b9450158c8b8375d9beb301a98a1` accepts the correction for the uv-locked Dashboard-embedded binary. The expanded unreleased-tree risk remains MEDIUM/open pending an official release, and independently pip-resolved wheels remain outside the supported product contract; both boundaries stay explicit in the remediation audit, reference and S08 Step Record.
 
 ### Reproduction appendix
 

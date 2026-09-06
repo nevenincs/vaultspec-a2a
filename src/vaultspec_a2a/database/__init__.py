@@ -124,8 +124,16 @@ from .task_queue_repository import get_queue_view as get_queue_view
 from .task_queue_repository import mark_task_complete as mark_task_complete
 from .task_queue_repository import seed_task_queue as seed_task_queue
 from .thread_repository import ActiveThreadProjection as ActiveThreadProjection
+from .thread_repository import (
+    ThreadStatusElectionOutcome as ThreadStatusElectionOutcome,
+)
+from .thread_repository import (
+    ThreadStatusElectionResult as ThreadStatusElectionResult,
+)
+from .thread_repository import ThreadWriteExpectation as ThreadWriteExpectation
 from .thread_repository import create_thread as create_thread
 from .thread_repository import delete_thread as delete_thread
+from .thread_repository import elect_thread_status as elect_thread_status
 from .thread_repository import get_thread as get_thread
 from .thread_repository import (
     get_thread_execution_state as get_thread_execution_state,
@@ -152,6 +160,9 @@ from .thread_repository import (
     set_thread_approval_state as set_thread_approval_state,
 )
 from .thread_repository import set_thread_repair_state as set_thread_repair_state
+from .thread_repository import (
+    thread_write_expectation as thread_write_expectation,
+)
 from .thread_repository import update_thread_status as update_thread_status
 
 __all__ = [
@@ -171,6 +182,9 @@ __all__ = [
     "ThreadDeletionSagaModel",
     "ThreadExecutionStateModel",
     "ThreadModel",
+    "ThreadStatusElectionOutcome",
+    "ThreadStatusElectionResult",
+    "ThreadWriteExpectation",
     "acquire_control_action_lease",
     "append_cost_record",
     "append_permission_log",
@@ -184,6 +198,7 @@ __all__ = [
     "create_control_action",
     "create_thread",
     "delete_thread",
+    "elect_thread_status",
     "expire_pending_permission_requests",
     "get_artifact",
     "get_artifacts_by_thread",
@@ -232,6 +247,7 @@ __all__ = [
     "sum_cost_by_thread",
     "supersede_permission_requests",
     "supported_migration_head",
+    "thread_write_expectation",
     "update_thread_status",
     "validate_desktop_schema",
     "verify_wal_mode",

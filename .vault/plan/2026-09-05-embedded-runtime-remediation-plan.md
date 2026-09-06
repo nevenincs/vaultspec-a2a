@@ -24,7 +24,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
 modified: '2026-09-06'
 body_schema: body-v2
-body_hash: 'sha256:11c6086b5258c4bedc1a9444f33336362c3844a74e61be654baa05570de8cdbc'
+body_hash: 'sha256:fedf4ba07748b1c55ea1212ce27812ab6c4aa11952be3b1e790372bbe9d2dcec'
 ---
 
 # `embedded-runtime-remediation` plan
@@ -74,7 +74,7 @@ Remove stale-write and early-completion races while retaining existing state obl
 - [x] `W02.P03.S76` - Declare durable run revision and writer generation plus action-specific receipt identity without storing credentials or duplicating transcript authority; `src/vaultspec_a2a/database/models.py`.
 - [x] `W02.P03.S77` - Add the current ownership and receipt schema with upgrade validation; refuse pre-current or unknown-ownership rows as incompatible without backfill, translation, migration-time substitution or execution; `src/vaultspec_a2a/database/migrations`.
 - [ ] `W02.P03.S09` - Add atomic expected-state/revision election with durable writer/action identity and test completed-versus-cancelled stale sessions; `src/vaultspec_a2a/database/thread_repository.py`.
-- [ ] `W02.P03.S10` - Verify transitional-writer and projection obligations under 2026-08-05-served-capability-contract-plan W04.P07.S22 and W04.P08.S26 against the new election primitive; `state obligation dependency`.
+- [ ] `W02.P03.S10` - Verify every current transitional writer and projection obligation under 2026-08-05-served-capability-contract-plan W04.P07.S22 and W04.P08.S26 adopts the election primitive, including archive and atomic deletion-saga entry, and remove the unconditional lifecycle setter after the final caller migrates; `src/vaultspec_a2a/control, src/vaultspec_a2a/database`.
 - [ ] `W02.P03.S11` - Verify abandoned-run reconciliation under owner W04.P08.S56 and integrate the new atomic election without duplicating its existing generic reconciliation assignment; `abandoned transition dependency`.
 - [ ] `W02.P03.S78` - Declare checkpointed graph-action receipts binding action, payload fingerprint and dispatch identity while retaining existing typed clarification and permission state; `src/vaultspec_a2a/thread/state.py`.
 - [ ] `W02.P03.S12` - Persist request-scoped checkpoint incorporation evidence for graph actions before reporting application, retaining dispatch identity and winning payload fingerprint; use durable cessation or no-op evidence for cancellation without graph incorporation; `src/vaultspec_a2a/worker/executor.py`.

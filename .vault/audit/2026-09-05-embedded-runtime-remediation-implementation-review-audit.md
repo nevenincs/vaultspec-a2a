@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d4364d7573f1a2c877c9732e828f7ea4e24f51002ed235e20e53d80243f8bd15'
+body_hash: 'sha256:6d9c59edf9fc20c2ac780296773d61ba3753686cb7214d946600933dd934604e'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1246,3 +1246,28 @@ Type: test lifecycle and developer-time loss. The corrected nine-case migration 
 Type: lifecycle traceability. Formal PASS `9ca08596` accepts the complete implementation and correction chain: `7586f2ee` -> formal FAIL `da7cd035` -> `9ec2396d` -> formal FAIL `e52bd82e` -> `48c661c2` -> formal PASS `9ca08596`. The first HIGH false-success accepted same-name permissive CHECK predicates and the wrong-column receipt index; the second HIGH accepted required CHECK text hidden in SQLite lexical non-code. Both are resolved and independently verified. Vaultspec Core closes only `W02.P03.S77`; plan status is 12 of 81 Steps complete and `W02.P03.S09` is next.
 
 The locked PostgreSQL live-catalog and future-migration proof remains MEDIUM/open under its server-profile evidence follow-up. The post-result pytest teardown hang remains MEDIUM/open under `resource-aware-test-execution` in `src/vaultspec_a2a/testing`, with sessions `62322`, `96385`, and `50170` preserved as exact evidence. Remediation and served-capability-contract feature checks each pass all 19 Core checks with zero diagnostics. Closure adds no runtime behavior or legacy, deprecated, default, backfill, translation, alias, fallback, or compatibility path.
+## W02.P03.S09 implementation-pass findings
+
+### s09-unconditional-status-race | high | primitive resolved; adoption queued
+
+Type: durable state ownership. The retained ORM implementation allowed two sessions that observed RUNNING to commit conflicting terminal outcomes. S09 adds one conditional database update over expected status, run revision, writer generation, action type and receipt, with exact successor rules and same-thread/action receipt correspondence. The focused SQLite gate proves both completed-versus-cancelled orderings and one revision advance. Production writer adoption remains explicitly open across S10, S11, S13 and S14; ER02 is not closed by the primitive alone.
+
+### s09-early-completion-discard | high | primitive resolved; terminal adoption queued
+
+Type: lifecycle correctness. SUBMITTED previously rejected COMPLETED, so a terminal event arriving before RUNNING could be treated as an already-terminal no-op and later leave completed work active. The transition domain now admits SUBMITTED to COMPLETED, and the atomic election test proves completion wins while the late RUNNING witness loses. Receipt-bearing production terminal settlement remains queued under S78, S12 and S13.
+
+### s09-noop-revision-churn | medium | resolved
+
+Type: authority invariant. The first implementation draft admitted a same-state update with the same action identity while advancing only the revision. It now refuses that shape before SQL. Same-action state advancement retains generation, while installing a different receipt/action requires exactly one generation increment.
+
+### s09-archive-deletion-adoption-gap | high | open and queued in S10
+
+Type: plan decomposition. Archive and deletion-saga entry are lifecycle writers that can race stale state, but the original follow-up rows did not explicitly assign their adoption. Vaultspec Core updated S10 to include archive, atomic deletion-saga entry and removal of the unconditional status setter after the final current caller migrates. Deletion must create the saga and enter DELETING in one caller-owned transaction.
+
+### s09-postgresql-concurrency-proof | medium | open
+
+Type: evidence. The conditional UPDATE compiles from cross-dialect SQLAlchemy Core and has real SQLite contention proof. No locked live PostgreSQL service is available in this pass, so live PostgreSQL lock-and-predicate-recheck evidence remains open with the existing PostgreSQL catalog/runtime proof obligation. No unsupported or deprecated lane is declared.
+
+### s09-test-outcome-classification | low | resolved
+
+Type: test accuracy. The first focused run expected LOST when the supplied successor receipt itself lacked same-thread/action correspondence. Production correctly returned RECEIPT_MISMATCH. The assertion was corrected to preserve the more precise typed refusal; the run exited normally with 23 passing nodes and one failed assertion in 20.99 seconds. The terminal gate then passed 25 tests in 6.58 seconds. No test process hang or residue occurred in this pass.

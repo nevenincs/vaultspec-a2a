@@ -6,16 +6,18 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from enum import StrEnum
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
+    from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql import Select
     from sqlalchemy.sql.elements import ColumnElement
@@ -40,12 +42,22 @@ from ._helpers import (
     _UnsetType,
     save_model,
 )
-from .models import RunWriteAuthority, ThreadExecutionStateModel, ThreadModel, _utcnow
+from .models import (
+    ControlActionModel,
+    RunWriteAuthority,
+    ThreadExecutionStateModel,
+    ThreadModel,
+    _utcnow,
+)
 
 __all__ = [
     "ActiveThreadProjection",
+    "ThreadStatusElectionOutcome",
+    "ThreadStatusElectionResult",
+    "ThreadWriteExpectation",
     "create_thread",
     "delete_thread",
+    "elect_thread_status",
     "get_thread",
     "get_thread_execution_state",
     "get_thread_metadata",
@@ -58,6 +70,7 @@ __all__ = [
     "record_thread_execution_state",
     "set_thread_approval_state",
     "set_thread_repair_state",
+    "thread_write_expectation",
     "update_thread_status",
 ]
 
@@ -70,6 +83,50 @@ class ActiveThreadProjection:
     status: str
     feature_tag: str | None
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadWriteExpectation:
+    """Exact durable state and authority a lifecycle writer observed."""
+
+    status: ThreadStatus
+    authority: RunWriteAuthority
+
+    def __post_init__(self) -> None:
+        """Refuse a partially typed election witness."""
+        if not isinstance(self.status, ThreadStatus):
+            raise TypeError("status must be a ThreadStatus")
+        if not isinstance(self.authority, RunWriteAuthority):
+            raise TypeError("authority must be a RunWriteAuthority")
+
+
+class ThreadStatusElectionOutcome(StrEnum):
+    """Durable disposition of one conditional lifecycle write."""
+
+    WON = "won"
+    LOST = "lost"
+    NOT_FOUND = "not_found"
+    RECEIPT_MISMATCH = "receipt_mismatch"
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadStatusElectionResult:
+    """Immutable result of a lifecycle ownership election."""
+
+    outcome: ThreadStatusElectionOutcome
+
+
+def thread_write_expectation(thread: ThreadModel) -> ThreadWriteExpectation:
+    """Snapshot the complete current election witness from a durable row."""
+    return ThreadWriteExpectation(
+        status=_coerce_status(thread.status),
+        authority=RunWriteAuthority(
+            run_revision=thread.run_revision,
+            writer_generation=thread.writer_generation,
+            action_type=_coerce_control_action_type(thread.writer_action_type),
+            action_receipt_id=thread.writer_action_receipt_id,
+        ),
+    )
 
 
 def path_safe_run_id_clause() -> ColumnElement[bool]:
@@ -438,6 +495,119 @@ def _capped_single_line(text: str) -> str:
         return collapsed
     budget = _MAX_FAILURE_REASON_BYTES - len(_TRUNCATION_MARK.encode("utf-8"))
     return encoded[:budget].decode("utf-8", errors="ignore") + _TRUNCATION_MARK
+
+
+def _validate_successor_authority(
+    expectation: ThreadWriteExpectation,
+    successor: RunWriteAuthority,
+) -> None:
+    """Validate the only two current authority-advance shapes."""
+    current = expectation.authority
+    if successor.run_revision != current.run_revision + 1:
+        raise ValueError("successor run_revision must advance by exactly one")
+
+    same_action = (
+        successor.action_type is current.action_type
+        and successor.action_receipt_id == current.action_receipt_id
+    )
+    expected_generation = (
+        current.writer_generation
+        if same_action
+        else current.writer_generation + 1
+    )
+    if successor.writer_generation != expected_generation:
+        relation = "remain unchanged" if same_action else "advance by exactly one"
+        raise ValueError(f"successor writer_generation must {relation}")
+
+
+async def elect_thread_status(
+    session: AsyncSession,
+    thread_id: str,
+    *,
+    expectation: ThreadWriteExpectation,
+    status: ThreadStatus,
+    successor: RunWriteAuthority,
+    failure_reason: str | None = None,
+    provider_condition: str | None = None,
+) -> ThreadStatusElectionResult:
+    """Atomically elect one lifecycle writer from an exact durable witness.
+
+    The update predicate contains the observed state and every authority field.
+    Database lock rechecks therefore choose one winner even when two sessions
+    carry the same stale snapshot. The successor receipt must already identify
+    a same-thread, same-action journal row; absence is a typed refusal and never
+    causes authority to be invented.
+    """
+    if not isinstance(expectation, ThreadWriteExpectation):
+        raise TypeError("expectation must be a ThreadWriteExpectation")
+    if not isinstance(status, ThreadStatus):
+        raise TypeError("status must be a ThreadStatus")
+    if not isinstance(successor, RunWriteAuthority):
+        raise TypeError("successor must be a RunWriteAuthority")
+
+    validate_transition(expectation.status, status, thread_id=thread_id)
+    _validate_successor_authority(expectation, successor)
+    current = expectation.authority
+    if (
+        status is expectation.status
+        and successor.action_type is current.action_type
+        and successor.action_receipt_id == current.action_receipt_id
+    ):
+        raise ValueError(
+            "an election must advance state or install a new action identity"
+        )
+
+    receipt_exists = exists(
+        select(ControlActionModel.id).where(
+            ControlActionModel.thread_id == thread_id,
+            ControlActionModel.action_type == successor.action_type.value,
+            ControlActionModel.dispatch_id == successor.action_receipt_id,
+        )
+    )
+    values: dict[str, object] = {
+        "status": status.value,
+        "is_active": status in ACTIVE_STATUSES,
+        "updated_at": _utcnow(),
+        "run_revision": successor.run_revision,
+        "writer_generation": successor.writer_generation,
+        "writer_action_type": successor.action_type.value,
+        "writer_action_receipt_id": successor.action_receipt_id,
+    }
+    if failure_reason:
+        values["failure_reason"] = _capped_single_line(failure_reason)
+    if provider_condition:
+        values["provider_condition"] = provider_condition
+
+    statement = (
+        update(ThreadModel)
+        .where(
+            ThreadModel.id == thread_id,
+            ThreadModel.status == expectation.status.value,
+            ThreadModel.run_revision == current.run_revision,
+            ThreadModel.writer_generation == current.writer_generation,
+            ThreadModel.writer_action_type == current.action_type.value,
+            ThreadModel.writer_action_receipt_id == current.action_receipt_id,
+            receipt_exists,
+        )
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    result = cast("CursorResult[object]", await session.execute(statement))
+    if result.rowcount == 1:
+        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.WON)
+
+    row_exists = await session.scalar(
+        select(ThreadModel.id).where(ThreadModel.id == thread_id)
+    )
+    if row_exists is None:
+        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.NOT_FOUND)
+
+    matching_receipt = await session.scalar(select(receipt_exists))
+    if not matching_receipt:
+        return ThreadStatusElectionResult(
+            ThreadStatusElectionOutcome.RECEIPT_MISMATCH
+        )
+    return ThreadStatusElectionResult(ThreadStatusElectionOutcome.LOST)
 
 
 async def update_thread_status(

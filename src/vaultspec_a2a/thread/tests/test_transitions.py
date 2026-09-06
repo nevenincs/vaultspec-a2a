@@ -18,6 +18,10 @@ def test_valid_transition_submitted_to_running() -> None:
     validate_transition(ThreadStatus.SUBMITTED, ThreadStatus.RUNNING)
 
 
+def test_valid_transition_submitted_to_completed_for_early_completion() -> None:
+    validate_transition(ThreadStatus.SUBMITTED, ThreadStatus.COMPLETED)
+
+
 def test_valid_transition_running_to_completed() -> None:
     validate_transition(ThreadStatus.RUNNING, ThreadStatus.COMPLETED)
 

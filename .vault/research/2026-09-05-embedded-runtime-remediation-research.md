@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:bec2f270365daad783ce9930d3bf99b9d653a0c6032feac263c3c179c89b965f'
+body_hash: 'sha256:d14b98cdaa94ebf455a9e25a4445029f923435e193e541a587ab5aa5c2bbfd96'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -163,3 +163,10 @@ Formal S77 review showed that schema-object names alone are not identity. A same
 PostgreSQL inspection commonly renders equivalent checks with text casts, `btrim`, redundant parentheses and `ARRAY`/`ANY`; the shared fingerprint normalizes those dialect forms and has a deterministic rendered-expression proof. No locked PostgreSQL service or connection environment was available for this correction pass, so live PostgreSQL catalog output remains a MEDIUM evidence gap. This does not weaken the SQLite Dashboard contract or silently declare PostgreSQL unsupported.
 
 Formal rereview `e52bd82e` found that the first SQLite extractor still searched raw `CREATE TABLE` text and could count a complete required constraint hidden in a block comment. The correction replaces raw regular-expression discovery with one SQLite lexical scan. It skips line and block comments, string literals and SQLite quoted identifiers while discovering constraint declarations and while balancing each real `CHECK` predicate; the extracted predicate slice retains its literals for exact normalization. Unterminated comments, strings or quoted identifiers, unbalanced predicates and duplicate constraint names fail closed. Both ordinary compatibility and SQLite migration preflight consume this same extractor, while non-SQLite dialects retain catalog inspection and the open PostgreSQL evidence obligation.
+## W02.P03.S09 atomic lifecycle election boundary
+
+The current repository status writer validates an ORM snapshot and then flushes an unconditional mutation. The S09 primitive instead accepts one strict witness containing the expected `ThreadStatus` and complete `RunWriteAuthority`, validates an exact successor revision and generation, and issues one SQL `UPDATE` whose predicate matches status plus all four persisted authority fields. The successor receipt must already name a control action with the same thread and action type. A row-count of one is the only winning disposition; absent rows, missing receipt correspondence and lost elections are distinct typed results. Same-state, same-action revision churn is refused because it proves no new state or action ownership.
+
+Real file-backed SQLite tests retain one witness across independent sessions and prove both orderings: COMPLETED prevents stale CANCELLED, and CANCELLED prevents stale COMPLETED. Each winner advances the revision once. A SUBMITTED completion also wins before a late RUNNING projection and cannot be overwritten. SQLite serializes competing writes and reevaluates the full predicate; PostgreSQL READ COMMITTED provides the same lock-and-recheck shape, but a live PostgreSQL concurrency proof remains part of the existing open PostgreSQL evidence obligation.
+
+S09 establishes the repository election and does not claim ER02 production closure. Current terminal payloads still omit the dispatch receipt and writer generation; S78/S12 own that evidence and S13 owns terminal adoption. Caller inventory places transitional writers under S10, abandoned-run writers under S11, terminal settlement under S13 and durable retry under S14. Archive and deletion-saga entry were not explicit in the original decomposition, so S10 now names their atomic adoption and removal of the unconditional lifecycle setter after its final current caller migrates.

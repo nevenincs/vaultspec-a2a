@@ -13,6 +13,7 @@ _VALID_TRANSITIONS: dict[ThreadStatus, frozenset[ThreadStatus]] = {
     ThreadStatus.SUBMITTED: frozenset(
         {
             ThreadStatus.RUNNING,
+            ThreadStatus.COMPLETED,
             ThreadStatus.INPUT_REQUIRED,
             ThreadStatus.CANCELLING,
             ThreadStatus.CANCELLED,

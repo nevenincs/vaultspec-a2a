@@ -846,17 +846,10 @@ async def _await_worker_ready_inner(
     """Seat and poll the worker; see :func:`_await_worker_ready` for the guard."""
     if containment is not None:
         # Assign the worker to its containment before it boots far enough to spawn
-        # any descendant (provider roots, MCP bridges). A failed Windows
-        # assignment downgrades to the per-pid fallback rather than failing boot.
-        try:
-            containment.assign(process.pid)
-        except ProcessContainmentError:
-            logger.warning(
-                "Could not seat worker PID %d in its OS containment; shutdown will"
-                " fall back to a per-pid tree kill",
-                process.pid,
-                exc_info=True,
-            )
+        # any descendant (provider roots, MCP bridges). A worker this gateway owns
+        # is not admitted without durable tree authority: otherwise a descendant
+        # created during cooperative exit can outlive a root that exits first.
+        containment.assign_process(process)
     logger.info(
         "Worker process spawned (PID %d) via `%s` with stderr at %s",
         process.pid,
@@ -941,10 +934,10 @@ async def _spawn_worker_owned(
 
     The single seam both spawn paths - first dispatch and watchdog restart - go
     through, so the ownership contract is enforced in one place rather than
-    re-implemented per caller. It allocates the armed desktop profile's
-    containment (Compose and development get ``None`` and the unchanged per-pid
-    path), spawns, and releases the handle on every outcome except the one that
-    transfers ownership: a live process for the caller to shut down later.
+    re-implemented per caller. Every gateway-owned worker receives containment,
+    independent of serving profile. Externally managed workers are attached to,
+    never spawned here. The seam releases the handle on every outcome except the
+    one that transfers ownership: a live process for the caller to shut down later.
 
     Returns ``(process, containment)``, where a non-``None`` containment is always
     paired with the live process it contains. A failed spawn returns
@@ -952,9 +945,7 @@ async def _spawn_worker_owned(
     handle a caller would otherwise have to remember to drop - and a raised spawn
     propagates with the handle already released.
     """
-    containment = (
-        ProcessContainment.create() if settings.desktop_profile_armed else None
-    )
+    containment = ProcessContainment.create()
     owned = False
     try:
         process = await _spawn_worker(
@@ -1305,20 +1296,42 @@ class LazyWorkerSpawner:
 
     async def shutdown(self, *, deadline: ShutdownDeadline | None = None) -> None:
         """Cooperatively stop the owned worker, then reap its tree by deadline."""
-        if self._process is not None:
-            process = self._process
-            uncontained_descendants: list[psutil.Process] = []
-            if self._containment is None and process.poll() is None:
+        if self._process is None:
+            return
+        process = self._process
+        shutdown_containment = self._containment
+        transient_containment: ProcessContainment | None = None
+        retained_descendants: list[psutil.Process] = []
+        try:
+            if shutdown_containment is None and process.poll() is None:
                 try:
                     owner = psutil.Process(process.pid)
-                    uncontained_descendants = [
+                    retained_descendants = [
                         child
                         for child in owner.children(recursive=True)
                         if child.is_running()
                     ]
                 except psutil.NoSuchProcess:
                     pass
-            if deadline is not None and process.poll() is None:
+                try:
+                    transient_containment = ProcessContainment.create()
+                    transient_containment.assign_process(process)
+                    shutdown_containment = transient_containment
+                except (OSError, ProcessContainmentError):
+                    if transient_containment is not None:
+                        transient_containment.close()
+                    transient_containment = None
+                    logger.warning(
+                        "Worker lacked retained containment and could not be seated "
+                        "for cooperative shutdown; escalating while its root identity "
+                        "is still live",
+                        exc_info=True,
+                    )
+            if (
+                deadline is not None
+                and process.poll() is None
+                and shutdown_containment is not None
+            ):
                 cooperative_budget = min(deadline.remaining(reserve=3.0), 1.0)
                 if cooperative_budget > 0:
                     import httpx
@@ -1341,31 +1354,36 @@ class LazyWorkerSpawner:
                             "Worker cooperative shutdown request failed; escalating",
                             exc_info=True,
                         )
-                # A containment keeps descendants reachable after the root exits,
-                # so it is safe to grant the worker a cooperative grace period.
-                # The per-pid fallback must snapshot/terminate while the root is
-                # still alive; otherwise a cooperatively exited parent can leave
-                # descendants that no longer have a discoverable relationship.
+                # Containment remains authoritative after the root exits, so the
+                # worker can receive a cooperative grace interval without losing
+                # descendants it creates while handling the request.
                 wait_budget = min(deadline.remaining(reserve=2.0), 5.0)
-                if (
-                    self._containment is not None
-                    and wait_budget > 0
-                    and process.poll() is None
-                ):
+                if wait_budget > 0 and process.poll() is None:
                     with contextlib.suppress(subprocess.TimeoutExpired):
                         await asyncio.to_thread(process.wait, wait_budget)
-            if process.poll() is None or self._containment is not None:
-                await _shutdown_worker_process(
-                    process, self._containment, deadline=deadline
-                )
-            if uncontained_descendants:
-                await _reap_retained_processes(
-                    uncontained_descendants, deadline=deadline
-                )
-            self._process = None
-            if self._containment is not None:
-                self._containment.close()
-            self._containment = None
+        finally:
+            try:
+                if process.poll() is None or shutdown_containment is not None:
+                    await complete_cleanup(
+                        _shutdown_worker_process(
+                            process, shutdown_containment, deadline=deadline
+                        )
+                    )
+            finally:
+                try:
+                    if retained_descendants:
+                        await complete_cleanup(
+                            _reap_retained_processes(
+                                retained_descendants, deadline=deadline
+                            )
+                        )
+                finally:
+                    self._process = None
+                    if self._containment is not None:
+                        self._containment.close()
+                    if transient_containment is not None:
+                        transient_containment.close()
+                    self._containment = None
 
 
 # ---------------------------------------------------------------------------

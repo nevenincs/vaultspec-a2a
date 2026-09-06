@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:971f3cbf30e369e28709fe576f791d9e7505f07e15f54835e2bfa722565fa44a'
+body_hash: 'sha256:ae6af5472bcf1e5f544e21fcf00403b6e44ba5c78e8be44016a5256d4d581071'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -708,3 +708,8 @@ A separate HIGH recovery hang remains open. The instrumented current-schema rest
 
 
 S49's final implementation review additionally bounds cancellation/join of an already-running bridge flush and restores its extracted batch on cancellation during HTTP or retry backoff. A malformed worker lifecycle owner now fails 503. The final shared gate passes 48 tests in 41.39 seconds; worker app/IPC coverage passes 35 tests in 12.76 seconds. These are corrected pending formal review and do not alter the open S14 durability boundary.
+Formal S49 FAIL `dcac3b27` proved an initially uncontained root could create a child during its shutdown request and exit before the pre-request identity snapshot covered it. The correction makes containment mandatory for every gateway spawn and seats any restored live uncontained handle before offering cooperative shutdown; failed seating skips cooperation and escalates while the root remains live. Real initially uncontained/then-seated and precontained variants create their only child inside `/admin/shutdown`, return 202, exit the root and finish with zero survivors in 1.65 and 1.60 seconds inside one four-second deadline. The 16-test ownership gate passes in 18.75 seconds. The HIGH finding is corrected pending rereview; S49 and ER15/ER16 remain open.
+
+The complete post-correction S49 focused gate passed 67 tests in 56.64 seconds; Ruff and Ty passed on every changed Python path.
+
+Windows seating uses the exact retained Popen OS handle rather than reopening a numeric pid, so exit and pid reuse cannot redirect containment to an unrelated process. POSIX retains the isolated process-group authority established at spawn. The late-child variants plus containment utility coverage pass 15 tests in 27.60 seconds.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:3e829f54d6eee63cd301cd93c4b16f243af34d27cc4ad0243a17fd8812a659c7'
+body_hash: 'sha256:64b8fdb44643ba6d0b42d4eb5aab0d692e1c182b9b07b63562c0d5e8fbe1ae7b'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -128,3 +128,13 @@ Formal review found that a non-callable lifecycle-owner value passed the origina
 ## W04.P10.S49 final implementation review additions
 
 Review of the actual S49 worker path found two related deadline-boundary gaps before commit. A malformed non-callable worker lifecycle owner could reach the handler's invocation after returning neither a typed refusal nor a useful transition; it now returns 503. Bridge close also joined an already-running deferred flush without consulting the shutdown clock, and cancellation during its HTTP request or backoff could leave the extracted batch outside the buffer. The join now consumes only remaining time, and both cancellation sites restore the batch to the front of the in-memory buffer before propagating cancellation. The final shared shutdown gate passes 48 tests in 41.39 seconds. The worker app/IPC gate, including callable-owner and accepted-but-unanswered bridge cases, passes 35 tests in 12.76 seconds. This preservation remains volatile process memory and does not change S14's durable-delivery owner.
+
+## W04.P10.S49 formal-review late-descendant correction
+
+Formal review `dcac3b27` reproduced a HIGH ordering defect: an initially uncontained worker created its only child inside `/admin/shutdown`, returned 202 and exited before the pre-request snapshot could include that child. S49 now treats OS containment as mandatory authority for every gateway-spawned worker in every profile. A failed assignment aborts and reaps the spawn instead of admitting a worker whose descendants cannot be addressed after root exit. An already-live owned handle without retained containment is seated into a temporary Job Object or existing isolated process group before cooperative shutdown; if that exact seating cannot be established, the spawner skips the cooperative interval and escalates while the root identity is still live. Retained psutil creation identities continue to backstop children that existed before seating, without a host-wide scan or action on a reused pid.
+
+The cooperative path and every forced cleanup now sit inside one cancellation-safe `finally`: process-tree teardown, retained-identity reap and containment-handle release still run if the cooperative request or grace wait is cancelled. A real worker seam starts with no child, creates a 300-second child only inside the shutdown handler, returns 202 and exits its root. Both the initially uncontained/then-seated band and the precontained band finish inside the original four-second deadline with root and late child absent; observed calls were 1.65 and 1.60 seconds in the combined ownership gate. The existing pre-request-child, cancellation, containment-handle and no-survivor cases remain green: 16 tests passed in 18.75 seconds. S49 remains open for rereview.
+
+The complete post-correction S49 focused gate passed 67 tests in 56.64 seconds; Ruff and Ty passed on every changed Python path.
+
+Windows seating uses the exact retained Popen OS handle rather than reopening a numeric pid, so exit and pid reuse cannot redirect containment to an unrelated process. POSIX retains the isolated process-group authority established at spawn. The late-child variants plus containment utility coverage pass 15 tests in 27.60 seconds.

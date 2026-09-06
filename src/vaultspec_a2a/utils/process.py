@@ -1160,7 +1160,6 @@ class ProcessContainment:
         import ctypes
         from ctypes import wintypes
 
-        self._pid = pid
         if self._job is None:
             raise ProcessContainmentError("Windows containment has no job object")
         # Assign-after-spawn window (documented reliance, not silence): the root is
@@ -1193,18 +1192,43 @@ class ProcessContainment:
                 f"{ctypes.WinError(ctypes.get_last_error())}"
             )
         try:
-            kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-            kernel32.AssignProcessToJobObject.argtypes = (
-                wintypes.HANDLE,
-                wintypes.HANDLE,
-            )
-            if not kernel32.AssignProcessToJobObject(self._job, handle):
-                raise ProcessContainmentError(
-                    f"could not assign process {pid} to the job: "
-                    f"{ctypes.WinError(ctypes.get_last_error())}"
-                )
+            self._assign_win_handle(pid, handle)
         finally:
             kernel32.CloseHandle(handle)
+
+    def assign_process(self, process: subprocess.Popen[bytes]) -> None:
+        """Bind the exact retained ``Popen`` identity to this containment.
+
+        Windows uses the process handle owned by ``Popen`` rather than reopening
+        its numeric pid, so an exit/reuse race cannot seat an unrelated process.
+        POSIX uses the isolated process group established at spawn.
+        """
+        if sys.platform != "win32":
+            self.assign(process.pid)
+            return
+        handle = getattr(process, "_handle", None)
+        if handle is None:
+            raise ProcessContainmentError("Popen has no retained Windows handle")
+        self._assign_win_handle(process.pid, handle)
+
+    def _assign_win_handle(self, pid: int, handle: Any) -> None:
+        if sys.platform != "win32" or self._job is None:
+            raise ProcessContainmentError("Windows containment has no job object")
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = _win_kernel32()
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = (
+            wintypes.HANDLE,
+            wintypes.HANDLE,
+        )
+        if not kernel32.AssignProcessToJobObject(self._job, handle):
+            raise ProcessContainmentError(
+                f"could not assign process {pid} to the job: "
+                f"{ctypes.WinError(ctypes.get_last_error())}"
+            )
+        self._pid = pid
         self._assigned = True
 
     @property

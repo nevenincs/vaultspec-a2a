@@ -8,8 +8,9 @@ merely leaking a process.
 
 These drive the production reap seam with REAL process trees: a parent that
 spawns real grandchildren, reaped through the same function the readiness
-timeout calls. Both bands are covered, because they take different paths - the
-armed desktop gateway owns an OS containment, Compose and development do not.
+timeout calls. Gateway-owned workers retain OS containment in every profile;
+the fallback case starts without retained authority and seats the live root
+before beginning cooperative shutdown.
 
 The grandchildren are what make these tests discriminating. A bare
 ``Popen.terminate`` fells the parent and passes any parent-only assertion, so a
@@ -74,6 +75,25 @@ def _cooperative_worker_script(port: int, marker: Path) -> str:
         " def do_POST(self):\n"
         "  if self.path != '/admin/shutdown':\n"
         "   self.send_response(404); self.end_headers(); return\n"
+        "  path.write_text(str(kid.pid), encoding='utf-8')\n"
+        "  self.send_response(202); self.end_headers()\n"
+        "  threading.Thread(target=server.shutdown, daemon=True).start()\n"
+        f"server=http.server.ThreadingHTTPServer(('127.0.0.1',{port}),H)\n"
+        "server.serve_forever(); server.server_close()\n"
+    )
+
+
+def _late_child_worker_script(port: int, marker: Path) -> str:
+    """Return a worker that creates its only child while handling shutdown."""
+    return (
+        "import http.server, pathlib, subprocess, sys, threading\n"
+        f"path=pathlib.Path({str(marker)!r})\n"
+        "class H(http.server.BaseHTTPRequestHandler):\n"
+        " def log_message(self,*args): pass\n"
+        " def do_POST(self):\n"
+        "  if self.path != '/admin/shutdown':\n"
+        "   self.send_response(404); self.end_headers(); return\n"
+        "  kid=subprocess.Popen([sys.executable,'-c','import time; time.sleep(300)'])\n"
         "  path.write_text(str(kid.pid), encoding='utf-8')\n"
         "  self.send_response(202); self.end_headers()\n"
         "  threading.Thread(target=server.shutdown, daemon=True).start()\n"
@@ -251,8 +271,9 @@ async def test_spawner_cooperates_then_reaps_the_remaining_owned_tree(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=sys.platform != "win32",
     )
-    containment.assign(process.pid)
+    containment.assign_process(process)
     spawner = LazyWorkerSpawner(
         worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
     )
@@ -291,6 +312,64 @@ async def test_spawner_cooperates_then_reaps_the_remaining_owned_tree(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("precontained", [False, True])
+async def test_shutdown_reaps_child_created_after_cooperative_request(
+    tmp_path: Path,
+    precontained: bool,
+) -> None:
+    """Containment authority survives a root that exits after creating a child."""
+    port = _free_port()
+    marker = tmp_path / f"late-child-{precontained}.txt"
+    containment = ProcessContainment.create() if precontained else None
+    base_interpreter = getattr(sys, "_base_executable", sys.executable)
+    start_new_session = sys.platform != "win32"
+    process = subprocess.Popen(
+        [base_interpreter, "-c", _late_child_worker_script(port, marker)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=start_new_session,
+    )
+    if containment is not None:
+        containment.assign_process(process)
+    spawner = LazyWorkerSpawner(
+        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
+    )
+    spawner.replace_process(process, containment)
+    ready_deadline = time.monotonic() + 5.0
+    while time.monotonic() < ready_deadline:
+        try:
+            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        except OSError:
+            await asyncio.sleep(0.02)
+            continue
+        writer.close()
+        await writer.wait_closed()
+        break
+    else:
+        await _force_cleanup([process.pid])
+        raise AssertionError("late-child worker socket did not become ready")
+
+    started = asyncio.get_running_loop().time()
+    deadline = ShutdownDeadline.start(4.0)
+    try:
+        await spawner.shutdown(deadline=deadline)
+        elapsed = asyncio.get_running_loop().time() - started
+        assert marker.exists(), "shutdown request did not create the late child"
+        child_pid = int(marker.read_text(encoding="utf-8"))
+        assert elapsed < 4.2, f"late-child teardown took {elapsed:.4f}s"
+        assert process.poll() is not None
+        assert not is_pid_alive(child_pid), "late descendant survived root exit"
+    finally:
+        child_pids = []
+        if marker.exists():
+            child_pids.append(int(marker.read_text(encoding="utf-8")))
+        await _force_cleanup([process.pid, *child_pids])
+        if containment is not None:
+            containment.close()
+
+
+@pytest.mark.asyncio
 async def test_spawner_snapshots_uncontained_tree_before_root_exits(
     tmp_path: Path,
 ) -> None:
@@ -303,6 +382,7 @@ async def test_spawner_snapshots_uncontained_tree_before_root_exits(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=sys.platform != "win32",
     )
     spawner = LazyWorkerSpawner(
         worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False

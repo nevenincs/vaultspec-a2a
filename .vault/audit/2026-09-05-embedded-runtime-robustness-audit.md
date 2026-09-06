@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:96c5a7b7fe2c35fe650383ec87a99170cd6f6d192d4f47d3d7fa8ee2c837d192'
+body_hash: 'sha256:95cee7851251211805823fecf562b49ca64cde45f4504dfa4afd77091e4cfaa8'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"
@@ -205,10 +205,9 @@ FAIL means at least one specified requirement is contradicted; it does not imply
 **OPEN; test contract drift; M02.** `api/tests/test_provider_catalog_route.py:150` expects the OpenAI catalog to be unavailable; the actual route returns available after its preceding HTTP/status/order/schema assertions pass. The production OpenAI registration in `providers/factory.py:1180` calls real prompt-free discovery, and `providers/openai_catalog.py` owns GET/models enumeration. An available catalog is not execution admission or completed-work proof. **Owner:** provider catalog tests. **Close when:** the test distinguishes declared catalog behavior from environment-dependent availability without weakening admission assertions or hiding a real discovery failure.
 **Resolution evidence (provider-model-catalog P01.S11, 2026-09-05): ER19 CORRECTED; owning step pending.** The route test now parses the v1 response, keys records by provider identity, and validates OpenAI and Z.AI against their observed available or unavailable state. Available results require entries, revision, expiry, and authenticated evidence; unavailable results require no entries and a bounded reason. Health catalog state must equal the catalog state in either case. Exact-mode admission remains independently `not_admitted` and `selectable=false`, so successful prompt-free discovery is not promoted to completed-turn evidence. The former failing test and assembled 49-test catalog behavior set pass on the credentialed host. Formal review `16066b83983a90a6a7dc067f98510e3fc5c040fc` reopened P01.S11 because P01.S10 remains open and the battery does not yet drive a real persisted legacy assignment through fresh gateway/worker startup redispatch. Those blockers prevent S11 and remediation S05 closure without invalidating the ER19 route correction.
 
-### ER20-rag-version-mismatch | medium | RESOLVED pending W01.P02.S06 formal review
+### ER20-rag-version-mismatch | medium | CLOSED
 
 **HISTORICAL FINDING; evidence/environment; A04/A32; M02.** `providers/tests/test_harness_mcp_pinning.py:408` invokes the real server; its failure is `service_version_mismatch`: client 0.4.23 versus service 0.4.21, raised by the RAG service-port check. The expected pinned workspace never appears in the diagnosis. This proves a dependency mismatch, not that the server ignored the workspace pin. It is the same mismatch that blocked semantic discovery at audit orientation. **Owner:** RAG/test environment. **Close when:** the intended locked runtime/service identities agree and the real pin proof reaches and verifies its discriminator. Shared service lifecycle was left untouched.
-
 
 **Resolution evidence (W01.P02.S06):** the discriminator now reads the single
 locked RAG version from `uv.lock`, runs both the production stdio MCP entry point
@@ -645,7 +644,6 @@ W01.P02.S05 and created its evidence Step Record. S06-S08 and later assembled
 Dashboard/external qualification remain open. This lifecycle entry adds no
 runtime, test, legacy or deprecated behavior; closure-record review is pending.
 
-
 **S06 formal-review correction:** review `14ae6ddf` found the first evidence
 commit disclosed the shared credential and did not prove degraded cleanup. The
 current audit corpus contains no raw copy. Operator-owned rotation changed its
@@ -657,7 +655,6 @@ Private cleanup is shielded and total-bounded, retains exact process identity,
 uses an owned-tree fallback and requires process/listener absence. The complete
 pinning module passes 34 tests; formal re-review remains required.
 
-
 **S06 readiness-envelope correction:** follow-up review `02edd63c` found an
 unbounded second output-drain wait after initial service-control timeout. The
 current helper uses owned temporary output files capped at 64 KiB, reserves
@@ -668,7 +665,6 @@ control wrapper held inherited handles; the timeout returned in 49.77 seconds
 inside the asserted combined bound, and the complete 35-test module passed in
 143.04 seconds. Private process and listener were absent; shared digest remained
 `changed=false`. Formal S06 re-review remains required.
-
 
 **S06 one-deadline correction:** review `1322d4ef` found separate readiness and
 cleanup envelopes. The current test environment creates one absolute deadline
@@ -683,3 +679,7 @@ rerun and was resolved by accepting only exact terminal
 ### W01.P02.S06 stop-control fallback reservation correction
 
 Formal review `47f541201bb601aa8f20b1668f8e8c21c87c70b3` identified that the normal private RAG stop attempt could exhaust the total operation deadline before exact-owner fallback. The S06 test environment now gives stop an earlier absolute slice and retains eight seconds inside the same original deadline for process-tree termination and listener-absence proof. The real exact-command hung-stop discriminator passed, the full module passed 36 tests, and the shared service fingerprint was unchanged. A related nonzero control-exit exception mismatch was classified MEDIUM and resolved with the helper's typed `RuntimeError` path. S06 remains open for formal re-review.
+
+### W01.P02.S06 lifecycle closure
+
+Formal PASS review `613d23e2b5e73eaa948cc49c745743d328c074ea` accepted the exact-version isolated RAG proof and its bounded owned-process lifecycle. Core closed `W01.P02.S06` and ER20. The separate cold provider-catalog/Uvicorn shutdown issue remains open under `W01.P02.S07` and `W04.P10.S49`.

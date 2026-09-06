@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:f33e4b96f72b1cc31a62265afef9a004fba11373b0f3883c13cb10f2d3b065b9'
+body_hash: 'sha256:fdf95433708fe22ab830a27a2a4ed6b6d61aa2ca83873f452d281e45324b6093'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -435,7 +435,7 @@ validation counts, and complete deletion replacement map. Feature Core checks
 are clean. Catalog P01.S11 and remediation W01.P02.S05 remain open, so this
 closure introduces no false remediation completion. Formal lifecycle review
 passes with no remaining finding.
-### p01-s11-rag-data-plane-version-drift | medium | resolved pending W01.P02.S06 formal review
+### p01-s11-rag-data-plane-version-drift | medium | closed
 
 Type: test environment and repository tooling. Historical status: open and
 nonblocking for
@@ -821,7 +821,7 @@ Type: lifecycle-record review disposition. Closure commit `b77cb4212754048a27c2b
 
 No runtime or test path changed, index and audit lifecycle state agree with the plan, `git diff --check` passes, and all 19 feature Core checks report zero diagnostics with no missing execution records. No finding surfaced. S05 lifecycle closure passes; later external and Dashboard qualification remains open under W05.P12.S57.
 
-### w01-p02-s06-isolated-rag-pinning-evidence | medium | corrected pending formal review
+### w01-p02-s06-isolated-rag-pinning-evidence | medium | closed
 
 Type: test-environment isolation and real MCP behavior evidence. The S06 change
 keeps the shipped registry surface unchanged while deriving an exact current
@@ -846,11 +846,11 @@ shutdown observation was not exercised by this RAG test and remains open under
 W01.P02.S07 diagnosis and W04.P10.S49 runtime ownership. W01.P02.S06 remains
 open for formal implementation review.
 
-### w01-p02-s06-shared-rag-token-disclosure | high | resolved pending formal re-review
+### w01-p02-s06-shared-rag-token-disclosure | high | closed
 
 Type: security and evidence handling. Commit `9d56e23e40e46e9cb754cfb3512365d96d524948` persists the live shared RAG service token verbatim in `.vault/audit/2026-08-02-provider-model-catalog-implementation-review-audit.md:220` and `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md:463,839`. The token is credential material, not a safe durable fingerprint. This blocks S06 closure even though the test did not stop or otherwise mutate the shared daemon. Remove the raw value from all current documents, retain only a one-way digest/equality result, and rotate the exposed token through the operator-owned RAG lifecycle before re-review. Do not rewrite historical commits or make the S06 test control the shared daemon.
 
-### w01-p02-s06-private-service-cleanup-incomplete | medium | resolved pending formal re-review
+### w01-p02-s06-private-service-cleanup-incomplete | medium | closed
 
 Type: test resource lifecycle and degraded cleanup. `_run_rag_cli` at `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py:96-122` bounds a control subprocess and kills that subprocess on timeout. During context cleanup at lines 182-198, however, a timed-out or cancelled `server stop` can leave the already detached private service alive because no terminal owned-process fallback or post-stop absence check runs. The normal-path stop passed, but S06 explicitly owns bounded isolated cleanup and must remain review-blocked until cancellation/stop degradation cannot leak its daemon. Use the private service record's exact ownership identity for a bounded fallback, shield cleanup from caller cancellation within a total deadline, verify the owned process/port is gone, and add a discriminator that exercises cancellation or failed stop without touching any shared service.
 
@@ -860,7 +860,7 @@ Type: formal implementation review disposition. The four-path commit has the int
 
 The plaintext shared credential is a HIGH security defect, and degraded cleanup is a MEDIUM resource-lifecycle defect in S06 itself. S06 does not pass formal review and must remain open pending both corrections and re-review.
 
-### w01-p02-s06-review-corrections | high | corrected pending formal re-review
+### w01-p02-s06-review-corrections | high | closed
 
 Type: security evidence and isolated process lifecycle. The raw shared-service
 credential identified by formal FAIL review `14ae6ddf` was removed from all
@@ -887,7 +887,7 @@ digest. On the final exact source, the complete module passed 34 tests in
 cancellation/failed-stop case took 43.88 seconds. No mock, monkeypatch, fake transport, deprecated/legacy surface
 or warning suppression was added. S06 remains open for formal re-review.
 
-### w01-p02-s06-start-timeout-reap-unbounded | medium | resolved pending formal re-review
+### w01-p02-s06-start-timeout-reap-unbounded | medium | closed
 
 Type: test readiness and subprocess lifecycle. Correction `f7a9b14d349a8ac9c815d7e7b1296f2edd62d65a` bounds `process.communicate()` initially, but its timeout branch at `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py:138-142` kills only the direct `uvx` control process and then awaits a second `process.communicate()` without a deadline. A spawned child retaining the inherited output handles, or a kill/reap failure, can therefore hold initial service start beyond the declared 120-second readiness budget. The thirty-second cleanup envelope bounds stop calls only after an owner is discovered; it does not bound this pre-yield start path. S06 owns bounded readiness and remains review-blocked. Put launch, timeout termination, output drain and late-record discovery inside one total deadline; terminate the exact spawned control tree when required; cap captured output; and add a real-process timeout discriminator proving terminal return plus cleanup of any late-published owned service without touching the shared daemon.
 
@@ -897,7 +897,7 @@ Type: formal correction review disposition. The correction changes the same four
 
 The initial-start timeout branch remains outside a total reap deadline, so bounded readiness is not yet proved. S06 does not pass and remains open for correction and re-review.
 
-### w01-p02-s06-readiness-envelope-correction | medium | corrected pending formal re-review
+### w01-p02-s06-readiness-envelope-correction | medium | closed
 
 Type: test readiness and subprocess lifecycle. Formal review `02edd63c` found
 that the initial CLI timeout killed only `uvx` and then awaited pipe drainage
@@ -924,7 +924,7 @@ checks remain required before commit. No product hook, compatibility path,
 deprecated/legacy behavior, fake transport, monkeypatch or warning suppression
 was added. S06 remains open for formal re-review.
 
-### w01-p02-s06-readiness-cleanup-deadline-split | medium | resolved pending formal re-review
+### w01-p02-s06-readiness-cleanup-deadline-split | medium | closed
 
 Type: test readiness and owned-service lifecycle. Correction `1d3f99e9afcb2a8265882a9fdaee97bd004fb90e` makes the CLI control subprocess itself bounded, but `_isolated_rag_service` still composes two independent budgets. It sets `readiness_deadline = start + start_timeout_seconds` at `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py:409`, may spend that budget on launch/reap plus late-record discovery, and only afterward enters `_cleanup_private_rag_service`'s separate thirty-second timeout at line 282. The new proof exposes this split at line 1010 by accepting a sixty-second readiness request when the combined operation returns in anything under ninety seconds. This does not satisfy S06's required one total launch, termination, output-drain, late-record and owned-cleanup deadline.
 
@@ -936,7 +936,7 @@ Type: formal correction review disposition. The four-path correction resolves th
 
 The remaining split deadline is a MEDIUM defect in S06's explicit bounded-readiness success shape. S06 does not pass formal review and remains open for correction and re-review.
 
-### w01-p02-s06-single-absolute-deadline | medium | corrected pending formal re-review
+### w01-p02-s06-single-absolute-deadline | medium | closed
 
 Type: test readiness and owned-service lifecycle. Formal review `1322d4ef`
 confirmed the previous correction still added a relative cleanup budget after
@@ -951,7 +951,7 @@ It passed independently in 39.69 seconds and at 35.52 seconds inside the final
 module run. The full module passed 35 tests in 161.51 seconds; the real pin case
 took 80.75 seconds and cancellation/failed-stop took 43.58 seconds.
 
-### w01-p02-s06-terminal-pid-signal-race | medium | resolved
+### w01-p02-s06-terminal-pid-signal-race | medium | closed
 
 Type: test subprocess lifecycle and cleanup race. The first combined run of the
 single-deadline correction surfaced an exact child exiting between
@@ -965,7 +965,7 @@ and unchanged shared digest. No new product, deprecated/legacy, compatibility,
 mock, monkeypatch, fake transport or warning-suppression path was added. S06
 remains open for formal re-review.
 
-### w01-p02-s06-stop-timeout-consumes-fallback-budget | medium | resolved pending formal re-review
+### w01-p02-s06-stop-timeout-consumes-fallback-budget | medium | closed
 
 Type: degraded cleanup and deadline partition. Correction `785029d5e81e512958d561e68f4493fece6735f2` now mints one operation deadline, but `_cleanup_private_rag_service` passes that final deadline unchanged to `_run_rag_cli` for the normal stop attempt at `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py:296-311`. When an absolute deadline is present, `_run_rag_cli` derives its wait and reap reservations from the full remaining interval and does not apply `timeout_seconds` as an earlier stop-attempt boundary. A stop command that launches successfully and hangs can therefore spend the remaining cleanup interval on its own wait and control-tree reap; the catch at lines 314-315 then has no time left for the exact owned-daemon fallback or process/port absence proof. The existing degraded cleanup test forces stop-process creation to fail immediately, so it does not discriminate this path.
 
@@ -977,13 +977,13 @@ Type: formal correction review disposition. The correction changes the same four
 
 The normal stop-timeout path still consumes the fallback reservation, so CLI stop, fallback and verified absence are not all guaranteed inside the one deadline. S06 does not pass formal review and remains open for correction and re-review.
 
-### w01-p02-s06-stop-slice-preserves-fallback-budget | medium | corrected pending formal re-review
+### w01-p02-s06-stop-slice-preserves-fallback-budget | medium | closed
 
 Type: degraded cleanup and deadline partition. Formal review `47f541201bb601aa8f20b1668f8e8c21c87c70b3` found that the normal exact-version stop control received the final operation deadline and could consume the time required for retained-owner fallback and absence proof. The cleanup now derives an earlier stop-control deadline and reserves eight seconds inside the original absolute operation deadline for exact-owner process-tree termination and process/listener absence verification. No phase resets or extends the original bound.
 
 A deterministic filesystem wrapper successfully creates the exact locked `uvx --from vaultspec-rag[mcp]==0.4.23 vaultspec-rag server stop` child with its real arguments, records the child PID and command, suspends it, and holds the control process. The stop slice expires while the private daemon remains owned; cleanup records fallback use and proves the retained process and private port absent before the explicit 120-second total deadline. The focused proof passed in 53.24 seconds with a 51.57-second test body. After the final exact-command assertions, the authoritative exact-source module passed 36 tests in 215.98 seconds; the same case took 63.65 seconds. The shared-service digest remained unchanged. No product fault hook, mock, monkeypatch, compatibility path, deprecated/legacy behavior, or warning suppression was added. S06 remains open for formal re-review.
 
-### w01-p02-s06-nonzero-control-exit-exception-mismatch | medium | resolved
+### w01-p02-s06-nonzero-control-exit-exception-mismatch | medium | closed
 
 Type: test subprocess lifecycle and error contract. The first hung-stop discriminator surfaced that `_run_rag_cli` represented a real nonzero control-process exit with `AssertionError`, while degraded cleanup accepts the helper's operational `RuntimeError` contract. That mismatch could bypass retained-owner fallback after a launched stop control failed normally. The helper now raises bounded `RuntimeError` with capped captured output for every nonzero exit; start failures still propagate, while cleanup can execute its exact-owner fallback. The focused and complete reruns above prove terminal cleanup. The failed exploratory run also exposed a Windows wrapper constant mistake before the exact suspended child was created; the wrapper now uses the documented Windows creation flag value and the passing test asserts the recorded exact command and PID.
 
@@ -994,3 +994,9 @@ Type: formal correction review disposition. Correction `79c01caa9b8e7330778a8c6f
 The real filesystem wrapper launches the exact locked `uvx --from vaultspec-rag[mcp]==0.4.23 vaultspec-rag server stop --port <private> --json` child, records its PID and argv, suspends it, and holds the parent until the earlier stop slice expires. It asserts the private port differs from the recorded shared port, then proves fallback use, exact private process absence, listener closure and unchanged shared digest inside the original 120-second deadline. Independent review reran the focused case (`1 passed` in 52.96 seconds; 51.59-second body); the recorded final module result is 36 passes. Ruff format/check, Ty, diff, secret scans and all 19 remediation Core checks pass.
 
 All prior S06 credential redaction/rotation, shared-service isolation, cancellation cleanup, bounded start/output/late-record behavior and ER20-only ownership remain intact. The distinct cold catalog/Uvicorn finding remains S07/S49, and no compatibility, legacy or deprecated surface was added. No finding remains. S06 is review-passed and ready for separate Core lifecycle closure; this review leaves it open.
+
+### w01-p02-s06-core-lifecycle-closure | low | closed
+
+Type: dependency-verification lifecycle. Formal PASS review `613d23e2b5e73eaa948cc49c745743d328c074ea` independently accepted the exact locked client/service pinning boundary, private service isolation, credential redaction and rotation evidence, single absolute launch/readiness/cleanup deadline, exact-owner fallback, terminal PID-race handling and typed nonzero control failures. The authoritative exact-source module passed 36 tests in 215.98 seconds, including the real suspended exact stop command in 63.65 seconds inside its explicit 120-second total deadline. Ruff, format, Ty, diff, secret scans and both feature Core checks passed; the shared service remained healthy with its rotated digest unchanged.
+
+Core closed only `W01.P02.S06`. Every historical FAIL and PASS review remains above. ER20 and all S06-owned correction findings are closed. The distinct cold provider-catalog/Uvicorn shutdown finding remains open under `W01.P02.S07` and `W04.P10.S49`; S07 is the next open remediation step.

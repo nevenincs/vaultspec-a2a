@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:3bbfcb8ef72be145c08b0e230394a89bca811cfec1df465b2bfc18f339796970'
+body_hash: 'sha256:ea857e288b099c1999b7273cb03d36feaafa5d676e150206da25857577df815e'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -192,7 +192,7 @@ critical, high, medium, or low S01/S02/S12/S13 finding remains after remediation
 
 - For `p01-s11-legacy-restart-proof-absent`, seed a real pre-migration frozen profile in durable stores, restart fresh gateway and worker instances, and prove redispatch constructs the exact persisted legacy assignment without catalog re-resolution.
 - For `p01-s11-premature-plan-closure`, reopen S11 and preserve the valid ER19 route correction while P01.S10 and the missing real-behavior proof are completed.
-### p01-s11-rag-data-plane-version-drift | medium | resolved pending W01.P02.S06 formal review
+### p01-s11-rag-data-plane-version-drift | medium | closed
 
 Type: test environment and repository tooling. Historical status: open and
 nonblocking for
@@ -982,7 +982,7 @@ path changes. Full Core reports a clean vault; plan status reports only the know
 checked S08 missing Step Record and names P03.S19 as next. No missing S11 record,
 incorrect count or unresolved closure finding remains. Lifecycle review passes.
 
-### w01-p02-s06-evidence-credential-correction | high | resolved pending formal re-review
+### w01-p02-s06-evidence-credential-correction | high | closed
 
 Type: security and evidence handling. Formal review `14ae6ddf` found that the
 first S06 evidence commit persisted the shared service credential in current
@@ -998,7 +998,7 @@ the shared service remained healthy at PID 58992, port 8766, version 0.4.23 and
 the post-rotation digest comparison was `changed=false`. The S06 test itself
 still has no shared-service control path.
 
-### w01-p02-s06-bounded-rag-readiness-follow-up | medium | resolved pending formal review
+### w01-p02-s06-bounded-rag-readiness-follow-up | medium | closed
 
 Type: test-environment resource lifecycle. Review `02edd63c` found the first
 isolated RAG control timeout could await pipe drainage indefinitely. The S06
@@ -1009,7 +1009,7 @@ before a filesystem control wrapper holds the handles; the timeout returns and
 proves process/port absence without changing the shared-service digest. The
 final pinning module passes 35 tests. Remediation S06 remains open for review.
 
-### w01-p02-s06-single-deadline-follow-up | medium | resolved pending formal review
+### w01-p02-s06-single-deadline-follow-up | medium | closed
 
 Type: test-environment resource lifecycle. Review `1322d4ef` found readiness
 and cleanup budgets were additive. S06 now uses one absolute deadline from
@@ -1019,6 +1019,10 @@ real degraded sixty-second proof returns in 35.52 seconds in the passing
 accepting only terminal `NoSuchProcess`/`ProcessLookupError`; all other errors
 remain visible. Shared-service digest remained unchanged. S06 review is open.
 
-### w01-p02-s06-stop-fallback-budget-follow-up | medium | corrected pending formal re-review
+### w01-p02-s06-stop-fallback-budget-follow-up | medium | closed
 
-Remediation review `47f541201bb601aa8f20b1668f8e8c21c87c70b3` found that an exact-version RAG stop control could consume the final cleanup deadline. S06 now caps that control at an earlier slice and preserves eight seconds of the same original absolute deadline for retained-owner fallback and process/port absence. A real suspended exact stop child proves the path; the complete pinning module passes 36 tests, and the shared daemon's digest remains unchanged. The surfaced nonzero-control exception mismatch is also resolved through the helper's bounded `RuntimeError` contract. ER20 remains corrected pending formal re-review; S06 stays open.
+Remediation review `47f541201bb601aa8f20b1668f8e8c21c87c70b3` found that an exact-version RAG stop control could consume the final cleanup deadline. S06 now caps that control at an earlier slice and preserves eight seconds of the same original absolute deadline for retained-owner fallback and process/port absence. A real suspended exact stop child proves the path; the complete pinning module passes 36 tests, and the shared daemon's digest remains unchanged. The surfaced nonzero-control exception mismatch is also resolved through the helper's bounded `RuntimeError` contract. Formal review `613d23e2` passed; ER20 and S06 are closed.
+
+### w01-p02-s06-lifecycle-closure | low | closed
+
+Formal review `613d23e2b5e73eaa948cc49c745743d328c074ea` passes the isolated exact-version RAG project-pinning evidence and every bounded-cleanup correction. Core closed remediation `W01.P02.S06`; ER20 and the catalog audit's S06 follow-ups are closed. The cold provider-catalog/Uvicorn shutdown finding remains assigned to `W01.P02.S07` and `W04.P10.S49`.

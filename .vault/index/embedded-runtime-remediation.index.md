@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d76f87e0d800edfdeeda230d7a6947dc79fd3000b2d52de84afeef5fcbf456c7'
+body_hash: 'sha256:cf2ce078d2d4e417734290afd084723b4d804568dc7c5460671a2fea1c375e73'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -14,6 +14,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-summary]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S04]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S05]]'
+  - '[[2026-09-05-embedded-runtime-remediation-W01-P02-S06]]'
   - '[[2026-09-05-embedded-runtime-remediation-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
@@ -46,6 +47,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-05-embedded-runtime-remediation-W01-P01-summary` - `embedded-runtime-remediation` `W01.P01` summary
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S04` - Run PostgreSQL URL checks under the locked server dependency profile and make that profile explicit while preserving the SQLite binary profile
 - `2026-09-05-embedded-runtime-remediation-W01-P02-S05` - Verify catalog availability-test correction under owner P01.S11 in 2026-08-02-provider-model-catalog-plan, preserving exact-mode admission assertions
+- `2026-09-05-embedded-runtime-remediation-W01-P02-S06` - Align an isolated RAG client/service test environment and rerun the real project-pinning discriminator without altering an unrelated shared daemon
 
 ### plan
 

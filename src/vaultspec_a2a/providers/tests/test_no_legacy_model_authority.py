@@ -5,10 +5,14 @@ from pathlib import Path
 import pytest
 
 from ...api.app import create_app
+from ...control.config import settings
 from ...graph import enums
 from ...graph.enums import Provider
 from ...ipc.schemas import DispatchRequest
 from ...team import team_config
+from ..factory import ProviderFactory
+from ..in_process_catalog import served_in_process_lanes
+from ..provider_catalog import ProviderCatalogKey
 
 
 def test_retired_authority_symbols_are_absent() -> None:
@@ -94,3 +98,43 @@ def test_retired_provider_and_discovery_authorities_are_absent() -> None:
         if present:
             hits[path.relative_to(source_root).as_posix()] = present
     assert hits == {}
+
+
+def test_supported_provider_and_exact_mode_inventories_are_current_only() -> None:
+    """Every constructible provider is owned by one exact current lane."""
+    assert tuple(provider.value for provider in Provider) == (
+        "antigravity",
+        "claude",
+        "codex",
+        "deterministic",
+        "kimi",
+        "mock",
+        "openai",
+        "zai",
+        "zhipu",
+    )
+    factory = ProviderFactory()
+    external = tuple(
+        registration.key for registration in factory.catalog_registrations(Path.cwd())
+    )
+    assert external == (
+        ProviderCatalogKey("antigravity", "antigravity-cli"),
+        ProviderCatalogKey("claude", f"claude-agent-acp:{settings.acp_backend}"),
+        ProviderCatalogKey("codex", "codex-app-server"),
+        ProviderCatalogKey("kimi", "kimi-code-acp"),
+        ProviderCatalogKey("openai", "openai-api"),
+        ProviderCatalogKey("zai", f"zai-claude-agent-acp:{settings.acp_backend}"),
+        ProviderCatalogKey("zhipu", "zhipu-openai-compatible-api"),
+    )
+    armed = tuple(
+        registration.key
+        for registration in factory.catalog_registrations(
+            Path.cwd(), serve_in_process_lanes=True
+        )
+    )
+    assert armed == external + served_in_process_lanes(
+        armed=True, mock_api_base=settings.mock_api_base
+    )
+    assert all(
+        "gemini" not in f"{key.provider_id}/{key.execution_mode}" for key in armed
+    )

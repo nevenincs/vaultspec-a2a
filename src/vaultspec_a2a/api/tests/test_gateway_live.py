@@ -1438,10 +1438,10 @@ async def test_run_start_freezes_and_discloses_catalog_selection(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_run_start_rejects_unknown_profile(
+async def test_run_start_rejects_retired_profile_field(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """An unknown profile is refused with a 422 and never dispatched."""
+    """A retired profile field is refused with a 422 and never dispatched."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
@@ -1467,10 +1467,10 @@ async def test_run_start_rejects_unknown_profile(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_run_start_conflicts_on_profile_change_retry(
+async def test_run_start_conflicts_on_selection_request_change_retry(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """A retry that changes the frozen profile is a 409, never a silent replay."""
+    """A retry with changed work is a conflict rather than a silent replay."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
@@ -1489,10 +1489,8 @@ async def test_run_start_conflicts_on_profile_change_retry(
         frozen = first.json()["frozen_assignment"]
         assert frozen
 
-        # Same run id, DIFFERENT body -> conflict, not a replay. The field that
-        # used to vary here was `profile_id`, which no longer exists; what a
-        # retry can now change about a run's identity is its message, and the
-        # gateway must refuse that exactly as it refused a changed profile.
+        # Same run id, DIFFERENT body -> conflict, not a replay. The changed
+        # message is a different durable intention and must be refused.
         conflict = await client.post(
             "/v1/runs",
             json={
@@ -1504,7 +1502,7 @@ async def test_run_start_conflicts_on_profile_change_retry(
         assert conflict.status_code == 409, conflict.text
         assert "different request body" in conflict.json()["detail"]
 
-        # Same run id, same (default) profile -> idempotent replay returns the run.
+        # Same run id and same request -> idempotent replay returns the run.
         replay = await client.post(
             "/v1/runs",
             json={"run_id": "gwlive-24", **payload, **await _run_fields(client)},

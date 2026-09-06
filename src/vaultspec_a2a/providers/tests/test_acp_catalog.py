@@ -130,6 +130,35 @@ def test_retired_models_payload_is_not_accepted_as_catalog_authority() -> None:
     assert catalog.state.status is CatalogStatus.UNAVAILABLE
     assert catalog.models == ()
     assert catalog.native_controls == ()
+    assert (
+        catalog.state.reason == "provider session did not advertise model enumeration"
+    )
+    assert "retired-current" not in str(catalog)
+    assert "retired-other" not in str(catalog)
+
+
+def test_retired_models_payload_cannot_override_current_config_options() -> None:
+    catalog = catalog_from_session_result(
+        {
+            "configOptions": [
+                {
+                    "id": "model",
+                    "category": "model",
+                    "type": "select",
+                    "options": [{"value": "current-model", "name": "Current"}],
+                }
+            ],
+            "models": {
+                "currentModelId": "retired-model",
+                "availableModels": [{"modelId": "retired-model", "name": "Retired"}],
+            },
+        },
+        key=_KEY,
+    )
+
+    assert catalog.state.status is CatalogStatus.AVAILABLE
+    assert [model.provider_value for model in catalog.models] == ["current-model"]
+    assert "retired-model" not in str(catalog)
 
 
 def test_missing_enumeration_is_truthfully_unavailable() -> None:

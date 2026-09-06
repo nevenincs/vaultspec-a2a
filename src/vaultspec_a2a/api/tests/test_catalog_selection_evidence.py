@@ -20,6 +20,7 @@ Live, mock-free evidence that the gateway tests do not already cover:
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any, cast
 
 import httpx
@@ -143,6 +144,64 @@ async def test_launch_freezes_the_served_catalog_entry(
             # The exact provider value is server-resolved from the entry; it
             # must be present in the freeze without the caller supplying it.
             assert role["model_name"]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_refuses_every_retired_selection_surface_before_dispatch(
+    session_factory, checkpointer
+) -> None:
+    """Retired policy, provider and mode inputs never reach construction."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        current = await _run_fields(client)
+        cases: tuple[tuple[str, tuple[str, ...], str, object], ...] = (
+            ("profile-id", (), "profile_id", "retired-profile"),
+            ("default-profile", (), "default_profile_id", "retired-profile"),
+            ("profile-object", (), "profile", {"id": "retired-profile"}),
+            ("model-profile", (), "model_profile", {"id": "retired-profile"}),
+            ("free-provider", (), "provider", "gemini"),
+            ("free-model", (), "model", "retired-model"),
+            ("nested-profile", ("selection",), "profile_id", "retired-profile"),
+            ("nested-model", ("selection",), "model_name", "retired-model"),
+            ("gemini-provider", ("selection",), "provider_id", "gemini"),
+            (
+                "gemini-mode",
+                ("selection",),
+                "execution_mode",
+                "gemini-cli-acp",
+            ),
+            (
+                "stale-revision",
+                ("selection",),
+                "catalog_revision",
+                "retired-revision",
+            ),
+        )
+        for label, path, field, value in cases:
+            fields = deepcopy(current)
+            target: object = fields
+            for key in path:
+                assert isinstance(target, dict)
+                target = target[key]
+            assert isinstance(target, dict)
+            target[field] = value
+            response = await client.post(
+                "/v1/runs",
+                json={
+                    "run_id": f"retired-selection-{label}",
+                    "team_preset": _PRESET,
+                    "message": "go",
+                    "autonomous": True,
+                    **fields,
+                },
+            )
+            assert response.status_code == 422, (label, response.text)
+            assert response.json().get("detail"), label
+
+        assert worker.dispatches == []
 
 
 @pytest.mark.asyncio(loop_scope="function")

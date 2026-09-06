@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:b91788caa31f319cf59ce7da2f11320fc7800c828f7da6d8a169a7ccab1384ae'
+body_hash: 'sha256:aca0259144bfb4b9a9ef24e158a8bac06949a50073efbb1b842dae0a2d873304'
 step_id: 'S77'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -118,9 +118,16 @@ related:
 - `verify:` exact real-SQLite comment/string compatibility discriminator -> `pass` (3 tests in 11.60 seconds)
 - `verify:` exact forged-schema migration-preflight discriminator -> `pass` (5 tests in 7.12 seconds)
 - `verify:` exact populated-current migration discriminator -> `pass` (1 test in 1.12 seconds)
+- `verify:` complete implementation/review chain `7586f2ee` -> `da7cd035` FAIL -> `9ec2396d` -> `e52bd82e` FAIL -> `48c661c2` -> `9ca08596` PASS
+- `verify:` independent lexer and fingerprint gate -> `pass` (16 tests in 0.21 seconds)
+- `verify:` independent forged-preflight and populated-current gate -> `pass` (6 tests in 36.76 seconds)
+- `verify:` S77 lifecycle state -> `pass` (Core closed only `W02.P03.S77`; 12 of 81 Steps complete; `W02.P03.S09` next)
+- `verify:` remediation and served-capability-contract Core feature checks -> `pass` (19 checks each; zero diagnostics)
 
 ## Notes
 
 The compatibility rerun reached all 15 passing nodes and 100% before the separately queued pytest teardown stall. Session `62322` was interrupted immediately; its exact command-line process was absent. The completed four-case discriminator is the terminal pytest pass for S77.
 
 Formal rereview `e52bd82e` found that the initial balanced extractor could count required constraint text hidden in SQLite comments. The correction lexes SQLite table DDL, excludes comments, literals and quoted identifiers from discovery and balancing, preserves actual predicate literals, and fails closed on malformed or duplicate declarations. S77 remains open for another formal rereview; the live PostgreSQL catalog evidence and test teardown findings remain open.
+
+Formal PASS `9ca08596` accepts correction `48c661c2` and the complete S77 chain. Both HIGH schema-integrity findings are closed. Live PostgreSQL catalog and future-migration evidence remains MEDIUM/open under the locked PostgreSQL server-profile evidence follow-up. The post-result pytest teardown hang remains MEDIUM/open under `resource-aware-test-execution` in `src/vaultspec_a2a/testing`, with sessions `62322`, `96385`, and `50170` retained as evidence. Lifecycle closure adds no runtime behavior or legacy, deprecated, default, backfill, translation, alias, fallback, or compatibility path.

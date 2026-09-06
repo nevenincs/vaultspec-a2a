@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d34d2d1b58f629bdd708099d28517a3119d07c2ff4c1a1a0e7ab244647da3c7a'
+body_hash: 'sha256:d4364d7573f1a2c877c9732e828f7ea4e24f51002ed235e20e53d80243f8bd15'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1240,3 +1240,9 @@ Type: schema integrity and admission safety. Formal rereview FAIL `e52bd82e` pro
 ### w02-p03-s77-correction-module-teardown | medium | open under resource-aware-test-execution
 
 Type: test lifecycle and developer-time loss. The corrected nine-case migration module emitted nine passing nodes and `[100%]` at 30 seconds, then stalled after results. Session `96385` was interrupted immediately and no matching pytest process remained. The authoritative terminal correction gates are the completed three-case migration-preflight discriminator, two-case read-only compatibility discriminator and three-case schema-fingerprint unit gate. This is the same post-result teardown class already queued; it supports no completed-module pass claim.
+
+### w02-p03-s77-core-lifecycle-closure | low | closed pending closure-record review
+
+Type: lifecycle traceability. Formal PASS `9ca08596` accepts the complete implementation and correction chain: `7586f2ee` -> formal FAIL `da7cd035` -> `9ec2396d` -> formal FAIL `e52bd82e` -> `48c661c2` -> formal PASS `9ca08596`. The first HIGH false-success accepted same-name permissive CHECK predicates and the wrong-column receipt index; the second HIGH accepted required CHECK text hidden in SQLite lexical non-code. Both are resolved and independently verified. Vaultspec Core closes only `W02.P03.S77`; plan status is 12 of 81 Steps complete and `W02.P03.S09` is next.
+
+The locked PostgreSQL live-catalog and future-migration proof remains MEDIUM/open under its server-profile evidence follow-up. The post-result pytest teardown hang remains MEDIUM/open under `resource-aware-test-execution` in `src/vaultspec_a2a/testing`, with sessions `62322`, `96385`, and `50170` preserved as exact evidence. Remediation and served-capability-contract feature checks each pass all 19 Core checks with zero diagnostics. Closure adds no runtime behavior or legacy, deprecated, default, backfill, translation, alias, fallback, or compatibility path.

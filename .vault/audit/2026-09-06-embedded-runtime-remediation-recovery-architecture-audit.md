@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6b8372f728656894feb5333e50f38c210039d8ddaac0bfc31b59ce32afd88d27'
+body_hash: 'sha256:6277e69313062c53e3034eb2d517aab1ccb4f5d782fccaec3844df338acb93c1'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -89,3 +89,9 @@ Follow-up and resume producers still commit their lease and requested projection
 ### schema-refusal-verification | medium | open; migration evidence
 
 Migration 0018 refuses populated pre-current stores instead of inventing historical graph receipts. Fresh-schema admission was exercised through the production migration-backed test fixture. A dedicated populated-store refusal and cancellation/no-op migration discriminator remains required. This partial S12 pass does not close the recovery conditions.
+
+### physical-transaction-escape | high | corrected in continuing S12; broader contention review open
+
+Formal review and a real SQLite test found reservation SAVEPOINT release committed a new accepted action before the intended outer transaction existed. Rolling back a failed writer election left that action present. This was reproduced as one failing test in the first two-case atomicity run (10.76 seconds, exit 1). The application engine now owns physical BEGIN before SAVEPOINT through SQLAlchemy events. Graph-action claim installs the writer and persists the receipt before committing its lease; delivery cannot promote a writer. The corrected two-case discriminator passed in 8.97 seconds with bounded runner exit 0. An independent session verifies accepted action, writer and receipt are visible together; stale refusal leaves no action row.
+
+The graph writer/receipt portion of admission-transaction-gap is corrected. Permission/requested projections and full non-initial effective dispatch input still need integration into the durable authority. Explicit SQLite read transactions also expose lock or snapshot-upgrade contention that must be classified and scheduled through S83; this pass does not claim that retry owner is complete. Cancellation-proof and receipt-consumer-boundary remain open. Focused Ty passed; the continuing S12 row remains unchecked.

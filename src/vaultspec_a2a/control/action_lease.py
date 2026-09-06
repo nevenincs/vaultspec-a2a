@@ -14,11 +14,13 @@ from ..database import (
     reserve_control_action,
 )
 from ..thread.dispatch_policy import FailureType
+from ..thread.enums import ControlActionType
+from .dispatch_receipts import prepare_graph_action_receipt
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..thread.enums import ControlActionType
+    from ..database.thread_repository import ThreadWriteExpectation
 
 __all__ = [
     "CONTROL_ACTION_LEASE_TTL",
@@ -45,6 +47,7 @@ class ControlActionClaim:
     created: bool
     payload_matches: bool
     acquired: bool
+    authority_matches: bool
     applied: bool
     result_status: str
     claim_token: str | None
@@ -61,6 +64,7 @@ async def claim_control_action(
     worker_generation: int = 0,
     now: datetime | None = None,
     lease_ttl: timedelta = CONTROL_ACTION_LEASE_TTL,
+    write_expectation: ThreadWriteExpectation | None = None,
 ) -> ControlActionClaim:
     """Atomically reserve one intention and acquire its renewable dispatch lease.
 
@@ -93,6 +97,7 @@ async def claim_control_action(
 
     claim_token: str | None = None
     acquired = False
+    authority_matches = True
     if reservation.payload_matches and action.applied_at is None:
         claim_token = uuid4().hex
         acquired = await acquire_control_action_lease(
@@ -103,6 +108,16 @@ async def claim_control_action(
             now=instant,
         )
 
+    if acquired and action_type != ControlActionType.CANCEL:
+        receipt = await prepare_graph_action_receipt(
+            db,
+            thread_id=thread_id,
+            dispatch_id=dispatch_id,
+            install_from=write_expectation if reservation.created else None,
+        )
+        if receipt is None:
+            acquired = False
+            authority_matches = False
     if acquired and claim_token is not None:
         await commit_control_action_lease(
             db,
@@ -119,6 +134,7 @@ async def claim_control_action(
         created=reservation.created,
         payload_matches=reservation.payload_matches,
         acquired=acquired,
+        authority_matches=authority_matches,
         applied=applied,
         result_status=result_status,
         claim_token=claim_token,

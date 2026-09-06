@@ -5,14 +5,13 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:ab00524e9550bade31439bd10235db490b932d9d1d33af80d8a3dc4c291699b5'
+body_hash: 'sha256:7b8b62f6ddcfbb78f05ce30d2e350f9c9157209bf65c7760abc0e38c3d48b050'
 related:
   - "[[2026-08-02-control-action-leases-research]]"
   - "[[2026-08-02-control-action-leases-reference]]"
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]'
 ---
-
 # `control-action-leases` adr: `durable leased dispatch claims` | (**status:** `accepted`)
 
 ## Problem Statement
@@ -101,3 +100,9 @@ No retired action, provider or ownership representation is supported. Recovery n
 An initial graph action is accepted only when its run row, stable action receipt and complete effective non-secret dispatch input are committed together. Resolve local configuration and project inputs before acquiring the database write lock. The initial message, frozen assignment, effective controls and context belong to the accepted input; title and preset identifiers alone cannot authorize recovery of them.
 
 Ephemeral actor tokens never enter the journal or checkpoint. The durable record states whether the accepted dispatch requires those credentials. Recovery must obtain credentials through their existing authorized owner or return a typed refusal; it may not silently omit required tokens, store them durably, or substitute ambient authority. Missing or retired dispatch records are refused without reconstruction, translation or backfill. General checkpoint incorporation receipts identify the exact accepted journal action and payload; they do not certify terminal completion.
+
+### Transaction ownership at action acceptance
+
+Graph-action acceptance commits the reserved action, renewable lease, conditional thread writer and immutable graph receipt in one database transaction. A lost prior-writer witness refuses acceptance and rolls back the reservation. Recovery may renew only an action that already owns the current run; delivery cannot promote an action in a later transaction.
+
+The application engine owns the physical SQLite BEGIN boundary before any SAVEPOINT. Releasing a reservation savepoint must not commit an action independently of the outer acceptance transaction. SQLAlchemy's transaction event begins that transaction; driver-delayed BEGIN is not an alternative authority. Cancellation still requires its separate durable cessation or no-op evidence.

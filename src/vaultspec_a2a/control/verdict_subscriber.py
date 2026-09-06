@@ -645,12 +645,18 @@ class VerdictSubscriber:
         async with self._session_factory() as db:
             claim = await claim_control_action(
                 db,
+                write_expectation=write_expectation,
                 thread_id=thread_id,
                 action_type=ControlActionType.RESUME,
                 idempotency_key=_verdict_resume_idempotency_key(current_gate),
                 request_id=current_gate,
                 payload=resume_value,
             )
+            if not claim.authority_matches:
+                logger.warning(
+                    "Refused stale verdict authority for thread %s", thread_id
+                )
+                return
             if not claim.payload_matches:
                 logger.warning(
                     "Skipping competing verdict resume for thread %s gate %s",
@@ -687,9 +693,7 @@ class VerdictSubscriber:
             dispatch.dispatch_id,
         )
         async with self._session_factory() as db:
-            dispatch = await bind_graph_action_receipt(
-                db, dispatch, install_from=write_expectation
-            )
+            dispatch = await bind_graph_action_receipt(db, dispatch)
         outcome = await safe_dispatch(
             self._worker_client,
             dispatch,

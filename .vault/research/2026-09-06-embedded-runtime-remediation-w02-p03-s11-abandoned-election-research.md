@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:446a1e592b0cc5508abbca3c0e7acc8f8de36e9dd25c1311e320d8a0155959e9'
+body_hash: 'sha256:4089ebc423a69a21e0c44bec9f30b392f03d35595412ca6ed6af58c89da92cbc'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-audit]]"
@@ -70,3 +70,9 @@ The initial dispatch can be constructed before the database write transaction be
 Graph receipt creation cannot recompute identity from every current thread revision: normal status transitions advance the revision while the accepted action remains unchanged. Persist the original receipt once on the action journal, and return that exact receipt on retries under the current matching writer generation. A new action may install ownership only from its pre-lease thread witness; recovery cannot promote a stale action. Real independent-session tests distinguish these cases.
 
 The partial producer also exposes an earlier atomicity gap: follow-up and resume acceptance commits before writer installation. Fencing delivery prevents stale execution but does not make that acceptance recoverable after a crash. Consolidation must move acceptance, complete effective input, writer and receipt into one durable transaction. Cancellation remains a separate cessation/no-op evidence problem, and event consumers must verify checkpoint receipts before settling leases. These findings remain queued in the recovery architecture audit.
+
+## Physical transaction boundary finding
+
+A real SQLite discriminator showed that rejecting stale authority and rolling back the session left the reserved action committed. The repository wrapped its INSERT in SAVEPOINT before the driver had emitted BEGIN. Releasing that savepoint committed the action independently of the intended outer transaction. This matches the documented SQLite driver behavior in the [SQLAlchemy transaction documentation](https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#enabling-non-legacy-sqlite-transactional-modes-with-the-sqlite3-or-aiosqlite-driver).
+
+The production application engine now owns BEGIN through SQLAlchemy's begin event and disables the driver's delayed BEGIN. This makes the lease transaction a physical transaction before the reservation savepoint. Graph writer election and receipt persistence move inside that same lease transaction. A later delivery binder can read current evidence but cannot install ownership. The stale-action discriminator verifies no reservation survives rollback; the success discriminator reads action, writer and receipt from an independent session before delivery.

@@ -64,7 +64,6 @@ if TYPE_CHECKING:
         PermissionRequestModel,
         ThreadModel,
     )
-    from ..database.thread_repository import ThreadWriteExpectation
     from ..streaming.aggregator import EventAggregator
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
@@ -236,7 +235,6 @@ class _PermissionTransition:
     """
 
     claim: ControlActionClaim
-    write_expectation: ThreadWriteExpectation
     resume_value: str | dict[str, str | None]
     team_preset: str | None
     workspace_root: str | None
@@ -794,12 +792,26 @@ async def _record_permission_transition(
 
     claim = await claim_control_action(
         db,
+        write_expectation=write_expectation,
         thread_id=thread_id,
         action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
         request_id=request_id,
         idempotency_key=permission_response_action_key(request_id),
         payload=_response_payload(option_id, notes),
     )
+    if not claim.authority_matches:
+        return PermissionResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            idempotency_key=resolved_idempotency_key,
+            approval_status=replay_approval_status,
+            error_status_code=409,
+            failure_type=FailureType.INCOMPATIBLE_STATE,
+            error_detail="Accepted action no longer owns the current run",
+        )
     if not claim.payload_matches:
         return PermissionResult(
             request_id=request_id,
@@ -866,7 +878,6 @@ async def _record_permission_transition(
 
     return _PermissionTransition(
         claim=claim,
-        write_expectation=write_expectation,
         resume_value=resume_value,
         team_preset=team_preset,
         workspace_root=workspace_root,
@@ -926,9 +937,7 @@ async def _dispatch_permission_resume(
         },
     )
 
-    dispatch = await bind_graph_action_receipt(
-        db, dispatch, install_from=transition.write_expectation
-    )
+    dispatch = await bind_graph_action_receipt(db, dispatch)
     outcome = await safe_dispatch(
         worker_client,
         dispatch,

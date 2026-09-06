@@ -320,6 +320,7 @@ async def respond_to_clarification(
 
     claim = await claim_control_action(
         db,
+        write_expectation=write_expectation,
         thread_id=thread_id,
         action_type=ControlActionType.RESUME,
         idempotency_key=idempotency_key,
@@ -327,6 +328,17 @@ async def respond_to_clarification(
         payload=payload,
         worker_generation=worker_generation,
     )
+    if not claim.authority_matches:
+        return ClarificationResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            error_status_code=409,
+            failure_type=FailureType.INCOMPATIBLE_STATE,
+            error_detail="Accepted action no longer owns the current run",
+        )
     action = await db.get(ControlActionModel, claim.action_id, populate_existing=True)
     if action is None:
         raise RuntimeError("claimed clarification action disappeared")
@@ -369,9 +381,7 @@ async def respond_to_clarification(
         recursion_limit=recursion_limit,
         model_assignment=execution_authority.model_assignment,
     )
-    dispatch = await bind_graph_action_receipt(
-        db, dispatch, install_from=write_expectation
-    )
+    dispatch = await bind_graph_action_receipt(db, dispatch)
     outcome = await safe_dispatch(
         worker_client,
         dispatch,

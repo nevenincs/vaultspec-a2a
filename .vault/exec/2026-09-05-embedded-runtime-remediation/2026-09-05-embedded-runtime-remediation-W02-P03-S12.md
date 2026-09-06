@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:30587881097d5f180b4715adda506d44f3fa8c751721a88945a7ed19a135368b'
+body_hash: 'sha256:f2aaa84f233d2f82df2a13a7dfef5699d54fa7dd2c4d1c688711f165a0fd191b'
 step_id: 'S12'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -22,6 +22,9 @@ related:
 - `persistence and incorporation`
 
 ## Changes
+
+- `M` `src/vaultspec_a2a/control/action_lease.py`
+- `M` `src/vaultspec_a2a/database/session.py`
 
 - `M` `src/vaultspec_a2a/control/clarification_service.py`
 - `M` `src/vaultspec_a2a/control/direct_control_recovery.py`
@@ -47,4 +50,4 @@ related:
 
 ## Notes
 
-Partial S12 implementation. Cancellation cessation/no-op evidence, atomic follow-up admission and complete receipt consumption remain open in the recovery architecture audit. S12 remains unchecked; these focused passes do not establish complete recovery or a green worker suite.
+Partial S12 implementation. Continuing verification: atomic acceptance and database bootstrap passed four tests in 39.19 seconds with bounded runner exit 0. Cancellation cessation/no-op evidence, atomic follow-up admission and complete receipt consumption remain open in the recovery architecture audit. S12 remains unchecked; these focused passes do not establish complete recovery or a green worker suite.

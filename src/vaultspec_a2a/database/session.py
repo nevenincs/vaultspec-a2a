@@ -14,6 +14,7 @@ from typing import Literal
 
 from fastapi import Request
 from sqlalchemy import event, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -35,6 +36,7 @@ __all__ = [
     "application_session_factory",
     "checkpoint_wal",
     "close_db",
+    "configure_sqlite_transactions",
     "get_db",
     "get_engine",
     "get_session_factory",
@@ -128,6 +130,24 @@ def _set_wal_mode(dbapi_conn: sqlite3.Connection, _connection_record: object) ->
     cursor.execute(f"PRAGMA busy_timeout={settings.sqlite_busy_timeout_ms}")
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
+
+
+def _disable_driver_begin(dbapi_conn: sqlite3.Connection, _record: object) -> None:
+    dbapi_conn.isolation_level = None
+
+
+def _begin_sqlite_transaction(connection: Connection) -> None:
+    connection.exec_driver_sql("BEGIN")
+
+
+def configure_sqlite_transactions(engine: AsyncEngine) -> None:
+    """Make SQLAlchemy the sole owner of SQLite transaction boundaries.
+
+    Every transaction begins before SAVEPOINT. Otherwise releasing the first
+    savepoint can commit an accepted action that an outer rollback cannot undo.
+    """
+    event.listen(engine.sync_engine, "connect", _disable_driver_begin)
+    event.listen(engine.sync_engine, "begin", _begin_sqlite_transaction)
 
 
 CheckpointMode = Literal["PASSIVE", "FULL", "RESTART", "TRUNCATE"]
@@ -263,6 +283,7 @@ def get_engine(
     _engine = create_async_engine(url, **engine_kwargs)
 
     if url.startswith("sqlite"):
+        configure_sqlite_transactions(_engine)
         event.listen(_engine.sync_engine, "connect", _set_wal_mode)
 
     return _engine

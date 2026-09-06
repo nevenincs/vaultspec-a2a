@@ -143,7 +143,17 @@ async def send_followup_message(
         action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
         idempotency_key=resolved_idempotency_key,
         payload={"content": content, "agent_id": agent_id},
+        write_expectation=write_expectation,
     )
+    if not claim.authority_matches:
+        return MessageResult(
+            action_id="",
+            thread_id=thread_id,
+            thread_status=thread_status,
+            dispatched=False,
+            failure_type=FailureType.INCOMPATIBLE_STATE,
+            error_detail="Accepted action no longer owns the current run",
+        )
     if not claim.payload_matches:
         return MessageResult(
             action_id=claim.action_id,
@@ -218,9 +228,7 @@ async def send_followup_message(
         },
     )
 
-    dispatch = await bind_graph_action_receipt(
-        db, dispatch, install_from=write_expectation
-    )
+    dispatch = await bind_graph_action_receipt(db, dispatch)
     outcome = await safe_dispatch(
         worker_client,
         dispatch,

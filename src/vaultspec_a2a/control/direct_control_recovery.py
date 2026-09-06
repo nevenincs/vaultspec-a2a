@@ -268,6 +268,9 @@ async def redrive_direct_control_actions(
                 payload=action.payload,
                 worker_generation=action.worker_generation,
             )
+            if not claim.authority_matches:
+                conflicted += 1
+                continue
             if not claim.payload_matches:
                 conflicted += 1
                 continue

@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:9fbd8399c468b07f96467d131a5dea7d91d2c98ac4f35e15710210d95701766f'
+body_hash: 'sha256:509ae4026f859577124087231a224a995c29739fb27eb301a43737ec5098dd92'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -23,6 +23,7 @@ related:
   - '[[2026-09-05-embedded-runtime-remediation-provider-selection-prerequisites-reference]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
+  - '[[2026-09-06-embedded-runtime-remediation-starlette-blocking-portal-dependency-reference]]'
 ---
 
 # `embedded-runtime-remediation` feature index
@@ -59,6 +60,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 
 - `2026-09-05-embedded-runtime-remediation-provider-selection-prerequisites-reference` - `embedded-runtime-remediation` reference: `Provider Selection Prerequisite Evidence`
 - `2026-09-05-embedded-runtime-remediation-qualification-inputs-reference` - `embedded-runtime-remediation` reference: `qualification-inputs`
+- `2026-09-06-embedded-runtime-remediation-starlette-blocking-portal-dependency-reference` - `embedded-runtime-remediation` reference: `Starlette BlockingPortal dependency correction provenance`
 
 ### research
 

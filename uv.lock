@@ -3,8 +3,8 @@ revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
-    "(python_full_version < '3.14' and sys_platform == 'linux') or (python_full_version < '3.14' and sys_platform == 'win32')",
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "(python_full_version < '3.14' and sys_platform == 'linux') or (python_full_version < '3.14' and sys_platform == 'win32')",
     "python_full_version < '3.14' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 
@@ -3102,13 +3102,9 @@ wheels = [
 [[package]]
 name = "starlette"
 version = "1.6.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/Kludex/starlette.git?rev=bbee894422c6cc1306327335ae385b901ccfec13#bbee894422c6cc1306327335ae385b901ccfec13" }
 dependencies = [
     { name = "anyio" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/b4/205b0d5241d934e8add0c38aa924c4f9fb7330834ff11e5444db964ec3f9/starlette-1.6.0.tar.gz", hash = "sha256:d4e3ac5e546444960c710297a3c9fc3f7ebae1b7e963f3d36173b49da535be9b", size = 2716969, upload-time = "2026-08-08T18:27:57.512Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/cb/6a6a47d5b464bd08695d254f3da6e7986cc70c9fa5d778eda57538edfe56/starlette-1.6.0-py3-none-any.whl", hash = "sha256:a86dd39d14bb45f85a3d18525215a9ef0cfd1f192ac793220e72598c90335f0c", size = 75969, upload-time = "2026-08-08T18:27:56.196Z" },
 ]
 
 [[package]]
@@ -3710,7 +3706,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "rich", specifier = ">=14.3.2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.40" },
-    { name = "starlette", specifier = ">=0.52.1" },
+    { name = "starlette", git = "https://github.com/Kludex/starlette.git?rev=bbee894422c6cc1306327335ae385b901ccfec13" },
     { name = "torch", marker = "(sys_platform == 'linux' and extra == 'rag') or (sys_platform == 'win32' and extra == 'rag')", specifier = ">=2.4", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "vaultspec-a2a", extra = "rag" } },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32' and extra == 'rag'", specifier = ">=2.4" },
     { name = "typing-extensions", specifier = ">=4.16.0" },

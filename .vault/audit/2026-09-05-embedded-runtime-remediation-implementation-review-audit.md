@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:616cb07de313f4a5b6a3921b33cb61fb41265f8f0fdc0baec7d1bfc5af2d99f1'
+body_hash: 'sha256:39057a3b60151329419c348ff69fa5fe23c5be75ce1476bd58010e4554798ce0'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1076,3 +1076,35 @@ Type: lifecycle-record review disposition. Closure commit `566b58a6b2127e90fa888
 The Step Record preserves the complete `76cb91e5` implementation -> `691f62cc` formal FAIL -> `82c8e518` correction -> `6c742790` formal PASS chain and the authoritative evidence: original ER21 25.312691-second work / 0.6182457-second gap / 1557 ticks, unchanged M15 success, corrected non-vacuous `C=5` compile gaps 0.0546-0.1796 seconds, independent 5-test warmup and one-test current-schema restart checks, static checks, both 19-check Core gates, retired/deprecated scan and empty owned-process scan. The historical 2.3452-second work / 11.0947-second contaminated gap and the correction's intentionally failing diagnostic remain in the audit trail.
 
 ER21 and its S07-owned compile-window measurement findings are closed. The phase-isolated 7.1849-second `WorkerBridge.close()` / 3.6920-second loop stall and the separate cold provider-catalog/Uvicorn lifecycle finding remain MEDIUM and open under `W04.P10.S49`; neither audit nor Step Record claims teardown closure. Current Core checks for remediation and robustness are clean, source-support history is unchanged, and no legacy/deprecated product claim was introduced. No new finding surfaced; the S07 lifecycle closure passes mandatory review.
+
+### w01-p02-s08-starlette-blocking-portal-deprecation | low | corrected pending formal review
+
+Type: upstream dependency maintenance. Baseline AnyIO 4.15.1 / Starlette 1.6.0 fails `import starlette.testclient` under `-W error::DeprecationWarning` at installed line 53 because Starlette evaluates `anyio.abc.BlockingPortal`. PyPI has no newer release. S08 adds an exact uv source for official merged commit `bbee894422c6cc1306327335ae385b901ccfec13` and regenerates `uv.lock`; the graph remains 211 packages and source metadata remains version 1.6.0. After locked sync, the warning-as-error import and real TestClient GET pass, the old access scan is empty, and exactly three canonical `anyio.from_thread.BlockingPortal` accesses remain. There is no warning filter, AnyIO downgrade, local patch, compatibility shim or old runtime option.
+
+### w01-p02-s08-unreleased-starlette-tree-delta | medium | mitigated pending formal review
+
+Type: dependency provenance and regression surface. Official PR 3498 changes only three TestClient annotations, but its merge commit tree is 27 commits / 54 files / 2,586 additions / 357 deletions beyond Starlette tag 1.6.0. The immutable official source is the only immediate current fix because no released artifact contains the correction, but it widens S08 beyond a three-line package delta. The exact 12-module TestClient consumer run under deprecations-as-errors completed 197 passes and two failures. A representative worker/control/internal-auth set passed 28 tests. The failures were differentially reproduced against registry 1.6.0, so neither is caused by the pin. Formal review must decide whether that regression evidence is sufficient for this interim source until the next official Starlette release.
+
+### w01-p02-s08-wheel-source-boundary | low | bounded by embedded-binary product contract
+
+Type: packaging and distribution boundary. `tool.uv.sources` governs this repository's uv-managed frozen build but is not emitted into wheel `Requires-Dist`. An independently pip-resolved wheel would still select released Starlette 1.6.0 and encounter the warning. The remediation ADR defines this component as a Dashboard-embedded binary rather than a standalone wheel product. `uv export --locked` emits the immutable Git source, and `uv run --locked --group freeze` imports TestClient without warning while installed `direct_url.json` binds requested revision and commit ID to `bbee8944`; `scripts/build_binary.py` invokes PyInstaller through that same interpreter. S08 adds no compatibility support for an independent wheel lane.
+
+### s08-team-status-node-summary-baseline-failure | medium | open under W05.P13.S67
+
+Type: current-source test/state projection drift. `TestTeamStatus.test_node_summaries_surface_as_agents` expected one agent and received an empty list. It failed in the 12-module pinned run and individually. A controlled reinstall of registry Starlette 1.6.0 reproduced the same failure, proving it is not introduced by S08. Owner `W05.P13.S67` must reconcile the status projection/fixture before loaded status qualification; S08 does not relax or edit the test.
+
+### s08-plan-approval-response-baseline-failure | medium | open under W02.P03.S78/W02.P03.S13
+
+Type: current-source durable permission test drift. `TestInternalEvents.test_plan_approval_relay_creates_durable_permission_and_can_be_responded` expected HTTP 200 and received typed 409. It failed in the 12-module pinned run and individually, then reproduced unchanged against registry Starlette 1.6.0. The durable action-receipt and settlement owners `W02.P03.S78` and `W02.P03.S13` must reconcile the fixture with current permission ownership; S08 preserves both the typed response and the failing assertion.
+
+The exact current lock, warnings-as-errors import/GET, installed-source scan, frozen-build interpreter proof and 28-test representative set pass. The broad result is 197 passed / 2 pre-existing failures in 195.99 seconds. Final dependency, static and Core results are recorded below. S08 stays open for formal review.
+### s08-shared-environment-incomplete-distribution-metadata | low | resolved
+
+Type: evidence-environment integrity. The locked sync exposed incomplete pre-existing `.venv` records for `watchfiles 1.2.0` and `zstandard 0.25.0`: `uv pip check` could not find their installed `METADATA`, and the distributions lacked uninstall records. S08 reinstalled those exact locked current versions into the same environment, without changing either dependency constraint or lock resolution. `uv pip check` then reported all 188 installed packages compatible, and the exact Starlette warnings-as-errors discriminator remained green. This is resolved environment repair evidence rather than a dependency-policy change.
+
+### s08-whole-tree-ty-provider-model-test-diagnostics | low | open under W06.P14.S72
+
+Type: repository static-check baseline. Whole-tree `uv run ty check` reports five diagnostics, all in unchanged provider-model test code: three object subscript/assignment diagnostics in `ipc/tests/test_model_assignment_schema.py`, one missing required `model` argument in `providers/tests/test_codex_chat_model.py`, and one object key-type diagnostic in `providers/tests/test_team_selection.py`. S08 changes dependency metadata and Vault evidence only, so these findings are outside its implementation surface. Final repository-check reconciliation remains owned by `W06.P14.S72`; S08 neither suppresses nor claims a clean whole-tree type gate.
+### w01-p02-s08-final-implementation-gates | low | ready for formal review
+
+Type: implementation evidence disposition. `uv lock --check` retains the 211-package exact graph; `uv pip check` reports all 188 installed packages compatible. The warnings-as-errors real TestClient request passes, and the installed-source discriminator reports three canonical accesses and zero old-alias accesses. `deptry src`, `ruff check src`, and `git diff --check` pass. The representative TestClient suite remains 28 passed; the broad result remains 197 passed and two differentially proven pre-existing failures. Whole-tree Ty retains the five separately queued unchanged-test diagnostics and is not reported as green. Both embedded-runtime-remediation and embedded-runtime-robustness Core feature checks complete all 19 checks with zero diagnostics after Core markdown and feature-index maintenance. S08 changes no application runtime or test source, keeps the no-legacy/no-deprecated contract, and remains open for formal review.

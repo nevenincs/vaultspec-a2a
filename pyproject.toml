@@ -185,6 +185,11 @@ default-groups = []
 torch = [
     { index = "pytorch-cu130", extra = "rag", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+# Starlette 1.6.0 was released before AnyIO 4.15 began warning on its
+# long-deprecated BlockingPortal alias. This immutable upstream commit includes
+# the reviewed three-access TestClient correction and keeps the locked binary
+# build off the deprecated alias until Starlette publishes it in a release.
+starlette = { git = "https://github.com/Kludex/starlette.git", rev = "bbee894422c6cc1306327335ae385b901ccfec13" }
 
 [[tool.uv.index]]
 name = "pytorch-cu130"

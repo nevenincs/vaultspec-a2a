@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:37096b46081e3de86c1e659a81f5ac12f442bfa8bf5290e9d4f5cc1b310c2bed'
+body_hash: 'sha256:d14347d6e95101f61a3c3b1b7e4e7843201ccbb1bd4c7faf034247e116beabbb'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -97,3 +97,11 @@ Formal review found the initial compile result mixed two intervals: graph durati
 This separation changed the diagnosis. Under the same non-vacuous five-owner load, all five compile gaps passed the unchanged 0.5-second ceiling at 0.0546-0.1796 seconds. One independent bridge-close phase took 7.1849 seconds and blocked the loop for 3.6920 seconds; its sibling bridge samples stayed at 0.0272-0.0769 seconds, while checkpointer exit and ambient scheduling stayed below 0.018 seconds. The bridge path was real: graph compilation buffered an event and close exhausted asynchronous delivery retries against the unreachable test gateway. The finding therefore belongs to worker/gateway shutdown qualification `W04.P10.S49`. S07 retains the phase evidence and does not treat that lifecycle threshold as passed.
 
 The corrected warmup module passed five tests in 139.74 seconds. Its stable assertions cover exact compile-window responsiveness and non-vacuous phase separation; they do not waive the open S49 defect. The current-schema restart/catalog path separately passed in 51.63 seconds, with no shutdown failure despite its 50.79-second cold call.
+
+## W01.P02.S08 Starlette BlockingPortal dependency correction
+
+The locked baseline was already current at AnyIO 4.15.1, FastAPI 0.141.1 and Starlette 1.6.0, but current did not mean warning-free. Importing `starlette.testclient` with deprecations promoted to errors failed at its first runtime annotation access to `anyio.abc.BlockingPortal`. AnyIO 4.15.1 owns the emitting lazy deprecated alias; downgrading it would conceal Starlette's stale access rather than correct it.
+
+No released Starlette contains the correction. PyPI's latest 1.6.0 tag predates official PR 3498, merged as immutable commit `bbee894422c6cc1306327335ae385b901ccfec13`. The PR replaces the three TestClient accesses with `anyio.from_thread.BlockingPortal`. S08 therefore uses that exact official source through `tool.uv.sources` and regenerates the lock. The 211-package graph and compatible AnyIO/FastAPI constraints remain unchanged; the Starlette source changes from registry 1.6.0 to Git metadata 1.6.0 at `bbee8944`.
+
+This immediate correction has a wider provenance boundary than its three-line target patch: the source tree is 27 commits and 54 files beyond tag 1.6.0. Broad TestClient regression is therefore required. The warnings-as-errors consumer run passed 197 tests and failed two; both failures reproduced unchanged after controlled reinstall of registry 1.6.0, which also restored the BlockingPortal warning. Representative pinned coverage passed 28 tests. The frozen build invocation resolves the exact Git commit through the same uv-locked interpreter. Independent wheel resolution does not consume `tool.uv.sources`, but wheels are outside the ADR's supported Dashboard-embedded binary product boundary until Starlette publishes the fix.

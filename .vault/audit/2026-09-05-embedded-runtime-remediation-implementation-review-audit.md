@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:cbb891481bca521aff520702eb5c40c9e2479970880e96d045c27f3f8d782bd7'
+body_hash: 'sha256:616cb07de313f4a5b6a3921b33cb61fb41265f8f0fdc0baec7d1bfc5af2d99f1'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1068,3 +1068,11 @@ Independent re-review passed the full warmup module, 5 tests in 113.80 seconds, 
 Type: lifecycle traceability. Formal PASS `6c742790f42b21d433c371ed6db738c866d0fcd7` accepted correction `82c8e5181453e2c3a6f7712c2f9d8a6048342876` after original implementation `76cb91e54c42b6b9881b16e97dbcb47d354ce50e` and formal FAIL `691f62cc60260e30a82ef5c8c1682276bbe8aba7`. The S07 Step Record retains original ER21 25.312691-second work / 0.6182457-second gap / 1557 ticks, unchanged M15 success, corrected non-vacuous `C=5` compile gaps 0.0546-0.1796 seconds, independent 5-test and restart checks, static/Core/current-only scans, and the exact review chain.
 
 Vaultspec Core closed only `W01.P02.S07`; plan status is 7 of 81 Steps complete and `W01.P02.S08` is next. ER21's compile diagnosis is closed. The phase-isolated 7.1849-second `WorkerBridge.close()` / 3.6920-second loop stall and the distinct cold provider-catalog/Uvicorn lifecycle issue both remain MEDIUM and open under `W04.P10.S49`. All historical failures and reviews remain in the audit. No runtime source changed during lifecycle closure.
+
+### w01-p02-s07-core-lifecycle-closure-formal-review | low | PASS
+
+Type: lifecycle-record review disposition. Closure commit `566b58a6b2127e90fa888b640621fa9ae24632ee` has exact parent `6c742790f42b21d433c371ed6db738c866d0fcd7` and changes exactly five Core-managed Vault paths: the two owning audits, new S07 Step Record, remediation index and remediation plan. The only plan-row transition is `W01.P02.S07`; Core reports 7 of 81 Steps complete, no missing execution records and `W01.P02.S08` next. No runtime or test path changed.
+
+The Step Record preserves the complete `76cb91e5` implementation -> `691f62cc` formal FAIL -> `82c8e518` correction -> `6c742790` formal PASS chain and the authoritative evidence: original ER21 25.312691-second work / 0.6182457-second gap / 1557 ticks, unchanged M15 success, corrected non-vacuous `C=5` compile gaps 0.0546-0.1796 seconds, independent 5-test warmup and one-test current-schema restart checks, static checks, both 19-check Core gates, retired/deprecated scan and empty owned-process scan. The historical 2.3452-second work / 11.0947-second contaminated gap and the correction's intentionally failing diagnostic remain in the audit trail.
+
+ER21 and its S07-owned compile-window measurement findings are closed. The phase-isolated 7.1849-second `WorkerBridge.close()` / 3.6920-second loop stall and the separate cold provider-catalog/Uvicorn lifecycle finding remain MEDIUM and open under `W04.P10.S49`; neither audit nor Step Record claims teardown closure. Current Core checks for remediation and robustness are clean, source-support history is unchanged, and no legacy/deprecated product claim was introduced. No new finding surfaced; the S07 lifecycle closure passes mandatory review.

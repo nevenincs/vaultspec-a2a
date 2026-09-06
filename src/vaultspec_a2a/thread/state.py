@@ -10,7 +10,10 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
-from .action_receipts import merge_graph_action_receipts
+from .action_receipts import (
+    merge_graph_action_receipts,
+    merge_graph_completion_receipts,
+)
 
 __all__ = ["TeamState"]
 
@@ -189,6 +192,10 @@ class TeamState(TypedDict):
     model_assignment_digest: NotRequired[str]
     graph_action_receipts: NotRequired[
         Annotated[dict[str, dict[str, object]], merge_graph_action_receipts]
+    ]
+    active_graph_action_receipt: NotRequired[dict[str, object]]
+    graph_completion_receipts: NotRequired[
+        Annotated[dict[str, dict[str, object]], merge_graph_completion_receipts]
     ]
     next: NotRequired[str]
 

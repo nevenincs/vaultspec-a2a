@@ -5,13 +5,12 @@ tags:
 date: '2026-08-05'
 modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:a9ebd7f6449ab50bb00e426fd5d4fb2513cfde7518cbe9b825dd6f66d6d4a2bd'
+body_hash: 'sha256:763ccf4515866f7edf320decb3de9d23a2fba98cb9c95065a189af2b18814d10'
 related:
   - "[[2026-08-05-served-capability-contract-gateway-contract-audit]]"
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]'
 ---
-
 # `served-capability-contract` adr: `terminal states, obligated writers, and fields that must not contradict the run` | (**status:** `accepted`)
 
 ## Problem Statement
@@ -239,3 +238,9 @@ The run-derived execution deadline and the client observation deadline are disti
 Every response projection is built after reconciliation from a fresh durable read. Election loss, concurrent completion or cancellation, and concurrent deletion cannot be served from a projection captured before the election.
 
 Only current-schema ownership is admitted. Pre-current, retired or unknown ownership is refused before recovery without translation, backfill, substitution, migration-time invention or dispatch. This replaces the former open question about supporting legacy rows; there is no supported legacy population.
+
+### Durable graph completion producer
+
+Every served graph topology routes successful completion through one graph finalizer before END. The finalizer persists an immutable completion receipt for the explicitly active accepted graph action, matching its incorporation receipt. That receipt is graph output committed by the checkpointer; pending writes, a supervisor's finish intention, stream exhaustion and worker notifications cannot substitute for it.
+
+The graph input and resume command carry the active accepted receipt explicitly. Recovery reads completion for the exact current accepted action without compiling providers or consulting mutable graph configuration. A prior action's completion does not complete a newly accepted action. Missing or conflicting current-schema receipt state receives typed refusal. Cancellation uses separate durable cessation or no-op evidence and never obtains a graph-completion receipt by substitution.

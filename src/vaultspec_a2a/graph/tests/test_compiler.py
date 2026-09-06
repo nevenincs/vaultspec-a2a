@@ -132,6 +132,10 @@ async def test_compile_graph_structure(
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
     assert expected_workers <= node_keys
+    terminal_edges = [
+        edge for edge in graph.get_graph().edges if edge.target == "__end__"
+    ]
+    assert [edge.source for edge in terminal_edges] == ["_record_graph_completion"]
 
     if has_supervisor:
         assert "supervisor" in node_keys
@@ -494,6 +498,10 @@ async def test_compile_pipeline_loop_structure(
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
     assert "supervisor" not in node_keys
+    terminal_edges = [
+        edge for edge in graph.get_graph().edges if edge.target == "__end__"
+    ]
+    assert [edge.source for edge in terminal_edges] == ["_record_graph_completion"]
     assert {
         "vaultspec-plan-author",
         "vaultspec-coder",

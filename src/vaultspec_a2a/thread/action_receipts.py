@@ -12,8 +12,10 @@ from .enums import ControlActionType
 
 __all__ = [
     "GraphActionReceipt",
+    "GraphCompletionReceipt",
     "control_action_payload_fingerprint",
     "merge_graph_action_receipts",
+    "merge_graph_completion_receipts",
 ]
 
 _Identity = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^\S+$")]
@@ -42,6 +44,33 @@ class GraphActionReceipt(BaseModel):
     dispatch_id: _Identity
     run_revision: Annotated[int, Field(strict=True, ge=0)]
     writer_generation: Annotated[int, Field(strict=True, ge=1)]
+
+
+class GraphCompletionReceipt(BaseModel):
+    """Successful graph completion committed for one exact accepted action."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    schema_version: Literal["graph-completion-v1"]
+    action: GraphActionReceipt
+    outcome: Literal["completed"]
+
+
+def merge_graph_completion_receipts(
+    existing: dict[str, dict[str, object]],
+    incoming: dict[str, dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    """Retain immutable completion evidence across later accepted actions."""
+    merged: dict[str, dict[str, object]] = {}
+    for source in (existing, incoming):
+        for dispatch_id, raw in source.items():
+            receipt = GraphCompletionReceipt.model_validate(raw)
+            if dispatch_id != receipt.action.dispatch_id:
+                raise ValueError("completion receipt key does not match action")
+            canonical = receipt.model_dump(mode="json")
+            if dispatch_id in merged and merged[dispatch_id] != canonical:
+                raise ValueError("conflicting graph completion evidence")
+            merged[dispatch_id] = canonical
+    return merged
 
 
 def control_action_payload_fingerprint(payload: dict[str, object]) -> str:

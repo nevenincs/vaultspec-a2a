@@ -1359,6 +1359,9 @@ class TestSettleOrdering:
                 )
                 assert checkpoint is not None
                 assert checkpoint.checkpoint["channel_values"][
+                    "active_graph_action_receipt"
+                ] == receipt.model_dump(mode="json")
+                assert checkpoint.checkpoint["channel_values"][
                     "graph_action_receipts"
                 ] == {receipt.dispatch_id: receipt.model_dump(mode="json")}
                 receipts = [

@@ -61,6 +61,7 @@ from ..thread.errors import (
 from ..thread.state import TeamState
 from .enums import PipelinePhase, Provider
 from .nodes._config_contract import accepting_runnable_config
+from .nodes.action_completion import GRAPH_COMPLETION_NODE, record_graph_completion
 from .nodes.clarification import (
     ClarificationQuestionProducer,
     create_clarification_gate_node,
@@ -848,6 +849,8 @@ def compile_team_graph(
     # ``_compile_*`` call below an argument-type error, since those take a bare
     # ``StateGraph``. One cast at construction, not five at the call sites.
     builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder.add_node(GRAPH_COMPLETION_NODE, record_graph_completion)
+    builder.add_edge(GRAPH_COMPLETION_NODE, END)
     topology = team_config.topology
 
     # M3: validate topology_type is a known TopologyType enum value before dispatch.
@@ -1120,7 +1123,7 @@ def _compile_star(
 
     # Supervisor routes to mount_{wid} which then edges to wid.
     route_map: dict[str, str] = {wid: f"mount_{wid}" for wid in compiled_worker_ids}
-    route_map["FINISH"] = END
+    route_map["FINISH"] = GRAPH_COMPLETION_NODE
 
     supervisor_route_map = {**route_map, "plan_approval": "plan_approval"}
     builder.add_conditional_edges(
@@ -1228,7 +1231,7 @@ def _compile_pipeline(
     builder.add_edge(START, mount_names[0])
     for i in range(len(node_names) - 1):
         builder.add_edge(node_names[i], mount_names[i + 1])
-    builder.add_edge(node_names[-1], END)
+    builder.add_edge(node_names[-1], GRAPH_COMPLETION_NODE)
 
 
 def _validate_pipeline_loop_config(
@@ -1428,7 +1431,7 @@ def _compile_pipeline_loop(
     builder.add_conditional_edges(
         loop_node_id,
         _loop_router,
-        {"revise": loop_target_mount, "FINISH": END},
+        {"revise": loop_target_mount, "FINISH": GRAPH_COMPLETION_NODE},
     )
 
 
@@ -1969,7 +1972,7 @@ def _compile_research_adr(
         _RA_PLAN_GATE,
         create_phase_gate_node(
             PipelinePhase.PLAN,
-            approved_target=END,
+            approved_target=GRAPH_COMPLETION_NODE,
             revision_target=_RA_PLAN_AUTHOR,
         ),
     )

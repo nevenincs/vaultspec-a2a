@@ -930,6 +930,7 @@ class Executor:
             graph_input["graph_action_receipts"] = {
                 req.dispatch_id: receipt.model_dump(mode="json")
             }
+            graph_input["active_graph_action_receipt"] = receipt.model_dump(mode="json")
 
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
@@ -1051,6 +1052,9 @@ class Executor:
                             "graph_action_receipts": {
                                 req.dispatch_id: receipt.model_dump(mode="json")
                             },
+                            "active_graph_action_receipt": receipt.model_dump(
+                                mode="json"
+                            ),
                             "agent_descriptors": node_metadata_from_graph(graph),
                             "model_assignment_digest": model_assignment_digest(
                                 req.model_assignment

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6277e69313062c53e3034eb2d517aab1ccb4f5d782fccaec3844df338acb93c1'
+body_hash: 'sha256:5741d062cf7db7531f49d002267108bb3193565e1abb30301b0b691d50e4a8fa'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -95,3 +95,15 @@ Migration 0018 refuses populated pre-current stores instead of inventing histori
 Formal review and a real SQLite test found reservation SAVEPOINT release committed a new accepted action before the intended outer transaction existed. Rolling back a failed writer election left that action present. This was reproduced as one failing test in the first two-case atomicity run (10.76 seconds, exit 1). The application engine now owns physical BEGIN before SAVEPOINT through SQLAlchemy events. Graph-action claim installs the writer and persists the receipt before committing its lease; delivery cannot promote a writer. The corrected two-case discriminator passed in 8.97 seconds with bounded runner exit 0. An independent session verifies accepted action, writer and receipt are visible together; stale refusal leaves no action row.
 
 The graph writer/receipt portion of admission-transaction-gap is corrected. Permission/requested projections and full non-initial effective dispatch input still need integration into the durable authority. Explicit SQLite read transactions also expose lock or snapshot-upgrade contention that must be classified and scheduled through S83; this pass does not claim that retry owner is complete. Cancellation-proof and receipt-consumer-boundary remain open. Focused Ty passed; the continuing S12 row remains unchecked.
+
+### durable-graph-completion-producer | high | corrected in S87; consumers open
+
+Formal self-review confirms all four served compiler topology terminal routes converge on one finalizer before END. The worker supplies the explicitly active accepted action on ingest and resume. The finalizer requires its matching incorporation receipt and writes immutable, versioned completion evidence into graph state. Only the resulting committed channel value proves completion; neither pending writes nor prior action receipts substitute for it. Interrupted work has no completion receipt for its active action. Reopening the real SQLite checkpoint and resuming under a distinct accepted action records completion only for that resume.
+
+Verification through the bounded runner: two interruption/reopen and missing-incorporation tests passed in 2.17 seconds; two production pipeline/pipeline-loop topology tests passed in 2.53 seconds; the real worker active-action input test passed in 1.06 seconds. All exited 0. Focused Ruff and Ty passed after correcting test RunnableConfig annotations. The finalizer obeys the existing graph recursion budget; no extra execution budget is invented.
+
+S87 provides successful completion evidence only. S11 must consume it before any deadline or replay decision and replace the old empty-pending-writes heuristic. S13 must reject unverified terminal notifications. Durable cancellation/cessation evidence, failed-task classification, atomic requested projections and current-schema refusal remain queued; runtime recovery is not closed by this producer.
+
+### administrative-process-timeout | low | resolved; verification lifecycle
+
+The S87 Core exec-record set-body process exceeded a 30-second parent subprocess bound, then emitted its successful mutation result after the parent timed out. The administrative invocation is recorded as a timeout, not a clean process pass. The exact command-body-file process census subsequently found zero matching survivors and the stored exec body was verified. The graph tests above completed naturally through the bounded verification runner.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:9f8cfa56c40e86040cc8263d7b6eb64dbfa3600594efdd9efdd1dda3a5823f89'
+body_hash: 'sha256:fb9956996b32e7f132230941d26ff38f55301464df07716fab230c73147c49cd'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -173,3 +173,8 @@ Verification: S84 must replace historical tests importing the removed auto-commi
 The deleted `test_reconciling_abandonment.py` imported the removed read-time abandonment helper and asserted the retired mutable-preset timeout plus global 300-second floor. Recreating that helper would restore invalid recovery authority. Its current requirements are covered by checkpoint-first recovery, startup-only unfinished-execution demotion, and the public fresh-projection terminal-winner discriminator.
 
 A canonical collection-only run after deletion collected 439 current control tests and exited 1 with six remaining collection errors. Every error is a historical test importing the removed auto-committing `claim_control_action` API: direct-control leases, direct recovery, event handlers, verdict loop, verdict subscriber, and live verdict subscriber. This failed collection is the exact S84 queue for the next migration pass. No alias or compatibility helper will be added.
+### retired-precurrent-backfill-contract | high | resolved in partial S84
+
+The migration test required a pre-0012 populated action to receive a synthetic dispatch identity and remain claimable through the removed implicit-commit API. That is legacy backfill behavior and conflicts with the current rule that populated pre-current stores are refused rather than interpreted. The test and its obsolete control-action imports are removed. The migration chain remains usable to construct a fresh schema; no populated historical action is accepted by this change.
+
+After removal, canonical collection of the database test directory completed naturally with 385 tests and no collection error. The broader S84 control-test queue remains open.

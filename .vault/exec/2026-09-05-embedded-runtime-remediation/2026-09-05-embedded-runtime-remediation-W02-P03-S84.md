@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:bde0a92c8cbec1b9397555ed70235a1353cb524840fc01a72a98db3c12828362'
+body_hash: 'sha256:117734ee66453563b06132683d0d08519f4234a234ae5605224d93b9b1092f8e'
 step_id: 'S84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -34,3 +34,13 @@ related:
 ## Next action
 
 Migrate each retained scenario to explicit prepare/finalize acceptance with a real current receipt. Delete scenarios whose only purpose is the removed implicit-commit contract. Do not add `claim_control_action` back under any name or provide partial-payload interpretation.
+## Populated pre-current action test removal
+
+- `D` retired `test_pre_0012_action_is_backfilled_and_claimable` from `src/vaultspec_a2a/database/tests/test_migrations.py`.
+- Removed its import of the deleted implicit-commit claim API.
+- HIGH legacy backfill/claimability expectation -> resolved by deletion.
+- `verify:` canonical database-test collection -> 385 tests collected, natural exit 0.
+- `verify:` focused Ty -> pass.
+- `verify:` focused Ruff initially reported import grouping after deletion; corrected before commit.
+
+S84 remains open for the six recorded control-test modules and the complete conditions matrix.

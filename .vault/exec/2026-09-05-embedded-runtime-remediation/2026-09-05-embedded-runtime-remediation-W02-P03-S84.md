@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:c7712ec9494e3bf5d1bad9e2cd4be462e859e9a7167757760cf75225b5c74ff3'
+body_hash: 'sha256:48e38701aaf508e14d2d0b6bc1d896040bf1f613215de4c668dec2f195100a7f'
 step_id: 'S84'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
@@ -147,3 +147,14 @@ Verification evidence:
 - Focused Ruff and Ty passed.
 
 The unit subscriber fixture's dispatch-auth and graph-cache findings are resolved. S84 remains open: live subscriber and verdict-loop fixtures still require complete accepted graph authority, and the complete conditions 1-16 qualification matrix is unfinished.
+## Live verdict subscriber frozen-authority migration
+
+- `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py`.
+- Receipt-bearing parked-gate fixtures now persist the complete accepted initial action, immutable graph receipt, current model assignment, exact frozen `mock-success-single` graph, and matching checkpoint/cache digests.
+- Removed the invented `verdict-receipt-preset`, four-member cache identity, synthetic non-hex checkpoint ids, and unauthenticated worker requests. No compatibility interpretation was introduced.
+- Formal review found no new production defect. HIGH graph-authority and dispatch-auth fixture drift -> resolved statically; MEDIUM invalid checkpoint construction -> resolved. The event bridge still buffers the receipt for explicit event-consumer exercise and its live lifecycle remains runtime-qualified only when the declared service stack exists.
+- `verify:` focused Ruff and Ty -> pass.
+- `verify:` default profile -> five service cases deselected, natural exit 1 because no tests ran; not pass evidence.
+- `verify:` explicit service profile -> five skips in 2.47 seconds, natural exit 0, because no healthy engine discovery record resolved. Runtime behavior is unqualified rather than blocked or inferred.
+
+S84 remains open. The live subscriber's static current-contract migration is complete; verdict-loop migration and live service execution remain queued.

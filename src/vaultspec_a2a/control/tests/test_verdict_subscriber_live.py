@@ -68,14 +68,19 @@ from ...authoring import (
     verdict_from_event,
 )
 from ...conftest import materialize_schema
+from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.config import settings
+from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import relay_event
+from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import (
     VerdictSubscriber,
     _verdict_resume_idempotency_key,
 )
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
+    create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
     get_permission_request,
@@ -83,15 +88,28 @@ from ...database import (
     record_permission_request,
     update_thread_status,
 )
+from ...ipc.schemas import DispatchRequest
+from ...team.team_config import load_team_config
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
+from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
     from fastapi import FastAPI
+
+
+_TEST_INTERNAL_TOKEN = "verdict-subscriber-live-test-token"
+
+
+@pytest.fixture(autouse=True)
+def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give both sides of real worker dispatch the current IPC credential."""
+    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
 
 
 @pytest_asyncio.fixture
@@ -265,7 +283,6 @@ async def _seed_parked(
     changeset_id: str,
 ) -> None:
     checkpoint = empty_checkpoint()
-    checkpoint["id"] = f"cp-{thread_id}"
     checkpoint["channel_values"]["authoring_proposal_ids"] = [proposal_id]
     checkpoint["channel_values"]["authoring_changeset_ids"] = [changeset_id]
     await checkpointer.aput(
@@ -420,11 +437,26 @@ async def _seed_parked_gate(
     left the run mis-statused RUNNING even though its checkpoint is parked at the
     gate - the case the reconcile must still recover by checkpoint truth.
     """
+    workspace = Path.cwd()
+    metadata = current_execution_metadata(workspace)
+    execution_authority = resolve_execution_authority(metadata)
+    definition = (
+        freeze_graph_definition(
+            load_team_config(team_preset, workspace_root=workspace),
+            workspace_root=workspace,
+        )
+        if team_preset is not None
+        else None
+    )
     checkpoint = empty_checkpoint()
-    checkpoint["id"] = f"cp-{thread_id}"
     checkpoint["channel_values"]["authoring_proposal_ids"] = [proposal_id]
     checkpoint["channel_values"]["authoring_changeset_ids"] = [changeset_id]
     checkpoint["channel_values"]["gate_pending_proposal_id"] = proposal_id
+    if definition is not None:
+        checkpoint["channel_values"]["model_assignment_digest"] = (
+            execution_authority.model_assignment_digest
+        )
+        checkpoint["channel_values"]["graph_definition_digest"] = definition.digest()
     await checkpointer.aput(
         {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
         checkpoint,
@@ -432,12 +464,42 @@ async def _seed_parked_gate(
         {},
     )
     async with session_factory() as session:
+        authority = make_test_write_authority()
         await create_thread(
             session,
-            write_authority=make_test_write_authority(),
+            write_authority=authority,
             thread_id=thread_id,
             team_preset=team_preset,
+            metadata=metadata,
         )
+        if team_preset is not None and definition is not None:
+            dispatch = DispatchRequest(
+                dispatch_id=authority.action_receipt_id,
+                action="ingest",
+                thread_id=thread_id,
+                content="seed accepted graph authority",
+                team_preset=team_preset,
+                graph_definition=definition,
+                workspace_root=str(workspace),
+                recursion_limit=25,
+                model_assignment=execution_authority.model_assignment,
+            )
+            await create_control_action(
+                session,
+                thread_id=thread_id,
+                action_type=authority.action_type,
+                idempotency_key=f"thread-create:{thread_id}",
+                dispatch_id=authority.action_receipt_id,
+                payload=freeze_accepted_input(
+                    dispatch, intent={"content": "seed accepted graph authority"}
+                ),
+            )
+            receipt = await prepare_graph_action_receipt(
+                session,
+                thread_id=thread_id,
+                dispatch_id=authority.action_receipt_id,
+            )
+            assert receipt is not None
         await update_thread_status(session, thread_id, status)
         await record_permission_request(
             session,
@@ -464,13 +526,21 @@ def _install_receipt_graph(
     builder.add_node("worker", complete)
     builder.add_edge("__start__", "worker")
     builder.add_edge("worker", "__end__")
+    workspace = Path.cwd()
+    definition = freeze_graph_definition(
+        load_team_config("mock-success-single", workspace_root=workspace),
+        workspace_root=workspace,
+    )
     executor.register_compiled_graph(
         thread_id,
         (
-            "verdict-receipt-preset",
-            None,
+            "mock-success-single",
+            str(workspace),
             False,
-            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            resolve_execution_authority(
+                current_execution_metadata(workspace)
+            ).model_assignment_digest,
+            definition.digest(),
         ),
         builder.compile(checkpointer=checkpointer),
     )
@@ -493,6 +563,7 @@ async def _worker_runtime(
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://worker",
+            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
         ) as client:
             yield client, app, bridge
         tasks.cancel_scope.cancel()
@@ -595,7 +666,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             thread_id=thread_id,
             proposal_id=info["proposal_id"],
             changeset_id=info["changeset_id"],
-            team_preset="verdict-receipt-preset",
+            team_preset="mock-success-single",
         )
         async with _worker_runtime(checkpointer, receipt_threads=(thread_id,)) as (
             worker_client,
@@ -723,7 +794,7 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
             proposal_id=info["proposal_id"],
             changeset_id=info["changeset_id"],
             status=ThreadStatus.RUNNING,
-            team_preset="verdict-receipt-preset",
+            team_preset="mock-success-single",
         )
         async with _worker_runtime(checkpointer, receipt_threads=(thread_id,)) as (
             worker_client,

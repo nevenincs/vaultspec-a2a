@@ -5,7 +5,7 @@ tags:
 date: '2026-09-06'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:26e826153b516e7d9bceca9cf292b8aece4597c9dc0f69f54fd9abb98c98e5c7'
+body_hash: 'sha256:d2ba900a7a2f3fc91f262c000ccbcacb418b5c04999c44ce606abecc2fafa243'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]"
@@ -241,3 +241,8 @@ Formal review classified and resolved four findings: HIGH missing dispatch authe
 Failed evidence remains explicit: the paired race cases timed out at 90 seconds and were reaped; the isolated concurrent-resume case timed out at 60 seconds and was reaped; and the competing-payload case naturally failed once in 14.84 seconds before its stale assertion and fixture lifecycle were corrected. Final evidence exited naturally: two race cases passed in 38.12 seconds and all 22 subscriber tests passed in 56.19 seconds. Focused Ruff and Ty passed.
 
 The unit fixture is current. The live subscriber and verdict-loop fixtures remain HIGH S84 work because they still lack complete accepted initial graph authority and matching five-member compiled-graph identity.
+### live-verdict-subscriber-frozen-authority | high | static migration resolved; service proof unavailable
+
+The receipt-bearing live subscriber fixtures now start from `accepted-action-input-v2`, its immutable initial graph receipt, the exact frozen `mock-success-single` graph and current provider assignment. Their checkpoints and compiled-graph cache keys carry matching graph and provider digests. Exact worker dispatch uses the current bearer credential. Invented preset identity, four-member cache authority, synthetic non-hex checkpoint ids and unauthenticated dispatch are removed without adapters.
+
+Focused Ruff and Ty pass. The default invocation deselected all five service cases and exited 1, so it is not pass evidence. The explicit service profile exited naturally with five skips in 2.47 seconds because no healthy external engine discovery record resolved. Static contract drift is resolved; runtime qualification remains open until the declared service stack is available. The verdict-loop fixture remains the final known verdict graph-identity migration in S84.

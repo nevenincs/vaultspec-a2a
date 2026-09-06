@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#embedded-runtime-remediation'
 date: '2026-09-05'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:0d023dc67e0ed614d6e61133f87769cf3cb591e501a2060bf32d12a156847ca2'
+body_hash: 'sha256:9f59c8049de1edd4f17eef0e43aaea5491b90ed5c67ce269829e3df80492bbdd'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -359,3 +359,35 @@ are correct, project confinement remains covered, and focused tests/OpenAPI/Ruff
 checks pass. The two HIGH durable/IPC fail-closed defects above prevent catalog
 `P01.S10` closure and keep remediation `W01.P02.S05` blocked. The uncommitted S10
 Step Record is review evidence only and cannot close the implementation.
+
+### s10-correction-resolves-nested-fields-and-impossible-modes | low | resolved
+
+Type: state compatibility review. A2A `e2934a2e` closes persisted and IPC key
+sets at every nested layer and prevalidates every role/fallback provider-mode
+pair before construction. Existing-digest retired fields, a corrupt later role,
+and an impossible fallback now fail before worker or factory contact. The prior
+two HIGH findings are resolved for those exact cases. Current admission citation
+and topology-only preset claim tests also resolve the two prior MEDIUM coverage
+findings.
+
+### s10-structural-native-control-errors-still-fallback | high | open
+
+Type: safety and fail-closed behavior. Status: blocks catalog `P01.S10` and
+remediation `W01.P02.S05`. Provider-specific control semantics are not included
+in whole-assignment prevalidation, while worker resolution still catches broad
+factory `ValueError` as runtime unavailability. Unsupported or duplicate native
+controls and other structural/configuration failures can therefore construct a
+fallback. Independent review reproduced an unsupported Codex control reaching
+and returning the fallback. Ownership: catalog `P01.S10`; prevalidate every
+provider's control semantics, introduce a typed runtime-unavailable condition,
+and catch only that condition for fallback, with later-role/fallback zero-contact
+proof.
+
+### s10-correction-formal-rereview | high | FAIL - structural errors can still substitute fallback
+
+Type: formal implementation review disposition. Correction `e2934a2e` is scoped
+and resolves the reported nested-key, impossible-mode and coverage defects, but
+the remaining HIGH control/error-typing gap violates the same no-substitution
+contract. Focused exact-commit verification passes 136 tests and Ruff/format/diff
+checks pass. Keep provider-model-catalog `P01.S10` and remediation
+`W01.P02.S05` open pending correction and formal re-review.

@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#provider-model-catalog'
 date: '2026-08-02'
-modified: '2026-09-05'
+modified: '2026-09-06'
 body_schema: 'body-v1'
-body_hash: 'sha256:db37e51b9db62dbc614dc1eea4ac12fef9d1f01d0487b67603205a9870506101'
+body_hash: 'sha256:20052475561593729910199263ddd5210eab16dced9f4e03bdb7facb2a5a3fb8'
 related:
   - "[[2026-08-02-provider-model-catalog-adr]]"
   - "[[2026-08-02-provider-model-catalog-plan]]"
@@ -239,3 +239,87 @@ and `git diff --check` pass. Independent adversarial probes reproduced all
 retired-field and invalid-mode acceptances above. The implementer's full-run
 accounting remains 4,355 passed, 3 skipped, 188 deselected, and 11 failed, with
 the nine unrelated server-profile/desktop baseline failures already queued.
+
+## Formal re-review of correction `e2934a2e`
+
+### frozen-selection-and-ipc-schema-closure | low | prior high resolved
+
+Type: state compatibility and schema validation. Correction
+`e2934a2e136a434bac4852af0902ed9cf5d204c6` applies exact required/optional key
+sets at the persisted root, primary lane, override, fallback, native-control and
+replay layers and rejects additional provenance keys. IPC model assignments
+apply the same closed nested shape. Existing-digest additions of `profile_id`,
+`default_profile_id`, `profile`, `model_profile` or any other field are refused;
+redispatch marks invalid records terminal without worker contact. The first
+formal review's nested-authority HIGH is resolved.
+
+### whole-assignment-provider-mode-prevalidation | low | prior high narrowed
+
+Type: safety and fail-closed behavior. Compilation now parses every role's
+primary and fallback lanes and validates every current provider/execution-mode
+pair before the first provider-factory call. Persisted reconstruction validates
+the same 7 external plus 2 explicitly armed in-process mode inventory. Tests
+cover a corrupt later role and corrupt fallback with zero factory calls, while a
+valid lane whose construction raises runtime `ConfigError` may use an exact
+valid fallback. The first review's impossible-mode substitution is resolved.
+
+### structural-factory-value-errors-still-enter-fallback | high | open
+
+Type: safety, state compatibility, and fail-closed behavior. Status:
+review-blocking for `P01.S10`. Whole-assignment prevalidation validates control
+record keys and string shapes but not provider-specific control ids,
+duplicates after provider field normalization, or allowed control semantics.
+`_resolve_model_for_worker()` still catches every `ValueError` raised by
+`ProviderFactory.create()` together with runtime `ConfigError` and advances to
+the next fallback. The real factory uses `ValueError` for unsupported Codex and
+Kimi native controls, duplicate normalized Codex controls, controls on providers
+that support none, backend conflicts, invalid authentication configuration and
+other structural failures. Independent review supplied a closed, current
+`codex/codex-app-server` primary with `retired-control`; a factory raising the
+real unsupported-control `ValueError` was logged as unavailable and the valid
+fallback was constructed and returned. In-process mock/deterministic branches
+also return before rejecting nonempty controls.
+
+Ownership: finish `P01.S10` by prevalidating provider-specific native-control
+semantics for every primary/override/fallback before any construction and by
+replacing the broad exception contract with a typed runtime-lane-unavailable
+outcome. Catch only that typed runtime condition for fallback. Structural,
+auth/configuration and unsupported-control errors must substitute nothing and
+must fail the run terminally. Add multi-role tests with unsupported, duplicate,
+and provider-inapplicable controls in a later role and fallback, proving zero
+factory calls, plus a production-factory discriminator showing only the typed
+runtime-unavailable condition reaches fallback.
+
+### current-admission-and-preset-claim-coverage | low | prior mediums resolved
+
+Type: evidence integrity and product-truth coverage. New current-only tests cover
+every provider's explicit classification and deny-by-default result, exact
+provider resolution, live and rotten proof citations, immutable declarations,
+and the web-proof-implies-turn invariant. The topology-only preset scan reaches
+at least ten shipped presets, proves real/nonempty surfaces, and forbids live-web
+or online-research claims without restoring profile policy. Both MEDIUM coverage
+findings from the first review are resolved.
+
+### p01-s10-correction-formal-rereview | high | FAIL
+
+Type: formal implementation review disposition. Status: open at correction
+`e2934a2e136a434bac4852af0902ed9cf5d204c6`, exact parent
+`6f1b33963408170df08c6dcd59edd5aaf7b23ad0`. The thirteen-path correction is
+scoped to the reported trust boundaries, tests, and two stale fixtures updated
+to current exact schema values. It resolves the original two HIGH cases for
+unknown nested fields and impossible provider/mode pairs and restores both
+MEDIUM test surfaces. The no-legacy removals, exact 7+2 inventory,
+current-schema restart, required factory model signatures/call sites,
+API/IPC/OpenAPI contraction, Gemini retirement, ACP configOptions-only behavior,
+Kimi alias refusal, Codex tier retirement, project confinement, streaming
+snapshots and deletion replacement map remain intact.
+
+Formal re-review fails because the remaining structural-control `ValueError`
+path still substitutes a fallback. Independent exact-commit focused verification
+passes 136 tests across selection, IPC, admission, preset claims, redispatch,
+graph compilation and factory behavior; the recorded correction evidence also
+reports 135 focused and 63 graph passes plus 14 correction-specific cases.
+Ruff lint/format for all thirteen retained paths and `git diff --check` pass.
+The independent broad-suite terminal result is recorded separately when its
+running exact-commit invocation completes. Do not close `P01.S10` until the HIGH
+finding is corrected and formally re-reviewed.

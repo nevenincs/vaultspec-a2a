@@ -1271,9 +1271,7 @@ class ProviderFactory:
                 logger.error(
                     "Failed to authenticate %s: Missing ZHIPU_API_KEY", provider
                 )
-                raise ProviderRuntimeUnavailableError(
-                    f"Authentication required for {provider}"
-                )
+                raise ValueError(f"Authentication required for {provider}")
 
             logger.debug(
                 "[%s] Resolved authentication via: %s", provider, auth_resolved
@@ -1300,9 +1298,7 @@ class ProviderFactory:
                 logger.error(
                     "Failed to authenticate %s: Missing OPENAI_API_KEY", provider
                 )
-                raise ProviderRuntimeUnavailableError(
-                    f"Authentication required for {provider}"
-                )
+                raise ValueError(f"Authentication required for {provider}")
 
             logger.debug(
                 "[%s] Resolved authentication via: %s", provider, auth_resolved

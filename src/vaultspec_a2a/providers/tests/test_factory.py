@@ -524,6 +524,19 @@ def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable()
         )
 
 
+def test_production_factory_types_a_missing_acp_runtime() -> None:
+    from ..factory import ProviderRuntimeUnavailableError
+
+    if _BIN_PATH is not None:
+        pytest.skip("repository carries the optional binary ACP runtime")
+    with pytest.raises(ProviderRuntimeUnavailableError, match="no executable found"):
+        ProviderFactory().create(
+            Provider.CLAUDE,
+            model="exact",
+            backend="binary",
+        )
+
+
 class TestProviderAdmission:
     """The admission path, exercised apart from construction after the split.
 

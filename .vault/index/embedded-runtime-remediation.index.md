@@ -6,7 +6,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:bf6f20125add934f43aa1b4f8dd37fff94fd978e899b3633a21391935e6c4200'
+body_hash: 'sha256:ae5f255966ed2ec79e94ea32bc9ac20d4d76300efffe9c1430f080a9f914a713'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S01]]'
   - '[[2026-09-05-embedded-runtime-remediation-W01-P01-S02]]'
@@ -33,6 +33,7 @@ related:
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s76-write-authority-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s77-current-schema-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s77-lexer-correction-rereview-audit]]'
+  - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s77-lifecycle-closure-review-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s77-schema-fingerprint-rereview-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-rereview-audit]]'
   - '[[2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-review-audit]]'
@@ -61,6 +62,7 @@ Auto-generated index of all documents tagged with `#embedded-runtime-remediation
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s76-write-authority-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S76 run write authority review`
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s77-current-schema-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S77 current ownership schema review`
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s77-lexer-correction-rereview-audit` - `embedded-runtime-remediation` audit: `W02 P03 S77 lexer correction rereview`
+- `2026-09-06-embedded-runtime-remediation-w02-p03-s77-lifecycle-closure-review-audit` - `embedded-runtime-remediation` audit: `W02 P03 S77 lifecycle closure review`
 - `2026-09-06-embedded-runtime-remediation-w02-p03-s77-schema-fingerprint-rereview-audit` - `embedded-runtime-remediation` audit: `W02 P03 S77 schema fingerprint rereview`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-rereview-audit` - `embedded-runtime-remediation` audit: `W04.P10.S47 cooperative server owner formal rereview`
 - `2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-review-audit` - `embedded-runtime-remediation` audit: `W04.P10.S47 cooperative server owner formal review`

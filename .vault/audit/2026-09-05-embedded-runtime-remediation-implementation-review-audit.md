@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:6d9c59edf9fc20c2ac780296773d61ba3753686cb7214d946600933dd934604e'
+body_hash: 'sha256:b4978882b9f07c94a5c1964ff66dea9a8b45acf5191cd15129432cd481808f10'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1271,3 +1271,11 @@ Type: evidence. The conditional UPDATE compiles from cross-dialect SQLAlchemy Co
 ### s09-test-outcome-classification | low | resolved
 
 Type: test accuracy. The first focused run expected LOST when the supplied successor receipt itself lacked same-thread/action correspondence. Production correctly returned RECEIPT_MISMATCH. The assertion was corrected to preserve the more precise typed refusal; the run exited normally with 23 passing nodes and one failed assertion in 20.99 seconds. The terminal gate then passed 25 tests in 6.58 seconds. No test process hang or residue occurred in this pass.
+### s09-same-session-election-state-stale | high | open and blocking S09
+
+Type: lifecycle correctness and transaction consistency. Formal review of 8c37f800 proved that a winning election leaves an already identity-mapped ThreadModel stale because the Core update disables session synchronization. In a real file-backed SQLite session, RUNNING to COMPLETED returned WON while the same mapped object remained RUNNING at revision zero both before and after commit under expire_on_commit=False. Same-transaction effects can therefore act on state that contradicts the winning durable election. Correction must synchronize or expire the mapped row and prove status plus all four authority fields after election and commit. Formal verdict: FAIL; S09 remains open.
+
+### s09-formal-review-verification | low | verified subject to blocking correction
+
+Type: formal verification. The exact conditional predicate, successor revision/generation rules, same-thread/action/receipt requirement, typed refusal outcomes, terminal non-reopen and early completion behavior are sound at the durable SQL boundary. The focused suite passed 25 tests in 3.72 seconds; Ruff and Ty passed. A reviewer-run overlapping SQLite discriminator yielded one WON and one LOST. Current production adoption remains honestly queued across S10, S11, S78/S12/S13 and S14; archive/deletion adoption remains HIGH/open in S10; live PostgreSQL proof remains MEDIUM/open. No legacy, deprecated, default, backfill, translation, alias, fallback or inferred-authority behavior was added.
+

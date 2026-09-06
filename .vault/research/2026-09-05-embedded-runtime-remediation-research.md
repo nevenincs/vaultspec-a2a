@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d14b98cdaa94ebf455a9e25a4445029f923435e193e541a587ab5aa5c2bbfd96'
+body_hash: 'sha256:bf475f3b9e9ce08e24266206c2c2655807d2d469e92a1583ad7fc8eb9b46c7f0'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -170,3 +170,5 @@ The current repository status writer validates an ORM snapshot and then flushes 
 Real file-backed SQLite tests retain one witness across independent sessions and prove both orderings: COMPLETED prevents stale CANCELLED, and CANCELLED prevents stale COMPLETED. Each winner advances the revision once. A SUBMITTED completion also wins before a late RUNNING projection and cannot be overwritten. SQLite serializes competing writes and reevaluates the full predicate; PostgreSQL READ COMMITTED provides the same lock-and-recheck shape, but a live PostgreSQL concurrency proof remains part of the existing open PostgreSQL evidence obligation.
 
 S09 establishes the repository election and does not claim ER02 production closure. Current terminal payloads still omit the dispatch receipt and writer generation; S78/S12 own that evidence and S13 owns terminal adoption. Caller inventory places transitional writers under S10, abandoned-run writers under S11, terminal settlement under S13 and durable retry under S14. Archive and deletion-saga entry were not explicit in the original decomposition, so S10 now names their atomic adoption and removal of the unconditional lifecycle setter after its final current caller migrates.
+Formal S09 review found a transaction-visibility requirement that the initial boundary omitted. A winning Core update is insufficient when the supplied ORM session already identity-maps the thread and retains it after commit: with session synchronization disabled, the durable row advances while the mapped object remains at the expected state and authority. Election ownership therefore includes same-session truthfulness. A winner must synchronize or expire any mapped thread before same-transaction effects can inspect it, and the regression proof must cover status and all four authority fields both before and after commit under the production expire_on_commit=False configuration. This is HIGH and blocks S09; it does not change the later production-adoption owners.
+

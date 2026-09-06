@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:2986be7c1f78c2dcce2ccc775d81c57a8fb6d345359ac583150b1897aa5a0ca3'
+body_hash: 'sha256:9a5b91097ef7951c3205052bab27d89092267d5f8ba8791caac150a7d836a063'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -886,3 +886,13 @@ digest. On the final exact source, the complete module passed 34 tests in
 112.39 seconds: the real project-pin case took 66.37 seconds and the
 cancellation/failed-stop case took 43.88 seconds. No mock, monkeypatch, fake transport, deprecated/legacy surface
 or warning suppression was added. S06 remains open for formal re-review.
+
+### w01-p02-s06-start-timeout-reap-unbounded | medium | open
+
+Type: test readiness and subprocess lifecycle. Correction `f7a9b14d349a8ac9c815d7e7b1296f2edd62d65a` bounds `process.communicate()` initially, but its timeout branch at `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py:138-142` kills only the direct `uvx` control process and then awaits a second `process.communicate()` without a deadline. A spawned child retaining the inherited output handles, or a kill/reap failure, can therefore hold initial service start beyond the declared 120-second readiness budget. The thirty-second cleanup envelope bounds stop calls only after an owner is discovered; it does not bound this pre-yield start path. S06 owns bounded readiness and remains review-blocked. Put launch, timeout termination, output drain and late-record discovery inside one total deadline; terminate the exact spawned control tree when required; cap captured output; and add a real-process timeout discriminator proving terminal return plus cleanup of any late-published owned service without touching the shared daemon.
+
+### w01-p02-s06-isolated-rag-pinning-correction-formal-review | medium | FAIL
+
+Type: formal correction review disposition. The correction changes the same four intended paths and resolves both earlier findings. The disclosed credential is absent from the full current tree; current audit prose retains only one-way SHA-256 comparisons. Operator-owned rotation is recorded without the new credential, and the S06 code has no shared-service control or network path. Private cleanup retains a non-rendering exact process/token identity, verifies the private endpoint, shields cleanup from caller cancellation within a thirty-second deadline, tries the exact-version CLI stop, falls back only to the retained process tree, refuses a changed listener identity, performs bounded late-record discovery and requires both process and listener absence. The new real discriminator makes stop-process creation fail by removing executable lookup only after the private daemon is ready, cancels the owning task, and proves fallback, process absence and port closure. Independent re-review passed that case once in 51.22 seconds; the recorded exact module result is 34 passes, including both live cases. Ruff format/check, Ty, `git diff --check` and all 19 remediation Core checks pass. No legacy/deprecated surface was added. ER20 alone remains corrected pending review, while the cold catalog/Uvicorn finding stays open under S07/S49.
+
+The initial-start timeout branch remains outside a total reap deadline, so bounded readiness is not yet proved. S06 does not pass and remains open for correction and re-review.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:aa7014c2d7c83461466084444f504861404a9638cda3c0e20d3f9f68118e62ad'
+body_hash: 'sha256:a6a16e2c2ca754cad68e68c243c26fa767455293360b4547338c7910c6a26b5b'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1026,3 +1026,19 @@ No runtime authority, provider surface, compatibility path, deprecated option or
 ### w01-p02-s07-load-cleanup-terminal-race | low | resolved
 
 Type: measurement-harness resource cleanup. Final review of the owned CPU-load helper found a process could exit between `poll()` and `terminate()`. Cleanup now accepts only terminal `ProcessLookupError`, still waits each exact process and escalates its same handle on timeout, and the test asserts every retained `psutil.Process` identity is absent after the load context. The authoritative combined run passes and an independent command-line scan reports zero matching burner processes.
+
+### w01-p02-s07-compile-window-includes-teardown | medium | open
+
+Type: performance measurement integrity. In `src/vaultspec_a2a/providers/tests/probe_loop_responsiveness.py:59-116`, `_run_compile` captures `compile_seconds` immediately after `get_or_compile_graph`, but then awaits `bridge.close()` and exits the checkpointer context before returning while the shared heartbeat continues until `_measure` stops it at lines 149-150. The asserted `max_loop_gap_seconds` therefore covers graph compilation plus bridge/checkpointer teardown, while `work_seconds` covers compilation alone. Independent formal review reproduced the named `C=5` gate and one trial reported `work_seconds=2.3452` with `max_loop_gap_seconds=11.0947`; a loop gap almost nine seconds longer than the measured work proves the two fields do not describe the same interval. This invalidates the five-trial compile-only conclusion and blocks S07 evidence closure.
+
+Freeze or pause the heartbeat at the exact compile completion boundary and return that bounded sample independently from teardown. Keep bridge/checkpointer cleanup terminal and separately measured. Re-run the idle calibration and five non-vacuous current production compiles under the fixed 0.5-second ceiling on the named load, preserving the failed observation.
+
+### w01-p02-s07-post-compile-teardown-stall | medium | open
+
+Type: resource lifecycle and performance diagnosis. The same independent run observed an 11.0947-second event-loop gap after the 2.3452-second compile measurement but before the probe returned. The current probe cannot attribute that interval between `WorkerBridge.close()`, checkpointer exit and ambient scheduling, so it is not evidence that graph compilation regressed or that bridge close alone blocked. Instrument the two teardown phases separately with the same idle/load calibration, preserve exact timing and cleanup evidence, and route any confirmed production lifecycle defect to its owning worker/checkpoint or S49 lifecycle path. Do not suppress the observation by stopping measurement without retaining a separate teardown result.
+
+### w01-p02-s07-compile-loop-diagnosis-formal-review | medium | FAIL
+
+Type: formal implementation review disposition. Commit `76cb91e54c42b6b9881b16e97dbcb47d354ce50e` has the intended five-path test/research/audit scope and no production change. RAG-first semantic lookup reached `worker/graph_lifecycle.py`; its limited code corpus warning was retained, followed by whole-source inspection and exact-symbol confirmation that current `_compile_graph` still awaits `asyncio.to_thread(warm_model_imports)` before provider construction. The new Windows base-interpreter owners are non-vacuous: the independent gate reached the compile assertion only after all five owners accrued CPU, remained active across trials, were reaped, and the idle scheduler control stayed below 0.5 seconds. A post-failure scan found zero burner processes. The original 25.312691-second/0.6182457-second failure and M15 pass remain historical evidence, and the threshold is unchanged.
+
+The exact cold catalog/current-schema restart case independently passed once in 24.50 seconds, supporting the documented absence of warmup coupling while leaving its separate S49 ownership open. Ruff format/check, Ty, diff and all 19 remediation Core checks pass; no legacy/deprecated surface was added. The recorded six cold-catalog passes and original load results remain evidence, but the independent named-load run failed with gaps `0.0620, 11.0947, 0.0572, 0.0569, 0.0666` seconds (`1 failed` in 76.51 seconds). The contaminated timing window and separately unclassified teardown stall are MEDIUM findings. S07 does not pass and remains open for correction and re-review.

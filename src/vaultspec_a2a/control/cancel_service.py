@@ -27,6 +27,7 @@ from ..database import (
     successor_thread_write_authority,
     thread_write_expectation,
 )
+from ..database.models import ThreadModel
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.cancel_policy import can_cancel
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
@@ -200,23 +201,36 @@ async def cancel_thread(
             failure_type=FailureType.CONFLICT,
         )
     if not claim.acquired:
-        await db.refresh(thread)
+        current_thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+        if current_thread is None:
+            return CancelResult(
+                action_id=claim.action_id,
+                thread_id=thread_id,
+                cancelled=False,
+                thread_status="",
+                error_detail="Thread disappeared while cancellation was leased",
+                accepted=False,
+                applied=False,
+                action_status=claim.result_status,
+                idempotency_key=response_idempotency_key,
+                failure_type=FailureType.NOT_FOUND,
+            )
         claim_owns_thread = (
-            thread.status == ThreadStatus.CANCELLING.value
-            and thread.writer_action_type == ControlActionType.CANCEL.value
-            and thread.writer_action_receipt_id == claim.dispatch_id
+            current_thread.status == ThreadStatus.CANCELLING.value
+            and current_thread.writer_action_type == ControlActionType.CANCEL.value
+            and current_thread.writer_action_receipt_id == claim.dispatch_id
         )
         if not claim_owns_thread:
             return CancelResult(
                 action_id=claim.action_id,
                 thread_id=thread_id,
-                cancelled=thread.status == ThreadStatus.CANCELLED.value,
-                thread_status=thread.status,
+                cancelled=current_thread.status == ThreadStatus.CANCELLED.value,
+                thread_status=current_thread.status,
                 error_detail=(
                     "Cancellation action is leased but does not own thread authority"
                 ),
                 accepted=False,
-                applied=thread.status == ThreadStatus.CANCELLED.value,
+                applied=current_thread.status == ThreadStatus.CANCELLED.value,
                 action_status=claim.result_status,
                 idempotency_key=response_idempotency_key,
                 failure_type=FailureType.CONFLICT,

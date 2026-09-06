@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
@@ -12,27 +11,19 @@ from sqlalchemy import select
 
 from ..database import (
     ControlActionModel,
-    ThreadStatusElectionOutcome,
-    elect_thread_status,
     get_permission_request,
     get_thread,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
-from ..thread.enums import ControlActionType, InvalidTransitionError, ThreadStatus
+from ..thread.enums import ControlActionType, ThreadStatus
 from ._thread_metadata import dispatchable_workspace_root
 from .action_lease import claim_control_action, release_definite_non_delivery
 from .dispatch import safe_dispatch
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .permission_dispatch import permission_resume_value
-from .repair_transitions import (
-    mark_cancel_requested,
-    mark_message_followup_requested,
-    mark_permission_response_requested,
-)
 
 if TYPE_CHECKING:
     import httpx
@@ -91,7 +82,6 @@ class _StoredAction:
     idempotency_key: str
     payload: dict[str, object]
     worker_generation: int
-    requested_at: datetime
 
 
 def _decode_payload(encoded: str | None) -> dict[str, object] | None:
@@ -221,53 +211,11 @@ async def _restore_requested_state(
         target = ThreadStatus.CANCELLING
     else:
         target = expectation.status
-    if (
+    return (
         target is expectation.status
         and action_type is expectation.authority.action_type
         and action_receipt_id == expectation.authority.action_receipt_id
-    ):
-        return True
-    current_action_requested_at = await db.scalar(
-        select(ControlActionModel.requested_at).where(
-            ControlActionModel.thread_id == action.thread_id,
-            ControlActionModel.action_type == expectation.authority.action_type.value,
-            ControlActionModel.dispatch_id
-            == expectation.authority.action_receipt_id,
-        )
     )
-    if current_action_requested_at is None:
-        return False
-    current_requested_at = current_action_requested_at
-    candidate_requested_at = action.requested_at
-    if current_requested_at.tzinfo is None:
-        current_requested_at = current_requested_at.replace(tzinfo=UTC)
-    if candidate_requested_at.tzinfo is None:
-        candidate_requested_at = candidate_requested_at.replace(tzinfo=UTC)
-    if candidate_requested_at <= current_requested_at:
-        return False
-    try:
-        election = await elect_thread_status(
-            db,
-            action.thread_id,
-            expectation=expectation,
-            status=target,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=action_type,
-                action_receipt_id=action_receipt_id,
-            ),
-        )
-    except InvalidTransitionError:
-        return False
-    if election.outcome is not ThreadStatusElectionOutcome.WON:
-        return False
-    if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
-        await mark_message_followup_requested(db, action.thread_id)
-    elif action.action_type == ControlActionType.CANCEL.value:
-        await mark_cancel_requested(db, action.thread_id)
-    elif action.action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value:
-        await mark_permission_response_requested(db, action.thread_id)
-    return True
 
 
 async def redrive_direct_control_actions(
@@ -301,7 +249,6 @@ async def redrive_direct_control_actions(
                 idempotency_key=row.idempotency_key,
                 payload=payload,
                 worker_generation=row.worker_generation,
-                requested_at=row.requested_at,
             )
             for row in rows
             if (payload := _decode_payload(row.payload_json)) is not None

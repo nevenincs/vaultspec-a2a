@@ -201,6 +201,26 @@ async def _seed_unapplied_actions(
                 )
             ).dispatch_id,
         }
+        for thread_id, action_type in (
+            (_MESSAGE_THREAD, ControlActionType.MESSAGE_FOLLOWUP_REQUESTED),
+            (_CANCEL_THREAD, ControlActionType.CANCEL),
+            (_PERMISSION_THREAD, ControlActionType.PERMISSION_RESPONSE_SUBMITTED),
+        ):
+            thread = await get_thread(db, thread_id)
+            assert thread is not None
+            expectation = thread_write_expectation(thread)
+            election = await elect_thread_status(
+                db,
+                thread_id,
+                expectation=expectation,
+                status=expectation.status,
+                successor=successor_thread_write_authority(
+                    expectation,
+                    action_type=action_type,
+                    action_receipt_id=dispatch_ids[thread_id],
+                ),
+            )
+            assert election.outcome is ThreadStatusElectionOutcome.WON
         await db.commit()
     return dispatch_ids
 

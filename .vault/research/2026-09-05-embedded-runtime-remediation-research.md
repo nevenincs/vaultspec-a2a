@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:b5eba3723671bbfa1d3c26974114462caa6f744850e90bc4fcc3b4e19fe4f82d'
+body_hash: 'sha256:53cbc91face1d7a918103dd370de0ba2a9a0ed006d09040a96aafb1a5d3472e4'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-audit]]"
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
@@ -188,3 +188,6 @@ Formal S10 review established that a durable action reservation and even a fresh
 Recovery also needs ordering evidence before installing a stored receipt over current authority. Exact-current replay is safe. For a different receipt, the candidate request must be strictly later than the journal action named by the thread; missing current-action evidence, equal timestamps and older timestamps are ambiguous or stale and are refused before worker contact. This closes the reproduced old-message-over-new-permission replay without manufacturing sequence or treating unapplied as newer.
 
 A lost status election never proves transport success by itself. For initial INGEST, only current ownership by the exact INGEST receipt supports an accepted result. A different winning action preserves its durable status but leaves the definite initial-dispatch failure intact. Post-rollback service branches similarly re-read by identity because a retained ORM object can disappear during concurrent deletion.
+Correction rereview disproved durable request time as causal authority. `requested_at` comes from application wall time and can move backward or be assigned inconsistently with commit order; a greater timestamp therefore cannot prove that an action succeeds the receipt currently named by the thread. Equal, missing and older timestamps failing closed does not repair that unsound positive branch.
+
+S10 recovery consequently admits only exact-current action identity. A durable action and expired lease that were never elected remain visible for reconciliation but cannot be dispatched or installed over another receipt. Later checkpoint incorporation and settlement work may add causal evidence for those rows; recovery cannot anticipate it. This removes both clock dependence and the ability of any historical unapplied action to reclaim current authority.

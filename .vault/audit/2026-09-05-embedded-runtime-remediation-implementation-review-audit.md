@@ -5,7 +5,7 @@ tags:
 date: '2026-09-05'
 modified: '2026-09-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:16c6f2995e62e28a36450e1c10496f93a4bfe3d3d1cd3ff9f8eebafcb062ec0a'
+body_hash: 'sha256:5c96053221ffc3d883de1778fee0fcf82688373f61c529caa6d206c433c76dd0'
 related:
   - '[[2026-09-05-embedded-runtime-remediation-plan]]'
   - '[[2026-09-05-embedded-runtime-remediation-qualification-inputs-reference]]'
@@ -1356,3 +1356,14 @@ Type: typed API race handling. Archive and deletion loser paths now re-read by p
 ### w02-p03-s10-runtime-test-process-hangs | medium | open under resource-aware-test-execution
 
 Type: developer-time blocker and measurement integrity. Formal review's full deletion module exceeded its bound and the reviewer terminated only exact owned PIDs, verifying no survivor and claiming no module pass. A later paired cancel command reached 100 percent but did not exit after an additional 10 seconds; its exact PTY session was interrupted. Both cancel nodes subsequently passed in separate normal-exit runs. Broad/module reruns remain prohibited until the test-lifecycle owner diagnoses the shutdown leak.
+### w02-p03-s10-requested-at-authority-rereview | high | FAIL
+
+Type: formal correction rereview. The first correction used `ControlActionModel.requested_at` as action ordering authority, but it is application wall time with no monotonic, causal or schema guarantee. A real current-schema clock-rollback discriminator gave an older stale message a later persisted timestamp than current permission authority; recovery reopened INPUT_REQUIRED to RUNNING and dispatched the stale receipt. The exact-current, missing, equal and ordinary older branches were sound, but strictly later wall time was unsafe. The rereview also found the fresh-cancel loser still refreshed a retained ORM row after rollback and could raise if concurrent deletion finalized it.
+
+### w02-p03-s10-exact-current-recovery-only | high | resolved pending formal rereview
+
+Type: recovery authority and fail-closed admission. Direct-control recovery no longer compares timestamps or elects a stored candidate over different current authority. Worker dispatch is admitted only when current thread status, action type and receipt exactly name the stored action. Pre-election crash rows remain durable and conflicted; later checkpoint incorporation and settlement Steps own any stronger causal evidence. Recovery fixtures now create real matching control actions and elect their receipts before simulating restart. Exact-current recovery, stale refusal, fresh-cancel conflict and different-winner 429 passed four tests in 13.68 seconds; Ruff and Ty passed.
+
+### w02-p03-s10-cancel-post-rollback-removed-row | medium | resolved pending formal rereview
+
+Type: typed API race handling. The fresh-lease cancellation replay now performs an identity re-read with populate-existing after claim rollback. Concurrent final deletion returns typed NOT_FOUND with no dispatch instead of refreshing a removed ORM object and raising.

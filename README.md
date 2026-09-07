@@ -1,5 +1,9 @@
 # vaultspec-a2a
 
+<p align="center">
+  <img src="assets/logo.png" alt="Vaultspec A2A logo" width="256">
+</p>
+
 Headless agent-to-agent orchestration for Vaultspec.
 
 Run agent workflows without a user interface. A gateway accepts HTTP and WebSocket

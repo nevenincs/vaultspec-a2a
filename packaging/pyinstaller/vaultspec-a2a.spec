@@ -19,7 +19,13 @@
 #   likewise reached dynamically via runpy and are pinned as hidden imports
 #   even though static analysis usually finds them through the CLI.
 
+from pathlib import Path
+
+from PyInstaller.compat import is_win
 from PyInstaller.utils.hooks import collect_all
+
+_SPEC_DIR = Path(SPECPATH).resolve()
+_WINDOWS_ICON = _SPEC_DIR / "vaultspec.ico"
 
 datas = []
 binaries = []
@@ -103,6 +109,7 @@ exe = EXE(
     upx=False,
     console=True,
     disable_windowed_traceback=False,
+    icon=str(_WINDOWS_ICON) if is_win else None,
 )
 
 coll = COLLECT(

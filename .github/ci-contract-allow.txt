@@ -14,7 +14,6 @@ bootstrap-branch.yml:Bootstrap local worktree
 # Project-board automation: reads and writes GitHub state through `gh`, which
 # is already permitted, and differs only in reaching it through a shell
 # conditional.
-add-to-project.yml:Set target date to created_at + 30 days
 
 # --- pending ----------------------------------------------------------------
 # Installs the provider CLIs the prerequisite gates spawn, UNPINNED and

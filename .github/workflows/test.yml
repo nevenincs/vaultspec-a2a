@@ -81,52 +81,52 @@ jobs:
       - name: Run type-strict sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true
-        run: just lint type-strict
+        run: just check-type-strict
 
       - name: Run complexity sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true
-        run: just lint complexity
+        run: just check-complexity
 
       - name: Run cyclomatic sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true
-        run: just lint cyclomatic
+        run: just check-cyclomatic
 
       - name: Run shape sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true
-        run: just lint shape
+        run: just check-shape
 
       - name: Run limits sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true
-        run: just lint limits
+        run: just check-limits
 
       - name: Run nesting sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true
-        run: just lint nesting
+        run: just check-nesting
 
       - name: Run size sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true
-        run: just lint size
+        run: just check-size
 
       - name: Run advisory production JSCPD clone detection
         if: ${{ !cancelled() }}
         continue-on-error: true
-        run: just audit duplication
+        run: just audit-duplication
 
       # The environment synchronized above carries --extra server, which
       # installs the OTLP exporter, so no step before this one can observe a
       # base-only installation. This gate builds its own isolated default-deps
       # environment for exactly that reason.
       - name: Prove telemetry starts in a base-only installation
-        run: just dev test clean-base
+        run: just test-clean-base
 
       - name: Build strict documentation
-        run: just dev build docs
+        run: just build-docs
 
   desktop-certification:
     name: Desktop service tests (${{ matrix.target }})
@@ -169,7 +169,7 @@ jobs:
       - name: Run desktop service gates
         shell: bash
         run: |
-          just dev test service src/vaultspec_a2a/desktop_tests/
+          just test-service src/vaultspec_a2a/desktop_tests/
 
   provider-prerequisites:
     name: Provider prerequisite gates
@@ -214,7 +214,7 @@ jobs:
       # Declares those CLIs present, so a gate that skips anyway fails this job
       # rather than vanishing from the totals.
       - name: Run provider prerequisite gates
-        run: just dev test provider-gates
+        run: just test-provider-gates
 
   compose-regression:
     name: Compose server profile regression
@@ -246,5 +246,5 @@ jobs:
 
       - name: Run Compose server profile regression
         run: |
-          just dev test service \
+          just test-service \
             src/vaultspec_a2a/service_tests/test_compose_profile_regression.py

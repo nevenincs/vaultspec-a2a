@@ -2,7 +2,7 @@
 
 Run through the harness::
 
-    just dev vault install
+    just vault-install
 
 Vaultspec Core's own ``install`` rewrites every framework surface in place. In
 a checkout those surfaces are tracked files that a reviewer has already

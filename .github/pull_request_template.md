@@ -23,8 +23,8 @@
 | Gate | Command | Status | Result |
 | --- | --- | --- | --- |
 | Continuous integration | `just ci` | passed / failed / not run | |
-| Documentation | `just dev build docs` | passed / failed / not run | |
-| Service tests, if relevant | `just dev test service` | passed / failed / not run | |
+| Documentation | `just build-docs` | passed / failed / not run | |
+| Service tests, if relevant | `just test-service` | passed / failed / not run | |
 
 ### Excluded or not run gates
 

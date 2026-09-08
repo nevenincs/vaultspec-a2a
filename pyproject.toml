@@ -367,13 +367,13 @@ unfixable = ["B"]
 
 # INDUSTRY DEFAULTS, NOT CALIBRATED TO THIS TREE. The rules these two tables
 # configure are deliberately absent from `select` above, so they do not fire on
-# the everyday `just dev lint python` gate. They are selected explicitly by
-# `just dev lint limits` and `just dev lint nesting`, which are the burndown
+# the everyday `just check-python` gate. They are selected explicitly by
+# `just check-limits` and `just check-nesting`, which are the burndown
 # dimensions: keeping them out of the base gate is what stops an unfinished
 # burndown from hiding a real style or correctness regression behind it.
 #
 # Every number below is the tool's own published default. Nothing here was
-# raised to accommodate the current worst offender - `just dev health` reports
+# raised to accommodate the current worst offender - `just health-report` reports
 # the distance, and the number to move is the code.
 [tool.ruff.lint.mccabe]
 # McCabe's own recommendation, and the flake8, ruff, and SonarQube default.
@@ -470,8 +470,8 @@ root = [".", "src"]
 
 # ── Strict type checking ─────────────────────────────────────────────────────
 # `ty` above is the FAST gate: it runs on every commit through prek and in
-# `just dev lint all`. basedpyright is the STRICT pass behind it, run by
-# `just dev lint type-strict`. Two checkers rather than one is deliberate -
+# `just check-all`. basedpyright is the STRICT pass behind it, run by
+# `just check-type-strict`. Two checkers rather than one is deliberate -
 # a fast checker earns its place by being fast, which means it declines to
 # prove the expensive things, and those are exactly what the strict pass adds.
 [tool.basedpyright]

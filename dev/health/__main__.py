@@ -94,7 +94,7 @@ def _gate(dimensions: list[Dimension], selected: str, *, top_n: int) -> int:
     Returns:
         1 when any selected dimension has an offender, otherwise 0. Unlike
         every other rendering here, this one is a GATE - it is what makes
-        ``just dev lint cyclomatic`` fail a build.
+        ``just check-cyclomatic`` fail a build.
     """
     keys = (selected,) if selected else GATED
     known = {d.key for d in dimensions}

@@ -130,7 +130,7 @@ def test_ci_contract() -> None:
     assert duplication is not None
     assert duplication.advisory
     assert "duplication" not in lint_all_targets
-    duplication_steps = _run_steps(steps, "just audit duplication")
+    duplication_steps = _run_steps(steps, "just audit-duplication")
     assert len(duplication_steps) == 1
     assert duplication_steps[0].get("if") == "${{ !cancelled() }}"
     assert duplication_steps[0].get("continue-on-error") is True

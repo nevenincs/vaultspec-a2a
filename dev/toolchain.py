@@ -438,6 +438,7 @@ LINT = Verb(
                     "shell",
                 )
             ),
+            keep_going=True,
         ),
         Target(
             "strict",

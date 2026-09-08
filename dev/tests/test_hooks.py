@@ -80,7 +80,7 @@ def test_install_hook_upgrades_a_hook_written_before_the_harness_move(
 ) -> None:
     """A hook carrying the installer's former module path is still ours.
 
-    Every checkout that ran ``just dev hooks install`` before the installer left
+    Every checkout that ran ``just hooks-install`` before the installer left
     the shipped package has that marker on disk. Failing to recognise it would
     turn the next install into a false "unmanaged hook" refusal on every
     developer machine.

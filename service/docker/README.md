@@ -19,7 +19,7 @@ targets are:
 Build both targets without starting Compose:
 
 ```console
-just dev build docker-prod
+just build-docker-prod
 ```
 
 ### `vidaimock.Dockerfile`
@@ -30,7 +30,7 @@ is not part of the development or production profiles.
 ### `dev.Dockerfile`
 
 This file retains a standalone `python-base` development image definition. The
-current Compose and Just recipes do not select it; `just dev build docker`
+current Compose and Just recipes do not select it; `just build-docker`
 builds the gateway and worker declared by `docker-compose.dev.yml`, which both
 use `prod.Dockerfile`.
 
@@ -47,11 +47,11 @@ Use the repository-owned stack recipes rather than inventing service lifecycle
 commands:
 
 ```console
-just dev stack help
-just dev stack dev-config
-just dev stack integration-config
-just dev stack prod-config
-just dev stack database-config
+just --list
+just stack-dev-config
+just stack-integration-config
+just stack-prod-config
+just stack-database-config
 ```
 
 The gateway and worker share one `VAULTSPEC_INTERNAL_TOKEN` in production

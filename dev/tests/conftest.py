@@ -3,7 +3,7 @@
 ``pytest dev`` collects these modules from a directory that carries no
 ``__init__.py``, so pytest's ``prepend`` import mode puts ``dev/tests`` on
 ``sys.path`` rather than the repository root, and ``import dev.repo`` would
-fail. Inserting the root here keeps ``just dev test harness`` self-contained
+fail. Inserting the root here keeps ``just test-harness`` self-contained
 instead of depending on where the caller happened to start it.
 """
 

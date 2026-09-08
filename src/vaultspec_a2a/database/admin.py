@@ -276,7 +276,7 @@ def _action_restore(name: str, yes: bool) -> None:
         try:
             request.urlopen(f"http://127.0.0.1:{check_port}{path}", timeout=2.0)
             print(
-                "Service is running.  Stop it first: just dev service stop",
+                "Service is running.  Stop it first: just service-kill <name>",
                 file=sys.stderr,
             )
             raise SystemExit(1)

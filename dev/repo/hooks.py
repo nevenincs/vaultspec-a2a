@@ -9,8 +9,8 @@ The generated hook is intentionally path-agnostic:
 
 Run through the harness::
 
-    just dev hooks install
-    just dev hooks remove
+    just hooks-install
+    just hooks-remove
 """
 
 from __future__ import annotations

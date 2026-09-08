@@ -1,6 +1,6 @@
 """Real-repository tests for safe Vaultspec Core enrollment.
 
-The end-to-end case drives the script exactly as ``just dev vault install``
+The end-to-end case drives the script exactly as ``just vault-install``
 does - the interpreter against the file path - rather than importing ``main``,
 so a broken invocation shape fails here instead of in a developer's checkout.
 """

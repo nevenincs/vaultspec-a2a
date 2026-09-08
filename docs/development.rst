@@ -29,9 +29,9 @@ Diagnose the host tools before synchronizing dependencies:
 
 .. code-block:: console
 
-   just doctor
+   just doctor-check
 
-``just doctor`` enforces Just 1.31 or later and Node.js 26, requires ``uv`` and
+``just doctor-check`` enforces Just 1.31 or later and Node.js 26, requires ``uv`` and
 ``npm``, and reports Docker as optional. It doesn't validate Git, Python,
 dependencies, framework enrollment, or application health.
 
@@ -40,12 +40,12 @@ Install the continuous integration (CI) contributor environment:
 .. code-block:: console
 
    uv sync --locked --no-default-groups --extra server --group all
-   just dev deps node
+   just deps-node
 
 The ``base`` profile contains runtime dependencies. The ``tooling`` profile
 supports hooks and narrower repository checks. The composed ``all`` group adds
 documentation to tooling, while CI also selects the ``server`` extra. RAG and
-Torch remain isolated in the optional ``rag`` extra. ``just dev deps all`` is
+Torch remain isolated in the optional ``rag`` extra. ``just deps-all`` is
 the explicit profile that selects every runtime extra. The separate Node recipe
 restores the exact Claude ACP dependency graph from ``package-lock.json``.
 
@@ -59,7 +59,7 @@ Enroll all Vaultspec Core (Core) provider projections in ``dev`` mode:
 
 .. code-block:: console
 
-   just dev vault setup
+   just vault-setup
 
 Core exclusively owns provider projections and its marker-bounded block in
 ``.gitignore``. Canonical inputs remain tracked, and content outside the marker
@@ -69,10 +69,10 @@ Inspect the Core state and proposed changes before reconciling drift:
 
 .. code-block:: console
 
-   just dev vault status
-   just dev vault doctor
-   just dev vault install-dry-run
-   just dev vault sync-dry-run
+   just vault-status
+   just vault-doctor
+   just vault-install-dry-run
+   just vault-sync-dry-run
 
 ``status`` follows Core's diagnostic contract: exit code 0 means no findings,
 1 means one or more warnings, and 2 means errors. Review the output and dry
@@ -81,13 +81,13 @@ verb:
 
 .. code-block:: console
 
-   just dev vault sync
+   just vault-sync
 
 If semantic discovery is required, enroll the optional RAG bridge:
 
 .. code-block:: console
 
-   just dev rag setup
+   just rag-setup
 
 RAG is installed in ``dependency`` mode. Its profile already includes Model
 Context Protocol (MCP) support. Enrollment doesn't download models or Qdrant,
@@ -95,15 +95,15 @@ and it doesn't rewrite Torch configuration. Diagnose it with:
 
 .. code-block:: console
 
-   just dev rag install-dry-run
-   just dev rag status
+   just rag-install-dry-run
+   just rag-status
 
 Only explicit upgrade commands mutate the Core or RAG lock selection:
 
 .. code-block:: console
 
-   just dev vault upgrade
-   just dev rag upgrade
+   just vault-upgrade
+   just rag-upgrade
 
 Core adoption stages forced reconciliation in a disposable clone. It promotes
 runtime state only when the tracked projection is byte-identical, then performs
@@ -125,10 +125,10 @@ The command is fail-fast and runs these stages in order:
 
 #. ``uv sync --locked --no-default-groups --extra server --group all`` prepares
    the exact locked environment.
-#. ``just dev deps node`` restores the pinned Claude ACP runtime.
-#. ``just dev code check`` runs Ruff lint, Ruff format checking, Ty, Deptry,
+#. ``just deps-node`` restores the pinned Claude ACP runtime.
+#. ``just check-all`` runs Ruff lint, Ruff format checking, Ty, Deptry,
    and Actionlint workflow validation.
-#. ``just dev test unit`` runs every test not marked ``service``.
+#. ``just test-unit`` runs every test not marked ``service``.
 
 A failed stage reports a validation failure. Later stages are *not run*.
 Service tests and documentation are *excluded* from ``just ci``. The unit gate
@@ -143,29 +143,29 @@ Use narrower commands to diagnose failures:
 
    * - Command
      - Scope
-   * - ``just dev code lint``
-     - Run Ruff lint.
-   * - ``just dev code format-check``
-     - Check Ruff formatting without changing files.
-   * - ``just dev code type``
+   * - ``just check-python``
+     - Run Ruff lint and format verification.
+   * - ``just check-type``
      - Run the Ty type checker.
-   * - ``just dev code dependencies``
+   * - ``just check-dependencies``
      - Run the Deptry dependency checker.
-   * - ``just dev test collect-unit``
+   * - ``just check-all``
+     - Run every gating dimension that holds the line today.
+   * - ``just test-collect-unit``
      - Collect the non-service gate without executing it.
-   * - ``just dev test unit``
+   * - ``just test-unit``
      - Run every test not marked ``service``.
-   * - ``just dev test service``
+   * - ``just test-service``
      - Deliberately run service-marked tests.
-   * - ``just dev test all``
+   * - ``just test-all``
      - Deliberately run all collected tests.
-   * - ``just dev build docs``
+   * - ``just build-docs``
      - Run documentation tests, build HTML with Sphinx in nitpicky mode, and
        treat warnings as errors.
 
 Hosted validation runs the documentation gate separately. Validation commands
 don't intentionally modify tracked source, although tests and documentation
-may create ignored caches or build output. ``just dev code repair`` explicitly
+may create ignored caches or build output. ``just fix-python`` explicitly
 applies Ruff fixes and formatting; it doesn't repair Ty, Deptry, test, or
 documentation findings.
 

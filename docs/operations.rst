@@ -13,15 +13,11 @@ Command discovery
 
    * - Command
      - Scope
-   * - ``just help``
-     - List top-level repository commands.
-   * - ``just dev help``
-     - List development modules.
-   * - ``just dev <module> help``
-     - List commands in one development module.
-   * - ``just dev product help``
-     - List product passthrough recipes.
-   * - ``just dev product cli --help``
+   * - ``just``
+     - List every recipe, grouped by consequence.
+   * - ``just --list --unsorted``
+     - The same list in declaration order.
+   * - ``just product-cli --help``
      - Display the native product CLI reference.
 
 Just selects frozen project dependencies and routes arguments. It owns no
@@ -30,7 +26,7 @@ product behavior.
 Product command-line interface (CLI)
 ------------------------------------
 
-``just dev product cli`` exposes the native :mod:`vaultspec_a2a.cli` command
+``just product-cli`` exposes the native :mod:`vaultspec_a2a.cli` command
 surface, including ``serve``, ``doctor``, ``presets``, ``run``, ``workspace``,
 and ``procs``. The table lists shorter Just wrapper routes. ``product mcp``
 targets a separate MCP console command rather than the native product CLI.
@@ -41,21 +37,21 @@ targets a separate MCP console command rather than the native product CLI.
 
    * - Route
      - Destination
-   * - ``just dev product cli serve``
+   * - ``just product-cli serve``
      - Start the caller-owned :mod:`vaultspec_a2a.api` gateway.
-   * - ``just dev product doctor``
+   * - ``just product-doctor``
      - Report gateway health.
-   * - ``just dev product presets``
+   * - ``just product-presets``
      - List available team presets.
-   * - ``just dev product run``
+   * - ``just product-run``
      - Run start, status, or cancellation operations.
-   * - ``just dev product workspace``
+   * - ``just product-workspace``
      - Provision or verify a run workspace through
        :mod:`vaultspec_a2a.cli.provision` and
        :mod:`vaultspec_a2a.context.harness`.
 
-``just doctor`` diagnoses repository prerequisites. It is distinct from
-``just dev product doctor``, which checks gateway health. A foreground gateway
+``just doctor-check`` diagnoses repository prerequisites. It is distinct from
+``just product-doctor``, which checks gateway health. A foreground gateway
 is attached to its invoking terminal; the caller owns its lifetime.
 
 Gateway bearer authentication
@@ -117,7 +113,7 @@ Named host-process registry
 
 The :mod:`vaultspec_a2a.lifecycle` machine-global registry exclusively owns
 named development-process allocation, registration, liveness, restart state,
-and process-tree termination. The ``just dev service`` recipes pass through to
+and process-tree termination. The ``service-*`` recipes pass through to
 ``vaultspec-a2a procs``.
 
 Square brackets mark optional arguments; don't type the brackets.
@@ -128,28 +124,28 @@ Square brackets mark optional arguments; don't type the brackets.
 
    * - Route
      - Operation
-   * - ``just dev service gateway-up [NAME]``
+   * - ``just service-gateway-up [NAME]``
      - Start a gateway under an optional registry name.
-   * - ``just dev service worker-up [NAME]``
+   * - ``just service-worker-up [NAME]``
      - Start a :mod:`vaultspec_a2a.worker` process under an optional registry
        name.
-   * - ``just dev service engine-up NAME REPO BUILD_REPO WORKSPACE``
+   * - ``just service-engine-up NAME REPO BUILD_REPO WORKSPACE``
      - Start an explicitly named engine seat.
-   * - ``just dev service list``
+   * - ``just service-list``
      - List registrations, liveness, and endpoints.
-   * - ``just dev service attach NAME``
+   * - ``just service-attach NAME``
      - Verify that a named process is live and print its endpoint.
-   * - ``just dev service kill NAME``
+   * - ``just service-kill NAME``
      - Terminate its process tree and remove its registration.
-   * - ``just dev service allocate ROLE``
+   * - ``just service-allocate ROLE``
      - Reserve the next available role port.
-   * - ``just dev service rebuild NAME``
+   * - ``just service-rebuild NAME``
      - Run the registered build command.
-   * - ``just dev service rerun NAME``
+   * - ``just service-rerun NAME``
      - Kill, rebuild, and restart on the same port.
-   * - ``just dev service resume NAME``
+   * - ``just service-resume NAME``
      - Restart a dead registration on its original port.
-   * - ``just dev service reap``
+   * - ``just service-reap``
      - Terminate and clear stale or dead registrations.
 
 The registry is distinct from :mod:`vaultspec_a2a.thread` application
@@ -160,14 +156,14 @@ Compose-owned stacks
 
 Docker Compose exclusively owns multi-service stack lifecycle.
 
-#. Run ``just doctor`` to verify Docker support.
+#. Run ``just doctor-check`` to verify Docker support.
 #. Inspect the development configuration, then start its isolated Compose
    project:
 
    .. code-block:: console
 
-      just dev stack dev-config
-      just dev stack dev-up
+      just stack-dev-config
+      just stack-dev-up
 
 .. list-table::
    :header-rows: 1

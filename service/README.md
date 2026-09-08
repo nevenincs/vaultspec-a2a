@@ -13,16 +13,16 @@ interface.
 | `docker-compose.prod.yml` | Gateway, worker, and Jaeger with shared SQLite storage |
 | `docker-compose.prod.postgres.yml` | Overlay that adds PostgreSQL and switches both application services to it |
 
-Run every command from the repository root. Use `just doctor` to check Docker,
+Run every command from the repository root. Use `just doctor-check` to check Docker,
 then validate a Docker Compose (Compose) configuration before starting it.
 
 ## Development stack
 
 ```console
-just dev stack dev-config
-just dev stack dev-up
-just dev stack dev-status
-just dev stack dev-down
+just stack-dev-config
+just stack-dev-up
+just stack-dev-status
+just stack-dev-down
 ```
 
 The gateway is published at <http://localhost:18000>. The worker remains on the
@@ -31,10 +31,10 @@ Compose network and is not published to the host.
 ## Integration stack
 
 ```console
-just dev stack integration-config
-just dev stack integration-up
-just dev stack integration-status
-just dev stack integration-down
+just stack-integration-config
+just stack-integration-up
+just stack-integration-status
+just stack-integration-down
 ```
 
 The stack publishes the gateway at <http://localhost:18000>, VidaiMock at
@@ -47,20 +47,20 @@ Set a non-empty `VAULTSPEC_INTERNAL_TOKEN` in the repository-root `.env`, then
 run the SQLite-backed production images:
 
 ```console
-just dev stack prod-config
-just dev stack prod-up
-just dev stack prod-status
-just dev stack prod-down
+just stack-prod-config
+just stack-prod-up
+just stack-prod-status
+just stack-prod-down
 ```
 
 For PostgreSQL, also set `POSTGRES_PASSWORD`. The `database-*` recipes validate
 the combined production configuration but start and manage only PostgreSQL:
 
 ```console
-just dev stack database-config
-just dev stack database-up
-just dev stack database-status
-just dev stack database-down
+just stack-database-config
+just stack-database-up
+just stack-database-status
+just stack-database-down
 ```
 
 To run the complete PostgreSQL-backed application stack, combine the base file

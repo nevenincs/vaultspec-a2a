@@ -2,7 +2,7 @@
 
 Run through the harness::
 
-    just dev build clean
+    just build-clean
 
 The working directory is the repository being cleaned, and every removal is
 re-checked against it after resolution, so a symlink pointing out of the tree

@@ -13,7 +13,7 @@ mention inside a string, a docstring, or a comment.
 
 Run through the harness::
 
-    just dev lint imports
+    just check-imports
 
 An import that genuinely must be absolute - a runtime plugin lookup, a lazy
 module path resolved by name - is exempted with a trailing ``# absolute-import-ok``

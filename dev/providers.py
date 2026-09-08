@@ -14,8 +14,8 @@ Printing them from live discovery is the fix; do not commit the values.
 
 Run through the harness::
 
-    just dev test lanes
-    just dev test lanes --exports claude=haiku --option effort=low
+    just test-lanes
+    just test-lanes --exports claude=haiku --option effort=low
 
 ``--exports`` renders the environment block for one chosen lane, in the syntax of
 the shell that asked for it.

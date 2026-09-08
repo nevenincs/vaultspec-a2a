@@ -7,8 +7,8 @@ rev-parse`` on purpose - a checkout is exactly what they operate on - which is
 the anchoring the shipped package is forbidden to do and
 :mod:`dev.guards.repo_anchors` enforces.
 
-Standard library only, like the dispatch core above them: ``just dev build
-clean`` runs without any development group installed.
+Standard library only, like the dispatch core above them: ``just build-clean``
+runs without any development group installed.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 # Deterministic certification stack for issue #17.
 # Usage:
-#   just dev service start integration
-#   just dev service logs integration
+#   just stack-integration-up
+#   just stack-integration-status
 #
 # Stack:
 #   gateway + worker + VidaiMock + Jaeger

@@ -2,7 +2,7 @@
 
 MEASUREMENT ONLY. Every entry point here exits 0 whatever it finds: a health
 report is a ranking that tells you where to spend the next hour, not a verdict
-that stops a build. The verdicts live in ``just dev lint``.
+that stops a build. The verdicts live in ``just check-all``.
 
 The thresholds this package ranks against are the same industry defaults the
 gates enforce - they are stated once in :mod:`dev.health.report` and imported

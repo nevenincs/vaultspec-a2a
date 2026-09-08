@@ -8,7 +8,7 @@ public issue.
 
 1. Open or select a scoped item in [GitHub Issues](https://github.com/nevenincs/vaultspec-a2a/issues).
 2. Follow the [README](README.md) and [development guide](docs/development.rst).
-3. Run `just help` to discover the native task surface.
+3. Run `just` to discover the task surface, grouped by consequence.
 4. Keep the change focused on the selected issue.
 5. If behavior or user workflows change, update tests and documentation.
 
@@ -50,16 +50,16 @@ Run the required gates:
 
 ```console
 just ci
-just dev build docs
+just build-docs
 ```
 
 If the change affects services, also run:
 
 ```console
-just dev test service
+just test-service
 ```
 
-If you intend to apply Ruff fixes and formatting, use `just dev code repair`.
+If you intend to apply Ruff fixes and formatting, use `just fix-python`.
 The PostgreSQL migration upgrade-and-downgrade round trip is a
 separate hosted workflow. If a gate can't run, document why and state the
 resulting uncertainty.

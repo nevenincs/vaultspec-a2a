@@ -29,8 +29,8 @@ Cognitive complexity is deliberately ABSENT. It is a distinct metric from
 cyclomatic complexity - it measures how much state a reader must hold, not how
 many paths exist - and ``complexipy`` is its implementation here. Restating it
 in this module would mean reimplementing a scoring specification, and the two
-copies would disagree the first time either moved. Run ``just dev lint
-complexity`` for that dimension.
+copies would disagree the first time either moved. Run ``just check-complexity``
+for that dimension.
 """
 
 from __future__ import annotations
@@ -344,9 +344,9 @@ def render_report(
     lines.extend(
         [
             "",
-            "Cognitive complexity is measured separately by 'just lint complexity'",
-            "(complexipy, Sonar limit 15); duplication by 'just audit duplication'",
-            "and dead code by 'just audit dead-code'.",
+            "Cognitive complexity is measured separately by 'just check-complexity'",
+            "(complexipy, Sonar limit 15); duplication by 'just audit-duplication'",
+            "and dead code by 'just audit-dead-code'.",
         ]
     )
     return "\n".join(lines)
@@ -382,7 +382,7 @@ def render_census(dimensions: Sequence[Dimension]) -> str:
 #: to exit 0 - so the two can never disagree about a number.
 #:
 #: ``cyclomatic`` is deliberately ABSENT, though this module measures it. Ruff's
-#: ``C901`` already gates that dimension from ``just lint limits``, and the two
+#: ``C901`` already gates that dimension from ``just check-limits``, and the two
 #: tools do not agree: on
 #: ``control/permission_service.py::_authorize_permission_response`` radon
 #: scores 26 and ruff scores 15, because radon also counts boolean operators,

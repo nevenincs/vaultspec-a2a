@@ -27,7 +27,7 @@ rather than inferring it from a path.
 
 Run through the harness::
 
-    just dev lint anchors
+    just check-anchors
 
 A genuinely correct use - a development-only entry point, an anchor that is
 itself the configured override seam - is exempted with a trailing

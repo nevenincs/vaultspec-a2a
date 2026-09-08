@@ -38,12 +38,12 @@ series.
 git clone https://github.com/nevenincs/vaultspec-a2a
 cd vaultspec-a2a
 uv python install 3.13
-just doctor
-just dev deps tooling
-just dev deps node
+just doctor-check
+just deps-tooling
+just deps-node
 ```
 
-`just doctor` verifies the required command-line tools and reports Docker as
+`just doctor-check` verifies the required command-line tools and reports Docker as
 optional. The [development guide](docs/development.rst) defines its diagnostic
 boundary and remediation paths.
 
@@ -52,7 +52,7 @@ boundary and remediation paths.
 Enroll the repository with the Core version selected by `uv.lock`:
 
 ```console
-just dev vault setup
+just vault-setup
 ```
 
 This installs the locked tooling profile, then enrolls all Vaultspec Core
@@ -63,7 +63,7 @@ remain repository-owned and trackable.
 If you need semantic discovery, enable the optional RAG bridge:
 
 ```console
-just dev rag setup
+just rag-setup
 ```
 
 This installs the `rag` extra and enrolls RAG in `dependency` mode. The extra
@@ -90,7 +90,7 @@ marked `service`. It stops at the first failure.
 Validate documentation separately:
 
 ```console
-just dev build docs
+just build-docs
 ```
 
 This runs documentation tests, builds HTML with Sphinx in nitpicky mode, and
@@ -100,15 +100,15 @@ and explicit repair commands.
 
 ## Choose the next task
 
-Start with `just help`, then narrow the native command tree with `just dev help`
-or `just dev <module> help`.
+Start with `just`, which lists every recipe grouped by consequence - `setup`,
+`dev`, `check`, `fix`, `audit`, `build`, `docs`, `test`, `meta`.
 
-- Start a caller-owned foreground gateway with `just dev product cli serve`.
-- Manage registry-owned host processes through `just dev service ...`.
-- Manage Compose-owned stacks through `just dev stack ...`.
-- Discover test and build workflows with `just dev test help` and
-  `just dev build help`.
-- Explore product commands with `just dev product help`.
+- Start a caller-owned foreground gateway with `just product-cli serve`.
+- Manage registry-owned host processes through the `service-*` recipes.
+- Manage Compose-owned stacks through the `stack-*` recipes.
+- Run the gates with `just check-all`, the suites with `just test-all`, and the
+  artifacts with `just build-all`.
+- Explore product commands through the `product-*` recipes.
 
 Focused guides and references:
 

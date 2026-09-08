@@ -87,6 +87,57 @@ default:
 #  already-resolved tooling profile.
 # ===========================================================================
 
+# PowerShell's `-Command` host exits 1 for ANY failing native command rather
+# than forwarding that command's own status, which would collapse every
+# `init` exit code onto 1 and destroy the distinction between "a host tool is
+# missing", "the lockfile drifted", and "an editor is holding .venv open".
+# Appending an explicit propagation is the whole remedy; it is empty on unix,
+# where `sh` already forwards the status, so no recipe needs a platform pair.
+propagate := if os_family() == "windows" { "; exit $LASTEXITCODE" } else { "" }
+
+# `init` is the one command a fresh worktree needs, and the command git
+# tooling and the worktree provisioner call after creating one. It cannot
+# route through `{{dev}}`, which presumes the environment `init` is
+# responsible for creating; it runs on an ephemeral interpreter instead, and
+# `dev/init/` is stdlib-only for exactly that reason.
+#
+# Idempotent: a second run costs a stamp comparison and touches nothing.
+# `just init-check` verifies without mutating, exiting 3 when the worktree is
+# not initialized, which is what a hook or a provisioner calls. Set
+# VAULTSPEC_INIT_JSON=1 for an NDJSON event stream, VAULTSPEC_INIT_FORCE=1 to
+# ignore the stamp. Every run writes `.venv/init-report.json`.
+#
+# The phases run in dependency order and stop at the first failure: unlike the
+# `-all` aggregates, which chain independent inspectors and run every one,
+# these build one artifact, and `init-tools` runs executables out of the
+# environment `init-python` creates. The report still lists every phase, with
+# the ones that were not attempted naming the failure that stopped them.
+
+# Initialize a fresh clone or worktree: dependencies, ACP runtime, enrollment, hooks.
+[group('setup')]
+init:
+    uv run --no-project --python 3.13 -- python -m dev.init all{{propagate}}
+
+# Resolve the locked tooling and server dependency profiles into .venv.
+[group('setup')]
+init-python:
+    uv run --no-project --python 3.13 -- python -m dev.init python{{propagate}}
+
+# Restore the project-pinned Claude ACP runtime from the npm lock.
+[group('setup')]
+init-node:
+    uv run --no-project --python 3.13 -- python -m dev.init node{{propagate}}
+
+# Enroll the Vaultspec workspace and install the prek hook.
+[group('setup')]
+init-tools:
+    uv run --no-project --python 3.13 -- python -m dev.init tools{{propagate}}
+
+# Report whether this worktree is initialized. Mutates nothing; exits 3 if not.
+[group('setup')]
+init-check:
+    uv run --no-project --python 3.13 -- python -m dev.init check{{propagate}}
+
 # Resolve the base runtime profile from the project lock.
 [group('setup')]
 deps-base:

@@ -416,7 +416,7 @@ async def _resolve_served_codex_model(
     the catalog supplies the value, so a stale declaration fails legibly here
     instead of spending on a model nobody chose.
 
-    Print a current block with ``just dev test lanes --exports codex=<model>``.
+    Print a current block with ``just test-lanes --exports codex=<model>``.
     """
     rule("provider-catalog-live-selection")
     declared_provider = (os.environ.get("VAULTSPEC_LIVE_PROVIDER_ID") or "").strip()

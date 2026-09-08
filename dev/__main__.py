@@ -45,7 +45,7 @@ def _print_verb_help(verb: Verb) -> None:
     Args:
         verb: The verb whose help to render.
     """
-    print(f"usage: just dev {verb.name} <target>")
+    print(f"usage: just {verb.name}-<target>")
     print(f"  {verb.summary}")
     print()
     width = max(len(name) for name in public_targets(verb))

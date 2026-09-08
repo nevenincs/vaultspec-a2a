@@ -676,6 +676,109 @@ TEST = Verb(
 
 
 # ---------------------------------------------------------------------------
+#  build - produces artifacts
+# ---------------------------------------------------------------------------
+
+BUILD = Verb(
+    name="build",
+    summary="Build the distributable artifacts.",
+    note=(
+        "The container targets require Docker and say so through the doctor "
+        "probe rather than failing on a missing binary."
+    ),
+    targets=(
+        Target(
+            "package",
+            "Build the Python source distribution and wheel.",
+            (Cmd(("uv", "build", "--build-constraints", "build-constraints.txt")),),
+        ),
+        Target(
+            "docs",
+            "Run documentation tests and build strict Sphinx HTML.",
+            (
+                Cmd(
+                    (
+                        "uv", "run", "--isolated", "--locked", "--group", "docs",
+                        "--group", "dev", "python", "-m",
+                        "vaultspec_a2a.testing.runner", "--", "docs/tests", "-q",
+                    )
+                ),
+                Cmd(
+                    (
+                        "uv", "run", "--isolated", "--locked", "--group", "docs",
+                        "sphinx-build", "-n", "-W", "--keep-going", "-b", "html",
+                        "docs", "docs/_build/html",
+                    )
+                ),
+            ),
+        ),
+        Target(
+            "docker",
+            "Build the local development container images.",
+            (
+                Cmd(
+                    (
+                        "uv", "run", "--no-sync", "--frozen",
+                        "--no-default-groups", "--group", "tooling", "python",
+                        "-m", "dev.doctor", "docker",
+                    )
+                ),
+                Cmd(
+                    (
+                        "docker", "compose", "-f",
+                        "service/docker-compose.dev.yml", "build",
+                    )
+                ),
+            ),
+        ),
+        Target(
+            "docker-prod",
+            "Build the production gateway and worker container images.",
+            (
+                Cmd(
+                    (
+                        "uv", "run", "--no-sync", "--frozen",
+                        "--no-default-groups", "--group", "tooling", "python",
+                        "-m", "dev.doctor", "docker",
+                    )
+                ),
+                Cmd(
+                    (
+                        "docker", "build", "-t", "vaultspec-a2a-gateway", "-f",
+                        "service/docker/prod.Dockerfile", "--target", "gateway", ".",
+                    )
+                ),
+                Cmd(
+                    (
+                        "docker", "build", "-t", "vaultspec-a2a-worker", "-f",
+                        "service/docker/prod.Dockerfile", "--target", "worker", ".",
+                    )
+                ),
+            ),
+        ),
+        Target(
+            "clean",
+            "Remove generated package, documentation, and cache artifacts.",
+            (
+                Cmd(
+                    (
+                        "uv", "run", "--no-sync", "--frozen", "--no-default-groups",
+                        "python", "-m", "dev.repo.build_clean",
+                    )
+                ),
+            ),
+        ),
+        Target(
+            "all",
+            "Build every artifact producible without Docker.",
+            (Ref("package"), Ref("docs")),
+            keep_going=True,
+        ),
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
 #  health - MEASURES, always exits 0
 # ---------------------------------------------------------------------------
 
@@ -746,7 +849,7 @@ CI = Verb(
 )
 
 
-VERBS: tuple[Verb, ...] = (DEPS, LINT, FIX, AUDIT, TEST, HEALTH, CI)
+VERBS: tuple[Verb, ...] = (DEPS, LINT, FIX, AUDIT, TEST, BUILD, HEALTH, CI)
 
 #: The target each verb selects when invoked with no argument.
 DEFAULTS: dict[str, str] = {
@@ -755,6 +858,7 @@ DEFAULTS: dict[str, str] = {
     "fix": "all",
     "audit": "all",
     "test": "unit",
+    "build": "all",
     "health": "report",
     "ci": "all",
 }

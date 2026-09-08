@@ -642,12 +642,12 @@ service-reap:
 
 # Start a named development gateway through the production registry.
 [group('dev')]
-service-gateway-up NAME="dev" *ARGS:
+service-gateway-up NAME="dev" *ARGS="":
     {{procs}} up gateway-dev {{ NAME }} {{ ARGS }}
 
 # Start a named development worker through the production registry.
 [group('dev')]
-service-worker-up NAME="dev" *ARGS:
+service-worker-up NAME="dev" *ARGS="":
     {{procs}} up worker-dev {{ NAME }} {{ ARGS }}
 
 # Start a named development engine with explicit serve, build, and data seats.

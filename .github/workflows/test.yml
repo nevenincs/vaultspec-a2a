@@ -126,7 +126,7 @@ jobs:
         run: just test-clean-base
 
       - name: Build strict documentation
-        run: just build-docs
+        run: just docs-build
 
   desktop-certification:
     name: Desktop service tests (${{ matrix.target }})

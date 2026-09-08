@@ -90,7 +90,7 @@ marked `service`. It stops at the first failure.
 Validate documentation separately:
 
 ```console
-just build-docs
+just docs-build
 ```
 
 This runs documentation tests, builds HTML with Sphinx in nitpicky mode, and

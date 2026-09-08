@@ -50,7 +50,7 @@ Run the required gates:
 
 ```console
 just ci
-just build-docs
+just docs-build
 ```
 
 If the change affects services, also run:

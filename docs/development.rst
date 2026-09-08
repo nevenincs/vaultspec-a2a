@@ -159,7 +159,7 @@ Use narrower commands to diagnose failures:
      - Deliberately run service-marked tests.
    * - ``just test-all``
      - Deliberately run all collected tests.
-   * - ``just build-docs``
+   * - ``just docs-build``
      - Run documentation tests, build HTML with Sphinx in nitpicky mode, and
        treat warnings as errors.
 

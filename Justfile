@@ -522,11 +522,6 @@ test-collect-all *ARGS:
 build-package:
     {{dev}} build package
 
-# Run documentation tests and build strict Sphinx HTML.
-[group('build')]
-build-docs:
-    {{dev}} build docs
-
 # Build the local development container images.
 [group('build')]
 build-docker:
@@ -546,6 +541,21 @@ build-clean:
 [group('build')]
 build-all:
     {{dev}} build all
+
+# ===========================================================================
+#  docs
+#
+#  The registry verb behind this is still `build`, because the documentation
+#  IS an artifact and `build-all` composes it. The recipe is named and grouped
+#  for the reader instead: every repository in the fleet spells its
+#  documentation entry point `docs-*`, and a contributor looking for "how do I
+#  build the docs" reads the group list, not the toolchain table.
+# ===========================================================================
+
+# Run documentation tests and build strict Sphinx HTML.
+[group('docs')]
+docs-build:
+    {{dev}} build docs
 
 # ===========================================================================
 #  dev - passthroughs to the product CLI, the process registry, the bounded

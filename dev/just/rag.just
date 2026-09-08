@@ -5,7 +5,7 @@ rag_cli := "uv run --no-sync --frozen --no-default-groups --extra rag vaultspec-
 
 # Fail when the ACP launch spec does not serve the tools the harness declares.
 _check-tool-contract:
-    uv run --no-sync --frozen --no-default-groups --extra rag python -c "import asyncio, os; from vaultspec_a2a.providers._acp_mcp import resolve_harness_mcp_servers; from vaultspec_a2a.providers._mcp_contract import verify_harness_mcp_contract; asyncio.run(verify_harness_mcp_contract(resolve_harness_mcp_servers(['vaultspec-rag']), env=dict(os.environ)))"
+    uv run --no-sync --frozen --no-default-groups --extra rag python -m dev.rag tool-contract
 
 # Resolve locked RAG dependencies and enroll the workspace without external provisioning.
 setup:

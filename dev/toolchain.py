@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from dev.exit_codes import FINDINGS_CODES
 from dev.runner import (
     Cmd,
     Echo,
@@ -127,6 +128,11 @@ class Target:
         summary: One-line description shown by ``help``.
         steps: The steps to run, in order.
         advisory: When true the target reports findings but always exits 0.
+        findings_codes: The statuses this target's tool uses to mean "I found
+            something". Only these are suppressed when `advisory` is set;
+            every other non-zero status is the tool failing to RUN, and
+            propagates. Defaults to `FINDINGS_CODES` ({1}), which is right for
+            every scanner here but vulture, which reports dead code with 3.
         keep_going: When true a failing step does not stop the remaining steps.
             Aggregate dashboards set this so one red dimension does not hide
             every dimension after it.
@@ -136,6 +142,7 @@ class Target:
     summary: str
     steps: tuple[Step, ...]
     advisory: bool = False
+    findings_codes: frozenset[int] = FINDINGS_CODES
     keep_going: bool = False
 
 
@@ -401,10 +408,19 @@ LINT = Verb(
             "Taplo TOML linting.",
             (ToolOrDocker("taplo", ("lint", "*.toml"), "tamasfe/taplo:0.9.3"),),
         ),
+        # Two questions about the same artifacts. actionlint asks whether the
+        # YAML is well-formed and its expressions resolve; the contract asks
+        # whether a `run:` step is calling a recipe or re-implementing one. A
+        # workflow can be perfectly valid YAML and still repeat `uv sync
+        # --locked --no-default-groups --extra server --group all` in five
+        # jobs, which is what this repository's did.
         Target(
             "workflow",
-            "Actionlint GitHub workflow checking.",
-            (uv_run("actionlint"),),
+            "Lint the workflows, then hold them to the CI/justfile contract.",
+            (
+                uv_run("python", "-m", "dev.actionlint"),
+                uv_run("python", "-m", "dev.ci_contract"),
+            ),
         ),
         Target(
             "shell",
@@ -572,6 +588,11 @@ AUDIT = Verb(
             "Vulture dead-code scan.",
             (uv_run("vulture"),),
             advisory=True,
+            # vulture reports dead code with 3, reserving 1 for invalid input
+            # and 2 for invalid arguments. Under the fleet default ({1}) its
+            # findings would read as a broken scanner and its broken
+            # invocations would read as findings - both backwards.
+            findings_codes=frozenset({3}),
         ),
         Target(
             "duplication",
@@ -844,6 +865,13 @@ CI = Verb(
                 uv_run("vaultspec-core", "vault", "check", "all"),
                 _verb("test", "harness"),
                 _verb("test", "unit"),
+                # BUILD IS PART OF CI. It was not, and in this repository the
+                # release path is the whole product: a frozen onedir that only
+                # release.yml has ever produced. A break in it surfaced at
+                # release, with the tag cut. The gates above prove the source
+                # is well-formed and the tests pass; only this one proves the
+                # artifact a user receives can still be produced from it.
+                _verb("build", "all"),
             ),
         ),
     ),

@@ -48,7 +48,23 @@
 #  the distance between the two.
 # ===========================================================================
 
-set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
+# Requires just >= 1.38 (`set working-directory`, native modules, `[doc]`/`[group]`).
+#
+# just defaults to `sh -cu` on every platform, which on Windows means a Git Bash
+# `sh.exe` that is only on PATH for some Git for Windows install options. This
+# names the one interpreter every Windows machine is guaranteed to have.
+#
+# `cmd` is chosen for EXIT-CODE FIDELITY, not familiarity. It forwards a native
+# command's status verbatim; `pwsh -Command` and `powershell -Command` collapse
+# every non-zero status onto 1, which would flatten the whole of
+# `dev/exit_codes.py` - INIT_STALE 3, INIT_LOCKED 6, TOOL_BROKEN 7,
+# NOTHING_SELECTED 8 - onto FAILED, and destroy the advisory-versus-gating
+# split the recipe groups are built on. cmd's weaknesses - `%VAR%` expansion
+# and no single-quote literal - cost nothing here, because every recipe body
+# below is a single command with no shell syntax and no recipe body contains
+# either character.
+set windows-shell := ["cmd.exe", "/c"]
+set quiet := true
 set dotenv-load := true
 
 # The development toolchain's single entry point.
@@ -87,14 +103,6 @@ default:
 #  already-resolved tooling profile.
 # ===========================================================================
 
-# PowerShell's `-Command` host exits 1 for ANY failing native command rather
-# than forwarding that command's own status, which would collapse every
-# `init` exit code onto 1 and destroy the distinction between "a host tool is
-# missing", "the lockfile drifted", and "an editor is holding .venv open".
-# Appending an explicit propagation is the whole remedy; it is empty on unix,
-# where `sh` already forwards the status, so no recipe needs a platform pair.
-propagate := if os_family() == "windows" { "; exit $LASTEXITCODE" } else { "" }
-
 # `init` is the one command a fresh worktree needs, and the command git
 # tooling and the worktree provisioner call after creating one. It cannot
 # route through `{{dev}}`, which presumes the environment `init` is
@@ -116,27 +124,27 @@ propagate := if os_family() == "windows" { "; exit $LASTEXITCODE" } else { "" }
 # Initialize a fresh clone or worktree: dependencies, ACP runtime, enrollment, hooks.
 [group('setup')]
 init:
-    uv run --no-project --python 3.13 -- python -m dev.init all{{propagate}}
+    uv run --no-project --python 3.13 -- python -m dev.init all
 
 # Resolve the locked tooling and server dependency profiles into .venv.
 [group('setup')]
 init-python:
-    uv run --no-project --python 3.13 -- python -m dev.init python{{propagate}}
+    uv run --no-project --python 3.13 -- python -m dev.init python
 
 # Restore the project-pinned Claude ACP runtime from the npm lock.
 [group('setup')]
 init-node:
-    uv run --no-project --python 3.13 -- python -m dev.init node{{propagate}}
+    uv run --no-project --python 3.13 -- python -m dev.init node
 
 # Enroll the Vaultspec workspace and install the prek hook.
 [group('setup')]
 init-tools:
-    uv run --no-project --python 3.13 -- python -m dev.init tools{{propagate}}
+    uv run --no-project --python 3.13 -- python -m dev.init tools
 
 # Report whether this worktree is initialized. Mutates nothing; exits 3 if not.
 [group('setup')]
 init-check:
-    uv run --no-project --python 3.13 -- python -m dev.init check{{propagate}}
+    uv run --no-project --python 3.13 -- python -m dev.init check
 
 # Resolve the base runtime profile from the project lock.
 [group('setup')]

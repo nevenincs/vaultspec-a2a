@@ -21,7 +21,10 @@ looks.
 Advisory intent is legitimate. The mechanism must be structural: the target
 declares `advisory=True`, and the runner suppresses only the statuses that mean
 "findings" (`FINDINGS_CODES`, which is `{1}` for every scanner in this fleet).
-Anything else propagates as `ADVISORY_BROKEN` (7).
+Anything else propagates as `TOOL_BROKEN` (7), which `ADVISORY_BROKEN` is the
+advisory-facing name for. One code serves gates and advisories alike: "the
+scanner did not run" means the same thing whichever kind of target hit it, and
+whether that gates is already carried by the target's declaration.
 
 ## Verb classes, keyed to CONSEQUENCE
 
@@ -72,7 +75,7 @@ summary AND the exit code, never from the exit code alone.
 | 4 | `INIT_STEP_FAILED` | `just init`: one bootstrap step failed (L6) |
 | 5 | `DRIFT` | managed content differs from its generated form (L6; also `fix` under `VAULTSPEC_FIX_STRICT`) |
 | 6 | `INIT_LOCKED` | `just init`: the environment is held open by another process (L6) |
-| 7 | `ADVISORY_BROKEN` | an advisory target's tool failed to RUN |
+| 7 | `TOOL_BROKEN` (`ADVISORY_BROKEN`) | the tool failed to RUN: it started and could not do its job |
 | 8 | `NOTHING_SELECTED` | nothing ran: empty selection, or every test skipped |
 | 127 | `TOOL_MISSING` | required tool absent, no fallback |
 

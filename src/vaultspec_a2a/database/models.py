@@ -30,7 +30,6 @@ from sqlalchemy.types import TypeEngine
 
 from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import (
-    RECOVERY_ACTION_TYPES,
     ControlActionResultStatus,
     ControlActionType,
     PermissionRequestStatus,
@@ -39,6 +38,7 @@ from ..thread.enums import (
     TaskQueueStatus,
     ThreadStatus,
 )
+from .control_action_schema import CONTROL_ACTION_SQL_VALUES, RECOVERY_ACTION_SQL_VALUES
 from .write_authority_schema import WRITE_ACTION_SQL_VALUES
 
 __all__ = [
@@ -580,6 +580,17 @@ class ControlActionModel(Base):
     __tablename__ = "control_actions"
 
     __table_args__ = (
+        CheckConstraint(
+            f"action_type IN ({CONTROL_ACTION_SQL_VALUES})",
+            name="ck_control_actions_action_type_current",
+        ),
+        CheckConstraint(
+            f"(action_type IN ({RECOVERY_ACTION_SQL_VALUES}) "
+            "AND recovery_deadline_at IS NOT NULL) OR "
+            f"(action_type NOT IN ({RECOVERY_ACTION_SQL_VALUES}) "
+            "AND recovery_deadline_at IS NULL)",
+            name="ck_control_actions_recovery_deadline_required",
+        ),
         Index("ix_control_actions_thread_id", "thread_id"),
         Index("ix_control_actions_request_id", "request_id"),
         Index("ux_control_actions_dispatch_id", "dispatch_id", unique=True),
@@ -625,11 +636,6 @@ class ControlActionModel(Base):
 _RECOVERY_CONDITION_SQL_VALUES = ", ".join(
     f"'{condition.value}'" for condition in RecoveryCondition
 )
-_RECOVERY_ACTION_SQL_VALUES = ", ".join(
-    f"'{action.value}'" for action in RECOVERY_ACTION_TYPES
-)
-
-
 class RecoveryAttemptModel(Base):
     """Durable retry schedule for one exact accepted run writer."""
 
@@ -667,7 +673,7 @@ class RecoveryAttemptModel(Base):
             name="ck_recovery_attempts_condition_current",
         ),
         CheckConstraint(
-            f"action_type IN ({_RECOVERY_ACTION_SQL_VALUES})",
+            f"action_type IN ({RECOVERY_ACTION_SQL_VALUES})",
             name="ck_recovery_attempts_action_type_current",
         ),
         CheckConstraint(

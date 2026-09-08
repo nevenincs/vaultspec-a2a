@@ -8,9 +8,15 @@ from typing import TYPE_CHECKING
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...database.models import Base, RecoveryAttemptModel, RunWriteAuthority
+from ...database.models import (
+    Base,
+    ControlActionModel,
+    RecoveryAttemptModel,
+    RunWriteAuthority,
+)
 from ...database.permission_repository import create_control_action
 from ...database.session import configure_sqlite_transactions
 from ...database.thread_repository import create_thread
@@ -65,6 +71,83 @@ async def _thread(db: AsyncSession, *, deadline_at: datetime) -> RunWriteAuthori
         recovery_deadline_at=deadline_at,
     )
     return authority
+
+
+@pytest.mark.asyncio
+async def test_recoverable_action_deadline_is_a_storage_invariant(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    deadline = datetime(2026, 9, 7, 1, tzinfo=UTC)
+    async with sessions() as db:
+        with pytest.raises(ValueError, match="ingest requires a recovery deadline"):
+            await create_control_action(
+                db,
+                thread_id="missing",
+                action_type=ControlActionType.INGEST,
+                idempotency_key="missing-deadline",
+            )
+        with pytest.raises(
+            ValueError, match="repair_started cannot carry a recovery deadline"
+        ):
+            await create_control_action(
+                db,
+                thread_id="unexpected",
+                action_type=ControlActionType.REPAIR_STARTED,
+                idempotency_key="unexpected-deadline",
+                recovery_deadline_at=deadline,
+            )
+
+        authority = RunWriteAuthority(
+            0,
+            1,
+            ControlActionType.INGEST,
+            "schema-direct",
+        )
+        await create_thread(db, thread_id="schema-direct", write_authority=authority)
+        db.add(
+            ControlActionModel(
+                id="invalid-direct-row",
+                thread_id="schema-direct",
+                action_type=ControlActionType.INGEST.value,
+                idempotency_key="invalid-direct-row",
+            )
+        )
+        with pytest.raises(
+            IntegrityError,
+            match="ck_control_actions_recovery_deadline_required",
+        ):
+            await db.flush()
+
+
+@pytest.mark.asyncio
+async def test_control_action_storage_refuses_unknown_action_types(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    authority = RunWriteAuthority(
+        0,
+        1,
+        ControlActionType.INGEST,
+        "schema-current-action",
+    )
+    async with sessions() as db:
+        await create_thread(
+            db,
+            thread_id="schema-current-action",
+            write_authority=authority,
+        )
+        db.add(
+            ControlActionModel(
+                id="unknown-action-row",
+                thread_id="schema-current-action",
+                action_type="unknown_action",
+                idempotency_key="unknown-action-row",
+            )
+        )
+        with pytest.raises(
+            IntegrityError,
+            match="ck_control_actions_action_type_current",
+        ):
+            await db.flush()
 
 
 @pytest.mark.asyncio

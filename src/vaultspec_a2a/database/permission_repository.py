@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..thread.enums import (
+    RECOVERY_ACTION_TYPES,
     ControlActionResultStatus,
     ControlActionType,
     PermissionRequestStatus,
@@ -321,10 +322,17 @@ async def create_control_action(
     recovery_deadline_at: datetime | None = None,
 ) -> ControlActionModel:
     """Append a durable control journal record."""
+    resolved_type = _coerce_control_action_type(action_type)
+    requires_deadline = resolved_type in RECOVERY_ACTION_TYPES
+    if requires_deadline != (recovery_deadline_at is not None):
+        requirement = "requires" if requires_deadline else "cannot carry"
+        raise ValueError(
+            f"{resolved_type.value} {requirement} a recovery deadline"
+        )
     model = ControlActionModel(
         id=uuid4().hex,
         thread_id=thread_id,
-        action_type=_coerce_control_action_type(action_type).value,
+        action_type=resolved_type.value,
         request_id=request_id,
         idempotency_key=idempotency_key,
         payload_json=_encode_payload(payload),

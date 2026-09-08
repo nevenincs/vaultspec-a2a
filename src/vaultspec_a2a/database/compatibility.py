@@ -26,6 +26,7 @@ from .checkpoint_schema import (
     open_checkpoint_read_only,
     validate_checkpoint_schema_connection,
 )
+from .control_action_schema import recovery_deadline_checks_match
 from .migrate import build_migration_config
 from .migrations import (
     CheckpointStateMigrationError,
@@ -176,6 +177,18 @@ def _validate_write_authority(db_path: Path) -> None:
             raise SchemaCompatibilityError(
                 f"desktop primary database at {db_path} lacks required current "
                 f"write-authority checks. {_REMEDY}"
+            )
+        action_sql_row = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'control_actions'"
+        ).fetchone()
+        action_sql = "" if action_sql_row is None else str(action_sql_row[0])
+        if not recovery_deadline_checks_match(
+            extract_named_check_predicates(action_sql)
+        ):
+            raise SchemaCompatibilityError(
+                f"desktop primary database at {db_path} lacks the exact current "
+                f"control-action recovery deadline check. {_REMEDY}"
             )
         placeholders = ", ".join("?" for _ in WRITE_ACTION_TYPES)
         invalid = conn.execute(

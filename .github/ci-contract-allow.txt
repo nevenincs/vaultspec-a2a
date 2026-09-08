@@ -1,0 +1,64 @@
+# Steps `dev/ci_contract.py` permits to name a tool, and the reason each does.
+#
+# An entry is `workflow.yml:Step name`. Every line is a debt with an owner, not
+# a dispensation: the file exists so the unconverted surface is a number
+# someone can burn down instead of a silence.
+
+# --- runner-plane -----------------------------------------------------------
+# Acts on the MACHINE, not the product. `bootstrap.sh` lives on the dev runner
+# and provisions a worktree there; it has no local meaning.
+bootstrap-branch.yml:Validate issue dispatch
+bootstrap-branch.yml:Bootstrap local worktree
+
+# --- CI-plane bookkeeping ---------------------------------------------------
+# Project-board automation: reads and writes GitHub state through `gh`, which
+# is already permitted, and differs only in reaching it through a shell
+# conditional.
+add-to-project.yml:Set target date to created_at + 30 days
+
+# --- pending ----------------------------------------------------------------
+# Installs the provider CLIs the prerequisite gates spawn, UNPINNED and
+# globally: `npm install -g @openai/codex @anthropic-ai/claude-code`. Two
+# unpinned global installs decide what a gate is testing. Recipe needed:
+# `init-tools` should provision them, which is what that phase is for.
+test.yml:Install the provider CLIs these gates require
+
+# Three `alembic` invocations that walk a migration to head, back to base, and
+# to head again. A real gate with no recipe, so nobody can run it before
+# pushing a migration. Recipe needed: `test-migrations`.
+migrations.yml:Exercise migration round trip
+
+# --- pending, the release lane ----------------------------------------------
+# This repository's product IS the frozen onedir, and release.yml is the only
+# thing that has ever produced one. Nothing below can be run by a developer,
+# which is why a break in it surfaces at release with the tag already cut.
+# It is also the fleet's worst single offender: `Prove the frozen tree is one
+# the consumer can install` is a 75-line Python program embedded in YAML.
+#
+# Recipes needed, in the order they would retire these entries:
+#   build-binary            the freeze itself; vaultspec-dashboard's
+#                           a2a-product-contract.yml reaches into this
+#                           repository and runs scripts/build_binary.py
+#                           directly, so a recipe is the only stable contract
+#                           between the two repos
+#   check-frozen-tree       the 75-line heredoc, moved into dev/ where it can
+#                           be tested and run
+#   test-artifact-lifecycle prove_artifact_lifecycle.sh is bash, and the
+#                           Windows leg runs it under Git Bash - the exact
+#                           platform assumption a recipe removes
+#   build-archive           the tar/7z branch and its sha256 sidecar
+#   check-tag-version       vaultspec-core asserts the same thing about its own
+#                           tag with its own copy
+#   check-release-cohort    the four-target completeness check, which lists the
+#                           targets by hand in a second place
+release.yml:Install Python
+release.yml:Resolve a host Python for the release scripts
+release.yml:Resolve and agree the version
+release.yml:Refuse to freeze for an architecture this runner is not
+release.yml:Install the locked freeze environment
+release.yml:Freeze the runtime
+release.yml:Prove the frozen tree is one the consumer can install
+release.yml:Prove the artifact starts, serves, and stops
+release.yml:Archive the onedir
+release.yml:Refuse an incomplete cohort
+release.yml:Upload the assets to the release

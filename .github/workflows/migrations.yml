@@ -28,11 +28,13 @@ jobs:
           enable-cache: true
           version: "0.11.29"
 
-      - name: Install Python
-        run: uv python install 3.13
+      - name: Set up just
+        uses: taiki-e/install-action@d56249f532886d210664917b882ad7e152e17d68 # v2
+        with:
+          tool: just@1.38.0
 
-      - name: Synchronize locked migration environment
-        run: uv sync --locked --no-default-groups --extra server --group tooling
+      - name: Initialize the worktree
+        run: just init
 
       # alembic.ini ships sqlalchemy.url empty so that a bare run cannot migrate
       # a database nobody named, so the round trip supplies its own throwaway

@@ -40,8 +40,26 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Lint GitHub Actions workflows
-        uses: docker://rhysd/actionlint:1.7.11
+      - name: Set up just
+        uses: taiki-e/install-action@d56249f532886d210664917b882ad7e152e17d68 # v2
+        with:
+          tool: just@1.38.0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          version: "0.11.29"
+
+      - name: Initialize the worktree
+        run: just init
+
+      # actionlint AND the CI/justfile contract, both through the recipe. The
+      # `docker://` step this replaces made a required check depend on the
+      # runner account reaching the docker socket - a fleet capability this
+      # repository cannot see or assert, and one that has failed elsewhere in
+      # the fleet before linting a single workflow.
+      - name: Workflow lint and CI contract (just check-workflow)
+        run: just check-workflow
 
   test:
     runs-on: [self-hosted, Linux, X64]
@@ -64,16 +82,13 @@ jobs:
           enable-cache: true
           version: "0.11.29"
 
-      - name: Set up Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Set up just
+        uses: taiki-e/install-action@d56249f532886d210664917b882ad7e152e17d68 # v2
         with:
-          just-version: "1.46.0"
+          tool: just@1.38.0
 
-      - name: Install Python
-        run: uv python install 3.13
-
-      - name: Synchronize locked CI environment
-        run: uv sync --locked --no-default-groups --extra server --group all
+      - name: Initialize the worktree
+        run: just init
 
       - name: Run canonical CI
         run: just ci
@@ -155,16 +170,13 @@ jobs:
           enable-cache: true
           version: "0.11.29"
 
-      - name: Set up Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Set up just
+        uses: taiki-e/install-action@d56249f532886d210664917b882ad7e152e17d68 # v2
         with:
-          just-version: "1.46.0"
+          tool: just@1.38.0
 
-      - name: Install Python
-        run: uv python install 3.13
-
-      - name: Synchronize locked CI environment
-        run: uv sync --locked --no-default-groups --extra server --group all
+      - name: Initialize the worktree
+        run: just init
 
       - name: Run desktop service gates
         shell: bash
@@ -193,16 +205,13 @@ jobs:
           enable-cache: true
           version: "0.11.29"
 
-      - name: Set up Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Set up just
+        uses: taiki-e/install-action@d56249f532886d210664917b882ad7e152e17d68 # v2
         with:
-          just-version: "1.46.0"
+          tool: just@1.38.0
 
-      - name: Install Python
-        run: uv python install 3.13
-
-      - name: Synchronize locked CI environment
-        run: uv sync --locked --no-default-groups --extra server --group all
+      - name: Initialize the worktree
+        run: just init
 
       # These gates were skipif-ed on CLIs no workflow ever installed, so they
       # skipped on every CI run and had never executed there: a regression in
@@ -233,16 +242,13 @@ jobs:
           enable-cache: true
           version: "0.11.29"
 
-      - name: Set up Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Set up just
+        uses: taiki-e/install-action@d56249f532886d210664917b882ad7e152e17d68 # v2
         with:
-          just-version: "1.46.0"
+          tool: just@1.38.0
 
-      - name: Install Python
-        run: uv python install 3.13
-
-      - name: Synchronize locked CI environment
-        run: uv sync --locked --no-default-groups --extra server --group all
+      - name: Initialize the worktree
+        run: just init
 
       - name: Run Compose server profile regression
         run: |

@@ -503,6 +503,7 @@ FIX = Verb(
             "all",
             "Run every fixer.",
             tuple(Ref(name) for name in ("python", "toml")),
+            keep_going=True,
         ),
     ),
 )

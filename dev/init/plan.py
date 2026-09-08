@@ -11,11 +11,16 @@ order - ``just doctor-check``, ``just deps-tooling``, ``just deps-node``,
 ``just vault-setup``, ``just hooks-install`` - and knowing which of them
 were optional. Each of those recipes remains; `init` is the order.
 
-The `.env` trap deserves naming. This repository's justfile sets
-``dotenv-load``, so `just` reads `.env` before it runs anything: a worktree
-without one was under-configured for the very command that would have created
-it. `.env` is now a preflight, materialized on every entry point including
-``init-python``, so the trap cannot recur.
+`.env` is materialized as a preflight, on every entry point including
+``init-python``. The reason has changed and the step has not. It was once the
+`dotenv-load` trap: the justfile loaded `.env` before running anything, so a
+worktree without one was under-configured for the very command that would have
+created it. That blanket load is gone - credentials now reach only the commands
+whose scope declares them, through :mod:`dev.credentials`. What remains is that
+`.env` is where those scopes READ from, so a worktree without one starts its
+services on defaults and refuses the scopes with required names. Materializing
+it first is still the right move; it is now a precondition for the credential
+scopes rather than for `just` itself.
 
 Stdlib-only, by the constraint stated in :mod:`dev.init`.
 """
@@ -79,8 +84,9 @@ REQUIREMENTS: Final[tuple[Requirement, ...]] = (
 
 #: Steps that run before any phase, on every entry point. Materializing `.env`
 #: belongs here rather than in `init-tools` because a worktree without one is
-#: under-configured for tools that read it, including `just` itself in the
-#: repositories that set `dotenv-load` - which this one does.
+#: under-configured for every tool that reads it - and in this repository that
+#: now means the credential scopes in :mod:`dev.credentials`, which resolve the
+#: service and compose variables out of exactly this file.
 PREFLIGHT: Final[tuple[Step, ...]] = (
     Step(
         name="dotenv",

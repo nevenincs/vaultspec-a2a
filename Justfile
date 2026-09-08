@@ -65,16 +65,31 @@
 # either character.
 set windows-shell := ["cmd.exe", "/c"]
 set quiet := true
-set dotenv-load := true
 
-# The development toolchain's single entry point.
+# `set dotenv-load` is deliberately ABSENT. It loaded `.env` once and injected
+# every variable in it - live provider keys included - into every subprocess of
+# every recipe, so a TOML formatter and a markdown linter both ran with
+# production API keys in their environment. Nothing needed them and nothing was
+# stopped from reading them.
+#
+# Credentials now reach only the commands that need them, through the scopes
+# declared in `dev/credentials.py`. A recipe that names no scope inherits
+# nothing. `python -m dev.credentials <scope> --describe` reports which of a
+# scope's variables are set, by NAME and a boolean - never a value.
+creds := "uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.credentials"
+
+# The development toolchain's single entry point. Deliberately UNSCOPED: no
+# gate, audit, or measurement in `dev/` reads a credential - the whole package
+# mentions none of their names - so the entire check/fix/audit/health surface
+# runs with no secret in its environment at all.
 dev := "uv run --no-sync --frozen --no-default-groups --group tooling python -m dev"
 
-# The product CLI, for the passthrough recipes in the `dev` group.
-product := "uv run --no-sync --frozen --no-default-groups vaultspec-a2a"
+# The product CLI and the process registry both RUN the product against real
+# providers, so they carry the `service` scope.
+product := creds + " service -- uv run --no-sync --frozen --no-default-groups vaultspec-a2a"
 
 # The process registry that owns every long-lived development service.
-procs := "uv run --no-sync --frozen --no-default-groups vaultspec-a2a procs"
+procs := creds + " service -- uv run --no-sync --frozen --no-default-groups vaultspec-a2a procs"
 
 # The vaultspec-core and vaultspec-rag CLIs this checkout runs on ITSELF.
 core := "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec-core"
@@ -83,11 +98,11 @@ safe_enroll := "uv run --no-sync --frozen --no-default-groups --group tooling py
 
 # The bounded Docker Compose projects. Each is pinned to its own project name
 # so one stack can never tear another's containers down.
-compose_dev := "docker compose --project-name vaultspec-a2a-dev -f service/docker-compose.dev.yml"
-compose_integration := "docker compose --project-name vaultspec-a2a-integration -f service/docker-compose.integration.yml"
-compose_database := "docker compose --project-name vaultspec-a2a-database -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml"
-compose_prod := "docker compose --project-name vaultspec-a2a-prod -f service/docker-compose.prod.yml"
-compose_infrastructure := "docker compose --project-name vaultspec-a2a-infrastructure -f service/docker-compose.integration.yml"
+compose_dev := creds + " compose -- docker compose --project-name vaultspec-a2a-dev -f service/docker-compose.dev.yml"
+compose_integration := creds + " compose -- docker compose --project-name vaultspec-a2a-integration -f service/docker-compose.integration.yml"
+compose_database := creds + " compose -- docker compose --project-name vaultspec-a2a-database -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml"
+compose_prod := creds + " compose -- docker compose --project-name vaultspec-a2a-prod -f service/docker-compose.prod.yml"
+compose_infrastructure := creds + " compose -- docker compose --project-name vaultspec-a2a-infrastructure -f service/docker-compose.integration.yml"
 
 # List every recipe, grouped by consequence.
 [group('meta')]
@@ -448,7 +463,7 @@ test-parallel:
 # Run deterministic service tests against real local services.
 [group('test')]
 test-service:
-    {{dev}} test service
+    {{creds}} live-tests -- {{dev}} test service
 
 # Run the unit gate with terminal coverage.
 [group('test')]
@@ -463,12 +478,13 @@ test-harness:
 # Run every collected test, removing the project default marker exclusion.
 [group('test')]
 test-all:
-    {{dev}} test all
+    {{creds}} live-tests -- {{dev}} test all
 
 # Report the lanes, models, and controls this host's provider CLIs serve.
 # `--exports claude=haiku --option effort=low` renders the VAULTSPEC_LIVE_*
 # block the live tier opts in with; the ids are catalog-derived, so read them
 # from here rather than committing a block that goes stale.
+[doc("Report the lanes, models, and controls this host's provider CLIs serve.")]
 [group('test')]
 test-lanes *ARGS:
     uv run --no-sync --frozen python -m dev.providers {{ ARGS }}
@@ -482,7 +498,7 @@ test-lanes *ARGS:
 # Prove durable replay and lost-ack recovery across repositories (never skips).
 [group('test')]
 test-cross-repo *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "" --require-prerequisite=dashboard-engine src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py {{ ARGS }}
+    {{creds}} live-tests -- uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "" --require-prerequisite=dashboard-engine src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py {{ ARGS }}
 
 # These need the Codex and Claude CLIs on PATH and no credential whatsoever, so
 # a certification job can provision them. Selected by explicit node id and run
@@ -502,6 +518,7 @@ test-provider-gates *ARGS:
 # condition that once aborted startup and that the main suite, which has the
 # exporter installed, cannot reproduce. Installed editable on purpose: the wheel
 # excludes `**/tests`, so the probe has no installed-module form to invoke.
+[doc('Prove gateway and worker telemetry start in a base-only installation.')]
 [group('test')]
 test-clean-base:
     uv run --isolated --no-project --with-editable . python -m vaultspec_a2a.telemetry.tests.probe_clean_base
@@ -813,7 +830,6 @@ vault-sanitize:
 
 # Fail when the ACP launch spec does not serve the tools the harness declares.
 [private]
-[group('dev')]
 _rag-check-tool-contract:
     uv run --no-sync --frozen --no-default-groups --extra rag python -m dev.rag tool-contract
 
@@ -898,6 +914,6 @@ rag-warmup:
 # ===========================================================================
 
 # Run the current read-only local validation baseline.
-[group('meta')]
+[group('check')]
 ci:
     uv run --isolated --no-project python -m dev ci all

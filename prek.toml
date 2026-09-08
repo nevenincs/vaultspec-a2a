@@ -40,7 +40,11 @@ repo = "local"
   types = ["toml"]
 
   [[repos.hooks]]
-  entry = "uv run --no-sync --frozen --no-default-groups --group tooling ty check src/vaultspec_a2a"
+  # Scope matches `PYTHON_PATHS` in dev/toolchain.py, which is what
+  # `just check-types` checks. `dev/` is not incidental any more: it holds
+  # every recipe's real logic since the justfile was flattened, so tooling
+  # left outside this gate is untyped tooling for the whole repository.
+  entry = "uv run --no-sync --frozen --no-default-groups --group tooling ty check src dev docs scripts packaging"
   id = "ty"
   language = "system"
   name = "Type-check Python codebase (Ty)"

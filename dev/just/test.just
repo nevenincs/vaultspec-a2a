@@ -18,7 +18,7 @@ lanes *ARGS:
 
 # Run deterministic service tests against real local services.
 service *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" -m service {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m service {{ ARGS }}
 
 # The durable-replay proof lives in the service tier, which the default gate
 # excludes, so a default run never executed it and a bare service run could
@@ -28,7 +28,7 @@ service *ARGS:
 #
 # Prove durable replay and lost-ack recovery across repositories (never skips).
 cross-repo *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --require-prerequisite=dashboard-engine src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "" --require-prerequisite=dashboard-engine src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py {{ ARGS }}
 
 # These need the Codex and Claude CLIs on PATH and no credential whatsoever, so
 # a certification job can provision them. Selected by explicit node id and run
@@ -38,11 +38,11 @@ cross-repo *ARGS:
 #
 # Run the provider gates whose prerequisite is an installable CLI (never skips).
 provider-gates *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --require-prerequisite=codex-cli --require-prerequisite=claude-cli --require-prerequisite=mcp-streamable-http src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_classify_provider_command_resolves_codex src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_codex_readiness_ready_when_installed src/vaultspec_a2a/providers/tests/test_codex_config_home.py::TestCodexEntrypointAcceptsEmittedMcpConfig::test_codex_mcp_list_accepts_the_built_config_home src/vaultspec_a2a/providers/tests/test_acp_project_mcp.py::TestAcpEntrypointAcceptsProjectedMcpConfig::test_claude_mcp_list_accepts_the_projected_config {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "" --require-prerequisite=codex-cli --require-prerequisite=claude-cli --require-prerequisite=mcp-streamable-http src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_classify_provider_command_resolves_codex src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_codex_readiness_ready_when_installed src/vaultspec_a2a/providers/tests/test_codex_config_home.py::TestCodexEntrypointAcceptsEmittedMcpConfig::test_codex_mcp_list_accepts_the_built_config_home src/vaultspec_a2a/providers/tests/test_acp_project_mcp.py::TestAcpEntrypointAcceptsProjectedMcpConfig::test_claude_mcp_list_accepts_the_projected_config {{ ARGS }}
 
 # Run every collected test, removing the project default marker exclusion.
 all *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "" {{ ARGS }}
 
 # Prove gateway and worker telemetry start in a base-only installation.
 #
@@ -64,8 +64,8 @@ collect-unit *ARGS:
 
 # Collect the service gate without executing tests.
 collect-service *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --collect-only -m service {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --collect-only -m service {{ ARGS }}
 
 # Collect every test without the project default marker exclusion.
 collect-all *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" --collect-only {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "" --collect-only {{ ARGS }}

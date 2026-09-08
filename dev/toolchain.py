@@ -524,10 +524,30 @@ AUDIT = Verb(
         "clone may be two things that merely look alike."
     ),
     targets=(
+        # `uv audit` exits 0 even when it prints advisories, so this target -
+        # labelled GATES since it was written - could not fail; and it saw only
+        # Python, while this repository also locks the Node tree that hosts the
+        # ACP CLI the worker runs. dev/audit/dependency_audit.py resolves every
+        # pinned coordinate out of uv.lock AND package-lock.json and queries
+        # OSV for all of them, so the verdict is a property of the finding set
+        # rather than of a preview tool's exit code. Accepted advisories live
+        # in dependency-audit-allowlist.toml, each with a reason and an expiry;
+        # an expired acceptance fails the gate.
         Target(
             "deps",
-            "Dependency vulnerability advisories (GATES).",
-            (Cmd(("uv", "audit", "--locked", "--preview-features", "audit")),),
+            "Dependency vulnerability advisories, every ecosystem (GATES).",
+            (
+                Cmd(
+                    (
+                        "uv",
+                        "run",
+                        "--no-sync",
+                        "python",
+                        "-m",
+                        "dev.audit.dependency_audit",
+                    )
+                ),
+            ),
         ),
         Target(
             "security",
@@ -594,15 +614,6 @@ AUDIT = Verb(
 #  test - GATES
 # ---------------------------------------------------------------------------
 
-#: The service tier needs real local services and is excluded from the default
-#: gate by ``addopts`` in pyproject.toml. Overriding ``addopts`` wholesale is
-#: how a lane reaches it, so the override string is stated once here rather
-#: than copied into every service-shaped target.
-ADDOPTS_OVERRIDE = (
-    "--override-ini",
-    "addopts=--durations=10 --showlocals -ra --capture=sys",
-)
-
 TEST = Verb(
     name="test",
     summary="Run the project test suites.",
@@ -635,12 +646,12 @@ TEST = Verb(
         Target(
             "service",
             "Deterministic service tests against real local services.",
-            (_pytest(*ADDOPTS_OVERRIDE, "-m", "service"),),
+            (_pytest("-m", "service"),),
         ),
         Target(
             "all",
             "Every collected test, without the default marker exclusion.",
-            (_pytest(*ADDOPTS_OVERRIDE),),
+            (_pytest("-m", ""),),
         ),
         Target(
             "coverage",

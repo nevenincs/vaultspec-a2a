@@ -38,6 +38,7 @@ node_modules/
 
 # Python caches
 .pytest_cache/
+.pytest-tmp/
 .ruff_cache/
 .uv-cache/
 .prek-home/

@@ -45,7 +45,7 @@ jobs:
         with:
           tool: just@1.38.0
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
           version: "0.11.29"
@@ -96,7 +96,7 @@ jobs:
           cache: npm
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           # `false` on purpose, and it is not a de-optimisation. These runners
           # are self-hosted and persistent, and each one pins UV_CACHE_DIR at a
@@ -194,7 +194,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           # `false` on purpose, and it is not a de-optimisation. These runners
           # are self-hosted and persistent, and each one pins UV_CACHE_DIR at a
@@ -239,7 +239,7 @@ jobs:
           node-version-file: .node-version
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           # `false` on purpose, and it is not a de-optimisation. These runners
           # are self-hosted and persistent, and each one pins UV_CACHE_DIR at a
@@ -286,7 +286,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           # `false` on purpose, and it is not a de-optimisation. These runners
           # are self-hosted and persistent, and each one pins UV_CACHE_DIR at a

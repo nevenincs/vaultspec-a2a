@@ -3743,7 +3743,7 @@ all = [
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
-    { name = "vaultspec-core", specifier = ">=0.1.56,<0.2" },
+    { name = "vaultspec-core", specifier = ">=0.1.56,<0.3" },
     { name = "vulture", specifier = ">=2.16" },
     { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
@@ -3773,7 +3773,7 @@ dev = [
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
-    { name = "vaultspec-core", specifier = ">=0.1.56,<0.2" },
+    { name = "vaultspec-core", specifier = ">=0.1.56,<0.3" },
     { name = "vulture", specifier = ">=2.16" },
     { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
@@ -3781,7 +3781,7 @@ dev = [
 docs = [{ name = "sphinx", specifier = ">=8.2" }]
 freeze = [
     { name = "pyinstaller", specifier = ">=6.11" },
-    { name = "vaultspec-core", specifier = ">=0.1.56,<0.2" },
+    { name = "vaultspec-core", specifier = ">=0.1.56,<0.3" },
 ]
 tooling = [
     { name = "actionlint-py", specifier = "==1.7.12.24" },
@@ -3808,7 +3808,7 @@ tooling = [
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
-    { name = "vaultspec-core", specifier = ">=0.1.56,<0.2" },
+    { name = "vaultspec-core", specifier = ">=0.1.56,<0.3" },
     { name = "vulture", specifier = ">=2.16" },
     { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },

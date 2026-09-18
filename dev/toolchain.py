@@ -113,10 +113,9 @@ BANDIT_EXCLUDES = ("-x", ",".join(f"*/{tier}/*" for tier in TEST_TIERS))
 #: and ``[tool.ruff.lint.pylint]``.
 FUNCTION_LIMITS = "C90,PLR0911,PLR0912,PLR0913,PLR0915"
 
-#: Duplication-detector thresholds. jscpd's own defaults (5 lines / 50 tokens)
-#: report formatting coincidences; 20 lines with 70 tokens is the threshold at
-#: which a clone is a maintenance liability rather than a similarity.
-JSCPD = ("--min-lines", "20", "--min-tokens", "70", "--reporters", "console")
+#: The duplication detector's thresholds and scope now live with its runner in
+#: `dev/audit/duplication.py`, which owns the whole measurement. They are not
+#: restated here: a threshold in two places is a threshold that drifts.
 
 
 @dataclass(frozen=True)
@@ -323,32 +322,60 @@ LINT = Verb(
             "Ruff lint and format verification.",
             (_ruff("check"), _ruff("format", "--check")),
         ),
+        # The three type targets share one harness (`dev.quality.types`)
+        # rather than shelling out to the checkers directly. It reads each
+        # checker's JSON rather than its console rendering, REFUSES an empty
+        # report instead of reading it as zero diagnostics, and prints a
+        # summary grouped by rule and file rather than the raw dump - which
+        # for the strict pass is 3500 lines nobody reads to the end.
         Target(
             "type",
-            "Ty type checking.",
-            (uv_run("ty", "check", *PYTHON_PATHS),),
+            "Ty type checking, grouped by rule and file.",
+            (dev_module("quality.types", "--no-strict"),),
         ),
         Target(
             "type-platforms",
-            "Ty type checking against every target platform.",
-            tuple(
-                uv_run(
-                    "python",
-                    "-m",
-                    "ty",
-                    "check",
-                    "--python-platform",
-                    platform,
-                    *PYTHON_PATHS,
-                )
-                for platform in ("linux", "darwin", "win32")
-            ),
-            keep_going=True,
+            "Ty type checking against every target platform, as one verdict.",
+            (dev_module("quality.types", "--no-strict", "--platforms"),),
         ),
         Target(
             "type-strict",
-            "Basedpyright strict-mode type checking.",
-            (uv_run("basedpyright"),),
+            "Ty plus the basedpyright strict pass, grouped.",
+            (dev_module("quality.types"),),
+        ),
+        # Ruff's TC rules move imports INTO the TYPE_CHECKING guard; nothing
+        # stock checks the other direction, and a guarded name evaluated at
+        # runtime is a NameError a type checker is perfectly happy with.
+        Target(
+            "type-guards",
+            "TYPE_CHECKING-only imports must not be referenced at runtime.",
+            (dev_module("quality.type_checking_runtime_use"),),
+        ),
+        # Static analysis proves a module is REFERENCED. Only importing it
+        # proves it LOADS.
+        Target(
+            "imports-load",
+            "Every shipped production module must import in a clean process.",
+            (dev_module("quality.import_load_probe"),),
+        ),
+        # The three zero-target coverage gates over `dev.audit.unreachable_code`.
+        # Each has no baseline and no exclusion list: a baseline reports the
+        # delta against a number someone wrote down, and the number is what
+        # gets updated when the gate goes red.
+        Target(
+            "reachability",
+            "Every shipped module must be reachable from a shipped entry point.",
+            (dev_module("quality.unreachable_module_coverage"),),
+        ),
+        Target(
+            "symbols",
+            "Every top-level symbol must have a consumer that is not its own test.",
+            (dev_module("quality.unused_symbol_coverage"),),
+        ),
+        Target(
+            "exports",
+            "Every name published in __all__ must have an importer.",
+            (dev_module("quality.unconsumed_export_coverage"),),
         ),
         Target(
             "complexity",
@@ -441,13 +468,24 @@ LINT = Verb(
             # threshold backlog but a live production break - `mcp` 2.0.0 had
             # removed `mcp.server.fastmcp`, which the server still imported - and
             # a gate going red on a genuine break is the gate working.
+            #
+            # `type-guards` and `imports-load` joined on the same rule: both
+            # were written green over this tree and both answer a question
+            # nothing else here asks - whether a TYPE_CHECKING-only name is
+            # evaluated at runtime, and whether every shipped module actually
+            # imports. The reachability trio (`reachability`, `symbols`,
+            # `exports`) is NOT chained: it opened at 8, 53 and 155 findings,
+            # which is a burndown, and lives in `strict` and `audit` until it
+            # reaches zero.
             tuple(
                 Ref(name)
                 for name in (
                     "python",
                     "type",
                     "type-platforms",
+                    "type-guards",
                     "imports",
+                    "imports-load",
                     "dependencies",
                     "toml",
                     "workflow",
@@ -466,6 +504,7 @@ LINT = Verb(
                     "type",
                     "type-platforms",
                     "type-strict",
+                    "type-guards",
                     "complexity",
                     "cyclomatic",
                     "shape",
@@ -473,6 +512,10 @@ LINT = Verb(
                     "nesting",
                     "size",
                     "imports",
+                    "imports-load",
+                    "reachability",
+                    "symbols",
+                    "exports",
                     "dependencies",
                     "toml",
                     "workflow",
@@ -535,11 +578,14 @@ AUDIT = Verb(
     summary="Audit dependencies and code quality; only 'deps' gates.",
     note=(
         "Only 'deps' gates - a published advisory against a pinned version is a "
-        "verdict, not a lead. Every other target is advisory and exits 0 even with "
-        "findings, because each yields something to confirm: vulture infers "
-        "reachability it cannot always see, bandit reports this project's "
-        "deliberate subprocess design alongside anything real, and a duplication "
-        "clone may be two things that merely look alike."
+        "verdict, not a lead. Every other target reports findings and still exits "
+        "0, because each yields something to confirm: vulture infers reachability "
+        "it cannot see, bandit reports this project's deliberate subprocess design "
+        "alongside anything real, and a duplication clone may be two things that "
+        "merely look alike. What none of them may do is report a scan that did not "
+        "happen as a scan that found nothing - 'dead-code', 'duplication' and "
+        "'reachability' each own that distinction themselves and exit 7 when the "
+        "measurement was unavailable."
     ),
     targets=(
         # `uv audit` exits 0 even when it prints advisories, so this target -
@@ -583,22 +629,39 @@ AUDIT = Verb(
             ),
             advisory=True,
         ),
+        # These three do NOT carry `advisory=True`, and that is not an
+        # oversight. Each runner owns its tool's whole measurement and
+        # therefore its own exit contract: it returns OK when the scan RAN,
+        # findings and all, and ADVISORY_BROKEN when it could not. Layering
+        # the harness's findings-suppression on top would map a scan that
+        # never happened onto a clean result, which is the exact failure the
+        # runners were written to remove - `npx` exits 0 when it cannot
+        # resolve a package, so on a machine with no Node the old duplication
+        # target reported exactly like a clean tree.
         Target(
             "dead-code",
-            "Vulture dead-code scan.",
-            (uv_run("vulture"),),
-            advisory=True,
-            # vulture reports dead code with 3, reserving 1 for invalid input
-            # and 2 for invalid arguments. Under the fleet default ({1}) its
-            # findings would read as a broken scanner and its broken
-            # invocations would read as findings - both backwards.
-            findings_codes=frozenset({3}),
+            "Vulture dead-code scan, with the denominator it was found in.",
+            (dev_module("audit.dead_code"),),
         ),
         Target(
             "duplication",
-            "Copy-paste clone detection over production code.",
-            (Cmd(("npx", "--yes", "jscpd@4", PACKAGE, *JSCPD)),),
-            advisory=True,
+            "Copy-paste clone detection over production Python.",
+            (dev_module("audit.duplication"),),
+        ),
+        # The reachability audit is what makes the dead-code dimension mean
+        # something over this tree: vulture has no model of framework
+        # registration, so it reports every FastAPI handler and every typer
+        # command as unused. This walks the import graph from the shipped
+        # entry points instead.
+        Target(
+            "reachability",
+            "Shipped code no shipped entry point reaches.",
+            (dev_module("audit.unreachable_code"),),
+        ),
+        Target(
+            "types",
+            "Every type diagnostic verbatim, behind the grouped gate's summary.",
+            (dev_module("quality.types", "--full"),),
         ),
         Target(
             "docstrings",
@@ -622,6 +685,8 @@ AUDIT = Verb(
                 Ref("security"),
                 Echo("=== dead code ==="),
                 Ref("dead-code"),
+                Echo("=== reachability ==="),
+                Ref("reachability"),
                 Echo("=== duplication ==="),
                 Ref("duplication"),
                 Echo("=== docstring coverage ==="),

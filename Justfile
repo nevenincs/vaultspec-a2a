@@ -283,6 +283,31 @@ check-type-platforms:
 check-type-strict:
     {{dev}} lint type-strict
 
+# Gate TYPE_CHECKING-only imports against runtime references.
+[group('check')]
+check-type-guards:
+    {{dev}} lint type-guards
+
+# Prove every shipped production module imports in a clean process.
+[group('check')]
+check-imports-load:
+    {{dev}} lint imports-load
+
+# Gate shipped modules against reachability from a shipped entry point.
+[group('check')]
+check-reachability:
+    {{dev}} lint reachability
+
+# Gate top-level symbols against having a consumer other than their own test.
+[group('check')]
+check-symbols:
+    {{dev}} lint symbols
+
+# Gate names published in __all__ against having an importer.
+[group('check')]
+check-exports:
+    {{dev}} lint exports
+
 # Gate cognitive complexity over production code.
 [group('check')]
 check-complexity:
@@ -413,6 +438,16 @@ audit-dead-code:
 [group('audit')]
 audit-duplication:
     {{dev}} audit duplication
+
+# Report shipped code no shipped entry point reaches; advisory, exits 0.
+[group('audit')]
+audit-reachability:
+    {{dev}} audit reachability
+
+# Print every type diagnostic verbatim, behind the grouped gate's summary.
+[group('audit')]
+audit-types:
+    {{dev}} audit types
 
 # Report missing and malformed docstrings; advisory, exits 0.
 [group('audit')]

@@ -74,13 +74,11 @@ if TYPE_CHECKING:
 __all__ = [
     "AUTHORING_MCP_SERVER_NAME",
     "AUTHORING_STDIO_MODULE",
-    "LOOPBACK_HOSTS",
     "AuthoringToolBinding",
     "attach_authoring_tools",
     "authoring_allowed_tool_names",
     "build_authoring_mcp_servers",
     "build_authoring_stdio_mcp_servers",
-    "codex_authoring_mcp_server_spec",
     "config_home_authoring_entry",
     "is_write_tool_name",
 ]

@@ -30,7 +30,6 @@ __all__ = [
     "owner_only_mode",
     "restrict_windows_file",
     "unfollowed_read_flags",
-    "windows_current_user_sid",
     "windows_file_is_restricted",
 ]
 

@@ -24,7 +24,6 @@ __all__ = [
     "MissingInstalledVocabularyError",
     "acp_adapter_error_kinds",
     "acp_error_kinds",
-    "acp_sdk_types_path",
     "codex_error_info_variants",
 ]
 

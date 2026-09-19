@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     from ._json_contract import JsonValue
 
 __all__ = [
-    "CONTRACT_PROBE_TIMEOUT_SECONDS",
     "verify_declared_tool_contract",
     "verify_harness_mcp_contract",
 ]

@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
-    "attach_process_containment",
     "kill_process_tree",
     "process_containment",
     "redact_secrets",

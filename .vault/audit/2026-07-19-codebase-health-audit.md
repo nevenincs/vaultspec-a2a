@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:e0b0348a49cfe2092e9bb26516892be18802c3d236000182ad71b9a3c1d96d66'
+body_hash: 'sha256:2bbda6395d0046dd5801774064daf6bfa4e3e7315f5828308946e7130d2012d6'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3116,3 +3116,7 @@ The next full service run passed the Compose and permission cases but surfaced o
 ### 2026-09-19 complete service gate result
 
 The full `just test-service` gate now exits successfully: 121 passed, 68 skipped, 4,574 deselected, and one warning in 182.76 seconds. The declared skips require live engine/provider credentials or a separately served mock backend; none is a failing test. The production Compose image, worker startup, permission conflict, and cancellation cases all pass in this run. This closes the high-severity image/import defects and the medium-severity cancellation lock collision at the service-gate cadence. The strict complexity, nested-block, Pylint shape, and unconsumed-export findings remain open and prevent completion of the requested zero-issue quality pass.
+
+### 2026-09-19 private export review pass
+
+The strict unconsumed-export audit reported 110 published names with no consumers. Review of private desktop and provider modules found 15 low-severity API-surface findings: 14 internal symbols were unnecessarily listed in `__all__`, and the `thaw_json` helper had no consumer at all. The internal symbols remain available to their owning modules, while their unused exports are removed; `thaw_json` is deleted along with its stale module description. No wildcard import of these private modules exists in the repository. The export audit now reports 95 findings across 1,205 published names. These 95 findings, the 323 Ruff structure errors, 33 nested-block errors, and Pylint shape findings remain open; the strict gate is not yet green.

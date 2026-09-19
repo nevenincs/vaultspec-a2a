@@ -2,8 +2,7 @@
 
 The provider layer emits protocol/configuration objects rather than arbitrary
 Python containers.  Keeping the recursive shape here lets each boundary prove
-its payload is serialisable, while ``freeze_json`` protects closed registries
-and ``thaw_json`` gives every consumer an independent mutable wire object.
+its payload is serialisable, while ``freeze_json`` protects closed registries.
 """
 
 from __future__ import annotations
@@ -14,13 +13,11 @@ __all__ = [
     "FrozenJsonObject",
     "FrozenJsonValue",
     "JsonObject",
-    "JsonScalar",
     "JsonValue",
     "freeze_json",
     "json_object",
     "lenient_json_object",
     "lenient_json_object_list",
-    "thaw_json",
 ]
 
 type JsonScalar = str | int | float | bool | None
@@ -42,15 +39,6 @@ def freeze_json(value: JsonValue) -> FrozenJsonValue:
         return tuple(freeze_json(item) for item in value)
     if isinstance(value, dict):
         return MappingProxyType({key: freeze_json(item) for key, item in value.items()})
-    return value
-
-
-def thaw_json(value: FrozenJsonValue) -> JsonValue:
-    """Return a fresh mutable JSON-shaped counterpart of one frozen value."""
-    if isinstance(value, tuple):
-        return [thaw_json(item) for item in value]
-    if isinstance(value, MappingProxyType):
-        return {key: thaw_json(item) for key, item in value.items()}
     return value
 
 

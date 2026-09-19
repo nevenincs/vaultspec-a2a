@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:a3da609c64fac11cdf673d30d42632034884ae085aa2fdee33db9d0c47711231'
+body_hash: 'sha256:1fc84ff9378a4ca2129e254ede0598c6e39c511c001c32ba40a0c6214ef559d1'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3236,3 +3236,7 @@ Five medium-severity strict Ruff return, complexity, branch, and statement findi
 ### 2026-09-20 thread admission and archive structure review pass
 
 Four medium-severity strict Ruff argument, complexity, and return findings in thread creation and archive election were resolved. Initial worker dependencies now travel as one typed runtime; failed dispatch settlement and archive-election rechecks have focused helpers. Review checked that the thread and graph action remain durable before worker dispatch, the recovery deadline and receipt authority are preserved, a concurrent terminal writer can still win while dispatch is in flight, missing rows still report their typed outcome, and archive election failure rolls back before re-reading current state. Sixty-three focused creation, deletion-saga, drain, and live gateway tests pass; `just check-all`, `just check-type-strict`, and focused Ruff pass. Strict Ruff structure falls from 220 to 216; code-health parameter-count findings fall from 95 to 94. No new review findings were surfaced. The pre-existing medium-severity cognitive-complexity finding in `list_threads_service` remains open in this module. The remaining 216 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 thread-list summary complexity review pass
+
+One medium-severity cognitive-complexity finding in `list_threads_service` was resolved by extracting checkpoint state, live plan approval, and summary projection. Review checked that missing and uncertain checkpoint probes still degrade readiness and hide approvals, recovery-epoch and checkpoint-id mismatches still degrade stale execution state, terminal threads still hide approvals, and only the latest pending plan permission with valid options is exposed. Eighty-three focused control and API tests pass; `just check-all`, `just check-type-strict`, focused Ruff and Ty, and module complexipy pass. The module now has no cognitive-complexity finding. No new review findings were surfaced. Strict Ruff structure remains at 216; code health remains at 13 module-length, 15 function-length, 94 parameter-count, and four nesting findings. These and the remaining nested-block and Pylint findings stay open in the audit queue.

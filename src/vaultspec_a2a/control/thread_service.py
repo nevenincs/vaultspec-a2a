@@ -43,7 +43,7 @@ from ..database import (
     successor_thread_write_authority,
     thread_write_expectation,
 )
-from ..database.models import RunWriteAuthority, ThreadModel
+from ..database.models import RunWriteAuthority, ThreadExecutionStateModel, ThreadModel
 from ..domain_config import domain_config
 from ..graph.nodes.vault_reader import build_initial_vault_index
 from ..ipc.schemas import DispatchRequest, canonical_project_root, to_dispatch_action
@@ -239,6 +239,99 @@ async def _bulk_read_checkpoints(
     return dict(pairs)
 
 
+def _summary_checkpoint_state(
+    thread: ThreadModel,
+    execution_state: ThreadExecutionStateModel | None,
+    probe: _CheckpointProbe,
+    *,
+    checkpointer_active: bool,
+) -> tuple[str | None, str | None, bool]:
+    repair_status = thread.repair_status
+    execution_readiness = thread.execution_readiness
+    checkpoint_unverified = checkpointer_active and probe.unverified
+    checkpoint_id: str | None = None
+    if checkpointer_active and probe.tuple is not None:
+        checkpoint_id = project_checkpoint_tuple(
+            probe.tuple, thread_id=thread.id
+        ).checkpoint_id
+    if checkpoint_unverified:
+        repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+    if execution_state is not None and (
+        execution_state.recovery_epoch != thread.recovery_epoch
+        or (
+            checkpointer_active
+            and probe.tuple is not None
+            and checkpoint_id is not None
+            and execution_state.checkpoint_id != checkpoint_id
+        )
+    ):
+        repair_status, execution_readiness = _degrade_stale_execution_state_summary(
+            repair_status=repair_status,
+            execution_readiness=execution_readiness,
+        )
+    return repair_status, execution_readiness, checkpoint_unverified
+
+
+async def _summary_approval(
+    db: AsyncSession, thread: ThreadModel, *, checkpoint_unverified: bool
+) -> tuple[str | None, str | None]:
+    if thread.status in TERMINAL_STATUS_VALUES or checkpoint_unverified:
+        return None, None
+    live_plan_permissions = [
+        permission
+        for permission in await get_pending_permission_requests(
+            db,
+            thread_id=thread.id,
+            include_answered_pending_apply=False,
+        )
+        if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
+    ]
+    if not live_plan_permissions:
+        return None, None
+    live_permission = live_plan_permissions[-1]
+    if not extract_allowed_option_ids(live_permission.allowed_options_json):
+        return None, None
+    return ApprovalStatus.PENDING.value, live_permission.request_id
+
+
+async def _thread_summary(
+    db: AsyncSession,
+    thread: ThreadModel,
+    probe: _CheckpointProbe,
+    *,
+    checkpointer_active: bool,
+) -> ThreadSummaryData:
+    feature_tag, source_branch, callee = _parse_thread_summary_metadata(
+        thread.thread_metadata
+    )
+    execution_state = await get_thread_execution_state(db, thread.id)
+    repair_status, execution_readiness, checkpoint_unverified = (
+        _summary_checkpoint_state(
+            thread, execution_state, probe, checkpointer_active=checkpointer_active
+        )
+    )
+    approval_status, approval_request_id = await _summary_approval(
+        db, thread, checkpoint_unverified=checkpoint_unverified
+    )
+    return ThreadSummaryData(
+        thread_id=thread.id,
+        title=thread.title,
+        status=thread.status,
+        repair_status=repair_status,
+        execution_readiness=execution_readiness,
+        approval_status=approval_status,
+        approval_request_id=approval_request_id,
+        team_preset=thread.team_preset,
+        created_at=thread.created_at,
+        updated_at=thread.updated_at,
+        nickname=thread.nickname,
+        feature_tag=feature_tag,
+        source_branch=source_branch,
+        callee=callee,
+    )
+
+
 async def list_threads_service(
     db: AsyncSession,
     *,
@@ -268,91 +361,17 @@ async def list_threads_service(
             concurrency=domain_config.thread_list_checkpoint_concurrency,
             deadline=domain_config.thread_list_checkpoint_deadline_seconds,
         )
-    summaries: list[ThreadSummaryData] = []
-    for t in threads:
-        feature_tag, source_branch, callee = _parse_thread_summary_metadata(
-            t.thread_metadata
+    summaries = [
+        await _thread_summary(
+            db,
+            thread,
+            checkpoint_probes.get(
+                thread.id, _CheckpointProbe(unverified=checkpointer is not None)
+            ),
+            checkpointer_active=checkpointer is not None,
         )
-        repair_status = t.repair_status
-        execution_readiness = t.execution_readiness
-        approval_status = t.approval_status
-        approval_request_id = t.approval_request_id
-        is_terminal_thread = t.status in TERMINAL_STATUS_VALUES
-        execution_state = await get_thread_execution_state(db, t.id)
-        checkpoint_id: str | None = None
-        checkpoint_present = False
-        checkpoint_unverified = False
-        if checkpointer is not None:
-            probe = checkpoint_probes.get(t.id, _CheckpointProbe(unverified=True))
-            checkpoint_unverified = probe.unverified
-            if probe.tuple is not None:
-                checkpoint_present = True
-                checkpoint_id = project_checkpoint_tuple(
-                    probe.tuple,
-                    thread_id=t.id,
-                ).checkpoint_id
-        if checkpoint_unverified:
-            repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-            execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-            # Checkpoint state is LangGraph's resumability authority. If the
-            # probe itself is unverified, the summary surface must not expose a
-            # still-actionable approval target.
-            approval_status = None
-            approval_request_id = None
-        if execution_state is not None and (
-            execution_state.recovery_epoch != t.recovery_epoch
-            or (
-                checkpoint_present
-                and checkpoint_id is not None
-                and execution_state.checkpoint_id != checkpoint_id
-            )
-        ):
-            repair_status, execution_readiness = _degrade_stale_execution_state_summary(
-                repair_status=repair_status,
-                execution_readiness=execution_readiness,
-            )
-        if is_terminal_thread or checkpoint_unverified:
-            approval_status = None
-            approval_request_id = None
-        else:
-            live_plan_permissions = [
-                permission
-                for permission in await get_pending_permission_requests(
-                    db,
-                    thread_id=t.id,
-                    include_answered_pending_apply=False,
-                )
-                if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
-            ]
-            if live_plan_permissions:
-                live_permission = live_plan_permissions[-1]
-                if not extract_allowed_option_ids(live_permission.allowed_options_json):
-                    approval_status = None
-                    approval_request_id = None
-                else:
-                    approval_status = ApprovalStatus.PENDING.value
-                    approval_request_id = live_permission.request_id
-            else:
-                approval_status = None
-                approval_request_id = None
-        summaries.append(
-            ThreadSummaryData(
-                thread_id=t.id,
-                title=t.title,
-                status=t.status,
-                repair_status=repair_status,
-                execution_readiness=execution_readiness,
-                approval_status=approval_status,
-                approval_request_id=approval_request_id,
-                team_preset=t.team_preset,
-                created_at=t.created_at,
-                updated_at=t.updated_at,
-                nickname=t.nickname,
-                feature_tag=feature_tag,
-                source_branch=source_branch,
-                callee=callee,
-            )
-        )
+        for thread in threads
+    ]
     return ListThreadsResult(threads=summaries, total=total)
 
 

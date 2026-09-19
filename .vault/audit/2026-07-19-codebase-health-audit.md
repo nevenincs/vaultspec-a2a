@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:1be7771a5f90aa21e627a3a6931a30e50b1a054e0a125dc8077716ddc341b995'
+body_hash: 'sha256:611dfe79f10caa5a7be10db4843994e25d21e2aa921686b1ff958c0b25fd6274'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3096,3 +3096,7 @@ A four-worker `pytest -m "not service"` run, excluding the accelerator-dependent
 ### 2026-09-19 strict gate baseline after nonservice test recovery
 
 `just check-strict` remains red on the current pushed branch. Its current output reports 323 Ruff complexity/shape errors (137 excessive arguments, 77 complexity, 39 statements, 37 branches, 33 returns), 33 nested-block errors, 60 Pylint shape findings, and 110 unconsumed exports. All are open findings; the passing `just check-all` and 4,535 passing nonservice tests do not close this stricter gate. The queue is to refactor or justify each reported interface and structure, then rerun the complete strict recipe to zero. No thresholds were raised and no diagnostics were suppressed in this pass.
+
+### 2026-09-19 harness CI contract review pass
+
+`just test-harness` found one medium-severity test contract drift in `dev/tests/test_ci_contract.py`: it still looked for `just lint` workflow sentinel commands, treated duplication as a harness-level advisory target, and expected separate Ty platform commands. The current workflow uses `just check-*` sentinels; the duplication runner owns its advisory result, and platform typing is one `dev.quality.types --no-strict --platforms` command. The test now checks those current artifacts. Focused CI contract and the full harness suite pass (119 tests). Review found no workflow or runner behavior change. The service and strict gates remain open.

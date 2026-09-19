@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:1fc84ff9378a4ca2129e254ede0598c6e39c511c001c32ba40a0c6214ef559d1'
+body_hash: 'sha256:85078eb5ce5c0415d509859ecb1fba688315be4c88159b4d03ee0bd5d1777277'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3240,3 +3240,7 @@ Four medium-severity strict Ruff argument, complexity, and return findings in th
 ### 2026-09-20 thread-list summary complexity review pass
 
 One medium-severity cognitive-complexity finding in `list_threads_service` was resolved by extracting checkpoint state, live plan approval, and summary projection. Review checked that missing and uncertain checkpoint probes still degrade readiness and hide approvals, recovery-epoch and checkpoint-id mismatches still degrade stale execution state, terminal threads still hide approvals, and only the latest pending plan permission with valid options is exposed. Eighty-three focused control and API tests pass; `just check-all`, `just check-type-strict`, focused Ruff and Ty, and module complexipy pass. The module now has no cognitive-complexity finding. No new review findings were surfaced. Strict Ruff structure remains at 216; code health remains at 13 module-length, 15 function-length, 94 parameter-count, and four nesting findings. These and the remaining nested-block and Pylint findings stay open in the audit queue.
+
+### 2026-09-20 graph receipt predicate review pass
+
+One low-severity Pylint R0916 boolean-expression finding in graph receipt persistence was resolved by separating exact action identity from original dispatch evidence. Review checked that all seven original comparisons remain, including the upper bound on stored revision after a state-only election; invalid or mismatched receipts still return no persisted witness. Eleven focused receipt and dispatch tests pass; focused Ruff, Ty, and Pylint pass, as does `just check-all`. No new review findings were surfaced. The remaining strict Ruff, nested-block, cyclomatic, module/function/parameter/nesting, and Pylint findings stay open in the audit queue.

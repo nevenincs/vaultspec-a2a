@@ -275,6 +275,12 @@ class TestTeamStateStructure:
             "thread_id",
             "token_usage",
             "loop_count",
+            "agent_descriptors",
+            "model_assignment_digest",
+            "graph_definition_digest",
+            "graph_action_receipts",
+            "active_graph_action_receipt",
+            "graph_completion_receipts",
             "routing_error",
             # SDD blackboard awareness fields
             "active_feature",

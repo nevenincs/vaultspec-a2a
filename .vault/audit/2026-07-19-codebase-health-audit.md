@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:bedcda942e0ecc9ce1c45eec89bb0bee8cd91f6a95120f5e017b775f4b089453'
+body_hash: 'sha256:3caa36b14a5ed767e752f54b042e625ab3c892d8869ddd1e04b4629b77c9a3c6'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3076,3 +3076,9 @@ Open queue: convert the four actor-token lifecycle tests from synthetic preset/c
 The four remaining worker failures were synthetic fixture drift: token tests registered injected graphs under fake preset and definition digests, then sent receiptless ingest/resume requests. This pass froze the current mock graph program, minted exact action receipts, and keyed the injected graphs from those requests. Review confirms the tests still assert token isolation, interrupt retention, terminal disposal, durable checkpoint secrecy, and log secrecy. The focused lifecycle file passed 5 tests; the full worker package passed 143 tests (2 deselected); Ruff and strict typing passed. These medium-severity test contract findings are resolved.
 
 Open queue: rerun the full nonservice inventory without the accelerator-dependent harness, then address any remaining failures. `just check-strict` structural, Pylint, and export findings and the service harness accelerator prerequisite remain open.
+
+### 2026-09-19 TeamState schema review pass
+
+The late thread, utils, and workspace serial inventory found one medium-severity test contract drift: `TestTeamStateStructure` asserted an exact field set without the current agent descriptor, model assignment digest, graph definition digest, and three graph receipt fields. The expectation now includes those six fields; the focused test passes. The earlier late inventory had 403 passing and one failing test, so rerun that inventory and the full nonservice suite to close it. Review found no production change in this pass; the exact schema assertion remains useful for detecting future drift.
+
+Open queue: a broad xdist run still reported one other late failure before active workers stalled, but it yielded no named summary. Run the full nonservice inventory serially to identify it. The service harness and strict structural/export findings remain open.

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:7104cc617df03db9e8179245efc39c55e9c76daa17e8717c5b5f9642153fbff6'
+body_hash: 'sha256:08e0a9104f0cfd6a5f49be00adc561ba31c428d89b4a363debe0fed8b55669e0'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -2990,3 +2990,35 @@ Type: test contract drift. Two deletion tests created terminal threads with writ
 ### 2026-09-19 API batch follow-up | high | open
 
 Type: gate burndown. A broader API run stopped after 20 failures at 212 passing tests. Beyond the resolved permission-response and deletion clusters, remaining groups include cancel non-delivery state expectations, terminal checkpoint proof in gateway-drain tests, gateway live stream fixtures, and harness template discovery. These are queued for implementation and review; the repository-wide green gate has not been reached.
+
+### 2026-09-19 live stream queue shape | high | fixed in implementation
+
+Type: production streaming contract. `EventAggregator.relay_payload` queues a positive-projected dictionary for worker events, while `_stream_thread_events` passed every queue item to `sequenced_to_positive_payload`, which requires a `SequencedEvent`. A live stream crashed with `AttributeError` after a relayed progress event. The stream now distinguishes sequenced in-process events from already-projected worker dictionaries and applies the existing SSE encode boundary to both. Three focused live stream tests pass. The live gateway fixture also now seeds accepted graph authority, and the reconnect-cursor test records real completion evidence before asserting the terminal cursor.
+
+### 2026-09-19 cancel and drain recovery expectations | medium | fixed in implementation
+
+Type: test contract drift. The cancellation and drain tests expected an unreachable worker or a capacity refusal to restore pre-dispatch status or fail an accepted run. The current durable recovery contract preserves accepted work for redrive and requires matching terminal evidence before releasing admission. Updated tests assert the live recovery state and seed the required checkpoint/cancellation proof. All 8 gateway-drain and 11 endpoint delete/cancel tests pass.
+
+### 2026-09-19 installed harness template drift | high | fixed in implementation
+
+Type: installed dependency contract. The pinned `vaultspec-core install` provides `exec-ledger.md` but no `exec-step.md` or `exec-summary.md`, so `provision_workspace` always reported a newly provisioned authoring workspace as unready. The verifier now requires the installed ledger template. The bundled coder prompt was also updated from an obsolete per-Step document instruction to Core's `vault exec log` command and ledger template. All 18 gateway and harness tests pass. Review confirms this is a served authoring-path repair, not a test-only relaxation.
+
+### 2026-09-19 missing-transcript proof fixture | medium | fixed in implementation
+
+Type: test contract drift. Two history tests tried to settle COMPLETED without the graph completion checkpoint now required by production. They now complete with exact accepted evidence, delete the checkpoint, and verify that the wide read reports the resulting transcript loss. All 5 history transcript availability tests pass. The test retains its original failure-mode proof while following the current terminal contract.
+
+### 2026-09-19 served degradation vocabulary | medium | fixed in implementation
+
+Type: public contract drift. The snapshot producer emits `invalid_agent_descriptors` and `incompatible_execution_authority`, but neither token was declared in `DegradedReason`. Both members are now declared, the containment sweep passes (21 tests), and the committed OpenAPI artifact was regenerated from the live schema (6 tests pass).
+
+### 2026-09-19 deletion saga endpoint authority | medium | fixed in implementation
+
+Type: test contract drift. Eight endpoint saga tests seeded thread writer receipts without matching control actions. The deletion election correctly refused terminal seeds. A shared helper now seeds a matching journal row; all 8 endpoint saga cases pass.
+
+### 2026-09-19 internal relay evidence backlog | high | open
+
+Type: test and worker contract drift. The second API batch reached 446 passing tests before 20 failures; after resolving OpenAPI, history transcript, vocabulary, and deletion fixtures, the remaining dominant cluster is `api/tests/test_internal.py`. Its terminal tests relay COMPLETED with no checkpoint or FAILED with no exact action evidence, which current production correctly refuses. The worker-rejection case also exposes the previously recorded high receipt-less double-fault. These require current accepted-action fixtures and evidence-aware assertions, plus a production rejection fix.
+
+### 2026-09-19 subscriber queue annotation | medium | open
+
+Type: typing contract. Review of the SSE fix found `SubscriberManager` annotates subscriber queues as containing only `SequencedEvent`, while `relay_payload` inserts projected dictionaries and can pass through other objects for malformed input. The stream reader now decodes both runtime shapes through an explicit `object` boundary and strict typing passes. The queue's producer/consumer type should be reconciled across the aggregator, WebSocket readers, fanout, and tests so the shared annotation itself is truthful; a broad queue-type change currently surfaces many downstream assumptions. This is queued separately from the fixed live stream crash.

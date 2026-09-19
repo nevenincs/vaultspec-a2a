@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,27 +20,85 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from starlette.testclient import TestClient
 
+from ...control.accepted_input import freeze_accepted_input
+from ...control.dispatch_receipts import prepare_graph_action_receipt
+from ...control.execution_authority import resolve_execution_authority
+from ...control.tests._catalog_authority import current_execution_metadata
 from ...control.worker_management import WorkerLiveness
 from ...database import (
+    create_control_action,
     create_thread,
     get_permission_request,
     get_thread_execution_state,
     set_thread_repair_state,
 )
 from ...database.models import ThreadExecutionStateModel
+from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
+from ...team.team_config import load_team_config
 from ...tests._write_authority import make_test_write_authority
+from ...thread.executable_graph import freeze_graph_definition
 from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ...thread.action_receipts import GraphActionReceipt
     from .conftest import SessionFactory
 
 # Every dispatch names an active project, as a real one does. This package's own
 # directory is real, absolute, and present on either platform.
 _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
+
+
+async def _seed_accepted_thread(
+    session: AsyncSession,
+    *,
+    thread_id: str | None = None,
+    status: str = "running",
+) -> tuple[str, GraphActionReceipt]:
+    """Seed one current accepted graph action for relay-contract tests."""
+    workspace = pathlib.Path(_WORKSPACE)
+    metadata = current_execution_metadata(workspace)
+    authority = make_test_write_authority()
+    thread = await create_thread(
+        session,
+        write_authority=authority,
+        thread_id=thread_id,
+        status=status,
+        team_preset="mock-success-single",
+        metadata=metadata,
+    )
+    dispatch = DispatchRequest(
+        action="ingest",
+        thread_id=thread.id,
+        content="relay fixture",
+        workspace_root=_WORKSPACE,
+        recursion_limit=25,
+        team_preset="mock-success-single",
+        graph_definition=freeze_graph_definition(
+            load_team_config("mock-success-single", workspace_root=workspace),
+            workspace_root=workspace,
+        ),
+        model_assignment=resolve_execution_authority(metadata).model_assignment,
+    )
+    await create_control_action(
+        session,
+        thread_id=thread.id,
+        action_type=authority.action_type,
+        idempotency_key=f"thread-create:{thread.id}",
+        dispatch_id=authority.action_receipt_id,
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+        payload=freeze_accepted_input(dispatch, intent={"content": "relay fixture"}),
+    )
+    receipt = await prepare_graph_action_receipt(
+        session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
+    )
+    assert receipt is not None
+    return thread.id, receipt
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -248,7 +307,7 @@ class TestInternalHeartbeat:
                     },
                 )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         record = next(
             rec for rec in caplog.records if "Worker heartbeat (HTTP)" in rec.message
         )
@@ -486,14 +545,10 @@ class TestInternalEvents:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                title="Relay plan approval",
-            )
+            thread_id, _receipt = await _seed_accepted_thread(session)
             await session.commit()
 
-        request_id = f"{thread.id}:plan-approval"
+        request_id = f"{thread_id}:plan-approval"
         async with AsyncClient(
             transport=ASGITransport(app=app),
             base_url="http://test",
@@ -502,7 +557,7 @@ class TestInternalEvents:
                 "/internal/events",
                 json={
                     "type": "event",
-                    "thread_id": thread.id,
+                    "thread_id": thread_id,
                     "payload": {
                         "type": "plan_approval_request",
                         "request_id": request_id,
@@ -534,11 +589,11 @@ class TestInternalEvents:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                f"/v1/runs/{thread.id}/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "approve"},
             )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         assert len(worker.dispatches) == 1
         assert worker.dispatches[0]["option_id"] == {
             "verdict": "approved",

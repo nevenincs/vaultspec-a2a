@@ -12,7 +12,7 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -23,6 +23,7 @@ from ..database import get_thread
 from ..graph.enums import ServerEventType
 from ..providers.conditions import ProviderCondition
 from ..streaming.sse_frames import encode_sse_frame
+from ..streaming.types import SequencedEvent
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..thread.errors import EventAggregatorError
 from .event_adapter import sequenced_to_positive_payload
@@ -45,6 +46,15 @@ _UNRECORDED_REASON = "The run failed; no reason was recorded"
 Says what is true of the RECORD rather than inventing an account of the failure,
 so a client is never handed a diagnosis nothing observed.
 """
+
+
+def _queue_progress_payload(item: object) -> dict[str, object] | None:
+    """Decode either producer shape held by the shared subscriber queue."""
+    if isinstance(item, SequencedEvent):
+        return sequenced_to_positive_payload(item)
+    if isinstance(item, dict):
+        return cast("dict[str, object]", item)
+    return None
 
 
 async def _stream_thread_events(
@@ -168,7 +178,11 @@ async def _stream_thread_events(
             # allowlist here; relayed worker payloads were already projected
             # at the relay seam. The encode boundary re-applies the allowlist
             # to both, so a forbidden body cannot cross by either path.
-            payload = sequenced_to_positive_payload(item)
+            # Local domain events carry sequence wrappers; worker relay events
+            # have already crossed the positive projection as plain mappings.
+            payload = _queue_progress_payload(item)
+            if payload is None:
+                continue
 
             event_type = payload.get("type")
             yield encode_sse_frame(

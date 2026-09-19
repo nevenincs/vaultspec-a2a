@@ -72,8 +72,7 @@ DEFAULT_REQUIRED_TEMPLATES: tuple[str, ...] = (
     "plan",
     "research",
     "reference",
-    "exec-step",
-    "exec-summary",
+    "exec-ledger",
 )
 
 # The CLI the agent environment must resolve for read-only self-validation

@@ -3420,17 +3420,10 @@ class TestCreateThreadAutonomous:
 class TestCancelThread:
     """Tests for POST /v1/runs/{thread_id}/cancel."""
 
-    def test_failed_cancel_dispatch_restores_repair_state(
+    def test_failed_cancel_dispatch_preserves_redrivable_state(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """A definitely-undelivered cancel must not leave a ghost cancel_pending state.
-
-        A saturated worker answers the cancel with its real 429, which is a
-        DEFINITE non-delivery: the dispatch was received and refused outright, so
-        the run is provably still whatever it was. Only that certainty licenses
-        rolling the cancel-requested repair state back; the ambiguous case is the
-        sibling test below.
-        """
+        """A 429 releases the lease while preserving cancellation for redrive."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -3446,33 +3439,29 @@ class TestCancelThread:
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
 
-            async def _status_before() -> str:
+            async def _assert_initial_action() -> None:
                 async with session_factory() as session:
                     thread = await session.get(ThreadModel, thread_id)
                     assert thread is not None
                     assert thread.last_requested_action == "ingest"
-                    return thread.status
 
-            # Captured rather than hardcoded: the property under test is that a
-            # failed cancel RESTORES the status the run held, not that the run
-            # holds any particular one.
-            status_before = asyncio.run(_status_before())
+            asyncio.run(_assert_initial_action())
 
             worker.dispatches.clear()
             worker.refuse_at_capacity()
             cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
 
-            async def _assert_reset() -> None:
+            async def _assert_redrivable() -> None:
                 async with session_factory() as session:
                     thread = await session.get(ThreadModel, thread_id)
                     assert thread is not None
-                    assert thread.status == status_before
-                    assert thread.repair_status == "healthy"
-                    assert thread.execution_readiness == "healthy"
-                    assert thread.repair_reason is None
-                    assert thread.last_requested_action == "ingest"
+                    assert thread.status == ThreadStatus.CANCELLING.value
+                    assert (
+                        thread.last_requested_action == ControlActionType.CANCEL.value
+                    )
+                    assert thread.repair_reason is not None
 
-            asyncio.run(_assert_reset())
+            asyncio.run(_assert_redrivable())
 
         # The refusal really crossed the wire; this is not a pre-flight rejection.
         assert len(worker.dispatches) == 1

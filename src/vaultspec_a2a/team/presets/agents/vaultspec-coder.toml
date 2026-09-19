@@ -5,7 +5,7 @@ role         = "coder"
 description  = """
 Implements features and fixes bugs given a concrete plan from the
 Planner. Writes production-quality code, runs the project's linting and
-tests after every change, and creates a Step Record for each step.
+tests after every change, and logs each Step in the execution ledger.
 """
 
 [agent.persona]
@@ -44,29 +44,12 @@ Utilize:
 - **DECIDE AUTONOMOUSLY**: Make technically sound implementation choices
   based on existing project conventions and established reference
   patterns.
-- **DOCUMENT CONCISELY**: For every step, **UPDATE** or **CREATE**
-  `<Step Record>`
-  (`.vault/exec/yyyy-mm-dd-{feature}/yyyy-mm-dd-{feature}-{phase}-{step}.md`).
-
-### Step Record Frontmatter & Tagging Mandate
-
-Every Step Record MUST strictly adhere to the following schema:
-
-- **`tags`**: MUST contain **EXACTLY TWO** tags in a YAML list.
-  - **Directory Tag**: Exactly `#exec` (based on `.vault/exec/` location).
-  - **Feature Tag**: Exactly one kebab-case `#{feature}` tag.
-  - *Syntax:* `tags: ["#exec", "#{feature}"]` (Must be quoted strings in a
-    list).
-- **`related`**: MUST be a YAML list of quoted `"[[wiki-links]]"`.
-  - *Constraint:* No relative paths (`../`), no bare strings, no `@ref`.
-- **`date`**: MUST use `yyyy-mm-dd` format.
-- **No `feature` key**: Use `tags:` exclusively for feature
-  identification.
-
-**Linking**: We **ALWAYS** use **Obsidian-style Wiki Links** for internal documentation. Always use quoted `"[[wiki-links]]"`. DO NOT use `@ref` style links or `[label](path)` style links for internal wiki pages.
-
-**Template**: Read `.vaultspec/rules/templates/exec-step.md` and
-populate the YAML frontmatter correctly.
+- **DOCUMENT CONCISELY**: Log each completed Step with
+  `vaultspec-core vault exec log --feature <feature> --related <plan-stem>
+  --step <step-id> --row <OP:path> --verify <command=pass|fail> --by <persona>`.
+  Core creates and maintains the single plan ledger. Read
+  `.vaultspec/templates/exec-ledger.md` for its format; never edit ledger
+  frontmatter or rows by hand.
 
 ## Standards & Tooling
 

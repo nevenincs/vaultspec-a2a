@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:99f78bb6d34604dcc6efd192fe01cb41fb1f07735fc07aaef9de54d852629a72'
+body_hash: 'sha256:5a721e290c51afaa67116eba1938564f1981c617ccf57db3a2a6058b95afce94'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3104,3 +3104,7 @@ A four-worker `pytest -m "not service"` run, excluding the accelerator-dependent
 ### 2026-09-19 service gate review pass
 
 `just test-service` completed with 115 passed, 68 skipped, one failed test, and five Compose setup errors. The five errors shared a high-severity image-build defect: the locked Starlette Git dependency requires a Git executable, absent from the production Python base image. The image now installs Git before `uv sync`; the gateway image builds successfully. The single failure was medium-severity test contract drift: a repeated identical permission verdict is accepted and deduplicated by the service, while the test expected rejection. The service test now submits a conflicting verdict after completion and expects the documented conflict response. Focused test verification and the complete service gate rerun remain in the queue until they finish. Existing service skips require live external prerequisites; the strict structural, Pylint, and export findings remain open.
+
+### 2026-09-19 production import closure review pass
+
+The service rerun resolved the permission conflict test but found a second high-severity Compose defect: the worker image crashed at import because `control.worker_management` imports `psutil` while the production dependency set declared it only in the tooling group. `psutil` is now a direct base dependency, the tooling duplicate and its DEP004 exception are removed, and the lockfile is updated. The complete Compose regression module passes all 17 tests, including gateway and worker health. `just check-all` and a full service rerun remain required before closing the gate. The strict structural, Pylint, and export queue remains open.

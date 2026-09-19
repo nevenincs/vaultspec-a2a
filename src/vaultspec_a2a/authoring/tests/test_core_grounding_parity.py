@@ -14,12 +14,9 @@ values match. That is a weaker coupling than an import and it is stated as such 
 if core ever exports the vocabulary, this should become an import and this module
 should shrink to nothing.
 
-The plan rule is deliberately NOT asserted equal. Core requires the ADR and only
-warns about grounding (research, reference, or audit); the submitter requires
-both, by owner ruling, because a warning raised after a plan exists is a refusal
-worth making before it lands.
-That divergence is a decision, so the test below pins the part that must match
-and leaves the part that must not.
+The plan rule is deliberately not asserted equal. Core now permits plans
+without a decision and checks that linked governing ADRs are accepted. The
+submitter's stricter grounding rule is a separate owner decision.
 """
 
 from __future__ import annotations
@@ -76,45 +73,12 @@ def test_adr_grounding_vocabulary_matches_core() -> None:
     )
 
 
-def test_core_still_requires_an_adr_for_a_plan() -> None:
-    """The half we match: core treats a plan without an ADR as an error.
-
-    If core ever downgrades this to a warning, our hard refusal stops being
-    "stricter about the same rule" and becomes our own invention - which is a
-    decision to retake deliberately, not to discover from a passing suite.
-    """
+def test_core_checks_linked_plan_adrs_are_accepted() -> None:
+    """Core checks the status of governing ADRs on active approved plans."""
     source = _core_references_source()
     plan_check = source.split("def _check_plan_grounding", 1)[-1]
-
-    adr_severity = re.search(
-        r"Plan has no references to ADR documents.*?Severity\.(\w+)",
-        plan_check,
-        re.DOTALL,
-    )
-    assert adr_severity is not None, (
-        "core's plan check no longer raises a diagnostic naming a missing ADR"
-    )
-    assert adr_severity.group(1) == "ERROR", (
-        "core downgraded 'plan without an ADR' from ERROR to "
-        f"{adr_severity.group(1)}; our hard refusal is no longer a stricter "
-        "reading of core's rule and needs re-deciding, not re-asserting"
-    )
-
-    # Core names this half "grounding" and admits research, reference OR audit -
-    # the same three the ADR check accepts. It read "references to research
-    # documents" when this test was written; the rule did not change, the wording
-    # and the breadth did, so the pattern follows core rather than pinning a
-    # sentence core no longer writes.
-    grounding_severity = re.search(
-        r"Plan has no grounding references.*?Severity\.(\w+)",
-        plan_check,
-        re.DOTALL,
-    )
-    assert grounding_severity is not None, (
-        "core's plan check no longer raises a diagnostic about missing grounding"
-    )
-    assert grounding_severity.group(1) == "WARNING", (
-        "core changed the grounding diagnostic's severity; the submitter's stricter "
-        "stance was chosen against a WARNING, so revisit it against "
-        f"{grounding_severity.group(1)}"
-    )
+    assert "adr_status_from_body" in plan_check
+    assert "AdrStatus.ACCEPTED" in plan_check
+    assert 'target.frontmatter.get("superseded_by")' in plan_check
+    assert "Active approved plan references non-accepted ADR" in plan_check
+    assert "severity=Severity.ERROR" in plan_check

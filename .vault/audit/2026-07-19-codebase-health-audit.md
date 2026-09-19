@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:ab40b6d6aab1b31c6016a71f3c68161af74356cd3142bf39d83aecdeeff69be0'
+body_hash: 'sha256:7f127e2f22e4dc82c5accf33f390341296329874e08f32af3baa590fb2a71407'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3026,3 +3026,11 @@ Type: typing contract. Review of the SSE fix found `SubscriberManager` annotates
 ### 2026-09-19 internal relay evidence and receipt-less worker review | high | fixed in implementation
 
 Type: production terminal authority and test contract drift. Review traced the internal relay tests through the accepted action, graph receipt, and checkpoint imports. Forty-four relay tests now pass with exact accepted dispatch evidence, including valid failure evidence and completed checkpoint proof. Malformed failure details and unknown provider conditions are refused without changing durable status. A direct receipt-less Executor rejection previously tried to project FAILED without GraphFailureEvidence, then entered a second unhandled-failure path; both paths now skip unproven terminal settlement. The worker still emits a condition for observability and releases its local slot. API suite: 525 passed; strict typing: green. Remaining queue: subscriber queue type mismatch, structural strict gate, export gate, repository-wide tests, and the unraisable Windows transport warning observed during API tests.
+
+### 2026-09-19 full unit gate first failure batch | high | partial fixes, queue open
+
+Type: gate burndown and production concurrency. The resource-aware parallel unit run reached 1,096 passing tests before stopping after 26 failures. Review classified 19 deletion-saga failures as a fixture missing the current ingest recovery deadline (fixed; 19 focused cases pass), five graph-input failures and adjacent cache cases as missing accepted frozen definitions or outdated bound-authority messages (fixed; 48 focused cases pass), and one Core parity assertion as stale after Core changed active-plan rules (fixed; two focused cases pass). Startup reconciliation was spawning a worker before checking whether a reconciling row exists; the worker spawn now follows the empty-row check. The desktop lazy-worker test then exposed a separate high production issue: four concurrent run starts produce three SQLite `database is locked` 500 responses while one succeeds. The first writer holds the database long enough for other request inserts to fail. This remains OPEN for transaction-boundary/concurrency repair; a journal-mode read experiment did not resolve it and was reverted. The failure batch also contains desktop ownership/admission failures that remain OPEN pending focused review. Structural strict and export gates remain OPEN.
+
+### 2026-09-19 desktop gate follow-up review | high | fixed in implementation
+
+Type: production admission and lifecycle harness. The high concurrent SQLite start finding above is closed by retrying a transient SQLite lock on a fresh transaction, resolving a committed same-ID winner as a replay or conflict, and bounding attempts. The real four-request lazy-worker test returns four 201 responses and confirms a single worker spawn. Thirty live gateway tests, including same-ID insert races and different-body conflicts, pass. Review risk: a sustained SQLite lock beyond four attempts still propagates an error and merits a typed busy response in a later pass. The lifecycle owner in the gateway boot helper now binds its Uvicorn server, allowing the receipt-owned shutdown route to perform a real graceful stop; the process-tree shutdown test passes. The terminal child context fixture gained the session closing field; its real process-tree test passes. Focused run-admission desktop suite: nine passed, while two owner-tree tests were subsequently repaired. No open finding remains from these focused desktop failures. The wider unit gate and structural/export gates remain OPEN.

@@ -286,7 +286,6 @@ async def redispatch_reconciling_threads(
     lifespan startup to send them to the worker.
     """
     try:
-        await spawner.ensure_worker()
         session_factory = get_session_factory()
         async with session_factory() as db:
             threads, _ = await list_threads(
@@ -294,6 +293,7 @@ async def redispatch_reconciling_threads(
             )
             if not threads:
                 return
+            await spawner.ensure_worker()
             logger.info("Re-dispatching %d reconciling threads", len(threads))
             failure_counts: dict[str, int] = {}
             failure_thread_ids: dict[str, list[str]] = {}

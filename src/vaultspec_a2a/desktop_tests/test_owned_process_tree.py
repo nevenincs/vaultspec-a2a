@@ -175,6 +175,7 @@ class _TerminalCtx:
         self.terminals: dict[str, Any] = {}
         self.interrupt_exc: list[Any] = []
         self.chunk_queue: asyncio.Queue[Any] = asyncio.Queue()
+        self.closing = False
 
 
 _TERMINAL_GRANDCHILD_SCRIPT = (

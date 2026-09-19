@@ -42,7 +42,6 @@ __all__ = [
     "OWNERSHIP_CAPABILITY_NAME",
     "WORKER_IPC_CREDENTIAL_NAME",
     "CredentialError",
-    "CredentialPlane",
     "DesktopCredentialPaths",
     "create_worker_ipc_credential",
     "credential_paths",

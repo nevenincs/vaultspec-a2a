@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-__all__ = ["REPLACE_RETRY_SECONDS", "atomic_write_text"]
+__all__ = ["atomic_write_text"]
 
 REPLACE_RETRY_SECONDS = 2.0
 """How long to ride out a transient Windows sharing violation on the rename.

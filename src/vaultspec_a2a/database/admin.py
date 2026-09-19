@@ -30,8 +30,6 @@ clear --yes
 
 from __future__ import annotations
 
-__all__ = ["main"]
-
 import argparse
 import sys
 from typing import TYPE_CHECKING

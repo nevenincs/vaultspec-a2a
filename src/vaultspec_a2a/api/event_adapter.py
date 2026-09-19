@@ -61,7 +61,6 @@ from .schemas.events import (
 __all__ = [
     "domain_to_wire",
     "sequenced_to_positive_payload",
-    "sequenced_to_wire",
 ]
 
 

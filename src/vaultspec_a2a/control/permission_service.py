@@ -75,7 +75,6 @@ if TYPE_CHECKING:
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
-    "PermissionResult",
     "permission_response_action_key",
     "respond_to_permission",
 ]

@@ -36,7 +36,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ..database.compatibility import supported_migration_head
 
 __all__ = [
-    "PRIMARY_SCHEMA_VERSION",
     "ComponentEntrypoint",
     "ComponentEntrypoints",
     "ComponentIdentity",

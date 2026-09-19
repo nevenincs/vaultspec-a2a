@@ -76,7 +76,6 @@ if TYPE_CHECKING:
 __all__ = [
     "READINESS_TIMEOUT",
     "GatewayBootError",
-    "GatewayLogLevel",
     "armed_gateway_env",
     "await_gateway_ready",
     "clean_subprocess_environment",

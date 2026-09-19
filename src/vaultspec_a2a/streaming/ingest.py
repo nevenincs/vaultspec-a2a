@@ -31,7 +31,7 @@ from .transformer import (
 )
 from .types import StreamableGraph
 
-__all__ = ["IngestManager", "IngestStallTimeoutError", "summarize_ingest_exception"]
+__all__ = ["IngestManager", "summarize_ingest_exception"]
 
 logger = logging.getLogger(__name__)
 

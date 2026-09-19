@@ -54,7 +54,6 @@ if TYPE_CHECKING:
     import subprocess
 
 __all__ = [
-    "ServiceStatus",
     "ServiceVerbError",
     "migrate_service",
     "register_service_commands",

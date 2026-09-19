@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 __all__ = [
-    "FailureAction",
     "FailureType",
     "classify_dispatch_failure",
     "evaluate_dispatch_failure",

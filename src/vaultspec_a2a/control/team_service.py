@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
     from ..streaming.aggregator import EventAggregator
 
-__all__ = ["TeamStatus", "build_team_status"]
+__all__ = ["build_team_status"]
 
 
 def _has_valid_permission_options(raw_options_json: str | None) -> bool:

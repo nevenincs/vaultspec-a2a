@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
-    "RecoveryAttemptClaim",
     "RecoveryAuthorityLostError",
     "acquire_due_recovery_attempts",
     "record_recovery_deadline",

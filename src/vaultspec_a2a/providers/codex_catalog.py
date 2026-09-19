@@ -46,7 +46,6 @@ from .provider_catalog import (
 )
 
 __all__ = [
-    "CodexCatalogDiscovery",
     "CodexCatalogProtocolError",
     "catalog_from_app_server",
     "discover_codex_catalog",

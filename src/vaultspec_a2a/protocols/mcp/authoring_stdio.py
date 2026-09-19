@@ -41,7 +41,6 @@ __all__ = [
     "ENV_CATALOG_JSON",
     "ENV_RUN_ID",
     "ENV_SERVER_NAME",
-    "main",
 ]
 
 # Env var names this bridge reads. The provider-side config builder writes the

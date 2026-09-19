@@ -47,7 +47,6 @@ from .provider_catalog import (
 )
 
 __all__ = [
-    "KimiCatalogDiscovery",
     "KimiCatalogProtocolError",
     "catalog_from_provider_list",
     "discover_kimi_catalog",

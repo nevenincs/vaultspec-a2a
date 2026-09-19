@@ -49,8 +49,6 @@ if TYPE_CHECKING:
 __all__ = [
     "AdmissionBroker",
     "AdmissionReadiness",
-    "CommitOutcome",
-    "PrepareOutcome",
     "ReservationState",
 ]
 

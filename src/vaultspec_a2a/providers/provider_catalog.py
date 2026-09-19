@@ -21,8 +21,6 @@ __all__ = [
     "AdmissionState",
     "AuthenticationState",
     "CacheFreshness",
-    "CatalogCacheCapacityError",
-    "CatalogCacheSnapshot",
     "CatalogRefreshCache",
     "CatalogRefreshInvalidatedError",
     "CatalogRefreshSuppressedError",
@@ -39,7 +37,6 @@ __all__ = [
     "ProviderRecord",
     "SelectionReference",
     "StructuredProviderHealth",
-    "required_text",
 ]
 
 CATALOG_SCHEMA_VERSION: Final = 1

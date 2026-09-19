@@ -36,7 +36,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ProvisionError",
-    "ProvisionResult",
     "provision_workspace",
 ]
 

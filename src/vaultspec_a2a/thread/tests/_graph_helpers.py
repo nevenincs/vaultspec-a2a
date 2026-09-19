@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
     from langgraph.types import Command
 
-__all__ = ["CompiledTestGraph", "add_node", "compile_graph", "new_builder"]
+__all__ = ["add_node", "compile_graph", "new_builder"]
 
 
 def new_builder() -> StateGraph[Any, None, Any, Any]:

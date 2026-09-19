@@ -85,12 +85,9 @@ if TYPE_CHECKING:
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
-    "ArchiveResult",
     "DeleteResult",
-    "ListThreadsResult",
     "ThreadCreationRequest",
     "ThreadCreationResult",
-    "ThreadSummaryData",
     "archive_thread",
     "create_and_dispatch_thread",
     "delete_thread_service",

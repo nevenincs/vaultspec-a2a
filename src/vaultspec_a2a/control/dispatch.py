@@ -46,13 +46,6 @@ if TYPE_CHECKING:
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
-    "DispatchError",
-    "DispatchOutcome",
-    "WorkerAtCapacityError",
-    "WorkerCircuitOpenError",
-    "WorkerDispatchRejectedError",
-    "WorkerUnreachableError",
-    "dispatch_to_worker",
     "redispatch_reconciling_threads",
     "safe_dispatch",
 ]

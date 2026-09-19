@@ -46,7 +46,6 @@ from .provider_catalog import (
 )
 
 __all__ = [
-    "AcpCatalogDiscovery",
     "AcpCatalogProtocolError",
     "catalog_from_session_result",
     "discover_acp_catalog",

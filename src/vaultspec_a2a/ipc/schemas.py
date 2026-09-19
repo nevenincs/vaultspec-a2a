@@ -27,7 +27,6 @@ from ..thread.enums import ControlActionType
 from ..thread.executable_graph import FrozenGraphDefinition
 
 __all__ = [
-    "ActiveProjectRoot",
     "DispatchApplicationReceiptPayload",
     "DispatchRequest",
     "DispatchResponse",

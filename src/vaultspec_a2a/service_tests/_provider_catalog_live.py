@@ -34,7 +34,6 @@ __all__ = [
     "LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON",
     "LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON",
     "LIVE_PROVIDER_PREREQUISITES",
-    "LiveProviderCatalogSelector",
     "declared_lane_model_value",
     "live_provider_catalog_selector_is_configured",
     "live_provider_override_selector_is_configured",

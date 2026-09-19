@@ -59,10 +59,8 @@ __all__ = [
     "build_full_health",
     "build_sqlite_fallback_diagnostics",
     "build_storage_diagnostics",
-    "probe_database_ready",
     "probe_desktop_readiness",
     "probe_engine_discovery_freshness",
-    "probe_journal_mode",
 ]
 
 # The in-memory SQLite URL has no file on disk and no journal to degrade, so the

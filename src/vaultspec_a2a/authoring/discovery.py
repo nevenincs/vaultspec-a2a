@@ -33,7 +33,6 @@ __all__ = [
     "DESKTOP_RECORD_VERSION",
     "HEARTBEAT_STALE_MS",
     "SERVICE_JSON_ENV",
-    "DiscoveryRecordView",
     "EngineEndpoint",
     "heartbeat_is_fresh",
     "parse_discovery_record",

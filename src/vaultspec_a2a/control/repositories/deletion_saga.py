@@ -71,7 +71,6 @@ __all__ = [
     "CleanupItemResult",
     "CleanupItemState",
     "DeletionSaga",
-    "DeletionSagaContentionError",
     "FinalizeOutcome",
     "advance_deletion_cleanup_item",
     "claim_deletion_saga",

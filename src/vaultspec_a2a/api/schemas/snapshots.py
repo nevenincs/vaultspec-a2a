@@ -23,11 +23,9 @@ from .events import ToolCallContent, ToolCallLocation
 __all__ = [
     "AgentSnapshot",
     "ArtifactSnapshot",
-    "ClarificationQuestionSnapshot",
     "ClarificationRequestSnapshot",
     "ExecutionTaskSnapshot",
     "MessageSnapshot",
-    "PermissionOptionSnapshot",
     "PermissionSnapshot",
     "ThreadStateSnapshot",
     "ToolCallSnapshot",

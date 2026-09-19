@@ -20,8 +20,6 @@ from .enums import (
 from .snapshots import PLAN_APPROVAL_PAUSE_CAUSES
 
 __all__ = [
-    "PermissionRequestEffects",
-    "PermissionResolutionEffects",
     "compute_permission_request_effects",
     "compute_permission_resolution_effects",
     "response_is_rejection",

@@ -36,7 +36,6 @@ from .provider_catalog import (
 )
 
 __all__ = [
-    "OpenAICompatibleCatalogDiscovery",
     "OpenAICompatibleCatalogError",
     "catalog_from_model_list",
     "discover_openai_compatible_catalog",

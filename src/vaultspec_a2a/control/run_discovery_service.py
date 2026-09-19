@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
 
-__all__ = ["ActiveRunDiscoveryResult", "ActiveRunSummary", "discover_active_runs"]
+__all__ = ["ActiveRunDiscoveryResult", "discover_active_runs"]
 
 _MAX_DISCOVERY_RESULTS = 100
 _MAX_RUN_ID_LENGTH = 128

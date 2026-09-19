@@ -48,7 +48,6 @@ __all__ = [
     "SINGLETON_RECORD_VERSION",
     "RuntimeSingleton",
     "SingletonConflictError",
-    "SingletonError",
     "SingletonHeldError",
     "SingletonRecord",
     "SingletonState",
@@ -61,7 +60,6 @@ __all__ = [
     "process_start_fingerprint",
     "recorded_process_is_live",
     "set_active_singleton",
-    "singleton_lock_path",
     "singleton_record_path",
 ]
 

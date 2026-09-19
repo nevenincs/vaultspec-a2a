@@ -24,8 +24,6 @@ if TYPE_CHECKING:
     from ..thread.actor_tokens import ActorTokenBundle
 
 __all__ = [
-    "ExecutionEligibility",
-    "RunStartEligibility",
     "evaluate_execution_eligibility",
     "evaluate_run_start_eligibility",
     "is_document_authoring_preset",

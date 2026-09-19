@@ -66,12 +66,9 @@ from ..utils.coercion import coerce_int
 __all__ = [
     "DESKTOP_DISCOVERY_VERSION",
     "DESKTOP_PROTOCOL_MAX",
-    "DESKTOP_PROTOCOL_MIN",
     "HEARTBEAT_REFRESH_SECONDS",
-    "DesktopDiscoveryRecord",
     "DesktopDiscoveryState",
     "DiscoveryState",
-    "ServiceInfo",
     "another_resident_is_live",
     "classify_desktop_discovery",
     "classify_discovery",

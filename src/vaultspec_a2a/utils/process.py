@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
-    "DetachedSpawnFlags",
     "ListenerOwnership",
     "ProcessContainment",
     "ProcessContainmentError",
@@ -48,7 +47,6 @@ __all__ = [
     "pid_is_live",
     "port_listener_pid",
     "posix_descendant_pids",
-    "posix_parent_map",
 ]
 
 logger = logging.getLogger(__name__)

@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from ..context.harness import HarnessReadiness
 
 __all__ = [
-    "ProviderReadiness",
     "probe_harness_ready",
     "probe_provider_readiness",
 ]

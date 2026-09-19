@@ -58,8 +58,6 @@ if TYPE_CHECKING:
     from ..streaming.aggregator import EventAggregator
 
 __all__ = [
-    "SemanticContext",
-    "ThreadStateCapture",
     "capture_thread_state",
     "project_semantic_phase",
 ]

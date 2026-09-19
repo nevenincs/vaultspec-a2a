@@ -35,7 +35,6 @@ __all__ = [
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "TERMINAL_STATUS_MAP",
-    "WIRE_EVENT_TYPE_KEYS",
     "AgentData",
     "ArtifactData",
     "CheckpointProjection",

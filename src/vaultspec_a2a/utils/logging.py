@@ -40,7 +40,6 @@ __all__ = [
     "JSONFormatter",
     "LivenessPollFilter",
     "OTelCorrelationFilter",
-    "ProcessKind",
     "configure_logging",
     "reconfigure_console_utf8",
 ]

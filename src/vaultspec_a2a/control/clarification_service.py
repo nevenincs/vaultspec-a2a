@@ -62,8 +62,6 @@ if TYPE_CHECKING:
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
-    "ClarificationRecoverySummary",
-    "ClarificationResult",
     "redrive_clarification_actions",
     "respond_to_clarification",
 ]

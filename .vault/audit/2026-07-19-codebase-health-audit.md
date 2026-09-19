@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:611dfe79f10caa5a7be10db4843994e25d21e2aa921686b1ff958c0b25fd6274'
+body_hash: 'sha256:99f78bb6d34604dcc6efd192fe01cb41fb1f07735fc07aaef9de54d852629a72'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3100,3 +3100,7 @@ A four-worker `pytest -m "not service"` run, excluding the accelerator-dependent
 ### 2026-09-19 harness CI contract review pass
 
 `just test-harness` found one medium-severity test contract drift in `dev/tests/test_ci_contract.py`: it still looked for `just lint` workflow sentinel commands, treated duplication as a harness-level advisory target, and expected separate Ty platform commands. The current workflow uses `just check-*` sentinels; the duplication runner owns its advisory result, and platform typing is one `dev.quality.types --no-strict --platforms` command. The test now checks those current artifacts. Focused CI contract and the full harness suite pass (119 tests). Review found no workflow or runner behavior change. The service and strict gates remain open.
+
+### 2026-09-19 service gate review pass
+
+`just test-service` completed with 115 passed, 68 skipped, one failed test, and five Compose setup errors. The five errors shared a high-severity image-build defect: the locked Starlette Git dependency requires a Git executable, absent from the production Python base image. The image now installs Git before `uv sync`; the gateway image builds successfully. The single failure was medium-severity test contract drift: a repeated identical permission verdict is accepted and deduplicated by the service, while the test expected rejection. The service test now submits a conflicting verdict after completion and expects the documented conflict response. Focused test verification and the complete service gate rerun remain in the queue until they finish. Existing service skips require live external prerequisites; the strict structural, Pylint, and export findings remain open.

@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-08-02'
-body_hash: 'sha256:22b62723da613e4f864bad3efd09ffe445d5a6d187144e9fa5b5f0aeffe6efc2'
+modified: '2026-09-19'
+body_hash: 'sha256:e0545329b82cf18746007473e3d978c44394afefbcf39128eb7111ba56fee9b9'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -2862,3 +2862,10 @@ Whole-tree lint and type gates clean. The full package passes 2,784 tests with n
 over twenty minutes of real processes and stores, taken while no other writer was touching
 the tree - which is what makes the real-process suites trustworthy here rather than
 contended. The consuming product passes 376 native and 281 interface tests.
+### 2026-09-19 dead-code measurement pass | low | three private constants removed; reachability leads queued
+
+Type: maintenance. Status: three confirmed removals closed; broader scan open for triage. The repository's Vulture scan measured 525 findings over 794 offered Python modules (8 high-confidence heuristic hits). The entry-point reachability scan measured 8 unreachable modules, 52 unused top-level symbols, and 2 orphaned tests over 302 shipped modules. Manual reference checks confirmed `_STALE_MS` in `authoring/discovery.py` and `_JSON_OBJECT` in both `providers/acp_catalog.py` and `providers/codex_catalog.py` had no consumers. After removal, the unused-symbol count is 49. Ruff and ty pass on the touched files.
+
+Follow-up queue: classify the remaining 49 symbols and 8 modules against installed entry points, dynamic registration, tests, and dev harness consumers before deleting any. In particular, `providers/lane_admission.py` exports `lane_admission_reason` and `unproven_lanes_in` with no current in-tree callers; public exports need compatibility review. The 2 catalog-selection orphaned tests need ownership review. Vulture's highest-confidence import hits are type-annotation imports and its two variable hits are protocol/framework parameters, so they are false positives for deletion. The supplied `Scripts/github-audit` tool measures GitHub security settings, workflows, and secrets rather than dead code. The root Node manifest is an ACP dependency host with no application JavaScript source or Knip enrollment; no Node dead-code denominator exists here.
+
+Review result: PASS for the focused three-constant removal. Type: follow-up investigation; severity low; status open for the remaining reachability leads. No behavioral interface changed by this pass.

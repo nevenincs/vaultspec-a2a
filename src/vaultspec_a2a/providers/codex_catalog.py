@@ -14,10 +14,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from pydantic import TypeAdapter
-
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from ._json_contract import JsonObject, JsonValue
 
 from ..utils import package_version
 from ._catalog_fields import (
@@ -28,7 +28,6 @@ from ._catalog_fields import (
     optional_description,
 )
 from ._cleanup import CleanupStep, run_independent_cleanups
-from ._json_contract import JsonObject, JsonValue
 from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
@@ -58,7 +57,6 @@ _MAX_FRAMES_PER_RESPONSE: Final = 64
 _MAX_PAGES: Final = 16
 _MODEL_PAGE_SIZE: Final = 100
 _CATALOG_TTL: Final = timedelta(minutes=5)
-_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 _CLIENT_INFO: JsonObject = {
     "title": "Vaultspec A2A Catalog",
     "name": "vaultspec-a2a-catalog",

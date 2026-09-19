@@ -57,7 +57,6 @@ _DESKTOP_PROFILE = "desktop"
 # Consumer staleness window: a heartbeat older than this is treated as a crash,
 # not as an available service (mirrors the engine's HEARTBEAT_STALE_MS).
 HEARTBEAT_STALE_MS = 120_000
-_STALE_MS = HEARTBEAT_STALE_MS
 
 
 def read_service_json(path: Path) -> dict[str, object] | None:

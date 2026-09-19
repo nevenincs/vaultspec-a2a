@@ -816,6 +816,63 @@ def _admit_and_resolve_model_name(provider: Provider, model: object) -> str:
     return model
 
 
+def _admit_execution_mode(
+    provider: Provider, backend: str | None, execution_mode: object
+) -> str | None:
+    if execution_mode is not None:
+        if not isinstance(execution_mode, str):
+            raise ValueError("execution_mode must be a string")
+        acp_prefixes = {
+            Provider.CLAUDE: "claude-agent-acp:",
+            Provider.ZAI: "zai-claude-agent-acp:",
+        }
+        acp_prefix = acp_prefixes.get(provider)
+        if acp_prefix is not None and execution_mode.startswith(acp_prefix):
+            frozen_backend = execution_mode.removeprefix(acp_prefix)
+            if frozen_backend not in {"node", "binary"}:
+                raise ValueError(
+                    f"Provider {provider.value!r} cannot execute mode "
+                    f"{execution_mode!r}"
+                )
+            if backend is not None and backend != frozen_backend:
+                raise ValueError("backend conflicts with frozen execution_mode")
+            backend = frozen_backend
+        validate_current_execution_lane(provider, execution_mode)
+    return backend
+
+
+def _admit_native_controls(
+    provider: Provider, native_controls: object
+) -> dict[str, str]:
+    if native_controls is None:
+        selected_controls: dict[str, str] = {}
+    elif isinstance(native_controls, dict):
+        raw_controls = cast("dict[object, object]", native_controls)
+        if not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in raw_controls.items()
+        ):
+            raise ValueError("native_controls must map control ids to provider values")
+        selected_controls = cast("dict[str, str]", dict(raw_controls))
+    else:
+        raise ValueError("native_controls must map control ids to provider values")
+    validate_current_native_controls(provider, selected_controls)
+    return selected_controls
+
+
+def _admit_create_options(
+    provider: Provider, backend: str | None, kwargs: dict[str, Any]
+) -> tuple[Any, str | None, dict[str, str]]:
+    timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
+    backend = _admit_execution_mode(
+        provider, backend, kwargs.pop("execution_mode", None)
+    )
+    selected_controls = _admit_native_controls(
+        provider, kwargs.pop("native_controls", None)
+    )
+    return timeout, backend, selected_controls
+
+
 class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
@@ -943,43 +1000,9 @@ class ProviderFactory:
 
         from .acp_chat_model import AcpChatModel
 
-        timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
-        execution_mode = kwargs.pop("execution_mode", None)
-        native_controls = kwargs.pop("native_controls", None)
-        if execution_mode is not None:
-            if not isinstance(execution_mode, str):
-                raise ValueError("execution_mode must be a string")
-            acp_prefixes = {
-                Provider.CLAUDE: "claude-agent-acp:",
-                Provider.ZAI: "zai-claude-agent-acp:",
-            }
-            acp_prefix = acp_prefixes.get(provider)
-            if acp_prefix is not None and execution_mode.startswith(acp_prefix):
-                frozen_backend = execution_mode.removeprefix(acp_prefix)
-                if frozen_backend not in {"node", "binary"}:
-                    raise ValueError(
-                        f"Provider {provider.value!r} cannot execute mode "
-                        f"{execution_mode!r}"
-                    )
-                if backend is not None and backend != frozen_backend:
-                    raise ValueError("backend conflicts with frozen execution_mode")
-                backend = frozen_backend
-            validate_current_execution_lane(provider, execution_mode)
-        if native_controls is None:
-            selected_controls: dict[str, str] = {}
-        elif isinstance(native_controls, dict):
-            raw_controls = cast("dict[object, object]", native_controls)
-            if not all(
-                isinstance(key, str) and isinstance(value, str)
-                for key, value in raw_controls.items()
-            ):
-                raise ValueError(
-                    "native_controls must map control ids to provider values"
-                )
-            selected_controls = cast("dict[str, str]", dict(raw_controls))
-        else:
-            raise ValueError("native_controls must map control ids to provider values")
-        validate_current_native_controls(provider, selected_controls)
+        timeout, backend, selected_controls = _admit_create_options(
+            provider, backend, kwargs
+        )
 
         # Admission: refuse an unsupported provider and resolve its model name
         # before any construction begins, so a bad request fails clearly rather

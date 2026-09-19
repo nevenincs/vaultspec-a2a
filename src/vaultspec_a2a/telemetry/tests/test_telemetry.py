@@ -496,6 +496,9 @@ async def test_ws_span_propagates_exception() -> None:
 @pytest.mark.asyncio
 async def test_ws_span_extra_attributes() -> None:
     """ws_span passes extra kwargs as span attributes and yields a recording span."""
+    # This assertion requires an SDK provider and must not depend on an earlier
+    # configure_telemetry test happening to share this xdist worker.
+    configure_telemetry()
     async with ws_span("ws.op", thread_id="t1", agent="coder", node="worker") as span:
         assert span is not None
         assert span.is_recording()
@@ -507,6 +510,7 @@ async def test_ws_span_extra_attributes() -> None:
 @pytest.mark.asyncio
 async def test_ws_span_no_thread_id() -> None:
     """ws_span works without a thread_id argument."""
+    configure_telemetry()
     async with ws_span("ws.ping") as span:
         assert span is not None
         assert span.is_recording()

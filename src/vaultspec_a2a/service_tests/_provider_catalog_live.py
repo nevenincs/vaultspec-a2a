@@ -13,22 +13,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Final
-
-from ..api.schemas.gateway import ProviderCatalogSelection
-from ..api.schemas.provider_catalog import ProviderCatalogResponse
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-from ..providers.provider_catalog import (
-    AdmissionState,
-    AuthenticationState,
-    CatalogStatus,
-    HealthState,
-)
+    from ..api.schemas.gateway import ProviderCatalogSelection
 
 __all__ = [
     "LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON",
@@ -158,6 +148,17 @@ def _validated_selection(
     selector: LiveProviderCatalogSelector, payload: object, *, what: str
 ) -> ProviderCatalogSelection:
     """Prove one declared lane is still served, selectable, and admitted."""
+    from datetime import UTC, datetime
+
+    from ..api.schemas.gateway import ProviderCatalogSelection
+    from ..api.schemas.provider_catalog import ProviderCatalogResponse
+    from ..providers.provider_catalog import (
+        AdmissionState,
+        AuthenticationState,
+        CatalogStatus,
+        HealthState,
+    )
+
     catalog = ProviderCatalogResponse.model_validate(payload)
     matching_lanes = [
         record

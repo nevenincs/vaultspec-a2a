@@ -22,6 +22,7 @@ import pytest
 
 from ...authoring.discovery import SERVICE_JSON_ENV
 from ...control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
+from ...testing.ports import free_port
 from ..discovery import is_pid_alive
 from ..manager import (
     LifecycleError,
@@ -1048,7 +1049,9 @@ def test_serve_up_reaps_the_owned_tree_when_commit_fails_after_readiness(
     doomed.mkdir()
 
     pid_file = tmp_path / "served.pid"
-    port = 18996
+    # Hold a machine-global scratch reservation so concurrent workers cannot
+    # take this real bind target while the isolated lifecycle home uses it.
+    port = free_port()
     config = _serve_config(
         [sys.executable, "-c", _BIND_AND_RECORD_PID, "{port}", str(pid_file)],
         band=(port, port),

@@ -70,6 +70,33 @@ def test_every_prerequisite_names_what_is_missing_and_how_to_supply_it() -> None
         assert prerequisite.probe is None or callable(prerequisite.probe)
 
 
+def test_prerequisite_import_does_not_load_live_catalog_validation() -> None:
+    """Collection-only prerequisite checks do not load provider schema stacks."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys\n"
+                "import vaultspec_a2a.conftest\n"
+                "heavy = {\n"
+                "    'vaultspec_a2a.api.schemas.gateway',\n"
+                "    'vaultspec_a2a.api.schemas.provider_catalog',\n"
+                "    'vaultspec_a2a.providers.provider_catalog',\n"
+                "}\n"
+                "loaded = sorted(heavy.intersection(sys.modules))\n"
+                "assert not loaded, loaded\n"
+            ),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_unknown_declaration_is_a_usage_error() -> None:
     """A typo in a certification job must not silently declare nothing."""
     result = _pytest(

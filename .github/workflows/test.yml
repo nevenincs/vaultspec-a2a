@@ -117,7 +117,7 @@ jobs:
           tool: just@1.38.0
 
       - name: Initialize the worktree
-        run: just init
+        run: just init-full
 
       - name: Run canonical CI
         run: just ci
@@ -260,7 +260,7 @@ jobs:
           tool: just@1.38.0
 
       - name: Initialize the worktree
-        run: just init
+        run: just init-full
 
       # These gates were skipif-ed on CLIs no workflow ever installed, so they
       # skipped on every CI run and had never executed there: a regression in

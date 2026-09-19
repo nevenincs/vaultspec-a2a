@@ -9,7 +9,7 @@ change makes a phase stale and the artifacts whose absence does the same.
 running five commands from two different sections of the README in the right
 order - ``just doctor-check``, ``just deps-tooling``, ``just deps-node``,
 ``just vault-setup``, ``just hooks-install`` - and knowing which of them
-were optional. Each of those recipes remains; `init` is the order.
+were optional. Each of those recipes remains; `init` selects the needed phases.
 
 `.env` is materialized as a preflight, on every entry point including
 ``init-python``. The reason has changed and the step has not. It was once the
@@ -56,8 +56,8 @@ TOOLING: Final[tuple[str, ...]] = (
 #: `.node-version` and `package.json`'s `engines` field are the authority on
 #: the Node version, not the README - they disagreed, and a version check that
 #: reads a prose file is not a check. `dev/node/check_node_version.mjs` is the
-#: precise arbiter and runs as a step; this probe only establishes that a Node
-#: exists to ask.
+#: precise arbiter and runs as a step; full setup also checks the host version
+#: before trusting an existing phase stamp.
 REQUIREMENTS: Final[tuple[Requirement, ...]] = (
     Requirement(
         command="uv",

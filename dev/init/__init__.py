@@ -16,13 +16,9 @@ It runs BEFORE the virtual environment exists.
     or anything reached through ``uv run --no-sync python -m dev``: those
     presume the environment this package is responsible for creating.
 
-It is the same command in every repository.
-    Every module here except :mod:`dev.init.plan` is byte-identical across
-    ``vaultspec-core``, ``vaultspec-rag``, ``vaultspec-dashboard``,
-    ``vaultspec-a2a`` and ``cadrumo``. :mod:`dev.init.plan` is the one file
-    that states what THIS repository's bootstrap actually is, declaratively, as
-    data. A repository's initialization differs in its steps, never in its
-    contract.
+Its phase selection follows this repository's needs.
+    The default creates a Python development environment. Full setup also
+    installs the Claude ACP adapter, which needs the pinned Node runtime.
 
 Its failures are read by machines.
     A provisioner needs to tell "your workstation is missing Node" apart from

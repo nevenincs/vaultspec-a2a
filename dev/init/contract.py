@@ -29,8 +29,7 @@ CONTRACT_VERSION: Final = 1
 
 #: The phases, in the order `init` runs them. The order is a dependency order,
 #: not a preference: `tools` installs git hooks and enrolls the framework out
-#: of the environment `python` creates, and in one repository those hooks lint
-#: the SPA that `node` restores.
+#: of the environment `python` creates. Callers select the phases they need.
 PHASES: Final[tuple[str, ...]] = ("python", "node", "tools")
 
 #: The environment variable that turns on the NDJSON event stream, so the

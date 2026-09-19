@@ -16,7 +16,6 @@ reconstruction:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import pathlib
@@ -32,11 +31,19 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import interrupt
 
 from ...api.tests.clarification_harness import new_state_graph
+from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...ipc.schemas import DispatchRequest
 from ...providers.team_selection import model_assignment_digest
+from ...team.team_config import load_team_config
+from ...thread.action_receipts import (
+    GraphActionReceipt,
+    control_action_payload_fingerprint,
+)
 from ...thread.actor_tokens import ActorTokenBundle
+from ...thread.enums import ControlActionType
+from ...thread.executable_graph import freeze_graph_definition
 from ..executor import Executor
 from ..ipc import WorkerBridge
 
@@ -54,18 +61,66 @@ _BEARER = "secret-machine-bearer"
 
 def _current_assignment() -> dict[str, dict[str, object]]:
     return resolve_execution_authority(
-        current_execution_metadata(pathlib.Path.cwd())
+        current_execution_metadata(
+            pathlib.Path.cwd(), required_roles=("mock-coder-success",)
+        )
     ).model_assignment
 
 
-def _test_graph_definition_digest(team_preset: str) -> str:
-    """Deterministic stand-in for a frozen graph definition's digest.
+def _accepted_ingest(thread_id: str, bundle: ActorTokenBundle) -> DispatchRequest:
+    workspace = pathlib.Path(_WORKSPACE)
+    definition = freeze_graph_definition(
+        load_team_config("mock-success-single", workspace_root=workspace),
+        workspace_root=workspace,
+    )
+    request = DispatchRequest(
+        action="ingest",
+        dispatch_id=f"{thread_id}-ingest",
+        workspace_root=_WORKSPACE,
+        thread_id=thread_id,
+        content="build it",
+        team_preset="mock-success-single",
+        graph_definition=definition,
+        recursion_limit=10,
+        actor_tokens=bundle,
+        model_assignment=_current_assignment(),
+    )
+    accepted = freeze_accepted_input(request, intent={"content": "build it"})
+    receipt = GraphActionReceipt(
+        schema_version="graph-action-v1",
+        thread_id=thread_id,
+        action_id=f"{thread_id}-ingest-action",
+        action_type=ControlActionType.INGEST,
+        payload_fingerprint=control_action_payload_fingerprint(accepted),
+        dispatch_id=request.dispatch_id,
+        run_revision=0,
+        writer_generation=1,
+    )
+    return request.model_copy(update={"graph_action_receipt": receipt})
 
-    Injected graphs bypass compilation, so no ``ExecutableGraphDefinition`` is
-    ever frozen for them; the cache key still requires a digest-shaped value
-    to bind the injected entry to its owning preset.
-    """
-    return hashlib.sha256(team_preset.encode()).hexdigest()
+
+def _accepted_resume(ingest: DispatchRequest) -> DispatchRequest:
+    request = ingest.model_copy(
+        update={
+            "action": "resume",
+            "dispatch_id": f"{ingest.thread_id}-resume",
+            "content": None,
+            "option_id": "approved",
+            "graph_action_receipt": None,
+        }
+    )
+    accepted = freeze_accepted_input(request, intent={"option_id": "approved"})
+    receipt = GraphActionReceipt(
+        schema_version="graph-action-v1",
+        thread_id=request.thread_id,
+        action_id=f"{request.thread_id}-resume-action",
+        action_type=ControlActionType.RESUME,
+        payload_fingerprint=control_action_payload_fingerprint(accepted),
+        dispatch_id=request.dispatch_id,
+        run_revision=1,
+        writer_generation=2,
+    )
+    return request.model_copy(update={"graph_action_receipt": receipt})
 
 
 def _make_bridge() -> WorkerBridge:
@@ -95,10 +150,11 @@ def _make_bridge() -> WorkerBridge:
 
 def _install_probe_graph(
     executor: Executor,
-    thread_id: str,
+    request: DispatchRequest,
     observed: dict[str, Any],
 ) -> None:
     """Compile a real one-node graph that records what the store hands the role."""
+    thread_id = request.thread_id
 
     async def coder_node(state: TeamState) -> dict[str, Any]:
         store = executor.token_store
@@ -117,11 +173,11 @@ def _install_probe_graph(
     )
 
     cache_key = (
-        "token-preset",
-        None,
-        False,
-        model_assignment_digest(_current_assignment()),
-        _test_graph_definition_digest("token-preset"),
+        request.require_graph_definition().team_id,
+        request.workspace_root,
+        request.autonomous,
+        model_assignment_digest(request.model_assignment),
+        request.require_graph_definition().digest(),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -135,22 +191,12 @@ async def test_tokens_injected_during_run_and_dropped_after() -> None:
         bridge = _make_bridge()
         executor = Executor(checkpointer=cp, bridge=bridge)
         try:
-            _install_probe_graph(executor, thread_id, observed)
-
             bundle = ActorTokenBundle(
                 tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
                 engine_bearer=_BEARER,
             )
-            req = DispatchRequest(
-                action="ingest",
-                workspace_root=_WORKSPACE,
-                thread_id=thread_id,
-                content="build it",
-                team_preset="token-preset",
-                recursion_limit=10,
-                actor_tokens=bundle,
-                model_assignment=_current_assignment(),
-            )
+            req = _accepted_ingest(thread_id, bundle)
+            _install_probe_graph(executor, req, observed)
             await executor.handle_dispatch(req)
 
             # Injection: the owning role received its own token while running.
@@ -169,7 +215,7 @@ async def test_tokens_injected_during_run_and_dropped_after() -> None:
 
 def _install_interrupting_graph(
     executor: Executor,
-    thread_id: str,
+    request: DispatchRequest,
 ) -> None:
     """Compile a real one-node graph that parks on ``interrupt`` then completes.
 
@@ -194,13 +240,13 @@ def _install_interrupting_graph(
     )
 
     cache_key = (
-        "gate-preset",
-        None,
-        False,
-        model_assignment_digest(_current_assignment()),
-        _test_graph_definition_digest("gate-preset"),
+        request.require_graph_definition().team_id,
+        request.workspace_root,
+        request.autonomous,
+        model_assignment_digest(request.model_assignment),
+        request.require_graph_definition().digest(),
     )
-    executor.register_compiled_graph(thread_id, cache_key, graph)
+    executor.register_compiled_graph(request.thread_id, cache_key, graph)
 
 
 def _bundle() -> ActorTokenBundle:
@@ -219,18 +265,8 @@ async def test_tokens_retained_through_interrupt_and_dropped_on_resume() -> None
         bridge = _make_bridge()
         executor = Executor(checkpointer=cp, bridge=bridge)
         try:
-            _install_interrupting_graph(executor, thread_id)
-
-            ingest = DispatchRequest(
-                action="ingest",
-                workspace_root=_WORKSPACE,
-                thread_id=thread_id,
-                content="build it",
-                team_preset="gate-preset",
-                recursion_limit=10,
-                actor_tokens=_bundle(),
-                model_assignment=_current_assignment(),
-            )
+            ingest = _accepted_ingest(thread_id, _bundle())
+            _install_interrupting_graph(executor, ingest)
             await executor.handle_dispatch(ingest)
 
             # Retained across the park: the run interrupted, not terminated, so its
@@ -238,15 +274,7 @@ async def test_tokens_retained_through_interrupt_and_dropped_on_resume() -> None
             assert executor.token_store.has(thread_id) is True
             assert executor.token_store.actor_token(thread_id, "coder") == _CODER_TOKEN
 
-            resume = DispatchRequest(
-                action="resume",
-                thread_id=thread_id,
-                option_id="approved",
-                team_preset="gate-preset",
-                recursion_limit=10,
-                actor_tokens=_bundle(),
-                model_assignment=_current_assignment(),
-            )
+            resume = _accepted_resume(ingest)
             await executor.handle_dispatch(resume)
 
             # Terminal (completed): the active window truly closed, tokens dropped.
@@ -265,20 +293,9 @@ async def test_cancel_of_parked_run_drops_tokens_at_terminal() -> None:
         bridge = _make_bridge()
         executor = Executor(checkpointer=cp, bridge=bridge)
         try:
-            _install_interrupting_graph(executor, thread_id)
-
-            await executor.handle_dispatch(
-                DispatchRequest(
-                    action="ingest",
-                    workspace_root=_WORKSPACE,
-                    thread_id=thread_id,
-                    content="build it",
-                    team_preset="gate-preset",
-                    recursion_limit=10,
-                    actor_tokens=_bundle(),
-                    model_assignment=_current_assignment(),
-                )
-            )
+            ingest = _accepted_ingest(thread_id, _bundle())
+            _install_interrupting_graph(executor, ingest)
+            await executor.handle_dispatch(ingest)
             assert executor.token_store.has(thread_id) is True
 
             # No ingest is active for the parked run, so the cancel is itself the
@@ -306,22 +323,12 @@ async def test_tokens_absent_from_durable_checkpoint() -> None:
         bridge = _make_bridge()
         executor = Executor(checkpointer=cp, bridge=bridge)
         try:
-            _install_probe_graph(executor, thread_id, observed)
-
             bundle = ActorTokenBundle(
                 tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
                 engine_bearer=_BEARER,
             )
-            req = DispatchRequest(
-                action="ingest",
-                workspace_root=_WORKSPACE,
-                thread_id=thread_id,
-                content="build it",
-                team_preset="token-preset",
-                recursion_limit=10,
-                actor_tokens=bundle,
-                model_assignment=_current_assignment(),
-            )
+            req = _accepted_ingest(thread_id, bundle)
+            _install_probe_graph(executor, req, observed)
             await executor.handle_dispatch(req)
 
             # The run produced a durable checkpoint; no token may appear in it.
@@ -346,22 +353,12 @@ async def test_tokens_absent_from_logs_during_dispatch(
         bridge = _make_bridge()
         executor = Executor(checkpointer=cp, bridge=bridge)
         try:
-            _install_probe_graph(executor, thread_id, observed)
-
             bundle = ActorTokenBundle(
                 tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
                 engine_bearer=_BEARER,
             )
-            req = DispatchRequest(
-                action="ingest",
-                workspace_root=_WORKSPACE,
-                thread_id=thread_id,
-                content="build it",
-                team_preset="token-preset",
-                recursion_limit=10,
-                actor_tokens=bundle,
-                model_assignment=_current_assignment(),
-            )
+            req = _accepted_ingest(thread_id, bundle)
+            _install_probe_graph(executor, req, observed)
             with caplog.at_level(logging.DEBUG):
                 await executor.handle_dispatch(req)
 

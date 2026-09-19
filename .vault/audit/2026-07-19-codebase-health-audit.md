@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:abd9dc2e34fa23803f84ea5ec27c98ef6028d7ee7105426795b9e47759ed31c7'
+body_hash: 'sha256:bedcda942e0ecc9ce1c45eec89bb0bee8cd91f6a95120f5e017b775f4b089453'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3070,3 +3070,9 @@ Open review findings: nine `worker/tests/test_executor.py` tests still fail in s
 The executor file passed all 59 tests after accepted graph receipts and exact cache digests were supplied to settle and refusal fixtures. Review found a high-severity production bug: a resume with no durable checkpoint could compile a new graph and continue. The worker graph lifecycle now reads checkpoint authority on every resume and returns the existing missing-graph refusal when absent; a normal gated resume and the no-checkpoint refusal both pass. This is a behavior fix, not only a fixture update. The full worker package then reported 139 passing and four failing actor-token lifecycle tests.
 
 Open queue: convert the four actor-token lifecycle tests from synthetic preset/cache digests and receiptless graph dispatches to accepted graph authority, then rerun the worker package and broad nonservice suite. Review risk: the extra checkpoint read on resume may increase read latency; preserve the existing deadline and verify checkpoint lock/capacity tests in the package rerun. The strict gate and accelerator-dependent harness findings remain open.
+
+### 2026-09-19 actor-token lifecycle review pass
+
+The four remaining worker failures were synthetic fixture drift: token tests registered injected graphs under fake preset and definition digests, then sent receiptless ingest/resume requests. This pass froze the current mock graph program, minted exact action receipts, and keyed the injected graphs from those requests. Review confirms the tests still assert token isolation, interrupt retention, terminal disposal, durable checkpoint secrecy, and log secrecy. The focused lifecycle file passed 5 tests; the full worker package passed 143 tests (2 deselected); Ruff and strict typing passed. These medium-severity test contract findings are resolved.
+
+Open queue: rerun the full nonservice inventory without the accelerator-dependent harness, then address any remaining failures. `just check-strict` structural, Pylint, and export findings and the service harness accelerator prerequisite remain open.

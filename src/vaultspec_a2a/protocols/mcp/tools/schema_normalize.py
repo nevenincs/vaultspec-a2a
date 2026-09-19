@@ -78,40 +78,48 @@ def _looks_like_json_schema(raw: dict[str, Any]) -> bool:
     return raw.get("type") == "object" and isinstance(raw.get("properties"), dict)
 
 
-def _deep_strip_injected(node: Any, injected: frozenset[str]) -> None:
-    """Remove *injected* names from every ``properties`` map and ``required`` list.
+def _strip_injected_properties(
+    node_map: dict[str, object], injected: frozenset[str]
+) -> None:
+    properties = node_map.get("properties")
+    if isinstance(properties, dict):
+        properties_map = cast("dict[str, object]", properties)
+        for name in list(properties_map):
+            if name in injected:
+                del properties_map[name]
+            else:
+                _deep_strip_injected(properties_map[name], injected)
+    required = node_map.get("required")
+    if isinstance(required, list):
+        required_list = cast("list[object]", required)
+        node_map["required"] = [item for item in required_list if item not in injected]
 
-    The dispatcher owns these ids and injects them below the model, so they must
-    never reach the model's contract - wherever they appear in a passed-through
-    engine schema (top level or nested under ``properties`` / ``items`` /
-    ``oneOf`` / ``anyOf`` / ``allOf``). Mutates *node* in place; callers pass a
-    deep copy so the source schema is never touched.
-    """
+
+def _strip_injected_children(
+    node_map: dict[str, object], injected: frozenset[str]
+) -> None:
+    for key in ("items", "additionalProperties"):
+        child = node_map.get(key)
+        if isinstance(child, (dict, list)):
+            _deep_strip_injected(child, injected)
+    for key in ("oneOf", "anyOf", "allOf"):
+        branches = node_map.get(key)
+        if isinstance(branches, list):
+            for branch in cast("list[object]", branches):
+                _deep_strip_injected(branch, injected)
+
+
+def _strip_injected_from_object(
+    node_map: dict[str, object], injected: frozenset[str]
+) -> None:
+    _strip_injected_properties(node_map, injected)
+    _strip_injected_children(node_map, injected)
+
+
+def _deep_strip_injected(node: Any, injected: frozenset[str]) -> None:
+    """Remove dispatcher-owned names recursively from a copied schema."""
     if isinstance(node, dict):
-        node_map = cast("dict[str, object]", node)
-        properties = node_map.get("properties")
-        if isinstance(properties, dict):
-            properties_map = cast("dict[str, object]", properties)
-            for name in list(properties_map):
-                if name in injected:
-                    del properties_map[name]
-                else:
-                    _deep_strip_injected(properties_map[name], injected)
-        required = node_map.get("required")
-        if isinstance(required, list):
-            required_list = cast("list[object]", required)
-            node_map["required"] = [
-                item for item in required_list if item not in injected
-            ]
-        for key in ("items", "additionalProperties"):
-            child = node_map.get(key)
-            if isinstance(child, (dict, list)):
-                _deep_strip_injected(child, injected)
-        for key in ("oneOf", "anyOf", "allOf"):
-            branches = node_map.get(key)
-            if isinstance(branches, list):
-                for branch in cast("list[object]", branches):
-                    _deep_strip_injected(branch, injected)
+        _strip_injected_from_object(cast("dict[str, object]", node), injected)
     elif isinstance(node, list):
         for item in cast("list[object]", node):
             _deep_strip_injected(item, injected)
@@ -161,6 +169,45 @@ def _merge_properties(
             target[name] = subschema
 
 
+def _branch_discriminator_note(
+    branch: dict[str, Any],
+    note_parts: list[str],
+    enum_values: dict[str, list[str]],
+) -> str | None:
+    for key in _DISCRIMINATOR_KEYS:
+        value: object = branch.get(key)
+        if isinstance(value, str):
+            values = enum_values.setdefault(key, [])
+            if value not in values:
+                values.append(value)
+            detail = "; ".join(note_parts) if note_parts else "no fields"
+            return f"{key}={value!r} {detail}"
+    return None
+
+
+def _oneof_branch_note(
+    branch: dict[str, Any],
+    required: list[str],
+    optional: list[str],
+    enum_values: dict[str, list[str]],
+) -> tuple[str | None, bool]:
+    """Collect a branch's discriminator guidance and opaque-shape signal."""
+    payload: object = branch.get("payload")
+    alias_of: object = branch.get("alias_of")
+    note_parts: list[str] = []
+    if required:
+        note_parts.append("requires " + ", ".join(required))
+    if isinstance(payload, str):
+        note_parts.append(f"sends payload {payload}")
+    opaque_alias = isinstance(alias_of, str) and not (required or optional)
+    if opaque_alias:
+        note_parts.append(f"input aliases {alias_of}")
+    return (
+        _branch_discriminator_note(branch, note_parts, enum_values),
+        isinstance(payload, str) or opaque_alias,
+    )
+
+
 def _translate_oneof_schema(
     branches: list[Any], injected: frozenset[str]
 ) -> tuple[dict[str, Any], list[str], list[str], bool]:
@@ -188,31 +235,10 @@ def _translate_oneof_schema(
         # placeholders above with the real nested shape.
         _merge_properties(properties, branch.get("properties"), injected)
         required_sets.append(set(b_required))
-        payload: object = branch.get("payload")
-        alias_of: object = branch.get("alias_of")
-        note_parts: list[str] = []
-        if b_required:
-            note_parts.append("requires " + ", ".join(b_required))
-        if isinstance(payload, str):
-            open_schema = True
-            note_parts.append(f"sends payload {payload}")
-        if isinstance(alias_of, str) and not (b_required or b_optional):
-            # An alias with no enumerated fields is an opaque input shape.
-            open_schema = True
-            note_parts.append(f"input aliases {alias_of}")
-        discriminator: tuple[str, str] | None = None
-        for key in _DISCRIMINATOR_KEYS:
-            value: object = branch.get(key)
-            if isinstance(value, str):
-                values = enum_values.setdefault(key, [])
-                if value not in values:
-                    values.append(value)
-                discriminator = (key, value)
-                break
-        if discriminator is not None:
-            key, value = discriminator
-            detail = "; ".join(note_parts) if note_parts else "no fields"
-            branch_notes.append(f"{key}={value!r} {detail}")
+        note, opaque = _oneof_branch_note(branch, b_required, b_optional, enum_values)
+        open_schema = open_schema or opaque
+        if note is not None:
+            branch_notes.append(note)
     for disc_key, values in enum_values.items():
         properties[disc_key] = {"type": "string", "enum": values}
     # Per-branch required sets differ, so the top-level guarantee is their

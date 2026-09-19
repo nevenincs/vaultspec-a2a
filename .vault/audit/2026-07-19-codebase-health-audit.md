@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:41daf4f676694a7c30ff86cff25264e4d2e8857500cb487de128fa127b730537'
+body_hash: 'sha256:871e05884b9469d9f9d8efe4739e9f354bb9b8f3f2d5bf0b668337a784a50d9e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3162,3 +3162,7 @@ The streaming transformer had seven medium-severity Ruff structure findings in t
 ### 2026-09-20 event adapter structure review pass
 
 The domain-to-wire adapter had three medium-severity strict structure findings from an eleven-case conversion function. The message, tool-start, tool-update, control, and state mappings now live in focused functions, with one dispatcher preserving the same event classes, field conversion, sequence, and timestamp. Review found no dropped event case or changed fallback error. Five focused API tests, `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 301 to 298. No new review findings were surfaced. The remaining 298 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 MCP schema normalization structure review pass
+
+Four medium-severity strict structure findings in recursive injected-field removal and older-engine oneOf translation were resolved by extracting property, child, discriminator, and branch-guidance operations. Review checked that nested property/required removal, oneOf/anyOf/allOf traversal, discriminator order and deduplication, opaque payload/alias handling, and required-set intersection retain their behavior. All 20 schema-normalization tests pass, including the real MCP serving case; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 298 to 294. No new review findings were surfaced. The remaining 294 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.

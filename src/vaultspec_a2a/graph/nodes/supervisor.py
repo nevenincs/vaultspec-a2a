@@ -263,14 +263,11 @@ def _evaluate_supervisor_response(
                 )
 
     approval_granted = state.get("approval_status") == ApprovalStatus.APPROVED
-    if (
-        not autonomous
-        and worker_phase_map
-        and worker_phase_map.get(next_route) == PipelinePhase.EXEC
-        and state.get("active_feature")
-        and vault_index.get("plan")
-        and not approval_granted
-    ):
+    exec_route = bool(worker_phase_map) and (
+        worker_phase_map.get(next_route) == PipelinePhase.EXEC
+    )
+    plan_ready = bool(state.get("active_feature") and vault_index.get("plan"))
+    if not autonomous and exec_route and plan_ready and not approval_granted:
         payload = {
             "type": "plan_approval_request",
             "feature": state.get("active_feature"),

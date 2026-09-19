@@ -155,27 +155,33 @@ class DispatchRequest(BaseModel):
         """Require a matching current receipt before graph execution admission."""
         self.require_graph_definition()
         receipt = self.graph_action_receipt
-        if (
-            receipt is None
-            or receipt.thread_id != self.thread_id
-            or receipt.dispatch_id != self.dispatch_id
-            or (
-                self.action == "ingest"
-                and receipt.action_type
-                not in {
+        allowed_ingest = (
+            self.action == "ingest"
+            and receipt is not None
+            and (
+                receipt.action_type
+                in {
                     ControlActionType.INGEST,
                     ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
                 }
             )
-            or (
-                self.action == "resume"
-                and receipt.action_type
-                not in {
+        )
+        allowed_resume = (
+            self.action == "resume"
+            and receipt is not None
+            and (
+                receipt.action_type
+                in {
                     ControlActionType.RESUME,
                     ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
                 }
             )
-            or self.action == "cancel"
+        )
+        if (
+            receipt is None
+            or receipt.thread_id != self.thread_id
+            or receipt.dispatch_id != self.dispatch_id
+            or not (allowed_ingest or allowed_resume)
         ):
             raise ValueError("incompatible graph dispatch authority")
         return receipt

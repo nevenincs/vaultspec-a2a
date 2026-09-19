@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:85078eb5ce5c0415d509859ecb1fba688315be4c88159b4d03ee0bd5d1777277'
+body_hash: 'sha256:71185c6b3cd7642e0c9e46c02a0c5c534c3091356abe9a430abdaa09669e2f1e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3244,3 +3244,7 @@ One medium-severity cognitive-complexity finding in `list_threads_service` was r
 ### 2026-09-20 graph receipt predicate review pass
 
 One low-severity Pylint R0916 boolean-expression finding in graph receipt persistence was resolved by separating exact action identity from original dispatch evidence. Review checked that all seven original comparisons remain, including the upper bound on stored revision after a state-only election; invalid or mismatched receipts still return no persisted witness. Eleven focused receipt and dispatch tests pass; focused Ruff, Ty, and Pylint pass, as does `just check-all`. No new review findings were surfaced. The remaining strict Ruff, nested-block, cyclomatic, module/function/parameter/nesting, and Pylint findings stay open in the audit queue.
+
+### 2026-09-20 dispatch and selection predicate review pass
+
+Three low-severity Pylint R0916 boolean-expression findings were resolved in supervisor plan-approval routing, IPC graph receipt admission, and persisted team-selection validation. Review checked that execution routing still requires a plan and active feature without existing approval, ingest and resume retain their exact allowed action types while cancel remains refused, and role/fallback validation still rejects empty, duplicate, invalid, or excessive inputs. Fifty-six focused graph, provider, and receipt tests pass; focused Ruff, Ty, and Pylint pass. The first `just check-all` run exposed only an IPC formatting change, which was applied before rerunning the gate. No new review findings were surfaced. All remaining strict findings stay open in the audit queue.

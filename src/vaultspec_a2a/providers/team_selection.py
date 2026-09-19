@@ -569,15 +569,15 @@ def frozen_team_selection_from_record(record: object) -> FrozenTeamSelection:
     raw_roles = stored.get("roles")
     raw_overrides = _json_object(stored.get("overrides"))
     raw_fallbacks = stored.get("fallbacks")
-    if (
-        not isinstance(raw_roles, list)
-        or not raw_roles
-        or len(raw_roles) > MAX_ROLES_PER_RUN
-        or not all(isinstance(role, str) and role for role in raw_roles)
-        or len(raw_roles) != len(set(raw_roles))
-        or not isinstance(raw_fallbacks, list)
-        or len(raw_fallbacks) > 8
-    ):
+    if not isinstance(raw_roles, list) or not isinstance(raw_fallbacks, list):
+        raise TeamSelectionError("persisted team selection is invalid")
+    valid_roles = (
+        bool(raw_roles)
+        and len(raw_roles) <= MAX_ROLES_PER_RUN
+        and all(isinstance(role, str) and role for role in raw_roles)
+        and len(raw_roles) == len(set(raw_roles))
+    )
+    if not valid_roles or len(raw_fallbacks) > 8:
         raise TeamSelectionError("persisted team selection is invalid")
     roles = tuple(role for role in raw_roles if isinstance(role, str))
     if not set(raw_overrides).issubset(roles):

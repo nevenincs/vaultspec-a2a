@@ -26,14 +26,17 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.permission_service import respond_to_permission
+from ...control.permission_service import (
+    PermissionInput,
+    PermissionRuntime,
+    respond_to_permission,
+)
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...control.tests.test_dispatch_failure_transitions import (
     _seed_accepted_initial_action,
 )
 from ...control.worker_management import LazyWorkerSpawner
 from ...graph.enums import PermissionType
-from ...streaming.aggregator import EventAggregator
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ApprovalStatus, ThreadStatus
 from ...worker.app import create_worker_app
@@ -159,18 +162,14 @@ async def _decide(
     async with sessions() as db:
         return await respond_to_permission(
             db,
-            request_id=request_id,
-            option_id=option_id,
-            notes=None,
-            idempotency_key=idempotency_key,
-            aggregator=EventAggregator(),
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=3, recovery_timeout=30.0
+            response=PermissionInput(request_id, option_id, idempotency_key),
+            runtime=PermissionRuntime(
+                WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30.0),
+                _spawner(),
+                worker_client,
+                25,
+                None,
             ),
-            worker_spawner=_spawner(),
-            worker_client=worker_client,
-            recursion_limit=25,
-            trace_headers=None,
         )
 
 

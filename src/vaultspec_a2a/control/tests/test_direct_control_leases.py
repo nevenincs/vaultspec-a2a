@@ -40,6 +40,8 @@ from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
 from ...control.message_service import MessageResult, send_followup_message
 from ...control.permission_service import (
+    PermissionInput,
+    PermissionRuntime,
     permission_response_action_key,
     respond_to_permission,
 )
@@ -54,7 +56,6 @@ from ...database import (
 )
 from ...database.models import Base, RecoveryAttemptModel
 from ...ipc.schemas import DispatchRequest
-from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
@@ -311,16 +312,12 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
         async with session_factory() as db:
             result = await respond_to_permission(
                 db,
-                request_id=request_id,
-                option_id="allow_once",
-                notes=None,
-                idempotency_key="permission-client-retry",
-                aggregator=EventAggregator(),
-                circuit_breaker=_circuit_breaker(),
-                worker_spawner=_spawner(),
-                worker_client=worker_client,
-                recursion_limit=25,
-                trace_headers=None,
+                response=PermissionInput(
+                    request_id, "allow_once", "permission-client-retry"
+                ),
+                runtime=PermissionRuntime(
+                    _circuit_breaker(), _spawner(), worker_client, 25, None
+                ),
             )
         assert result.accepted is True
         assert result.applied is False

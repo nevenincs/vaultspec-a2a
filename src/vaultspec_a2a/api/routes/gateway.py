@@ -55,7 +55,11 @@ from ...control.health import (
     probe_engine_discovery_freshness,
 )
 from ...control.message_service import send_followup_message
-from ...control.permission_service import respond_to_permission
+from ...control.permission_service import (
+    PermissionInput,
+    PermissionRuntime,
+    respond_to_permission,
+)
 from ...control.run_discovery_service import discover_active_runs
 from ...control.run_start_policy import (
     evaluate_execution_eligibility,
@@ -2132,7 +2136,6 @@ async def run_permission_respond_endpoint(
     request: Request,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
-    aggregator: EventAggregator = Depends(get_aggregator),
     circuit_breaker: Any = Depends(get_circuit_breaker),
     worker_spawner: Any = Depends(get_worker_spawner),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -2166,16 +2169,16 @@ async def run_permission_respond_endpoint(
 
     result = await respond_to_permission(
         db=db,
-        request_id=request_id,
-        option_id=body.option_id,
-        idempotency_key=idempotency_key,
-        aggregator=aggregator,
-        circuit_breaker=circuit_breaker,
-        worker_spawner=worker_spawner,
-        worker_client=worker_client,
-        recursion_limit=domain_config.graph_recursion_limit,
-        trace_headers=trace_headers(),
-        notes=body.notes,
+        response=PermissionInput(
+            request_id, body.option_id, idempotency_key, body.notes
+        ),
+        runtime=PermissionRuntime(
+            circuit_breaker,
+            worker_spawner,
+            worker_client,
+            domain_config.graph_recursion_limit,
+            trace_headers(),
+        ),
     )
 
     if result.dispatched:

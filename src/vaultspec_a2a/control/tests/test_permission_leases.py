@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import (
+    PermissionInput,
+    PermissionRuntime,
     permission_response_action_key,
     respond_to_permission,
 )
@@ -21,7 +23,6 @@ from ...database import (
     record_permission_request,
 )
 from ...database.models import Base
-from ...streaming.aggregator import EventAggregator
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
@@ -79,16 +80,10 @@ async def _run_case(runtime_dir: Path, bodies: list[tuple[str, str | None]]):
             await start.wait()
             return await respond_to_permission(
                 session,
-                request_id=request_id,
-                option_id=option_id,
-                notes=notes,
-                idempotency_key=f"client-retry-{index}",
-                aggregator=EventAggregator(),
-                circuit_breaker=breaker,
-                worker_spawner=spawner,
-                worker_client=client,
-                recursion_limit=25,
-                trace_headers=None,
+                response=PermissionInput(
+                    request_id, option_id, f"client-retry-{index}", notes
+                ),
+                runtime=PermissionRuntime(breaker, spawner, client, 25, None),
             )
 
     tasks = [

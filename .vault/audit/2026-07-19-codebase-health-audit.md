@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:05e738906e8eb05e54f9e91cf82aca0b02ea9e31cd40920462e50a986b802fc5'
+body_hash: 'sha256:1f09d9680b898409f8d1901a235da2f68938f9b5a9d07af6454e354fc2c9af39'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3212,3 +3212,7 @@ Three low-severity strict argument-count and medium-severity cyclomatic findings
 ### 2026-09-20 clarification replay and claim structure review pass
 
 Four medium-severity strict Ruff findings remaining in the clarification service were resolved. Existing-action replay, claim preparation, post-claim state decisions, and worker dispatch now have bounded functions; error details travel as one typed value. Review checked that an existing matching receipt settles before any new claim, conflicting accepted input still returns 409, expired ORM state is not read after a losing claim rollback, non-active and no-longer-parked paths roll back, and only a checkpoint receipt marks application. Ten focused clarification and dispatch-failure tests pass; `just check-all`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 252 to 248, and the clarification service has no remaining strict Ruff or complexipy findings. No new review findings were surfaced. The remaining 248 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 permission response structure review pass
+
+Seven medium-severity strict Ruff findings in the permission-response service were resolved. A typed response and worker runtime now carry the service inputs; rejection journaling, idempotency replay, pending-state authorization, option validation, and failed dispatch have focused helpers. The unused aggregator argument was removed because application is proved by the exact receipt path. Review checked rejection-journal durability, retry replay before pending-status rejection, accepted-body conflict handling, claim election, audit-log placement before dispatch, and definite versus ambiguous dispatch failure compensation. Review surfaced one medium-severity behavior-drift risk: an extracted helper initially used the permission row's thread id, which could differ from the resolved fallback id. It was fixed before commit by using the loaded thread record's id in all three extracted helpers. Fifty-one focused control, database, and live gateway tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 248 to 241; code-health function-length findings fall from 21 to 19 and parameter-count findings from 104 to 97. The permission service has no remaining strict Ruff or complexipy findings. The remaining 241 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.

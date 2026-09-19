@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:8d5d013acc3df4a088797878a287b30c72047111390f2cd42500120f014b1e2b'
+body_hash: 'sha256:a3da609c64fac11cdf673d30d42632034884ae085aa2fdee33db9d0c47711231'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3232,3 +3232,7 @@ Five medium-severity strict Ruff complexity, branch, and statement findings in t
 ### 2026-09-20 Codex provider turn structure review pass
 
 Five medium-severity strict Ruff return, complexity, branch, and statement findings in Codex app-server response routing, native-control admission, and turn streaming were resolved. The turn now keeps deferred retry evidence, cumulative token usage, and side-effect evidence in one state object; notification wait, item projection, retry errors, and terminal settlement have focused functions. Review checked that only the exact thread's item, usage, and terminal frames are honored, retry errors remain deferred until final failure/EOF/idle timeout, a supervised permission interrupt still escapes before frame projection, cumulative usage is emitted once, and terminal status is stamped before a failed-turn exception. Review surfaced one low-severity malformed-frame risk: set membership on an untrusted JSON method could raise for a list or object. It was fixed before commit by using safe tuple comparisons. Eighty-three focused provider tests pass. The one service-marked live Codex turn was attempted and skipped because no current provider lane was selected. `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 225 to 220; code-health function-length findings fall from 16 to 15 and worst nesting depth from eight to seven. No unresolved new review findings were surfaced. The remaining 220 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 thread admission and archive structure review pass
+
+Four medium-severity strict Ruff argument, complexity, and return findings in thread creation and archive election were resolved. Initial worker dependencies now travel as one typed runtime; failed dispatch settlement and archive-election rechecks have focused helpers. Review checked that the thread and graph action remain durable before worker dispatch, the recovery deadline and receipt authority are preserved, a concurrent terminal writer can still win while dispatch is in flight, missing rows still report their typed outcome, and archive election failure rolls back before re-reading current state. Sixty-three focused creation, deletion-saga, drain, and live gateway tests pass; `just check-all`, `just check-type-strict`, and focused Ruff pass. Strict Ruff structure falls from 220 to 216; code-health parameter-count findings fall from 95 to 94. No new review findings were surfaced. The pre-existing medium-severity cognitive-complexity finding in `list_threads_service` remains open in this module. The remaining 216 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.

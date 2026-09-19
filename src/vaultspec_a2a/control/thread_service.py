@@ -21,7 +21,7 @@ from uuid import uuid4
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
 from ..control.accepted_input import freeze_accepted_input
-from ..control.dispatch import safe_dispatch
+from ..control.dispatch import DispatchOutcome, safe_dispatch
 from ..control.dispatch_receipts import (
     bind_graph_action_receipt,
     prepare_graph_action_receipt,
@@ -88,6 +88,7 @@ __all__ = [
     "DeleteResult",
     "ThreadCreationRequest",
     "ThreadCreationResult",
+    "ThreadDispatchRuntime",
     "archive_thread",
     "create_and_dispatch_thread",
     "delete_thread_service",
@@ -388,6 +389,23 @@ class ThreadCreationResult:
     failure_type: FailureType | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ThreadDispatchRuntime:
+    circuit_breaker: WorkerCircuitBreaker
+    worker_spawner: LazyWorkerSpawner
+    worker_client: httpx.AsyncClient
+    recursion_limit: int
+    trace_headers: dict[str, str] | None
+
+
+@dataclass(frozen=True, slots=True)
+class _CreationDispatchContext:
+    request: ThreadCreationRequest
+    thread: ThreadModel
+    action_receipt_id: str
+    recovery_deadline_at: datetime
+
+
 def process_metadata(
     metadata: ThreadMetadata | None,
     thread_id: str,
@@ -503,15 +521,72 @@ def _initial_dispatch(
     )
 
 
+async def _failed_initial_dispatch(
+    db: AsyncSession, context: _CreationDispatchContext, outcome: DispatchOutcome
+) -> ThreadCreationResult:
+    req = context.request
+    thread = context.thread
+    action_receipt_id = context.action_receipt_id
+    recovery_deadline_at = context.recovery_deadline_at
+    _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
+    if typed_failure is None:
+        raise RuntimeError("failed initial dispatch carries no failure type")
+    observed_at = datetime.now(UTC)
+    # A checkpoint or another accepted action may win while dispatch is in
+    # flight. Its exact authority decides the result, so discard stale work.
+    with suppress(RecoveryAuthorityLostError):
+        await record_recovery_failure(
+            db,
+            thread_id=thread.id,
+            authority=thread_write_expectation(thread).authority,
+            condition=RecoveryCondition(typed_failure.value),
+            observed_at=observed_at,
+            next_eligible_at=min(
+                observed_at + timedelta(seconds=2), recovery_deadline_at
+            ),
+            deadline_at=recovery_deadline_at,
+            detail=outcome.detail,
+        )
+    await db.commit()
+    current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
+    if current_thread is None:
+        return ThreadCreationResult(
+            thread_id=thread.id,
+            status="",
+            nickname=req.nickname,
+            dispatched=False,
+            error_detail="Thread disappeared while initial dispatch settled",
+            failure_type=FailureType.NOT_FOUND,
+        )
+    if (
+        current_thread.writer_action_type == ControlActionType.INGEST.value
+        and current_thread.writer_action_receipt_id == action_receipt_id
+        and current_thread.status
+        in {ThreadStatus.COMPLETED.value, ThreadStatus.FAILED.value}
+    ):
+        return ThreadCreationResult(
+            thread_id=thread.id,
+            status=current_thread.status,
+            nickname=req.nickname,
+            dispatched=True,
+            error_detail=None,
+            failure_type=None,
+        )
+    return ThreadCreationResult(
+        thread_id=thread.id,
+        status=current_thread.status,
+        nickname=req.nickname,
+        dispatched=False,
+        error_detail=outcome.detail,
+        failure_type=typed_failure,
+    )
+
+
 async def create_and_dispatch_thread(
     db: AsyncSession,
     req: ThreadCreationRequest,
     *,
-    circuit_breaker: WorkerCircuitBreaker,
-    worker_spawner: LazyWorkerSpawner,
-    worker_client: httpx.AsyncClient,
-    recursion_limit: int,
-    trace_headers: dict[str, str] | None,
+    runtime: ThreadDispatchRuntime,
 ) -> ThreadCreationResult:
     """Create a thread row, build dispatch payload, and dispatch to worker.
 
@@ -528,7 +603,7 @@ async def create_and_dispatch_thread(
         raise ValueError("run admission requires an allocated thread identity")
     dispatch = (
         _initial_dispatch(
-            req, dispatch_id=action_receipt_id, recursion_limit=recursion_limit
+            req, dispatch_id=action_receipt_id, recursion_limit=runtime.recursion_limit
         )
         if requires_dispatch(req.team_preset)
         else None
@@ -630,65 +705,20 @@ async def create_and_dispatch_thread(
     dispatch = await bind_graph_action_receipt(db, dispatch)
     # -- Dispatch via safe_dispatch (non-raising) ------------------------------
     outcome = await safe_dispatch(
-        worker_client,
+        runtime.worker_client,
         dispatch,
-        circuit_breaker,
-        worker_spawner,
-        trace_headers=trace_headers,
+        runtime.circuit_breaker,
+        runtime.worker_spawner,
+        trace_headers=runtime.trace_headers,
     )
 
     if not outcome.success:
-        _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-        if typed_failure is None:
-            raise RuntimeError("failed initial dispatch carries no failure type")
-        observed_at = datetime.now(UTC)
-        # A checkpoint or another accepted action may win while dispatch is in
-        # flight. Its exact authority decides the result, so discard stale work.
-        with suppress(RecoveryAuthorityLostError):
-            await record_recovery_failure(
-                db,
-                thread_id=thread.id,
-                authority=thread_write_expectation(thread).authority,
-                condition=RecoveryCondition(typed_failure.value),
-                observed_at=observed_at,
-                next_eligible_at=min(
-                    observed_at + timedelta(seconds=2), recovery_deadline_at
-                ),
-                deadline_at=recovery_deadline_at,
-                detail=outcome.detail,
-            )
-        await db.commit()
-        current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
-        if current_thread is None:
-            return ThreadCreationResult(
-                thread_id=thread.id,
-                status="",
-                nickname=req.nickname,
-                dispatched=False,
-                error_detail="Thread disappeared while initial dispatch settled",
-                failure_type=FailureType.NOT_FOUND,
-            )
-        if (
-            current_thread.writer_action_type == ControlActionType.INGEST.value
-            and current_thread.writer_action_receipt_id == action_receipt_id
-            and current_thread.status
-            in {ThreadStatus.COMPLETED.value, ThreadStatus.FAILED.value}
-        ):
-            return ThreadCreationResult(
-                thread_id=thread.id,
-                status=current_thread.status,
-                nickname=req.nickname,
-                dispatched=True,
-                error_detail=None,
-                failure_type=None,
-            )
-        return ThreadCreationResult(
-            thread_id=thread.id,
-            status=current_thread.status,
-            nickname=req.nickname,
-            dispatched=False,
-            error_detail=outcome.detail,
-            failure_type=typed_failure,
+        return await _failed_initial_dispatch(
+            db,
+            _CreationDispatchContext(
+                req, thread, action_receipt_id, recovery_deadline_at
+            ),
+            outcome,
         )
 
     # -- Success ---------------------------------------------------------------
@@ -876,6 +906,22 @@ class ArchiveResult:
     error_detail: str | None = None
 
 
+async def _archive_election_failure(db: AsyncSession, thread_id: str) -> ArchiveResult:
+    await db.rollback()
+    current_thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+    if current_thread is None:
+        return ArchiveResult(archived=False, not_found=True)
+    refreshed = can_archive(current_thread.status)
+    if refreshed.already_archived:
+        return ArchiveResult(archived=True, already_archived=True)
+    return ArchiveResult(
+        archived=False,
+        error_detail=(
+            refreshed.reason or "Thread authority changed during archive election"
+        ),
+    )
+
+
 async def archive_thread(db: AsyncSession, thread_id: str) -> ArchiveResult:
     """Transition a thread to ARCHIVED status after lifecycle-guard validation.
 
@@ -905,18 +951,6 @@ async def archive_thread(db: AsyncSession, thread_id: str) -> ArchiveResult:
         ),
     )
     if election.outcome is not ThreadStatusElectionOutcome.WON:
-        await db.rollback()
-        current_thread = await db.get(ThreadModel, thread_id, populate_existing=True)
-        if current_thread is None:
-            return ArchiveResult(archived=False, not_found=True)
-        refreshed = can_archive(current_thread.status)
-        if refreshed.already_archived:
-            return ArchiveResult(archived=True, already_archived=True)
-        return ArchiveResult(
-            archived=False,
-            error_detail=(
-                refreshed.reason or "Thread authority changed during archive election"
-            ),
-        )
+        return await _archive_election_failure(db, thread_id)
     await db.commit()
     return ArchiveResult(archived=True)

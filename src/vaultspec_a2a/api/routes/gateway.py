@@ -74,6 +74,7 @@ from ...control.team_service import build_team_status
 from ...control.thread_service import (
     ThreadCreationRequest,
     ThreadCreationResult,
+    ThreadDispatchRuntime,
     archive_thread,
     create_and_dispatch_thread,
     delete_thread_service,
@@ -557,11 +558,13 @@ async def _create_run_core(
                     result = await create_and_dispatch_thread(
                         db,
                         creation_request,
-                        circuit_breaker=circuit_breaker,
-                        worker_spawner=worker_spawner,
-                        worker_client=worker_client,
-                        recursion_limit=domain_config.graph_recursion_limit,
-                        trace_headers=trace_headers(),
+                        runtime=ThreadDispatchRuntime(
+                            circuit_breaker=circuit_breaker,
+                            worker_spawner=worker_spawner,
+                            worker_client=worker_client,
+                            recursion_limit=domain_config.graph_recursion_limit,
+                            trace_headers=trace_headers(),
+                        ),
                     )
                     break
                 except OperationalError as exc:

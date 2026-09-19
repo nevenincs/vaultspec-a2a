@@ -29,6 +29,7 @@ from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.thread_service import (
     ThreadCreationRequest,
+    ThreadDispatchRuntime,
     create_and_dispatch_thread,
 )
 from ...control.worker_management import LazyWorkerSpawner
@@ -124,15 +125,17 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
                     metadata_json=None,
                     workspace_root=Path("relative-project"),
                 ),
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
+                runtime=ThreadDispatchRuntime(
+                    circuit_breaker=WorkerCircuitBreaker(
+                        failure_threshold=1, recovery_timeout=1.0
+                    ),
+                    worker_spawner=LazyWorkerSpawner(
+                        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+                    ),
+                    worker_client=client,
+                    recursion_limit=20,
+                    trace_headers=None,
                 ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-                ),
-                worker_client=client,
-                recursion_limit=20,
-                trace_headers=None,
             )
         await session.commit()
     async with session_factory() as session:
@@ -281,11 +284,13 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
                 workspace_root=tmp_path,
                 actor_tokens=bundle,
             ),
-            circuit_breaker=circuit_breaker,
-            worker_spawner=spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=None,
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=circuit_breaker,
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
+            ),
         )
 
     assert result.dispatched is True
@@ -355,13 +360,15 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=1, recovery_timeout=1.0
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=1, recovery_timeout=1.0
+                ),
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
             ),
-            worker_spawner=spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=None,
         )
     assert result.dispatched is True
     assert result.status == ThreadStatus.COMPLETED.value
@@ -404,13 +411,15 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=1, recovery_timeout=1.0
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=1, recovery_timeout=1.0
+                ),
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
             ),
-            worker_spawner=spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=None,
         )
     assert result.dispatched is True
     assert result.status == ""
@@ -454,13 +463,15 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=1, recovery_timeout=1.0
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=1, recovery_timeout=1.0
+                ),
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
             ),
-            worker_spawner=spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=None,
         )
     assert result.status == ThreadStatus.COMPLETED.value
     assert result.dispatched is True
@@ -498,13 +509,15 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=1, recovery_timeout=1.0
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=1, recovery_timeout=1.0
+                ),
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
             ),
-            worker_spawner=spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=None,
         )
 
     assert result.status == ThreadStatus.CANCELLING.value

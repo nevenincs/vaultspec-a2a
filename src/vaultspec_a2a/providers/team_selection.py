@@ -20,6 +20,8 @@ from .provider_catalog import (
     MAX_TEXT_LENGTH,
     CatalogStatus,
     ControlSelection,
+    ModelCatalogEntry,
+    NativeControl,
     ProviderRecord,
     SelectionReference,
 )
@@ -204,38 +206,24 @@ class FrozenTeamSelection:
         }
 
 
-def _normalize_reference(
-    reference: SelectionReference,
-    lanes: dict[tuple[str, str], ProviderRecord],
-) -> FrozenSelectedLane:
-    lane_id = (reference.provider_id, reference.execution_mode)
-    record = lanes.get(lane_id)
-    if record is None:
-        raise TeamSelectionError("selection names an unknown provider execution lane")
-    try:
-        Provider(reference.provider_id)
-    except ValueError as exc:
-        raise TeamSelectionError(
-            "selection names a provider unsupported by execution"
-        ) from exc
-    catalog = record.catalog
-    now = datetime.now(UTC)
+def _require_selectable_record(record: ProviderRecord) -> None:
+    state = record.catalog.state
     if (
         not record.health.selectable
-        or catalog.state.status is not CatalogStatus.AVAILABLE
-        or catalog.state.expires_at is None
-        or catalog.state.expires_at <= now
+        or state.status is not CatalogStatus.AVAILABLE
+        or state.expires_at is None
+        or state.expires_at <= datetime.now(UTC)
     ):
         raise TeamSelectionError(
             "selection names a provider lane that is not selectable"
         )
-    if catalog.state.revision != reference.catalog_revision:
-        raise TeamSelectionError("selection names a stale catalog revision")
-    model = catalog.model(reference.entry_id)
-    if model is None:
-        raise TeamSelectionError("selection names an unknown catalog entry")
 
-    advertised = {item.control_id: item for item in catalog.native_controls}
+
+def _freeze_controls(
+    reference: SelectionReference,
+    model: ModelCatalogEntry,
+    advertised: dict[str, NativeControl],
+) -> tuple[SelectionReference, tuple[FrozenNativeControl, ...], tuple[str, ...]]:
     attached = set(model.native_control_ids)
     chosen = {item.control_id: item.option_id for item in reference.controls}
     defaulted: list[str] = []
@@ -276,14 +264,68 @@ def _normalize_reference(
                 option_display_name=option.display_name,
             )
         )
+    return normalized, tuple(frozen_controls), tuple(defaulted)
+
+
+def _normalize_reference(
+    reference: SelectionReference,
+    lanes: dict[tuple[str, str], ProviderRecord],
+) -> FrozenSelectedLane:
+    lane_id = (reference.provider_id, reference.execution_mode)
+    record = lanes.get(lane_id)
+    if record is None:
+        raise TeamSelectionError("selection names an unknown provider execution lane")
+    try:
+        Provider(reference.provider_id)
+    except ValueError as exc:
+        raise TeamSelectionError(
+            "selection names a provider unsupported by execution"
+        ) from exc
+    catalog = record.catalog
+    _require_selectable_record(record)
+    if catalog.state.revision != reference.catalog_revision:
+        raise TeamSelectionError("selection names a stale catalog revision")
+    model = catalog.model(reference.entry_id)
+    if model is None:
+        raise TeamSelectionError("selection names an unknown catalog entry")
+
+    normalized, frozen_controls, defaulted = _freeze_controls(
+        reference,
+        model,
+        {item.control_id: item for item in catalog.native_controls},
+    )
     return FrozenSelectedLane(
         reference=normalized,
         provider_value=model.provider_value,
-        controls=tuple(frozen_controls),
+        controls=frozen_controls,
         provider_display_name=record.display_name,
         model_display_name=model.display_name,
-        defaulted_control_ids=tuple(defaulted),
+        defaulted_control_ids=defaulted,
     )
+
+
+def _stored_replay_controls(stored_record: JsonObject) -> dict[str, str]:
+    raw_stored_controls = stored_record.get("controls")
+    if not isinstance(raw_stored_controls, list):
+        raise TeamSelectionError("persisted team selection is invalid")
+    stored_controls: dict[str, str] = {}
+    for raw_control in raw_stored_controls:
+        control = _json_object(raw_control)
+        _require_exact_keys(
+            control,
+            required={"control_id", "option_id", "provider_value"},
+            optional={"display_name", "option_display_name"},
+        )
+        key = control.get("control_id")
+        value = control.get("option_id")
+        if (
+            not isinstance(key, str)
+            or not isinstance(value, str)
+            or key in stored_controls
+        ):
+            raise TeamSelectionError("persisted team selection is invalid")
+        stored_controls[key] = value
+    return stored_controls
 
 
 def _normalize_replay_lane(
@@ -312,26 +354,7 @@ def _normalize_replay_lane(
         or stored_record.get("entry_id") != incoming.entry_id
     ):
         raise TeamSelectionError("replay selection does not match the accepted run")
-    raw_stored_controls = stored_record.get("controls")
-    if not isinstance(raw_stored_controls, list):
-        raise TeamSelectionError("persisted team selection is invalid")
-    stored_controls: dict[str, str] = {}
-    for raw_control in raw_stored_controls:
-        control = _json_object(raw_control)
-        _require_exact_keys(
-            control,
-            required={"control_id", "option_id", "provider_value"},
-            optional={"display_name", "option_display_name"},
-        )
-        key = control.get("control_id")
-        value = control.get("option_id")
-        if (
-            not isinstance(key, str)
-            or not isinstance(value, str)
-            or key in stored_controls
-        ):
-            raise TeamSelectionError("persisted team selection is invalid")
-        stored_controls[key] = value
+    stored_controls = _stored_replay_controls(stored_record)
     raw_defaulted = stored_record.get("defaulted_control_ids", [])
     if not isinstance(raw_defaulted, list) or not all(
         isinstance(item, str) for item in raw_defaulted

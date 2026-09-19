@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:71185c6b3cd7642e0c9e46c02a0c5c534c3091356abe9a430abdaa09669e2f1e'
+body_hash: 'sha256:62cea358181de8477f7b257a7690acccd209510e35aff9c644c50360c8f3570d'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3248,3 +3248,7 @@ One low-severity Pylint R0916 boolean-expression finding in graph receipt persis
 ### 2026-09-20 dispatch and selection predicate review pass
 
 Three low-severity Pylint R0916 boolean-expression findings were resolved in supervisor plan-approval routing, IPC graph receipt admission, and persisted team-selection validation. Review checked that execution routing still requires a plan and active feature without existing approval, ingest and resume retain their exact allowed action types while cancel remains refused, and role/fallback validation still rejects empty, duplicate, invalid, or excessive inputs. Fifty-six focused graph, provider, and receipt tests pass; focused Ruff, Ty, and Pylint pass. The first `just check-all` run exposed only an IPC formatting change, which was applied before rerunning the gate. No new review findings were surfaced. All remaining strict findings stay open in the audit queue.
+
+### 2026-09-20 team selection normalization review pass
+
+One medium-severity strict Ruff C901 finding and two medium-severity cognitive-complexity findings in team selection normalization were resolved. Catalog selectability, native-control defaulting and freezing, and persisted replay-control decoding now have focused functions. Review checked that provider lane lookup, catalog revision/expiry, model entry, attached controls, option ids, exact replay identity, and stored default controls retain the same validation order and errors. Twenty-two focused selection and persisted-authority tests pass; `just check-all`, focused strict Ruff and Ty, and module complexipy pass. Radon cyclomatic findings fall from 139 to 138. No new review findings were surfaced. The remaining strict Ruff, cyclomatic, nesting, shape, and Pylint findings stay open in the audit queue.

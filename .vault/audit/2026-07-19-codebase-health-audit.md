@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:0da09108e6a7c2445b7c7e7931ef1eccee20395b6bafa26e0b33485c2bd02f3b'
+body_hash: 'sha256:6b66fabaa64d7d8a55875df8665be271b531c8eb2984f76d1cc3ebd5e4b8030c'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3192,3 +3192,7 @@ Four medium-severity strict Ruff structure findings in ACP stdout dispatch, serv
 ### 2026-09-20 ACP response complexity review pass
 
 The ACP response handler had one medium-severity cognitive-complexity finding after the dispatch cleanup. Future settlement and terminal prompt-result validation now have focused helpers, preserving duplicate-terminal refusal, late-future handling, error sentinel behavior, and stop-reason validation order. Thirty-four focused response and process-lifetime tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. No new review findings were surfaced. The module has no remaining complexipy offender; the repository-wide strict backlog remains open.
+
+### 2026-09-20 discovery credential and desktop parsing review pass
+
+Six medium-severity strict Ruff structure findings in lifecycle discovery were resolved. The desktop record parser combines equivalent invalidity checks; credential reading and private publication now use focused helpers for leased reads, source claims, existing-file refusal, POSIX identity verification, and platform publication. Review checked that the credential remains owner-restricted, link-like paths and changed identities remain refused, source cleanup still runs after publication failure, Windows ACL hardening still follows publication, and malformed desktop records still fail closed. Twenty-five lifecycle and desktop ownership tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 280 to 274. The two public discovery writer signatures still have low-severity excessive-argument findings; their call contracts remain in the open queue. No new review findings were surfaced. The remaining 274 Ruff structure, 32 nested-block, and Pylint/health findings remain open.

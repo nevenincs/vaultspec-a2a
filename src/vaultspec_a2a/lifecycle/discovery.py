@@ -32,7 +32,7 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import cast, override
+from typing import BinaryIO, cast, override
 
 import httpx
 
@@ -41,6 +41,7 @@ from ..authoring.discovery import (
     read_service_json,
 )
 from ..desktop._filesystem_authority import (
+    DirectoryAuthority,
     assert_directory_authority,
     create_anonymous_file,
     create_private_file,
@@ -135,44 +136,43 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
         if candidate != expected or path_is_link_like(candidate):
             return None
         with directory_lease(authority) as leased:
-            if path_is_link_like(expected):
-                return None
-            if os.name == "posix":
-                if leased.dir_fd is None or not hasattr(os, "O_NOFOLLOW"):
-                    return None
-                descriptor = os.open(
-                    "service.token",
-                    unfollowed_read_flags(),
-                    dir_fd=leased.dir_fd,
-                )
-                named = os.stat(
-                    "service.token", dir_fd=leased.dir_fd, follow_symlinks=False
-                )
-            else:
-                # Shares DELETE: a plain `os.open` here would block the very
-                # publication this read is checking against, for as long as the
-                # read holds the file.
-                descriptor = open_shared_read_descriptor(expected)
-                named = expected.stat(follow_symlinks=False)
-            try:
-                opened = os.fstat(descriptor)
-                if not confirm_opened_secret(descriptor, named=named, path=expected):
-                    return None
-                with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
-                    descriptor = -1
-                    token = handle.read().strip()
-                assert_directory_authority(leased)
-                named_after = expected.stat(follow_symlinks=False)
-                if path_is_link_like(expected) or (
-                    named_after.st_dev,
-                    named_after.st_ino,
-                ) != (opened.st_dev, opened.st_ino):
-                    return None
-            finally:
-                if descriptor >= 0:
-                    os.close(descriptor)
+            return _read_leased_credential(leased, expected)
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def _read_leased_credential(leased: DirectoryAuthority, expected: Path) -> str | None:
+    """Read one verified token while holding its parent directory authority."""
+    if path_is_link_like(expected):
+        return None
+    if os.name == "posix":
+        if leased.dir_fd is None or not hasattr(os, "O_NOFOLLOW"):
+            return None
+        descriptor = os.open(
+            "service.token", unfollowed_read_flags(), dir_fd=leased.dir_fd
+        )
+        named = os.stat("service.token", dir_fd=leased.dir_fd, follow_symlinks=False)
+    else:
+        # DELETE sharing keeps a credential read from blocking publication.
+        descriptor = open_shared_read_descriptor(expected)
+        named = expected.stat(follow_symlinks=False)
+    try:
+        opened = os.fstat(descriptor)
+        if not confirm_opened_secret(descriptor, named=named, path=expected):
+            return None
+        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+            descriptor = -1
+            token = handle.read().strip()
+        assert_directory_authority(leased)
+        named_after = expected.stat(follow_symlinks=False)
+        if path_is_link_like(expected) or (
+            named_after.st_dev,
+            named_after.st_ino,
+        ) != (opened.st_dev, opened.st_ino):
+            return None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     return token or None
 
 
@@ -203,82 +203,85 @@ def _publish_credential(path: Path, payload: bytes) -> Path:
     raise last
 
 
+def _remove_existing_credential(leased: DirectoryAuthority, destination: Path) -> None:
+    if path_is_link_like(destination):
+        raise OSError("credential destination is link-like")
+    try:
+        metadata = destination.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISREG(metadata.st_mode):
+        raise OSError("credential destination is not a regular file")
+    destination.unlink()
+    assert_directory_authority(leased)
+
+
+def _claim_credential_source(
+    leased: DirectoryAuthority, source_name: str
+) -> tuple[BinaryIO, bool]:
+    if os.name != "nt":
+        try:
+            return create_anonymous_file(leased), True
+        except OSError:
+            pass
+    return create_private_file(leased, source_name), False
+
+
+def _publish_posix_credential(
+    leased: DirectoryAuthority, handle: BinaryIO, source_name: str
+) -> None:
+    if leased.dir_fd is None:
+        raise OSError("POSIX credential authority is not leased")
+    os.link(
+        source_name,
+        "service.token",
+        src_dir_fd=leased.dir_fd,
+        dst_dir_fd=leased.dir_fd,
+        follow_symlinks=False,
+    )
+    opened = os.fstat(handle.fileno())
+    published = os.stat("service.token", dir_fd=leased.dir_fd, follow_symlinks=False)
+    if not stat.S_ISREG(published.st_mode) or (
+        published.st_dev,
+        published.st_ino,
+    ) != (opened.st_dev, opened.st_ino):
+        os.unlink("service.token", dir_fd=leased.dir_fd)
+        raise OSError("credential publication identity changed")
+    os.unlink(source_name, dir_fd=leased.dir_fd)
+
+
+def _publish_credential_source(
+    leased: DirectoryAuthority,
+    handle: BinaryIO,
+    source_name: str,
+    anonymous: bool,
+) -> None:
+    if os.name == "nt" or anonymous:
+        publish_no_replace(
+            leased, source_name, "service.token", source_fd=handle.fileno()
+        )
+        if os.name == "nt":
+            # Restrict the published name after rename to avoid sharing conflicts.
+            _restrict_windows_file(leased.path / "service.token")
+    else:
+        _publish_posix_credential(leased, handle, source_name)
+
+
 def _replace_private_credential(path: Path, payload: bytes) -> Path:
     """Replace the adjacent credential through one leased parent authority."""
     authority = resolve_directory_authority(path.parent)
-    destination_name = "service.token"
-    destination = authority.path / destination_name
+    destination = authority.path / "service.token"
     with directory_lease(authority, publication=True) as leased:
-        if path_is_link_like(destination):
-            raise OSError("credential destination is link-like")
-        try:
-            metadata = destination.stat(follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        else:
-            if not stat.S_ISREG(metadata.st_mode):
-                raise OSError("credential destination is not a regular file")
-            destination.unlink()
-            assert_directory_authority(leased)
-
-        anonymous = False
-        if os.name == "nt":
-            source_name = f".service-token-{os.getpid()}-{secrets.token_hex(16)}"
-            handle = create_private_file(leased, source_name)
-        else:
-            source_name = f".service-token-{os.getpid()}-{secrets.token_hex(16)}"
-            try:
-                handle = create_anonymous_file(leased)
-                anonymous = True
-            except OSError:
-                handle = create_private_file(leased, source_name)
+        _remove_existing_credential(leased, destination)
+        source_name = f".service-token-{os.getpid()}-{secrets.token_hex(16)}"
+        handle, anonymous = _claim_credential_source(leased, source_name)
         try:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
             if os.name == "posix":
                 os.fchmod(handle.fileno(), 0o600)
-            if os.name == "nt" or anonymous:
-                publish_no_replace(
-                    leased,
-                    source_name,
-                    destination_name,
-                    source_fd=handle.fileno(),
-                )
-                if os.name == "nt":
-                    # Restrict the PUBLISHED file, not the source.
-                    # `SetNamedSecurityInfoW` opens by NAME, and doing that to
-                    # the source between creating it and renaming it put a
-                    # second opener on the exact file the rename needs
-                    # delete-class access to - a sharing violation the publisher
-                    # then took the blame for. Deferring exposes nothing: the
-                    # credential only ever exists inside the parent authority,
-                    # which this module restricts and verifies before writing
-                    # anything into it.
-                    _restrict_windows_file(leased.path / destination_name)
-            else:
-                if leased.dir_fd is None:
-                    raise OSError("POSIX credential authority is not leased")
-                os.link(
-                    source_name,
-                    destination_name,
-                    src_dir_fd=leased.dir_fd,
-                    dst_dir_fd=leased.dir_fd,
-                    follow_symlinks=False,
-                )
-                opened = os.fstat(handle.fileno())
-                published = os.stat(
-                    destination_name,
-                    dir_fd=leased.dir_fd,
-                    follow_symlinks=False,
-                )
-                if not stat.S_ISREG(published.st_mode) or (
-                    published.st_dev,
-                    published.st_ino,
-                ) != (opened.st_dev, opened.st_ino):
-                    os.unlink(destination_name, dir_fd=leased.dir_fd)
-                    raise OSError("credential publication identity changed")
-                os.unlink(source_name, dir_fd=leased.dir_fd)
+            _publish_credential_source(leased, handle, source_name, anonymous)
         finally:
             handle.close()
             if not anonymous:
@@ -589,16 +592,19 @@ def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | N
     any missing required identity/endpoint field yields ``None`` (classified
     ``MALFORMED``) rather than a partially trusted record.
     """
-    if info.get("version") != DESKTOP_DISCOVERY_VERSION:
-        return None
-    if info.get("profile") != _DESKTOP_PROFILE:
+    if (
+        info.get("version") != DESKTOP_DISCOVERY_VERSION
+        or info.get("profile") != _DESKTOP_PROFILE
+    ):
         return None
     protocol_raw = info.get("protocol")
     process_raw = info.get("process")
     endpoint_raw = info.get("endpoint")
-    if not isinstance(protocol_raw, dict) or not isinstance(process_raw, dict):
-        return None
-    if not isinstance(endpoint_raw, dict):
+    if not (
+        isinstance(protocol_raw, dict)
+        and isinstance(process_raw, dict)
+        and isinstance(endpoint_raw, dict)
+    ):
         return None
     protocol = cast("dict[str, object]", protocol_raw)
     process = cast("dict[str, object]", process_raw)
@@ -614,22 +620,24 @@ def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | N
         or pid is None
         or port is None
         or last_heartbeat is None
+        or protocol_min > protocol_max
     ):
-        return None
-    if protocol_min > protocol_max:
         return None
     host = endpoint.get("host")
     owner = info.get("owner")
     generation = info.get("generation")
-    if not isinstance(host, str) or not host:
-        return None
-    if not isinstance(owner, str) or not isinstance(generation, str):
+    if (
+        not isinstance(host, str)
+        or not host
+        or not isinstance(owner, str)
+        or not isinstance(generation, str)
+    ):
         return None
     fingerprint = process.get("start_fingerprint")
-    if fingerprint is not None and not isinstance(fingerprint, str):
-        return None
     reference = info.get("credential_reference")
-    if reference is not None and not isinstance(reference, str):
+    if (fingerprint is not None and not isinstance(fingerprint, str)) or (
+        reference is not None and not isinstance(reference, str)
+    ):
         return None
     return DesktopDiscoveryRecord(
         version=DESKTOP_DISCOVERY_VERSION,

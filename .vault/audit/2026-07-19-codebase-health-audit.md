@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:020de786a236f4f9a1395290326aae2b6b1c9b47e99730cd6c41be7014065042'
+body_hash: 'sha256:1be7771a5f90aa21e627a3a6931a30e50b1a054e0a125dc8077716ddc341b995'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3092,3 +3092,7 @@ The structural-duplication gate found identical interrupt graph helpers in execu
 ### 2026-09-19 complete nonservice repository run
 
 A four-worker `pytest -m "not service"` run, excluding the accelerator-dependent provider harness file, completed with 4,535 passed, 1 skipped, and 2 Windows Proactor transport warnings in 375.57 seconds. No test failed. This closes the previously open unnamed broad-suite and lifecycle concurrency failures at the four-worker cadence. The skip is the acceptance proof requiring a reachable loopback authoring engine; the two warnings are unclosed transport finalizers on Windows. They remain medium-severity environment/test-cleanup findings rather than being counted as passing quality work. The strict structural, Pylint, and export gate findings and accelerator-dependent harness remain high-priority open queue items.
+
+### 2026-09-19 strict gate baseline after nonservice test recovery
+
+`just check-strict` remains red on the current pushed branch. Its current output reports 323 Ruff complexity/shape errors (137 excessive arguments, 77 complexity, 39 statements, 37 branches, 33 returns), 33 nested-block errors, 60 Pylint shape findings, and 110 unconsumed exports. All are open findings; the passing `just check-all` and 4,535 passing nonservice tests do not close this stricter gate. The queue is to refactor or justify each reported interface and structure, then rerun the complete strict recipe to zero. No thresholds were raised and no diagnostics were suppressed in this pass.

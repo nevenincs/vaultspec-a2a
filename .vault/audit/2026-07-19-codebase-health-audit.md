@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:b62b4fc1f93d6575c9a43c4aab6a085ad89db214f9f32c6d21fd79b8923a894c'
+body_hash: 'sha256:876f265f9c36c547000cf94c99a091d1f0f1f1ac991af02d484bfb8316148822'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3124,3 +3124,7 @@ The strict unconsumed-export audit reported 110 published names with no consumer
 ### 2026-09-19 unconsumed export zero review pass
 
 The remaining 95 unconsumed published names were reviewed against repository imports. They were symbols retained for their owning modules or directly importable by name, but had no repository consumer of their `__all__` publication; no wildcard import of these modules exists. Their unused `__all__` entries were removed without changing the symbol definitions or direct imports. The former sole `database.admin.main` list was removed because the command entry point is invoked directly. The export audit now reports zero findings across 1,110 published names, and `just check-all` passes. This closes the low-severity export-surface queue. A downstream wildcard importer would see a narrower set; explicit imports remain available. The 323 Ruff structure errors, 33 nested-block errors, and Pylint shape findings remain open; `just check-strict` is still red.
+
+### 2026-09-19 strict argument shape review pass
+
+The strict Ruff pass found a low-severity excessive-argument issue in the deterministic completion review-bundle helper: six pieces of one run-bound evidence record crossed its call boundary separately. They now travel as a frozen typed `_ReviewBundleInput`, with the same fields and one unchanged call site. The focused Ruff shape and format checks and Ty pass; the acceptance test itself still requires its declared live engine and durable evidence directory. The strict Ruff structure count falls from 323 to 322. The remaining 322 structure errors, 33 nested-block errors, and Pylint shape findings remain open.

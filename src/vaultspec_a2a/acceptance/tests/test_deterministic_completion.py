@@ -20,6 +20,7 @@ import json
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -109,17 +110,24 @@ def _bundle_root() -> Path:
     return root
 
 
-def _emit_review_bundle(
-    *,
-    bundle_root: Path,
-    scenario: dict[str, object],
-    run_id: str,
-    authored_output: str,
-    materialized: dict[str, Path],
-    status: dict[str, Any],
-    history: dict[str, Any],
-) -> Path:
+@dataclass(frozen=True, slots=True)
+class _ReviewBundleInput:
+    scenario: dict[str, object]
+    run_id: str
+    authored_output: str
+    materialized: dict[str, Path]
+    status: dict[str, Any]
+    history: dict[str, Any]
+
+
+def _emit_review_bundle(bundle_root: Path, evidence: _ReviewBundleInput) -> Path:
     """Write and self-verify the automated evidence awaiting separate review."""
+    scenario = evidence.scenario
+    run_id = evidence.run_id
+    authored_output = evidence.authored_output
+    materialized = evidence.materialized
+    status = evidence.status
+    history = evidence.history
     scenario_id = str(scenario["scenario_id"])
     bundle = bundle_root / scenario_id / run_id
     bundle.mkdir(parents=True, exist_ok=False)
@@ -345,12 +353,14 @@ async def test_deterministic_completion_emits_a_run_bound_review_bundle(
     )
 
     bundle = _emit_review_bundle(
-        bundle_root=_bundle_root(),
-        scenario=scenario,
-        run_id=run_id,
-        authored_output=content,
-        materialized=materialized,
-        status=terminal,
-        history=history,
+        _bundle_root(),
+        _ReviewBundleInput(
+            scenario=scenario,
+            run_id=run_id,
+            authored_output=content,
+            materialized=materialized,
+            status=terminal,
+            history=history,
+        ),
     )
     assert bundle.is_dir(), f"review bundle was not emitted: {bundle}"

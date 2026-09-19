@@ -9,6 +9,7 @@ the worker's synchronous dispatch-ID admission boundary.
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -24,9 +25,11 @@ from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...api.tests.clarification_harness import new_state_graph
+from ...control import cancel_service
 from ...control.accepted_input import freeze_accepted_input
 from ...control.cancel_service import CancelResult, cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -462,6 +465,50 @@ async def test_competing_same_key_messages_conflict_and_dispatch_once(
             FailureType.CONFLICT,
         }
         assert first.action_id == second.action_id
+        assert len(worker_app.state.dispatch_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_retries_sqlite_lock_before_claim(
+    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thread_id = "locked-cancel-thread"
+    await _running_thread(session_factory, thread_id)
+    original_claim = cancel_service.prepare_control_action_claim
+    attempts = 0
+
+    async def locked_once(*args: Any, **kwargs: Any) -> Any:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OperationalError(
+                "INSERT INTO control_actions",
+                {},
+                sqlite3.OperationalError("database is locked"),
+            )
+        return await original_claim(*args, **kwargs)
+
+    monkeypatch.setattr(cancel_service, "prepare_control_action_claim", locked_once)
+    async with _worker_runtime(tmp_path / "locked-cancel-checkpoints.db") as (
+        worker_client,
+        worker_app,
+        _bridge,
+        _checkpointer,
+    ):
+        async with session_factory() as db:
+            result = await cancel_thread(
+                db,
+                thread_id=thread_id,
+                idempotency_key=None,
+                circuit_breaker=_circuit_breaker(),
+                worker_spawner=_spawner(),
+                worker_client=worker_client,
+                recursion_limit=25,
+            )
+        assert result.accepted
+        assert attempts == 2
         assert len(worker_app.state.dispatch_ids) == 1
 
 

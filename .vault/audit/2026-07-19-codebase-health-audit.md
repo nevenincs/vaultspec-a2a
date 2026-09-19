@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:5a721e290c51afaa67116eba1938564f1981c617ccf57db3a2a6058b95afce94'
+body_hash: 'sha256:81f0c91f0b0b3ecfb123982b95df6ec475e77dab590e4561d062033838502683'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3108,3 +3108,7 @@ A four-worker `pytest -m "not service"` run, excluding the accelerator-dependent
 ### 2026-09-19 production import closure review pass
 
 The service rerun resolved the permission conflict test but found a second high-severity Compose defect: the worker image crashed at import because `control.worker_management` imports `psutil` while the production dependency set declared it only in the tooling group. `psutil` is now a direct base dependency, the tooling duplicate and its DEP004 exception are removed, and the lockfile is updated. The complete Compose regression module passes all 17 tests, including gateway and worker health. `just check-all` and a full service rerun remain required before closing the gate. The strict structural, Pylint, and export queue remains open.
+
+### 2026-09-19 cancellation lock collision review pass
+
+The next full service run passed the Compose and permission cases but surfaced one medium-severity concurrency defect: a running thread's cancel request returned HTTP 500 when its SQLite control-action insert collided with a concurrent event write (`sqlite3.OperationalError: database is locked`). The cancel service now rolls back and retries only this specific SQLite lock error at the pre-dispatch claim boundary, with four bounded retries and a fresh durable authority read each time. A direct control lease test injects the collision once and proves one worker dispatch; the focused live cancel test and the direct lease package pass. Review found the retry boundary precedes the accepted action and external dispatch, so the failed attempt cannot duplicate worker work. It also found low-severity module documentation drift: the header denied commits although this service commits durable transitions; the header now states the actual contract. The complete service rerun and strict findings remain open until their gates finish.

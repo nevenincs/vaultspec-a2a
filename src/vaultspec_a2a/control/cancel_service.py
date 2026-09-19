@@ -2,15 +2,19 @@
 
 Owns the full cancel workflow: thread validation, idempotency dedup,
 control-action creation, repair-state transition, and dispatch.
-Does NOT commit, raise HTTPException, or touch FastAPI request state.
+Commits durable transitions; does not raise HTTPException or touch FastAPI state.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+
+from sqlalchemy.exc import OperationalError
 
 from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
@@ -149,6 +153,7 @@ async def cancel_thread(
     worker_client: httpx.AsyncClient,
     recursion_limit: int,
     trace_headers: dict[str, str] | None = None,
+    _busy_retries: int = 0,
 ) -> CancelResult:
     """Execute the cancel-thread workflow.
 
@@ -218,15 +223,36 @@ async def cancel_thread(
         thread_id=thread_id,
         recursion_limit=recursion_limit,
     )
-    claim = await prepare_control_action_claim(
-        db,
-        thread_id=thread_id,
-        action_type=ControlActionType.CANCEL,
-        idempotency_key=resolved_idempotency_key,
-        payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
-        dispatch_id=dispatch.dispatch_id,
-        recovery_deadline_at=owning_action.recovery_deadline_at,
-    )
+    try:
+        claim = await prepare_control_action_claim(
+            db,
+            thread_id=thread_id,
+            action_type=ControlActionType.CANCEL,
+            idempotency_key=resolved_idempotency_key,
+            payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
+            dispatch_id=dispatch.dispatch_id,
+            recovery_deadline_at=owning_action.recovery_deadline_at,
+        )
+    except OperationalError as exc:
+        if (
+            not isinstance(exc.orig, sqlite3.OperationalError)
+            or "locked" not in str(exc.orig).lower()
+            or _busy_retries >= 4
+        ):
+            raise
+        await db.rollback()
+        await asyncio.sleep(0.02 * (_busy_retries + 1))
+        return await cancel_thread(
+            db,
+            thread_id=thread_id,
+            idempotency_key=idempotency_key,
+            circuit_breaker=circuit_breaker,
+            worker_spawner=worker_spawner,
+            worker_client=worker_client,
+            recursion_limit=recursion_limit,
+            trace_headers=trace_headers,
+            _busy_retries=_busy_retries + 1,
+        )
     if not claim.payload_matches:
         return CancelResult(
             action_id=claim.action_id,

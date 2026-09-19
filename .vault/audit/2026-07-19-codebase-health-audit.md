@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:e855b479ebea933868cd0a48a5cfa6b706a3a17f17e7ef98f961de8d3a5ed533'
+body_hash: 'sha256:abd9dc2e34fa23803f84ea5ec27c98ef6028d7ee7105426795b9e47759ed31c7'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3064,3 +3064,9 @@ Remaining queue: the full repository suite is not yet green. A broad parallel ru
 Review of the worker changes confirms that dispatch ID concurrency tests now send graph definitions and matching action receipts with model selections for their actual mock role; held-checkpoint tests reuse an accepted ingest fixture; graph-input projection tests supply a frozen program; receiptless rejection tests assert the current warning and do not invent terminal settlement. Focused dispatch ID, held-checkpoint, graph-input, and receiptless tests pass. These were medium-severity test contract drift issues, resolved here.
 
 Open review findings: nine `worker/tests/test_executor.py` tests still fail in settle ordering and pre-run refusal coverage. The settle fixtures use synthetic preset and cache digests without accepted graph definitions, while refusal fixtures still expect terminal evidence from receiptless dispatches. This is high-severity test contract drift because the suite cannot verify terminal behavior until those requests carry valid authority. The full nonservice suite remains open; a timed broad run was interrupted after the worker cluster. The strict gate findings remain open as recorded above.
+
+### 2026-09-19 worker resume and executor review pass
+
+The executor file passed all 59 tests after accepted graph receipts and exact cache digests were supplied to settle and refusal fixtures. Review found a high-severity production bug: a resume with no durable checkpoint could compile a new graph and continue. The worker graph lifecycle now reads checkpoint authority on every resume and returns the existing missing-graph refusal when absent; a normal gated resume and the no-checkpoint refusal both pass. This is a behavior fix, not only a fixture update. The full worker package then reported 139 passing and four failing actor-token lifecycle tests.
+
+Open queue: convert the four actor-token lifecycle tests from synthetic preset/cache digests and receiptless graph dispatches to accepted graph authority, then rerun the worker package and broad nonservice suite. Review risk: the extra checkpoint read on resume may increase read latency; preserve the existing deadline and verify checkpoint lock/capacity tests in the package rerun. The strict gate and accelerator-dependent harness findings remain open.

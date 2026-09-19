@@ -96,13 +96,19 @@ def _artifact_label_from_tool_input(file_path: str) -> str:
     return PurePath(normalized).name or "artifact"
 
 
+@dataclass(frozen=True, slots=True)
+class _ToolEmission:
+    thread_id: str
+    agent_id: str
+    tool_call_id: str
+    node: str | None
+    emitters: EventEmitters
+
+
 async def _emit_completed_action(
-    thread_id: str,
-    agent_id: str,
-    tool_call_id: str,
+    emission: _ToolEmission,
     item_type: str,
     detail: dict[str, Any],
-    emitters: EventEmitters,
 ) -> None:
     """Register and immediately resolve a Codex one-shot completed-action item.
 
@@ -116,17 +122,17 @@ async def _emit_completed_action(
     """
     status = map_action_item_status(detail.get("status"))
     content, locations = action_detail_projection(item_type, detail)
-    await emitters.emit_tool_call_start(
-        thread_id=thread_id,
-        agent_id=agent_id,
-        tool_call_id=tool_call_id,
+    await emission.emitters.emit_tool_call_start(
+        thread_id=emission.thread_id,
+        agent_id=emission.agent_id,
+        tool_call_id=emission.tool_call_id,
         title=item_type,
         kind=classify_tool_kind(item_type),
     )
-    await emitters.emit_tool_call_update(
-        thread_id=thread_id,
-        agent_id=agent_id,
-        tool_call_id=tool_call_id,
+    await emission.emitters.emit_tool_call_update(
+        thread_id=emission.thread_id,
+        agent_id=emission.agent_id,
+        tool_call_id=emission.tool_call_id,
         status=status,
         content=content,
         locations=locations,
@@ -166,7 +172,9 @@ async def _translate_tool_call_chunks(
             # Codex's completed-action shape: a single self-contained
             # terminal report, not a plain registration.
             await _emit_completed_action(
-                thread_id, effective_agent_id, tc_id, name, detail, emitters
+                _ToolEmission(thread_id, effective_agent_id, tc_id, None, emitters),
+                name,
+                detail,
             )
             continue
         if tc_id in known:
@@ -290,37 +298,65 @@ async def _translate_chat_model_end(
 
 async def _translate_tool_start(
     event_data: dict[str, Any],
-    thread_id: str,
-    effective_agent_id: str,
-    run_id: str,
-    node: str | None,
-    emitters: EventEmitters,
+    emission: _ToolEmission,
 ) -> None:
-    if node:
+    if emission.node:
         tool_name = event_data.get("name", "unknown_tool")
         tool_input: object = _data_field(event_data).get("input")
         input_args = (
             cast("dict[str, Any]", tool_input) if isinstance(tool_input, dict) else None
         )
-        await emitters.emit_tool_call_start(
-            thread_id=thread_id,
-            agent_id=effective_agent_id,
-            tool_call_id=run_id,
+        await emission.emitters.emit_tool_call_start(
+            thread_id=emission.thread_id,
+            agent_id=emission.agent_id,
+            tool_call_id=emission.tool_call_id,
             title=tool_name,
             kind=classify_tool_kind(tool_name),
             input_args=input_args,
         )
 
 
+async def _emit_tool_artifact(
+    event_data: dict[str, Any],
+    emission: _ToolEmission,
+    tool_name: str,
+    output: object,
+) -> None:
+    """Project a completed file tool's path into its artifact update."""
+    file_tool_keywords = {"write", "edit", "create", "save", "move", "rename", "delete"}
+    if not any(keyword in tool_name.lower() for keyword in file_tool_keywords):
+        return
+    output_str = ""
+    output_content_attr = getattr(output, "content", None)
+    if output_content_attr is not None:
+        output_str = str(output_content_attr)
+    elif isinstance(output, str):
+        output_str = output
+    tool_input_end: object = _data_field(event_data).get("input", {})
+    file_path = ""
+    if isinstance(tool_input_end, dict):
+        tool_input_map = cast("dict[str, object]", tool_input_end)
+        file_path = (
+            _text_field(tool_input_map, "file_path")
+            or _text_field(tool_input_map, "path")
+            or _text_field(tool_input_map, "filename")
+        )
+    if not file_path:
+        return
+    filename = _artifact_label_from_tool_input(file_path)
+    await emission.emitters.emit_artifact_update(
+        thread_id=emission.thread_id,
+        artifact_id=f"{emission.tool_call_id}:{filename}",
+        filename=filename,
+        content=output_str[:500] if output_str else f"[{tool_name}] {filename}",
+    )
+
+
 async def _translate_tool_end(
     event_data: dict[str, Any],
-    thread_id: str,
-    effective_agent_id: str,
-    run_id: str,
-    node: str | None,
-    emitters: EventEmitters,
+    emission: _ToolEmission,
 ) -> None:
-    if node:
+    if emission.node:
         tool_name = event_data.get("name", "")
         output: object = _data_field(event_data).get("output")
         output_content: list[dict[str, str | None]] | None = None
@@ -338,74 +374,36 @@ async def _translate_tool_end(
                 if len(output_str) > max_len:
                     output_str = output_str[:max_len] + "..."
                 output_content = [{"content_type": "text", "text": output_str}]
-        await emitters.emit_tool_call_update(
-            thread_id=thread_id,
-            agent_id=effective_agent_id,
-            tool_call_id=run_id,
+        await emission.emitters.emit_tool_call_update(
+            thread_id=emission.thread_id,
+            agent_id=emission.agent_id,
+            tool_call_id=emission.tool_call_id,
             status=ToolCallStatus.COMPLETED,
             content=output_content,
         )
-        _file_tool_keywords = {
-            "write",
-            "edit",
-            "create",
-            "save",
-            "move",
-            "rename",
-            "delete",
-        }
-        if any(kw in tool_name.lower() for kw in _file_tool_keywords):
-            output_str = ""
-            file_path = ""
-            output_content_attr = getattr(output, "content", None)
-            if output_content_attr is not None:
-                output_str = str(output_content_attr)
-            elif isinstance(output, str):
-                output_str = output
-            tool_input_end: object = _data_field(event_data).get("input", {})
-            if isinstance(tool_input_end, dict):
-                tool_input_map = cast("dict[str, object]", tool_input_end)
-                file_path = (
-                    _text_field(tool_input_map, "file_path")
-                    or _text_field(tool_input_map, "path")
-                    or _text_field(tool_input_map, "filename")
-                )
-            if file_path:
-                filename = _artifact_label_from_tool_input(file_path)
-                await emitters.emit_artifact_update(
-                    thread_id=thread_id,
-                    artifact_id=f"{run_id}:{filename}",
-                    filename=filename,
-                    content=output_str[:500]
-                    if output_str
-                    else f"[{tool_name}] {filename}",
-                )
+        await _emit_tool_artifact(event_data, emission, tool_name, output)
 
 
 async def _translate_tool_error(
     event_data: dict[str, Any],
-    thread_id: str,
-    effective_agent_id: str,
-    run_id: str,
-    node: str | None,
-    emitters: EventEmitters,
+    emission: _ToolEmission,
 ) -> None:
-    if node:
+    if emission.node:
         error_data = event_data.get("data", {})
         error_msg = str(error_data.get("error", "Tool call failed"))
         logger.warning(
             "Tool error in thread %s node %s: %s",
-            thread_id,
-            node,
+            emission.thread_id,
+            emission.node,
             error_msg,
         )
         error_content: list[dict[str, str | None]] | None = (
             [{"content_type": "text", "text": error_msg}] if error_msg else None
         )
-        await emitters.emit_tool_call_update(
-            thread_id=thread_id,
-            agent_id=effective_agent_id,
-            tool_call_id=run_id,
+        await emission.emitters.emit_tool_call_update(
+            thread_id=emission.thread_id,
+            agent_id=emission.agent_id,
+            tool_call_id=emission.tool_call_id,
             status=ToolCallStatus.FAILED,
             content=error_content,
         )
@@ -527,19 +525,29 @@ async def _emit_chain_artifacts(
             )
 
 
+@dataclass(frozen=True, slots=True)
+class EventProjectionServices:
+    """The stable emitter, buffer, and telemetry dependencies for one stream."""
+
+    emitters: EventEmitters
+    buffering: BufferingManager
+    telemetry: TelemetryHook | NullTelemetryHook
+
+
 async def process_langgraph_event(
     event_data: dict[str, Any],
     thread_id: str,
     agent_id: str,
-    emitters: EventEmitters,
-    buffering: BufferingManager,
-    telemetry: TelemetryHook | NullTelemetryHook,
+    services: EventProjectionServices,
 ) -> None:
     """Transform a LangGraph astream_events callback into wire events.
 
     Filters events using ``langgraph_node`` metadata to eliminate
     ~60% of noisy sub-runnable events (research §1.2).
     """
+    emitters = services.emitters
+    buffering = services.buffering
+    telemetry = services.telemetry
     event_kind = event_data.get("event", "")
     run_id = event_data.get("run_id", str(uuid4()))
     metadata = event_data.get("metadata", {})
@@ -560,19 +568,16 @@ async def process_langgraph_event(
         await _translate_chat_model_end(event_data, projection)
         return
     if event_kind == "on_tool_start":
-        await _translate_tool_start(
-            event_data, thread_id, effective_agent_id, run_id, node, emitters
-        )
+        emission = _ToolEmission(thread_id, effective_agent_id, run_id, node, emitters)
+        await _translate_tool_start(event_data, emission)
         return
     if event_kind == "on_tool_end":
-        await _translate_tool_end(
-            event_data, thread_id, effective_agent_id, run_id, node, emitters
-        )
+        emission = _ToolEmission(thread_id, effective_agent_id, run_id, node, emitters)
+        await _translate_tool_end(event_data, emission)
         return
     if event_kind == "on_tool_error":
-        await _translate_tool_error(
-            event_data, thread_id, effective_agent_id, run_id, node, emitters
-        )
+        emission = _ToolEmission(thread_id, effective_agent_id, run_id, node, emitters)
+        await _translate_tool_error(event_data, emission)
         return
     if event_kind == "on_custom_event":
         await _translate_custom_event(
@@ -583,7 +588,6 @@ async def process_langgraph_event(
         await _translate_node_boundary(
             event_data, thread_id, effective_agent_id, node, emitters
         )
-        return
 
     # --- Everything else is filtered out (research §1.2) ---
     if event_kind not in PASSTHROUGH_EVENTS | NODE_BOUNDARY_EVENTS:

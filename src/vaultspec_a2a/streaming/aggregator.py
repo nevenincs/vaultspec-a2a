@@ -316,15 +316,15 @@ class EventAggregator:
         thread_id: str,
         agent_id: str,
     ) -> None:
-        from .transformer import process_langgraph_event
+        from .transformer import EventProjectionServices, process_langgraph_event
 
         await process_langgraph_event(
             event_data=event_data,
             thread_id=thread_id,
             agent_id=agent_id,
-            emitters=self._emitters,
-            buffering=self._buffering,
-            telemetry=self._telemetry,
+            services=EventProjectionServices(
+                self._emitters, self._buffering, self._telemetry
+            ),
         )
 
     # -- Ingest (delegates to ingest manager) ---------------------------

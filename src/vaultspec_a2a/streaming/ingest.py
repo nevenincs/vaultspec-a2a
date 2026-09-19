@@ -24,6 +24,7 @@ from ..thread.errors import describe_exception_chain
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .transformer import (
+    EventProjectionServices,
     GraphInterrupt,
     GraphRecursionError,
     emit_interrupt_events,
@@ -297,6 +298,9 @@ class IngestManager:
                     config,
                     version="v2",
                 ).__aiter__()
+                services = EventProjectionServices(
+                    self._emitters, self._buffering, self._telemetry
+                )
                 while True:
                     try:
                         raw_event = await asyncio.wait_for(
@@ -337,9 +341,7 @@ class IngestManager:
                         event_data=raw_event,
                         thread_id=thread_id,
                         agent_id=agent_id,
-                        emitters=self._emitters,
-                        buffering=self._buffering,
-                        telemetry=self._telemetry,
+                        services=services,
                     )
             except BaseException as exc:
                 _is_interrupt = (

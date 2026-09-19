@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:3b420053bb4a9302f15965855653e9e6b290665db2d2ec1a3b50dc9706bedc2a'
+body_hash: 'sha256:be5c0dabb99257d13028ac7361d3ee40dcc37eb00177460a71f9fb92818695e6'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3154,3 +3154,7 @@ Strict typing also exposed one low-severity test import-boundary finding from th
 ### 2026-09-20 Codex catalog structure review pass
 
 The Codex catalog discovery module had five medium-severity strict Ruff structure findings and one complexipy finding across its control construction, RPC exchange, pagination, and normalization paths. Native-control fields now travel as a typed specification; process, timeout, and output budget are bound in one RPC session; pagination returns ordered pages with the next request id; and a typed catalog builder owns model/control accumulation. Review checked that page and control ceilings, duplicate-model and cursor rejection, request-id order, shared output budget, and process cleanup retain their prior behavior. All 13 catalog tests pass, including the service-marked real process and failure cases. `just check-all`, `just check-type-strict`, and the module complexipy check pass. Strict Ruff structure falls from 313 to 308. The public discovery function still has one excessive-argument finding; changing its published call contract needs a separate decision. The remaining 308 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 streaming transformer structure review pass
+
+The streaming transformer had seven medium-severity Ruff structure findings in tool-event projection and its event entry point: five excessive-argument signatures, one complex tool completion path, and one excessive-return path. Tool-event identity and emitters now travel as one typed emission context; stable stream services travel as one typed dependency context; file artifact projection has a focused helper; and the redundant node-boundary return is removed. Review checked that tool start, end, error, completed-action, and artifact updates preserve their IDs, ordering, status, payload limits, and node filtering. The 81 focused streaming and aggregator tests pass; `just check-all`, `just check-type-strict`, and focused Ruff pass. Strict Ruff structure falls from 308 to 301. No new review findings were surfaced. The remaining 301 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.

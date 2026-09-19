@@ -99,10 +99,8 @@ def _loc_to_wire(loc: dict[str, str | int | None]) -> ToolCallLocation:
     )
 
 
-def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
-    """Map a domain event + sequence number to a wire-protocol event."""
-    ts = _ts(event.timestamp)
-
+def _message_to_wire(event: DomainEvent, sequence: int, ts: datetime) -> ServerEvent:
+    """Map message domain events to their wire variants."""
     match event:
         case MessageChunk():
             return MessageChunkEvent(
@@ -125,46 +123,62 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
                 message_id=event.message_id,
             )
 
-        case ToolCallStart():
-            content: list[ToolCallContent] = [
-                w for c in event.content if (w := _content_to_wire(c)) is not None
-            ]
-            locations = [_loc_to_wire(loc) for loc in event.locations]
-            return ToolCallStartEvent(
-                thread_id=event.thread_id,
-                agent_id=event.agent_id,
-                sequence=sequence,
-                timestamp=ts,
-                tool_call_id=event.tool_call_id,
-                title=event.title,
-                kind=event.kind,
-                status=event.status,
-                content=content,
-                locations=locations,
-            )
+        case _:
+            msg = f"Unmapped domain event type: {type(event).__name__}"
+            raise TypeError(msg)
 
-        case ToolCallUpdate():
-            upd_content: list[ToolCallContent] | None = None
-            if event.content is not None:
-                upd_content = [
-                    w for c in event.content if (w := _content_to_wire(c)) is not None
-                ]
-            upd_locations = None
-            if event.locations is not None:
-                upd_locations = [_loc_to_wire(loc) for loc in event.locations]
-            return ToolCallUpdateEvent(
-                thread_id=event.thread_id,
-                agent_id=event.agent_id,
-                sequence=sequence,
-                timestamp=ts,
-                tool_call_id=event.tool_call_id,
-                title=event.title,
-                kind=event.kind,
-                status=event.status,
-                content=upd_content,
-                locations=upd_locations,
-            )
 
+def _tool_start_to_wire(
+    event: ToolCallStart, sequence: int, ts: datetime
+) -> ServerEvent:
+    """Map a tool-call start into its wire variant."""
+    content: list[ToolCallContent] = [
+        w for c in event.content if (w := _content_to_wire(c)) is not None
+    ]
+    locations = [_loc_to_wire(loc) for loc in event.locations]
+    return ToolCallStartEvent(
+        thread_id=event.thread_id,
+        agent_id=event.agent_id,
+        sequence=sequence,
+        timestamp=ts,
+        tool_call_id=event.tool_call_id,
+        title=event.title,
+        kind=event.kind,
+        status=event.status,
+        content=content,
+        locations=locations,
+    )
+
+
+def _tool_update_to_wire(
+    event: ToolCallUpdate, sequence: int, ts: datetime
+) -> ServerEvent:
+    """Map a tool-call update into its wire variant."""
+    upd_content: list[ToolCallContent] | None = None
+    if event.content is not None:
+        upd_content = [
+            w for c in event.content if (w := _content_to_wire(c)) is not None
+        ]
+    upd_locations = None
+    if event.locations is not None:
+        upd_locations = [_loc_to_wire(loc) for loc in event.locations]
+    return ToolCallUpdateEvent(
+        thread_id=event.thread_id,
+        agent_id=event.agent_id,
+        sequence=sequence,
+        timestamp=ts,
+        tool_call_id=event.tool_call_id,
+        title=event.title,
+        kind=event.kind,
+        status=event.status,
+        content=upd_content,
+        locations=upd_locations,
+    )
+
+
+def _control_to_wire(event: DomainEvent, sequence: int, ts: datetime) -> ServerEvent:
+    """Map control domain events to their wire variants."""
+    match event:
         case PermissionRequest():
             options = [
                 PermissionOption(
@@ -216,6 +230,14 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
                 entries=entries,
             )
 
+        case _:
+            msg = f"Unmapped domain event type: {type(event).__name__}"
+            raise TypeError(msg)
+
+
+def _state_to_wire(event: DomainEvent, sequence: int, ts: datetime) -> ServerEvent:
+    """Map state domain events to their wire variants."""
+    match event:
         case ArtifactUpdate():
             return ArtifactUpdateEvent(
                 thread_id=event.thread_id,
@@ -276,6 +298,20 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
         case _:
             msg = f"Unmapped domain event type: {type(event).__name__}"
             raise TypeError(msg)
+
+
+def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
+    """Map a domain event + sequence number to a wire-protocol event."""
+    ts = _ts(event.timestamp)
+    if isinstance(event, (MessageChunk, ThoughtChunk)):
+        return _message_to_wire(event, sequence, ts)
+    if isinstance(event, ToolCallStart):
+        return _tool_start_to_wire(event, sequence, ts)
+    if isinstance(event, ToolCallUpdate):
+        return _tool_update_to_wire(event, sequence, ts)
+    if isinstance(event, (PermissionRequest, ClarificationPending, PlanUpdate)):
+        return _control_to_wire(event, sequence, ts)
+    return _state_to_wire(event, sequence, ts)
 
 
 def sequenced_to_wire(sequenced: SequencedEvent) -> ServerEvent:

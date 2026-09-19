@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:be5c0dabb99257d13028ac7361d3ee40dcc37eb00177460a71f9fb92818695e6'
+body_hash: 'sha256:41daf4f676694a7c30ff86cff25264e4d2e8857500cb487de128fa127b730537'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3158,3 +3158,7 @@ The Codex catalog discovery module had five medium-severity strict Ruff structur
 ### 2026-09-20 streaming transformer structure review pass
 
 The streaming transformer had seven medium-severity Ruff structure findings in tool-event projection and its event entry point: five excessive-argument signatures, one complex tool completion path, and one excessive-return path. Tool-event identity and emitters now travel as one typed emission context; stable stream services travel as one typed dependency context; file artifact projection has a focused helper; and the redundant node-boundary return is removed. Review checked that tool start, end, error, completed-action, and artifact updates preserve their IDs, ordering, status, payload limits, and node filtering. The 81 focused streaming and aggregator tests pass; `just check-all`, `just check-type-strict`, and focused Ruff pass. Strict Ruff structure falls from 308 to 301. No new review findings were surfaced. The remaining 301 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 event adapter structure review pass
+
+The domain-to-wire adapter had three medium-severity strict structure findings from an eleven-case conversion function. The message, tool-start, tool-update, control, and state mappings now live in focused functions, with one dispatcher preserving the same event classes, field conversion, sequence, and timestamp. Review found no dropped event case or changed fallback error. Five focused API tests, `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 301 to 298. No new review findings were surfaced. The remaining 298 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.

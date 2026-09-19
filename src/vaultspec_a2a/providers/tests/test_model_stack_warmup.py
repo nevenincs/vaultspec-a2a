@@ -124,6 +124,14 @@ def blocked_loop_control(
     return _probe("on-loop", tmp_path_factory.mktemp("warmup-control"))
 
 
+@pytest.fixture(scope="module")
+def cold_compile_probe(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, Any]:
+    """One immutable cold compile report shared by its independent assertions."""
+    return _probe("compile", tmp_path_factory.mktemp("warmup-compile"))
+
+
 def test_importing_the_model_stack_on_the_loop_blocks_it(
     blocked_loop_control: dict[str, Any],
 ) -> None:
@@ -155,7 +163,7 @@ def test_warm_model_imports_offloads_the_cost_off_the_loop(
 
 
 def test_compiling_a_graph_keeps_the_loop_serving(
-    blocked_loop_control: dict[str, Any], tmp_path: Path
+    blocked_loop_control: dict[str, Any], cold_compile_probe: dict[str, Any]
 ) -> None:
     """The production compile seam pays the import without stalling the loop.
 
@@ -164,7 +172,7 @@ def test_compiling_a_graph_keeps_the_loop_serving(
     and no network, and still pays the identical cost: ``create`` imports the
     model stack before it branches on the requested provider.
     """
-    compiled = _probe("compile", tmp_path)
+    compiled = cold_compile_probe
 
     assert compiled["max_loop_gap_seconds"] < _RESPONSIVE_LOOP_CEILING_SECONDS, (
         "compiling a graph stalled the worker's event loop; the model stack is "
@@ -175,7 +183,9 @@ def test_compiling_a_graph_keeps_the_loop_serving(
     ), f"compile is no better than importing on the loop: {compiled}"
 
 
-def test_compile_probe_reports_distinct_teardown_windows(tmp_path: Path) -> None:
+def test_compile_probe_reports_distinct_teardown_windows(
+    cold_compile_probe: dict[str, Any],
+) -> None:
     """Compile cleanup phases have independent, internally bounded samples.
 
     This discriminator establishes the measurement boundary. The serving
@@ -183,7 +193,7 @@ def test_compile_probe_reports_distinct_teardown_windows(tmp_path: Path) -> None
     qualification; an intermittent bridge-close violation must remain visible
     there without invalidating the compile-only sample.
     """
-    compiled = _probe("compile", tmp_path)
+    compiled = cold_compile_probe
 
     for duration_field, gap_field in _TEARDOWN_PHASE_FIELDS:
         assert duration_field in compiled, (

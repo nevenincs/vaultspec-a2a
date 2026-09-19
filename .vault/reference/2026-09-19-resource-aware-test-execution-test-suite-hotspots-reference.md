@@ -5,7 +5,7 @@ tags:
 date: '2026-09-19'
 modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:9414c02f60d19745d4a75076bcc45dd6e5dc5e59272fa640f52fe3e6ce7745af'
+body_hash: 'sha256:f85e58d162cccbdd2cc1f606cc214aa0e20fbda5b7ce9c988b4106e3096ec88a'
 related:
   - "[[2026-08-02-resource-aware-test-execution-adr]]"
 ---
@@ -158,3 +158,19 @@ serialized dynamic range only for contiguous multi-port proofs, and passes 39
 tests under four workers. The third failure is a desktop run-admission readiness
 race retained in the audit queue. An unrelated concurrent worktree edit to the
 Codex catalog was not changed or attributed to this pass.
+
+## Model and CLI hotspot optimization — 2026-09-20
+
+The model-stack module contained two consumers of the same cold compile report,
+but each paid for a fresh interpreter and graph compilation. A module-scoped
+fixture now supplies one read-only report to both assertions. The five-process,
+five-trial loaded proof remains uncached. The isolated module measured 52.71s
+before the change and 46.52-48.48s afterward; its remaining 35-37s is the
+intentional loaded campaign rather than duplicate setup.
+
+The 26.25s CLI failed-start hotspot was an injected `ready_timeout=25.0`, not
+slow tree reaping. The test still occupies a real loopback port, launches the
+detached service, waits for failure, fells the process tree, and proves that no
+live resident was published, but now uses a three-second deadline. Two focused
+runs completed in 3.18s and 5.31s, retaining a small variable tree-cleanup tail
+without idling for the production startup budget.

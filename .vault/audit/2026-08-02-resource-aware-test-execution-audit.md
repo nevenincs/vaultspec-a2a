@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-19'
 body_schema: 'body-v1'
-body_hash: 'sha256:10ffceacf397993ca27c74b878933c7213e9bf0ca49e35f83626a4bd98c97f6d'
+body_hash: 'sha256:eb7b0c18eb7634dbef4dbe5ba394b425c24abe3ab8384f300acda93358692251'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -404,6 +404,37 @@ skip, and three failures: the two manager port failures fixed after that run and
 the queued desktop race. An unrelated concurrent edit to `providers/codex_catalog.py`
 was present in the worktree and is excluded from this pass.
 
+### model-stack-identical-cold-probe-duplication | low | resolved
+
+Type: fixture lifecycle and cache opportunity. Two assertions in the model-stack
+warmup module launched identical isolated interpreters and performed the same
+cold graph compile even though both consumed a read-only report from the same
+measurement boundary. A module-scoped fixture now creates that immutable report
+once; the separate five-trial loaded campaign remains unchanged because its
+repetition and CPU contention are the behavior under proof. The isolated module
+improved from 52.71s to 46.52-48.48s across post-change runs. Status: resolved.
+
+### cli-failed-start-test-used-production-readiness-budget | low | resolved
+
+Type: process handling and idle time. The real detached-process failure proof
+held the requested TCP port and then passed a 25-second readiness deadline. The
+occupied port makes readiness impossible, so the test spent nearly all of its
+26.25s hotspot duration waiting for a production-sized budget before exercising
+the tree-kill path. It now retains the real socket, detached process, timeout,
+tree kill, and no-live-resident assertion with a three-second test deadline.
+Repeated focused calls completed in 3.18s and 5.31s. Status: resolved.
+
+### model-and-cli-hotspot-review-2026-09-20 | low | PASS
+
+Review result: PASS for the scoped test-only changes. The compile cache shares
+only an immutable subprocess report between independent assertions and does not
+reduce the five cold trials under load. The CLI proof still launches and fells a
+real detached tree on an unavailable port; only its explicitly injected test
+deadline changed. No production timeout or process semantics changed. Ruff, ty,
+BasedPyright, the five-test model-stack module, repeated CLI failure calls, and
+the complete service-verb module pass. The high-severity desktop readiness and
+permission-response races remain separately queued.
+
 ## Recommendations
 
 - Migrate the outlying live suites (CLI live tests, authoring discovery retry
@@ -429,3 +460,5 @@ was present in the worktree and is excluded from this pass.
   stale writer witness, then retain a deterministic two-caller barrier test.
 - Capture worker-health transitions around the desktop admission release/commit
   race before changing its readiness contract.
+- Keep production-scale timeouts injectable in real-process failure proofs, but
+  use the shortest test deadline that still reaches and verifies cleanup.

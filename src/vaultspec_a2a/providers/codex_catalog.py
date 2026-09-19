@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
@@ -106,38 +106,42 @@ def _capabilities(result: JsonObject) -> tuple[str, ...]:
         ("namespaceTools", "namespace_tools"),
     )
     capabilities: list[str] = []
-    for field, normalized in fields:
-        value = result.get(field)
+    for field_name, normalized in fields:
+        value = result.get(field_name)
         if not isinstance(value, bool):
             raise CodexCatalogProtocolError(
-                f"Codex capability field {field!r} must be a boolean"
+                f"Codex capability field {field_name!r} must be a boolean"
             )
         if value:
             capabilities.append(normalized)
     return tuple(capabilities)
 
 
+@dataclass(frozen=True, slots=True)
+class _ControlSpec:
+    field: str
+    kind: ControlKind
+    display_name: str
+    values: tuple[tuple[str, str, str | None], ...]
+    default_value: str | None
+
+
 def _control(
-    *,
     key: ProviderCatalogKey,
     entry_id: str,
     model_name: str,
-    field: str,
-    kind: ControlKind,
-    display_name: str,
-    values: tuple[tuple[str, str, str | None], ...],
-    default_value: str | None,
+    spec: _ControlSpec,
 ) -> NativeControl | None:
-    if not values:
+    if not spec.values:
         return None
-    control_id = f"{field}:{entry_id}"
+    control_id = f"{spec.field}:{entry_id}"
     namespace = f"{key.provider_id}:{key.execution_mode}:{control_id}"
     seen: set[str] = set()
     options: list[NativeControlOption] = []
-    for provider_value, option_name, description in values:
+    for provider_value, option_name, description in spec.values:
         if provider_value in seen:
             raise CodexCatalogProtocolError(
-                f"Codex model {field!r} options contain duplicate values"
+                f"Codex model {spec.field!r} options contain duplicate values"
             )
         seen.add(provider_value)
         options.append(
@@ -150,17 +154,17 @@ def _control(
         )
     if len(options) > MAX_OPTIONS:
         raise CodexCatalogProtocolError(
-            f"Codex model {field!r} options exceed {MAX_OPTIONS} items"
+            f"Codex model {spec.field!r} options exceed {MAX_OPTIONS} items"
         )
     default_option_id = (
-        local_id(namespace, default_value)
-        if default_value is not None and default_value in seen
+        local_id(namespace, spec.default_value)
+        if spec.default_value is not None and spec.default_value in seen
         else None
     )
     return NativeControl(
         control_id=control_id,
-        kind=kind,
-        display_name=display_label(f"{display_name} for {model_name}"),
+        kind=spec.kind,
+        display_name=display_label(f"{spec.display_name} for {model_name}"),
         options=tuple(options),
         default_option_id=default_option_id,
     )
@@ -235,22 +239,17 @@ def _revision(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def catalog_from_app_server(
-    model_pages: tuple[JsonObject, ...],
-    capabilities_result: JsonObject,
-    *,
-    key: ProviderCatalogKey,
-    checked_at: datetime | None = None,
-) -> ProviderCatalog:
-    """Normalize ordered app-server pages and capabilities into the catalog contract."""
-    capabilities = _capabilities(capabilities_result)
-    models: list[ModelCatalogEntry] = []
-    controls: list[NativeControl] = []
-    seen_models: set[str] = set()
-    for page_index, page in enumerate(model_pages):
-        # Pages accumulate into one catalog, so each page is bounded by what the
-        # bound leaves rather than by the whole bound.
-        remaining = MAX_MODELS - len(models)
+@dataclass(slots=True)
+class _CatalogBuilder:
+    key: ProviderCatalogKey
+    capabilities: tuple[str, ...]
+    models: list[ModelCatalogEntry] = field(default_factory=list)
+    controls: list[NativeControl] = field(default_factory=list)
+    seen_models: set[str] = field(default_factory=set)
+
+    def add_page(self, page: JsonObject, page_index: int) -> None:
+        """Validate one bounded page before adding its models in source order."""
+        remaining = MAX_MODELS - len(self.models)
         page_models = _objects(
             page.get("data"), field=f"pages[{page_index}].data", limit=MAX_MODELS
         )
@@ -259,68 +258,89 @@ def catalog_from_app_server(
                 f"Codex catalog exceeds {MAX_MODELS} models"
             )
         for model_index, model in enumerate(page_models):
-            value = _FIELDS.required_text(
-                model.get("model"),
-                field=f"pages[{page_index}].data[{model_index}].model",
+            self.add_model(model, page_index, model_index)
+
+    def add_model(self, model: JsonObject, page_index: int, model_index: int) -> None:
+        """Normalize one provider model and its bounded native controls."""
+        value = _FIELDS.required_text(
+            model.get("model"),
+            field=f"pages[{page_index}].data[{model_index}].model",
+        )
+        if value in self.seen_models:
+            raise CodexCatalogProtocolError(
+                "Codex catalog contains duplicate model values"
             )
-            if value in seen_models:
-                raise CodexCatalogProtocolError(
-                    "Codex catalog contains duplicate model values"
-                )
-            seen_models.add(value)
-            entry_id = local_id(f"{key.provider_id}:{key.execution_mode}:model", value)
-            model_name = display_text(model.get("displayName"), value)
-            raw_default_effort = model.get("defaultReasoningEffort")
-            default_effort = (
-                raw_default_effort if isinstance(raw_default_effort, str) else None
-            )
-            reasoning = _control(
-                key=key,
-                entry_id=entry_id,
-                model_name=model_name,
+        self.seen_models.add(value)
+        entry_id = local_id(
+            f"{self.key.provider_id}:{self.key.execution_mode}:model", value
+        )
+        model_name = display_text(model.get("displayName"), value)
+        raw_default_effort = model.get("defaultReasoningEffort")
+        default_effort = (
+            raw_default_effort if isinstance(raw_default_effort, str) else None
+        )
+        reasoning = _control(
+            self.key,
+            entry_id,
+            model_name,
+            _ControlSpec(
                 field="reasoning_effort",
                 kind=ControlKind.THOUGHT_LEVEL,
                 display_name="Reasoning effort",
                 values=_reasoning_values(model),
                 default_value=default_effort,
-            )
-            raw_default_tier = model.get("defaultServiceTier")
-            default_tier = (
-                raw_default_tier if isinstance(raw_default_tier, str) else None
-            )
-            service_tier = _control(
-                key=key,
-                entry_id=entry_id,
-                model_name=model_name,
+            ),
+        )
+        raw_default_tier = model.get("defaultServiceTier")
+        default_tier = raw_default_tier if isinstance(raw_default_tier, str) else None
+        service_tier = _control(
+            self.key,
+            entry_id,
+            model_name,
+            _ControlSpec(
                 field="service_tier",
                 kind=ControlKind.SERVICE_TIER,
                 display_name="Service tier",
                 values=_service_tier_values(model),
                 default_value=default_tier,
+            ),
+        )
+        self.controls.extend(
+            control for control in (reasoning, service_tier) if control is not None
+        )
+        self.models.append(
+            ModelCatalogEntry(
+                entry_id=entry_id,
+                provider_value=value,
+                display_name=model_name,
+                description=optional_description(model.get("description")),
+                capabilities=self.capabilities,
+                native_control_ids=tuple(
+                    control.control_id
+                    for control in (reasoning, service_tier)
+                    if control is not None
+                ),
             )
-            controls.extend(
-                control for control in (reasoning, service_tier) if control is not None
+        )
+        if len(self.controls) > MAX_CONTROLS:
+            raise CodexCatalogProtocolError(
+                f"Codex catalog exceeds {MAX_CONTROLS} native controls"
             )
-            models.append(
-                ModelCatalogEntry(
-                    entry_id=entry_id,
-                    provider_value=value,
-                    display_name=model_name,
-                    description=optional_description(model.get("description")),
-                    capabilities=capabilities,
-                    native_control_ids=tuple(
-                        control.control_id
-                        for control in (reasoning, service_tier)
-                        if control is not None
-                    ),
-                )
-            )
-            if len(controls) > MAX_CONTROLS:
-                raise CodexCatalogProtocolError(
-                    f"Codex catalog exceeds {MAX_CONTROLS} native controls"
-                )
+
+
+def catalog_from_app_server(
+    model_pages: tuple[JsonObject, ...],
+    capabilities_result: JsonObject,
+    *,
+    key: ProviderCatalogKey,
+    checked_at: datetime | None = None,
+) -> ProviderCatalog:
+    """Normalize ordered app-server pages and capabilities into the catalog contract."""
+    builder = _CatalogBuilder(key, _capabilities(capabilities_result))
+    for page_index, page in enumerate(model_pages):
+        builder.add_page(page, page_index)
     now = (checked_at or datetime.now(UTC)).astimezone(UTC)
-    if not models:
+    if not builder.models:
         return ProviderCatalog(
             key=key,
             state=CatalogState(
@@ -330,8 +350,8 @@ def catalog_from_app_server(
             ),
             models=(),
         )
-    normalized_controls = tuple(controls)
-    normalized_models = tuple(models)
+    normalized_controls = tuple(builder.controls)
+    normalized_models = tuple(builder.models)
     return ProviderCatalog(
         key=key,
         state=CatalogState(
@@ -387,32 +407,33 @@ async def _read_response(
     )
 
 
-async def _request(
-    process: asyncio.subprocess.Process,
-    *,
-    request_id: int,
-    method: str,
-    params: JsonObject,
-    timeout: float,
-    output_budget: OutputBudget,
-) -> JsonObject:
-    if process.stdin is None or process.stdout is None:
-        raise CodexCatalogProtocolError("Codex discovery stdio is unavailable")
-    request: JsonObject = {"id": request_id, "method": method, "params": params}
-    process.stdin.write(json.dumps(request).encode() + b"\n")
-    await process.stdin.drain()
-    response = await _read_response(
-        process.stdout,
-        request_id=request_id,
-        timeout=timeout,
-        output_budget=output_budget,
-    )
-    if "error" in response:
-        raise _rpc_error(method, response["error"])
-    result = response.get("result")
-    if not isinstance(result, dict):
-        raise CodexCatalogProtocolError(f"Codex {method} returned no object result")
-    return result
+@dataclass(frozen=True, slots=True)
+class _CatalogRpc:
+    process: asyncio.subprocess.Process
+    timeout: float
+    output_budget: OutputBudget
+
+    async def request(
+        self, request_id: int, method: str, params: JsonObject
+    ) -> JsonObject:
+        """Send one bounded JSON-RPC call over this discovery process."""
+        if self.process.stdin is None or self.process.stdout is None:
+            raise CodexCatalogProtocolError("Codex discovery stdio is unavailable")
+        request: JsonObject = {"id": request_id, "method": method, "params": params}
+        self.process.stdin.write(json.dumps(request).encode() + b"\n")
+        await self.process.stdin.drain()
+        response = await _read_response(
+            self.process.stdout,
+            request_id=request_id,
+            timeout=self.timeout,
+            output_budget=self.output_budget,
+        )
+        if "error" in response:
+            raise _rpc_error(method, response["error"])
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise CodexCatalogProtocolError(f"Codex {method} returned no object result")
+        return result
 
 
 async def _notify_initialized(process: asyncio.subprocess.Process) -> None:
@@ -422,6 +443,44 @@ async def _notify_initialized(process: asyncio.subprocess.Process) -> None:
         json.dumps({"method": "initialized", "params": {}}).encode() + b"\n"
     )
     await process.stdin.drain()
+
+
+async def _read_model_pages(
+    rpc: _CatalogRpc,
+    request_id: int,
+) -> tuple[tuple[JsonObject, ...], int]:
+    """Read bounded model pages and return the next free JSON-RPC request id."""
+    pages: list[JsonObject] = []
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    for _ in range(_MAX_PAGES):
+        page = await rpc.request(
+            request_id,
+            "model/list",
+            {
+                "cursor": cursor,
+                "limit": _MODEL_PAGE_SIZE,
+                "includeHidden": False,
+            },
+        )
+        request_id += 1
+        pages.append(page)
+        next_cursor = page.get("nextCursor")
+        if next_cursor is None:
+            break
+        if not isinstance(next_cursor, str) or not next_cursor:
+            raise CodexCatalogProtocolError(
+                "Codex model/list nextCursor must be a non-blank string or null"
+            )
+        if next_cursor in seen_cursors:
+            raise CodexCatalogProtocolError(
+                "Codex model/list pagination repeated a cursor"
+            )
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    else:
+        raise CodexCatalogProtocolError(f"Codex model/list exceeds {_MAX_PAGES} pages")
+    return tuple(pages), request_id
 
 
 async def discover_codex_catalog(
@@ -440,6 +499,7 @@ async def discover_codex_catalog(
         list(command), dict(env), cwd, use_exec=False, metadata=metadata
     )
     output_budget = OutputBudget(_protocol_error)
+    rpc = _CatalogRpc(process, timeout, output_budget)
     stderr_task = asyncio.create_task(
         drain_stderr(process.stderr, process, metadata, output_budget)
     )
@@ -447,70 +507,27 @@ async def discover_codex_catalog(
     failure: BaseException | None = None
     try:
         request_id = 1
-        await _request(
-            process,
-            request_id=request_id,
-            method="initialize",
-            params={"clientInfo": _CLIENT_INFO, "capabilities": {}},
-            timeout=timeout,
-            output_budget=output_budget,
+        await rpc.request(
+            request_id,
+            "initialize",
+            {"clientInfo": _CLIENT_INFO, "capabilities": {}},
         )
         await _notify_initialized(process)
         request_id += 1
-        account = await _request(
-            process,
-            request_id=request_id,
-            method="account/read",
-            params={"refreshToken": False},
-            timeout=timeout,
-            output_budget=output_budget,
+        account = await rpc.request(
+            request_id,
+            "account/read",
+            {"refreshToken": False},
         )
         request_id += 1
-        pages: list[JsonObject] = []
-        cursor: str | None = None
-        seen_cursors: set[str] = set()
-        for _ in range(_MAX_PAGES):
-            page = await _request(
-                process,
-                request_id=request_id,
-                method="model/list",
-                params={
-                    "cursor": cursor,
-                    "limit": _MODEL_PAGE_SIZE,
-                    "includeHidden": False,
-                },
-                timeout=timeout,
-                output_budget=output_budget,
-            )
-            request_id += 1
-            pages.append(page)
-            next_cursor = page.get("nextCursor")
-            if next_cursor is None:
-                break
-            if not isinstance(next_cursor, str) or not next_cursor:
-                raise CodexCatalogProtocolError(
-                    "Codex model/list nextCursor must be a non-blank string or null"
-                )
-            if next_cursor in seen_cursors:
-                raise CodexCatalogProtocolError(
-                    "Codex model/list pagination repeated a cursor"
-                )
-            seen_cursors.add(next_cursor)
-            cursor = next_cursor
-        else:
-            raise CodexCatalogProtocolError(
-                f"Codex model/list exceeds {_MAX_PAGES} pages"
-            )
-        capabilities = await _request(
-            process,
-            request_id=request_id,
-            method="modelProvider/capabilities/read",
-            params={},
-            timeout=timeout,
-            output_budget=output_budget,
+        pages, request_id = await _read_model_pages(rpc, request_id)
+        capabilities = await rpc.request(
+            request_id,
+            "modelProvider/capabilities/read",
+            {},
         )
         outcome = CodexCatalogDiscovery(
-            catalog=catalog_from_app_server(tuple(pages), capabilities, key=key),
+            catalog=catalog_from_app_server(pages, capabilities, key=key),
             authentication=_authentication(account),
         )
     except BaseException as exc:

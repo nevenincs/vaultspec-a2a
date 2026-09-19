@@ -11,12 +11,13 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import select
 
 from ..database import (
     ControlActionModel,
+    ThreadModel,
     get_control_action_by_idempotency_key,
     get_thread,
     mark_control_action_applied,
@@ -118,6 +119,24 @@ class _DispatchContext:
     thread_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class _ClaimContext:
+    runtime: ClarificationRuntime
+    fingerprint: str
+    payload: dict[str, Any]
+    idempotency_key: str
+    thread_id: str
+    request_id: str
+    parked_matches: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _ResultError:
+    detail: str
+    status_code: int
+    failure_type: FailureType | None = None
+
+
 def _idempotency_key(request_id: str) -> str:
     """Build this action's key as a READABLE prefix, never a digest.
 
@@ -199,9 +218,7 @@ def _result(
     accepted: bool = True,
     applied: bool | None = None,
     dispatched: bool = False,
-    error_detail: str | None = None,
-    error_status_code: int | None = None,
-    failure_type: FailureType | None = None,
+    error: _ResultError | None = None,
 ) -> ClarificationResult:
     return ClarificationResult(
         request_id=action.request_id or "",
@@ -212,10 +229,45 @@ def _result(
         action_id=action.id,
         idempotency_key=action.idempotency_key,
         dispatched=dispatched,
-        error_detail=error_detail,
-        error_status_code=error_status_code,
-        failure_type=failure_type,
+        error_detail=error.detail if error else None,
+        error_status_code=error.status_code if error else None,
+        failure_type=error.failure_type if error else None,
     )
+
+
+async def _replay_existing_action(
+    db: AsyncSession,
+    existing: ControlActionModel,
+    fingerprint: str,
+    checkpoint_snapshot: object | None,
+    parked_matches: bool,
+) -> ClarificationResult | None:
+    stored = _stored_resolution(existing)
+    if stored is None or clarification_resolution_fingerprint(stored) != fingerprint:
+        return _result(
+            existing,
+            accepted=False,
+            error=_ResultError(
+                "A different clarification resolution is already accepted", 409
+            ),
+        )
+    if await _settle_from_receipt(
+        db,
+        existing,
+        fingerprint=fingerprint,
+        checkpoint_tuple=checkpoint_snapshot,
+    ):
+        await db.refresh(existing)
+        return _result(existing, applied=True)
+    if existing.applied_at is not None:
+        return _result(existing, applied=True)
+    if not parked_matches:
+        # The exact resolution already owns this durable idempotency key.
+        # A fast worker may have consumed the interrupt before its receipt
+        # becomes visible; replay returns that accepted action rather than
+        # pretending the now-absent questionnaire invalidates the write.
+        return _result(existing)
+    return None
 
 
 async def respond_to_clarification(
@@ -234,7 +286,6 @@ async def respond_to_clarification(
     checkpoint receipt settles the journal row.
     """
     checkpointer = runtime.checkpointer
-    recursion_limit = runtime.recursion_limit
     thread = await get_thread(db, thread_id)
     if thread is None:
         return ClarificationResult(
@@ -287,36 +338,34 @@ async def respond_to_clarification(
             )
 
     if existing is not None:
-        stored = _stored_resolution(existing)
-        if (
-            stored is None
-            or clarification_resolution_fingerprint(stored) != fingerprint
-        ):
-            return _result(
-                existing,
-                accepted=False,
-                error_detail=(
-                    "A different clarification resolution is already accepted"
-                ),
-                error_status_code=409,
-            )
-        if await _settle_from_receipt(
+        replay = await _replay_existing_action(
             db,
             existing,
-            fingerprint=fingerprint,
-            checkpoint_tuple=checkpoint_snapshot,
-        ):
-            await db.refresh(existing)
-            return _result(existing, applied=True)
-        if existing.applied_at is not None:
-            return _result(existing, applied=True)
-        if parked is None or parked.request_id != request_id:
-            # The exact resolution already owns this durable idempotency key.
-            # A fast worker may have consumed the interrupt before its receipt
-            # becomes visible; replay returns that accepted action rather than
-            # pretending the now-absent questionnaire invalidates the write.
-            return _result(existing)
+            fingerprint,
+            checkpoint_snapshot,
+            parked is not None and parked.request_id == request_id,
+        )
+        if replay is not None:
+            return replay
 
+    return await _claim_and_dispatch(
+        db,
+        thread,
+        _ClaimContext(
+            runtime,
+            fingerprint,
+            payload,
+            idempotency_key,
+            thread_id,
+            request_id,
+            parked is not None and parked.request_id == request_id,
+        ),
+    )
+
+
+async def _claim_and_dispatch(
+    db: AsyncSession, thread: ThreadModel, context: _ClaimContext
+) -> ClarificationResult:
     # ``prepare_control_action_claim`` rolls back the caller's session when this request
     # loses a concurrent insert.  SQLAlchemy expires every loaded ORM instance
     # on that rollback, so all thread fields needed after the election must be
@@ -329,8 +378,8 @@ async def respond_to_clarification(
     workspace_root = dispatchable_workspace_root(thread.thread_metadata)
     if workspace_root is None:
         return ClarificationResult(
-            request_id=request_id,
-            thread_id=thread_id,
+            request_id=context.request_id,
+            thread_id=context.thread_id,
             accepted=False,
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
@@ -339,13 +388,13 @@ async def respond_to_clarification(
             failure_type=FailureType.NO_ACTIVE_PROJECT,
         )
     try:
-        graph_definition = await read_accepted_graph_definition(db, thread_id)
+        graph_definition = await read_accepted_graph_definition(db, context.thread_id)
         team_preset = graph_definition.team_id
         execution_authority = resolve_execution_authority(thread.thread_metadata)
     except (ExecutionAuthorityError, ValueError) as exc:
         return ClarificationResult(
-            request_id=request_id,
-            thread_id=thread_id,
+            request_id=context.request_id,
+            thread_id=context.thread_id,
             accepted=False,
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
@@ -356,30 +405,30 @@ async def respond_to_clarification(
 
     dispatch = DispatchRequest(
         action=to_dispatch_action(ControlActionType.RESUME),
-        thread_id=thread_id,
-        option_id=payload,
+        thread_id=context.thread_id,
+        option_id=context.payload,
         team_preset=team_preset,
         graph_definition=graph_definition,
         workspace_root=workspace_root,
-        recursion_limit=recursion_limit,
+        recursion_limit=context.runtime.recursion_limit,
         model_assignment=execution_authority.model_assignment,
     )
     claim = await prepare_control_action_claim(
         db,
         write_expectation=write_expectation,
-        thread_id=thread_id,
+        thread_id=context.thread_id,
         action_type=ControlActionType.RESUME,
-        idempotency_key=idempotency_key,
-        request_id=request_id,
-        payload=freeze_accepted_input(dispatch, intent=payload),
+        idempotency_key=context.idempotency_key,
+        request_id=context.request_id,
+        payload=freeze_accepted_input(dispatch, intent=context.payload),
         dispatch_id=dispatch.dispatch_id,
         worker_generation=worker_generation,
         recovery_timeout_seconds=graph_definition.run_timeout_seconds,
     )
     if not claim.authority_matches:
         return ClarificationResult(
-            request_id=request_id,
-            thread_id=thread_id,
+            request_id=context.request_id,
+            thread_id=context.thread_id,
             accepted=False,
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
@@ -390,23 +439,43 @@ async def respond_to_clarification(
     action = await db.get(ControlActionModel, claim.action_id, populate_existing=True)
     if action is None:
         raise RuntimeError("claimed clarification action disappeared")
+    result = await _claimed_action_result(db, action, claim, context, thread_status)
+    if result is not None:
+        return result
+
+    return await _dispatch_claimed(
+        db,
+        action,
+        claim,
+        dispatch,
+        _DispatchContext(context.runtime, context.fingerprint, context.thread_id),
+    )
+
+
+async def _claimed_action_result(
+    db: AsyncSession,
+    action: ControlActionModel,
+    claim: ControlActionClaim,
+    context: _ClaimContext,
+    thread_status: str,
+) -> ClarificationResult | None:
     if not claim.payload_matches:
         return _result(
             action,
             accepted=False,
-            error_detail="A different clarification resolution is already accepted",
-            error_status_code=409,
+            error=_ResultError(
+                "A different clarification resolution is already accepted", 409
+            ),
         )
 
     if claim.applied or action.applied_at is not None:
         return _result(action, applied=True)
 
-    if parked is None or parked.request_id != request_id:
+    if not context.parked_matches:
         result = _result(
             action,
             accepted=False,
-            error_detail="Clarification application cannot be confirmed",
-            error_status_code=409,
+            error=_ResultError("Clarification application cannot be confirmed", 409),
         )
         await db.rollback()
         return result
@@ -414,8 +483,7 @@ async def respond_to_clarification(
         result = _result(
             action,
             accepted=False,
-            error_detail="Run is not active",
-            error_status_code=409,
+            error=_ResultError("Run is not active", 409),
         )
         await db.rollback()
         return result
@@ -423,9 +491,7 @@ async def respond_to_clarification(
     if not claim.acquired:
         return _result(action)
 
-    return await _dispatch_claimed(
-        db, action, claim, dispatch, _DispatchContext(runtime, fingerprint, thread_id)
-    )
+    return None
 
 
 async def _dispatch_claimed(
@@ -469,11 +535,11 @@ async def _dispatch_claimed(
         await db.commit()
         return _result(
             action,
-            error_detail=detail,
-            error_status_code=(
-                503 if failure_type is FailureType.CIRCUIT_OPEN else 502
+            error=_ResultError(
+                detail,
+                503 if failure_type is FailureType.CIRCUIT_OPEN else 502,
+                failure_type,
             ),
-            failure_type=failure_type,
         )
 
     # A very fast worker may already have checkpointed the receipt before its HTTP

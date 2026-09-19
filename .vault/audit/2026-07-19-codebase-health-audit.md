@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:b61d92fc2fd518cf730dd97a7a5605b98bc6436bd3a1f87012cd8bc56cc00b89'
+body_hash: 'sha256:05e738906e8eb05e54f9e91cf82aca0b02ea9e31cd40920462e50a986b802fc5'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3208,3 +3208,7 @@ Seven medium-severity strict Ruff complexity, branch, return, and statement find
 ### 2026-09-20 clarification dispatch structure review pass
 
 Three low-severity strict argument-count and medium-severity cyclomatic findings were resolved. The response and restart recovery paths now pass their worker dependencies in one typed runtime; dispatch after a successful claim is a focused helper. Review checked that the claim is finalized before dispatch, the graph receipt is bound before sending, definite non-delivery still records a repair reason, ambiguous delivery retains the lease, and only a matching checkpoint receipt proves application. Ten focused clarification and dispatch-failure tests pass, as do the regular Ruff gate and diff check. Strict Ruff structure falls from 255 to 252. Four pre-existing medium-severity structure findings remain in this service: the main responder has excessive complexity, returns, and branches, and the result builder has excessive parameters. These and the repository-wide strict backlog remain in the audit queue. No new review findings were surfaced.
+
+### 2026-09-20 clarification replay and claim structure review pass
+
+Four medium-severity strict Ruff findings remaining in the clarification service were resolved. Existing-action replay, claim preparation, post-claim state decisions, and worker dispatch now have bounded functions; error details travel as one typed value. Review checked that an existing matching receipt settles before any new claim, conflicting accepted input still returns 409, expired ORM state is not read after a losing claim rollback, non-active and no-longer-parked paths roll back, and only a checkpoint receipt marks application. Ten focused clarification and dispatch-failure tests pass; `just check-all`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 252 to 248, and the clarification service has no remaining strict Ruff or complexipy findings. No new review findings were surfaced. The remaining 248 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.

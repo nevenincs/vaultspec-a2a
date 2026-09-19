@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:c1c70c416d7ac408c85bc8408a4e69e77591eab4491f54952a478daf94522e09'
+body_hash: 'sha256:e73a07b75c2caabc24b48cfbe16114a007bba9740a6f063545ed17fb50e5031d'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3260,3 +3260,7 @@ The high-severity maintainability cluster in `ProviderFactory.create` remains op
 ### 2026-09-20 provider factory construction review pass
 
 Five medium-severity strict Ruff complexity, branch, statement, return, and parameter findings in provider construction were resolved. Codex, Claude, Z.ai, Kimi, in-process, and OpenAI-compatible constructors now have focused functions; Kimi's independent home variable is composed after temporary-model validation. Review checked the frozen model and backend authority, exact native controls, lazy model imports, ambient Claude auth, Z.ai token injection, Kimi command and temporary-provider values, and OpenAI/Zhipu credential precedence. Review surfaced two low-severity private-helper risks: permissive fallback to another provider, fixed by exact provider refusals; the first full check also caught an unused import, removed before the final run. One hundred thirty-five focused provider tests pass, with three deselected by the project marker policy; 46 focused factory tests pass after the review fix. `just check-all`, `just check-type-strict`, strict Ruff for the module, complexipy, and diff check pass. Repository strict Ruff structure falls from 215 after the prior team-selection pass to 210; radon findings fall from 138 to 136; code-health function-length falls from 15 to 14 and parameter-count from 94 to 93. No unresolved new review findings were surfaced. The factory still has a medium-severity module-length finding; the remaining 210 Ruff structure and other strict backlog stay open in the audit queue.
+
+### 2026-09-20 snapshot projection structure review pass
+
+Three medium-severity strict Ruff complexity, branch, and statement findings and one medium-severity cognitive-complexity finding in snapshot enrichment were resolved. Message projection, checkpoint-owned agent descriptors, checkpoint and live tool-call projection now have focused functions. Review checked that checkpoint descriptors retain priority over aggregator state, invalid descriptors still degrade the snapshot, provider action status and ToolMessage correlation remain distinct, and live tool calls do not duplicate checkpoint calls. Review surfaced one low-severity malformed tool-args risk in the extracted projector; an absent args mapping now safely takes the pending/completed correlation path. Strict basedpyright also exposed an imprecise extracted `ToolCall` type, corrected before final verification. One hundred one focused snapshot and API tests pass, followed by 26 focused snapshot and thread-state tests after the final type correction. `just check-all`, `just check-type-strict`, focused strict Ruff and Ty, module complexipy, and diff check pass. Repository strict Ruff structure falls from 210 to 207; radon findings from 136 to 135; code-health function-length findings from 14 to 13. No unresolved new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

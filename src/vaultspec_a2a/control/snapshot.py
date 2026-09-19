@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolCall, ToolMessage
 
 from ..graph.enums import (
     AgentLifecycleState,
@@ -52,49 +52,34 @@ def _is_valid_agent_descriptor(name: object, descriptor: object) -> bool:
     )
 
 
-def enrich_snapshot_from_state(
-    snapshot: ThreadStateData,
-    state: Any,
-    aggregator: EventAggregator | None = None,
-    expected_assignment_digest: str | None = None,
-) -> ThreadStateData:
-    """Populate snapshot fields from LangGraph checkpointer state.
-
-    Maps LangChain ``BaseMessage`` objects to ``MessageData`` and
-    extracts ``checkpoint_id``, plan, artifacts from the state config.
-    Populates agents and pending permissions from the aggregator.
-    """
-    msgs: list[MessageData] = []
-    for m in state.values.get("messages", []):
-        role = classify_message_role(m)
-        content = m.content if isinstance(m.content, str) else str(m.content)
-        ts = extract_message_timestamp(m)
-        stored_id: str | None = getattr(m, "id", None)
-        message_id = derive_message_id(role, content, stored_id)
-        msgs.append(
+def _checkpoint_messages(values: dict[str, Any]) -> list[MessageData]:
+    messages: list[MessageData] = []
+    for message in values.get("messages", []):
+        role = classify_message_role(message)
+        content = (
+            message.content
+            if isinstance(message.content, str)
+            else str(message.content)
+        )
+        stored_id: str | None = getattr(message, "id", None)
+        messages.append(
             MessageData(
-                message_id=message_id,
+                message_id=derive_message_id(role, content, stored_id),
                 role=role,
                 content=content,
-                agent_id=getattr(m, "name", None),
-                timestamp=ts,
+                agent_id=getattr(message, "name", None),
+                timestamp=extract_message_timestamp(message),
             )
         )
+    return messages
 
-    checkpoint_id: str | None = None
-    if hasattr(state, "config") and state.config:
-        checkpoint_id = state.config.get("configurable", {}).get("checkpoint_id")
 
-    plan_entries = normalize_plan_entries(state.values.get("current_plan", []))
-
-    artifact_dicts = normalize_artifacts(state.values.get("artifacts", []))
-    artifact_data = [ArtifactData(**d) for d in artifact_dicts]
-
-    # Populate agents from the thread's checkpoint-owned graph descriptors.
-    # The thread-scoped live cache is used only before that first checkpoint
-    # lands; there is no process-global node-name fallback.
-    agent_data: list[AgentData] = []
-    raw_descriptors: object = state.values.get("agent_descriptors")
+def _checkpoint_agents(
+    snapshot: ThreadStateData,
+    values: dict[str, Any],
+    aggregator: EventAggregator | None,
+) -> list[AgentData]:
+    raw_descriptors: object = values.get("agent_descriptors")
     node_summaries: list[dict[str, str]] = []
     if isinstance(raw_descriptors, dict):
         descriptors = cast("dict[object, object]", raw_descriptors)
@@ -116,21 +101,132 @@ def enrich_snapshot_from_state(
             snapshot.degraded_reasons.append("invalid_agent_descriptors")
     elif aggregator is not None:
         node_summaries = aggregator.get_node_summaries(snapshot.thread_id)
-    if node_summaries:
-        agent_states = (
-            aggregator.get_agent_states(snapshot.thread_id)
-            if aggregator is not None
-            else {}
+    if not node_summaries:
+        return []
+    agent_states = (
+        aggregator.get_agent_states(snapshot.thread_id)
+        if aggregator is not None
+        else {}
+    )
+    return [
+        build_agent_descriptor(
+            node,
+            agent_states.get(
+                node.get("agent_id", node.get("node_name", "")),
+                AgentLifecycleState.IDLE,
+            ),
+            thread_id=snapshot.thread_id,
         )
-        for node in node_summaries:
-            agent_id = node.get("agent_id", node.get("node_name", ""))
-            agent_data.append(
-                build_agent_descriptor(
-                    node,
-                    agent_states.get(agent_id, AgentLifecycleState.IDLE),
-                    thread_id=snapshot.thread_id,
-                )
+        for node in node_summaries
+    ]
+
+
+def _checkpoint_tool_call(
+    call: ToolCall, answered_tool_ids: set[str]
+) -> ToolCallData | None:
+    call_id = call.get("id")
+    if not isinstance(call_id, str):
+        return None
+    name = call.get("name", "unknown_tool")
+    detail = call.get("args") or {}
+    if "status" in detail:
+        content, locations = action_detail_projection(name, detail)
+        return ToolCallData(
+            tool_call_id=call_id,
+            title=name,
+            kind=str(classify_tool_kind(name)),
+            status=str(map_action_item_status(detail.get("status"))),
+            content=content,
+            locations=locations,
+        )
+    return ToolCallData(
+        tool_call_id=call_id,
+        title=name,
+        kind=str(classify_tool_kind(name)),
+        status=str(
+            ToolCallStatus.COMPLETED
+            if call_id in answered_tool_ids
+            else ToolCallStatus.PENDING
+        ),
+    )
+
+
+def _checkpoint_tool_calls(
+    values: dict[str, Any],
+) -> tuple[list[ToolCallData], set[str]]:
+    answered_tool_ids: set[str] = {
+        message.tool_call_id
+        for message in values.get("messages", [])
+        if isinstance(message, ToolMessage)
+    }
+    tool_calls: list[ToolCallData] = []
+    checkpoint_ids: set[str] = set()
+    for message in values.get("messages", []):
+        if not isinstance(message, AIMessage) or not message.tool_calls:
+            continue
+        for call in message.tool_calls:
+            projected = _checkpoint_tool_call(call, answered_tool_ids)
+            if projected is None:
+                continue
+            checkpoint_ids.add(projected.tool_call_id)
+            tool_calls.append(projected)
+    return tool_calls, checkpoint_ids
+
+
+def _live_tool_calls(
+    aggregator: EventAggregator, thread_id: str, checkpoint_ids: set[str]
+) -> list[ToolCallData]:
+    tool_calls: list[ToolCallData] = []
+    for call_id, state in aggregator.get_tool_call_states(thread_id).items():
+        if call_id in checkpoint_ids:
+            continue
+        try:
+            kind = str(ToolKind(state.get("kind", ToolKind.OTHER.value)))
+        except ValueError:
+            kind = str(ToolKind.OTHER)
+        try:
+            status = str(
+                ToolCallStatus(state.get("status", ToolCallStatus.PENDING.value))
             )
+        except ValueError:
+            status = str(ToolCallStatus.PENDING)
+        tool_calls.append(
+            ToolCallData(
+                tool_call_id=call_id,
+                title=state.get("title", "unknown_tool"),
+                kind=kind,
+                status=status,
+            )
+        )
+    return tool_calls
+
+
+def enrich_snapshot_from_state(
+    snapshot: ThreadStateData,
+    state: Any,
+    aggregator: EventAggregator | None = None,
+    expected_assignment_digest: str | None = None,
+) -> ThreadStateData:
+    """Populate snapshot fields from LangGraph checkpointer state.
+
+    Maps LangChain ``BaseMessage`` objects to ``MessageData`` and
+    extracts ``checkpoint_id``, plan, artifacts from the state config.
+    Populates agents and pending permissions from the aggregator.
+    """
+    msgs = _checkpoint_messages(state.values)
+
+    checkpoint_id: str | None = None
+    if hasattr(state, "config") and state.config:
+        checkpoint_id = state.config.get("configurable", {}).get("checkpoint_id")
+
+    plan_entries = normalize_plan_entries(state.values.get("current_plan", []))
+
+    artifact_dicts = normalize_artifacts(state.values.get("artifacts", []))
+    artifact_data = [ArtifactData(**d) for d in artifact_dicts]
+
+    # Checkpoint-owned descriptors win; the thread-scoped live cache is used
+    # only before the first descriptor checkpoint lands.
+    agent_data = _checkpoint_agents(snapshot, state.values, aggregator)
 
     # Extract tool calls from AIMessage.tool_calls. Two shapes reach this
     # loop through the identical field:
@@ -154,75 +250,11 @@ def enrich_snapshot_from_state(
     # map_action_item_status are the SAME functions streaming.transformer
     # uses for the live stream, so a provider action classifies identically
     # whether read live or reconstructed from a settled run's checkpoint.
-    answered_tool_ids: set[str] = {
-        m.tool_call_id
-        for m in state.values.get("messages", [])
-        if isinstance(m, ToolMessage)
-    }
-    tool_call_data: list[ToolCallData] = []
-    checkpoint_tc_ids: set[str] = set()
-    for m in state.values.get("messages", []):
-        if isinstance(m, AIMessage) and m.tool_calls:
-            for tc in m.tool_calls:
-                tc_id = tc.get("id")
-                if not isinstance(tc_id, str):
-                    continue
-                tc_name = tc.get("name", "unknown_tool")
-                checkpoint_tc_ids.add(tc_id)
-                tc_args = tc.get("args")
-                detail = tc_args if "status" in tc_args else None
-                if detail is not None:
-                    content, locations = action_detail_projection(tc_name, detail)
-                    tool_call_data.append(
-                        ToolCallData(
-                            tool_call_id=tc_id,
-                            title=tc_name,
-                            kind=str(classify_tool_kind(tc_name)),
-                            status=str(map_action_item_status(detail.get("status"))),
-                            content=content,
-                            locations=locations,
-                        )
-                    )
-                    continue
-                tool_call_data.append(
-                    ToolCallData(
-                        tool_call_id=tc_id,
-                        title=tc_name,
-                        kind=str(classify_tool_kind(tc_name)),
-                        status=str(
-                            ToolCallStatus.COMPLETED
-                            if tc_id in answered_tool_ids
-                            else ToolCallStatus.PENDING
-                        ),
-                    )
-                )
-
-    # Merge tool calls from aggregator in-memory state for tool calls
-    # not present in the checkpoint.
+    tool_call_data, checkpoint_tc_ids = _checkpoint_tool_calls(state.values)
     if aggregator is not None:
-        thread_id = snapshot.thread_id
-        aggregator_tc_states = aggregator.get_tool_call_states(thread_id)
-        for tc_id, tc_state in aggregator_tc_states.items():
-            if tc_id in checkpoint_tc_ids:
-                continue
-            try:
-                kind = str(ToolKind(tc_state.get("kind", ToolKind.OTHER.value)))
-            except ValueError:
-                kind = str(ToolKind.OTHER)
-            try:
-                status = str(
-                    ToolCallStatus(tc_state.get("status", ToolCallStatus.PENDING.value))
-                )
-            except ValueError:
-                status = str(ToolCallStatus.PENDING)
-            tool_call_data.append(
-                ToolCallData(
-                    tool_call_id=tc_id,
-                    title=tc_state.get("title", "unknown_tool"),
-                    kind=kind,
-                    status=status,
-                )
-            )
+        tool_call_data.extend(
+            _live_tool_calls(aggregator, snapshot.thread_id, checkpoint_tc_ids)
+        )
 
     snapshot.messages = msgs
     assignment_digest = state.values.get("model_assignment_digest")

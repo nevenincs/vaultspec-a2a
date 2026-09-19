@@ -43,7 +43,7 @@ from ..control.health import (
     build_sqlite_fallback_diagnostics,
     probe_desktop_readiness,
 )
-from ..control.verdict_subscriber import VerdictSubscriber
+from ..control.verdict_subscriber import VerdictSubscriber, VerdictSubscriberConfig
 from ..control.worker_management import (
     LazyWorkerSpawner,
     WorkerLiveness,
@@ -563,23 +563,25 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         verdict_subscriber_task: asyncio.Task[None] | None = None
         if settings.authoring_subscriber_enabled:
             verdict_subscriber = VerdictSubscriber(
-                session_factory=get_session_factory(),
-                checkpointer=checkpointer,
-                worker_client=worker_client,
-                circuit_breaker=circuit_breaker,
-                worker_spawner=worker_spawner,
-                endpoint_provider=resolve_engine,
-                recursion_limit=domain_config.graph_recursion_limit,
-                trace_headers_fn=trace_headers,
-                poll_interval_seconds=(
-                    settings.authoring_subscriber_poll_interval_seconds
-                ),
-                reconnect_base_seconds=(
-                    settings.authoring_subscriber_reconnect_base_seconds
-                ),
-                reconnect_max_seconds=(
-                    settings.authoring_subscriber_reconnect_max_seconds
-                ),
+                VerdictSubscriberConfig(
+                    session_factory=get_session_factory(),
+                    checkpointer=checkpointer,
+                    worker_client=worker_client,
+                    circuit_breaker=circuit_breaker,
+                    worker_spawner=worker_spawner,
+                    endpoint_provider=resolve_engine,
+                    recursion_limit=domain_config.graph_recursion_limit,
+                    trace_headers_fn=trace_headers,
+                    poll_interval_seconds=(
+                        settings.authoring_subscriber_poll_interval_seconds
+                    ),
+                    reconnect_base_seconds=(
+                        settings.authoring_subscriber_reconnect_base_seconds
+                    ),
+                    reconnect_max_seconds=(
+                        settings.authoring_subscriber_reconnect_max_seconds
+                    ),
+                )
             )
             verdict_subscriber_task = asyncio.create_task(verdict_subscriber.run())
             logger.info("Authoring verdict subscriber enabled")

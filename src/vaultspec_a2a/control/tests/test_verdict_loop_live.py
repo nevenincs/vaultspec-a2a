@@ -91,7 +91,7 @@ from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 from ..circuit_breaker import WorkerCircuitBreaker
-from ..verdict_subscriber import VerdictSubscriber
+from ..verdict_subscriber import VerdictSubscriber, VerdictSubscriberConfig
 from ..worker_management import LazyWorkerSpawner
 from ._catalog_authority import current_execution_metadata
 from .test_verdict_subscriber_live import _decide, _submit_proposal
@@ -385,17 +385,19 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
                 await db.commit()
 
             subscriber = VerdictSubscriber(
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-                worker_client=worker_client,
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=3, recovery_timeout=30.0
-                ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://worker", worker_port=1, auto_spawn=False
-                ),
-                endpoint_provider=lambda: None,
-                recursion_limit=10,
+                VerdictSubscriberConfig(
+                    session_factory=session_factory,
+                    checkpointer=checkpointer,
+                    worker_client=worker_client,
+                    circuit_breaker=WorkerCircuitBreaker(
+                        failure_threshold=3, recovery_timeout=30.0
+                    ),
+                    worker_spawner=LazyWorkerSpawner(
+                        worker_url="http://worker", worker_port=1, auto_spawn=False
+                    ),
+                    endpoint_provider=lambda: None,
+                    recursion_limit=10,
+                )
             )
 
             frames = [f async for f in client.stream_lifecycle(last_seq=baseline)]

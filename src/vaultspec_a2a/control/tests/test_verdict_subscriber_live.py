@@ -74,6 +74,7 @@ from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import (
     VerdictSubscriber,
+    VerdictSubscriberConfig,
     _verdict_resume_idempotency_key,
 )
 from ...control.worker_management import LazyWorkerSpawner
@@ -362,17 +363,19 @@ async def test_live_verdict_round_trip_parks_and_resumes(
             )
 
         subscriber = VerdictSubscriber(
-            session_factory=session_factory,
-            checkpointer=checkpointer,
-            worker_client=worker_client,
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=3, recovery_timeout=30.0
-            ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
-            ),
-            endpoint_provider=lambda: None,
-            recursion_limit=25,
+            VerdictSubscriberConfig(
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=LazyWorkerSpawner(
+                    worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
+                ),
+                endpoint_provider=lambda: None,
+                recursion_limit=25,
+            )
         )
 
         frames = [f async for f in client.stream_lifecycle(last_seq=baseline)]
@@ -674,17 +677,19 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             bridge,
         ):
             subscriber = VerdictSubscriber(
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-                worker_client=worker_client,
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=3, recovery_timeout=30.0
-                ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://worker", worker_port=1, auto_spawn=False
-                ),
-                endpoint_provider=lambda: live_engine,
-                recursion_limit=25,
+                VerdictSubscriberConfig(
+                    session_factory=session_factory,
+                    checkpointer=checkpointer,
+                    worker_client=worker_client,
+                    circuit_breaker=WorkerCircuitBreaker(
+                        failure_threshold=3, recovery_timeout=30.0
+                    ),
+                    worker_spawner=LazyWorkerSpawner(
+                        worker_url="http://worker", worker_port=1, auto_spawn=False
+                    ),
+                    endpoint_provider=lambda: live_engine,
+                    recursion_limit=25,
+                )
             )
 
             await subscriber._reconcile_parked_runs(live_engine)
@@ -807,17 +812,19 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
             bridge,
         ):
             subscriber = VerdictSubscriber(
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-                worker_client=worker_client,
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=3, recovery_timeout=30.0
-                ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://worker", worker_port=1, auto_spawn=False
-                ),
-                endpoint_provider=lambda: live_engine,
-                recursion_limit=25,
+                VerdictSubscriberConfig(
+                    session_factory=session_factory,
+                    checkpointer=checkpointer,
+                    worker_client=worker_client,
+                    circuit_breaker=WorkerCircuitBreaker(
+                        failure_threshold=3, recovery_timeout=30.0
+                    ),
+                    worker_spawner=LazyWorkerSpawner(
+                        worker_url="http://worker", worker_port=1, auto_spawn=False
+                    ),
+                    endpoint_provider=lambda: live_engine,
+                    recursion_limit=25,
+                )
             )
 
             await subscriber._reconcile_parked_runs(live_engine)

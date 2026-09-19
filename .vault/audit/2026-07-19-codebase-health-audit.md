@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:1f09d9680b898409f8d1901a235da2f68938f9b5a9d07af6454e354fc2c9af39'
+body_hash: 'sha256:f999a3b55bd9e68c2f8534e313d2c1b9205547cf2e9dca8af99823120465ebf8'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3216,3 +3216,7 @@ Four medium-severity strict Ruff findings remaining in the clarification service
 ### 2026-09-20 permission response structure review pass
 
 Seven medium-severity strict Ruff findings in the permission-response service were resolved. A typed response and worker runtime now carry the service inputs; rejection journaling, idempotency replay, pending-state authorization, option validation, and failed dispatch have focused helpers. The unused aggregator argument was removed because application is proved by the exact receipt path. Review checked rejection-journal durability, retry replay before pending-status rejection, accepted-body conflict handling, claim election, audit-log placement before dispatch, and definite versus ambiguous dispatch failure compensation. Review surfaced one medium-severity behavior-drift risk: an extracted helper initially used the permission row's thread id, which could differ from the resolved fallback id. It was fixed before commit by using the loaded thread record's id in all three extracted helpers. Fifty-one focused control, database, and live gateway tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 248 to 241; code-health function-length findings fall from 21 to 19 and parameter-count findings from 104 to 97. The permission service has no remaining strict Ruff or complexipy findings. The remaining 241 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 verdict subscriber structure review pass
+
+Six medium-severity strict Ruff findings in verdict subscriber setup, parked-run reconciliation, verdict resume, and recovery-proposal parsing were resolved. The subscriber now receives one typed configuration; candidate selection, decided-verdict mapping, current-gate dispatch setup, and proposal parsing have focused functions. Review checked that INPUT_REQUIRED and mis-statused RUNNING candidates are still deduplicated in order, the current gate alone authorizes a resume, the accepted graph and write expectation are read before claim election, a fresh claim is finalized before worker dispatch, and HTTP acknowledgement still does not mark the action applied. Twenty-two focused tests pass; the six service-marked cases were deselected by the default profile and explicitly run with `-m service`, where all six skipped because a healthy loopback engine plus gateway and worker were unavailable. `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 241 to 235; code-health function-length findings fall from 19 to 18 and parameter-count findings from 97 to 96. No new review findings were surfaced. The remaining 235 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.

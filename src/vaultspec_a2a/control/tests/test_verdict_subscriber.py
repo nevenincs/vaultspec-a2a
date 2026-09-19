@@ -46,6 +46,7 @@ from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import (
     VerdictSubscriber,
+    VerdictSubscriberConfig,
     _gate_resume_verdict,
     _iter_recovery_proposals,
     _proposal_reconcile_verdict,
@@ -99,17 +100,19 @@ def _make_subscriber(
 ) -> VerdictSubscriber:
     """Construct a subscriber with real (unused-in-correlation) dispatch deps."""
     return VerdictSubscriber(
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-        worker_client=worker_client,
-        circuit_breaker=WorkerCircuitBreaker(
-            failure_threshold=3, recovery_timeout=30.0
-        ),
-        worker_spawner=LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
-        ),
-        endpoint_provider=lambda: None,
-        recursion_limit=25,
+        VerdictSubscriberConfig(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            worker_client=worker_client,
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=3, recovery_timeout=30.0
+            ),
+            worker_spawner=LazyWorkerSpawner(
+                worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
+            ),
+            endpoint_provider=lambda: None,
+            recursion_limit=25,
+        )
     )
 
 

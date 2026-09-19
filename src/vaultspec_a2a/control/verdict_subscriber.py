@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict
 
 from ..authoring import (
@@ -78,12 +79,17 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..authoring import EngineEndpoint
-    from ..database import ControlActionModel
+    from ..database import ControlActionModel, ThreadWriteExpectation
     from ..database.checkpoints import Checkpointer
+    from ..thread.executable_graph import FrozenGraphDefinition
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 
-__all__ = ["VerdictSubscriber", "settle_verdict_dispatch_receipt"]
+__all__ = [
+    "VerdictSubscriber",
+    "VerdictSubscriberConfig",
+    "settle_verdict_dispatch_receipt",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +112,32 @@ class _RecoveryProposal(TypedDict):
     status: str
     ids: set[str]
     approval: Mapping[str, object] | None
+
+
+@dataclass(frozen=True, slots=True)
+class _VerdictSetup:
+    dispatch: DispatchRequest
+    write_expectation: ThreadWriteExpectation
+    current_gate: str
+    resume_value: dict[str, object]
+    graph_definition: FrozenGraphDefinition
+
+
+@dataclass(frozen=True, slots=True)
+class VerdictSubscriberConfig:
+    session_factory: async_sessionmaker[AsyncSession]
+    checkpointer: Checkpointer
+    worker_client: httpx.AsyncClient
+    circuit_breaker: WorkerCircuitBreaker
+    worker_spawner: LazyWorkerSpawner
+    endpoint_provider: Callable[[], EngineEndpoint | None]
+    recursion_limit: int
+    trace_headers_fn: Callable[[], dict[str, str]] | None = None
+    poll_interval_seconds: float = 3.0
+    reconnect_base_seconds: float = 2.0
+    reconnect_max_seconds: float = 30.0
+    checkpoint_timeout_seconds: float = 10.0
+    parked_thread_limit: int = 200
 
 
 def _verdict_resume_idempotency_key(proposal_id: str) -> str:
@@ -194,39 +226,34 @@ def _proposal_reconcile_verdict(proposal: _RecoveryProposal) -> str | None:
     return None
 
 
+def _decided_verdicts(data: object) -> dict[str, str]:
+    verdict_by_id: dict[str, str] = {}
+    for proposal in _iter_recovery_proposals(data):
+        verdict = _proposal_reconcile_verdict(proposal)
+        if verdict is None:
+            continue
+        for proposal_id in proposal["ids"]:
+            verdict_by_id.setdefault(proposal_id, verdict)
+    return verdict_by_id
+
+
 class VerdictSubscriber:
     """Consume engine authoring verdicts and resume the runs they belong to."""
 
-    def __init__(
-        self,
-        *,
-        session_factory: async_sessionmaker[AsyncSession],
-        checkpointer: Checkpointer,
-        worker_client: httpx.AsyncClient,
-        circuit_breaker: WorkerCircuitBreaker,
-        worker_spawner: LazyWorkerSpawner,
-        endpoint_provider: Callable[[], EngineEndpoint | None],
-        recursion_limit: int,
-        trace_headers_fn: Callable[[], dict[str, str]] | None = None,
-        poll_interval_seconds: float = 3.0,
-        reconnect_base_seconds: float = 2.0,
-        reconnect_max_seconds: float = 30.0,
-        checkpoint_timeout_seconds: float = 10.0,
-        parked_thread_limit: int = 200,
-    ) -> None:
-        self._session_factory = session_factory
-        self._checkpointer = checkpointer
-        self._worker_client = worker_client
-        self._circuit_breaker = circuit_breaker
-        self._worker_spawner = worker_spawner
-        self._endpoint_provider = endpoint_provider
-        self._recursion_limit = recursion_limit
-        self._trace_headers_fn = trace_headers_fn
-        self._poll_interval = poll_interval_seconds
-        self._reconnect_base = reconnect_base_seconds
-        self._reconnect_max = reconnect_max_seconds
-        self._checkpoint_timeout = checkpoint_timeout_seconds
-        self._parked_thread_limit = parked_thread_limit
+    def __init__(self, config: VerdictSubscriberConfig) -> None:
+        self._session_factory = config.session_factory
+        self._checkpointer = config.checkpointer
+        self._worker_client = config.worker_client
+        self._circuit_breaker = config.circuit_breaker
+        self._worker_spawner = config.worker_spawner
+        self._endpoint_provider = config.endpoint_provider
+        self._recursion_limit = config.recursion_limit
+        self._trace_headers_fn = config.trace_headers_fn
+        self._poll_interval = config.poll_interval_seconds
+        self._reconnect_base = config.reconnect_base_seconds
+        self._reconnect_max = config.reconnect_max_seconds
+        self._checkpoint_timeout = config.checkpoint_timeout_seconds
+        self._parked_thread_limit = config.parked_thread_limit
         self._last_parked_reconcile = 0.0
 
     # ------------------------------------------------------------------
@@ -320,38 +347,7 @@ class VerdictSubscriber:
         if now - self._last_parked_reconcile < _PARKED_RECONCILE_INTERVAL_SECONDS:
             return
         self._last_parked_reconcile = now
-        async with self._session_factory() as db:
-            parked, _ = await list_threads(
-                db,
-                status=ThreadStatus.INPUT_REQUIRED,
-                limit=self._parked_thread_limit,
-            )
-            # recovery_required wedge: a run whose checkpoint is parked at
-            # a gate interrupt can be left mis-statused RUNNING rather than
-            # INPUT_REQUIRED - either because a prior gate's application receipt set
-            # RUNNING and that write raced
-            # AFTER the next gate's permission event set INPUT_REQUIRED (a
-            # cross-writer clobber), or because that gate's permission event never
-            # landed. Such a run is parked-in-checkpoint but invisible to an
-            # INPUT_REQUIRED-only sweep, so its decided verdict is never delivered
-            # and NOTHING re-drives it. Recover by CHECKPOINT truth: also consider
-            # RUNNING candidates and let the per-thread gate_pending +
-            # decided-verdict + gate-precise, claim-leased ``_resume_with_verdict``
-            # filter to exactly the stuck-parked runs. A genuinely executing run
-            # has no decided gate_pending (or a fresh resume claim on it), so it is
-            # never disturbed; a resume it does not need is rejected harmlessly by
-            # the worker's ingest-active lock.
-            running, _ = await list_threads(
-                db,
-                status=ThreadStatus.RUNNING,
-                limit=self._parked_thread_limit,
-            )
-        candidates = list(parked)
-        seen = {thread.id for thread in candidates}
-        for thread in running:
-            if thread.id not in seen:
-                candidates.append(thread)
-                seen.add(thread.id)
+        candidates = await self._parked_candidate_ids()
         if not candidates:
             return
         try:
@@ -368,24 +364,41 @@ class VerdictSubscriber:
         # so a run can be matched by its CURRENT gate proposal alone. The verdict is
         # drawn from the changeset status OR - for a missed request_changes, which
         # leaves the changeset in draft - the resolved approval decision.
-        verdict_by_id: dict[str, str] = {}
-        for proposal in _iter_recovery_proposals(snapshot.data):
-            verdict = _proposal_reconcile_verdict(proposal)
-            if verdict is None:
-                continue
-            for pid in proposal["ids"]:
-                verdict_by_id.setdefault(pid, verdict)
+        verdict_by_id = _decided_verdicts(snapshot.data)
         if not verdict_by_id:
             return
-        for thread in candidates:
-            pending = await self._thread_pending_gate_proposal(thread.id)
+        for thread_id in candidates:
+            pending = await self._thread_pending_gate_proposal(thread_id)
             if pending is None:
                 continue
             verdict = verdict_by_id.get(pending)
             if verdict is not None:
                 # Gate-precise by construction: keyed on the run's CURRENT gate
                 # proposal, so the correlated id set is exactly that proposal.
-                await self._resume_with_verdict(thread.id, verdict, None, {pending})
+                await self._resume_with_verdict(thread_id, verdict, None, {pending})
+
+    async def _parked_candidate_ids(self) -> list[str]:
+        async with self._session_factory() as db:
+            parked, _ = await list_threads(
+                db,
+                status=ThreadStatus.INPUT_REQUIRED,
+                limit=self._parked_thread_limit,
+            )
+            # A checkpoint parked at a gate can be mis-statused RUNNING when a
+            # prior receipt races the gate event. The gate-precise claim below
+            # filters these candidates by checkpoint truth.
+            running, _ = await list_threads(
+                db,
+                status=ThreadStatus.RUNNING,
+                limit=self._parked_thread_limit,
+            )
+        candidates = [thread.id for thread in parked]
+        seen = set(candidates)
+        for thread in running:
+            if thread.id not in seen:
+                candidates.append(thread.id)
+                seen.add(thread.id)
+        return candidates
 
     async def _thread_pending_gate_proposal(self, thread_id: str) -> str | None:
         """The proposal id of the gate a run is CURRENTLY parked at.
@@ -588,36 +601,13 @@ class VerdictSubscriber:
     # Resume dispatch
     # ------------------------------------------------------------------
 
-    async def _resume_with_verdict(
+    async def _prepare_verdict_resume(
         self,
         thread_id: str,
         verdict: str,
         notes: str | None,
         correlated_ids: set[str],
-    ) -> None:
-        """Dispatch ``Command(resume={"verdict", "notes"})`` to a parked run.
-
-        The worker HTTP response acknowledges scheduling only. The exact internal
-        ``dispatch_applied`` receipt owns journal, permission-row, and RUNNING
-        settlement after graph execution actually begins.
-
-        Two ordering invariants close the intermittent request_changes-recovery
-        race, both keyed on the run's CURRENT gate proposal:
-
-        - **Gate-precision.** Resume only when the run's current
-          ``gate_pending_proposal_id`` is among ``correlated_ids`` - the ids the
-          caller matched the verdict on. A verdict for a SUPERSEDED gate (a late r1
-          request_changes arriving after the run already re-parked at r2, matched by
-          the run's ACCUMULATED authoring ids) has a current gate that is not in its
-          id set, so it is skipped rather than applied to the wrong gate's interrupt
-          - a stale resume that corrupts the checkpoint's interrupt lineage and
-          wedges the run at ``next_nodes=[]``.
-        - **Durable lease before dispatch.** The shared control-action journal
-          reserves the current gate's typed verdict and atomically elects one lease
-          owner before dispatch. Identical fresh replays skip, competing verdict
-          payloads conflict without replacing the winner, and an expired lease is
-          re-drivable so a lost dispatch never permanently orphans the run.
-        """
+    ) -> _VerdictSetup | None:
         async with self._session_factory() as db:
             thread = await get_thread(db, thread_id)
             if thread is None:
@@ -666,17 +656,57 @@ class VerdictSubscriber:
             recursion_limit=self._recursion_limit,
             model_assignment=execution_authority.model_assignment,
         )
+        return _VerdictSetup(
+            dispatch, write_expectation, current_gate, resume_value, graph_definition
+        )
+
+    async def _resume_with_verdict(
+        self,
+        thread_id: str,
+        verdict: str,
+        notes: str | None,
+        correlated_ids: set[str],
+    ) -> None:
+        """Dispatch ``Command(resume={"verdict", "notes"})`` to a parked run.
+
+        The worker HTTP response acknowledges scheduling only. The exact internal
+        ``dispatch_applied`` receipt owns journal, permission-row, and RUNNING
+        settlement after graph execution actually begins.
+
+        Two ordering invariants close the intermittent request_changes-recovery
+        race, both keyed on the run's CURRENT gate proposal:
+
+        - **Gate-precision.** Resume only when the run's current
+          ``gate_pending_proposal_id`` is among ``correlated_ids`` - the ids the
+          caller matched the verdict on. A verdict for a SUPERSEDED gate (a late r1
+          request_changes arriving after the run already re-parked at r2, matched by
+          the run's ACCUMULATED authoring ids) has a current gate that is not in its
+          id set, so it is skipped rather than applied to the wrong gate's interrupt
+          - a stale resume that corrupts the checkpoint's interrupt lineage and
+          wedges the run at ``next_nodes=[]``.
+        - **Durable lease before dispatch.** The shared control-action journal
+          reserves the current gate's typed verdict and atomically elects one lease
+          owner before dispatch. Identical fresh replays skip, competing verdict
+          payloads conflict without replacing the winner, and an expired lease is
+          re-drivable so a lost dispatch never permanently orphans the run.
+        """
+        setup = await self._prepare_verdict_resume(
+            thread_id, verdict, notes, correlated_ids
+        )
+        if setup is None:
+            return
+        dispatch = setup.dispatch
         async with self._session_factory() as db:
             claim = await prepare_control_action_claim(
                 db,
-                write_expectation=write_expectation,
+                write_expectation=setup.write_expectation,
                 thread_id=thread_id,
                 action_type=ControlActionType.RESUME,
-                idempotency_key=_verdict_resume_idempotency_key(current_gate),
-                request_id=current_gate,
-                payload=freeze_accepted_input(dispatch, intent=resume_value),
+                idempotency_key=_verdict_resume_idempotency_key(setup.current_gate),
+                request_id=setup.current_gate,
+                payload=freeze_accepted_input(dispatch, intent=setup.resume_value),
                 dispatch_id=dispatch.dispatch_id,
-                recovery_timeout_seconds=graph_definition.run_timeout_seconds,
+                recovery_timeout_seconds=setup.graph_definition.run_timeout_seconds,
             )
             if not claim.authority_matches:
                 logger.warning(
@@ -687,14 +717,14 @@ class VerdictSubscriber:
                 logger.warning(
                     "Skipping competing verdict resume for thread %s gate %s",
                     thread_id,
-                    current_gate,
+                    setup.current_gate,
                 )
                 return
             if not claim.acquired:
                 logger.debug(
                     "Skipping verdict resume replay for thread %s gate %s (applied=%s)",
                     thread_id,
-                    current_gate,
+                    setup.current_gate,
                     claim.applied,
                 )
                 return
@@ -785,24 +815,31 @@ def _iter_recovery_proposals(data: object) -> list[_RecoveryProposal]:
     if items is None:
         return out
     for item in items:
-        item_mapping = coerce_object_mapping(item)
-        if item_mapping is None:
-            continue
-        status = item_mapping.get("status")
-        if not isinstance(status, str):
-            continue
-        ids: set[str] = set()
-        changeset_id = item_mapping.get("changeset_id")
-        if isinstance(changeset_id, str) and changeset_id:
-            ids.add(changeset_id)
-        approval_obj = coerce_object_mapping(item_mapping.get("approval"))
-        if approval_obj is not None:
-            proposal_id = approval_obj.get("proposal_id")
-            if isinstance(proposal_id, str) and proposal_id:
-                ids.add(proposal_id)
-        if ids:
-            out.append({"status": status, "ids": ids, "approval": approval_obj})
+        proposal = _recovery_proposal(item)
+        if proposal is not None:
+            out.append(proposal)
     return out
+
+
+def _recovery_proposal(item: object) -> _RecoveryProposal | None:
+    item_mapping = coerce_object_mapping(item)
+    if item_mapping is None:
+        return None
+    status = item_mapping.get("status")
+    if not isinstance(status, str):
+        return None
+    ids: set[str] = set()
+    changeset_id = item_mapping.get("changeset_id")
+    if isinstance(changeset_id, str) and changeset_id:
+        ids.add(changeset_id)
+    approval_obj = coerce_object_mapping(item_mapping.get("approval"))
+    if approval_obj is not None:
+        proposal_id = approval_obj.get("proposal_id")
+        if isinstance(proposal_id, str) and proposal_id:
+            ids.add(proposal_id)
+    if not ids:
+        return None
+    return {"status": status, "ids": ids, "approval": approval_obj}
 
 
 def _recovery_high_water(data: object) -> int | None:

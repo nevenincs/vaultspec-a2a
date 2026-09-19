@@ -177,6 +177,7 @@ async def park_clarification(
     *,
     thread_id: str,
     model_assignment_digest: str | None = None,
+    graph_definition_digest: str | None = None,
 ) -> ParkedClarification:
     """Park the shared graph and return its checkpoint-authoritative request."""
     graph = clarification_graph(checkpointer)
@@ -193,6 +194,8 @@ async def park_clarification(
     }
     if model_assignment_digest is not None:
         state["model_assignment_digest"] = model_assignment_digest
+    if graph_definition_digest is not None:
+        state["graph_definition_digest"] = graph_definition_digest
     await graph.ainvoke(state, config=config)
     request = pending_clarification(
         await checkpointer.aget_tuple(config), thread_id=thread_id

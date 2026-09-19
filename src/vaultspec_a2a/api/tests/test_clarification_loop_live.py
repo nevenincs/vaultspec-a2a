@@ -141,7 +141,10 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
 
         cache_key = await _cache_key_for_thread(session_factory, thread_id)
         parked = await park_clarification(
-            checkpointer, thread_id=thread_id, model_assignment_digest=cache_key[3]
+            checkpointer,
+            thread_id=thread_id,
+            model_assignment_digest=cache_key[3],
+            graph_definition_digest=cache_key[4],
         )
         request_id = parked.request.request_id
 
@@ -264,7 +267,10 @@ async def test_new_prompt_resumes_the_parked_graph_as_a_real_human_turn(
 
         cache_key = await _cache_key_for_thread(session_factory, thread_id)
         parked = await park_clarification(
-            checkpointer, thread_id=thread_id, model_assignment_digest=cache_key[3]
+            checkpointer,
+            thread_id=thread_id,
+            model_assignment_digest=cache_key[3],
+            graph_definition_digest=cache_key[4],
         )
         request_id = parked.request.request_id
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
@@ -355,7 +361,10 @@ async def test_decline_resumes_the_parked_graph_with_the_fixed_marker(
 
         cache_key = await _cache_key_for_thread(session_factory, thread_id)
         parked = await park_clarification(
-            checkpointer, thread_id=thread_id, model_assignment_digest=cache_key[3]
+            checkpointer,
+            thread_id=thread_id,
+            model_assignment_digest=cache_key[3],
+            graph_definition_digest=cache_key[4],
         )
         request_id = parked.request.request_id
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}}

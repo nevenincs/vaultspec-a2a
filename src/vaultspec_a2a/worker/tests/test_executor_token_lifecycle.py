@@ -28,7 +28,6 @@ from fastapi.responses import Response
 from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.types import interrupt
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...control.accepted_input import freeze_accepted_input
@@ -46,6 +45,7 @@ from ...thread.enums import ControlActionType
 from ...thread.executable_graph import freeze_graph_definition
 from ..executor import Executor
 from ..ipc import WorkerBridge
+from .test_executor import _install_gated_graph
 
 if TYPE_CHECKING:
     from ...thread.state import TeamState
@@ -213,42 +213,6 @@ async def test_tokens_injected_during_run_and_dropped_after() -> None:
             await executor.shutdown()
 
 
-def _install_interrupting_graph(
-    executor: Executor,
-    request: DispatchRequest,
-) -> None:
-    """Compile a real one-node graph that parks on ``interrupt`` then completes.
-
-    First ingest hits the interrupt and parks (LangGraph writes an interrupt
-    task; the ingest reports ``"interrupted"``). A later resume passes the
-    interrupt and reaches ``END``, completing the run.
-    """
-
-    async def gate_node(state: TeamState) -> dict[str, Any]:
-        decision = interrupt({"type": "plan_approval_request", "prompt": "ok?"})
-        return {
-            "messages": [AIMessage(content=f"resumed:{decision}")],
-            "next": "FINISH",
-        }
-
-    builder = new_state_graph()
-    builder.add_node("gate", gate_node)
-    builder.add_edge("__start__", "gate")
-    builder.add_edge("gate", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
-    )
-
-    cache_key = (
-        request.require_graph_definition().team_id,
-        request.workspace_root,
-        request.autonomous,
-        model_assignment_digest(request.model_assignment),
-        request.require_graph_definition().digest(),
-    )
-    executor.register_compiled_graph(request.thread_id, cache_key, graph)
-
-
 def _bundle() -> ActorTokenBundle:
     return ActorTokenBundle(
         tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
@@ -266,7 +230,7 @@ async def test_tokens_retained_through_interrupt_and_dropped_on_resume() -> None
         executor = Executor(checkpointer=cp, bridge=bridge)
         try:
             ingest = _accepted_ingest(thread_id, _bundle())
-            _install_interrupting_graph(executor, ingest)
+            _install_gated_graph(executor, ingest)
             await executor.handle_dispatch(ingest)
 
             # Retained across the park: the run interrupted, not terminated, so its
@@ -294,7 +258,7 @@ async def test_cancel_of_parked_run_drops_tokens_at_terminal() -> None:
         executor = Executor(checkpointer=cp, bridge=bridge)
         try:
             ingest = _accepted_ingest(thread_id, _bundle())
-            _install_interrupting_graph(executor, ingest)
+            _install_gated_graph(executor, ingest)
             await executor.handle_dispatch(ingest)
             assert executor.token_store.has(thread_id) is True
 

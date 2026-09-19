@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:3caa36b14a5ed767e752f54b042e625ab3c892d8869ddd1e04b4629b77c9a3c6'
+body_hash: 'sha256:7d10c51ace33f54c5c5b348a296d171aae742b41e114df8f2aeb0855d7fab26b'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3082,3 +3082,9 @@ Open queue: rerun the full nonservice inventory without the accelerator-dependen
 The late thread, utils, and workspace serial inventory found one medium-severity test contract drift: `TestTeamStateStructure` asserted an exact field set without the current agent descriptor, model assignment digest, graph definition digest, and three graph receipt fields. The expectation now includes those six fields; the focused test passes. The earlier late inventory had 403 passing and one failing test, so rerun that inventory and the full nonservice suite to close it. Review found no production change in this pass; the exact schema assertion remains useful for detecting future drift.
 
 Open queue: a broad xdist run still reported one other late failure before active workers stalled, but it yielded no named summary. Run the full nonservice inventory serially to identify it. The service harness and strict structural/export findings remain open.
+
+### 2026-09-19 bound resume compatibility and duplicate test review pass
+
+Review of the resume guard against live clarification tests found a medium-severity compatibility regression: an accepted parked graph can be registered with a real checkpoint that predates the two digest fields. The bound resume path now checks checkpoint presence under the existing deadline and trusts the exact registered cache binding; the cold recompile path still requires and validates both digests. Current clarification fixtures supply both digests when representing current checkpoints, while the older accepted case remains undigested. All four live clarification tests, the no-checkpoint worker refusal, and the normal gated resume pass. The full lifecycle package passed 146 tests under four workers.
+
+The structural-duplication gate found identical interrupt graph helpers in executor and token tests. The token tests now import the existing helper; five token tests and the structural gate pass. These are resolved medium-severity test contract findings. The broad xdist lifecycle failure did not reproduce in the isolated package and remains a medium-severity concurrency/flakiness finding for a complete repository rerun. `just check-all` passed. The strict structural/export gate and accelerator-dependent service harness remain open.

@@ -397,10 +397,19 @@ class GraphLifecycleManager:
             await self._checkpoint_compilation_digests(
                 req.thread_id, checkpoint_deadline=checkpoint_deadline
             )
-            if bound is None or req.action == "resume"
+            if bound is None
             else None
         )
-        if req.action == "resume" and checkpoint_digest is None:
+        if (
+            req.action == "resume"
+            and checkpoint_digest is None
+            and (
+                bound is None
+                or not await self._checkpoint_present(
+                    req.thread_id, checkpoint_deadline=checkpoint_deadline
+                )
+            )
+        ):
             return None
         if bound is None:
             if (
@@ -497,6 +506,28 @@ class GraphLifecycleManager:
                 self._cache_key_compile_locks.pop(cache_key, None)
             else:
                 self._cache_key_compile_lock_users[cache_key] = users
+
+    async def _checkpoint_present(
+        self, thread_id: str, *, checkpoint_deadline: float | None
+    ) -> bool:
+        """Check that a bound resume has a durable checkpoint to resume."""
+        timeout = self._checkpoint_read_timeout_seconds
+        if checkpoint_deadline is not None:
+            timeout = min(
+                timeout, checkpoint_deadline - asyncio.get_running_loop().time()
+            )
+        if timeout <= 0:
+            raise GraphCompilationError("durable checkpoint read timed out")
+        try:
+            checkpoint_tuple = await asyncio.wait_for(
+                self._checkpointer.aget_tuple(
+                    {"configurable": {"thread_id": thread_id}}
+                ),
+                timeout=timeout,
+            )
+        except TimeoutError as exc:
+            raise GraphCompilationError("durable checkpoint read timed out") from exc
+        return checkpoint_tuple is not None
 
     async def _checkpoint_compilation_digests(
         self, thread_id: str, *, checkpoint_deadline: float | None

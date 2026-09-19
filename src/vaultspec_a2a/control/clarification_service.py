@@ -41,6 +41,7 @@ from ..thread.enums import (
 from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import AcceptedActionInput, freeze_accepted_input
 from .action_lease import (
+    ControlActionClaim,
     DispatchFailureDisposition,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
+    "ClarificationRuntime",
     "redrive_clarification_actions",
     "respond_to_clarification",
 ]
@@ -97,6 +99,23 @@ class ClarificationRecoverySummary:
     dispatched: int = 0
     deferred: int = 0
     conflicted: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ClarificationRuntime:
+    checkpointer: Checkpointer
+    worker_client: httpx.AsyncClient
+    circuit_breaker: WorkerCircuitBreaker
+    worker_spawner: LazyWorkerSpawner
+    recursion_limit: int
+    trace_headers: dict[str, str] | None
+
+
+@dataclass(frozen=True, slots=True)
+class _DispatchContext:
+    runtime: ClarificationRuntime
+    fingerprint: str
+    thread_id: str
 
 
 def _idempotency_key(request_id: str) -> str:
@@ -205,12 +224,7 @@ async def respond_to_clarification(
     thread_id: str,
     request_id: str,
     resolution: ClarificationResolution,
-    checkpointer: Checkpointer,
-    worker_client: httpx.AsyncClient,
-    circuit_breaker: WorkerCircuitBreaker,
-    worker_spawner: LazyWorkerSpawner,
-    recursion_limit: int,
-    trace_headers: dict[str, str] | None,
+    runtime: ClarificationRuntime,
 ) -> ClarificationResult:
     """Reserve, lease, and dispatch one typed clarification resolution.
 
@@ -219,6 +233,8 @@ async def respond_to_clarification(
     one redriver.  Worker success is not application proof: only the request-scoped
     checkpoint receipt settles the journal row.
     """
+    checkpointer = runtime.checkpointer
+    recursion_limit = runtime.recursion_limit
     thread = await get_thread(db, thread_id)
     if thread is None:
         return ClarificationResult(
@@ -407,15 +423,27 @@ async def respond_to_clarification(
     if not claim.acquired:
         return _result(action)
 
+    return await _dispatch_claimed(
+        db, action, claim, dispatch, _DispatchContext(runtime, fingerprint, thread_id)
+    )
+
+
+async def _dispatch_claimed(
+    db: AsyncSession,
+    action: ControlActionModel,
+    claim: ControlActionClaim,
+    dispatch: DispatchRequest,
+    context: _DispatchContext,
+) -> ClarificationResult:
     dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
     await finalize_control_action_acceptance(db, claim)
     dispatch = await bind_graph_action_receipt(db, dispatch)
     outcome = await safe_dispatch(
-        worker_client,
+        context.runtime.worker_client,
         dispatch,
-        circuit_breaker,
-        worker_spawner,
-        trace_headers=trace_headers,
+        context.runtime.circuit_breaker,
+        context.runtime.worker_spawner,
+        trace_headers=context.runtime.trace_headers,
     )
     if not outcome.success:
         _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
@@ -435,7 +463,7 @@ async def respond_to_clarification(
             # delivery is undecided, and says nothing.
             await record_undelivered_dispatch(
                 db,
-                thread_id,
+                context.thread_id,
                 reason=f"Clarification resume not delivered: {detail}",
             )
         await db.commit()
@@ -451,11 +479,13 @@ async def respond_to_clarification(
     # A very fast worker may already have checkpointed the receipt before its HTTP
     # acknowledgement reaches us. Settle opportunistically, but never infer
     # application merely from the acknowledgement.
-    latest_checkpoint = await read_run_snapshot(checkpointer, thread_id)
+    latest_checkpoint = await read_run_snapshot(
+        context.runtime.checkpointer, context.thread_id
+    )
     applied = await _settle_from_receipt(
         db,
         action,
-        fingerprint=fingerprint,
+        fingerprint=context.fingerprint,
         checkpoint_tuple=latest_checkpoint,
     )
     if applied:
@@ -466,12 +496,7 @@ async def respond_to_clarification(
 async def redrive_clarification_actions(
     session_factory: async_sessionmaker[AsyncSession],
     *,
-    checkpointer: Checkpointer,
-    worker_client: httpx.AsyncClient,
-    circuit_breaker: WorkerCircuitBreaker,
-    worker_spawner: LazyWorkerSpawner,
-    recursion_limit: int,
-    trace_headers: dict[str, str] | None,
+    runtime: ClarificationRuntime,
 ) -> ClarificationRecoverySummary:
     """Settle receipted actions and redrive expired parked leases after restart."""
     async with session_factory() as db:
@@ -502,12 +527,7 @@ async def redrive_clarification_actions(
                 thread_id=row.thread_id,
                 request_id=row.request_id,
                 resolution=resolution,
-                checkpointer=checkpointer,
-                worker_client=worker_client,
-                circuit_breaker=circuit_breaker,
-                worker_spawner=worker_spawner,
-                recursion_limit=recursion_limit,
-                trace_headers=trace_headers,
+                runtime=runtime,
             )
         if result.applied:
             applied += 1

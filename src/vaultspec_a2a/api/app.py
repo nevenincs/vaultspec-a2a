@@ -30,7 +30,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..authoring import resolve_engine
 from ..control.circuit_breaker import WorkerCircuitBreaker
-from ..control.clarification_service import redrive_clarification_actions
+from ..control.clarification_service import (
+    ClarificationRuntime,
+    redrive_clarification_actions,
+)
 from ..control.config import settings
 from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
@@ -432,12 +435,14 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 app.state.clarification_recovery_summary = (
                     await redrive_clarification_actions(
                         get_session_factory(),
-                        checkpointer=checkpointer,
-                        worker_client=worker_client,
-                        circuit_breaker=circuit_breaker,
-                        worker_spawner=worker_spawner,
-                        recursion_limit=domain_config.graph_recursion_limit,
-                        trace_headers=trace_headers(),
+                        runtime=ClarificationRuntime(
+                            checkpointer,
+                            worker_client,
+                            circuit_breaker,
+                            worker_spawner,
+                            domain_config.graph_recursion_limit,
+                            trace_headers(),
+                        ),
                     )
                 )
             except asyncio.CancelledError:

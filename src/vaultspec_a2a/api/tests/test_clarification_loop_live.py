@@ -44,7 +44,10 @@ from ...control.action_lease import (
     prepare_control_action_claim,
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.clarification_service import redrive_clarification_actions
+from ...control.clarification_service import (
+    ClarificationRuntime,
+    redrive_clarification_actions,
+)
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.graph_definition import read_accepted_graph_definition
@@ -549,12 +552,14 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
             worker_app.state.task_group = tg
             first = await redrive_clarification_actions(
                 session_factory,
-                checkpointer=checkpointer,
-                worker_client=worker_client,
-                circuit_breaker=circuit_breaker,
-                worker_spawner=worker_spawner,
-                recursion_limit=100,
-                trace_headers=None,
+                runtime=ClarificationRuntime(
+                    checkpointer,
+                    worker_client,
+                    circuit_breaker,
+                    worker_spawner,
+                    100,
+                    None,
+                ),
             )
             assert first.examined == 1
             assert first.dispatched == 1
@@ -574,12 +579,14 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
 
             second = await redrive_clarification_actions(
                 session_factory,
-                checkpointer=checkpointer,
-                worker_client=worker_client,
-                circuit_breaker=circuit_breaker,
-                worker_spawner=worker_spawner,
-                recursion_limit=100,
-                trace_headers=None,
+                runtime=ClarificationRuntime(
+                    checkpointer,
+                    worker_client,
+                    circuit_breaker,
+                    worker_spawner,
+                    100,
+                    None,
+                ),
             )
             assert second.examined == 1
             assert second.applied == 1

@@ -43,7 +43,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...context.metadata import ThreadMetadata
 from ...control.admission import AdmissionBroker, AdmissionReadiness
 from ...control.cancel_service import cancel_thread, raise_for_cancel_failure
-from ...control.clarification_service import respond_to_clarification
+from ...control.clarification_service import (
+    ClarificationRuntime,
+    respond_to_clarification,
+)
 from ...control.config import settings
 from ...control.drain import DrainGate
 from ...control.health import (
@@ -2238,12 +2241,14 @@ async def run_clarification_respond_endpoint(
         thread_id=run_id,
         request_id=request_id,
         resolution=resolution,
-        checkpointer=checkpointer,
-        worker_client=worker_client,
-        circuit_breaker=circuit_breaker,
-        worker_spawner=worker_spawner,
-        recursion_limit=domain_config.graph_recursion_limit,
-        trace_headers=trace_headers(),
+        runtime=ClarificationRuntime(
+            checkpointer,
+            worker_client,
+            circuit_breaker,
+            worker_spawner,
+            domain_config.graph_recursion_limit,
+            trace_headers(),
+        ),
     )
     if result.error_status_code is not None:
         raise HTTPException(

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:c4a05d9f4c896b8d9783bc46e238b40aa724d13dca4b928ebc9e81f2c57fb165'
+body_hash: 'sha256:b61d92fc2fd518cf730dd97a7a5605b98bc6436bd3a1f87012cd8bc56cc00b89'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3204,3 +3204,7 @@ Twelve medium-severity strict Ruff findings across worker spawn admission, readi
 ### 2026-09-20 terminal and application event structure review pass
 
 Seven medium-severity strict Ruff complexity, branch, return, and statement findings in terminal and dispatch-application handling were resolved. Completion, cancellation, and failure terminals now have separate proof checks; the terminal handler releases the drain gate and prunes aggregator state only after one proof accepts. Dispatch application now validates the private receipt, proves checkpoint incorporation, then reloads the current action under row locks before settlement. Review checked that sequence capture still precedes pruning, mismatched or stale evidence still refuses settlement, the intermediate database commit still precedes checkpoint inspection, and permission response resolution still returns its request id to the aggregator. Sixty-four focused control and API tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 262 to 255; code-health function-length findings fall from 23 to 21 and radon findings from 145 to 144. No new review findings were surfaced. Three excessive-argument signatures and the module-length finding remain open in this module; the remaining 255 Ruff structure, 31 nested-block, and Pylint/health findings remain open.
+
+### 2026-09-20 clarification dispatch structure review pass
+
+Three low-severity strict argument-count and medium-severity cyclomatic findings were resolved. The response and restart recovery paths now pass their worker dependencies in one typed runtime; dispatch after a successful claim is a focused helper. Review checked that the claim is finalized before dispatch, the graph receipt is bound before sending, definite non-delivery still records a repair reason, ambiguous delivery retains the lease, and only a matching checkpoint receipt proves application. Ten focused clarification and dispatch-failure tests pass, as do the regular Ruff gate and diff check. Strict Ruff structure falls from 255 to 252. Four pre-existing medium-severity structure findings remain in this service: the main responder has excessive complexity, returns, and branches, and the result builder has excessive parameters. These and the repository-wide strict backlog remain in the audit queue. No new review findings were surfaced.

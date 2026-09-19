@@ -22,7 +22,10 @@ from ...api.tests.clarification_harness import park_clarification
 from ...conftest import materialize_schema
 from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.clarification_service import respond_to_clarification
+from ...control.clarification_service import (
+    ClarificationRuntime,
+    respond_to_clarification,
+)
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.message_service import send_followup_message
@@ -383,12 +386,9 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
                     request_id=parked.request.request_id,
                     answers={"provider": "codex"},
                 ),
-                checkpointer=checkpointer,
-                worker_client=client,
-                circuit_breaker=circuit_breaker,
-                worker_spawner=spawner,
-                recursion_limit=1,
-                trace_headers=None,
+                runtime=ClarificationRuntime(
+                    checkpointer, client, circuit_breaker, spawner, 1, None
+                ),
             )
 
     assert result.dispatched is False

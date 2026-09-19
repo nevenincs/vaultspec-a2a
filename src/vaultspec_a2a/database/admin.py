@@ -58,9 +58,12 @@ def _alembic_cfg(database_url: str) -> AlembicConfig:
     the script location it names is relative to the working directory rather
     than to the installed package.
     """
+    from ..control.config import settings
     from .migrate import build_migration_config
 
-    return build_migration_config(database_url)
+    return build_migration_config(
+        database_url, sqlite_busy_timeout_ms=settings.sqlite_busy_timeout_ms
+    )
 
 
 def _migrate_to_head(database_url: str) -> None:
@@ -150,6 +153,7 @@ def _action_migrate(fix: bool) -> None:
 
     conn = sqlite3.connect(str(db_path))
     try:
+        _apply_sqlite_pragmas(conn, None)
         result = checkpoint_wal(conn)
         if result.blocked:
             # VACUUM needs a lock the same reader is denying, so attempting it

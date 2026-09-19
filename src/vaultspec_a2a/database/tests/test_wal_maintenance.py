@@ -48,7 +48,10 @@ from ..session import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PAYLOAD = "x" * 2000
+# WAL evidence depends on pages written, not on the number of commits. A larger
+# row reaches the same multi-megabyte/page-count thresholds with far fewer
+# fsync-heavy autocommits, which matters especially on Windows.
+_PAYLOAD = "x" * (16 * 1024)
 
 
 def _wal_bytes(database: Path) -> int:
@@ -63,6 +66,11 @@ def _open_wal_database(
     """Open a real WAL-mode SQLite connection with a table to churn."""
     conn = sqlite3.connect(str(database), isolation_level=None)
     conn.execute("PRAGMA journal_mode=WAL")
+    # These tests inspect WAL/checkpoint behaviour, not power-loss durability.
+    # Avoid an fsync for every intentionally separate autocommit while retaining
+    # real files, transactions, readers, frames, and checkpoint operations.
+    conn.execute("PRAGMA synchronous=OFF")
+    conn.execute("PRAGMA busy_timeout=50")
     if autocheckpoint is not None:
         conn.execute(f"PRAGMA wal_autocheckpoint={autocheckpoint:d}")
     conn.execute("CREATE TABLE IF NOT EXISTS churn (id INTEGER PRIMARY KEY, blob TEXT)")
@@ -130,7 +138,7 @@ def test_sustained_writes_settle_at_the_ceiling_rather_than_growing(
         page_size = conn.execute("PRAGMA page_size").fetchone()[0]
         sizes: list[int] = []
         for _ in range(5):
-            _churn(conn, 1200)
+            _churn(conn, 320)
             sizes.append(_wal_bytes(database))
     finally:
         conn.close()
@@ -140,8 +148,8 @@ def test_sustained_writes_settle_at_the_ceiling_rather_than_growing(
     # commit boundary, so it overshoots slightly rather than capping exactly.
     ceiling = pages * page_size * 2
     assert max(sizes) < ceiling, sizes
-    # 6,000 committed rows across five batches, and the last batch is no larger
-    # than the first: growth has stopped, it has not merely slowed.
+    # Five batches each cross the page ceiling, and the last is no larger than
+    # the first: growth has stopped, it has not merely slowed.
     assert sizes[-1] <= sizes[0] * 1.1, sizes
 
 
@@ -159,7 +167,7 @@ def test_a_truncating_checkpoint_returns_the_log_to_the_filesystem(
     # reclaiming; this is the condition a pinned reader produces in production.
     conn = _open_wal_database(database, autocheckpoint=0)
     try:
-        _churn(conn, 3000)
+        _churn(conn, 320)
         grown = _wal_bytes(database)
 
         result = checkpoint_wal(conn)
@@ -185,11 +193,11 @@ def test_an_idle_open_reader_does_not_prevent_reclamation(runtime_dir: Path) -> 
     writer = _open_wal_database(database, autocheckpoint=0)
     reader = sqlite3.connect(str(database), isolation_level=None)
     try:
-        _churn(writer, 500)
+        _churn(writer, 50)
         reader.execute("SELECT count(*) FROM churn").fetchone()
         assert reader.in_transaction is False
 
-        _churn(writer, 2000)
+        _churn(writer, 320)
         grown = _wal_bytes(database)
         result = checkpoint_wal(writer)
         reclaimed = _wal_bytes(database)
@@ -217,13 +225,13 @@ def test_an_open_read_transaction_pins_the_log_and_the_block_is_reported(
     writer = _open_wal_database(database, autocheckpoint=0)
     reader = sqlite3.connect(str(database), isolation_level=None)
     try:
-        _churn(writer, 200)
+        _churn(writer, 20)
 
         reader.execute("BEGIN")
         reader.execute("SELECT count(*) FROM churn").fetchone()
         assert reader.in_transaction is True
 
-        _churn(writer, 3000)
+        _churn(writer, 320)
         pinned_size = _wal_bytes(database)
 
         blocked = checkpoint_wal(writer)
@@ -327,7 +335,7 @@ def test_auto_vacuum_requires_a_full_vacuum_to_change_on_an_existing_database(
     database = runtime_dir / "needs-vacuum.db"
     conn = _open_wal_database(database)
     try:
-        _churn(conn, 200)
+        _churn(conn, 50)
         assert conn.execute("PRAGMA auto_vacuum").fetchone()[0] == 0
 
         conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
@@ -357,8 +365,9 @@ def test_incremental_vacuum_reclaims_far_less_than_a_full_vacuum(
         # Set before the header exists, which is the only point it can be set.
         conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
         conn.execute("CREATE TABLE churn (id INTEGER PRIMARY KEY, blob TEXT)")
-        _churn(conn, 2500)
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=OFF")
+        _churn(conn, 400)
         assert conn.execute("PRAGMA auto_vacuum").fetchone()[0] == 2
 
         checkpoint_wal(conn)
@@ -403,6 +412,10 @@ def _run_admin(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """
     env = dict(os.environ)
     env["VAULTSPEC_DATABASE_URL"] = f"sqlite+aiosqlite:///{database.as_posix()}"
+    # The blocked-checkpoint proof needs a nonzero wait, not the production
+    # default's five seconds of idle time. The administrative connection must
+    # honor the same setting as every other SQLite connection authority.
+    env["VAULTSPEC_SQLITE_BUSY_TIMEOUT_MS"] = "50"
     return subprocess.run(
         [sys.executable, "-m", "vaultspec_a2a.database.admin", *args],
         capture_output=True,
@@ -434,6 +447,8 @@ def _write_threads(database: Path, count: int) -> None:
     """Commit ``count`` real rows through the production models, one per commit."""
     engine = create_engine(f"sqlite:///{database}")
     try:
+        with engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA synchronous=OFF")
         with Session(engine) as session:
             for index in range(count):
                 authority = make_test_thread_authority_columns()
@@ -477,7 +492,7 @@ def test_migrate_fix_reclaims_the_log_and_reports_success(runtime_dir: Path) -> 
         holder.execute("SELECT count(*) FROM threads").fetchone()
         assert holder.in_transaction is False
 
-        _write_threads(database, 800)
+        _write_threads(database, 128)
         grown = _wal_bytes(database)
 
         result = _run_admin(database, "migrate", "--fix")
@@ -517,7 +532,7 @@ def test_migrate_fix_reports_a_blocked_checkpoint_instead_of_announcing_success(
         reader.execute("BEGIN")
         reader.execute("SELECT count(*) FROM threads").fetchone()
 
-        _write_threads(database, 800)
+        _write_threads(database, 128)
 
         pinned_size = _wal_bytes(database)
         result = _run_admin(database, "migrate", "--fix")

@@ -263,7 +263,7 @@ def test_attach_succeeds_on_a_bound_port_and_fails_on_a_dead_pid(
 
 
 def test_resume_restarts_a_died_record_on_its_original_port(tmp_path: Path) -> None:
-    original_port = 18904
+    original_port = free_port()
     record = _record(
         name="revive",
         pid=_dead_pid(),
@@ -274,7 +274,10 @@ def test_resume_restarts_a_died_record_on_its_original_port(tmp_path: Path) -> N
 
     # A serve that actually binds its port, so the resume's readiness gate is
     # satisfied and the new generation is published only once it is live.
-    config = _scratch_config(serve=[sys.executable, "-c", _BIND_SERVE, "{port}"])
+    config = _serve_config(
+        [sys.executable, "-c", _BIND_SERVE, "{port}"],
+        band=(original_port, original_port),
+    )
     updated = resume("revive", home=tmp_path, config=config)
     try:
         # A brand-new live pid, same port and workspace preserved.
@@ -487,9 +490,37 @@ def _serve_config(serve: list[str], band: tuple[int, int]) -> ProcsConfig:
     return ProcsConfig(resident={}, roles={"scratch": role})
 
 
+_LIVE_SOCKET_BAND = pytest.mark.resource("scratch-registry-socket-band")
+
+
+def _available_band(width: int) -> tuple[int, int]:
+    """Return a contiguous test-only loopback band free at selection time."""
+    first_candidate = 20_000 + (time.time_ns() % (10_000 - width))
+    for attempt in range(100):
+        start = 20_000 + ((first_candidate - 20_000 + attempt * width) % 10_000)
+        if start + width - 1 >= 30_000:
+            continue
+        probes: list[socket.socket] = []
+        try:
+            for port in range(start, start + width):
+                probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                probe.bind(("127.0.0.1", port))
+                probes.append(probe)
+        except OSError:
+            continue
+        else:
+            return start, start + width - 1
+        finally:
+            for probe in probes:
+                probe.close()
+    raise RuntimeError(f"could not find {width} contiguous free loopback ports")
+
+
+@_LIVE_SOCKET_BAND
 def test_serve_up_boots_registers_and_picks_distinct_ports(tmp_path: Path) -> None:
     serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
-    config = _serve_config(serve, band=(18990, 18992))
+    band = _available_band(3)
+    config = _serve_config(serve, band=band)
 
     first = serve_up(
         "scratch", "alpha", home=tmp_path, config=config, ready_timeout=15.0
@@ -502,8 +533,8 @@ def test_serve_up_boots_registers_and_picks_distinct_ports(tmp_path: Path) -> No
         # would have caused cannot happen because reserve_port is exclusive.
         assert is_pid_alive(first.pid) and is_pid_alive(second.pid)
         assert first.port != second.port
-        assert first.port in range(18990, 18993)
-        assert second.port in range(18990, 18993)
+        assert first.port in range(band[0], band[1] + 1)
+        assert second.port in range(band[0], band[1] + 1)
         # Records committed, reservation markers cleared, listeners real.
         assert read_record(record_path("scratch", "alpha", home=tmp_path)) is not None
         assert not list(tmp_path.glob("*.reserved"))
@@ -513,6 +544,7 @@ def test_serve_up_boots_registers_and_picks_distinct_ports(tmp_path: Path) -> No
         tree_kill(second.pid)
 
 
+@_LIVE_SOCKET_BAND
 def test_serve_up_reports_boot_failure_through_the_structured_log(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -527,7 +559,8 @@ def test_serve_up_reports_boot_failure_through_the_structured_log(
     Real subprocesses and a real two-port band, as in the sibling test; only the
     log is inspected here.
     """
-    config = _serve_config([sys.executable, "-c", "pass"], band=(18996, 18997))
+    band = _available_band(2)
+    config = _serve_config([sys.executable, "-c", "pass"], band=band)
     with (
         caplog.at_level(logging.WARNING, logger="vaultspec_a2a.lifecycle.manager"),
         pytest.raises(LifecycleError),
@@ -545,13 +578,14 @@ def test_serve_up_reports_boot_failure_through_the_structured_log(
     # Each failed attempt is accounted for, so an operator can see WHICH ports
     # were tried rather than only that the band was exhausted.
     attempts = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert {r.__dict__["port"] for r in attempts} == {18996, 18997}
+    assert {r.__dict__["port"] for r in attempts} == set(range(band[0], band[1] + 1))
 
 
+@_LIVE_SOCKET_BAND
 def test_serve_up_raises_when_no_band_port_yields_a_listener(tmp_path: Path) -> None:
     # A serve command that exits immediately never binds; a 2-port band bounds the
     # retry loop so the exhaustion is fast and deterministic.
-    config = _serve_config([sys.executable, "-c", "pass"], band=(18994, 18995))
+    config = _serve_config([sys.executable, "-c", "pass"], band=_available_band(2))
     with pytest.raises(LifecycleError, match="no band port yielded a live listener"):
         serve_up("scratch", "doomed", home=tmp_path, config=config, ready_timeout=3.0)
     # Nothing registered, every reservation released.
@@ -683,7 +717,8 @@ def test_serve_env_injects_gateway_url_and_reads_the_internal_token(
 
 def test_serve_up_refuses_a_missing_token_file_with_no_residue(tmp_path: Path) -> None:
     serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
-    config = _serve_config(serve, band=(18990, 18992))
+    port = free_port()
+    config = _serve_config(serve, band=(port, port))
     # The token-file read happens after reserve_port but before spawn; the refusal
     # must leave no record, no reservation marker, and nothing spawned.
     with pytest.raises(LifecycleError, match="unreadable"):
@@ -743,7 +778,8 @@ def test_serve_up_records_and_injects_the_worker_gateway_pairing(
     token_file = tmp_path / "tok"
     token_file.write_text("tok-abc\n")
     serve = [sys.executable, "-c", _PAIRING_PROBE_SERVE, "{port}", str(sentinel)]
-    config = _serve_config(serve, band=(18990, 18992))
+    port = free_port()
+    config = _serve_config(serve, band=(port, port))
     record = serve_up(
         "scratch",
         "w",
@@ -789,7 +825,8 @@ def test_serve_up_records_and_injects_engine_service_json(tmp_path: Path) -> Non
     sentinel = tmp_path / "seen-env.txt"
     seat = str(tmp_path / "engine-service.json")
     serve = [sys.executable, "-c", _ENV_PROBE_SERVE, "{port}", str(sentinel)]
-    config = _serve_config(serve, band=(18990, 18992))
+    port = free_port()
+    config = _serve_config(serve, band=(port, port))
     record = serve_up(
         "scratch",
         "w",
@@ -814,7 +851,8 @@ def test_resume_reproduces_recorded_engine_service_json(tmp_path: Path) -> None:
     sentinel = tmp_path / "resume-env.txt"
     seat = str(tmp_path / "engine-service.json")
     serve = [sys.executable, "-c", _ENV_PROBE_SERVE, "{port}", str(sentinel)]
-    config = _serve_config(serve, band=(18990, 18992))
+    port = free_port()
+    config = _serve_config(serve, band=(port, port))
     # A died record carrying an engine seat: resume must re-inject it from the record,
     # not depend on the resuming shell - the whole point of recording it.
     write_record(
@@ -822,7 +860,7 @@ def test_resume_reproduces_recorded_engine_service_json(tmp_path: Path) -> None:
             name="rev",
             role="scratch",
             pid=_dead_pid(),
-            port=18990,
+            port=port,
             engine_service_json=seat,
         ),
         home=tmp_path,
@@ -841,16 +879,17 @@ def test_resume_reproduces_recorded_engine_service_json(tmp_path: Path) -> None:
 def test_serve_up_injects_the_port_into_the_child_env(tmp_path: Path) -> None:
     # The child binds a port it learns ONLY from the injected env var (never argv),
     # so a live listener proves serve_up wired render_env into the child environment.
+    port = free_port()
     config = _serve_config_with_env(
         [sys.executable, "-c", _BIND_FROM_ENV],
-        band=(18996, 18997),
+        band=(port, port),
         env={"PROBEPORT": "{port}"},
     )
     record = serve_up(
         "scratch", "envboot", home=tmp_path, config=config, ready_timeout=15.0
     )
     try:
-        assert record.port in range(18996, 18998)
+        assert record.port == port
         assert attach("envboot", home=tmp_path).endpoint.endswith(str(record.port))
     finally:
         tree_kill(record.pid)
@@ -945,7 +984,8 @@ def test_serve_up_allows_a_require_repo_role_with_an_explicit_repo(
     tmp_path: Path,
 ) -> None:
     serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
-    config = _require_repo_config(serve, band=(18990, 18992))
+    port = free_port()
+    config = _require_repo_config(serve, band=(port, port))
     record = serve_up(
         "scratch",
         "eng",
@@ -999,7 +1039,8 @@ def test_resume_refuses_a_require_repo_role_without_an_explicit_repo(
 
 def test_serve_up_captures_build_repo_into_the_record(tmp_path: Path) -> None:
     serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
-    config = _serve_config(serve, band=(18990, 18992))
+    port = free_port()
+    config = _serve_config(serve, band=(port, port))
     engine_repo = str(tmp_path / "engine")
     record = serve_up(
         "scratch",

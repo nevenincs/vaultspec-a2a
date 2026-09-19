@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-19'
 body_schema: 'body-v1'
-body_hash: 'sha256:7a930bbb62fe9dfb0e355d8751349f7221f001481402663bccccd629e18db093'
+body_hash: 'sha256:10ffceacf397993ca27c74b878933c7213e9bf0ca49e35f83626a4bd98c97f6d'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -344,6 +344,66 @@ non-RAG full unit lane has not produced an all-green result because each pass
 surfaced independent pre-existing concurrency defects; exact results and timing
 are retained in the linked reference rather than hidden.
 
+### wal-maintenance-test-write-amplification | medium | resolved
+
+Type: performance and fixture design. The WAL-maintenance suite created its
+evidence with 2,500-6,000 tiny fsync-heavy autocommits per test. An isolated
+serial baseline was 105.12s for fourteen tests; the slowest cases took 30.62s,
+16.80s, 15.96s, and 14.62s. The assertions depend on pages and WAL state, not
+tiny-row count or crash durability. Test rows are now 16 KiB, counts are reduced
+while retaining the multi-megabyte and freelist thresholds, and test-only data
+generators use `synchronous=OFF` plus a 50ms busy timeout. Production-model and
+administrative subprocess paths remain real. Two post-change serial runs passed
+in 8.87s and 9.37s, a roughly 91% reduction, and no WAL case appears in the next
+full lane's fifty slowest items. Status: resolved.
+
+### migration-engine-ignored-configured-busy-timeout | medium | resolved
+
+Type: process idle time and configuration drift. The application, checkpoint,
+and administrative SQLAlchemy connections honored
+`VAULTSPEC_SQLITE_BUSY_TIMEOUT_MS`, but Alembic's async engine and the raw
+`migrate --fix` connection inherited sqlite defaults. The blocked-checkpoint
+proof therefore idled for about five seconds despite selecting a 50ms test
+budget. The programmatic migration config now carries the configured timeout,
+the Alembic environment passes it as SQLite `connect_args`, and the raw fix
+connection uses the existing administrative pragma authority. Migration,
+administration, and WAL coverage passes 40 tests under four workers. Status:
+resolved.
+
+### manager-real-bind-tests-used-shared-literal-bands | medium | resolved
+
+Type: test isolation. The prior repair covered the one manager failure then
+observed, but additional `serve_up`/`resume` tests still bound real listeners in
+`18990-18997` through isolated homes. A later full lane failed two environment
+injection tests after all three ports were occupied. Every single-port real bind
+now takes a held machine-global scratch reservation; the two tests that require
+a contiguous multi-port band select a probed test-only band under the same
+resource lease as registry socket-band tests. The manager module passes 39 tests
+across four workers. Status: resolved.
+
+### desktop-run-admission-readiness-race | high | open
+
+Type: product/test concurrency. The post-WAL full lane reached the serialized
+desktop admission proof but `test_exact_commit_replay_role_binding_release_and_race_are_linearized`
+received `503 run admission is not execution-ready` while preparing its final
+release/commit race. Earlier operations against the same real gateway succeeded,
+so execution readiness changed during the scenario. This is separate from the
+WAL and port work and requires a dedicated reproduction that captures worker
+health and gateway logs at the transition. Status: open.
+
+### wal-and-manager-optimization-review-2026-09-20 | high | REVISION REQUIRED
+
+Review result: the scoped WAL, migration-timeout, and manager-port changes pass
+review; the overall lane remains REVISION REQUIRED because the high-severity
+desktop admission race above is open. The review removed a load-sensitive
+four-second timing assertion and replaced it with deterministic configuration
+coverage, while retaining real contention behavior. Ruff, formatting, ty,
+BasedPyright, 40 database tests, two serial WAL repetitions, and all 39 manager
+tests pass. The non-RAG full lane completed in 386.11s with 4,534 passes, one
+skip, and three failures: the two manager port failures fixed after that run and
+the queued desktop race. An unrelated concurrent edit to `providers/codex_catalog.py`
+was present in the worktree and is excluded from this pass.
+
 ## Recommendations
 
 - Migrate the outlying live suites (CLI live tests, authoring discovery retry
@@ -367,3 +427,5 @@ are retained in the linked reference rather than hidden.
   gate cost.
 - Repair the permission-response replay/redrive race around a released lease and
   stale writer witness, then retain a deterministic two-caller barrier test.
+- Capture worker-health transitions around the desktop admission release/commit
+  race before changing its readiness contract.

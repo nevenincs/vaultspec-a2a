@@ -5,7 +5,7 @@ tags:
 date: '2026-09-19'
 modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:70a2defada0963d1275a213c76b2b385a4f326e3697dcea3647fc67cc8a27971'
+body_hash: 'sha256:9414c02f60d19745d4a75076bcc45dd6e5dc5e59272fa640f52fe3e6ce7745af'
 related:
   - "[[2026-08-02-resource-aware-test-execution-adr]]"
 ---
@@ -128,3 +128,33 @@ state can be proven independent.
 - The permission-response lease race and unclosed Windows asyncio transport
   warnings are correctness/cleanup findings, not timing optimizations, and are
   retained in the audit queue.
+
+## WAL optimization measurement — 2026-09-20
+
+An isolated serial run established a clean WAL-maintenance baseline: fourteen
+tests took 105.12s. The suite wrote thousands of 2 KiB rows as individual
+autocommits even though its assertions concern WAL pages, checkpoint blocking,
+file size, and freelist pages. Replacing transaction count with 16 KiB rows,
+disabling crash-durability fsync only in test data generators, and using a 50ms
+test busy timeout reduced two repeated serial runs to 8.87s and 9.37s. The same
+real SQLite files, open readers, transaction boundaries, checkpoints, vacuums,
+production ORM models, and administrative subprocess remain exercised.
+
+The work also closed a production posture gap found by the timing investigation:
+Alembic and the raw `migrate --fix` connection now honor the configured SQLite
+busy timeout. Forty combined migration, administration, and WAL tests pass under
+four workers.
+
+The next non-RAG full unit lane completed in 386.11s: 4,534 passed, one skipped,
+and three failed. This is 23.57s (5.8%) faster than the immediately preceding
+409.68s lane despite the serialized process tail still determining completion.
+No WAL-maintenance case remained in the fifty slowest items. The new top cost is
+the five-slot cold model compile at 38.30s, followed by CLI failed-start cleanup
+at 26.25s and serialized desktop process cases around 12-25s.
+
+Two failures revealed remaining manager tests binding shared literal ports; the
+module now uses held machine-global reservations for single-port binds and a
+serialized dynamic range only for contiguous multi-port proofs, and passes 39
+tests under four workers. The third failure is a desktop run-admission readiness
+race retained in the audit queue. An unrelated concurrent worktree edit to the
+Codex catalog was not changed or attributed to this pass.

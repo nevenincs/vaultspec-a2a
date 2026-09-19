@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:e03e6b2b33bf2e8734534e21b29692832e2e0510a56235fe7a1c04e30bc0235c'
+body_hash: 'sha256:3b420053bb4a9302f15965855653e9e6b290665db2d2ec1a3b50dc9706bedc2a'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3150,3 +3150,7 @@ The four-worker nonservice repository suite completed after the resource-aware t
 The strict gate found three medium-severity structure findings and one nested-block finding in the startup reconciliation sweep. The sweep now delegates metadata parsing, incompatible-authority refusal, missing-project refusal, accepted-action restoration, and batch failure summarization to focused helpers. Review checked that each refusal still commits before continuing, malformed metadata remains local to its thread, accepted dispatch remains bound to the stored authority, and each failure ladder category retains all thread IDs. Thirteen real redispatch tests pass, including fresh-worker restart, stale authority, missing project, and repeated circuit-open behavior. `just check-all`, `just check-type-strict`, and complexipy for the module pass. Strict Ruff structure falls from 316 to 313 and nested-block findings fall from 33 to 32.
 
 Strict typing also exposed one low-severity test import-boundary finding from the earlier cancellation retry proof: it read a non-exported claim helper through `cancel_service`. The test now imports that helper from its owning `action_lease` module; its focused test and the full strict type gate pass. The remaining 313 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 Codex catalog structure review pass
+
+The Codex catalog discovery module had five medium-severity strict Ruff structure findings and one complexipy finding across its control construction, RPC exchange, pagination, and normalization paths. Native-control fields now travel as a typed specification; process, timeout, and output budget are bound in one RPC session; pagination returns ordered pages with the next request id; and a typed catalog builder owns model/control accumulation. Review checked that page and control ceilings, duplicate-model and cursor rejection, request-id order, shared output budget, and process cleanup retain their prior behavior. All 13 catalog tests pass, including the service-marked real process and failure cases. `just check-all`, `just check-type-strict`, and the module complexipy check pass. Strict Ruff structure falls from 313 to 308. The public discovery function still has one excessive-argument finding; changing its published call contract needs a separate decision. The remaining 308 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.

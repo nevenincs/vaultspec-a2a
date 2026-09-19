@@ -243,10 +243,17 @@ async def run_async_migrations() -> None:
     """Create an async engine and bridge to sync Alembic context."""
     settings = dict(config.get_section(config.config_ini_section, {}))
     settings["sqlalchemy.url"] = resolve_database_url()
+    engine_options: dict[str, object] = {}
+    busy_timeout_ms = config.attributes.get("sqlite_busy_timeout_ms")
+    if settings["sqlalchemy.url"].startswith("sqlite") and isinstance(
+        busy_timeout_ms, int
+    ):
+        engine_options["connect_args"] = {"timeout": busy_timeout_ms / 1000}
     connectable = async_engine_from_config(
         settings,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        **engine_options,
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

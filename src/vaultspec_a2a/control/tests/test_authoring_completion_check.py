@@ -16,6 +16,7 @@ production path rather than a hand-set snapshot field.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -59,24 +60,28 @@ async def _snapshot(
     return capture.snapshot if capture is not None else None
 
 
+@dataclass(frozen=True, slots=True)
+class _ThreadSeed:
+    thread_id: str
+    team_preset: str
+    proposal_ids: list[str]
+    changeset_ids: list[str]
+    status: ThreadStatus = ThreadStatus.COMPLETED
+
+
 async def _seed_completed_thread(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
-    *,
-    thread_id: str,
-    team_preset: str,
-    proposal_ids: list[str],
-    changeset_ids: list[str],
-    status: ThreadStatus = ThreadStatus.COMPLETED,
+    seed: _ThreadSeed,
 ) -> None:
     """Seed a thread whose checkpoint carries the given authoring id lists."""
     await checkpointer.setup()
     checkpoint = empty_checkpoint()
-    checkpoint["id"] = f"cp-{thread_id}"
-    checkpoint["channel_values"]["authoring_proposal_ids"] = proposal_ids
-    checkpoint["channel_values"]["authoring_changeset_ids"] = changeset_ids
+    checkpoint["id"] = f"cp-{seed.thread_id}"
+    checkpoint["channel_values"]["authoring_proposal_ids"] = seed.proposal_ids
+    checkpoint["channel_values"]["authoring_changeset_ids"] = seed.changeset_ids
     await checkpointer.aput(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        {"configurable": {"thread_id": seed.thread_id, "checkpoint_ns": ""}},
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         {},
@@ -85,9 +90,9 @@ async def _seed_completed_thread(
         await create_thread(
             session,
             write_authority=make_test_write_authority(),
-            thread_id=thread_id,
-            team_preset=team_preset,
-            status=status,
+            thread_id=seed.thread_id,
+            team_preset=seed.team_preset,
+            status=seed.status,
             repair_status="healthy",
             execution_readiness="healthy",
         )
@@ -116,10 +121,12 @@ async def test_a_completed_doc_editor_run_with_no_artifact_is_flagged(
         await _seed_completed_thread(
             session_factory,
             checkpointer,
-            thread_id="doc-editor-empty",
-            team_preset="vaultspec-doc-editor",
-            proposal_ids=[],
-            changeset_ids=[],
+            _ThreadSeed(
+                thread_id="doc-editor-empty",
+                team_preset="vaultspec-doc-editor",
+                proposal_ids=[],
+                changeset_ids=[],
+            ),
         )
 
         async with session_factory() as session:
@@ -161,10 +168,12 @@ async def test_a_completed_doc_editor_run_that_did_propose_is_not_flagged(
         await _seed_completed_thread(
             session_factory,
             checkpointer,
-            thread_id="doc-editor-proposed",
-            team_preset="vaultspec-doc-editor",
-            proposal_ids=["prop-1"],
-            changeset_ids=[],
+            _ThreadSeed(
+                thread_id="doc-editor-proposed",
+                team_preset="vaultspec-doc-editor",
+                proposal_ids=["prop-1"],
+                changeset_ids=[],
+            ),
         )
 
         async with session_factory() as session:
@@ -203,10 +212,12 @@ async def test_a_completed_coder_run_with_no_authoring_ids_is_not_flagged(
         await _seed_completed_thread(
             session_factory,
             checkpointer,
-            thread_id="coder-empty",
-            team_preset="vaultspec-solo-coder",
-            proposal_ids=[],
-            changeset_ids=[],
+            _ThreadSeed(
+                thread_id="coder-empty",
+                team_preset="vaultspec-solo-coder",
+                proposal_ids=[],
+                changeset_ids=[],
+            ),
         )
 
         async with session_factory() as session:
@@ -239,11 +250,13 @@ async def test_a_still_running_doc_editor_thread_is_not_flagged(
         await _seed_completed_thread(
             session_factory,
             checkpointer,
-            thread_id="doc-editor-running",
-            team_preset="vaultspec-doc-editor",
-            proposal_ids=[],
-            changeset_ids=[],
-            status=ThreadStatus.RUNNING,
+            _ThreadSeed(
+                thread_id="doc-editor-running",
+                team_preset="vaultspec-doc-editor",
+                proposal_ids=[],
+                changeset_ids=[],
+                status=ThreadStatus.RUNNING,
+            ),
         )
 
         async with session_factory() as session:

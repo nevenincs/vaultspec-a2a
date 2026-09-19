@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:b2b529d03f1854b8871b09d0a3f587cab584e778c549351bc61a37f2206153bf'
+body_hash: 'sha256:7cc9e44c1a2433593ecf3eab531bc86c74f89ba7fad6fe64f6d10cb98b4e3f06'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3132,3 +3132,7 @@ The strict Ruff pass found a low-severity excessive-argument issue in the determ
 ### 2026-09-19 gateway auth case-shape review pass
 
 Two low-severity strict argument-shape findings came from gateway auth tests unpacking one parameterized route case into four pytest arguments alongside fixtures. The route case now crosses each test boundary as one typed tuple and is unpacked inside the test; all 25 gateway auth cases pass, and focused Ruff and format checks pass. The strict Ruff structure count falls from 322 to 320. The remaining 320 structure errors, 33 nested-block errors, and 60 Pylint shape findings remain open.
+
+### 2026-09-19 harness and authoring seed shape review pass
+
+Two low-severity strict argument-shape findings in test helpers were resolved. Harness corpus provisioning now uses one explicit agent-state choice (`complete`, `empty`, or `missing`) and a separate MCP-corpus step; this removes conflicting boolean combinations. The authoring completion tests now pass one typed thread seed holding the run identity, preset, authoring IDs, and status. All 11 harness and four authoring completion tests pass, and focused Ruff checks pass. The strict Ruff structure count falls from 320 to 318. The remaining 318 structure errors, 33 nested-block errors, and 60 Pylint shape findings remain open. A full four-worker nonservice run on the combined branch is in progress.

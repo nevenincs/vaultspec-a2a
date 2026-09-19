@@ -35,7 +35,6 @@ from ..snapshots import (
     extract_message_timestamp,
     finalize_snapshot_replay_status,
     is_permission_event,
-    is_progress_event,
     is_terminal_event,
     normalize_artifacts,
     normalize_plan_entries,
@@ -286,16 +285,6 @@ def test_is_permission_event_true() -> None:
 
 def test_is_permission_event_false() -> None:
     assert not is_permission_event({"type": "agent_status"})
-
-
-def test_is_progress_event_true() -> None:
-    assert is_progress_event({"type": "agent_status"})
-    assert is_progress_event({"type": "message_chunk"})
-    assert is_progress_event({"type": "tool_call_start"})
-
-
-def test_is_progress_event_false() -> None:
-    assert not is_progress_event({"type": "unknown_thing"})
 
 
 def test_classify_permission_pause_reason_plan_approval() -> None:

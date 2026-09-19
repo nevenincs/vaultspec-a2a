@@ -44,7 +44,6 @@ __all__ = [
     "classify_listener_ownership",
     "detached_spawn_kwargs",
     "kill_pid_tree_async",
-    "listener_belongs_to",
     "parse_netstat_listener_pid",
     "pid_is_live",
     "port_listener_pid",
@@ -365,28 +364,6 @@ def classify_listener_ownership(port: int, root_pid: int) -> ListenerOwnership:
     if belongs:
         return ListenerOwnership.CONFIRMED
     return ListenerOwnership.OUTSIDE
-
-
-def listener_belongs_to(port: int, root_pid: int) -> bool:
-    """``False`` only when *port*'s LISTENER is positively outside *root_pid*'s tree.
-
-    A readiness probe that a port is bound cannot tell our freshly spawned server
-    apart from a stranger that happens to hold the same port - an un-reaped orphan
-    of a felled generation, or a foreign racer on a fixed resume/rerun port. This
-    confirms the pid listening on the loopback port is *root_pid* itself or a
-    descendant of it, so readiness passes on OUR process and not a stranger's.
-
-    It fails safe: when the listener pid or the ancestry cannot be resolved (no
-    ``netstat``/``/proc``/``lsof``, or an unreadable parent map) it returns
-    ``True`` and degrades to the bare bound-port signal, so a normal boot is never
-    falsely failed. It returns ``False`` only when a listener pid is resolved AND
-    positively shown to descend from a different root.
-
-    Callers that need to know WHICH of the two accepting cases occurred - and a
-    readiness gate on a security-relevant port does - should use
-    :func:`classify_listener_ownership` instead.
-    """
-    return classify_listener_ownership(port, root_pid) is not ListenerOwnership.OUTSIDE
 
 
 def port_listener_pid(port: int) -> int | None:

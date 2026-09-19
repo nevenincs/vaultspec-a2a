@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
 # ``GraphCompilationError`` is imported to be CAUGHT here, not re-published:
 # ``graph_lifecycle`` raises it and is where every handler imports it from.
-__all__ = ["ConcurrentCapError", "Executor"]
+__all__ = ["Executor"]
 
 # The document-authoring role whose actor token closes the run's engine session.
 # It is the session's owner: the submitter's constant create_session key opens the
@@ -125,10 +125,6 @@ _SLOT_OWNING_ACTIONS = frozenset({ControlActionType.INGEST, ControlActionType.RE
 _CAPACITY_ACCEPTED = "accepted"
 _CAPACITY_THREAD_ACTIVE = "thread_active"
 _CAPACITY_FULL = "capacity_full"
-
-
-class ConcurrentCapError(RuntimeError):
-    """Raised when the worker concurrent thread cap is reached."""
 
 
 @dataclass(frozen=True, slots=True)

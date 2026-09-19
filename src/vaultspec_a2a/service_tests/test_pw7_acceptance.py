@@ -85,6 +85,11 @@ if TYPE_CHECKING:
 
     from ..conftest import ExternalPrerequisiteRule
 
+from vaultspec_a2a.testing.tests._support.catalog_selection import (
+    NoSelectableLaneError,
+    in_process_selection,
+)
+
 from ..authoring import AuthoringClient, mint_actor_token
 from ..authoring._envelope import AuthoringResponse, Denial
 from ..authoring._errors import AuthoringTransportError
@@ -93,7 +98,6 @@ from ..control.run_start_policy import required_role_ids
 from ..graph.enums import PermissionOptionKind, ToolKind
 from ..team.team_config import load_team_config
 from ..testing import resolve_gateway_url
-from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
 from ._provider_catalog_live import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,

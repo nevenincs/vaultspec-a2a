@@ -459,6 +459,11 @@ audit-duplication:
 audit-reachability:
     {{dev}} audit reachability
 
+# Print the reachability burndown as one integer; scan failures return nonzero.
+[group('audit')]
+audit-dead-code-burndown:
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.audit.dead_code_burndown
+
 # Print every type diagnostic verbatim, behind the grouped gate's summary.
 [group('audit')]
 audit-types:

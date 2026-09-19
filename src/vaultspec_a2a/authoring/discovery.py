@@ -37,7 +37,6 @@ __all__ = [
     "EngineEndpoint",
     "heartbeat_is_fresh",
     "parse_discovery_record",
-    "read_discovery_record",
     "read_service_json",
     "resolve_engine",
     "resolve_engine_with_retry",
@@ -197,14 +196,6 @@ def parse_discovery_record(info: Mapping[str, object]) -> DiscoveryRecordView | 
             reference if isinstance(reference, str) and reference else None
         ),
     )
-
-
-def read_discovery_record(path: Path) -> DiscoveryRecordView | None:
-    """Read and parse a discovery file into a shape-agnostic view, or ``None``."""
-    info = read_service_json(path)
-    if info is None:
-        return None
-    return parse_discovery_record(info)
 
 
 @dataclass(frozen=True, slots=True)

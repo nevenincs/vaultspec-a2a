@@ -17,13 +17,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing.listeners import health_listener
+from vaultspec_a2a.testing.tests._support.listeners import health_listener
+
 from ..discovery import (
     DESKTOP_RECORD_VERSION,
     SERVICE_JSON_ENV,
     EngineEndpoint,
     parse_discovery_record,
-    read_discovery_record,
     resolve_engine,
 )
 
@@ -95,24 +95,6 @@ def test_record_without_port_is_fail_closed() -> None:
         )
         is None
     )
-
-
-def test_round_trip_read_of_versioned_and_legacy(tmp_path: Path) -> None:
-    """Both record shapes read from disk into their expected views."""
-    versioned = tmp_path / "versioned.json"
-    versioned.write_text(
-        json.dumps(_versioned_record(8202, credential_reference="/c/b")),
-        encoding="utf-8",
-    )
-    legacy = tmp_path / "legacy.json"
-    legacy.write_text(
-        json.dumps({"port": 8203, "service_token": "tok"}), encoding="utf-8"
-    )
-
-    versioned_view = read_discovery_record(versioned)
-    legacy_view = read_discovery_record(legacy)
-    assert versioned_view is not None and versioned_view.versioned is True
-    assert legacy_view is not None and legacy_view.bearer_token == "tok"
 
 
 def test_legacy_record_still_resolves_the_engine(

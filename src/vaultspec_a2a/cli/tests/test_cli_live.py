@@ -30,10 +30,11 @@ import uvicorn
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from vaultspec_a2a.testing.tests._support.catalog_selection import in_process_selection
+
 from ...api.tests.conftest import make_app
 from ...conftest import materialize_schema
 from ...lifecycle.discovery import service_json_path, write_service_json
-from ...testing.catalog_selection import in_process_selection
 
 if TYPE_CHECKING:
     from types import TracebackType

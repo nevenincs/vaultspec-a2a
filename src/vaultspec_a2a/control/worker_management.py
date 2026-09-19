@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from ..lifecycle.shutdown import ShutdownDeadline
     from .circuit_breaker import WorkerCircuitBreaker
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..lifecycle.pairing import (
     WorkerPairingVerdict,
     classify_worker_pairing,
@@ -241,26 +240,6 @@ GATEWAY_LIFETIME_ID = uuid.uuid4().hex
 
 
 _WORKER_LOG_NAME_RE = re.compile(r"^worker-autospawn-(\d+)\.stderr\.log$")
-
-# The port-keyed filename is why this artifact accumulated: a dev-band worker
-# takes a fresh port each boot, so every boot minted a new file and nothing
-# reclaimed the previous one. The sweep below is the enforcement, and it runs
-# once per gateway boot rather than continuously, so orphans from a boot that
-# never recurs are only reclaimed when some later gateway starts.
-WORKER_STDERR_LOG_DECLARATION = ArtifactDeclaration(
-    name="worker-autospawn-stderr-log",
-    root="<a2a_home>/runtime/worker-autospawn-<port>.stderr.log",
-    owner="control.worker_management",
-    disposition=RetentionDisposition.SESSION_SCOPED,
-    mechanism=(
-        "truncated on each spawn, and orphans for ports with no live registry "
-        "claim are deleted by sweep_orphan_worker_logs once per gateway boot"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    WORKER_STDERR_LOG_DECLARATION,
-)
 
 
 def sweep_orphan_worker_logs(

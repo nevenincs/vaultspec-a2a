@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..testing.payloads import (
+from vaultspec_a2a.testing.tests._support.payloads import (
     json_object,
     json_object_list,
     required_bool,
     required_text,
 )
+
 from ._state import select_option_id, wait_for_state
 
 if TYPE_CHECKING:

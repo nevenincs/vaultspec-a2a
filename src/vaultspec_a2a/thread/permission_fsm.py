@@ -1,7 +1,7 @@
 """Pure permission state-machine decision logic — no I/O, no database.
 
-Computes the effects of permission request, resolution, and
-progress-applied events as frozen descriptor dataclasses.
+Computes the effects of permission request and resolution events as frozen
+descriptor dataclasses.
 """
 
 from __future__ import annotations
@@ -20,14 +20,10 @@ from .enums import (
 from .snapshots import PLAN_APPROVAL_PAUSE_CAUSES
 
 __all__ = [
-    "PROGRESS_BATCH_EFFECTS",
     "PermissionRequestEffects",
     "PermissionResolutionEffects",
-    "ProgressAppliedEffects",
-    "ProgressBatchEffects",
     "compute_permission_request_effects",
     "compute_permission_resolution_effects",
-    "compute_progress_applied_effects",
     "response_is_rejection",
 ]
 
@@ -122,64 +118,3 @@ def compute_permission_resolution_effects(
         is_plan_approval=is_plan,
         approval_status=approval,
     )
-
-
-@dataclass(frozen=True, slots=True)
-class ProgressAppliedEffects:
-    """Descriptor for a single answered permission inferred from progress."""
-
-    target_status: PermissionRequestStatus
-    last_applied_action: ControlActionType
-    is_plan_approval: bool
-    approval_status: ApprovalStatus | None
-
-
-def compute_progress_applied_effects(
-    response_option_id: str | None,
-    pause_reason_type: str | None,
-    allowed_options_json: str | None = None,
-) -> ProgressAppliedEffects:
-    """Compute per-permission effects when progress implies application.
-
-    Progress only tells us the worker moved on, never *how* the human answered,
-    so the settled status is derived from the recorded response exactly as the
-    primary resolution path derives it. A denial inferred from progress therefore
-    settles as REJECTED, not as the repository's applied default.
-    """
-    is_plan = (pause_reason_type or "") in PLAN_APPROVAL_PAUSE_CAUSES
-    is_rejected = response_is_rejection(allowed_options_json, response_option_id)
-
-    approval: ApprovalStatus | None = None
-    if is_plan:
-        approval = ApprovalStatus.REJECTED if is_rejected else ApprovalStatus.APPROVED
-
-    return ProgressAppliedEffects(
-        target_status=(
-            PermissionRequestStatus.REJECTED
-            if is_rejected
-            else PermissionRequestStatus.APPLIED
-        ),
-        last_applied_action=ControlActionType.PERMISSION_RESPONSE_APPLIED,
-        is_plan_approval=is_plan,
-        approval_status=approval,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class ProgressBatchEffects:
-    """Descriptor for the aggregate effects when any permissions were applied."""
-
-    thread_status: ThreadStatus
-    repair_status: RepairStatus
-    repair_reason: None
-    last_applied_action: ControlActionType
-
-
-PROGRESS_BATCH_EFFECTS = ProgressBatchEffects(
-    thread_status=ThreadStatus.RUNNING,
-    repair_status=RepairStatus.HEALTHY,
-    repair_reason=None,
-    last_applied_action=ControlActionType.PERMISSION_RESPONSE_APPLIED,
-)
-"""Singleton: the aggregate effects are always the same when any permissions
-were applied by progress inference."""

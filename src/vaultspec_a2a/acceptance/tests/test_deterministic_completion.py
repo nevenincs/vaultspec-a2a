@@ -33,7 +33,7 @@ from ...authoring.discovery import (
 from ...control.run_start_policy import required_role_ids
 from ...team.team_config import load_team_config
 from ...thread.enums import TERMINAL_STATUS_VALUES
-from .. import certified_gateway
+from ._harness import certified_gateway
 from .conftest import wait_for_run_status
 
 _BUNDLE_ROOT_ENV = "VAULTSPEC_ACCEPTANCE_BUNDLE_DIR"

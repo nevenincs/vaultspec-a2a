@@ -319,15 +319,35 @@ def module_execution_surfaces(shipped: dict[str, SourceModule]) -> tuple[str, ..
         shipped: Every shipped module.
 
     Returns:
-        Each ``__main__`` module's dotted name, in stable order.
+        Each ``__main__`` module and module with a runnable main guard.
     """
     return tuple(
         sorted(
             name
             for name, module in shipped.items()
-            if module.path.name == "__main__.py"
+            if not module.is_test
+            and (module.path.name == "__main__.py" or _has_main_guard(module.tree))
         )
     )
+
+
+def _has_main_guard(tree: ast.Module) -> bool:
+    """Recognize a module directly runnable with ``python -m``."""
+    for node in tree.body:
+        if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
+            continue
+        comparison = node.test
+        if (
+            isinstance(comparison.left, ast.Name)
+            and comparison.left.id == "__name__"
+            and len(comparison.ops) == 1
+            and isinstance(comparison.ops[0], ast.Eq)
+            and len(comparison.comparators) == 1
+            and isinstance(comparison.comparators[0], ast.Constant)
+            and comparison.comparators[0].value == "__main__"
+        ):
+            return True
+    return False
 
 
 def migration_surfaces(
@@ -400,6 +420,53 @@ def configured_surfaces(
     return tuple(sorted((named & set(shipped)) - {spec.package}))
 
 
+def pytest_plugin_modules(spec: ShippedTreeSpec) -> frozenset[str]:
+    """Read the root conftest's literal pytest plugin registrations."""
+    conftest = spec.repo_root / "conftest.py"
+    if not conftest.is_file():
+        return frozenset()
+    tree = ast.parse(conftest.read_text(encoding=UTF_8), filename=str(conftest))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not any(
+            isinstance(target, ast.Name) and target.id == "pytest_plugins"
+            for target in node.targets
+        ):
+            continue
+        value = node.value
+        if not isinstance(value, ast.Tuple | ast.List):
+            continue
+        return frozenset(
+            item.value
+            for item in value.elts
+            if isinstance(item, ast.Constant) and isinstance(item.value, str)
+        )
+    return frozenset()
+
+
+def configured_script_imports(
+    spec: ShippedTreeSpec, shipped: dict[str, SourceModule]
+) -> frozenset[str]:
+    """Reach package imports made by Python scripts launched from procs.toml."""
+    config = spec.repo_root / "procs.toml"
+    if not config.is_file():
+        return frozenset()
+    scripts = re.findall(
+        r"scripts/[A-Za-z0-9_/-]+\.py", config.read_text(encoding=UTF_8)
+    )
+    reached: set[str] = set()
+    for relative in scripts:
+        path = spec.repo_root / relative
+        if not path.is_file():
+            continue
+        for node in ast.walk(parse_module(path)):
+            if isinstance(node, ast.Import):
+                reached.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                reached.add(node.module)
+                reached.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return frozenset(reached & set(shipped))
+
+
 def entry_points(
     spec: ShippedTreeSpec, shipped: dict[str, SourceModule]
 ) -> tuple[str, ...]:
@@ -411,8 +478,7 @@ def entry_points(
 
     Returns:
         The console scripts, the ``python -m`` surfaces, the Alembic revision
-        modules, and the modules named by this repository's configuration,
-        deduped.
+        modules, and modules named or imported by configured scripts, deduped.
 
     Raises:
         UnreadableSourceError: As :func:`console_script_modules`.
@@ -422,6 +488,7 @@ def entry_points(
         | set(module_execution_surfaces(shipped))
         | set(migration_surfaces(spec, shipped))
         | set(configured_surfaces(spec, shipped))
+        | set(configured_script_imports(spec, shipped))
     )
     return tuple(sorted(root for root in roots if root in shipped))
 
@@ -789,7 +856,7 @@ def _attribute_names(modules: Iterable[SourceModule]) -> frozenset[str]:
 
     Returns:
         Each attribute name. This is a LABELLING signal only, never a clearing
-        one: ``module.ARTIFACT_DECLARATIONS`` in a reflective test reaches a
+        one: ``module.some_symbol`` in a reflective test reaches a
         symbol without importing it by name, and a reader deserves to be told
         that the only thing reaching a finding is a test - but an attribute
         name matches by spelling alone, so it can never clear one.
@@ -808,6 +875,7 @@ def find_symbol_findings(
     corpus: _Corpus,
     reach: dict[str, ModuleReach],
     convention_bound: frozenset[str] = frozenset(),
+    pytest_plugins: frozenset[str] = frozenset(),
 ) -> tuple[SymbolFinding, ...]:
     """Find every top-level symbol nothing shipped or tooling-side references.
 
@@ -820,6 +888,8 @@ def find_symbol_findings(
             read off the module object by the migration runner; nothing in the
             tree names them, and reporting all four for every revision is six
             findings apiece that are wrong every time.
+        pytest_plugins: Modules loaded by pytest from the root conftest. Pytest
+            calls their hook functions by name without a Python reference.
 
     Returns:
         Every finding, in stable order. Only RUNTIME modules are inspected: a
@@ -844,7 +914,11 @@ def find_symbol_findings(
         own = self_references(module)
         for definition in top_level_definitions(module.tree):
             pair = (name, definition.name)
-            if definition.framework_bound or definition.name in own:
+            if (
+                definition.framework_bound
+                or definition.name in own
+                or (name in pytest_plugins and definition.name.startswith("pytest_"))
+            ):
                 continue
             if (
                 pair in shipped_use
@@ -1010,6 +1084,7 @@ def scan_unreachable_code(spec: ShippedTreeSpec | None = None) -> UnreachableCod
         corpus,
         reach,
         frozenset(migration_surfaces(spec, corpus.shipped)),
+        pytest_plugin_modules(spec),
     )
     test_findings = find_orphan_tests(
         corpus,

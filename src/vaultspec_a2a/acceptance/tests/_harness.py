@@ -37,11 +37,11 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
-from ..testing.catalog_selection import (
+from vaultspec_a2a.testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
 )
-from ..tests.gateway_boot import (
+from vaultspec_a2a.tests.gateway_boot import (
     GatewayBootError,
     armed_gateway_env,
     gateway_script,

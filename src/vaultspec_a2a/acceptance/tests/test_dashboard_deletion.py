@@ -29,7 +29,7 @@ from .conftest import wait_for_terminal
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .. import CertifiedGateway
+    from ._harness import CertifiedGateway
 
 
 def _checkpoint_rows_for(app_home: Path, thread_id: str) -> int:

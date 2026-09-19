@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:e0545329b82cf18746007473e3d978c44394afefbcf39128eb7111ba56fee9b9'
+body_hash: 'sha256:bfc592c1ad60a5013182220aa2830defd2b35f81e0bbfc593660150ef155b2dc'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -2869,3 +2869,29 @@ Type: maintenance. Status: three confirmed removals closed; broader scan open fo
 Follow-up queue: classify the remaining 49 symbols and 8 modules against installed entry points, dynamic registration, tests, and dev harness consumers before deleting any. In particular, `providers/lane_admission.py` exports `lane_admission_reason` and `unproven_lanes_in` with no current in-tree callers; public exports need compatibility review. The 2 catalog-selection orphaned tests need ownership review. Vulture's highest-confidence import hits are type-annotation imports and its two variable hits are protocol/framework parameters, so they are false positives for deletion. The supplied `Scripts/github-audit` tool measures GitHub security settings, workflows, and secrets rather than dead code. The root Node manifest is an ACP dependency host with no application JavaScript source or Knip enrollment; no Node dead-code denominator exists here.
 
 Review result: PASS for the focused three-constant removal. Type: follow-up investigation; severity low; status open for the remaining reachability leads. No behavioral interface changed by this pass.
+### 2026-09-19 test-only dead-code burndown review | medium | scan reaches zero after entry-point corrections
+
+Result: PASS for the dead-code removal and signal correction; observed environment and contract test failures remain queued below. Type: implementation review. The entry-point reachability signal began at 8 unreachable modules, 49 unused symbols, and 2 orphaned tests (59 total) over 302 shipped modules. The `just audit-dead-code-burndown` command prints the integer and fails on scan error. The current signal is 0 after removals and corrected root modeling. Vulture's advisory count moved from 525 to 493; its eight high-confidence hits remain annotation imports and required callback/protocol parameters, not removal evidence. The root Node manifest is an ACP dependency host with no application JavaScript to run Knip against. The supplied `Scripts/github-audit` tool measures GitHub settings, workflows, and secrets, not dead code.
+
+#### scanner-missed-public-entry-points | high | type: measurement correctness | closed
+
+`database.admin` is a documented `python -m vaultspec_a2a.database.admin` CLI, referenced from `alembic.ini`; `lifecycle.engine_serve` is imported by `scripts/engine_serve.py`, which `procs.toml` launches. Both were initially reported unreachable. Their modules and behavior tests were preserved. `dev/audit/unreachable_code.py` now treats modules with a main guard and imports from configured Python scripts as runtime roots, with real-tree regression tests. Pytest hooks in the configured root plugin are also recognized as framework calls, while an ordinary unused helper in that plugin remains a finding.
+
+#### test-support-placement | medium | type: packaging | resolved by user direction
+
+Five shared helpers under `testing/` were imported by many live-behavior tests. Deleting them broke 54 type-check imports. The user chose moving them into the excluded test tree; their consumers were repointed and the live behavior tests remain. `acceptance/_harness.py` is moving beside its tests for the same reason. The test-only `artifacts` declaration package and its declaration-only tests were removed; two independent ACP ownership checks were retained under provider tests.
+
+#### artifact-declaration-proposal-drift | medium | type: decision/code conflict | open
+
+The `2026-07-21-ecosystem-artifact-lifecycle-adr` is **proposed**, not accepted. Its proposed requirement for declaration objects beside artifact creators conflicts with their removal under the user's test-only-code rule. Runtime artifact creation and cleanup paths remain. This proposed decision needs reconciliation before acceptance; the removed declarations cannot be cited as implemented evidence.
+
+#### external-api-compatibility | low | type: public surface | open
+
+Some deleted helpers were listed in `__all__` but had no production or development callers found by the scan. An external consumer could have imported them. No external consumer inventory is available in this pass; the change is a deliberate removal under the user's rule, and release review should treat it as an API change.
+
+#### existing-verification-failures | medium | type: test/contract | open
+
+A focused real-install provision test fails because the installed workspace lacks required `exec-step` and `exec-summary` templates, though those templates exist in this checkout. Admin/migration focused tests had one database `pause` check-constraint failure, and WAL tests had two write-authority rejection failures. A graph web-composition test reached an ACP `initialize` response with a missing or malformed `protocolVersion`; its 12 downstream cases failed. A provider live test requiring `vaultspec-rag` found no CUDA/MPS backend. These failures are recorded as observed, not attributed to this dead-code change without a baseline comparison. The focused tests that passed are reported in the execution summary when the integrated pass closes.
+#### integrated-verification | low | type: validation | closed
+
+The integrated pass reports 0 scanner findings. Ruff lint and format, ty, reachability, unused-symbol coverage, and 270 governed import-load probes pass. Focused test groups passed across the scanner, testing support, authoring, provider, service, control, API, desktop, and lifecycle scopes. Pytest collected 4,757 of 4,759 tests (two live proofs withheld by configured prerequisites); the collection recipe returned exit 4 despite listing the tree, so its harness exit behavior remains a medium open validation issue. The real-install, database authority, graph ACP, and GPU failures remain open as listed above. The review found no unqueued new issue from the merged cleanup.

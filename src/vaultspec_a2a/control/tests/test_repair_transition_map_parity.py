@@ -29,7 +29,6 @@ from ...control.repair_transitions import (
     mark_ingest_requested,
     mark_message_followup_applied,
     mark_message_followup_requested,
-    mark_permission_response_applied,
     mark_permission_response_requested,
 )
 from ...database import create_thread
@@ -65,11 +64,6 @@ _CASES: list[tuple[_TransitionFn, ControlActionType, str]] = [
         mark_permission_response_requested,
         ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
         "requested",
-    ),
-    (
-        mark_permission_response_applied,
-        ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-        "applied",
     ),
     (
         mark_message_followup_requested,

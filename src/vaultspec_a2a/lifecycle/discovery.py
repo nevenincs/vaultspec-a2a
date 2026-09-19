@@ -36,7 +36,6 @@ from typing import cast, override
 
 import httpx
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..authoring.discovery import (
     heartbeat_is_fresh,
     read_service_json,
@@ -65,13 +64,10 @@ from ..utils.atomic_write import atomic_write_text
 from ..utils.coercion import coerce_int
 
 __all__ = [
-    "ARTIFACT_DECLARATIONS",
     "DESKTOP_DISCOVERY_VERSION",
     "DESKTOP_PROTOCOL_MAX",
     "DESKTOP_PROTOCOL_MIN",
     "HEARTBEAT_REFRESH_SECONDS",
-    "SERVICE_CREDENTIAL_DECLARATION",
-    "SERVICE_DISCOVERY_DECLARATION",
     "DesktopDiscoveryRecord",
     "DesktopDiscoveryState",
     "DiscoveryState",
@@ -82,7 +78,6 @@ __all__ = [
     "is_pid_alive",
     "port_has_listener",
     "probe_health",
-    "read_desktop_discovery",
     "read_resident_service",
     "remove_service_json_if_owned",
     "service_json_path",
@@ -95,39 +90,6 @@ __all__ = [
 HEARTBEAT_REFRESH_SECONDS = 15
 
 _SERVICE_JSON_NAME = "service.json"
-
-# What this module leaves on disk, and who is answerable for it afterwards.
-# Both records are session-scoped in intent: they describe a running gateway and
-# are meaningless once it exits. Enforcement is currently partial, and the
-# mechanism text says so rather than implying a reaper that does not exist - a
-# record outliving its process is exactly how a pre-feature discovery file was
-# read as a live unauthenticated gateway two days after the process died.
-SERVICE_DISCOVERY_DECLARATION = ArtifactDeclaration(
-    name="service-discovery-record",
-    root="<a2a_home>/service.json",
-    owner="lifecycle.discovery",
-    disposition=RetentionDisposition.SESSION_SCOPED,
-    mechanism=(
-        "removed by remove_service_json_if_owned on a clean exit; NOT removed on "
-        "a crash, so a stale record can outlive its gateway indefinitely"
-    ),
-)
-
-SERVICE_CREDENTIAL_DECLARATION = ArtifactDeclaration(
-    name="service-handoff-credential",
-    root="<a2a_home>/service.token",
-    owner="lifecycle.discovery",
-    disposition=RetentionDisposition.SESSION_SCOPED,
-    mechanism=(
-        "replaced on each authenticated publication and unlinked by a deliberate "
-        "tokenless un-publish; shares the discovery record's crash exposure"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    SERVICE_DISCOVERY_DECLARATION,
-    SERVICE_CREDENTIAL_DECLARATION,
-)
 
 
 class DiscoveryState(StrEnum):
@@ -686,14 +648,6 @@ def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | N
         owner=owner,
         credential_reference=reference,
     )
-
-
-def read_desktop_discovery(path: Path) -> DesktopDiscoveryRecord | None:
-    """Read and validate a versioned desktop discovery record, or ``None``."""
-    info = read_service_json(path)
-    if info is None:
-        return None
-    return _parse_desktop_record(info)
 
 
 def classify_desktop_discovery(

@@ -27,11 +27,11 @@ import httpx
 import pytest
 import uvicorn
 
+from vaultspec_a2a.testing.tests._support.catalog_selection import in_process_selection
 from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
 from ...database import list_threads
 from ...streaming.aggregator import EventAggregator
-from ...testing.catalog_selection import in_process_selection
 from ..routes.gateway import admission_gate
 from .conftest import make_app
 

@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING, TypedDict, cast
 from ..lifecycle.discovery import (
     DesktopDiscoveryState,
     classify_desktop_discovery,
-    read_desktop_discovery,
     service_json_path,
 )
 from ..lifecycle.singleton import (
@@ -136,7 +135,7 @@ def test_second_gateway_cannot_own_or_overwrite_the_home(tmp_path: Path) -> None
     try:
         first_ready = cast("_ReadyPayload", json.loads(_await(first["ready"])))
         # Certify via the published record's process identity, not the launch pid.
-        record_before = read_desktop_discovery(service_json_path(app_home))
+        record_before = classify_desktop_discovery(service_json_path(app_home))[1]
         assert record_before is not None
         assert record_before.pid == first_ready["pid"]
         assert record_before.port == 8300
@@ -152,7 +151,7 @@ def test_second_gateway_cannot_own_or_overwrite_the_home(tmp_path: Path) -> None
 
         # The first gateway's record is untouched: the failed contender never
         # reached discovery publication (singleton is taken before publish).
-        record_after = read_desktop_discovery(service_json_path(app_home))
+        record_after = classify_desktop_discovery(service_json_path(app_home))[1]
         assert record_after == record_before
     finally:
         _stop(first)

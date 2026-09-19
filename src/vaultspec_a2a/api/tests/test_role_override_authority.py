@@ -19,7 +19,8 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
-from ...testing.catalog_selection import named_lane_selection
+from vaultspec_a2a.testing.tests._support.catalog_selection import named_lane_selection
+
 from .conftest import catalog_run_fields, make_app
 
 

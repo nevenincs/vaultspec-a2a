@@ -39,12 +39,10 @@ __all__ = [
     "expire_pending_permission_requests",
     "get_control_action_by_dispatch_id",
     "get_control_action_by_idempotency_key",
-    "get_control_actions_by_idempotency_keys",
     "get_latest_control_action",
     "get_or_create_control_action",
     "get_pending_permission_requests",
     "get_permission_request",
-    "get_threads_with_pending_permission_requests",
     "mark_control_action_applied",
     "mark_control_action_duplicate",
     "mark_control_action_superseded",
@@ -172,43 +170,6 @@ async def get_pending_permission_requests(
         stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
     stmt = stmt.order_by(PermissionRequestModel.created_at.asc())
     return (await session.execute(stmt)).scalars().all()
-
-
-async def get_threads_with_pending_permission_requests(
-    session: AsyncSession,
-    thread_ids: Sequence[str],
-    *,
-    include_answered_pending_apply: bool = True,
-) -> set[str]:
-    """Return which of ``thread_ids`` hold at least one pending request.
-
-    Startup reconciliation asked this one thread at a time, costing a round trip
-    per non-terminal thread before the gateway could serve. The lookup is a
-    membership test over the whole backlog, so it is issued as one query per
-    chunk instead.
-    """
-    statuses = (
-        _OUTSTANDING_PERMISSION_STATUSES
-        if include_answered_pending_apply
-        else (PermissionRequestStatus.PENDING.value,)
-    )
-
-    unique_ids = list(dict.fromkeys(thread_ids))
-    found: set[str] = set()
-    # Chunked because the backlog size is unbounded and every supported backend
-    # caps the number of bound parameters in a single statement.
-    for start in range(0, len(unique_ids), _IN_CLAUSE_CHUNK):
-        chunk = unique_ids[start : start + _IN_CLAUSE_CHUNK]
-        stmt = (
-            select(PermissionRequestModel.thread_id)
-            .where(
-                PermissionRequestModel.thread_id.in_(chunk),
-                PermissionRequestModel.request_status.in_(statuses),
-            )
-            .distinct()
-        )
-        found.update((await session.execute(stmt)).scalars().all())
-    return found
 
 
 async def record_permission_response_submission(
@@ -562,35 +523,6 @@ async def get_control_action_by_idempotency_key(
         ControlActionModel.idempotency_key == idempotency_key,
     )
     return (await session.execute(stmt)).scalar_one_or_none()
-
-
-async def get_control_actions_by_idempotency_keys(
-    session: AsyncSession,
-    keys: Sequence[tuple[str, str]],
-) -> dict[tuple[str, str], ControlActionModel]:
-    """Resolve many ``(thread_id, idempotency_key)`` journal rows in one sweep.
-
-    Startup reconciliation derives every key it will need up front, so the
-    existence lookup that :func:`get_or_create_control_action` performs per row
-    can be answered for the whole batch before the loop starts. A rebooted
-    backlog is the common case there, and every key in it already exists.
-    """
-    unique_keys = list(dict.fromkeys(keys))
-    resolved: dict[tuple[str, str], ControlActionModel] = {}
-    for start in range(0, len(unique_keys), _IN_CLAUSE_CHUNK):
-        chunk = unique_keys[start : start + _IN_CLAUSE_CHUNK]
-        stmt = select(ControlActionModel).where(
-            ControlActionModel.thread_id.in_({thread_id for thread_id, _ in chunk}),
-            ControlActionModel.idempotency_key.in_({key for _, key in chunk}),
-        )
-        wanted = set(chunk)
-        for action in (await session.execute(stmt)).scalars().all():
-            identity = (action.thread_id, action.idempotency_key)
-            # The two ``IN`` sets form a cross product wider than the requested
-            # pairs; keep only the pairs actually asked for.
-            if identity in wanted:
-                resolved[identity] = action
-    return resolved
 
 
 async def get_control_action_by_dispatch_id(

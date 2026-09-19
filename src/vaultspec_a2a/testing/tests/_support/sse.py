@@ -20,8 +20,8 @@ import asyncio
 import json
 from typing import TYPE_CHECKING
 
-from ..graph.enums import ServerEventType
-from ..thread.snapshots import wire_event_type
+from vaultspec_a2a.graph.enums import ServerEventType
+from vaultspec_a2a.thread.snapshots import wire_event_type
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

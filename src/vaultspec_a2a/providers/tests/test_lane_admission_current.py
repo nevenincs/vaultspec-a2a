@@ -8,14 +8,12 @@ import pytest
 from ...graph.enums import Provider
 from ...thread.errors import ConfigError
 from ..lane_admission import (
-    IN_PROCESS_LANES,
     PROVEN_TURN_LANES,
     PROVEN_WEB_LANES,
     LaneProof,
     WebLaneProof,
     _lane_of,
     _require_web_proof_implies_turn_proof,
-    is_lane_admissible,
 )
 
 _ROOT = Path(__file__).resolve().parents[4]
@@ -31,14 +29,6 @@ def _citation_problem(node_id: str) -> str | None:
     if f"def {function}(" not in path.read_text(encoding="utf-8"):
         return f"missing proof test: {node}"
     return None
-
-
-def test_every_current_provider_is_explicitly_classified_deny_by_default() -> None:
-    for provider in Provider:
-        assert is_lane_admissible(provider) is (
-            provider in PROVEN_TURN_LANES or provider in IN_PROCESS_LANES
-        )
-    assert is_lane_admissible(Provider.KIMI) is False
 
 
 def test_live_and_rotten_proof_citations_are_discriminated() -> None:

@@ -60,7 +60,6 @@ if TYPE_CHECKING:
 __all__ = [
     "SemanticContext",
     "ThreadStateCapture",
-    "build_thread_state",
     "capture_thread_state",
     "project_semantic_phase",
 ]
@@ -476,20 +475,3 @@ async def capture_thread_state(
             thread_status=thread.status,
         ),
     )
-
-
-async def build_thread_state(
-    db: AsyncSession,
-    *,
-    thread_id: str,
-    aggregator: EventAggregator,
-    checkpointer: Checkpointer,
-) -> ThreadStateData | None:
-    """Return the snapshot portion of :func:`capture_thread_state`."""
-    capture = await capture_thread_state(
-        db,
-        thread_id=thread_id,
-        aggregator=aggregator,
-        checkpointer=checkpointer,
-    )
-    return capture.snapshot if capture is not None else None

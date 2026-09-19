@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from ..testing.catalog_selection import in_process_selection
+from vaultspec_a2a.testing.tests._support.catalog_selection import in_process_selection
 
 __all__ = ["catalog_selection"]
 

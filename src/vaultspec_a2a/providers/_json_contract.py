@@ -17,9 +17,7 @@ __all__ = [
     "JsonScalar",
     "JsonValue",
     "freeze_json",
-    "json_list",
     "json_object",
-    "json_text",
     "lenient_json_object",
     "lenient_json_object_list",
     "thaw_json",
@@ -108,21 +106,5 @@ def json_object(value: JsonValue, *, at: str = "value") -> JsonObject:
     """Return *value* as a JSON object, or raise naming what it actually was."""
     if not isinstance(value, dict):
         msg = f"expected a JSON object at {at}, got {type(value).__name__}"
-        raise TypeError(msg)
-    return value
-
-
-def json_list(value: JsonValue, *, at: str = "value") -> list[JsonValue]:
-    """Return *value* as a JSON array, or raise naming what it actually was."""
-    if not isinstance(value, list):
-        msg = f"expected a JSON array at {at}, got {type(value).__name__}"
-        raise TypeError(msg)
-    return value
-
-
-def json_text(value: JsonValue, *, at: str = "value") -> str:
-    """Return *value* as a JSON string, or raise naming what it actually was."""
-    if not isinstance(value, str):
-        msg = f"expected a JSON string at {at}, got {type(value).__name__}"
         raise TypeError(msg)
     return value

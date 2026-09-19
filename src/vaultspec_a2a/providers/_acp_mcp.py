@@ -68,7 +68,6 @@ __all__ = [
     "harness_allowed_tool_names",
     "harness_server_egresses",
     "harness_server_exact_surface",
-    "harness_server_root_pin",
     "harness_spawn_env",
     "is_known_harness_server",
     "pin_harness_mcp_servers",
@@ -179,7 +178,6 @@ class HarnessMcpResolution:
 # CARRIES the field - it is built per run to hold the pin, rather than read from
 # an entry.
 _ENV_FIELD = "env"
-_LAUNCH_SPEC_KEYS = ("name", "command", "args", _ENV_FIELD)
 _TRUST_AXES = ("read_only", "network_egress")
 _ROOT_PIN_AXIS = "root_pin"
 _EXACT_SURFACE_AXIS = "exact_surface"
@@ -475,18 +473,6 @@ def _require_root_pin(name: str, entry: FrozenJsonObject) -> str:
     return variable
 
 
-def harness_server_root_pin(name: str) -> str | None:
-    """Return the environment variable that pins *name*, or ``None``.
-
-    The registry-keyed reader of the root-pin axis, for consumers that hold a
-    declared name rather than an entry.
-
-    Raises:
-        ConfigError: If *name* is not a known harness server.
-    """
-    return _declared_root_pin(name, _registry_entry(name))
-
-
 def harness_server_exact_surface(name: str) -> bool:
     """Return whether *name*'s served surface must EQUAL its declaration.
 
@@ -548,12 +534,7 @@ def _launch_spec(name: str, entry: FrozenJsonObject) -> JsonObject:
 # it would refuse every pinned run - which is why this is a comparison of LAUNCH
 # IDENTITY rather than of the whole spec.
 #
-# Stated as a partition of ``_LAUNCH_SPEC_KEYS`` rather than as its own list, and
-# asserted as one: a launch field added there but not classified here would be
-# rendered into every spec while nothing compared it, which is the same silent
-# widening this guard exists to close.
 _LAUNCH_IDENTITY_KEYS = ("command", "args")
-_LAUNCH_VARIANT_KEYS = ("name", "env")
 
 
 def registry_launch_divergence(

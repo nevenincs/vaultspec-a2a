@@ -12,6 +12,7 @@ assert on what each read surfaces.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -24,8 +25,8 @@ from vaultspec_a2a.tests._write_authority import make_test_write_authority
 from ...conftest import materialize_schema
 from ...control.repositories import create_deletion_saga
 from ...control.thread_service import list_threads_service
-from ...control.thread_state_service import build_thread_state
-from ...database import create_thread, get_thread
+from ...control.thread_state_service import capture_thread_state
+from ...database import create_control_action, create_thread, get_thread
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ThreadStatus
 
@@ -43,11 +44,20 @@ async def _seed_deleting_thread(
     session_factory: async_sessionmaker[AsyncSession], thread_id: str
 ) -> None:
     async with session_factory() as session:
+        authority = make_test_write_authority()
         await create_thread(
             session,
-            write_authority=make_test_write_authority(),
+            write_authority=authority,
             thread_id=thread_id,
             status=ThreadStatus.COMPLETED,
+        )
+        await create_control_action(
+            session,
+            thread_id=thread_id,
+            action_type=authority.action_type,
+            idempotency_key=f"seed:{thread_id}",
+            dispatch_id=authority.action_receipt_id,
+            recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
         )
         await create_deletion_saga(session, thread_id=thread_id, manifest=[])
         await session.commit()
@@ -102,12 +112,14 @@ async def test_run_lookup_reports_a_deleting_thread_as_absent(
     await _seed_deleting_thread(session_factory, "gone")
 
     async with session_factory() as session:
-        state = await build_thread_state(
+        capture = await capture_thread_state(
             session,
             thread_id="gone",
             aggregator=EventAggregator(),
             checkpointer=InMemorySaver(),
         )
+
+    state = capture.snapshot if capture is not None else None
 
     assert state is None
 

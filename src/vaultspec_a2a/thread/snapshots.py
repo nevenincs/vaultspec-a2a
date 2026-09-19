@@ -61,7 +61,6 @@ __all__ = [
     "finalize_snapshot_replay_status",
     "fold_pending_writes",
     "is_permission_event",
-    "is_progress_event",
     "is_terminal_event",
     "normalize_artifacts",
     "normalize_plan_entries",
@@ -127,18 +126,6 @@ CHECKPOINT_ERROR_REPAIR_MAP: dict[str, RepairStatus] = {
     "checkpoint_corrupt": RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
     "checkpoint_timeout": RepairStatus.NEEDS_RECONCILIATION,
 }
-
-_PROGRESS_EVENT_TYPES: frozenset[str] = frozenset(
-    {
-        "agent_status",
-        "message_chunk",
-        "tool_call_start",
-        "tool_call_update",
-        "plan_update",
-        "artifact_update",
-    }
-)
-
 
 # ---------------------------------------------------------------------------
 # Wire event-type key pair
@@ -211,11 +198,6 @@ def is_permission_event(payload: dict[str, Any]) -> bool:
         "document_approval_request",
         "permission_resolved",
     }
-
-
-def is_progress_event(payload: dict[str, Any]) -> bool:
-    """Return True if the payload represents post-resume worker progress."""
-    return wire_event_type(payload) in _PROGRESS_EVENT_TYPES
 
 
 def classify_permission_pause_reason(tool_call: str | None) -> str:

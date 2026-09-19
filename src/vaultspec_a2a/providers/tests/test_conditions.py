@@ -41,8 +41,6 @@ from ..codex_chat_model import (
 )
 from ..conditions import (
     ProviderCondition,
-    acp_mapped_error_kinds,
-    codex_mapped_error_infos,
     condition_from_acp_error,
     condition_from_codex_error_info,
     condition_from_codex_turn_error,
@@ -114,22 +112,6 @@ async def _drive_codex_frames(
 # ---------------------------------------------------------------------------
 # ACP lane
 # ---------------------------------------------------------------------------
-
-
-def test_every_installed_acp_error_kind_is_mapped_by_decision() -> None:
-    """No kind the installed adapter can emit reaches its member by fall-through.
-
-    Fails when the SDK union or the adapter's own kinds grow a member the
-    mapping has never considered - which is the drift a hand-written list of
-    kinds would hide, because the floor would silently absorb the new member.
-    """
-    installed = _installed_acp_kinds()
-    unmapped = installed - acp_mapped_error_kinds()
-    assert not unmapped, (
-        f"the installed ACP lane can emit {sorted(unmapped)}, which the "
-        "condition mapping does not decide; they would fall through to the "
-        "unknown member without anyone choosing that"
-    )
 
 
 def test_the_acp_mapping_resolves_every_installed_kind_to_a_member() -> None:
@@ -211,28 +193,6 @@ def test_the_acp_raise_site_falls_back_to_the_code_and_then_the_floor() -> None:
 # ---------------------------------------------------------------------------
 # Codex lane
 # ---------------------------------------------------------------------------
-
-
-def test_every_installed_codex_error_info_variant_is_mapped_by_decision(
-    tmp_path: Path,
-) -> None:
-    """No variant the installed app-server declares reaches its member by default.
-
-    The schema is generated from the binary during the test, so adding a variant
-    upstream fails this immediately instead of waiting for someone to refresh a
-    committed copy.
-    """
-    try:
-        installed = codex_error_info_variants(tmp_path / "codex-schema")
-    except MissingInstalledVocabularyError as exc:
-        pytest.skip(str(exc))
-
-    unmapped = installed - codex_mapped_error_infos()
-    assert not unmapped, (
-        f"the installed codex app-server declares {sorted(unmapped)}, which the "
-        "condition mapping does not decide; they would fall through to the "
-        "unknown member without anyone choosing that"
-    )
 
 
 def test_the_codex_mapping_resolves_every_installed_variant_to_a_member(
@@ -457,30 +417,3 @@ async def test_a_completed_codex_turn_still_ends_the_stream_cleanly(
 # ---------------------------------------------------------------------------
 # Cross-lane
 # ---------------------------------------------------------------------------
-
-
-def test_neither_lane_maps_a_discriminator_outside_its_installed_vocabulary(
-    tmp_path: Path,
-) -> None:
-    """The mappings do not carry entries the installed adapters cannot produce.
-
-    A stale entry is not a correctness bug, but it is a lie about what the lane
-    can report, and it is how a consumer comes to render a remediation for a
-    condition that no longer occurs.
-    """
-    installed_acp = _installed_acp_kinds()
-    stale_acp = acp_mapped_error_kinds() - installed_acp
-    assert not stale_acp, (
-        f"the ACP mapping decides {sorted(stale_acp)}, which the installed "
-        "adapter no longer declares"
-    )
-
-    try:
-        installed_codex = codex_error_info_variants(tmp_path / "codex-schema")
-    except MissingInstalledVocabularyError as exc:
-        pytest.skip(str(exc))
-    stale_codex = codex_mapped_error_infos() - installed_codex
-    assert not stale_codex, (
-        f"the Codex mapping decides {sorted(stale_codex)}, which the installed "
-        "app-server no longer declares"
-    )

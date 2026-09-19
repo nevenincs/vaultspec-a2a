@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
     from ..team.team_config import AgentConfig
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
@@ -52,9 +51,6 @@ from .provider_catalog import (
 )
 
 __all__ = [
-    "ANTIGRAVITY_CLI_STATE_DECLARATION",
-    "ARTIFACT_DECLARATIONS",
-    "KIMI_SESSION_STORE_DECLARATION",
     "ProviderCatalogDiscovery",
     "ProviderCatalogRegistration",
     "ProviderFactory",
@@ -128,61 +124,6 @@ def validate_current_native_controls(
 
 logger = logging.getLogger(__name__)
 
-
-ANTIGRAVITY_CLI_STATE_DECLARATION = ArtifactDeclaration(
-    name="antigravity-cli-state",
-    root="<ANTIGRAVITY_CLI_HOME, else operator ~/.gemini/antigravity-cli>/",
-    owner="providers.factory",
-    disposition=RetentionDisposition.PERMANENT,
-    reason=(
-        "the home belongs to the operator's Antigravity CLI and holds their own "
-        "interactive state - a conversation-summary database, an onboarding "
-        "cache - beside anything a spawn here produced, so nothing in it can be "
-        "reclaimed without deleting work this project never created. What makes "
-        "this lane especially costly is the key: other stores mint "
-        "one entry per distinct workspace, so a repeated discovery against the "
-        "same directory reuses an entry, while this CLI writes a fresh "
-        "TIMESTAMPED log per INVOCATION. Catalog discovery is an invocation, so "
-        "growth here tracks how often the catalog is read rather than how many "
-        "projects exist, and nothing in the name identifies the read that "
-        "produced it"
-    ),
-    mechanism=(
-        "NOTHING bounds it. Each run appends `log/cli-<timestamp>.log`, and a "
-        "failed run additionally leaves `crashes/crash_<pid>_<uuid>.log`; a bare "
-        "`agy models` was observed writing both while still exiting zero. "
-        "Measured on one developer host: 80 log files totalling 82 MB. No sweep "
-        "here reaches the home and no age gate applies, so an operator deletes "
-        "it by hand. Suppression is the lever, as on the other CLI lanes: "
-        "spawning fewer discoveries mints fewer entries"
-    ),
-)
-
-KIMI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
-    name="kimi-code-session-store",
-    root="<KIMI_CODE_HOME, else operator ~/.kimi-code>/<per-workspace partition>/",
-    owner="providers.factory",
-    disposition=RetentionDisposition.PERMANENT,
-    reason=(
-        "the store is the operator's, and on this lane orphanhood cannot even be "
-        "ESTABLISHED: the partition key is a one-way truncated digest of the "
-        "full working-directory path, so a key cannot be decoded back into the "
-        "directory it names and no reader here can ask whether that directory "
-        "still exists. A reclaim predicate needs a question this key cannot "
-        "answer, which is the strongest form of the argument that declaring, "
-        "not reaping, is the only mechanism that covers every lane"
-    ),
-    mechanism=(
-        "NOTHING bounds it, and nothing here can: see the reason above. Measured "
-        "volume is currently negligible - a single certification window - but "
-        "that is a fact about how rarely the lane is exercised, not a bound"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    ANTIGRAVITY_CLI_STATE_DECLARATION,
-    KIMI_SESSION_STORE_DECLARATION,
-)
 
 # Resolve the claude-agent-acp entry point from the project-level node_modules.
 # VAULTSPEC_PROJECT_ROOT controls the base; see Settings.project_root.

@@ -22,12 +22,12 @@ from typing import TYPE_CHECKING, cast
 import httpx
 import pytest
 
+from vaultspec_a2a.testing.tests._support.sse import read_frame
 from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
 from ...control.config import settings
 from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
-from ...testing.sse import read_frame
 from ...thread.enums import ThreadStatus
 from .conftest import AppFixture, SessionFactory, _live_server, make_app
 

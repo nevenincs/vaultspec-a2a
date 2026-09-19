@@ -20,8 +20,6 @@ from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from .._acp_mcp import (
     _KNOWN_MCP_SERVERS,
     _LAUNCH_IDENTITY_KEYS,
-    _LAUNCH_SPEC_KEYS,
-    _LAUNCH_VARIANT_KEYS,
     codex_mcp_server_specs,
     declared_harness_tools,
     harness_allowed_tool_names,
@@ -144,20 +142,6 @@ def test_an_absent_argument_vector_is_refused_rather_than_read_as_empty() -> Non
         require_declared_surface([spec], bridge_name=AUTHORING_MCP_SERVER_NAME)
 
 
-def test_every_rendered_launch_field_is_classified_by_the_comparison() -> None:
-    """A launch field added to the renderer must be compared or excluded on purpose.
-
-    The comparison walks the identity keys, so a field added to the rendered
-    launch spec and to nothing else would ride into every advertised server with
-    nothing checking it - silently, and looking exactly like today's passing
-    state. Partition rather than subset: an unclassified field fails here.
-    """
-    assert set(_LAUNCH_IDENTITY_KEYS).isdisjoint(_LAUNCH_VARIANT_KEYS)
-    assert set(_LAUNCH_IDENTITY_KEYS) | set(_LAUNCH_VARIANT_KEYS) == set(
-        _LAUNCH_SPEC_KEYS
-    )
-
-
 def test_both_transports_render_one_launch() -> None:
     """The enforcement is bound to one renderer, so there must BE only one.
 
@@ -175,18 +159,6 @@ def test_both_transports_render_one_launch() -> None:
         # Stated through the guard as well as by equality: this is the property
         # the guard would have to catch if the renderers ever came apart.
         assert registry_launch_divergence(codex, name=name) is None
-
-
-def test_the_codex_transport_adds_exactly_its_own_projection() -> None:
-    """A field added to either renderer must be classified, not silently carried.
-
-    The Codex spec is the shared launch plus this transport's own projection.
-    Asserted as an equality rather than a subset, so a field appearing on one
-    side and not the other fails here instead of riding into a config file.
-    """
-    for name in _KNOWN_MCP_SERVERS:
-        codex = codex_mcp_server_specs([name])[0]
-        assert set(codex) == set(_LAUNCH_SPEC_KEYS) | {"tools"}
 
 
 def test_the_advertised_permitted_and_verified_tools_are_one_declaration() -> None:

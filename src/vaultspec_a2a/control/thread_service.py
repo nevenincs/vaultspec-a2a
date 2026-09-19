@@ -94,7 +94,6 @@ __all__ = [
     "archive_thread",
     "create_and_dispatch_thread",
     "delete_thread_service",
-    "generate_thread_id",
     "list_threads_service",
     "process_metadata",
 ]
@@ -123,11 +122,6 @@ def _degrade_stale_execution_state_summary(
     }:
         execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
     return repair_status, execution_readiness
-
-
-def generate_thread_id() -> str:
-    """Generate a unique hex thread identifier."""
-    return uuid4().hex
 
 
 def _parse_thread_summary_metadata(

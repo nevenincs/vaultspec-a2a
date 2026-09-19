@@ -41,7 +41,6 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
@@ -96,8 +95,6 @@ from .acp_exceptions import (
 from .conditions import ProviderCondition, condition_from_acp_error
 
 __all__ = [
-    "ACP_SESSION_TRANSCRIPT_DECLARATION",
-    "ARTIFACT_DECLARATIONS",
     "AcpChatModel",
 ]
 
@@ -123,64 +120,6 @@ class _NativeCommandUnavailableError(RuntimeError):
 
 class _AcpSessionBusyError(RuntimeError):
     """The model already owns an in-flight provider session."""
-
-
-# The spawned CLI writes its own session transcript into the OPERATOR's real
-# config home, partitioned by the ABSOLUTE path of the directory the session
-# opened in. Nothing here creates, names, opens, or can reach that file; the
-# spawn is merely what causes it to exist, which is why this declaration sits
-# at a spawning seam.
-#
-# TWO seams spawn, and the declaration covers both. This one opens a session at
-# the run's active project. Catalog discovery opens one too - the prompt-free
-# probe in ``acp_catalog`` issues session/new with the caller's cwd - and it is
-# the HIGHER-frequency seam, because one catalog read probes every registered
-# lane while a run spawns only the lane it selected.
-#
-# What orphans a partition is therefore NOT which seam opened it. Neither mints
-# one per run; both mint one per WORKSPACE, and a partition is orphaned exactly
-# when the directory it keys stops existing. Served production hands both seams
-# the operator's own project, so their partitions coincide with the ones the
-# operator's interactive CLI already writes. A caller that mints a fresh
-# workspace per invocation collapses per-workspace into per-invocation, and
-# every such invocation leaves a partition behind - which is the accumulation
-# actually measured, and it is a property of the CALLER's workspace lifetime.
-#
-# Two measured facts fix the disposition. The CLI bounds the tree itself, and
-# this project never reads a transcript back: session/load is wired, but no
-# production construction supplies session_id, so provider-native resume has no
-# caller on this lane - the same posture the Codex lane ratified. That second
-# fact is what makes suppression, rather than reclamation, the correct remedy;
-# it is simply not available from here (see mechanism).
-ACP_SESSION_TRANSCRIPT_DECLARATION = ArtifactDeclaration(
-    name="acp-cli-session-transcript",
-    root="<operator CLAUDE_CONFIG_DIR>/projects/<encoded spawn workspace path>/",
-    owner="providers.acp_chat_model",
-    disposition=RetentionDisposition.BOUNDED_BY_AGE,
-    mechanism=(
-        "the CLI's OWN cleanupPeriodDays sweep, 30 days by default, applied "
-        "independently of this project. Nothing here bounds it and nothing here "
-        "may acquire the authority to: the transcript sits in the operator's real "
-        "config home under the no-auth ambient-environment contract, keyed "
-        "identically to the sessions the operator starts by hand, so NO predicate "
-        "available to this project separates a session either seam here spawned "
-        "from one a human started - the only discriminator is inside the file. "
-        "Nor does an exists-check on the keyed directory rescue it: an operator "
-        "who deletes a scratch directory they worked in leaves an orphan of their "
-        "own, indistinguishable from ours. The threshold "
-        "is therefore the operator's to set and not this project's to rely on. "
-        "The lever that would belong here is suppression, not reclamation, and it "
-        "is upstream: the agent SDK exposes persistSession=false, which would stop "
-        "the write outright and costs this lane nothing because no caller resumes "
-        "a persisted session, but the pinned ACP adapter does not thread the "
-        "option and its only persistence-relevant env knob is CLAUDE_CONFIG_DIR, "
-        "whose redirection the no-auth contract forbids"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    ACP_SESSION_TRANSCRIPT_DECLARATION,
-)
 
 
 def _required_session_id(result: JsonObject, *, operation: str) -> str:
@@ -691,10 +630,8 @@ class AcpChatModel(BaseChatModel):
             # config home, so the session tree is the only thing to release;
             # the CLI's own transcript lives in the operator's real config home
             # (like any interactive session) and is not ours to move. That
-            # states ownership, not lifetime, and reading it as an answer to
-            # both is how the transcript went undeclared: what it accumulates
-            # and what bounds it are recorded in
-            # ACP_SESSION_TRANSCRIPT_DECLARATION.
+            # states ownership, not lifetime: the CLI's own transcript lives in
+            # its operator-owned config tree and this project never cleans it up.
             cleanup_steps: list[CleanupStep] = []
             if ctx is not None:
                 session_ctx, out_task, err_task = ctx, stdout_task, stderr_task

@@ -8,7 +8,7 @@ for it. ``repair_status: "healthy"`` was never lying: that column classifies
 checkpoint-lineage integrity, not whether the run did its job, and the
 checkpoint really was readable and consistent.
 
-These drive ``build_thread_state`` against a real aiosqlite database and a
+These drive ``capture_thread_state`` against a real aiosqlite database and a
 real LangGraph ``AsyncSqliteSaver`` checkpointer - no mocks - through the
 actual read seam a reconnecting client uses, so the wiring under test is the
 production path rather than a hand-set snapshot field.
@@ -17,6 +17,7 @@ production path rather than a hand-set snapshot field.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
@@ -26,10 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
 from ...conftest import materialize_schema
-from ...control.thread_state_service import build_thread_state
+from ...control.thread_state_service import capture_thread_state
 from ...database import create_thread
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ThreadStatus
+
+if TYPE_CHECKING:
+    from ...thread.snapshots import ThreadStateData
 
 
 @pytest.fixture
@@ -37,6 +41,23 @@ def _case_dirs(tmp_path: Path) -> tuple[Path, Path]:
     case_dir = tmp_path / "authoring-completion-check"
     case_dir.mkdir(parents=True, exist_ok=True)
     return case_dir / "test.db", case_dir / "checkpoints.db"
+
+
+async def _snapshot(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    aggregator: EventAggregator,
+    checkpointer: AsyncSqliteSaver,
+) -> ThreadStateData | None:
+    """Project the live capture service to the snapshot these tests inspect."""
+    capture = await capture_thread_state(
+        session,
+        thread_id=thread_id,
+        aggregator=aggregator,
+        checkpointer=checkpointer,
+    )
+    return capture.snapshot if capture is not None else None
 
 
 async def _seed_completed_thread(
@@ -103,7 +124,7 @@ async def test_a_completed_doc_editor_run_with_no_artifact_is_flagged(
         )
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="doc-editor-empty",
                 aggregator=EventAggregator(),
@@ -148,7 +169,7 @@ async def test_a_completed_doc_editor_run_that_did_propose_is_not_flagged(
         )
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="doc-editor-proposed",
                 aggregator=EventAggregator(),
@@ -190,7 +211,7 @@ async def test_a_completed_coder_run_with_no_authoring_ids_is_not_flagged(
         )
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="coder-empty",
                 aggregator=EventAggregator(),
@@ -227,7 +248,7 @@ async def test_a_still_running_doc_editor_thread_is_not_flagged(
         )
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="doc-editor-running",
                 aggregator=EventAggregator(),

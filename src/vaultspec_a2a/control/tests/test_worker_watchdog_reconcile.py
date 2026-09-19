@@ -16,6 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from vaultspec_a2a.testing.tests._support.listeners import health_listener
+
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.health import assemble_health_status
@@ -25,7 +27,6 @@ from ...control.worker_management import (
     WorkerState,
     WorkerWatchdog,
 )
-from ...testing.listeners import health_listener
 from ...testing.ports import free_port
 
 

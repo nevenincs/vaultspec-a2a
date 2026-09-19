@@ -49,7 +49,6 @@ from .._acp_mcp import (
     _require_trust_root,
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
-    harness_server_root_pin,
     harness_spawn_env,
     pin_harness_mcp_servers,
     resolve_harness_mcp_servers,
@@ -559,12 +558,6 @@ def test_every_registry_entry_declares_the_root_pin_axis() -> None:
         assert pin is None or (isinstance(pin, str) and pin), (
             f"{name} declares a malformed root pin: {pin!r}"
         )
-
-
-def test_the_search_server_declares_its_own_root_channel() -> None:
-    # The variable is the server's, not a convention invented here: it is the
-    # root authority the installed server itself honours (proven live below).
-    assert harness_server_root_pin(RAG) == RAG_PIN_VARIABLE
 
 
 def test_registry_construction_refuses_an_omitted_root_pin() -> None:
@@ -1150,8 +1143,7 @@ class TestThePinReachesTheSpawnedChild:
     def test_the_hoist_carries_the_pinned_value_the_surface_only_references(
         self, tmp_path: Path
     ) -> None:
-        variable = harness_server_root_pin(RAG)
-        assert variable is not None
+        variable = RAG_PIN_VARIABLE
 
         pinned = pin_harness_mcp_servers(
             [_launch_spec(RAG, _shipped_entry(RAG))], project_root=str(tmp_path)

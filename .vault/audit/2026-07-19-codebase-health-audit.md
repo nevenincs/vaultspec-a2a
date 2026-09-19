@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:f999a3b55bd9e68c2f8534e313d2c1b9205547cf2e9dca8af99823120465ebf8'
+body_hash: 'sha256:6f30ceaa4a2b2c6a90bf6a6268333b19777c93a732f931e5c46eef6882ff6b21'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3220,3 +3220,7 @@ Seven medium-severity strict Ruff findings in the permission-response service we
 ### 2026-09-20 verdict subscriber structure review pass
 
 Six medium-severity strict Ruff findings in verdict subscriber setup, parked-run reconciliation, verdict resume, and recovery-proposal parsing were resolved. The subscriber now receives one typed configuration; candidate selection, decided-verdict mapping, current-gate dispatch setup, and proposal parsing have focused functions. Review checked that INPUT_REQUIRED and mis-statused RUNNING candidates are still deduplicated in order, the current gate alone authorizes a resume, the accepted graph and write expectation are read before claim election, a fresh claim is finalized before worker dispatch, and HTTP acknowledgement still does not mark the action applied. Twenty-two focused tests pass; the six service-marked cases were deselected by the default profile and explicitly run with `-m service`, where all six skipped because a healthy loopback engine plus gateway and worker were unavailable. `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 241 to 235; code-health function-length findings fall from 19 to 18 and parameter-count findings from 97 to 96. No new review findings were surfaced. The remaining 235 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 cancellation control structure review pass
+
+Five medium-severity strict Ruff findings in the cancel workflow were resolved. Worker dependencies now travel as one typed runtime; preflight deadline and eligibility checks, existing-claim replay, thread-authority election, and dispatch settlement are separate functions. Review checked that a caller retry label is still echoed while the thread owns one durable cancellation key, the accepted recovery deadline is captured before claim rollback can expire ORM state, the SQLite busy retry retains its bounded backoff, and ambiguous delivery preserves the lease and CANCELLING projection while definite non-delivery records the repair reason. Thirty-nine focused control and live gateway tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 235 to 230; code-health function-length findings fall from 18 to 17 and parameter-count findings from 96 to 95. No new review findings were surfaced. The remaining 230 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.

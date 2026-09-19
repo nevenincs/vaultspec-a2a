@@ -18,6 +18,7 @@ from sqlalchemy.exc import OperationalError
 
 from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
+    ControlActionClaim,
     DispatchFailureDisposition,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -53,8 +54,9 @@ if TYPE_CHECKING:
 
     from ..control.circuit_breaker import WorkerCircuitBreaker
     from ..control.worker_management import LazyWorkerSpawner
+    from ..database import ThreadWriteExpectation
 
-__all__ = ["CancelResult", "cancel_thread"]
+__all__ = ["CancelResult", "CancelRuntime", "cancel_thread"]
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,31 @@ class CancelResult:
     action_status: str = ControlActionResultStatus.REJECTED_INVALID_STATE.value
     idempotency_key: str | None = None
     failure_type: FailureType | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CancelRuntime:
+    circuit_breaker: WorkerCircuitBreaker
+    worker_spawner: LazyWorkerSpawner
+    worker_client: httpx.AsyncClient
+    recursion_limit: int
+    trace_headers: dict[str, str] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _CancelContext:
+    runtime: CancelRuntime
+    thread_id: str
+    response_idempotency_key: str
+    thread_status: str
+
+
+@dataclass(frozen=True, slots=True)
+class _CancelPreflight:
+    thread: ThreadModel
+    thread_status: str
+    expectation: ThreadWriteExpectation
+    recovery_deadline_at: datetime
 
 
 def raise_for_cancel_failure(result: CancelResult, *, resource_noun: str) -> None:
@@ -143,23 +170,9 @@ def raise_for_cancel_failure(result: CancelResult, *, resource_noun: str) -> Non
         )
 
 
-async def cancel_thread(
-    db: AsyncSession,
-    *,
-    thread_id: str,
-    idempotency_key: str | None,
-    circuit_breaker: WorkerCircuitBreaker,
-    worker_spawner: LazyWorkerSpawner,
-    worker_client: httpx.AsyncClient,
-    recursion_limit: int,
-    trace_headers: dict[str, str] | None = None,
-    _busy_retries: int = 0,
-) -> CancelResult:
-    """Execute the cancel-thread workflow.
-
-    Returns a :class:`CancelResult` describing what happened.  Commits the
-    session before returning — the service owns its transaction boundary.
-    """
+async def _cancel_preflight(
+    db: AsyncSession, thread_id: str
+) -> _CancelPreflight | CancelResult:
     thread = await get_thread(db, thread_id)
     if thread is None:
         return CancelResult(
@@ -211,6 +224,30 @@ async def cancel_thread(
             error_detail="The accepted run deadline has expired",
             failure_type=FailureType.DEADLINE_EXCEEDED,
         )
+    return _CancelPreflight(
+        thread, thread_status, expectation, owning_action.recovery_deadline_at
+    )
+
+
+async def cancel_thread(
+    db: AsyncSession,
+    *,
+    thread_id: str,
+    idempotency_key: str | None,
+    runtime: CancelRuntime,
+    _busy_retries: int = 0,
+) -> CancelResult:
+    """Execute the cancel-thread workflow.
+
+    Returns a :class:`CancelResult` describing what happened.  Commits the
+    session before returning — the service owns its transaction boundary.
+    """
+    preflight = await _cancel_preflight(db, thread_id)
+    if isinstance(preflight, CancelResult):
+        return preflight
+    thread = preflight.thread
+    thread_status = preflight.thread_status
+    expectation = preflight.expectation
 
     # Cancellation is a resource transition, so one thread has one durable
     # ownership key even when racing callers supplied different retry labels.
@@ -221,7 +258,7 @@ async def cancel_thread(
     dispatch = DispatchRequest(
         action=to_dispatch_action(ControlActionType.CANCEL),
         thread_id=thread_id,
-        recursion_limit=recursion_limit,
+        recursion_limit=runtime.recursion_limit,
     )
     try:
         claim = await prepare_control_action_claim(
@@ -231,7 +268,7 @@ async def cancel_thread(
             idempotency_key=resolved_idempotency_key,
             payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
             dispatch_id=dispatch.dispatch_id,
-            recovery_deadline_at=owning_action.recovery_deadline_at,
+            recovery_deadline_at=preflight.recovery_deadline_at,
         )
     except OperationalError as exc:
         if (
@@ -246,13 +283,39 @@ async def cancel_thread(
             db,
             thread_id=thread_id,
             idempotency_key=idempotency_key,
-            circuit_breaker=circuit_breaker,
-            worker_spawner=worker_spawner,
-            worker_client=worker_client,
-            recursion_limit=recursion_limit,
-            trace_headers=trace_headers,
+            runtime=runtime,
             _busy_retries=_busy_retries + 1,
         )
+    replay = await _existing_cancel_claim(
+        db, claim, thread_id, thread_status, response_idempotency_key
+    )
+    if replay is not None:
+        return replay
+    context = _CancelContext(
+        runtime, thread_id, response_idempotency_key, thread_status
+    )
+    election_result = await _elect_cancel_authority(
+        db, thread, claim, expectation, context
+    )
+    if election_result is not None:
+        return election_result
+
+    return await _dispatch_cancellation(
+        db,
+        thread,
+        claim,
+        dispatch,
+        context,
+    )
+
+
+async def _existing_cancel_claim(
+    db: AsyncSession,
+    claim: ControlActionClaim,
+    thread_id: str,
+    thread_status: str,
+    response_idempotency_key: str,
+) -> CancelResult | None:
     if not claim.payload_matches:
         return CancelResult(
             action_id=claim.action_id,
@@ -308,6 +371,19 @@ async def cancel_thread(
             action_status=claim.result_status,
             idempotency_key=response_idempotency_key,
         )
+    return None
+
+
+async def _elect_cancel_authority(
+    db: AsyncSession,
+    thread: ThreadModel,
+    claim: ControlActionClaim,
+    expectation: ThreadWriteExpectation,
+    context: _CancelContext,
+) -> CancelResult | None:
+    thread_id = context.thread_id
+    thread_status = context.thread_status
+    response_idempotency_key = context.response_idempotency_key
     already_owned = (
         expectation.status is ThreadStatus.CANCELLING
         and expectation.authority.action_type is ControlActionType.CANCEL
@@ -378,7 +454,19 @@ async def cancel_thread(
     if election is not None:
         await mark_cancel_requested(db, thread_id)
     await finalize_control_action_acceptance(db, claim)
+    return None
 
+
+async def _dispatch_cancellation(
+    db: AsyncSession,
+    thread: ThreadModel,
+    claim: ControlActionClaim,
+    dispatch: DispatchRequest,
+    context: _CancelContext,
+) -> CancelResult:
+    runtime = context.runtime
+    thread_id = context.thread_id
+    response_idempotency_key = context.response_idempotency_key
     dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
     logger.info(
         "Dispatching cancel dispatch_id=%s for thread %s",
@@ -392,12 +480,12 @@ async def cancel_thread(
     )
 
     outcome = await safe_dispatch(
-        worker_client,
+        runtime.worker_client,
         dispatch,
-        circuit_breaker,
-        worker_spawner,
+        runtime.circuit_breaker,
+        runtime.worker_spawner,
         bypass_circuit_breaker=True,
-        trace_headers=trace_headers,
+        trace_headers=runtime.trace_headers,
     )
 
     if not outcome.success:

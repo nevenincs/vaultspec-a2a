@@ -32,7 +32,7 @@ from ...api.tests.clarification_harness import new_state_graph
 from ...control import cancel_service
 from ...control.accepted_input import freeze_accepted_input
 from ...control.action_lease import prepare_control_action_claim
-from ...control.cancel_service import CancelResult, cancel_thread
+from ...control.cancel_service import CancelResult, CancelRuntime, cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.dispatch_receipts import prepare_graph_action_receipt
@@ -500,10 +500,9 @@ async def test_cancel_retries_sqlite_lock_before_claim(
                 db,
                 thread_id=thread_id,
                 idempotency_key=None,
-                circuit_breaker=_circuit_breaker(),
-                worker_spawner=_spawner(),
-                worker_client=worker_client,
-                recursion_limit=25,
+                runtime=CancelRuntime(
+                    _circuit_breaker(), _spawner(), worker_client, 25
+                ),
             )
         assert result.accepted
         assert attempts == 2
@@ -531,10 +530,9 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
                     db,
                     thread_id=thread_id,
                     idempotency_key=label,
-                    circuit_breaker=_circuit_breaker(),
-                    worker_spawner=_spawner(),
-                    worker_client=worker_client,
-                    recursion_limit=25,
+                    runtime=CancelRuntime(
+                        _circuit_breaker(), _spawner(), worker_client, 25
+                    ),
                 )
 
         first, second = await asyncio.gather(
@@ -665,11 +663,12 @@ async def test_ambiguous_cancel_preserves_durable_cancelling_intent(
             db,
             thread_id=thread_id,
             idempotency_key="desktop-cancel-attempt",
-            circuit_breaker=_circuit_breaker(),
-            worker_spawner=_spawner("http://127.0.0.1:1"),
-            worker_client=unreachable_client,
-            recursion_limit=25,
-            trace_headers=None,
+            runtime=CancelRuntime(
+                _circuit_breaker(),
+                _spawner("http://127.0.0.1:1"),
+                unreachable_client,
+                25,
+            ),
         )
 
     assert result.accepted is True
@@ -714,11 +713,7 @@ async def test_definite_cancel_non_delivery_never_rolls_back_lifecycle_authority
             db,
             thread_id=thread_id,
             idempotency_key="definite-cancel-attempt",
-            circuit_breaker=_circuit_breaker(),
-            worker_spawner=_spawner(),
-            worker_client=worker_client,
-            recursion_limit=25,
-            trace_headers=None,
+            runtime=CancelRuntime(_circuit_breaker(), _spawner(), worker_client, 25),
         )
     assert result.cancelled is False
     assert result.accepted is False
@@ -762,10 +757,9 @@ async def test_terminal_state_before_cancel_prevents_dispatch_reservation(
             db,
             thread_id=thread_id,
             idempotency_key="too-late",
-            circuit_breaker=_circuit_breaker(),
-            worker_spawner=_spawner("http://127.0.0.1:1"),
-            worker_client=worker_client,
-            recursion_limit=25,
+            runtime=CancelRuntime(
+                _circuit_breaker(), _spawner("http://127.0.0.1:1"), worker_client, 25
+            ),
         )
     assert result.accepted is False
     assert result.failure_type is FailureType.TERMINAL

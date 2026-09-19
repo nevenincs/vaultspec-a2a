@@ -42,7 +42,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
 from ...control.admission import AdmissionBroker, AdmissionReadiness
-from ...control.cancel_service import cancel_thread, raise_for_cancel_failure
+from ...control.cancel_service import (
+    CancelRuntime,
+    cancel_thread,
+    raise_for_cancel_failure,
+)
 from ...control.clarification_service import (
     ClarificationRuntime,
     respond_to_clarification,
@@ -1747,11 +1751,13 @@ async def run_cancel_endpoint(
         db=db,
         thread_id=run_id,
         idempotency_key=idempotency_key,
-        circuit_breaker=circuit_breaker,
-        worker_spawner=worker_spawner,
-        worker_client=worker_client,
-        recursion_limit=domain_config.graph_recursion_limit,
-        trace_headers=trace_headers(),
+        runtime=CancelRuntime(
+            circuit_breaker,
+            worker_spawner,
+            worker_client,
+            domain_config.graph_recursion_limit,
+            trace_headers(),
+        ),
     )
 
     raise_for_cancel_failure(result, resource_noun="Run")

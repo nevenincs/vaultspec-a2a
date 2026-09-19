@@ -9,6 +9,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from langgraph.types import Command
@@ -42,7 +43,7 @@ class IngestStallTimeoutError(TimeoutError):
 
     A run whose graph genuinely wedges mid-turn (observed live: the
     ground/clarification interrupt path, cause still under investigation)
-    previously hung the ingest coroutine forever — no exception, no log line,
+    previously hung the ingest coroutine forever â€” no exception, no log line,
     no checkpoint, the thread stuck ``running`` indefinitely with nothing to
     show an operator or a reloaded panel why. LangGraph's own per-step
     ``step_timeout`` (``graph.step_timeout``, set from the team TOML) is
@@ -112,7 +113,7 @@ def summarize_ingest_exception(exc: BaseException) -> str:
     the generic "Graph event stream failed unexpectedly", leaving both
     run-status and the relay stream with no way to distinguish a transient
     infrastructure fault from something like an expired authoring credential
-    on resume — the actual reason lived only in the worker's own log. Every
+    on resume â€” the actual reason lived only in the worker's own log. Every
     other classified branch in this handler (recursion limit, step timeout)
     already reports a specific reason; this restores that for the catch-all.
 
@@ -165,6 +166,16 @@ def _resolve_provider_condition(exc: BaseException) -> ProviderCondition:
     return ProviderCondition.UNKNOWN
 
 
+@dataclass(frozen=True, slots=True)
+class IngestRequest:
+    thread_id: str
+    agent_id: str
+    graph: StreamableGraph
+    graph_input: dict[str, Any] | Command[Any] | None
+    config: dict[str, Any]
+    on_graph_started: Callable[[], Awaitable[None]] | None = None
+
+
 class IngestManager:
     """Graph consumption lifecycle: ingest, cancel, cleanup."""
 
@@ -180,7 +191,7 @@ class IngestManager:
 
         # Per-thread cancellation events for ingest loops.
         self._cancel_events: dict[str, asyncio.Event] = {}
-        # Per-thread ingest queues for backpressure (research §1.3)
+        # Per-thread ingest queues for backpressure (research Â§1.3)
         self._ingest_queues: dict[str, asyncio.Queue[dict[str, Any] | None]] = {}
         # Per-thread fan-out tasks
         self._fanout_tasks: dict[str, asyncio.Task[None]] = {}
@@ -240,7 +251,7 @@ class IngestManager:
         """Pop and return the reason ``thread_id``'s last FAILED ingest ended with.
 
         ``None`` when the thread never failed (or its reason was already
-        consumed) — the caller's default, never-durably-record-anything
+        consumed) â€” the caller's default, never-durably-record-anything
         behaviour is unchanged when there is nothing to report.
         """
         return self._failure_reasons.pop(thread_id, None)
@@ -256,26 +267,22 @@ class IngestManager:
         return self._failure_conditions.pop(thread_id, None)
 
     # ------------------------------------------------------------------
-    # LangGraph graph ingest (research §1.3)
+    # LangGraph graph ingest (research Â§1.3)
     # ------------------------------------------------------------------
 
-    async def ingest(
-        self,
-        thread_id: str,
-        agent_id: str,
-        graph: StreamableGraph,
-        graph_input: dict[str, Any] | Command[Any] | None,
-        config: dict[str, Any],
-        *,
-        on_graph_started: Callable[[], Awaitable[None]] | None = None,
-    ) -> str:
+    async def ingest(self, request: IngestRequest) -> str:
         """Start consuming ``astream_events`` from a compiled graph.
 
         Returns one of ``"completed"``, ``"interrupted"``, or ``"failed"``.
         """
+        thread_id = request.thread_id
+        agent_id = request.agent_id
+        graph = request.graph
+        graph_input = request.graph_input
+        config = request.config
+        on_graph_started = request.on_graph_started
         start = time.monotonic()
         cancel_event = self._get_cancel_event(thread_id)
-        _is_interrupt = False
         _outcome = ThreadStatus.COMPLETED
         stall_timeout = _effective_stall_timeout(graph)
         with self._telemetry.start_span(
@@ -287,7 +294,7 @@ class IngestManager:
                 # Bounded manual iteration, not `async for`: a plain `async for`
                 # trusts astream_events to eventually yield, raise, or exhaust on
                 # its own. A real run was observed wedging silently inside this
-                # exact loop — no event, no exception, no log line, forever — with
+                # exact loop â€” no event, no exception, no log line, forever â€” with
                 # LangGraph's own per-step `step_timeout` never firing to save it.
                 # Wrapping each `__anext__()` in `wait_for` makes "no progress for
                 # stall_timeout seconds" itself a caught, classified, reported
@@ -344,132 +351,9 @@ class IngestManager:
                         services=services,
                     )
             except BaseException as exc:
-                _is_interrupt = (
-                    GraphInterrupt is not None and isinstance(exc, GraphInterrupt)
-                ) or exc.__class__.__name__ == "GraphInterrupt"
-                _is_recursion_limit = (
-                    GraphRecursionError is not None
-                    and isinstance(exc, GraphRecursionError)
-                ) or exc.__class__.__name__ == "GraphRecursionError"
-                _is_ingest_stall = isinstance(exc, IngestStallTimeoutError)
-                _is_provider_cancelled = isinstance(exc, AcpPromptCancelledError)
-                # Checked after the more specific IngestStallTimeoutError above:
-                # LangGraph's own step_timeout is also a bare TimeoutError, and
-                # the stall watchdog is deliberately a TimeoutError subclass so
-                # it still lands here as a fallback classification if this branch
-                # order is ever lost — but the specific check gives the truer,
-                # more actionable reason whenever it is the one that fired.
-                _is_step_timeout = not _is_ingest_stall and isinstance(
-                    exc, TimeoutError
+                _outcome = await self._handle_ingest_failure(
+                    (thread_id, agent_id), exc, stall_timeout, span
                 )
-                _reason: str | None = None
-                if _is_provider_cancelled:
-                    _outcome = ThreadStatus.CANCELLED
-                    logger.info("Provider cancelled the turn for thread %s", thread_id)
-                    span.set_attribute("cancelled", True)
-                    span.set_attribute("cancelled.by", "provider")
-                    await self._emitters.emit_agent_status(
-                        thread_id=thread_id,
-                        agent_id=agent_id,
-                        node_name="supervisor",
-                        state=AgentLifecycleState.CANCELLED,
-                        detail="Provider cancelled the turn",
-                    )
-                elif _is_interrupt:
-                    _outcome = "interrupted"
-                    logger.info(
-                        "Graph interrupted for thread %s (awaiting approval)",
-                        thread_id,
-                    )
-                    span.set_attribute("interrupted", True)
-                elif _is_recursion_limit:
-                    _outcome = ThreadStatus.FAILED
-                    _reason = (
-                        "Graph recursion limit reached — check recursion_limit"
-                        " configuration"
-                    )
-                    logger.warning(
-                        "Graph recursion limit reached for thread %s", thread_id
-                    )
-                    span.set_attribute("error.type", "recursion_limit")
-                    await self._emitters.emit_error(
-                        thread_id=thread_id,
-                        agent_id=agent_id,
-                        code="RECURSION_LIMIT_EXCEEDED",
-                        message=_reason,
-                        recoverable=False,
-                    )
-                elif _is_ingest_stall:
-                    _outcome = ThreadStatus.FAILED
-                    _reason = str(exc)
-                    logger.warning(
-                        "Ingest stall watchdog fired for thread %s (%.0fs, no "
-                        "LangGraph step_timeout caught it first)",
-                        thread_id,
-                        stall_timeout,
-                    )
-                    span.set_attribute("error.type", "ingest_stall_timeout")
-                    await self._emitters.emit_error(
-                        thread_id=thread_id,
-                        agent_id=agent_id,
-                        code="INGEST_STALL_TIMEOUT",
-                        message=_reason,
-                        recoverable=True,
-                    )
-                elif _is_step_timeout:
-                    _outcome = ThreadStatus.FAILED
-                    _reason = (
-                        "A graph node exceeded the step timeout — "
-                        "the operation may be retried"
-                    )
-                    logger.warning("Graph step_timeout fired for thread %s", thread_id)
-                    span.set_attribute("error.type", "step_timeout")
-                    await self._emitters.emit_error(
-                        thread_id=thread_id,
-                        agent_id=agent_id,
-                        code="STEP_TIMEOUT",
-                        message=_reason,
-                        recoverable=True,
-                    )
-                else:
-                    _outcome = ThreadStatus.FAILED
-                    _reason = summarize_ingest_exception(exc)
-                    # Every provider fault reaches this branch, and the three
-                    # branches above never do: a recursion limit, a stalled
-                    # stream and a step timeout are facts about the graph
-                    # infrastructure, not statements a provider made, so their
-                    # codes and recoverability stay as they are. Here the code
-                    # becomes the resolved condition - the catalogued field a
-                    # consumer already branches on, now carrying the one
-                    # classification that tells it which remedy to offer, in
-                    # place of a constant that told it only which handler caught
-                    # the failure.
-                    #
-                    # Recoverability comes from that same condition, through the
-                    # one predicate the node retry policy also consults. It used
-                    # to be a hardcoded false, which made the flag a statement
-                    # about WHICH except-branch caught the exception rather than
-                    # about the failure: a transient overload and a revoked
-                    # credential were reported identically unrecoverable, while
-                    # a step timeout was reported recoverable. Reading the shared
-                    # predicate is also what stops the graph quietly retrying a
-                    # failure the client was told was permanent.
-                    _condition = _resolve_provider_condition(exc)
-                    self._failure_conditions[thread_id] = _condition
-                    logger.exception(
-                        "Error during graph ingest for thread %s", thread_id
-                    )
-                    span.set_attribute("error", True)
-                    span.set_attribute("error.provider_condition", _condition.value)
-                    await self._emitters.emit_error(
-                        thread_id=thread_id,
-                        agent_id=agent_id,
-                        code=_condition.value,
-                        message=_reason,
-                        recoverable=condition_is_retryable(_condition),
-                    )
-                if _reason is not None:
-                    self._failure_reasons[thread_id] = _reason
             finally:
                 self._clear_cancel_event(thread_id)
                 await self._buffering.flush_chunk_buffer(thread_id)
@@ -486,6 +370,131 @@ class IngestManager:
                     thread_id=thread_id,
                 )
         return _outcome
+
+    async def _report_ingest_error(
+        self,
+        identity: tuple[str, str],
+        span: Any,
+        report: tuple[str, str, bool, str],
+    ) -> str:
+        thread_id, agent_id = identity
+        reason, code, recoverable, error_type = report
+        span.set_attribute("error.type", error_type)
+        await self._emitters.emit_error(
+            thread_id=thread_id,
+            agent_id=agent_id,
+            code=code,
+            message=reason,
+            recoverable=recoverable,
+        )
+        self._failure_reasons[thread_id] = reason
+        return ThreadStatus.FAILED
+
+    async def _report_provider_failure(
+        self, identity: tuple[str, str], exc: BaseException, span: Any
+    ) -> str:
+        thread_id, agent_id = identity
+        reason = summarize_ingest_exception(exc)
+        condition = _resolve_provider_condition(exc)
+        self._failure_conditions[thread_id] = condition
+        logger.exception("Error during graph ingest for thread %s", thread_id)
+        span.set_attribute("error", True)
+        span.set_attribute("error.provider_condition", condition.value)
+        await self._emitters.emit_error(
+            thread_id=thread_id,
+            agent_id=agent_id,
+            code=condition.value,
+            message=reason,
+            recoverable=condition_is_retryable(condition),
+        )
+        self._failure_reasons[thread_id] = reason
+        return ThreadStatus.FAILED
+
+    async def _report_graph_failure(
+        self,
+        identity: tuple[str, str],
+        exc: BaseException,
+        stall_timeout: float,
+        span: Any,
+    ) -> str | None:
+        thread_id, _ = identity
+        if (
+            GraphRecursionError is not None and isinstance(exc, GraphRecursionError)
+        ) or (exc.__class__.__name__ == "GraphRecursionError"):
+            logger.warning("Graph recursion limit reached for thread %s", thread_id)
+            return await self._report_ingest_error(
+                identity,
+                span,
+                (
+                    "Graph recursion limit reached — check recursion_limit"
+                    " configuration",
+                    "RECURSION_LIMIT_EXCEEDED",
+                    False,
+                    "recursion_limit",
+                ),
+            )
+        if isinstance(exc, IngestStallTimeoutError):
+            logger.warning(
+                "Ingest stall watchdog fired for thread %s (%.0fs, no "
+                "LangGraph step_timeout caught it first)",
+                thread_id,
+                stall_timeout,
+            )
+            return await self._report_ingest_error(
+                identity,
+                span,
+                (str(exc), "INGEST_STALL_TIMEOUT", True, "ingest_stall_timeout"),
+            )
+        if isinstance(exc, TimeoutError):
+            logger.warning("Graph step_timeout fired for thread %s", thread_id)
+            return await self._report_ingest_error(
+                identity,
+                span,
+                (
+                    "A graph node exceeded the step timeout — "
+                    "the operation may be retried",
+                    "STEP_TIMEOUT",
+                    True,
+                    "step_timeout",
+                ),
+            )
+        return None
+
+    async def _handle_ingest_failure(
+        self,
+        identity: tuple[str, str],
+        exc: BaseException,
+        stall_timeout: float,
+        span: Any,
+    ) -> str:
+        """Classify cancellation, graph limits, and provider failures in order."""
+        thread_id, agent_id = identity
+        if isinstance(exc, AcpPromptCancelledError):
+            logger.info("Provider cancelled the turn for thread %s", thread_id)
+            span.set_attribute("cancelled", True)
+            span.set_attribute("cancelled.by", "provider")
+            await self._emitters.emit_agent_status(
+                thread_id=thread_id,
+                agent_id=agent_id,
+                node_name="supervisor",
+                state=AgentLifecycleState.CANCELLED,
+                detail="Provider cancelled the turn",
+            )
+            return ThreadStatus.CANCELLED
+        if (GraphInterrupt is not None and isinstance(exc, GraphInterrupt)) or (
+            exc.__class__.__name__ == "GraphInterrupt"
+        ):
+            logger.info(
+                "Graph interrupted for thread %s (awaiting approval)", thread_id
+            )
+            span.set_attribute("interrupted", True)
+            return "interrupted"
+        graph_outcome = await self._report_graph_failure(
+            identity, exc, stall_timeout, span
+        )
+        if graph_outcome is not None:
+            return graph_outcome
+        return await self._report_provider_failure(identity, exc, span)
 
     # ------------------------------------------------------------------
     # Shutdown

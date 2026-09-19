@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:36a2cb0684b8b5fef9165e48fa0ac5b441fb3a512e0e7e967922f13b7df46ea7'
+body_hash: 'sha256:d36de31a7ea512b47394d8c8f55335a6c3cdfae112789c8c3fc3a88b3dee69d2'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3180,3 +3180,7 @@ The internal worker-event relay had one low-severity strict argument-count findi
 One medium-severity cyclomatic finding in contextual anchoring came from rendering vault-index entries within the same function as feature-state summary fields. A focused helper now renders document labels, capped paths, and remainder counts. Review checked that field ordering, empty-index omission, path cap, and validation-error placement stay the same. All 14 anchoring tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 289 to 288. No new review findings were surfaced.
 
 The latest complete `just check-strict` run remains red and confirms the broader open gate: 155 radon cyclomatic findings, 13 module-length findings, 24 function-length findings, 109 parameter-count findings, six code-health nesting findings, plus strict Ruff, nested-block, and Pylint shape findings. These are still in the audit queue; passing the regular gate and strict type checker does not close them.
+
+### 2026-09-20 stream ingest structure review pass
+
+The graph ingest path had four medium-severity strict Ruff findings: excessive argument count, cyclomatic complexity, branch count, and statement count. The internal ingest request now carries its run inputs as one typed value; graph-stream failure classification delegates bounded graph failures and provider failures to focused reporters. Review checked the original precedence of provider cancellation, graph interrupt, recursion limit, ingest stall, step timeout, and provider condition; the durable failure reason/condition writes and emitted codes remain tied to those branches. The 81 focused aggregator and transformer tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 288 to 284. The pre-existing overlong `ingest` function remains one medium-severity code-health finding; the extraction did not add another overlong function. No new review findings were surfaced. The remaining 284 Ruff structure, 32 nested-block, and Pylint/health findings remain open.

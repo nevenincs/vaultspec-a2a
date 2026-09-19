@@ -25,7 +25,7 @@ from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..providers import ProviderCondition
 from .buffering import BufferingManager
 from .emitters import EventEmitters
-from .ingest import IngestManager
+from .ingest import IngestManager, IngestRequest
 from .subscribers import SubscriberManager
 from .transformer import project_run_progress
 from .types import SequencedEvent, StreamableGraph
@@ -351,12 +351,14 @@ class EventAggregator:
         on_graph_started: Callable[[], Awaitable[None]] | None = None,
     ) -> str:
         return await self._ingest.ingest(
-            thread_id,
-            agent_id,
-            graph,
-            graph_input,
-            config,
-            on_graph_started=on_graph_started,
+            IngestRequest(
+                thread_id,
+                agent_id,
+                graph,
+                graph_input,
+                config,
+                on_graph_started,
+            )
         )
 
     # -- Shutdown -------------------------------------------------------

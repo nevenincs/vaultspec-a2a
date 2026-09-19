@@ -15,6 +15,13 @@ answers identically on every platform.
 from __future__ import annotations
 
 from dev.doctor._docker import docker_optional, docker_required
+from dev.doctor._pep561 import markers, repair_markers
 from dev.doctor._tools import required
 
-__all__ = ["docker_optional", "docker_required", "required"]
+__all__ = [
+    "docker_optional",
+    "docker_required",
+    "markers",
+    "repair_markers",
+    "required",
+]

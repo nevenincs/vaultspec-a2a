@@ -138,6 +138,7 @@ async def test_research_adr_compiles_expected_node_set(
         agent_configs=_agent_configs(team),
         checkpointer=checkpointer,
         provider_factory=pf,
+        step_timeout=42.0,
         proposal_submitter=_FakeSubmitter(),
         model_assignment=deterministic_model_assignment(team),
     )
@@ -186,6 +187,7 @@ async def test_research_adr_discloses_one_metadata_entry_per_worker(
         agent_configs=_agent_configs(team),
         checkpointer=checkpointer,
         provider_factory=pf,
+        step_timeout=42.0,
         proposal_submitter=_FakeSubmitter(),
         model_assignment=deterministic_model_assignment(team),
     )
@@ -226,6 +228,7 @@ async def test_research_adr_requires_proposal_submitter(
             agent_configs=_agent_configs(team),
             checkpointer=checkpointer,
             provider_factory=pf,
+            step_timeout=42.0,
             proposal_submitter=None,
             model_assignment=deterministic_model_assignment(team),
         )
@@ -246,6 +249,7 @@ async def test_research_adr_missing_role_raises(
             agent_configs=_agent_configs(team),
             checkpointer=checkpointer,
             provider_factory=pf,
+            step_timeout=42.0,
             proposal_submitter=_FakeSubmitter(),
             model_assignment=deterministic_model_assignment(team),
         )
@@ -274,6 +278,7 @@ async def test_research_adr_runs_to_first_document_gate(
         agent_configs=_agent_configs(team),
         checkpointer=checkpointer,
         provider_factory=pf,
+        step_timeout=42.0,
         proposal_submitter=submitter,
         model_assignment=deterministic_model_assignment(team),
     )
@@ -340,6 +345,7 @@ async def test_research_gate_submit_sees_run_state_and_synthesis_body(
         agent_configs=_agent_configs(team),
         checkpointer=checkpointer,
         provider_factory=pf,
+        step_timeout=42.0,
         proposal_submitter=submitter,
         model_assignment=deterministic_model_assignment(team),
     )
@@ -397,6 +403,7 @@ async def test_plan_phase_runs_after_gate_two_and_parks_on_gate_three(
         agent_configs=_agent_configs(team),
         checkpointer=checkpointer,
         provider_factory=pf,
+        step_timeout=42.0,
         proposal_submitter=submitter,
         model_assignment=deterministic_model_assignment(team),
     )
@@ -457,6 +464,7 @@ async def test_plan_gate_request_changes_loops_the_plan_writer(
         agent_configs=_agent_configs(team),
         checkpointer=checkpointer,
         provider_factory=pf,
+        step_timeout=42.0,
         proposal_submitter=submitter,
         model_assignment=deterministic_model_assignment(team),
     )

@@ -16,7 +16,7 @@ imports ``worker``, so the direction stays one-way.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -61,7 +61,9 @@ def node_metadata_from_graph(graph: Any) -> dict[str, dict[str, str]]:
     """
     extracted: dict[str, dict[str, str]] = {}
     for node_name, node_spec in getattr(graph, "nodes", {}).items():
-        meta = getattr(node_spec, "metadata", None) or {}
-        if meta:
-            extracted[node_name] = node_metadata_fields(meta)
+        meta_raw: object = getattr(node_spec, "metadata", None) or {}
+        if meta_raw and isinstance(meta_raw, dict):
+            extracted[node_name] = node_metadata_fields(
+                cast("Mapping[str, Any]", meta_raw)
+            )
     return extracted

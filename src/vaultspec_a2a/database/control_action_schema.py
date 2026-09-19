@@ -25,7 +25,7 @@ RECOVERY_DEADLINE_CHECKS = {
         "AND recovery_deadline_at IS NOT NULL) OR "
         f"(action_type NOT IN ({RECOVERY_ACTION_SQL_VALUES}) "
         "AND recovery_deadline_at IS NULL)"
-    )
+    ),
 }
 
 

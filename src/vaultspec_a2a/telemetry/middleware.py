@@ -23,17 +23,17 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from opentelemetry import context as otel_context
 from opentelemetry import propagate, trace
 from opentelemetry.trace import SpanKind, StatusCode
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .instrumentation import _SDK_DISABLED, get_tracer
+from .instrumentation import SDK_DISABLED, get_tracer
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable
 
     from starlette.requests import Request
     from starlette.responses import Response
@@ -105,7 +105,10 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
             excluded_paths if excluded_paths is not None else _EXCLUDED_PATHS
         )
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    @override
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Process an HTTP request, wrapping it in an OTel span.
 
         Args:
@@ -185,7 +188,7 @@ async def ws_span(
     """
     # when the OTel SDK is explicitly disabled, skip real span creation
     # and yield a no-op span to avoid unnecessary overhead.
-    if _SDK_DISABLED:
+    if SDK_DISABLED:
         yield trace.NonRecordingSpan(trace.INVALID_SPAN_CONTEXT)
         return
 

@@ -244,7 +244,7 @@ def _cancelling_capacity_worker(
 
 @pytest.mark.asyncio
 async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}

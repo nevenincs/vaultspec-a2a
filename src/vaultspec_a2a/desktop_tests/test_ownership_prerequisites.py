@@ -40,7 +40,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
@@ -76,7 +76,7 @@ from ._catalog import catalog_selection
 from .test_run_admission import _ATTACH, _OWNERSHIP
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 _CLI_MODULE = "vaultspec_a2a.cli.main"
 _PRESET = "mock-success-single"
@@ -87,7 +87,7 @@ _CONFLICT_REFUSAL = "refusing to start a second gateway on one application home"
 @contextmanager
 def _armed_serve(
     tmp_path: Path, *, auto_spawn: bool
-) -> Iterator[tuple[Path, int, int, str]]:
+) -> Generator[tuple[Path, int, int, str]]:
     """Boot a real armed desktop gateway through the production ``serve`` verb.
 
     Yields ``(app_home, gateway_port, worker_port, base)``. The gateway process
@@ -179,7 +179,7 @@ def _worker_health(port: int, secret: str, *, timeout: float = 60.0) -> dict[str
             if resp.status_code == 200:
                 body = resp.json()
                 assert isinstance(body, dict), body
-                return body
+                return cast("dict[str, Any]", body)
             last = resp.status_code
         except httpx.HTTPError as exc:
             last = repr(exc)

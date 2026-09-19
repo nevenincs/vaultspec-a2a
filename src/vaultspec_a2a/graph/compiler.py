@@ -86,7 +86,79 @@ from .web_locators import extract_web_locators
 logger = logging.getLogger(__name__)
 
 
-__all__ = ["CompiledTeamGraph", "compile_team_graph"]
+__all__ = ["CompiledTeamGraph", "compile_team_graph", "resolve_model_for_worker"]
+
+
+class _TypedBuilder(Protocol):
+    """The exact ``StateGraph`` surface this module uses, precisely typed.
+
+    Mirrors ``CompiledTeamGraph`` below: langgraph declares ``cache_policy``
+    and ``checkpointer`` as bare unparametrized generics in its own source, so
+    the member reads as partially unknown whatever a caller passes. Viewing the
+    builder through this declared subset is what makes the two calls below
+    checked rather than unknown. Every parameter here is narrower than
+    langgraph's real signature, never wider, so a call accepted here is
+    accepted there.
+    """
+
+    def add_node(
+        self,
+        node: str,
+        action: Callable[..., Any],
+        *,
+        metadata: dict[str, str] | None = ...,
+        retry_policy: RetryPolicy | Sequence[RetryPolicy] | None = ...,
+    ) -> object: ...
+
+    def compile(
+        self,
+        checkpointer: BaseCheckpointSaver[str] | bool | None = ...,
+        *,
+        interrupt_before: list[str] | None = ...,
+    ) -> object: ...
+
+
+def _add_node(
+    builder: StateGraph[Any, None, Any, Any],
+    name: str,
+    node: Callable[..., Any],
+    *,
+    metadata: dict[str, str] | None = None,
+    retry_policy: RetryPolicy | Sequence[RetryPolicy] | None = None,
+) -> None:
+    """Add a node to ``builder`` behind one fully-typed call boundary.
+
+    langgraph's own ``add_node`` overloads default ``cache_policy`` to a bare
+    ``CachePolicy[Unknown]`` in its shipped source (not just a stub gap), so
+    the member access itself is permanently partially-typed regardless of the
+    arguments passed at a given call site. Every ``add_node`` call in this
+    module routes through here instead of the library method directly, so
+    that irreducible diagnostic is paid once, at this boundary, rather than at
+    each of the two dozen call sites that would otherwise repeat it.
+    """
+    cast("_TypedBuilder", builder).add_node(
+        name, node, metadata=metadata, retry_policy=retry_policy
+    )
+
+
+def _compile_graph(
+    builder: StateGraph[Any, None, Any, Any],
+    *,
+    checkpointer: BaseCheckpointSaver[str] | None,
+    interrupt_before: list[str] | None,
+) -> CompiledTeamGraph:
+    """Compile ``builder`` behind one fully-typed call boundary.
+
+    Mirrors ``_add_node``: langgraph's ``compile`` overloads carry the same
+    unresolved ``BaseCheckpointSaver[Unknown]``-shaped defaults in their own
+    source, so this is the single place that diagnostic is paid.
+    """
+    return cast(
+        "CompiledTeamGraph",
+        cast("_TypedBuilder", builder).compile(
+            checkpointer, interrupt_before=interrupt_before
+        ),
+    )
 
 
 class CompiledTeamGraph(Protocol):
@@ -297,7 +369,7 @@ _NODE_RETRY_POLICY = RetryPolicy(
 )
 
 
-def _resolve_model_for_worker(
+def resolve_model_for_worker(
     worker_ref: Any,
     agent_config: Any,
     team_config: Any,
@@ -348,9 +420,11 @@ def _resolve_model_for_worker(
 
 def _catalog_fallbacks(frozen: dict[str, Any]) -> list[dict[str, Any]]:
     raw_value: object = frozen.get("fallbacks")
-    if not isinstance(raw_value, list) or len(raw_value) > 8:
+    if not isinstance(raw_value, list):
         raise ValueError("Frozen catalog assignment has invalid fallbacks")
     raw = cast("list[object]", raw_value)
+    if len(raw) > 8:
+        raise ValueError("Frozen catalog assignment has invalid fallbacks")
     if not all(isinstance(item, dict) for item in raw):
         raise ValueError("Frozen catalog assignment has invalid fallbacks")
     return [cast("dict[str, Any]", item) for item in raw]
@@ -409,9 +483,11 @@ def _parse_catalog_preferences(
     if not isinstance(execution_mode, str) or not execution_mode.strip():
         raise ValueError("Frozen catalog assignment is missing its execution_mode")
     raw_controls_value: object = frozen.get("controls")
-    if not isinstance(raw_controls_value, list) or len(raw_controls_value) > 32:
+    if not isinstance(raw_controls_value, list):
         raise ValueError("Frozen catalog assignment has invalid native controls")
     raw_controls = cast("list[object]", raw_controls_value)
+    if len(raw_controls) > 32:
+        raise ValueError("Frozen catalog assignment has invalid native controls")
     controls: dict[str, str] = {}
     for raw_control in raw_controls:
         if not isinstance(raw_control, dict):
@@ -438,7 +514,10 @@ def _parse_catalog_preferences(
         controls[control_id] = provider_value
     if "provenance" in frozen:
         provenance = frozen["provenance"]
-        if not isinstance(provenance, dict) or set(provenance) != {"selection_source"}:
+        if not isinstance(provenance, dict):
+            raise ValueError("Frozen catalog assignment has invalid provenance")
+        provenance_dict = cast("dict[object, object]", provenance)
+        if set(provenance_dict) != {"selection_source"}:
             raise ValueError("Frozen catalog assignment has invalid provenance")
     return provider, model_name, execution_mode, controls
 
@@ -538,7 +617,7 @@ def _compile_worker_node(
     rather than after) that they stay topology-owned rather than folded in here
     - that wiring is each topology's actual subject, not shared duplication.
     """
-    model, used_provider, model_name = _resolve_model_for_worker(
+    model, used_provider, model_name = resolve_model_for_worker(
         worker_ref,
         agent_cfg,
         team_config,
@@ -569,7 +648,7 @@ def _compile_worker_node(
 
 
 def _wire_diverge_stage(
-    builder: StateGraph,
+    builder: StateGraph[Any, None, Any, Any],
     *,
     dispatch_name: str,
     synthesis_name: str,
@@ -613,7 +692,8 @@ def _wire_diverge_stage(
     researcher_names: list[str] = []
     for index, spec in enumerate(specs):
         name = researcher_node_name(dispatch_name, index)
-        builder.add_node(
+        _add_node(
+            builder,
             name,
             make_researcher(spec),
             metadata=researcher_metadata,
@@ -622,7 +702,7 @@ def _wire_diverge_stage(
         builder.add_edge(name, synthesis_name)
         researcher_names.append(name)
 
-    builder.add_node(dispatch_name, create_research_dispatch_node(researcher_names))
+    _add_node(builder, dispatch_name, create_research_dispatch_node(researcher_names))
     return dispatch_name
 
 
@@ -804,7 +884,7 @@ def compile_team_graph(
     supervisor_agent_config: Any | None = None,
     workspace_root: Path | None = None,
     autonomous: bool = False,
-    step_timeout: float,
+    step_timeout: float | None = None,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
     cost_port: CostPort | None = None,
@@ -854,20 +934,18 @@ def compile_team_graph(
     """
     from ..team.team_config import TopologyType
 
-    if step_timeout <= 0:
+    if step_timeout is None:
+        step_timeout = team_config.graph.step_timeout_seconds
+
+    if step_timeout is None or step_timeout <= 0:
         raise ConfigError(
             "compiled execution requires an explicit positive step timeout"
         )
 
     _validate_frozen_assignment_inventory(model_assignment)
 
-    # ``cast`` matches how every other StateGraph in this tree is built. TeamState
-    # is a TypedDict and langgraph's state parameter does not accept one directly,
-    # so the bare form left the builder's type unresolved - which then made every
-    # ``_compile_*`` call below an argument-type error, since those take a bare
-    # ``StateGraph``. One cast at construction, not five at the call sites.
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
-    builder.add_node(GRAPH_COMPLETION_NODE, record_graph_completion)
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     topology = team_config.topology
 
@@ -961,7 +1039,8 @@ def compile_team_graph(
             "Expected 'star', 'pipeline', 'pipeline_loop', or 'research_adr'."
         )
 
-    graph = builder.compile(
+    graph = _compile_graph(
+        builder,
         checkpointer=checkpointer,
         interrupt_before=interrupt_nodes,
     )
@@ -969,11 +1048,11 @@ def compile_team_graph(
     # Apply per-preset graph settings.
     graph.step_timeout = step_timeout
 
-    return cast("CompiledTeamGraph", graph)
+    return graph
 
 
 def _compile_star(
-    builder: StateGraph,
+    builder: StateGraph[Any, None, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     supervisor_agent_config: Any | None,
@@ -1057,8 +1136,12 @@ def _compile_star(
         autonomous=autonomous,
         workspace_root=workspace_root,
     )
-    builder.add_node(
-        "supervisor", supervisor_node, metadata=sv_meta, retry_policy=_NODE_RETRY_POLICY
+    _add_node(
+        builder,
+        "supervisor",
+        supervisor_node,
+        metadata=sv_meta,
+        retry_policy=_NODE_RETRY_POLICY,
     )
     builder.add_edge(START, "supervisor")
 
@@ -1084,7 +1167,8 @@ def _compile_star(
             cost_port=cost_port,
             authoring_binding_provider=authoring_binding_provider,
         )
-        builder.add_node(
+        _add_node(
+            builder,
             agent_cfg.id,
             worker_node,
             metadata=node_metadata,
@@ -1093,7 +1177,7 @@ def _compile_star(
         builder.add_edge(agent_cfg.id, "supervisor")
         # Insert mount node between supervisor routing and worker invocation.
         mount_fn = create_mount_node(workspace_root, task_queue_port)
-        builder.add_node(f"mount_{agent_cfg.id}", mount_fn)
+        _add_node(builder, f"mount_{agent_cfg.id}", mount_fn)
         builder.add_edge(f"mount_{agent_cfg.id}", agent_cfg.id)
         compiled_worker_ids.append(agent_cfg.id)
 
@@ -1111,7 +1195,8 @@ def _compile_star(
     approval_node = create_plan_approval_node(
         compiled_worker_ids, worker_phase_map or None
     )
-    builder.add_node(
+    _add_node(
+        builder,
         "plan_approval",
         approval_node,
         metadata={
@@ -1131,16 +1216,26 @@ def _compile_star(
         _route_from_supervisor,
         cast("dict[Hashable, str]", supervisor_route_map),
     )
+
     # Approved -> exec worker's mount; rejected -> revision worker's mount.
+    def _route_from_plan_approval(state: TeamState) -> str:
+        next_route = state.get("next")
+        if next_route is None:
+            raise ConfigError(
+                "plan_approval routing invariant broken: 'next' was not set "
+                "before the plan_approval->route edge ran"
+            )
+        return next_route
+
     builder.add_conditional_edges(
         "plan_approval",
-        lambda state: state["next"],
+        _route_from_plan_approval,
         cast("dict[Hashable, str]", route_map),
     )
 
 
 def _compile_pipeline(
-    builder: StateGraph,
+    builder: StateGraph[Any, None, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     *,
@@ -1216,8 +1311,9 @@ def _compile_pipeline(
         # Insert mount node between pipeline stages.
         mount_fn = create_mount_node(workspace_root, task_queue_port)
         mount_id = f"mount_{agent_cfg.id}"
-        builder.add_node(mount_id, mount_fn)
-        builder.add_node(
+        _add_node(builder, mount_id, mount_fn)
+        _add_node(
+            builder,
             agent_cfg.id,
             worker_node,
             metadata=node_metadata,
@@ -1299,7 +1395,13 @@ def _route_from_supervisor(state: TeamState) -> str:
     """
     if state.get("approval_status") == "pending":
         return "plan_approval"
-    return state["next"]
+    next_route = state.get("next")
+    if next_route is None:
+        raise ConfigError(
+            "supervisor routing invariant broken: 'next' was not set before "
+            "the supervisor->route edge ran"
+        )
+    return next_route
 
 
 def _loop_route(*, next_value: object, loop_count: int, max_loops: int) -> str:
@@ -1330,8 +1432,12 @@ def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
         state: TeamState,
         config: RunnableConfig | None = None,
         _inner: WorkerNode = worker_node,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | Command[Any]:
         result = await _inner(state, config=config)
+        if isinstance(result, Command):
+            # Routing nodes never wrap the loop counter: only plain state
+            # updates need it incremented before ``_loop_router`` reads it.
+            return result
         result["loop_count"] = state.get("loop_count", 0) + 1
         return result
 
@@ -1339,7 +1445,7 @@ def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
 
 
 def _compile_pipeline_loop(
-    builder: StateGraph,
+    builder: StateGraph[Any, None, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     _supervisor_agent_config: Any | None,
@@ -1398,8 +1504,9 @@ def _compile_pipeline_loop(
         # Insert mount node before each worker.
         mount_id = f"mount_{agent_cfg.id}"
         mount_fn = create_mount_node(workspace_root, task_queue_port)
-        builder.add_node(mount_id, mount_fn)
-        builder.add_node(
+        _add_node(builder, mount_id, mount_fn)
+        _add_node(
+            builder,
             agent_cfg.id,
             worker_node,
             metadata=node_metadata,
@@ -1549,7 +1656,7 @@ def _resolve_research_adr_models(
 
     resolved: dict[str, tuple[BaseChatModel, dict[str, str]]] = {}
     for role in RESEARCH_ADR_ROLES:
-        model, provider, model_name = _resolve_model_for_worker(
+        model, provider, model_name = resolve_model_for_worker(
             ref_by_role[role],
             cfg_by_role[role],
             team_config,
@@ -1706,7 +1813,7 @@ def _doc_review_router(*, writer_target: str, gate_target: str) -> Any:
 
 
 def _compile_research_adr(
-    builder: StateGraph,
+    builder: StateGraph[Any, None, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     *,
@@ -1809,7 +1916,8 @@ def _compile_research_adr(
         researcher_metadata=researcher_metadata,
     )
 
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_SYNTHESIS,
         create_worker_node(
             synthesist_model,
@@ -1829,7 +1937,8 @@ def _compile_research_adr(
         metadata=synthesist_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_RESEARCH_REVIEW,
         create_worker_node(
             doc_reviewer_model,
@@ -1846,7 +1955,8 @@ def _compile_research_adr(
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_ADR_AUTHOR,
         create_worker_node(
             adr_author_model,
@@ -1866,7 +1976,8 @@ def _compile_research_adr(
         metadata=adr_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_ADR_REVIEW,
         create_worker_node(
             doc_reviewer_model,
@@ -1883,7 +1994,8 @@ def _compile_research_adr(
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_PLAN_AUTHOR,
         create_worker_node(
             plan_author_model,
@@ -1903,7 +2015,8 @@ def _compile_research_adr(
         metadata=plan_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_PLAN_REVIEW,
         create_worker_node(
             doc_reviewer_model,
@@ -1925,7 +2038,8 @@ def _compile_research_adr(
     # out-of-run verdict subscriber can correlate a verdict to the parked run via
     # the committed ``authoring_proposal_ids``. The inner review loop
     # routes into the SUBMIT node; the submit node routes on into its gate.
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_RESEARCH_SUBMIT,
         create_phase_submit_node(
             PipelinePhase.RESEARCH,
@@ -1934,7 +2048,8 @@ def _compile_research_adr(
             revision_target=_RA_SYNTHESIS,
         ),
     )
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_RESEARCH_GATE,
         create_phase_gate_node(
             PipelinePhase.RESEARCH,
@@ -1942,7 +2057,8 @@ def _compile_research_adr(
             revision_target=_RA_SYNTHESIS,
         ),
     )
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_ADR_SUBMIT,
         create_phase_submit_node(
             PipelinePhase.ADR,
@@ -1951,7 +2067,8 @@ def _compile_research_adr(
             revision_target=_RA_ADR_AUTHOR,
         ),
     )
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_ADR_GATE,
         create_phase_gate_node(
             PipelinePhase.ADR,
@@ -1959,7 +2076,8 @@ def _compile_research_adr(
             revision_target=_RA_ADR_AUTHOR,
         ),
     )
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_PLAN_SUBMIT,
         create_phase_submit_node(
             PipelinePhase.PLAN,
@@ -1968,7 +2086,8 @@ def _compile_research_adr(
             revision_target=_RA_PLAN_AUTHOR,
         ),
     )
-    builder.add_node(
+    _add_node(
+        builder,
         _RA_PLAN_GATE,
         create_phase_gate_node(
             PipelinePhase.PLAN,
@@ -1981,7 +2100,8 @@ def _compile_research_adr(
     if clarification_producer is None:
         builder.add_edge(START, _RA_DISPATCH)
     else:
-        builder.add_node(
+        _add_node(
+            builder,
             _RA_CLARIFY_REQUEST,
             create_clarification_request_node(
                 clarification_producer,
@@ -1989,7 +2109,8 @@ def _compile_research_adr(
                 proceed_target=_RA_DISPATCH,
             ),
         )
-        builder.add_node(
+        _add_node(
+            builder,
             _RA_CLARIFY_GATE,
             create_clarification_gate_node(proceed_target=_RA_DISPATCH),
         )

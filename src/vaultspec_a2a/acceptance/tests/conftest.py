@@ -54,7 +54,7 @@ def wait_for_run_status(
         response = gateway.status(run_id)
         if response.status_code == 200:
             last = response.json()
-            if predicate(last):
+            if last is not None and predicate(last):
                 return last
         time.sleep(interval)
     raise AssertionError(

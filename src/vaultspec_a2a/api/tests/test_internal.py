@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi import FastAPI
@@ -32,6 +33,11 @@ from ...streaming.aggregator import EventAggregator
 from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
 
+if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from .conftest import SessionFactory
+
 # Every dispatch names an active project, as a real one does. This package's own
 # directory is real, absolute, and present on either platform.
 _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
@@ -44,7 +50,7 @@ _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 def _make_test_app(
     *,
     with_aggregator: bool = False,
-    session_factory=None,
+    session_factory: SessionFactory | None = None,
 ) -> FastAPI:
     """Create a minimal FastAPI app with the internal router and wired state.
 
@@ -109,7 +115,7 @@ class TestInternalHealth:
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_dispatch_application_receipt_is_not_broadcast_to_progress(
-    session_factory,
+    session_factory: SessionFactory,
 ) -> None:
     """The private stable dispatch identity must stop at the gateway DB edge."""
     app = _make_test_app(with_aggregator=True, session_factory=session_factory)
@@ -346,7 +352,7 @@ class TestInternalEvents:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_execution_state_projection_persists_without_broadcasting(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """Execution-state projection events should persist via the internal path."""
         app = _make_test_app(
@@ -410,7 +416,7 @@ class TestInternalEvents:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_invalid_projection_timestamp_persists_without_relay_state(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """The ASGI projection route stores malformed clock data as absent.
 
@@ -472,8 +478,8 @@ class TestInternalEvents:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_plan_approval_relay_creates_durable_permission_and_can_be_responded(
         self,
-        session_factory,
-        checkpointer,
+        session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """A relayed plan approval must become durably respondable."""
         from .conftest import make_app
@@ -543,7 +549,7 @@ class TestInternalEvents:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_degraded_execution_state_projection_preserves_last_good_state(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """A degraded-only update must not erase the last good execution-state row."""
         app = _make_test_app(
@@ -732,7 +738,9 @@ class TestInternalEvents:
 class TestInternalWebSocketLogging:
     """Verify structured logging on the internal worker WebSocket path."""
 
-    def test_malformed_event_log_includes_runtime_fields(self, caplog) -> None:
+    def test_malformed_event_log_includes_runtime_fields(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Malformed event envelopes should log bounded WS metadata."""
         app = _make_test_app()
 
@@ -754,7 +762,9 @@ class TestInternalWebSocketLogging:
         assert record.__dict__["transport"] == "ws"
         assert record.__dict__["frame_size"] > 0
 
-    def test_missing_relay_target_log_includes_runtime_fields(self, caplog) -> None:
+    def test_missing_relay_target_log_includes_runtime_fields(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Dropped relay events should log thread and event correlation fields."""
         app = _make_test_app()
 
@@ -781,7 +791,9 @@ class TestInternalWebSocketLogging:
         assert record.__dict__["transport"] == "ws"
         assert record.__dict__["action"] == "relay_drop_event"
 
-    def test_ws_heartbeat_log_includes_runtime_fields(self, caplog) -> None:
+    def test_ws_heartbeat_log_includes_runtime_fields(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Internal WS heartbeat logs should carry count and transport metadata."""
         app = _make_test_app()
 
@@ -804,7 +816,9 @@ class TestInternalWebSocketLogging:
         assert record.__dict__["active_thread_count"] == 2
         assert record.__dict__["transport"] == "ws"
 
-    def test_unknown_ws_message_log_includes_runtime_fields(self, caplog) -> None:
+    def test_unknown_ws_message_log_includes_runtime_fields(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Unknown WS message types should log bounded frame metadata."""
         app = _make_test_app()
 
@@ -909,7 +923,7 @@ class TestAggregatorGCOnTerminal:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_terminal_event_prunes_thread_from_aggregator_sequences(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """_handle_terminal_event removes the terminated thread from
         aggregator _sequences.
@@ -940,7 +954,7 @@ class TestAggregatorGCOnTerminal:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_terminal_event_log_includes_runtime_fields(
         self,
-        session_factory,
+        session_factory: SessionFactory,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Terminal update logs should carry thread/status/event metadata."""
@@ -979,7 +993,7 @@ class TestAggregatorGCOnTerminal:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_terminal_transition_skip_log_includes_runtime_fields(
         self,
-        session_factory,
+        session_factory: SessionFactory,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Repeated terminal updates should log a structured skip record."""
@@ -1029,7 +1043,7 @@ class TestTerminalEventFailureReasonPersistence:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_error_detail_on_a_failed_terminal_event_is_durably_recorded(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         from ...control.event_handlers import _handle_terminal_event
         from ...database.models import ThreadModel
@@ -1065,7 +1079,7 @@ class TestTerminalEventFailureReasonPersistence:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_completed_terminal_event_leaves_failure_reason_untouched(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """No error_detail on completed/cancelled — the column stays None."""
         from ...control.event_handlers import _handle_terminal_event
@@ -1100,7 +1114,7 @@ class TestTerminalEventFailureReasonPersistence:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_non_string_error_detail_is_ignored_not_persisted(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """A malformed relay payload (e.g. error_detail as a number) never
         reaches the durable column — falls back to leaving it untouched
@@ -1140,7 +1154,7 @@ class TestTerminalEventProviderConditionPersistence:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_relayed_condition_is_durably_recorded(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """The lane's own verdict survives the relay hop into the column."""
         from ...control.event_handlers import _handle_terminal_event
@@ -1176,7 +1190,7 @@ class TestTerminalEventProviderConditionPersistence:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_failed_terminal_with_no_condition_records_the_floor(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """A failed run never persists a null condition.
 
@@ -1210,7 +1224,7 @@ class TestTerminalEventProviderConditionPersistence:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_an_unrecognised_condition_is_refused_for_the_floor(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """A value outside the closed vocabulary never reaches the column.
 
@@ -1249,7 +1263,7 @@ class TestTerminalEventProviderConditionPersistence:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_completed_terminal_records_no_condition(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """A run that did not fail has no provider failure to classify."""
         from ...control.event_handlers import _handle_terminal_event
@@ -1297,8 +1311,8 @@ class TestConditionSurvivesAReload:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_run_status_recovers_the_condition_with_no_stream_attached(
         self,
-        session_factory,
-        checkpointer,
+        session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         from ...providers import ProviderCondition
         from .conftest import make_app
@@ -1351,8 +1365,8 @@ class TestConditionSurvivesAReload:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_run_that_never_failed_discloses_no_condition(
         self,
-        session_factory,
-        checkpointer,
+        session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """An absent condition means no failure, never an unreported one."""
         from .conftest import make_app
@@ -1378,8 +1392,8 @@ class TestConditionSurvivesAReload:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_run_status_discloses_why_an_operation_missed_a_live_run(
         self,
-        session_factory,
-        checkpointer,
+        session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """A follow-up that never arrived is readable WITHOUT faking a failure.
 
@@ -1455,8 +1469,8 @@ class TestNoFailedRunPersistsWithoutACondition:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_worker_rejection_persists_a_condition(
         self,
-        session_factory,
-        checkpointer,
+        session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """A dispatch the worker refuses reaches the column with a condition.
 
@@ -1512,7 +1526,7 @@ class TestNoFailedRunPersistsWithoutACondition:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_dispatch_failure_persists_a_condition(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """A dispatch that never left the gateway fails the run with a condition."""
         from ...control.repair_transitions import apply_dispatch_failure
@@ -1546,7 +1560,7 @@ class TestNoFailedRunPersistsWithoutACondition:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_an_undelivered_resume_is_not_a_failed_run_and_records_none(
         self,
-        session_factory,
+        session_factory: SessionFactory,
     ) -> None:
         """The honest exception to the sweep above, asserted rather than glossed.
 

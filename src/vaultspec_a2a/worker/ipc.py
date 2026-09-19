@@ -55,7 +55,7 @@ class WorkerBridge:
         self._api_url = api_url.rstrip("/")
         self._worker_id = worker_id
         # Attach bearer token to all internal IPC requests if provided.
-        headers = {}
+        headers: dict[str, str] = {}
         if internal_token:
             headers["Authorization"] = f"Bearer {internal_token}"
         self._client = httpx.AsyncClient(
@@ -131,6 +131,10 @@ class WorkerBridge:
         if deadline is None:
             return None
         return max(deadline - asyncio.get_running_loop().time(), 0.0)
+
+    async def probe_health(self) -> httpx.Response:
+        """Issue a startup reachability probe against the gateway's health route."""
+        return await self._client.get("/health")
 
     # ------------------------------------------------------------------
     # Thread tracking

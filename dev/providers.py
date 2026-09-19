@@ -208,7 +208,8 @@ def _resolve_option(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m dev.providers", description=__doc__.splitlines()[0]
+        prog="python -m dev.providers",
+        description=(__doc__ or "").splitlines()[0],
     )
     parser.add_argument(
         "--json",

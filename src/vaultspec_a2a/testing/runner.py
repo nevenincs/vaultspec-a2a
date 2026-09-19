@@ -63,9 +63,7 @@ def _completion_received(listener: socket.socket, token: str) -> bool:
 def _terminate(
     containment: ProcessContainment, process: subprocess.Popen[bytes]
 ) -> bool:
-    tree_reaped = asyncio.run(
-        containment.terminate(term_timeout=2.0, kill_timeout=5.0)
-    )
+    tree_reaped = asyncio.run(containment.terminate(term_timeout=2.0, kill_timeout=5.0))
     try:
         process.wait(timeout=5.0)
     except subprocess.TimeoutExpired:

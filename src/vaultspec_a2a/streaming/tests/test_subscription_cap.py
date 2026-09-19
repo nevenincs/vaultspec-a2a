@@ -144,7 +144,7 @@ def test_a_refusal_emits_the_operational_counter() -> None:
     with pytest.raises(EventAggregatorError):
         aggregator.subscribe("client-1", _threads(0, limit + 1))
 
-    assert "aggregator.subscriptions_refused" in hook._counters
+    assert hook.has_registered_counter("aggregator.subscriptions_refused")
 
 
 def test_an_accepted_subscription_emits_no_refusal_counter() -> None:
@@ -155,7 +155,7 @@ def test_an_accepted_subscription_emits_no_refusal_counter() -> None:
 
     aggregator.subscribe("client-1", _threads(0, 5))
 
-    assert "aggregator.subscriptions_refused" not in hook._counters
+    assert not hook.has_registered_counter("aggregator.subscriptions_refused")
 
 
 def test_unsubscribing_frees_capacity_again(aggregator: EventAggregator) -> None:

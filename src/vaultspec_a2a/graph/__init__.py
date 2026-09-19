@@ -14,6 +14,15 @@ execution context.
 """
 
 import importlib
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Static re-exports for type checkers only; the runtime path is the lazy
+    # ``__getattr__`` below, which is what actually breaks the import cycle.
+    from .compiler import compile_team_graph as compile_team_graph
+    from .nodes.vault_reader import (
+        build_initial_vault_index as build_initial_vault_index,
+    )
 
 # Lazy imports to break a circular dependency: the ``.compiler`` tree pulls in
 # ``graph.nodes.supervisor``, which imports ``context.token_budget``, which

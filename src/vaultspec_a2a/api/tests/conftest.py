@@ -14,11 +14,12 @@ SQLite file so that gateway read-path enrichment exercises the real
 checkpointer implementation, not a ``MemorySaver`` stub.
 """
 
+from __future__ import annotations
+
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
@@ -42,6 +43,11 @@ from ...control.worker_management import LazyWorkerSpawner
 from ...streaming.aggregator import EventAggregator
 from ...testing.catalog_selection import in_process_selection
 from ..app import create_app
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, AsyncIterator
+
+    from ...providers.provider_catalog_service import ProviderCatalogService
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonValue = (
@@ -235,10 +241,10 @@ class _InProcessWorker:
 type AppFixture = tuple[FastAPI, EventAggregator, _InProcessWorker, AsyncSqliteSaver]
 
 
-_SESSION_CATALOG_SERVICE: Any = None
+_session_catalog_service_cache: ProviderCatalogService | None = None
 
 
-def _session_catalog_service() -> Any:
+def _session_catalog_service() -> ProviderCatalogService:
     """Return the process-wide provider catalog service, serving in-process lanes.
 
     Built once and reused. See the note at its injection site in `make_app` for
@@ -256,16 +262,16 @@ def _session_catalog_service() -> Any:
     holding a live provider session is that real provider - so every suite that
     starts a run was freezing a metered lane to assert on gateway plumbing.
     """
-    global _SESSION_CATALOG_SERVICE
-    if _SESSION_CATALOG_SERVICE is None:
+    global _session_catalog_service_cache
+    if _session_catalog_service_cache is None:
         from datetime import timedelta
 
         from ...providers.provider_catalog_service import ProviderCatalogService
 
-        _SESSION_CATALOG_SERVICE = ProviderCatalogService(
+        _session_catalog_service_cache = ProviderCatalogService(
             ttl=timedelta(hours=6), serve_in_process_lanes=True
         )
-    return _SESSION_CATALOG_SERVICE
+    return _session_catalog_service_cache
 
 
 def make_app(
@@ -428,7 +434,7 @@ async def async_catalog_run_fields(
 
 
 @asynccontextmanager
-async def _live_server(app: FastAPI) -> AsyncIterator[str]:
+async def _live_server(app: FastAPI) -> AsyncGenerator[str]:
     """Serve *app* on an ephemeral loopback port and yield its base URL.
 
     A real uvicorn server on a real TCP socket, not ``ASGITransport``: an SSE

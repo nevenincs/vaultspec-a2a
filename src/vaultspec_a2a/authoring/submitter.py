@@ -34,12 +34,13 @@ from __future__ import annotations
 import datetime
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..graph.enums import PipelinePhase
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND
 from ..graph.nodes.phase_gate import ProposalRevisionRequiredError
 from ..ipc.schemas import canonical_project_root
+from ..thread.state import read_untrusted_state_value
 from ._envelope import AuthoringResponse, Denial
 from ._errors import AuthoringError
 from ._ids import derive_idempotency_key
@@ -279,6 +280,7 @@ def _grounding_child_key(item: dict[str, Any]) -> str | None:
     """
     rollback = item.get("rollback")
     if isinstance(rollback, dict):
+        rollback = cast("dict[str, Any]", rollback)
         child_key = rollback.get("child_key")
         if isinstance(child_key, str) and child_key:
             return child_key
@@ -468,18 +470,22 @@ def _web_locator_urls(state: TeamState) -> list[str]:
     """
     urls: list[str] = []
     seen: set[str] = set()
-    findings = state.get("research_findings") or []
+    findings: object = read_untrusted_state_value(state, "research_findings") or []
     if not isinstance(findings, list):
         return urls
+    findings = cast("list[object]", findings)
     for finding in findings:
         if not isinstance(finding, dict):
             continue
+        finding = cast("dict[str, Any]", finding)
         locators = finding.get("locators")
         if not isinstance(locators, list):
             continue
+        locators = cast("list[object]", locators)
         for locator in locators:
             if not isinstance(locator, dict):
                 continue
+            locator = cast("dict[str, Any]", locator)
             if locator.get("kind") != WEB_LOCATOR_KIND:
                 continue
             url = locator.get("url")
@@ -629,7 +635,7 @@ class DocumentProposalSubmitter:
     async def __call__(self, state: TeamState, phase: str) -> str:
         """Propose and submit the phase's document; return its proposal id."""
         thread_id = state.get("thread_id")
-        if not isinstance(thread_id, str) or not thread_id:
+        if not thread_id:
             raise EngineUnavailableError(
                 "run state carries no thread_id; cannot resolve run identity"
             )
@@ -814,15 +820,27 @@ class DocumentProposalSubmitter:
             snapshot = await client.recovery_snapshot(last_seq=0)
         except AuthoringError:
             return []
-        data = snapshot.data if isinstance(snapshot.data, dict) else {}
-        proposals = (
-            data.get("snapshot", {}).get("proposals", {}).get("items", [])
-            if isinstance(data.get("snapshot"), dict)
-            else []
+        data: dict[str, Any] = (
+            cast("dict[str, Any]", snapshot.data)
+            if isinstance(snapshot.data, dict)
+            else {}
         )
+        snapshot_block = data.get("snapshot")
+        proposals: list[object] = []
+        if isinstance(snapshot_block, dict):
+            snapshot_block = cast("dict[str, Any]", snapshot_block)
+            proposals_block = snapshot_block.get("proposals")
+            if isinstance(proposals_block, dict):
+                proposals_block = cast("dict[str, Any]", proposals_block)
+                items = proposals_block.get("items")
+                if isinstance(items, list):
+                    proposals = cast("list[object]", items)
         stems: set[str] = set()
-        for item in proposals if isinstance(proposals, list) else []:
-            if not isinstance(item, dict) or item.get("status") != "applied":
+        for item in proposals:
+            if not isinstance(item, dict):
+                continue
+            item = cast("dict[str, Any]", item)
+            if item.get("status") != "applied":
                 continue
             child_key = _grounding_child_key(item)
             if child_key is None:
@@ -842,7 +860,8 @@ class DocumentProposalSubmitter:
     @staticmethod
     def _changeset_revision(result: AuthoringResponse | Denial) -> str:
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
-            revision = result.data.get("changeset_revision")
+            data = cast("dict[str, Any]", result.data)
+            revision = data.get("changeset_revision")
             if isinstance(revision, str) and revision:
                 return revision
         raise SubmitterError(
@@ -852,7 +871,8 @@ class DocumentProposalSubmitter:
     @staticmethod
     def _proposal_id(result: AuthoringResponse | Denial) -> str:
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
-            proposal_id = result.data.get("proposal_id")
+            data = cast("dict[str, Any]", result.data)
+            proposal_id = data.get("proposal_id")
             if isinstance(proposal_id, str) and proposal_id:
                 return proposal_id
         raise SubmitterError("submit receipt carried no proposal_id")

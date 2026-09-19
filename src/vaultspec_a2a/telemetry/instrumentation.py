@@ -47,16 +47,21 @@ real transport fault indistinguishable from the arrangement.
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
+import importlib
 import logging
 import os
+from typing import TYPE_CHECKING, cast, override
 
 from opentelemetry import metrics, trace
 
 from ..control.config import DEFAULT_OTLP_ENDPOINT
 from ..utils.version import package_version
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 __all__ = [
+    "SDK_DISABLED",
     "TelemetryConfig",
     "configure_telemetry",
     "get_meter",
@@ -71,14 +76,14 @@ logger = logging.getLogger(__name__)
 # configured provider.  Changing telemetry config at runtime is explicitly out of
 # scope for this service — operators restart the process to pick up new settings.
 #
-# _SDK_DISABLED (and other constants below) are evaluated once at import
+# SDK_DISABLED (and other constants below) are evaluated once at import
 # time.  Tests that need to vary this behaviour must use subprocess isolation
 # (e.g. ``subprocess.run([sys.executable, ...])`` with a custom env dict) rather
 # than monkeypatching the env var after import — the constant will not re-evaluate.
 _SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "vaultspec-a2a")
 _SERVICE_VERSION = os.environ.get("OTEL_SERVICE_VERSION", package_version())
 _OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_OTLP_ENDPOINT)
-_SDK_DISABLED = os.environ.get("OTEL_SDK_DISABLED", "").lower() in (
+SDK_DISABLED = os.environ.get("OTEL_SDK_DISABLED", "").lower() in (
     "1",
     "true",
     "yes",
@@ -149,6 +154,7 @@ class TelemetryConfig:
     traces_exporting: bool = False
     metrics_exporting: bool = False
 
+    @override
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
         return (
@@ -215,9 +221,20 @@ def _resolve_langsmith() -> tuple[bool, str]:
         ``(enabled, project)``. ``enabled`` is True for both remote and local
         tracing modes; ``project`` is the SDK's resolved project name.
     """
-    from langsmith.utils import get_tracer_project, tracing_is_enabled
+    import langsmith.utils as _langsmith_utils
 
-    return bool(tracing_is_enabled()), get_tracer_project() or "default"
+    # langsmith's own signature leaves `tracing_is_enabled`'s parameter partially
+    # untyped; the module is bound to `object` and the two functions read off it
+    # through explicit `Callable` casts, so the untyped boundary is confined to
+    # this one seam rather than spreading into the caller.
+    tracing_is_enabled_fn = cast(
+        "Callable[[], object]", _langsmith_utils.tracing_is_enabled
+    )
+    get_tracer_project_fn = cast(
+        "Callable[[], object]", _langsmith_utils.get_tracer_project
+    )
+    project = get_tracer_project_fn() or "default"
+    return bool(tracing_is_enabled_fn()), str(project)
 
 
 def _check_sdk() -> bool:
@@ -305,6 +322,7 @@ def _build_sdk_meter_provider(
         MeterProvider,
     )
     from opentelemetry.sdk.metrics.export import (
+        MetricReader,
         PeriodicExportingMetricReader,
     )
     from opentelemetry.sdk.resources import (
@@ -317,7 +335,7 @@ def _build_sdk_meter_provider(
             "service.version": _SERVICE_VERSION,
         }
     )
-    readers = []
+    readers: list[MetricReader] = []
 
     if _METRICS_EXPORT_DISABLED:
         logger.info("OTel metric export disabled via OTEL_METRICS_EXPORTER=none")
@@ -365,7 +383,7 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
     """
     sdk_available = _check_sdk()
     otlp_available = _check_otlp() if sdk_available else False
-    sdk_enabled = sdk_available and not _SDK_DISABLED
+    sdk_enabled = sdk_available and not SDK_DISABLED
     langsmith_enabled, langsmith_project = _resolve_langsmith()
 
     effective_service = service_name or _SERVICE_NAME
@@ -387,7 +405,7 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
             not _METRICS_EXPORT_DISABLED,
             langsmith_enabled,
         )
-    elif _SDK_DISABLED:
+    elif SDK_DISABLED:
         logger.info("OTel SDK explicitly disabled via OTEL_SDK_DISABLED")
     else:
         logger.info(

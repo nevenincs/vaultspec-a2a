@@ -41,7 +41,7 @@ from ...team.team_config import (
 )
 from ..event_adapter import domain_to_wire
 from ..schemas.events import TeamStatusEvent
-from .conftest import make_app
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -85,8 +85,8 @@ def _exact_assignment() -> dict[str, dict[str, object]]:
 
 @pytest.mark.asyncio
 async def test_team_status_reports_the_resolved_provider_and_model(
-    session_factory,
-    checkpointer,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
     graph_checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A compiled agent's provider and capability reach the REST response.
@@ -102,6 +102,7 @@ async def test_team_status_reports_the_resolved_provider_and_model(
         checkpointer=graph_checkpointer,
         provider_factory=ProviderFactory(),
         model_assignment=_exact_assignment(),
+        step_timeout=60.0,
     )
 
     aggregator = EventAggregator()
@@ -120,8 +121,8 @@ async def test_team_status_reports_the_resolved_provider_and_model(
 
 @pytest.mark.asyncio
 async def test_thread_state_snapshot_reports_the_resolved_assignment(
-    session_factory,
-    checkpointer,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
     graph_checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The snapshot route carries the assignment too, not just ``/team/status``.
@@ -139,6 +140,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
         checkpointer=graph_checkpointer,
         provider_factory=ProviderFactory(),
         model_assignment=_exact_assignment(),
+        step_timeout=60.0,
     )
     aggregator = EventAggregator()
     aggregator.register_graph(thread_id, cast("StreamableGraph", graph))
@@ -194,6 +196,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
         checkpointer=graph_checkpointer,
         provider_factory=ProviderFactory(),
         model_assignment=_exact_assignment(),
+        step_timeout=60.0,
     )
     aggregator = EventAggregator()
     thread_id = "thread-descriptor-broadcast"
@@ -259,7 +262,7 @@ async def test_aggregator_agent_states_are_enum_members_not_strings() -> None:
 
 @pytest.mark.asyncio
 async def test_team_status_reports_unknown_assignment_as_null(
-    session_factory,
+    session_factory: SessionFactory,
 ) -> None:
     """An agent registered without a resolved assignment reports null, not a guess.
 

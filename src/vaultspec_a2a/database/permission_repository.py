@@ -326,9 +326,7 @@ async def create_control_action(
     requires_deadline = resolved_type in RECOVERY_ACTION_TYPES
     if requires_deadline != (recovery_deadline_at is not None):
         requirement = "requires" if requires_deadline else "cannot carry"
-        raise ValueError(
-            f"{resolved_type.value} {requirement} a recovery deadline"
-        )
+        raise ValueError(f"{resolved_type.value} {requirement} a recovery deadline")
     model = ControlActionModel(
         id=uuid4().hex,
         thread_id=thread_id,

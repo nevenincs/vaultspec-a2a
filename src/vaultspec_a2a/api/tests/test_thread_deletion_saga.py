@@ -36,10 +36,12 @@ from ...control.repositories import (
 from ...database import create_artifact, create_thread, get_thread
 from ...database.models import ThreadDeletionSagaModel
 from ...thread.enums import CleanupKind
-from .conftest import make_app
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     import pathlib
+
+    from langchain_core.runnables import RunnableConfig
 
 
 def _detached_checkpoint_store(db_file: pathlib.Path) -> AsyncSqliteSaver:
@@ -92,7 +94,7 @@ class TestVersionedDeletionVerb:
     """
 
     def test_a_clean_deletion_answers_no_content(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Every store cleaned: no body at all, and the row really is gone."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -120,7 +122,7 @@ class TestVersionedDeletionVerb:
         assert gone.status_code == 404
 
     def test_a_lifecycle_refusal_is_a_conflict(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A non-terminal run is refused before any teardown begins."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -154,7 +156,7 @@ class TestVersionedDeletionVerb:
         assert no_saga is True
 
     def test_an_abandoned_finalize_answers_success_with_the_kinds(
-        self, session_factory, tmp_path
+        self, session_factory: SessionFactory, tmp_path: pathlib.Path
     ) -> None:
         """Stranded state is reported, named by kind, and never by locator."""
         store = _detached_checkpoint_store(tmp_path / "detached-v1.db")
@@ -210,7 +212,7 @@ class TestDeletionSagaEndpoint:
     """DELETE /v1/runs/{id} under replay and mid-flight resume."""
 
     def test_replayed_delete_after_completion_is_idempotent(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A second DELETE of an already-deleted thread reports it gone."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -236,7 +238,7 @@ class TestDeletionSagaEndpoint:
         assert second.status_code == 404
 
     def test_delete_resumes_a_mid_flight_saga(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A DELETE on an already-deleting thread finishes the existing saga.
 
@@ -277,7 +279,9 @@ class TestDeletionSagaEndpoint:
                 await session.commit()
 
         async def _checkpoint_exists() -> bool:
-            config = {"configurable": {"thread_id": "t-resume", "checkpoint_ns": ""}}
+            config: RunnableConfig = {
+                "configurable": {"thread_id": "t-resume", "checkpoint_ns": ""}
+            }
             return await checkpointer.aget_tuple(config) is not None
 
         async def _rows_gone() -> tuple[bool, bool]:
@@ -299,7 +303,7 @@ class TestDeletionSagaEndpoint:
         assert saga_gone is True
 
     def test_a_lifecycle_refusal_is_a_conflict_and_starts_no_saga(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A thread whose state refuses deletion is rejected before any teardown.
 
@@ -338,7 +342,7 @@ class TestDeletionSagaEndpoint:
         assert no_saga is True
 
     def test_a_delete_stranding_checkpoint_state_succeeds_and_says_so(
-        self, session_factory, tmp_path
+        self, session_factory: SessionFactory, tmp_path: pathlib.Path
     ) -> None:
         """An unremovable checkpoint yields retries, then a success naming it.
 
@@ -395,7 +399,7 @@ class TestDeletionSagaEndpoint:
         assert replay.status_code == 404
 
     def test_the_abandonment_body_names_every_stranded_kind(
-        self, session_factory, tmp_path
+        self, session_factory: SessionFactory, tmp_path: pathlib.Path
     ) -> None:
         """Both stranded kinds are named, in the cleanup manifest's own order.
 

@@ -30,7 +30,7 @@ class AcceptedActionInput(BaseModel):
     @field_validator("dispatch")
     @classmethod
     def complete_effective_input(cls, value: dict[str, object]) -> dict[str, object]:
-        if set(value) != _INPUT_FIELDS:
+        if set(value) != set(_INPUT_FIELDS):
             raise ValueError("accepted dispatch does not carry complete current input")
         if value["action"] != "cancel":
             definition = FrozenGraphDefinition.model_validate(value["graph_definition"])

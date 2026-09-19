@@ -21,6 +21,7 @@ from ...nodes.supervisor import (
     create_plan_approval_node,
     create_supervisor_node,
 )
+from .._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -95,10 +96,10 @@ def _build_approval_graph(
     worker_phase_map: dict[str, str] | None,
 ) -> Any:
     """Mirror the star wiring: supervisor marks pending, plan_approval interrupts."""
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
-    builder.add_node("supervisor", supervisor_node)
-    builder.add_node(
-        "plan_approval", create_plan_approval_node(workers, worker_phase_map)
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(builder, "supervisor", supervisor_node)
+    add_test_node(
+        builder, "plan_approval", create_plan_approval_node(workers, worker_phase_map)
     )
     builder.set_entry_point("supervisor")
 
@@ -113,7 +114,7 @@ def _build_approval_graph(
         {"plan_approval": "plan_approval", "__end__": END},
     )
     builder.add_edge("plan_approval", END)
-    return builder.compile(checkpointer=InMemorySaver())
+    return compile_test_graph(builder, checkpointer=InMemorySaver())
 
 
 def _make_state_for_plan_approval(

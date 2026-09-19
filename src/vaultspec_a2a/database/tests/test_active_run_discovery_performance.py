@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 import pytest_asyncio
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import insert, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -123,28 +124,32 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
     assert "SCAN threads" not in feature_plan_details
     assert "USE TEMP B-TREE" not in feature_plan_details
 
-    await discover_active_runs(
-        session,
-        workspace_root=tmp_path / "workspace",
-        feature_tag="a2a",
-        limit=5,
-    )
-    samples_ms: list[float] = []
-    result: ActiveRunDiscoveryResult | None = None
-    tracemalloc.start()
-    try:
-        for _ in range(20):
-            before = time.perf_counter()
-            result = await discover_active_runs(
-                session,
-                workspace_root=tmp_path / "workspace",
-                feature_tag="a2a",
-                limit=5,
-            )
-            samples_ms.append((time.perf_counter() - before) * 1_000)
-        _, peak_bytes = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
+        await checkpointer.setup()
+        await discover_active_runs(
+            session,
+            checkpointer=checkpointer,
+            workspace_root=tmp_path / "workspace",
+            feature_tag="a2a",
+            limit=5,
+        )
+        samples_ms: list[float] = []
+        result: ActiveRunDiscoveryResult | None = None
+        tracemalloc.start()
+        try:
+            for _ in range(20):
+                before = time.perf_counter()
+                result = await discover_active_runs(
+                    session,
+                    checkpointer=checkpointer,
+                    workspace_root=tmp_path / "workspace",
+                    feature_tag="a2a",
+                    limit=5,
+                )
+                samples_ms.append((time.perf_counter() - before) * 1_000)
+            _, peak_bytes = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
 
     assert result is not None
     assert [run.run_id for run in result.runs] == [

@@ -23,6 +23,8 @@ never see ``None`` leak into a set of "valid" ids, and never need a bare
 payload from a subprocess.
 """
 
+from typing import cast
+
 __all__ = ["OPTION_ID_KEYS", "option_id_of", "valid_option_ids"]
 
 # Accepted spellings of the option identity field, in precedence order.
@@ -38,8 +40,9 @@ def option_id_of(option: object) -> str | None:
     """
     if not isinstance(option, dict):
         return None
+    option_dict = cast("dict[str, object]", option)
     for key in OPTION_ID_KEYS:
-        value = option.get(key)
+        value = option_dict.get(key)
         if isinstance(value, str) and value:
             return value
     return None
@@ -58,11 +61,12 @@ def valid_option_ids(options: object) -> set[str]:
     if not isinstance(options, list):
         return set()
     option_ids: set[str] = set()
-    for option in options:
+    for option in cast("list[object]", options):
         if not isinstance(option, dict):
             continue
+        option_dict = cast("dict[str, object]", option)
         for key in OPTION_ID_KEYS:
-            value = option.get(key)
+            value = option_dict.get(key)
             if isinstance(value, str) and value:
                 option_ids.add(value)
     return option_ids

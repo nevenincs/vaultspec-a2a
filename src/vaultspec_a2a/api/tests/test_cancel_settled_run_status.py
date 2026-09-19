@@ -26,19 +26,23 @@ idempotent verb must not fail a request purely for being the second one.
 from __future__ import annotations
 
 import itertools
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 
 from ...thread.enums import ThreadStatus
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import SessionFactory, async_catalog_run_fields, make_app
 from .test_gateway_live import _live_server
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 _PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
 
 
-async def _run_body(client: httpx.AsyncClient) -> dict:
+async def _run_body(client: httpx.AsyncClient) -> dict[str, object]:
     """A complete run-start body, including the now-required identity and selection.
 
     The selection is derived from the catalog this gateway actually serves rather
@@ -55,7 +59,7 @@ async def _run_body(client: httpx.AsyncClient) -> dict:
     }
 
 
-def _terminal_envelope(run_id: str, status: str) -> dict:
+def _terminal_envelope(run_id: str, status: str) -> dict[str, object]:
     """The worker-IPC envelope carrying one run's terminal event."""
     return {
         "type": "event",
@@ -94,7 +98,7 @@ async def _settle(client: httpx.AsyncClient, run_id: str, status: str) -> None:
     "settled_status", [ThreadStatus.COMPLETED.value, ThreadStatus.FAILED.value]
 )
 async def test_cancelling_a_settled_run_is_a_conflict_not_a_bad_gateway(
-    session_factory, checkpointer, settled_status: str
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver, settled_status: str
 ) -> None:
     """A run that finished refuses the verb on its own state, with 409.
 
@@ -124,7 +128,7 @@ async def test_cancelling_a_settled_run_is_a_conflict_not_a_bad_gateway(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_cancelling_an_already_cancelled_run_succeeds_idempotently(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The second cancel of a cancelled run is satisfied, not refused.
 
@@ -159,7 +163,7 @@ async def test_cancelling_an_already_cancelled_run_succeeds_idempotently(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_cancelling_an_absent_run_is_still_a_not_found(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The narrowing must not disturb the case that was already right.
 

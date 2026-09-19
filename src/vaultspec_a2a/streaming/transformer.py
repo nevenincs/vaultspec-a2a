@@ -44,16 +44,16 @@ from .types import (
 try:
     from langgraph.errors import GraphInterrupt as _GraphInterrupt_cls
 
-    _GraphInterrupt: type[Exception] | None = _GraphInterrupt_cls
+    GraphInterrupt: type[Exception] | None = _GraphInterrupt_cls
 except ImportError:
-    _GraphInterrupt = None
+    GraphInterrupt = None
 
 try:
     from langgraph.errors import GraphRecursionError as _GraphRecursionError_cls
 
-    _GraphRecursionError: type[Exception] | None = _GraphRecursionError_cls
+    GraphRecursionError: type[Exception] | None = _GraphRecursionError_cls
 except ImportError:
-    _GraphRecursionError = None
+    GraphRecursionError = None
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,18 @@ def project_run_progress(payload: object) -> object:
     if isinstance(payload, Mapping):
         return enforce_progress_allowlist(cast("Mapping[str, object]", payload))
     return payload
+
+
+def _data_field(event_data: dict[str, Any]) -> dict[str, Any]:
+    """Return the event's ``data`` mapping, or an empty mapping when absent."""
+    data = event_data.get("data")
+    return cast("dict[str, Any]", data) if isinstance(data, dict) else {}
+
+
+def _text_field(mapping: Mapping[str, object], key: str) -> str:
+    """Read a string field from an untrusted mapping, defaulting to ``""``."""
+    value = mapping.get(key, "")
+    return value if isinstance(value, str) else ""
 
 
 def _artifact_label_from_tool_input(file_path: str) -> str:
@@ -178,19 +190,21 @@ async def _translate_chat_model_stream(
     emitters: EventEmitters,
     buffering: BufferingManager,
 ) -> None:
-    chunk = event_data.get("data", {}).get("chunk")
+    chunk: object = _data_field(event_data).get("chunk")
     if chunk is not None:
         await _translate_tool_call_chunks(
             chunk, thread_id, effective_agent_id, emitters
         )
-        content = getattr(chunk, "content", "")
+        content: object = getattr(chunk, "content", "")
         if isinstance(content, list):
-            for block in content:
+            content_blocks = cast("list[object]", content)
+            for block in content_blocks:
                 if isinstance(block, dict):
-                    if block.get("type") == "reasoning":
-                        reasoning_text = block.get("content", "") or block.get(
-                            "text", ""
-                        )
+                    block_map = cast("dict[str, object]", block)
+                    if block_map.get("type") == "reasoning":
+                        reasoning_text = _text_field(
+                            block_map, "content"
+                        ) or _text_field(block_map, "text")
                         if reasoning_text:
                             await emitters.emit_thought_chunk(
                                 thread_id=thread_id,
@@ -198,8 +212,10 @@ async def _translate_chat_model_stream(
                                 content=reasoning_text,
                                 message_id=run_id,
                             )
-                    elif block.get("type") in ("text", "text_delta"):
-                        text = block.get("text", "") or block.get("content", "")
+                    elif block_map.get("type") in ("text", "text_delta"):
+                        text = _text_field(block_map, "text") or _text_field(
+                            block_map, "content"
+                        )
                         if text:
                             await buffering.buffer_message_chunk(
                                 thread_id=thread_id,
@@ -215,10 +231,16 @@ async def _translate_chat_model_stream(
                 message_id=run_id,
             )
         if not isinstance(content, list):
-            additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
+            additional_kwargs_raw = getattr(chunk, "additional_kwargs", {}) or {}
+            additional_kwargs = cast(
+                "dict[str, object]",
+                additional_kwargs_raw
+                if isinstance(additional_kwargs_raw, dict)
+                else {},
+            )
             reasoning = (
-                additional_kwargs.get("reasoning")
-                or additional_kwargs.get("reasoning_content")
+                _text_field(additional_kwargs, "reasoning")
+                or _text_field(additional_kwargs, "reasoning_content")
                 or ""
             )
             if reasoning:
@@ -239,11 +261,17 @@ async def _translate_chat_model_end(
     buffering: BufferingManager,
 ) -> None:
     await buffering.flush_chunk_buffer(thread_id)
-    output = event_data.get("data", {}).get("output")
+    output: object = _data_field(event_data).get("output")
     finish_reason: str | None = None
     if output is not None:
-        resp_meta = getattr(output, "response_metadata", None) or {}
-        finish_reason = resp_meta.get("finish_reason") or resp_meta.get("stop_reason")
+        resp_meta_raw: object = getattr(output, "response_metadata", None) or {}
+        resp_meta = cast(
+            "dict[str, object]",
+            resp_meta_raw if isinstance(resp_meta_raw, dict) else {},
+        )
+        finish_reason = _text_field(resp_meta, "finish_reason") or _text_field(
+            resp_meta, "stop_reason"
+        )
     if finish_reason:
         await emitters.emit_message_chunk(
             thread_id=thread_id,
@@ -264,8 +292,10 @@ async def _translate_tool_start(
 ) -> None:
     if node:
         tool_name = event_data.get("name", "unknown_tool")
-        tool_input = event_data.get("data", {}).get("input")
-        input_args = tool_input if isinstance(tool_input, dict) else None
+        tool_input: object = _data_field(event_data).get("input")
+        input_args = (
+            cast("dict[str, Any]", tool_input) if isinstance(tool_input, dict) else None
+        )
         await emitters.emit_tool_call_start(
             thread_id=thread_id,
             agent_id=effective_agent_id,
@@ -286,12 +316,13 @@ async def _translate_tool_end(
 ) -> None:
     if node:
         tool_name = event_data.get("name", "")
-        output = event_data.get("data", {}).get("output")
+        output: object = _data_field(event_data).get("output")
         output_content: list[dict[str, str | None]] | None = None
         if output is not None:
             output_str = ""
-            if hasattr(output, "content"):
-                output_str = str(output.content)
+            output_content_attr = getattr(output, "content", None)
+            if output_content_attr is not None:
+                output_str = str(output_content_attr)
             elif isinstance(output, str):
                 output_str = output
             else:
@@ -320,16 +351,18 @@ async def _translate_tool_end(
         if any(kw in tool_name.lower() for kw in _file_tool_keywords):
             output_str = ""
             file_path = ""
-            if hasattr(output, "content"):
-                output_str = str(output.content)
+            output_content_attr = getattr(output, "content", None)
+            if output_content_attr is not None:
+                output_str = str(output_content_attr)
             elif isinstance(output, str):
                 output_str = output
-            tool_input = event_data.get("data", {}).get("input", {})
-            if isinstance(tool_input, dict):
+            tool_input_end: object = _data_field(event_data).get("input", {})
+            if isinstance(tool_input_end, dict):
+                tool_input_map = cast("dict[str, object]", tool_input_end)
                 file_path = (
-                    tool_input.get("file_path", "")
-                    or tool_input.get("path", "")
-                    or tool_input.get("filename", "")
+                    _text_field(tool_input_map, "file_path")
+                    or _text_field(tool_input_map, "path")
+                    or _text_field(tool_input_map, "filename")
                 )
             if file_path:
                 filename = _artifact_label_from_tool_input(file_path)
@@ -417,32 +450,43 @@ async def _translate_node_boundary(
             node_name=node,
             state=AgentLifecycleState.IDLE,
         )
-        output = event_data.get("data", {}).get("output")
+        output: object = _data_field(event_data).get("output")
         if isinstance(output, dict):
-            raw_plan = output.get("current_plan")
+            output_map = cast("dict[str, object]", output)
+            raw_plan = output_map.get("current_plan")
             if raw_plan and isinstance(raw_plan, list):
-                entries = [
+                raw_plan_entries = cast("list[object]", raw_plan)
+                entries: list[dict[str, str]] = [
                     {
-                        "content": str(entry.get("content", "")),
-                        "status": entry.get("status", "pending"),
-                        "priority": entry.get("priority", "medium"),
+                        "content": _text_field(entry_map, "content"),
+                        "status": _text_field(entry_map, "status") or "pending",
+                        "priority": _text_field(entry_map, "priority") or "medium",
                     }
-                    for entry in raw_plan
-                    if isinstance(entry, dict) and entry.get("content")
+                    for entry in raw_plan_entries
+                    if isinstance(entry, dict)
+                    for entry_map in (cast("dict[str, object]", entry),)
+                    if entry_map.get("content")
                 ]
                 if entries:
                     await emitters.emit_plan_update(thread_id, entries)
-            raw_artifacts = output.get("artifacts")
+            raw_artifacts = output_map.get("artifacts")
             if raw_artifacts and isinstance(raw_artifacts, list):
-                for artifact in raw_artifacts:
-                    if isinstance(artifact, dict) and artifact.get("id"):
+                raw_artifact_entries = cast("list[object]", raw_artifacts)
+                for artifact in raw_artifact_entries:
+                    if isinstance(artifact, dict):
+                        artifact_map = cast("dict[str, object]", artifact)
+                    else:
+                        continue
+                    if artifact_map.get("id"):
                         await emitters.emit_artifact_update(
                             thread_id=thread_id,
-                            artifact_id=str(artifact["id"]),
+                            artifact_id=str(artifact_map["id"]),
                             filename=str(
-                                artifact.get("filename", artifact.get("path", ""))
+                                artifact_map.get(
+                                    "filename", artifact_map.get("path", "")
+                                )
                             ),
-                            content=str(artifact.get("content", "")),
+                            content=str(artifact_map.get("content", "")),
                         )
     elif event_kind == "on_chain_error":
         error_data = event_data.get("data", {})
@@ -575,7 +619,7 @@ async def emit_interrupt_events(
         return False
 
     for emission in _interrupt_emissions(thread_id, tasks):
-        if emission.request_id not in emitters._pending_permissions:
+        if not emitters.has_pending_permission(emission.request_id):
             await _emit_interrupt(emission, emitters)
     return True
 

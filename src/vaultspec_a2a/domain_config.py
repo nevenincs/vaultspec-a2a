@@ -12,12 +12,19 @@ The settings govern :mod:`vaultspec_a2a.context`, :mod:`vaultspec_a2a.graph`,
 :mod:`vaultspec_a2a.streaming`, and :mod:`vaultspec_a2a.control.config`.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class DomainConfig(BaseModel):
-    """Behavioural knobs consumed by Layer 1 (domain) modules."""
+class DomainConfig(BaseSettings):
+    """Behavioural knobs consumed by Layer 1 (domain) modules.
+
+    Based on ``BaseSettings`` rather than ``BaseModel`` so that this class and
+    its env-reading subclass declare ``model_config`` with one and the same
+    type. Two pydantic bases that declare it differently are an unresolvable
+    conflict for a subclass of both, and nothing constructs this class directly:
+    the only instance is the ``DomainSettingsConfig`` singleton below.
+    """
 
     # -- Event aggregator debounce / buffer --------------------------------
 
@@ -222,7 +229,7 @@ class DomainConfig(BaseModel):
     )
 
 
-class DomainSettingsConfig(BaseSettings, DomainConfig):
+class DomainSettingsConfig(DomainConfig):
     """Env-reading subclass of DomainConfig.
 
     Reads ``VAULTSPEC_``-prefixed environment variables and ``.env`` files so

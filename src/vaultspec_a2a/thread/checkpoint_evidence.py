@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
 
@@ -54,18 +54,24 @@ async def read_checkpoint_evidence(
         return CheckpointEvidence(CheckpointEvidenceKind.UNAVAILABLE, None, False)
     if checkpoint is None:
         return CheckpointEvidence(CheckpointEvidenceKind.ABSENT, None, False)
-    checkpoint_id = checkpoint.checkpoint.get("id")
-    if not isinstance(checkpoint_id, str) or not checkpoint_id:
+    # The checkpoint is deserialized from durable storage, so its declared
+    # TypedDict shape is a schema hope, not a runtime guarantee; each field is
+    # re-checked here as untrusted `object` rather than trusted at face value.
+    checkpoint_id_raw = cast("object", checkpoint.checkpoint.get("id"))
+    if not isinstance(checkpoint_id_raw, str) or not checkpoint_id_raw:
         return CheckpointEvidence(CheckpointEvidenceKind.INCOMPATIBLE, None, False)
+    checkpoint_id = checkpoint_id_raw
     if requested_checkpoint_id is not None and checkpoint_id != requested_checkpoint_id:
         return CheckpointEvidence(
             CheckpointEvidenceKind.INCOMPATIBLE, checkpoint_id, False
         )
-    values = checkpoint.checkpoint.get("channel_values", {})
-    if not isinstance(values, dict) or not isinstance(checkpoint.metadata, dict):
+    values_raw = cast("object", checkpoint.checkpoint.get("channel_values", {}))
+    metadata_raw = cast("object", checkpoint.metadata)
+    if not isinstance(values_raw, dict) or not isinstance(metadata_raw, dict):
         return CheckpointEvidence(
             CheckpointEvidenceKind.INCOMPATIBLE, checkpoint_id, False
         )
+    values = cast("dict[str, object]", values_raw)
     try:
         active = GraphActionReceipt.model_validate(
             values.get("active_graph_action_receipt")
@@ -78,10 +84,13 @@ async def read_checkpoint_evidence(
         return CheckpointEvidence(
             CheckpointEvidenceKind.INCOMPATIBLE, checkpoint_id, False
         )
-    incorporated_values = values.get("graph_action_receipts")
-    if not isinstance(incorporated_values, dict) or incorporated_values.get(
-        active.dispatch_id
-    ) != active.model_dump(mode="json"):
+    incorporated_values_raw = values.get("graph_action_receipts")
+    if not isinstance(incorporated_values_raw, dict):
+        return CheckpointEvidence(
+            CheckpointEvidenceKind.INCOMPATIBLE, checkpoint_id, False
+        )
+    incorporated_values = cast("dict[str, object]", incorporated_values_raw)
+    if incorporated_values.get(active.dispatch_id) != active.model_dump(mode="json"):
         return CheckpointEvidence(
             CheckpointEvidenceKind.INCOMPATIBLE, checkpoint_id, False
         )
@@ -114,9 +123,9 @@ async def read_checkpoint_evidence(
         return CheckpointEvidence(CheckpointEvidenceKind.COMPLETED, checkpoint_id, True)
     writes = checkpoint.pending_writes
     if writes is not None and any(
-        not isinstance(write, (tuple, list))
+        not isinstance(cast("object", write), tuple | list)
         or len(write) != 3
-        or not isinstance(write[1], str)
+        or not isinstance(cast("object", write[1]), str)
         for write in writes
     ):
         return CheckpointEvidence(

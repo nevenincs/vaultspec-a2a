@@ -8,16 +8,17 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.base import Checkpoint
 from langgraph.checkpoint.base.id import uuid6
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
 from ..state import (
     TeamState,
-    _append_artifacts,
-    _append_research_findings,
-    _merge_token_usage,
-    _merge_unique_strs,
-    _replace_plan,
+    append_artifacts,
+    append_research_findings,
+    merge_token_usage,
+    merge_unique_strs,
+    replace_plan,
 )
+from ._graph_helpers import add_node, compile_graph, new_builder
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,7 +37,7 @@ class TestAppendArtifacts:
         """Two distinct artifact ids produce a result list of length two."""
         existing = [{"id": "a1", "path": "/f1", "type": "file", "created_by": "coder"}]
         new = [{"id": "a2", "path": "/f2", "type": "file", "created_by": "coder"}]
-        result = _append_artifacts(existing, new)
+        result = append_artifacts(existing, new)
         expected_len = 2
         assert len(result) == expected_len
         assert result[1]["id"] == "a2"
@@ -45,7 +46,7 @@ class TestAppendArtifacts:
         """Duplicate artifact id is not appended; first occurrence wins."""
         existing = [{"id": "a1", "path": "/f1", "type": "file", "created_by": "coder"}]
         new = [{"id": "a1", "path": "/f1-updated", "type": "file", "created_by": "x"}]
-        result = _append_artifacts(existing, new)
+        result = append_artifacts(existing, new)
         assert len(result) == 1
         # First occurrence wins
         assert result[0]["path"] == "/f1"
@@ -53,13 +54,13 @@ class TestAppendArtifacts:
     def test_empty_existing(self) -> None:
         """Appending to an empty list returns a single-item list."""
         new_artifact = {"id": "a1", "path": "/f", "type": "file", "created_by": ""}
-        result = _append_artifacts([], [new_artifact])
+        result = append_artifacts([], [new_artifact])
         assert len(result) == 1
 
     def test_empty_new(self) -> None:
         """Appending an empty list leaves the existing list unchanged."""
         existing = [{"id": "a1", "path": "/f", "type": "file", "created_by": ""}]
-        result = _append_artifacts(existing, [])
+        result = append_artifacts(existing, [])
         assert result == existing
 
 
@@ -67,20 +68,20 @@ class TestMergeUniqueStrs:
     """Tests for the append-and-deduplicate string reducer (authoring refs)."""
 
     def test_appends_new_ids(self) -> None:
-        result = _merge_unique_strs(["cs:1"], ["cs:2"])
+        result = merge_unique_strs(["cs:1"], ["cs:2"])
         assert result == ["cs:1", "cs:2"]
 
     def test_deduplicates_preserving_order(self) -> None:
-        result = _merge_unique_strs(["cs:1", "cs:2"], ["cs:2", "cs:3"])
+        result = merge_unique_strs(["cs:1", "cs:2"], ["cs:2", "cs:3"])
         assert result == ["cs:1", "cs:2", "cs:3"]
 
     def test_empty_new_keeps_existing(self) -> None:
-        result = _merge_unique_strs(["cs:1"], [])
+        result = merge_unique_strs(["cs:1"], [])
         assert result == ["cs:1"]
 
     def test_does_not_mutate_existing(self) -> None:
         existing = ["cs:1"]
-        _merge_unique_strs(existing, ["cs:2"])
+        merge_unique_strs(existing, ["cs:2"])
         assert existing == ["cs:1"]
 
 
@@ -94,7 +95,7 @@ class TestAppendResearchFindings:
         new: list[dict[str, Any]] = [
             {"claim": "c2", "locators": ["g.py:2"], "source_thread": "t2"}
         ]
-        result = _append_research_findings(existing, new)
+        result = append_research_findings(existing, new)
         assert result == [existing[0], new[0]]
 
     def test_accumulates_parallel_branches(self) -> None:
@@ -110,7 +111,7 @@ class TestAppendResearchFindings:
         new: list[dict[str, Any]] = [
             {"claim": "dup", "locators": [], "source_thread": "t2"}
         ]
-        result = _append_research_findings(existing, new)
+        result = append_research_findings(existing, new)
         assert len(result) == 2
         assert result[0]["source_thread"] == "t1"
         assert result[1]["source_thread"] == "t2"
@@ -119,14 +120,14 @@ class TestAppendResearchFindings:
         existing: list[dict[str, Any]] = [
             {"claim": "c1", "locators": [], "source_thread": "t1"}
         ]
-        result = _append_research_findings(existing, [])
+        result = append_research_findings(existing, [])
         assert result == existing
 
     def test_does_not_mutate_existing(self) -> None:
         existing: list[dict[str, Any]] = [
             {"claim": "c1", "locators": [], "source_thread": "t1"}
         ]
-        _append_research_findings(
+        append_research_findings(
             existing, [{"claim": "c2", "locators": [], "source_thread": "t2"}]
         )
         assert existing == [{"claim": "c1", "locators": [], "source_thread": "t1"}]
@@ -139,14 +140,14 @@ class TestMergeTokenUsage:
         """Existing and new counters for the same agent are added together."""
         existing = {"agent-a": {"input": 100, "output": 50, "total": 150}}
         new = {"agent-a": {"input": 20, "output": 10, "total": 30}}
-        result = _merge_token_usage(existing, new)
+        result = merge_token_usage(existing, new)
         assert result["agent-a"] == {"input": 120, "output": 60, "total": 180}
 
     def test_adds_new_agent(self) -> None:
         """A new agent key is added without affecting existing agents."""
         existing = {"agent-a": {"input": 10, "output": 5, "total": 15}}
         new = {"agent-b": {"input": 30, "output": 20, "total": 50}}
-        result = _merge_token_usage(existing, new)
+        result = merge_token_usage(existing, new)
         assert "agent-a" in result
         assert "agent-b" in result
         expected_total = 50
@@ -156,13 +157,13 @@ class TestMergeTokenUsage:
         """The existing dict is never modified in place."""
         existing = {"agent-a": {"input": 10, "output": 5, "total": 15}}
         original_inner = dict(existing["agent-a"])
-        _merge_token_usage(existing, {"agent-a": {"input": 1, "output": 1, "total": 2}})
+        merge_token_usage(existing, {"agent-a": {"input": 1, "output": 1, "total": 2}})
         assert existing["agent-a"] == original_inner
 
     def test_empty_merge(self) -> None:
         """Merging an empty dict returns the existing values unchanged."""
         existing = {"agent-a": {"input": 10, "output": 5, "total": 15}}
-        result = _merge_token_usage(existing, {})
+        result = merge_token_usage(existing, {})
         assert result == existing
 
 
@@ -173,7 +174,7 @@ class TestReplacePlan:
         """A non-empty new list fully replaces the old plan."""
         old = [{"step": "research", "status": "done", "agent": "planner"}]
         new = [{"step": "implement", "status": "pending", "agent": "coder"}]
-        result = _replace_plan(old, new)
+        result = replace_plan(old, new)
         assert result == new
 
     def test_empty_new_clears_plan(self) -> None:
@@ -181,13 +182,13 @@ class TestReplacePlan:
         (T12 fix — was silently discarded).
         """
         old = [{"step": "research", "status": "done", "agent": "planner"}]
-        result = _replace_plan(old, [])
+        result = replace_plan(old, [])
         assert result == []
 
     def test_none_new_keeps_existing(self) -> None:
         """None leaves the existing plan in place (reducer called with no update)."""
         old = [{"step": "research", "status": "done", "agent": "planner"}]
-        result = _replace_plan(old, None)
+        result = replace_plan(old, None)
         assert result == old
 
 
@@ -334,14 +335,14 @@ class TestUndeclaredCheckpointKeys:
             seen.append(dict(state))
             return {"active_agent": "probe"}
 
-        builder = StateGraph(cast("Any", TeamState))
-        builder.add_node("probe", probe)
+        builder = new_builder()
+        add_node(builder, "probe", probe)
         builder.add_edge(START, "probe")
         builder.add_edge("probe", END)
 
         db = tmp_path / "checkpoints.sqlite"
         async with AsyncSqliteSaver.from_conn_string(str(db)) as saver:
-            graph = builder.compile(checkpointer=saver)
+            graph = compile_graph(builder, checkpointer=saver)
             config: RunnableConfig = {
                 "configurable": {"thread_id": "retired-key-thread"},
             }

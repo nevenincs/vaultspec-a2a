@@ -23,6 +23,7 @@ from ....graph.nodes.phase_gate import (
     create_phase_submit_node,
 )
 from ....thread.state import TeamState
+from .._state_graph_helpers import add_test_node, compile_test_graph
 
 
 class _RefusingSubmitter:
@@ -73,7 +74,7 @@ def _gate_graph(submitter: DocumentProposalSubmitter) -> Any:
     pure gate node parks at its interrupt, so the correlation id is durable in the
     checkpoint while parked.
     """
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
 
     async def approved_end(state: TeamState) -> dict[str, Any]:
         return {}
@@ -89,14 +90,14 @@ def _gate_graph(submitter: DocumentProposalSubmitter) -> Any:
         approved_target="approved_end",
         revision_target="revise_end",
     )
-    builder.add_node("submit", submit)
-    builder.add_node("gate", gate)
-    builder.add_node("approved_end", approved_end)
-    builder.add_node("revise_end", revise_end)
+    add_test_node(builder, "submit", submit)
+    add_test_node(builder, "gate", gate)
+    add_test_node(builder, "approved_end", approved_end)
+    add_test_node(builder, "revise_end", revise_end)
     builder.add_edge(START, "submit")
     builder.add_edge("approved_end", END)
     builder.add_edge("revise_end", END)
-    return builder.compile(checkpointer=InMemorySaver())
+    return compile_test_graph(builder, checkpointer=InMemorySaver())
 
 
 @pytest.mark.asyncio

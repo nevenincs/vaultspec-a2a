@@ -29,7 +29,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 import httpx
 
@@ -87,6 +87,7 @@ def _make_handler(state: _ReceiverState) -> type[BaseHTTPRequestHandler]:
     """Build a settlement-receiver request handler bound to *state*."""
 
     class _Handler(BaseHTTPRequestHandler):
+        @override
         def log_message(self, format: str, *args: object) -> None:
             """Silence the default per-request stderr logging."""
             return

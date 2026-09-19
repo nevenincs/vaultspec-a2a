@@ -6,7 +6,7 @@ import sys
 from collections.abc import AsyncIterator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, cast, override
 
 import pytest
 from langchain_core.messages import AIMessageChunk
@@ -31,13 +31,14 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ...providers import AcpPromptCancelledError, AcpPromptError, ProviderCondition
 from ...thread.enums import ThreadStatus
 from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
 from ..aggregator import EventAggregator
-from ..ingest import _summarize_ingest_exception
+from ..ingest import summarize_ingest_exception
 from ..types import SequencedEvent, StreamableGraph
 
 # ---------------------------------------------------------------------------
@@ -1841,6 +1842,7 @@ assert issubclass(_FailingGraph, StreamableGraph)  # protocol drift guard
 
 
 class _ProviderCancelledGraph(_FailingGraph):
+    @override
     async def astream_events(
         self, graph_input: object, config: object, *, version: str
     ):
@@ -1930,7 +1932,7 @@ class TestIngestExceptionCauseChain:
         wrapper = ValueError("worker turn failed")
         wrapper.__cause__ = cause
 
-        summary = _summarize_ingest_exception(wrapper)
+        summary = summarize_ingest_exception(wrapper)
 
         assert "ValueError: worker turn failed" in summary
         assert "RuntimeError: provider refused: credit balance too low" in summary
@@ -1947,7 +1949,7 @@ class TestIngestExceptionCauseChain:
             except RuntimeError:
                 raise ValueError("the actual ingest failure") from None
         except ValueError as exc:
-            summary = _summarize_ingest_exception(exc)
+            summary = summarize_ingest_exception(exc)
 
         assert "the actual ingest failure" in summary
         assert "an unrelated error being handled" not in summary
@@ -1959,7 +1961,7 @@ class TestIngestExceptionCauseChain:
         first.__cause__ = second
         second.__cause__ = first
 
-        summary = _summarize_ingest_exception(first)
+        summary = summarize_ingest_exception(first)
 
         assert summary.count("RuntimeError: first") == 1
         assert "ValueError: second" in summary
@@ -1973,7 +1975,7 @@ class TestIngestExceptionCauseChain:
             wrapper.__cause__ = current
             current = wrapper
 
-        summary = _summarize_ingest_exception(current)
+        summary = summarize_ingest_exception(current)
 
         assert "link-0" in summary
         assert "link-9" not in summary
@@ -1985,7 +1987,7 @@ class TestIngestExceptionCauseChain:
         wrapper = ValueError("w" * 4000)
         wrapper.__cause__ = cause
 
-        summary = _summarize_ingest_exception(wrapper)
+        summary = summarize_ingest_exception(wrapper)
 
         assert "\n" not in summary
         assert summary.endswith("…")
@@ -2050,11 +2052,13 @@ def _failing_provider_graph(
         provider=lane,
         workspace_root=workspace_root,
     )
-    builder = StateGraph(cast("Any", TeamState))
-    builder.add_node("coder", create_worker_node(model, "You are a coder.", "coder"))
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(
+        builder, "coder", create_worker_node(model, "You are a coder.", "coder")
+    )
     builder.set_entry_point("coder")
     builder.add_edge("coder", END)
-    return builder.compile(checkpointer=InMemorySaver())
+    return compile_test_graph(builder, checkpointer=InMemorySaver())
 
 
 class TestProviderFailureReachesTheReason:

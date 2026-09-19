@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from .enums import InvalidTransitionError, ThreadStatus
 
-__all__ = ["validate_transition"]
+__all__ = ["VALID_TRANSITIONS", "validate_transition"]
 
-_VALID_TRANSITIONS: dict[ThreadStatus, frozenset[ThreadStatus]] = {
+VALID_TRANSITIONS: dict[ThreadStatus, frozenset[ThreadStatus]] = {
     ThreadStatus.SUBMITTED: frozenset(
         {
             ThreadStatus.RUNNING,
@@ -95,7 +95,7 @@ def validate_transition(
     """Raise ``InvalidTransitionError`` if *current* → *target* is not allowed."""
     if current == target:
         return
-    allowed = _VALID_TRANSITIONS.get(current, frozenset())
+    allowed = VALID_TRANSITIONS.get(current, frozenset())
     if target not in allowed:
         raise InvalidTransitionError(
             f"Cannot transition thread {thread_id} from "

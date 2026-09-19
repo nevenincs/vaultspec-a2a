@@ -16,8 +16,9 @@ wrong.
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from types import MappingProxyType
+from typing import override
 
 import pytest
 
@@ -68,12 +69,15 @@ class _HandRolledMapping(Mapping[str, object]):
     def __init__(self, data: dict[str, object]) -> None:
         self._data = data
 
+    @override
     def __getitem__(self, key: str) -> object:
         return self._data[key]
 
-    def __iter__(self):
+    @override
+    def __iter__(self) -> Iterator[str]:
         return iter(self._data)
 
+    @override
     def __len__(self) -> int:
         return len(self._data)
 
@@ -90,7 +94,8 @@ def test_a_plain_dict_passes_through_as_a_copy() -> None:
 
 def test_a_dict_subclass_is_accepted() -> None:
     """``OrderedDict`` etc. are ``dict`` subclasses and pass strict validation."""
-    result = coerce_object_mapping(OrderedDict(a=1, b=2))
+    ordered: OrderedDict[str, int] = OrderedDict(a=1, b=2)
+    result = coerce_object_mapping(ordered)
 
     assert result == {"a": 1, "b": 2}
 

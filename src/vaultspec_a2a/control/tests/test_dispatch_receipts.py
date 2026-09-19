@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...database import (
     create_control_action,
@@ -28,9 +30,17 @@ from ..action_lease import (
 )
 from ..dispatch_receipts import bind_graph_action_receipt
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
+
+    from ...database.thread_repository import ThreadWriteExpectation
+
 
 @pytest_asyncio.fixture
-async def sessions(tmp_path):
+async def sessions(
+    tmp_path: Path,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'receipts.db'}")
     configure_sqlite_transactions(engine)
     async with engine.begin() as connection:
@@ -39,7 +49,7 @@ async def sessions(tmp_path):
     await engine.dispose()
 
 
-async def _seed(sessions):
+async def _seed(sessions: async_sessionmaker[AsyncSession]) -> ThreadWriteExpectation:
     async with sessions() as db:
         thread = await create_thread(
             db,
@@ -63,7 +73,9 @@ async def _seed(sessions):
 
 
 @pytest.mark.asyncio
-async def test_delivery_cannot_create_missing_acceptance_evidence(sessions, tmp_path):
+async def test_delivery_cannot_create_missing_acceptance_evidence(
+    sessions: async_sessionmaker[AsyncSession], tmp_path: Path
+):
     await _seed(sessions)
     async with sessions() as db:
         bound = await bind_graph_action_receipt(
@@ -96,7 +108,7 @@ async def test_delivery_cannot_create_missing_acceptance_evidence(sessions, tmp_
 
 @pytest.mark.asyncio
 async def test_retry_preserves_original_receipt_after_state_revision(
-    sessions, tmp_path
+    sessions: async_sessionmaker[AsyncSession], tmp_path: Path
 ):
     witness = await _seed(sessions)
     async with sessions() as db:
@@ -180,7 +192,7 @@ async def test_retry_preserves_original_receipt_after_state_revision(
 
 @pytest.mark.asyncio
 async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
-    sessions, tmp_path
+    sessions: async_sessionmaker[AsyncSession], tmp_path: Path
 ):
     witness = await _seed(sessions)
     request = DispatchRequest(
@@ -255,7 +267,7 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("finalize", [False, True])
 async def test_requested_projection_and_receipt_share_acceptance_commit(
-    sessions, tmp_path, finalize
+    sessions: async_sessionmaker[AsyncSession], tmp_path: Path, finalize: bool
 ):
     witness = await _seed(sessions)
     async with sessions() as db:

@@ -51,7 +51,7 @@ import asyncio
 import os
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import pytest
@@ -152,26 +152,37 @@ def _selection_from_catalog(catalog: JsonObject) -> ProviderCatalogSelection | N
     have to revalidate against the live workspace catalog at admission, so a
     hand-written one would be refused the moment the catalog turned over.
     """
-    providers = catalog.get("providers")
-    if not isinstance(providers, list):
+    raw_providers: object = catalog.get("providers")
+    if not isinstance(raw_providers, list):
         return None
-    for record in providers:
-        if not isinstance(record, dict):
+    providers = cast("list[object]", raw_providers)
+    for raw_record in providers:
+        if not isinstance(raw_record, dict):
             continue
-        health = record.get("health")
-        lane = record.get("catalog")
-        if not isinstance(health, dict) or not isinstance(lane, dict):
+        record = cast("dict[str, object]", raw_record)
+        raw_health: object = record.get("health")
+        raw_lane: object = record.get("catalog")
+        if not isinstance(raw_health, dict) or not isinstance(raw_lane, dict):
             continue
+        health = cast("dict[str, object]", raw_health)
+        lane = cast("dict[str, object]", raw_lane)
         if health.get("selectable") is not True:
             continue
-        state = lane.get("state")
-        models = lane.get("models")
-        if not isinstance(state, dict) or not isinstance(models, list) or not models:
+        raw_state: object = lane.get("state")
+        raw_models: object = lane.get("models")
+        if (
+            not isinstance(raw_state, dict)
+            or not isinstance(raw_models, list)
+            or not raw_models
+        ):
             continue
+        state = cast("dict[str, object]", raw_state)
+        models = cast("list[object]", raw_models)
         revision = state.get("revision")
-        entry = models[0]
-        if not isinstance(revision, str) or not isinstance(entry, dict):
+        raw_entry = models[0]
+        if not isinstance(revision, str) or not isinstance(raw_entry, dict):
             continue
+        entry = cast("dict[str, object]", raw_entry)
         entry_id = entry.get("entry_id")
         provider_id = record.get("provider_id")
         execution_mode = record.get("execution_mode")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -10,7 +11,7 @@ from pydantic import ValidationError
 from ..schemas import DispatchRequest
 
 
-def _assignment() -> dict[str, dict[str, object]]:
+def _assignment() -> dict[str, dict[str, Any]]:
     return {
         "coder": {
             "provider": "codex",

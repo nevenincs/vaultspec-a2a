@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from ...graph.enums import PipelinePhase
 from ..submitter import (
@@ -51,7 +51,7 @@ The durable cursor pattern is already shipped at `src/x.py:10`.
 
 
 def _state(*bodies: str) -> TeamState:
-    messages = [HumanMessage(content="ground it")]
+    messages: list[BaseMessage] = [HumanMessage(content="ground it")]
     messages.extend(AIMessage(content=b, name=_WRITER) for b in bodies)
     return cast("TeamState", {"thread_id": "t1", "messages": messages})
 

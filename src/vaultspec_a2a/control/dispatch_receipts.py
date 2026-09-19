@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 from ..database import (
     ThreadModel,
@@ -171,7 +171,8 @@ async def bind_graph_action_receipt(
     """Read committed acceptance evidence; delivery creates no receipt or writer."""
     if dispatch.action == "cancel":
         return dispatch
-    if db.bind is None:
+    bind = cast("AsyncEngine | AsyncConnection | None", db.bind)
+    if bind is None:
         raise RuntimeError("receipt delivery requires a bound durable database")
     # A separate read transaction sees only committed acceptance and is closed
     # before network delivery. It cannot publish or discard the caller's writes.

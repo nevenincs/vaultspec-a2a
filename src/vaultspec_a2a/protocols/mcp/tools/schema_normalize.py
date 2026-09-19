@@ -30,7 +30,7 @@ catalog schema is never mutated; normalization happens only at serving time.
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import Any, cast
 
 __all__ = ["normalize_tool_input_schema"]
 
@@ -61,10 +61,11 @@ def _str_list(value: object, exclude: frozenset[str] = frozenset()) -> list[str]
     """Return the string members of *value* (a list), minus any in *exclude*."""
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, str) and item not in exclude]
+    items = cast("list[object]", value)
+    return [item for item in items if isinstance(item, str) and item not in exclude]
 
 
-def _looks_like_json_schema(raw: dict[Any, Any]) -> bool:
+def _looks_like_json_schema(raw: dict[str, Any]) -> bool:
     """Whether *raw* is ALREADY a valid JSON Schema object.
 
     A newer engine serves the model-owned content as standard JSON Schema
@@ -87,31 +88,37 @@ def _deep_strip_injected(node: Any, injected: frozenset[str]) -> None:
     deep copy so the source schema is never touched.
     """
     if isinstance(node, dict):
-        properties = node.get("properties")
+        node_map = cast("dict[str, object]", node)
+        properties = node_map.get("properties")
         if isinstance(properties, dict):
-            for name in list(properties):
+            properties_map = cast("dict[str, object]", properties)
+            for name in list(properties_map):
                 if name in injected:
-                    del properties[name]
+                    del properties_map[name]
                 else:
-                    _deep_strip_injected(properties[name], injected)
-        required = node.get("required")
+                    _deep_strip_injected(properties_map[name], injected)
+        required = node_map.get("required")
         if isinstance(required, list):
-            node["required"] = [item for item in required if item not in injected]
+            required_list = cast("list[object]", required)
+            node_map["required"] = [
+                item for item in required_list if item not in injected
+            ]
         for key in ("items", "additionalProperties"):
-            if isinstance(node.get(key), (dict, list)):
-                _deep_strip_injected(node[key], injected)
+            child = node_map.get(key)
+            if isinstance(child, (dict, list)):
+                _deep_strip_injected(child, injected)
         for key in ("oneOf", "anyOf", "allOf"):
-            branches = node.get(key)
+            branches = node_map.get(key)
             if isinstance(branches, list):
-                for branch in branches:
+                for branch in cast("list[object]", branches):
                     _deep_strip_injected(branch, injected)
     elif isinstance(node, list):
-        for item in node:
+        for item in cast("list[object]", node):
             _deep_strip_injected(item, injected)
 
 
 def _passthrough_valid_schema(
-    raw: dict[Any, Any], injected: frozenset[str]
+    raw: dict[str, Any], injected: frozenset[str]
 ) -> tuple[dict[str, Any], str]:
     """Pass an already-valid engine schema through, minus the injected ids.
 
@@ -146,7 +153,8 @@ def _merge_properties(
     """
     if not isinstance(provided, dict):
         return
-    for name, subschema in provided.items():
+    provided_map = cast("dict[object, object]", provided)
+    for name, subschema in provided_map.items():
         if not isinstance(name, str) or name in injected:
             continue
         if isinstance(subschema, dict):
@@ -167,9 +175,10 @@ def _translate_oneof_schema(
     required_sets: list[set[str]] = []
     enum_values: dict[str, list[str]] = {}
     branch_notes: list[str] = []
-    for branch in branches:
-        if not isinstance(branch, dict):
+    for branch_raw in branches:
+        if not isinstance(branch_raw, dict):
             continue
+        branch = cast("dict[str, Any]", branch_raw)
         b_required = _str_list(branch.get("required"), injected)
         b_optional = _str_list(branch.get("optional"), injected)
         for field in (*b_required, *b_optional):
@@ -179,8 +188,8 @@ def _translate_oneof_schema(
         # placeholders above with the real nested shape.
         _merge_properties(properties, branch.get("properties"), injected)
         required_sets.append(set(b_required))
-        payload = branch.get("payload")
-        alias_of = branch.get("alias_of")
+        payload: object = branch.get("payload")
+        alias_of: object = branch.get("alias_of")
         note_parts: list[str] = []
         if b_required:
             note_parts.append("requires " + ", ".join(b_required))
@@ -193,7 +202,7 @@ def _translate_oneof_schema(
             note_parts.append(f"input aliases {alias_of}")
         discriminator: tuple[str, str] | None = None
         for key in _DISCRIMINATOR_KEYS:
-            value = branch.get(key)
+            value: object = branch.get(key)
             if isinstance(value, str):
                 values = enum_values.setdefault(key, [])
                 if value not in values:
@@ -210,7 +219,7 @@ def _translate_oneof_schema(
     # intersection (often empty); per-branch requirements ride the guidance.
     required: list[str] = []
     if required_sets:
-        required = sorted(set.intersection(*required_sets))
+        required = sorted(required_sets[0].intersection(*required_sets[1:]))
     guidance_parts: list[str] = []
     if branch_notes:
         guidance_parts.append("One of: " + "; ".join(branch_notes) + ".")
@@ -218,7 +227,7 @@ def _translate_oneof_schema(
 
 
 def _translate_flat_schema(
-    raw: dict[Any, Any], injected: frozenset[str]
+    raw: dict[str, Any], injected: frozenset[str]
 ) -> tuple[dict[str, Any], list[str], bool]:
     """Translate a flat (non-``oneOf``) DSL schema into JSON-Schema fragments.
 
@@ -260,26 +269,31 @@ def normalize_tool_input_schema(
     """
     if not isinstance(raw, dict):
         return {"type": "object"}, ""
+    raw_map = cast("dict[str, Any]", raw)
 
-    if _looks_like_json_schema(raw):
-        return _passthrough_valid_schema(raw, injected)
+    if _looks_like_json_schema(raw_map):
+        return _passthrough_valid_schema(raw_map, injected)
 
-    branches = raw.get("oneOf")
-    if isinstance(branches, list) and branches:
+    branches_raw: object = raw_map.get("oneOf")
+    if isinstance(branches_raw, list) and branches_raw:
+        branches = cast("list[Any]", branches_raw)
         properties, required, guidance_parts, open_schema = _translate_oneof_schema(
             branches, injected
         )
     else:
-        properties, required, open_schema = _translate_flat_schema(raw, injected)
+        properties, required, open_schema = _translate_flat_schema(raw_map, injected)
         guidance_parts = []
 
-    bounds = raw.get("bounds")
-    if isinstance(bounds, dict) and bounds:
+    bounds_raw: object = raw_map.get("bounds")
+    if isinstance(bounds_raw, dict) and bounds_raw:
+        bounds = cast("dict[str, Any]", bounds_raw)
         guidance_parts.append(
             "Bounds: " + ", ".join(f"{k}={v}" for k, v in bounds.items()) + "."
         )
 
-    unknown = {k: v for k, v in raw.items() if k not in _CONSUMED_KEYS}
+    unknown: dict[str, Any] = {
+        k: v for k, v in raw_map.items() if k not in _CONSUMED_KEYS
+    }
     if unknown:
         guidance_parts.append(
             "Engine: " + "; ".join(f"{k}={v}" for k, v in unknown.items()) + "."

@@ -88,7 +88,10 @@ _CASES: list[tuple[_TransitionFn, ControlActionType, str]] = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("fn", "action", "phase"), _CASES)
 async def test_each_transition_persists_what_the_map_declares(
-    session_factory, fn, action, phase
+    session_factory: async_sessionmaker[AsyncSession],
+    fn: _TransitionFn,
+    action: ControlActionType,
+    phase: str,
 ) -> None:
     """What the function writes to the database is what the policy map holds."""
     expected = repair_state_for_action(action, phase)

@@ -20,7 +20,7 @@ operation is atomic between them.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 if TYPE_CHECKING:
     from ..thread.actor_tokens import ActorTokenBundle
@@ -66,6 +66,7 @@ class RunTokenStore:
         """Drop *thread_id*'s bundle at run end. Idempotent."""
         self._bundles.pop(thread_id, None)
 
+    @override
     def __repr__(self) -> str:
         """Redacted representation — reports only the active-run count (R7)."""
         return f"RunTokenStore(active_runs={len(self._bundles)})"

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from fastapi import (
     APIRouter,
@@ -223,16 +223,18 @@ async def _relay_single_event(
     )
 
 
-async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None:
+async def _relay_worker_event(
+    websocket: WebSocket, msg: dict[str, object], raw: str
+) -> None:
     """Relay a single worker event to WS clients and update aggregator/DB."""
-    thread_id = msg.get("thread_id", "")
-    payload = msg.get("payload", {})
-    if not thread_id or not payload:
+    thread_id_raw: object = msg.get("thread_id", "")
+    payload_raw: object = msg.get("payload", {})
+    if not thread_id_raw or not payload_raw:
         logger.warning(
             "Malformed worker event envelope: %s",
             raw[:200],
             extra={
-                "thread_id": thread_id,
+                "thread_id": thread_id_raw,
                 "event_type": "",
                 "message_type": str(msg.get("type", "")),
                 "transport": "ws",
@@ -240,6 +242,8 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
             },
         )
         return
+    thread_id = cast("str", thread_id_raw)
+    payload = cast("dict[str, Any]", payload_raw)
     session_factory = _app_session_factory(websocket.app)
     agg = getattr(websocket.app.state, "aggregator", None)
     # Read the seated gate rather than get-or-creating it: a gate that has never

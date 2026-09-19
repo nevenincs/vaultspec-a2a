@@ -18,7 +18,7 @@ update is lost when a turn interrupts.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
@@ -81,7 +81,7 @@ def create_mark_task_complete_tool(
     async def mark_task_complete(
         task_id: str,
         tool_call_id: Annotated[str, InjectedToolCallId],
-    ) -> Command:
+    ) -> Command[Any]:
         """Mark a task complete in the thread's database queue.
 
         Args:

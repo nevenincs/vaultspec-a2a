@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...database import (
     ThreadStatusElectionOutcome,
@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 
     from pytest import MonkeyPatch
 
+    from ...database.checkpoints import Checkpointer
+
 
 @pytest.mark.asyncio
 async def test_discovery_discards_projection_captured_before_terminal_winner(
@@ -41,9 +43,7 @@ async def test_discovery_discards_projection_captured_before_terminal_winner(
             await connection.run_sync(Base.metadata.create_all)
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         async with sessions() as db:
-            authority = RunWriteAuthority(
-                0, 1, ControlActionType.INGEST, "accepted"
-            )
+            authority = RunWriteAuthority(0, 1, ControlActionType.INGEST, "accepted")
             await create_thread(
                 db,
                 thread_id="terminal-during-discovery",
@@ -69,7 +69,12 @@ async def test_discovery_discards_projection_captured_before_terminal_winner(
             )
             await db.commit()
 
-        async def elect_terminal_winner(db, _checkpointer, thread_id, **_kwargs):
+        async def elect_terminal_winner(
+            db: AsyncSession,
+            _checkpointer: Checkpointer,
+            thread_id: str,
+            **_kwargs: Any,
+        ) -> None:
             current = await get_thread(db, thread_id)
             assert current is not None
             expectation = thread_write_expectation(current)

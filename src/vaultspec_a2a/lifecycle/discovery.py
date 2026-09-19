@@ -32,6 +32,7 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import cast, override
 
 import httpx
 
@@ -148,6 +149,7 @@ class ServiceInfo:
     service_token: str | None = None
     handoff_reference: str | None = None
 
+    @override
     def __repr__(self) -> str:
         """Redacted representation — never leaks the service token."""
         token = "<set>" if self.service_token else None
@@ -326,7 +328,7 @@ def _replace_private_credential(path: Path, payload: bytes) -> Path:
     return destination
 
 
-def _service_info(info: dict, discovery_path: Path) -> ServiceInfo | None:
+def _service_info(info: dict[str, object], discovery_path: Path) -> ServiceInfo | None:
     """Build a :class:`ServiceInfo` from a parsed record, or ``None`` if invalid."""
     port = coerce_int(info.get("port"))
     if port is None:
@@ -481,7 +483,7 @@ def write_service_json(
     atomic_write_text(path, json.dumps(record))
 
 
-def probe_health(base_url: str, *, timeout: float = 2.0) -> dict | None:
+def probe_health(base_url: str, *, timeout: float = 2.0) -> dict[str, object] | None:
     """Probe ``GET /health`` on a resident gateway (lifecycle-only, R8).
 
     Returns the parsed health body on a real ``200``, else ``None``. Reserved for
@@ -497,7 +499,7 @@ def probe_health(base_url: str, *, timeout: float = 2.0) -> dict | None:
         body = resp.json()
     except ValueError:
         return None
-    return body if isinstance(body, dict) else None
+    return cast("dict[str, object]", body) if isinstance(body, dict) else None
 
 
 def another_resident_is_live(a2a_home: Path, *, health_timeout: float = 2.0) -> bool:
@@ -621,7 +623,7 @@ class DesktopDiscoveryRecord:
         return self.protocol_min <= version <= self.protocol_max
 
 
-def _parse_desktop_record(info: dict) -> DesktopDiscoveryRecord | None:
+def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | None:
     """Map a parsed record dict to a versioned desktop record, or ``None``.
 
     Fail-closed: an absent or unknown ``version``, a non-``desktop`` profile, or
@@ -632,13 +634,16 @@ def _parse_desktop_record(info: dict) -> DesktopDiscoveryRecord | None:
         return None
     if info.get("profile") != _DESKTOP_PROFILE:
         return None
-    protocol = info.get("protocol")
-    process = info.get("process")
-    endpoint = info.get("endpoint")
-    if not isinstance(protocol, dict) or not isinstance(process, dict):
+    protocol_raw = info.get("protocol")
+    process_raw = info.get("process")
+    endpoint_raw = info.get("endpoint")
+    if not isinstance(protocol_raw, dict) or not isinstance(process_raw, dict):
         return None
-    if not isinstance(endpoint, dict):
+    if not isinstance(endpoint_raw, dict):
         return None
+    protocol = cast("dict[str, object]", protocol_raw)
+    process = cast("dict[str, object]", process_raw)
+    endpoint = cast("dict[str, object]", endpoint_raw)
     protocol_min = coerce_int(protocol.get("min"))
     protocol_max = coerce_int(protocol.get("max"))
     pid = coerce_int(process.get("pid"))

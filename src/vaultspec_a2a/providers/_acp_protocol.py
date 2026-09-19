@@ -76,9 +76,7 @@ def _rpc_id(value: JsonValue | None) -> AcpRpcId | None:
     return None
 
 
-def _bounded_command_text(
-    value: JsonValue | None, *, field: str, maximum: int
-) -> str:
+def _bounded_command_text(value: JsonValue | None, *, field: str, maximum: int) -> str:
     """Return one required bounded command field or raise on a bad snapshot."""
     if (
         not isinstance(value, str)

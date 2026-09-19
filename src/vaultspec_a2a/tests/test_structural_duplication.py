@@ -41,7 +41,7 @@ import ast
 import hashlib
 from collections import defaultdict
 from pathlib import Path
-from typing import Final
+from typing import Final, override
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -158,14 +158,17 @@ class _EraseIdentifiers(ast.NodeTransformer):
     things - which is what a copy is.
     """
 
+    @override
     def visit_Name(self, node: ast.Name) -> ast.Name:
         """Collapse a bare name."""
         return ast.copy_location(ast.Name(id="_", ctx=node.ctx), node)
 
+    @override
     def visit_arg(self, node: ast.arg) -> ast.arg:
         """Collapse a parameter, annotation included."""
         return ast.copy_location(ast.arg(arg="_", annotation=None), node)
 
+    @override
     def visit_Attribute(self, node: ast.Attribute) -> ast.Attribute:
         """Collapse an attribute access, keeping the value it reaches through."""
         self.generic_visit(node)

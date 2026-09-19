@@ -11,7 +11,7 @@ import pytest
 
 from ...utils.enums import AcpRequestId
 from .._acp_auth import authenticate_rpc
-from .._acp_types import AcpModelConfig
+from .._acp_types import AcpModelConfig, AcpResponseFutures
 from ..acp_exceptions import (
     AcpAuthError,
     AcpError,
@@ -23,6 +23,9 @@ from ..conditions import ProviderCondition
 
 
 class _AuthWriter:
+    def __init__(self) -> None:
+        self.frame: bytes = b""
+
     def write(self, data: bytes) -> None:
         self.frame = data
 
@@ -50,7 +53,7 @@ async def test_explicit_auth_failure_carries_credential_condition() -> None:
         command_target=None,
         auth_mode=None,
     )
-    futures = {}
+    futures: AcpResponseFutures = {}
     task = asyncio.create_task(
         authenticate_rpc(
             ctx=None,

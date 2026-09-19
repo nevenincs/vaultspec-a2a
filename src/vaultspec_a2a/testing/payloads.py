@@ -54,8 +54,8 @@ __all__ = [
     "required_text",
 ]
 
-_JSON_OBJECT: Final = TypeAdapter(JsonObject)
-_JSON_OBJECT_LIST: Final = TypeAdapter(list[JsonObject])
+_JSON_OBJECT: Final[TypeAdapter[JsonObject]] = TypeAdapter(JsonObject)
+_JSON_OBJECT_LIST: Final[TypeAdapter[list[JsonObject]]] = TypeAdapter(list[JsonObject])
 
 
 def json_object(value: object, *, at: str) -> JsonObject:

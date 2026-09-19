@@ -53,12 +53,13 @@ def _decode_checkpoint(type_name: object, payload: object) -> dict[str, object]:
         raise CheckpointStateMigrationError(
             "checkpoint payload is not a mapping and cannot carry channel_values"
         )
-    channel_values = checkpoint.get("channel_values")
+    checkpoint_obj = cast("dict[str, object]", checkpoint)
+    channel_values = checkpoint_obj.get("channel_values")
     if not isinstance(channel_values, dict):
         raise CheckpointStateMigrationError(
             "checkpoint payload has no mapping-valued channel_values"
         )
-    return cast("dict[str, object]", checkpoint)
+    return checkpoint_obj
 
 
 def _needs_sdd_backfill(checkpoint: dict[str, object]) -> bool:

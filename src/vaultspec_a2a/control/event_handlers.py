@@ -920,6 +920,8 @@ async def _handle_progress_event(
                 },
             )
             return
+        if stored_receipt is None:
+            return
         await db.commit()
         from ..domain_config import domain_config
 

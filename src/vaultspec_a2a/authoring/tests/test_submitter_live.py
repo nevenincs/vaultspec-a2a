@@ -53,8 +53,9 @@ async def _store_with_role_token(
             client, actor_id=f"agent:{role}-{thread_id}", kind="agent"
         )
     assert isinstance(minted, AuthoringResponse)
-    assert isinstance(minted.data, dict)
-    raw = minted.data.get("raw_token")
+    minted_data: object = minted.data
+    assert isinstance(minted_data, dict)
+    raw = cast("dict[str, object]", minted_data).get("raw_token")
     assert isinstance(raw, str) and raw
     store = RunTokenStore()
     store.register(

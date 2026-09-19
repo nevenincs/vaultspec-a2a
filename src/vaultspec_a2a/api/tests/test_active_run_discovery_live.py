@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
+from sqlalchemy import String
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from vaultspec_a2a.tests._write_authority import (
@@ -26,7 +27,7 @@ from ...testing.ports import free_port
 from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
 _SERVICE_TOKEN = "active-discovery-service-token"
@@ -45,7 +46,7 @@ _READY_INTERVAL_SECONDS = 0.02
 @asynccontextmanager
 async def _production_gateway(
     tmp_path: Path,
-) -> AsyncIterator[tuple[str, async_sessionmaker[AsyncSession]]]:
+) -> AsyncGenerator[tuple[str, async_sessionmaker[AsyncSession]]]:
     """Boot the installed gateway with its production lifespan and real storage."""
     port = free_port()
     database_path = tmp_path / "gateway.db"
@@ -131,7 +132,7 @@ async def _production_gateway(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_active_run_discovery_rebinds_to_authoritative_status(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """A reload discovers the scoped live run, then reads its recovery snapshot."""
     workspace = (tmp_path / "workspace").resolve()
@@ -416,7 +417,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_active_run_discovery_rejects_unbounded_selectors(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """Only the active state, absolute workspaces, and bounded limits are valid."""
     async with (
@@ -445,7 +446,9 @@ async def test_active_run_discovery_rejects_unbounded_selectors(
         # column can hold is answered, and the same root one character wider is
         # refused HERE rather than at the write, where the caller could only be
         # told about it as a failed transaction.
-        column_width = ThreadModel.__table__.c.workspace_root.type.length  # ty: ignore
+        workspace_root_type = ThreadModel.__table__.c.workspace_root.type
+        assert isinstance(workspace_root_type, String)
+        column_width = workspace_root_type.length
         assert isinstance(column_width, int)
         prefix = f"C:{os.sep}"
         widest = prefix + "w" * (column_width - len(prefix))
@@ -460,7 +463,7 @@ async def test_active_run_discovery_rejects_unbounded_selectors(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_the_two_readings_answer_with_different_records(tmp_path) -> None:
+async def test_the_two_readings_answer_with_different_records(tmp_path: Path) -> None:
     """Discovery stays narrow while history carries the projection.
 
     The two readings of one verb are asked different questions, so they answer

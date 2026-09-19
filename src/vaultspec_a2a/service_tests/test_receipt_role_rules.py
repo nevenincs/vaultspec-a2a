@@ -179,9 +179,12 @@ async def test_compiled_document_graph_receives_conventions_via_runtime_config(
     agent_configs = {
         worker.agent_id: load_agent_config(worker.agent_id) for worker in team.workers
     }
+    step_timeout_seconds = team.graph.step_timeout_seconds
+    assert step_timeout_seconds is not None
     graph = compile_team_graph(
         team_config=team,
         agent_configs=agent_configs,
+        step_timeout=float(step_timeout_seconds),
         provider_factory=ProviderFactory(),
         checkpointer=InMemorySaver(),
         workspace_root=workspace,

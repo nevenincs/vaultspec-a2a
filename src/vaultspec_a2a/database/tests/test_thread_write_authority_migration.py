@@ -159,25 +159,28 @@ async def test_runtime_runner_refuses_older_populated_store_before_any_revision(
     assert after_rows == before_rows
 
 
+_FORGED_SCHEMA_CASES: list[tuple[str, Callable[[Path], None]]] = [
+    ("permissive-checks", replace_authority_checks_with_true),
+    ("wrong-index-column", point_receipt_index_at_thread_id),
+    (
+        "checks-hidden-in-block-comments",
+        lambda path: hide_authority_checks_in_non_code(path, "block-comment"),
+    ),
+    (
+        "checks-hidden-in-line-comments",
+        lambda path: hide_authority_checks_in_non_code(path, "line-comment"),
+    ),
+    (
+        "checks-hidden-in-string-literals",
+        lambda path: hide_authority_checks_in_non_code(path, "string-literal"),
+    ),
+]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("case_name", "forge_schema"),
-    [
-        ("permissive-checks", replace_authority_checks_with_true),
-        ("wrong-index-column", point_receipt_index_at_thread_id),
-        (
-            "checks-hidden-in-block-comments",
-            lambda path: hide_authority_checks_in_non_code(path, "block-comment"),
-        ),
-        (
-            "checks-hidden-in-line-comments",
-            lambda path: hide_authority_checks_in_non_code(path, "line-comment"),
-        ),
-        (
-            "checks-hidden-in-string-literals",
-            lambda path: hide_authority_checks_in_non_code(path, "string-literal"),
-        ),
-    ],
+    _FORGED_SCHEMA_CASES,
 )
 async def test_runtime_runner_refuses_forged_empty_current_schema(
     runtime_dir: Path,

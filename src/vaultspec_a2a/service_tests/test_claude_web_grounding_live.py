@@ -153,7 +153,7 @@ _POLL_SECONDS = 15.0
 #: asserting the one it would prefer to report.
 _RATE_REFUSAL_CONDITION = ProviderCondition.THROTTLED
 
-_JSON_OBJECT = TypeAdapter(JsonObject)
+_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 _OBJECT_LIST = TypeAdapter(list[object])
 
 

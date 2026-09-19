@@ -16,13 +16,12 @@ node will read.
 from __future__ import annotations
 
 import itertools
-from typing import Any, cast
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 from httpx import ASGITransport
 from langchain_core.messages import HumanMessage
-from langgraph.graph import END, START, StateGraph
 
 from ...graph.nodes.clarification import (
     create_clarification_gate_node,
@@ -34,8 +33,13 @@ from ...thread.clarification import (
     ClarificationQuestion,
     ClarificationRequest,
 )
-from ...thread.state import TeamState
-from .conftest import async_catalog_run_fields, make_app
+from .clarification_harness import new_state_graph
+from .conftest import SessionFactory, async_catalog_run_fields, make_app
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from ...thread.state import TeamState
 
 _PRESET = "mock-success-single"
 
@@ -61,7 +65,7 @@ def _question_set(request_id: str) -> ClarificationRequest:
 
 
 async def _park_on_clarification(
-    checkpointer: Any, *, thread_id: str, request_id: str
+    checkpointer: AsyncSqliteSaver, *, thread_id: str, request_id: str
 ) -> None:
     """Park a real graph on a real clarification interrupt in the real store.
 
@@ -72,12 +76,14 @@ async def _park_on_clarification(
     request = _question_set(request_id)
 
     async def _producer(state: TeamState) -> ClarificationRequest | None:
+        del state
         return request
 
-    async def proceed(state: TeamState) -> dict[str, Any]:
+    def _proceed(state: TeamState) -> dict[str, object]:
+        del state
         return {}
 
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     builder.add_node(
         "clarification_request",
         create_clarification_request_node(
@@ -87,9 +93,9 @@ async def _park_on_clarification(
     builder.add_node(
         "clarification_gate", create_clarification_gate_node(proceed_target="proceed")
     )
-    builder.add_node("proceed", proceed)
-    builder.add_edge(START, "clarification_request")
-    builder.add_edge("proceed", END)
+    builder.add_node("proceed", _proceed)
+    builder.add_edge("__start__", "clarification_request")
+    builder.add_edge("proceed", "__end__")
     graph = builder.compile(checkpointer=checkpointer)
 
     await graph.ainvoke(
@@ -133,7 +139,7 @@ async def _start_run(client: httpx.AsyncClient) -> str:
 
 @pytest.mark.asyncio
 async def test_run_status_discloses_the_parked_questionnaire(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Recovery re-renders the questionnaire from authoritative state.
 
@@ -180,7 +186,7 @@ async def test_run_status_discloses_the_parked_questionnaire(
 
 @pytest.mark.asyncio
 async def test_run_status_discloses_nothing_when_no_question_is_pending(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A run with no parked question must not fabricate one."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -196,7 +202,7 @@ async def test_run_status_discloses_nothing_when_no_question_is_pending(
 
 @pytest.mark.asyncio
 async def test_answers_reach_the_worker_as_the_typed_resume_value(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The verb maps the answer sheet onto ``Command(resume=...)``, not a turn.
 
@@ -243,7 +249,7 @@ async def test_answers_reach_the_worker_as_the_typed_resume_value(
 
 @pytest.mark.asyncio
 async def test_answering_a_question_no_run_is_parked_on_is_refused(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A run that is not waiting has nothing to answer, and nothing is dispatched."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -264,7 +270,7 @@ async def test_answering_a_question_no_run_is_parked_on_is_refused(
 
 @pytest.mark.asyncio
 async def test_a_guessed_request_id_cannot_answer_a_parked_question(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Scoping precedes acting, so a mismatched id has no effect at all."""
     app, _agg, worker, cp = make_app(session_factory, checkpointer)
@@ -291,7 +297,7 @@ async def test_a_guessed_request_id_cannot_answer_a_parked_question(
 
 @pytest.mark.asyncio
 async def test_a_choice_outside_its_declared_options_is_refused(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The declared options bound the answer; an invented one never dispatches."""
     app, _agg, worker, cp = make_app(session_factory, checkpointer)
@@ -314,7 +320,7 @@ async def test_a_choice_outside_its_declared_options_is_refused(
 
 @pytest.mark.asyncio
 async def test_a_required_question_left_blank_is_refused(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A questionnaire that skips a required question is not an answer."""
     app, _agg, worker, cp = make_app(session_factory, checkpointer)
@@ -339,7 +345,7 @@ async def test_a_required_question_left_blank_is_refused(
 
 @pytest.mark.asyncio
 async def test_an_over_long_answer_is_refused_at_the_wire(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The cap is enforced by the type, before any run state is touched.
 
@@ -394,7 +400,7 @@ async def test_an_over_long_answer_is_refused_at_the_wire(
 
 @pytest.mark.asyncio
 async def test_the_answered_questionnaire_stops_being_disclosed(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Once answered and resumed, the question is no longer pending.
 
@@ -419,12 +425,14 @@ async def test_the_answered_questionnaire_stops_being_disclosed(
         request = _question_set("clarify-settle")
 
         async def _producer(state: TeamState) -> ClarificationRequest | None:
+            del state
             return request
 
-        async def proceed(state: TeamState) -> dict[str, Any]:
+        def _proceed(state: TeamState) -> dict[str, object]:
+            del state
             return {}
 
-        builder: StateGraph = StateGraph(cast("Any", TeamState))
+        builder = new_state_graph()
         builder.add_node(
             "clarification_request",
             create_clarification_request_node(
@@ -435,9 +443,9 @@ async def test_the_answered_questionnaire_stops_being_disclosed(
             "clarification_gate",
             create_clarification_gate_node(proceed_target="proceed"),
         )
-        builder.add_node("proceed", proceed)
-        builder.add_edge(START, "clarification_request")
-        builder.add_edge("proceed", END)
+        builder.add_node("proceed", _proceed)
+        builder.add_edge("__start__", "clarification_request")
+        builder.add_edge("proceed", "__end__")
         graph = builder.compile(checkpointer=cp)
 
         await graph.ainvoke(

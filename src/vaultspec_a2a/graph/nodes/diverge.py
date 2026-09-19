@@ -213,10 +213,9 @@ def _validate_web_locator(locator: dict[str, Any], where: str) -> None:
             f"web locator {where} carries unknown key(s) {unknown}; the contract is "
             f"closed at {_WEB_LOCATOR_REQUIRED_KEYS + _WEB_LOCATOR_OPTIONAL_KEYS}"
         )
-    _validate_locator_text(
-        locator["url"], MAX_WEB_LOCATOR_URL_CHARS, field="url", where=where
-    )
-    scheme = urlsplit(locator["url"]).scheme.lower()
+    url = locator["url"]
+    _validate_locator_text(url, MAX_WEB_LOCATOR_URL_CHARS, field="url", where=where)
+    scheme = urlsplit(cast("str", url)).scheme.lower()
     if scheme not in _WEB_LOCATOR_SCHEMES:
         raise ValueError(
             f"web locator {where} has url scheme {scheme!r}; the citation channel "
@@ -290,7 +289,8 @@ def _validate_finding(finding: object, spec: dict[str, Any]) -> dict[str, Any]:
         )
     if not isinstance(typed["claim"], str):
         raise TypeError(f"research finding 'claim' for thread {thread!r} must be a str")
-    if not isinstance(typed["locators"], list):
+    locators = typed["locators"]
+    if not isinstance(locators, list):
         raise TypeError(
             f"research finding 'locators' for thread {thread!r} must be a list"
         )
@@ -298,7 +298,7 @@ def _validate_finding(finding: object, spec: dict[str, Any]) -> dict[str, Any]:
         raise TypeError(
             f"research finding 'source_thread' for thread {thread!r} must be a str"
         )
-    _validate_locators(typed["locators"], thread)
+    _validate_locators(cast("list[object]", locators), thread)
     return typed
 
 

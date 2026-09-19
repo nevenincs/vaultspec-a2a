@@ -8,6 +8,7 @@ values come only from served provider catalogs.
 """
 
 from enum import StrEnum
+from typing import cast
 
 from .acp_options import option_id_of
 
@@ -194,10 +195,14 @@ def is_rejection_response(options: object, option_id: str | None) -> bool:
     if not option_id:
         return False
     if isinstance(options, list):
-        for option in options:
+        for option in cast("list[object]", options):
             if option_id_of(option) != option_id:
                 continue
-            kind = option.get("kind") if isinstance(option, dict) else None
+            kind = (
+                cast("dict[str, object]", option).get("kind")
+                if isinstance(option, dict)
+                else None
+            )
             # ``kind`` may arrive as a PermissionOptionKind or its bare value; a
             # StrEnum compares equal to its value, so normalising to str covers
             # both without narrowing to one transport's spelling.

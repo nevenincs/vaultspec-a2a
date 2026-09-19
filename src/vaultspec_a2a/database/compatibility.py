@@ -148,7 +148,7 @@ def _validate_write_authority(db_path: Path) -> None:
                     f"write-authority column {name!r}; expected required "
                     f"{expected_type} with no default. {_REMEDY}"
                 )
-        indexes = []
+        indexes: list[dict[str, object]] = []
         for row in conn.execute("PRAGMA index_list(threads)"):
             name = str(row[1])
             indexes.append(

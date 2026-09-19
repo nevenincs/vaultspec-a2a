@@ -25,6 +25,7 @@ a member may be added, but no member's spelling or meaning may change.
 
 from collections.abc import Mapping
 from enum import StrEnum
+from typing import cast
 
 __all__ = [
     "ProviderCondition",
@@ -290,16 +291,18 @@ def condition_from_acp_error(error: object) -> ProviderCondition:
     """
     if not isinstance(error, dict):
         return ProviderCondition.UNKNOWN
+    error_obj = cast("dict[str, object]", error)
 
-    data = error.get("data")
+    data = error_obj.get("data")
     if isinstance(data, dict):
-        kind = data.get("errorKind")
+        data_obj = cast("dict[str, object]", data)
+        kind = data_obj.get("errorKind")
         if isinstance(kind, str):
             mapped = _ACP_KIND_CONDITIONS.get(kind)
             if mapped is not None:
                 return mapped
 
-    code = error.get("code")
+    code = error_obj.get("code")
     if isinstance(code, int) and not isinstance(code, bool):
         return _ACP_CODE_CONDITIONS.get(code, ProviderCondition.UNKNOWN)
     return ProviderCondition.UNKNOWN
@@ -408,7 +411,8 @@ def _codex_http_status_condition(payload: object) -> ProviderCondition | None:
     """Resolve an object variant's forwarded HTTP status, when it carries one."""
     if not isinstance(payload, dict):
         return None
-    status = payload.get("httpStatusCode")
+    payload_obj = cast("dict[str, object]", payload)
+    status = payload_obj.get("httpStatusCode")
     if not isinstance(status, int) or isinstance(status, bool):
         return None
     return _CODEX_HTTP_STATUS_CONDITIONS.get(status)
@@ -425,13 +429,12 @@ def condition_from_codex_error_info(info: object) -> ProviderCondition:
         return _CODEX_ERROR_INFO_CONDITIONS.get(info, ProviderCondition.UNKNOWN)
     if not isinstance(info, dict):
         return ProviderCondition.UNKNOWN
+    info_obj = cast("dict[str, object]", info)
 
     # The variant is a single-key object, but the declared table is iterated
     # rather than the payload so a malformed frame carrying several keys still
     # resolves the same way every time.
-    named: dict[str, object] = {
-        key: value for key, value in info.items() if isinstance(key, str)
-    }
+    named: dict[str, object] = dict(info_obj)
     for variant, condition in _CODEX_OBJECT_INFO_CONDITIONS.items():
         if variant not in named:
             continue
@@ -450,4 +453,5 @@ def condition_from_codex_turn_error(error: object) -> ProviderCondition:
     """
     if not isinstance(error, dict):
         return ProviderCondition.UNKNOWN
-    return condition_from_codex_error_info(error.get("codexErrorInfo"))
+    error_obj = cast("dict[str, object]", error)
+    return condition_from_codex_error_info(error_obj.get("codexErrorInfo"))

@@ -8,7 +8,7 @@ for full type-safety.
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
-from typing import Any, override
+from typing import Any, cast, override
 
 from sqlalchemy import (
     BigInteger,
@@ -269,21 +269,25 @@ class RunWriteAuthority:
 
     def __post_init__(self) -> None:
         """Reject incomplete or structurally invalid current authority."""
+        # These fields carry static types, but the checks defend against callers
+        # that construct this value from untrusted/deserialized data and bypass
+        # the type checker entirely; `cast(object, ...)` only changes what the
+        # checker infers, not what runs.
         if (
             isinstance(self.run_revision, bool)
-            or not isinstance(self.run_revision, int)
+            or not isinstance(cast("object", self.run_revision), int)
             or self.run_revision < 0
         ):
             raise ValueError("run_revision must be a non-negative integer")
         if (
             isinstance(self.writer_generation, bool)
-            or not isinstance(self.writer_generation, int)
+            or not isinstance(cast("object", self.writer_generation), int)
             or self.writer_generation < 1
         ):
             raise ValueError("writer_generation must be a positive integer")
-        if not isinstance(self.action_type, ControlActionType):
+        if not isinstance(cast("object", self.action_type), ControlActionType):
             raise TypeError("action_type must be a ControlActionType")
-        if not isinstance(self.action_receipt_id, str):
+        if not isinstance(cast("object", self.action_receipt_id), str):
             raise TypeError("action_receipt_id must be a string")
         if (
             not self.action_receipt_id.strip()
@@ -481,6 +485,7 @@ class ThreadModel(Base):
         back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
 
+    @override
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
         return (
@@ -508,6 +513,7 @@ class ArtifactModel(Base):
 
     __table_args__ = (Index("ix_artifacts_thread_id", "thread_id"),)
 
+    @override
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
         return (
@@ -636,6 +642,8 @@ class ControlActionModel(Base):
 _RECOVERY_CONDITION_SQL_VALUES = ", ".join(
     f"'{condition.value}'" for condition in RecoveryCondition
 )
+
+
 class RecoveryAttemptModel(Base):
     """Durable retry schedule for one exact accepted run writer."""
 
@@ -780,6 +788,7 @@ class ThreadDeletionSagaModel(Base):
     manifest_json: Mapped[str] = mapped_column(Text)
     result_json: Mapped[str] = mapped_column(Text, default="{}")
 
+    @override
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
         return (
@@ -807,6 +816,7 @@ class AuthoringEventCursorModel(Base):
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
 
+    @override
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
         return (
@@ -891,6 +901,7 @@ class TaskQueueEntryModel(Base):
         back_populates="task_queue_entries", lazy="raise"
     )
 
+    @override
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
         return (

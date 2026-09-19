@@ -24,14 +24,14 @@ from ..thread.errors import describe_exception_chain
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .transformer import (
-    _GraphInterrupt,
-    _GraphRecursionError,
+    GraphInterrupt,
+    GraphRecursionError,
     emit_interrupt_events,
     process_langgraph_event,
 )
 from .types import StreamableGraph
 
-__all__ = ["IngestManager", "IngestStallTimeoutError"]
+__all__ = ["IngestManager", "IngestStallTimeoutError", "summarize_ingest_exception"]
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ def _effective_stall_timeout(graph: StreamableGraph) -> float:
     return global_default
 
 
-def _summarize_ingest_exception(exc: BaseException) -> str:
+def summarize_ingest_exception(exc: BaseException) -> str:
     """A client-visible, single-line summary of an uncaught ingest exception.
 
     Ingest previously discarded the real exception here and always reported
@@ -263,7 +263,7 @@ class IngestManager:
         thread_id: str,
         agent_id: str,
         graph: StreamableGraph,
-        graph_input: dict[str, Any] | Command | None,
+        graph_input: dict[str, Any] | Command[Any] | None,
         config: dict[str, Any],
         *,
         on_graph_started: Callable[[], Awaitable[None]] | None = None,
@@ -343,11 +343,11 @@ class IngestManager:
                     )
             except BaseException as exc:
                 _is_interrupt = (
-                    _GraphInterrupt is not None and isinstance(exc, _GraphInterrupt)
+                    GraphInterrupt is not None and isinstance(exc, GraphInterrupt)
                 ) or exc.__class__.__name__ == "GraphInterrupt"
                 _is_recursion_limit = (
-                    _GraphRecursionError is not None
-                    and isinstance(exc, _GraphRecursionError)
+                    GraphRecursionError is not None
+                    and isinstance(exc, GraphRecursionError)
                 ) or exc.__class__.__name__ == "GraphRecursionError"
                 _is_ingest_stall = isinstance(exc, IngestStallTimeoutError)
                 _is_provider_cancelled = isinstance(exc, AcpPromptCancelledError)
@@ -431,7 +431,7 @@ class IngestManager:
                     )
                 else:
                     _outcome = ThreadStatus.FAILED
-                    _reason = _summarize_ingest_exception(exc)
+                    _reason = summarize_ingest_exception(exc)
                     # Every provider fault reaches this branch, and the three
                     # branches above never do: a recursion limit, a stalled
                     # stream and a step timeout are facts about the graph

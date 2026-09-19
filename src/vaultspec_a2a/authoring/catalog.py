@@ -16,7 +16,7 @@ execute``. Turning a snapshot into MCP tool registrations lives in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from ._envelope import AuthoringResponse
@@ -103,17 +103,19 @@ def parse_catalog(data: dict[str, Any]) -> CatalogSnapshot:
     raw_tools = data.get("tools")
     if not isinstance(raw_tools, list):
         raise ValueError("catalog payload missing a 'tools' list")
+    raw_tools = cast("list[object]", raw_tools)
     tools: list[AgentTool] = []
     for entry in raw_tools:
         if not isinstance(entry, dict):
             raise ValueError("catalog tool entry is not an object")
+        entry = cast("dict[str, Any]", entry)
         name = entry.get("name")
         if not isinstance(name, str) or not name:
             raise ValueError("catalog tool entry missing a name")
         input_schema = entry.get("input_schema")
         raw_commands = entry.get("commands")
         commands = (
-            tuple(str(c) for c in raw_commands)
+            tuple(str(c) for c in cast("list[object]", raw_commands))
             if isinstance(raw_commands, list)
             else ()
         )
@@ -121,7 +123,11 @@ def parse_catalog(data: dict[str, Any]) -> CatalogSnapshot:
             AgentTool(
                 name=name,
                 description=str(entry.get("description", "")),
-                input_schema=input_schema if isinstance(input_schema, dict) else {},
+                input_schema=(
+                    cast("dict[str, Any]", input_schema)
+                    if isinstance(input_schema, dict)
+                    else {}
+                ),
                 risk_tier=str(entry.get("risk_tier", "")),
                 permission_requirement=str(entry.get("permission_requirement", "")),
                 idempotency_required=bool(entry.get("idempotency_required", False)),
@@ -136,7 +142,7 @@ async def fetch_catalog(client: AuthoringClient) -> CatalogSnapshot:
     response = await client.get(_CATALOG_PATH)
     if not isinstance(response.data, dict):
         raise ValueError("catalog response data is not an object")
-    return parse_catalog(response.data)
+    return parse_catalog(cast("dict[str, Any]", response.data))
 
 
 def snapshot_to_catalog_payload(snapshot: CatalogSnapshot) -> dict[str, Any]:
@@ -326,6 +332,7 @@ def make_tool_dispatch(
         data = result.data
         if not isinstance(data, dict):
             return
+        data = cast("dict[str, Any]", data)
         revision = data.get("changeset_revision")
         if isinstance(revision, str) and revision:
             lifecycle["revision"] = revision
@@ -354,7 +361,11 @@ def make_tool_dispatch(
         if isinstance(result, AuthoringResponse):
             _track(result)
             data = result.data
-            return data if isinstance(data, dict) else {"result": data}
+            return (
+                cast("dict[str, Any]", data)
+                if isinstance(data, dict)
+                else {"result": data}
+            )
         return {
             "status": "denied",
             "denial_kind": result.denial_kind,

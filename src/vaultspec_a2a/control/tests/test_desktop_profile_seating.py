@@ -19,14 +19,14 @@ from ...desktop.profile import derive_state_paths
 from ...testing import armed_environment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
 _APP_HOME_ENV = "VAULTSPEC_DESKTOP_APP_HOME"
 
 
 @contextmanager
-def _armed_env(app_home: str) -> Iterator[None]:
+def _armed_env(app_home: str) -> Generator[None]:
     """Set the desktop application-home environment variable, then restore it."""
     with armed_environment(**{_APP_HOME_ENV: app_home}):
         yield

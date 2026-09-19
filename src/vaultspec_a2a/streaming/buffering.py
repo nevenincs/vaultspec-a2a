@@ -246,4 +246,3 @@ class BufferingManager:
         self._chunk_buffer_meta.clear()
         self._tool_update_last_emit.clear()
         self._plan_update_last_emit.clear()
-        self._tool_call_states_ref = None

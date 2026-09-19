@@ -13,7 +13,7 @@ Token hygiene: tokens are never logged and never rendered in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast, override
 from urllib.parse import quote
 
 import httpx
@@ -150,6 +150,7 @@ class AuthoringClient:
     ) -> None:
         await self.aclose()
 
+    @override
     def __repr__(self) -> str:
         """Redacted representation — never leaks tokens."""
         actor = "set" if self._actor_token else "none"
@@ -338,7 +339,7 @@ class AuthoringClient:
             headers=self._headers(actor_token=None, with_actor=False),
             timeout=httpx.Timeout(None, connect=5.0),
         ) as response:
-            if response.status_code != httpx.codes.OK:
+            if response.status_code != int(httpx.codes.OK):
                 await response.aread()
                 raise AuthoringError(
                     "engine refused the lifecycle stream "
@@ -390,6 +391,7 @@ class AuthoringClient:
             ) from exc
         if not isinstance(body, dict):
             raise AuthoringError("engine returned a non-object JSON body")
+        body = cast("dict[str, Any]", body)
         raise_for_typed_error(response.status_code, body)
         denial = extract_denial(body)
         if denial is not None:

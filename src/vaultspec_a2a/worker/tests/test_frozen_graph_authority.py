@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -17,8 +17,11 @@ from ..executor import Executor
 from ..graph_lifecycle import GraphCompilationError
 from .test_executor import _make_bridge
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _definition(tmp_path):
+
+def _definition(tmp_path: Path) -> FrozenGraphDefinition:
     return freeze_graph_definition(
         load_team_config("mock-success-single", workspace_root=tmp_path),
         workspace_root=tmp_path,
@@ -26,7 +29,7 @@ def _definition(tmp_path):
 
 
 @pytest.mark.parametrize("damage", ["missing_field", "no_timeout", "missing_agent"])
-def test_partial_executable_authority_is_refused(tmp_path, damage):
+def test_partial_executable_authority_is_refused(tmp_path: Path, damage: str) -> None:
     raw = _definition(tmp_path).model_dump(mode="json")
     if damage == "missing_field":
         del raw["team"]["graph"]["recursion_limit"]
@@ -39,7 +42,9 @@ def test_partial_executable_authority_is_refused(tmp_path, damage):
 
 
 @pytest.mark.asyncio
-async def test_worker_compiles_accepted_program_after_files_change(tmp_path):
+async def test_worker_compiles_accepted_program_after_files_change(
+    tmp_path: Path,
+) -> None:
     definition = _definition(tmp_path)
     request = DispatchRequest(
         action="ingest",

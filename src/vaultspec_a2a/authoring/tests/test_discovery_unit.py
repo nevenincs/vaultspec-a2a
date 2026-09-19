@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 
@@ -128,6 +128,7 @@ def test_retry_resolves_after_a_transient_stall_window(
             self.send_response(503 if hits["count"] <= 2 else 200)
             self.end_headers()
 
+        @override
         def log_message(self, format: str, *args: object) -> None:
             pass
 

@@ -15,7 +15,7 @@ unknown id degrades to no grounding block rather than failing the worker turn
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ._errors import AuthoringError, AuthoringTransportError
 from .client import AuthoringClient
@@ -40,6 +40,7 @@ def render_feedback_batch(data: Any) -> str | None:
     """
     if not isinstance(data, dict):
         return None
+    data = cast("dict[str, Any]", data)
     # The engine read route serves the batch RECORD nested under "batch" (the
     # canonical receipt-vs-record split: create returns a flat batch_id receipt,
     # read returns data.batch.{feedback_batch_id, items, ...}). Target that shape
@@ -48,9 +49,11 @@ def render_feedback_batch(data: Any) -> str | None:
     batch = data.get("batch")
     if not isinstance(batch, dict):
         return None
+    batch = cast("dict[str, Any]", batch)
     items = batch.get("items")
     if not isinstance(items, list):
         return None
+    items = cast("list[object]", items)
 
     lines: list[str] = []
     instruction = batch.get("instruction")
@@ -60,12 +63,18 @@ def render_feedback_batch(data: Any) -> str | None:
     for item in items:
         if not isinstance(item, dict):
             continue
+        item = cast("dict[str, Any]", item)
         body = item.get("body")
         if not isinstance(body, str) or not body.strip():
             continue
         anchor = item.get("anchor")
-        heading_path = anchor.get("heading_path") if isinstance(anchor, dict) else None
+        heading_path = (
+            cast("dict[str, Any]", anchor).get("heading_path")
+            if isinstance(anchor, dict)
+            else None
+        )
         if isinstance(heading_path, list) and heading_path:
+            heading_path = cast("list[object]", heading_path)
             location = " > ".join(str(seg) for seg in heading_path)
             lines.append(f"- {location}: {body.strip()}")
         else:

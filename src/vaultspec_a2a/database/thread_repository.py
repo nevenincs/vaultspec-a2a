@@ -48,7 +48,9 @@ from .models import (
     RunWriteAuthority,
     ThreadExecutionStateModel,
     ThreadModel,
-    _utcnow,
+)
+from .models import (
+    utcnow as _utcnow,
 )
 
 __all__ = [
@@ -95,10 +97,16 @@ class ThreadWriteExpectation:
     authority: RunWriteAuthority
 
     def __post_init__(self) -> None:
-        """Refuse a partially typed election witness."""
-        if not isinstance(self.status, ThreadStatus):
+        """Refuse a partially typed election witness.
+
+        These fields carry static types, but the checks defend against callers
+        that construct this value from untrusted data and bypass the type
+        checker entirely; `cast(object, ...)` only changes what the checker
+        infers, not what runs.
+        """
+        if not isinstance(cast("object", self.status), ThreadStatus):
             raise TypeError("status must be a ThreadStatus")
-        if not isinstance(self.authority, RunWriteAuthority):
+        if not isinstance(cast("object", self.authority), RunWriteAuthority):
             raise TypeError("authority must be a RunWriteAuthority")
 
 
@@ -138,9 +146,9 @@ def successor_thread_write_authority(
     action_receipt_id: str,
 ) -> RunWriteAuthority:
     """Build the exact next authority from an observed durable receipt."""
-    if not isinstance(expectation, ThreadWriteExpectation):
+    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
         raise TypeError("expectation must be a ThreadWriteExpectation")
-    if not isinstance(action_type, ControlActionType):
+    if not isinstance(cast("object", action_type), ControlActionType):
         raise TypeError("action_type must be a ControlActionType")
     current = expectation.authority
     same_action = (
@@ -193,8 +201,9 @@ def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
         return None, None
     if not isinstance(value, dict):
         return None, None
-    workspace = value.get("workspace_root")
-    feature = value.get("feature_tag")
+    value_obj = cast("dict[str, object]", value)
+    workspace = value_obj.get("workspace_root")
+    feature = value_obj.get("feature_tag")
     if (
         not isinstance(workspace, str)
         or not os.path.isabs(workspace)
@@ -514,9 +523,7 @@ def _validate_successor_authority(
         and successor.action_receipt_id == current.action_receipt_id
     )
     expected_generation = (
-        current.writer_generation
-        if same_action
-        else current.writer_generation + 1
+        current.writer_generation if same_action else current.writer_generation + 1
     )
     if successor.writer_generation != expected_generation:
         relation = "remain unchanged" if same_action else "advance by exactly one"
@@ -541,11 +548,11 @@ async def elect_thread_status(
     a same-thread, same-action journal row; absence is a typed refusal and never
     causes authority to be invented.
     """
-    if not isinstance(expectation, ThreadWriteExpectation):
+    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
         raise TypeError("expectation must be a ThreadWriteExpectation")
-    if not isinstance(status, ThreadStatus):
+    if not isinstance(cast("object", status), ThreadStatus):
         raise TypeError("status must be a ThreadStatus")
-    if not isinstance(successor, RunWriteAuthority):
+    if not isinstance(cast("object", successor), RunWriteAuthority):
         raise TypeError("successor must be a RunWriteAuthority")
 
     validate_transition(expectation.status, status, thread_id=thread_id)
@@ -616,9 +623,7 @@ async def elect_thread_status(
 
     matching_receipt = await session.scalar(select(receipt_exists))
     if not matching_receipt:
-        return ThreadStatusElectionResult(
-            ThreadStatusElectionOutcome.RECEIPT_MISMATCH
-        )
+        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.RECEIPT_MISMATCH)
     return ThreadStatusElectionResult(ThreadStatusElectionOutcome.LOST)
 
 
@@ -634,7 +639,7 @@ async def elect_thread_deleting(
     receipt of its own.  This narrow operation cannot target any other state and
     ordinary lifecycle elections still cannot enter or leave ``DELETING``.
     """
-    if not isinstance(expectation, ThreadWriteExpectation):
+    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
         raise TypeError("expectation must be a ThreadWriteExpectation")
     eligibility = can_delete(expectation.status.value)
     if not eligibility.allowed:
@@ -695,9 +700,7 @@ async def elect_thread_deleting(
         )
     )
     if not matching_receipt:
-        return ThreadStatusElectionResult(
-            ThreadStatusElectionOutcome.RECEIPT_MISMATCH
-        )
+        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.RECEIPT_MISMATCH)
     return ThreadStatusElectionResult(ThreadStatusElectionOutcome.LOST)
 
 

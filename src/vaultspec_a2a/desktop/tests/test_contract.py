@@ -8,7 +8,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -23,6 +23,11 @@ from ..contract import (
     component_manifest_schema,
     export_component_manifest_schema,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from jsonschema.protocols import Validator
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _SCHEMA_SNAPSHOT = _PROJECT_ROOT / "schemas" / "desktop-capsule-manifest.json"
@@ -120,10 +125,20 @@ def test_manifest_rejects_non_gateway_entrypoint_kinds(wrong_kind: str) -> None:
         ComponentManifest.model_validate(payload)
 
 
+def _validator(schema: Mapping[str, object]) -> Validator:
+    """Bind the concrete validator to jsonschema's published ``Validator`` protocol.
+
+    The concrete class is stubbed ``validate(*args, **kwargs)``, so calling it
+    directly loses the argument type; the protocol declares the real signature.
+    Returning through it keeps every call site checked.
+    """
+    return Draft202012Validator(schema)
+
+
 def test_draft202012_schema_accepts_the_production_manifest() -> None:
     schema = component_manifest_schema()
     Draft202012Validator.check_schema(schema)
-    Draft202012Validator(schema).validate(_manifest_payload())
+    _validator(schema).validate(_manifest_payload())
 
 
 @pytest.mark.parametrize("wrong_kind", ["standalone-mcp", "worker", ""])
@@ -133,7 +148,7 @@ def test_draft202012_schema_rejects_non_gateway_entrypoint_kinds(
     payload = _manifest_payload()
     payload["entrypoints"]["gateway"]["kind"] = wrong_kind
     with pytest.raises(JsonSchemaValidationError):
-        Draft202012Validator(component_manifest_schema()).validate(payload)
+        _validator(component_manifest_schema()).validate(payload)
 
 
 @pytest.mark.parametrize("command", _INVALID_RELATIVE_COMMANDS)
@@ -143,7 +158,7 @@ def test_draft202012_schema_rejects_nonportable_relative_commands(
     payload = _manifest_payload()
     payload["entrypoints"]["gateway"]["relative_command"] = command
     with pytest.raises(JsonSchemaValidationError):
-        Draft202012Validator(component_manifest_schema()).validate(payload)
+        _validator(component_manifest_schema()).validate(payload)
 
 
 def test_committed_schema_snapshot_exactly_matches_production_exporter() -> None:

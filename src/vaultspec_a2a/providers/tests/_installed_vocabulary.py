@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import cast
 
 __all__ = [
     "MissingInstalledVocabularyError",
@@ -156,15 +157,22 @@ def codex_error_info_variants(destination: Path) -> frozenset[str]:
 
     schema_path = destination / "codex_app_server_protocol.v2.schemas.json"
     try:
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        raw_schema: object = json.loads(schema_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise MissingInstalledVocabularyError(
             f"the generated codex protocol schema is unreadable at {schema_path}"
         ) from exc
+    assert isinstance(raw_schema, dict)
+    schema = cast("dict[str, object]", raw_schema)
 
-    definitions = schema.get("definitions")
-    error_info = definitions.get("CodexErrorInfo") if definitions else None
-    branches = error_info.get("oneOf") if isinstance(error_info, dict) else None
+    raw_definitions = schema.get("definitions")
+    error_info: object = None
+    if isinstance(raw_definitions, dict):
+        definitions = cast("dict[str, object]", raw_definitions)
+        error_info = definitions.get("CodexErrorInfo")
+    branches: object = None
+    if isinstance(error_info, dict):
+        branches = cast("dict[str, object]", error_info).get("oneOf")
     if not isinstance(branches, list) or not branches:
         raise MissingInstalledVocabularyError(
             "the generated codex protocol schema no longer declares CodexErrorInfo "
@@ -172,17 +180,24 @@ def codex_error_info_variants(destination: Path) -> frozenset[str]:
         )
 
     variants: set[str] = set()
-    for branch in branches:
-        if not isinstance(branch, dict):
+    for raw_branch in cast("list[object]", branches):
+        if not isinstance(raw_branch, dict):
             continue
+        branch = cast("dict[str, object]", raw_branch)
         if branch.get("type") == "string":
             members = branch.get("enum")
             if isinstance(members, list):
-                variants.update(m for m in members if isinstance(m, str))
+                variants.update(
+                    m for m in cast("list[object]", members) if isinstance(m, str)
+                )
         elif branch.get("type") == "object":
             required = branch.get("required")
             if isinstance(required, list):
-                variants.update(name for name in required if isinstance(name, str))
+                variants.update(
+                    name
+                    for name in cast("list[object]", required)
+                    if isinstance(name, str)
+                )
     if not variants:
         raise MissingInstalledVocabularyError(
             f"the generated CodexErrorInfo union lists no variants in {schema_path}"

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, override, runtime_checkable
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -161,9 +161,11 @@ _NULL_SPAN = _NullSpan()
 class _NullSpanContext(AbstractContextManager[Any]):
     """Context manager that yields a no-op span."""
 
+    @override
     def __enter__(self) -> _NullSpan:
         return _NULL_SPAN
 
+    @override
     def __exit__(self, *_exc: object) -> None:
         pass
 

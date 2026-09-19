@@ -8,18 +8,20 @@ import pytest
 import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...database import create_control_action, create_thread, get_thread
 from ...database.models import Base, RunWriteAuthority
 from ...database.reconciliation import reconcile_threads_on_startup
 from ...database.session import configure_sqlite_transactions
+from ...graph.compiler import CompiledTeamGraph, _add_node, _compile_graph
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...thread.action_receipts import GraphActionReceipt
 from ...thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
     read_checkpoint_evidence,
@@ -34,11 +36,20 @@ from ..recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
 from ..run_discovery_service import discover_active_runs
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
+
     from langchain_core.runnables import RunnableConfig
+
+DurableRun = tuple[
+    async_sessionmaker[AsyncSession], AsyncSqliteSaver, GraphActionReceipt
+]
 
 
 @pytest_asyncio.fixture
-async def durable_run(tmp_path, request):
+async def durable_run(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> AsyncIterator[DurableRun]:
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'runs.db'}")
     configure_sqlite_transactions(engine)
     async with engine.begin() as connection:
@@ -88,7 +99,9 @@ async def durable_run(tmp_path, request):
 
 
 @pytest.mark.asyncio
-async def test_initial_graph_authority_is_bound_to_its_durable_receipt(durable_run):
+async def test_initial_graph_authority_is_bound_to_its_durable_receipt(
+    durable_run: DurableRun,
+):
     sessions, _, _ = durable_run
     async with sessions() as db:
         definition = await read_accepted_graph_definition(db, "run")
@@ -102,22 +115,22 @@ def _work(state: TeamState) -> dict[str, object]:
     return {}
 
 
-def _graph(saver, *, pause=False):
-    builder = StateGraph(cast("Any", TeamState))
-    builder.add_node("work", _work)
-    builder.add_node(GRAPH_COMPLETION_NODE, record_graph_completion)
+def _graph(saver: AsyncSqliteSaver, *, pause: bool = False) -> CompiledTeamGraph:
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    _add_node(builder, "work", _work)
+    _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(START, "work")
     builder.add_edge("work", GRAPH_COMPLETION_NODE)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
-    return builder.compile(
-        checkpointer=saver, interrupt_before=["work"] if pause else []
+    return _compile_graph(
+        builder, checkpointer=saver, interrupt_before=["work"] if pause else []
     )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entry", ["direct", "startup", "discovery"])
 async def test_each_entry_settles_checkpoint_completion_and_reads_fresh_state(
-    durable_run, entry
+    durable_run: DurableRun, entry: str
 ):
     sessions, saver, receipt = durable_run
     config: RunnableConfig = {"configurable": {"thread_id": "run"}}
@@ -155,7 +168,7 @@ async def test_each_entry_settles_checkpoint_completion_and_reads_fresh_state(
 
 
 @pytest.mark.asyncio
-async def test_empty_pending_writes_do_not_prove_completion(durable_run):
+async def test_empty_pending_writes_do_not_prove_completion(durable_run: DurableRun):
     sessions, saver, receipt = durable_run
     config: RunnableConfig = {"configurable": {"thread_id": "run"}}
     await _graph(saver, pause=True).ainvoke(
@@ -182,7 +195,7 @@ async def test_empty_pending_writes_do_not_prove_completion(durable_run):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("durable_run", [ThreadStatus.RUNNING], indirect=True)
-async def test_only_startup_demotes_unfinished_execution(durable_run):
+async def test_only_startup_demotes_unfinished_execution(durable_run: DurableRun):
     sessions, saver, _receipt = durable_run
     async with sessions() as db:
         observed = await reconcile_run_checkpoint(

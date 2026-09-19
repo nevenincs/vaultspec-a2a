@@ -8,8 +8,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from ...graph.enums import ServerEventType
-
 __all__ = [
     "EventEnvelope",
 ]
@@ -22,7 +20,10 @@ class EventEnvelope(BaseModel):
     to the correct thread store without inspecting the payload.
     """
 
-    type: ServerEventType
+    # `type` is deliberately NOT declared here. Every concrete event narrows it
+    # to its own Literal for the discriminated union, and narrowing a mutable
+    # base field is unsound - the checker is right to reject it. The base holds
+    # only what every event shares unchanged.
     thread_id: str
     agent_id: str | None = None
     timestamp: datetime

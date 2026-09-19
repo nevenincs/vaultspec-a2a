@@ -38,6 +38,7 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import cast
 
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..utils.atomic_write import atomic_write_text
@@ -320,17 +321,20 @@ def _read_record(path: Path) -> SingletonRecord | None:
         return None
     if not isinstance(data, dict):
         return None
-    version = data.get("version")
-    pid = data.get("pid")
-    owner = data.get("owner")
-    acquired = data.get("acquired_at_ms")
+    record = cast("dict[str, object]", data)
+    version = record.get("version")
+    pid = record.get("pid")
+    owner = record.get("owner")
+    acquired = record.get("acquired_at_ms")
+    if not isinstance(version, int) or isinstance(version, bool):
+        return None
     if version != SINGLETON_RECORD_VERSION:
         return None
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return None
     if not isinstance(owner, str):
         return None
-    fingerprint = data.get("start_fingerprint")
+    fingerprint = record.get("start_fingerprint")
     if fingerprint is not None and not isinstance(fingerprint, str):
         return None
     if not isinstance(acquired, int) or isinstance(acquired, bool):

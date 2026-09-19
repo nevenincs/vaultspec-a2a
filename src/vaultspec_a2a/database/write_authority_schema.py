@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..thread.enums import ControlActionType
 
@@ -218,7 +218,9 @@ def write_authority_receipt_index_matches(
         column_names = index.get("column_names")
         if not isinstance(column_names, (list, tuple)):
             return False
-        columns = tuple(str(column) for column in column_names)
+        columns = tuple(
+            str(column) for column in cast("Iterable[object]", column_names)
+        )
         return bool(index.get("unique")) and (
             columns == WRITE_AUTHORITY_RECEIPT_INDEX_COLUMNS
         )

@@ -8,13 +8,13 @@ import logging
 import sys
 import threading
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 if TYPE_CHECKING:
     import builtins
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncGenerator, AsyncIterator
     from concurrent.futures import Future as ConcurrentFuture
 
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -139,14 +139,14 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):
 
     def _submit(
         self, method_name: str, *args: object, **kwargs: object
-    ) -> ConcurrentFuture:
+    ) -> ConcurrentFuture[object]:
         if self._loop is None:
             raise RuntimeError("Selector thread loop is not running")
 
         async def _invoke() -> object:
             target = self._resolve_target(method_name)
             if callable(target):
-                fn = cast("Callable[..., object]", target)
+                fn = target
                 result = fn(*args, **kwargs)
             else:
                 if args or kwargs:
@@ -177,18 +177,22 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):
         return self._submit(method_name, *args, **kwargs).result()
 
     @property
+    @override
     def config_specs(self) -> Any:
         return self._run_sync("config_specs")
 
     async def setup(self) -> None:
         await self._run_async("setup")
 
+    @override
     async def aget(self, config: Any) -> Any:
         return await self._run_async("aget", config)
 
+    @override
     async def aget_tuple(self, config: Any) -> Any:
         return await self._run_async("aget_tuple", config)
 
+    @override
     async def alist(self, *args: Any, **kwargs: Any) -> AsyncIterator[Any]:
         items = cast(
             "list[Any]",
@@ -197,21 +201,27 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):
         for item in items:
             yield item
 
+    @override
     async def aput(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("aput", *args, **kwargs)
 
+    @override
     async def aput_writes(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("aput_writes", *args, **kwargs)
 
+    @override
     async def acopy_thread(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("acopy_thread", *args, **kwargs)
 
+    @override
     async def adelete_for_runs(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("adelete_for_runs", *args, **kwargs)
 
+    @override
     async def adelete_thread(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("adelete_thread", *args, **kwargs)
 
+    @override
     async def aprune(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("aprune", *args, **kwargs)
 
@@ -222,36 +232,47 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):
             raise RuntimeError("AsyncPostgresSaver is not initialized")
         return [item async for item in self._saver.alist(*args, **kwargs)]
 
+    @override
     def get(self, config: Any) -> Any:
         return self._run_sync("get", config)
 
+    @override
     def get_tuple(self, config: Any) -> Any:
         return self._run_sync("get_tuple", config)
 
+    @override
     def get_next_version(self, current: Any, channel: Any) -> Any:
         return self._run_sync("get_next_version", current, channel)
 
+    @override
     def list(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("list", *args, **kwargs)
 
+    @override
     def put(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("put", *args, **kwargs)
 
+    @override
     def put_writes(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("put_writes", *args, **kwargs)
 
+    @override
     def copy_thread(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("copy_thread", *args, **kwargs)
 
+    @override
     def delete_for_runs(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("delete_for_runs", *args, **kwargs)
 
+    @override
     def delete_thread(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("delete_thread", *args, **kwargs)
 
+    @override
     def prune(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("prune", *args, **kwargs)
 
+    @override
     def with_allowlist(
         self, *args: object, **kwargs: object
     ) -> _SelectorThreadPostgresCheckpointer:
@@ -264,7 +285,7 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):
 
 
 @asynccontextmanager
-async def open_checkpointer() -> AsyncIterator[Checkpointer]:
+async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
     """Open the configured LangGraph checkpointer backend."""
     if settings.resolved_checkpoint_backend == "sqlite":
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver

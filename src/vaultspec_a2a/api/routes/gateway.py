@@ -20,6 +20,7 @@ import json
 import logging
 import os
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -74,6 +75,7 @@ from ...control.thread_state_service import (
     project_semantic_phase,
 )
 from ...control.worker_management import worker_liveness
+from ...control.worker_status import WorkerConnectionStatus
 from ...database import (
     get_db,
     get_permission_logs_by_thread,
@@ -84,6 +86,7 @@ from ...database import (
 )
 from ...database.checkpoints import Checkpointer
 from ...domain_config import domain_config
+from ...providers import ProviderCondition
 from ...providers.provider_catalog import (
     ControlSelection,
     ProviderRecord,
@@ -100,6 +103,7 @@ from ...providers.team_selection import (
     normalize_replay_selection,
 )
 from ...streaming.aggregator import EventAggregator
+from ...team.preset_origin import PresetOrigin
 from ...thread.clarification import (
     ClarificationAnswers,
     ClarificationContinuation,
@@ -115,7 +119,9 @@ from ...thread.constants import (
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import (
     TERMINAL_STATUSES,
+    ApprovalStatus,
     PermissionRequestStatus,
+    RepairStatus,
     ThreadStatus,
     TranscriptAvailability,
 )
@@ -227,6 +233,14 @@ def _string_field(record: dict[str, object], field: str) -> str | None:
 def _bool_field(record: dict[str, object], field: str) -> bool | None:
     value = record.get(field)
     return value if isinstance(value, bool) else None
+
+
+def _optional_enum[StrEnumT: StrEnum](
+    enum_cls: type[StrEnumT],
+    value: str | None,
+) -> StrEnumT | None:
+    """Coerce a durable string field into its declared enum member, when present."""
+    return None if value is None else enum_cls(value)
 
 
 def admission_gate(app: FastAPI) -> DrainGate:
@@ -569,7 +583,7 @@ async def _create_run_core(
                     frozen=_read_persisted_team_selection(winner.thread_metadata),
                     replayed=True,
                 )
-            if nickname is not None and "nickname" in str(exc).lower():
+            if "nickname" in str(exc).lower():
                 raise HTTPException(
                     status_code=409,
                     detail=f"Run nickname already exists: {nickname!r}",
@@ -1493,9 +1507,13 @@ async def active_runs_endpoint(
                     title=thread.title,
                     nickname=thread.nickname,
                     team_preset=thread.team_preset,
-                    repair_status=thread.repair_status,
-                    execution_readiness=thread.execution_readiness,
-                    approval_status=thread.approval_status,
+                    repair_status=_optional_enum(RepairStatus, thread.repair_status),
+                    execution_readiness=_optional_enum(
+                        RepairStatus, thread.execution_readiness
+                    ),
+                    approval_status=_optional_enum(
+                        ApprovalStatus, thread.approval_status
+                    ),
                     approval_request_id=thread.approval_request_id,
                     created_at=thread.created_at,
                     updated_at=thread.updated_at,
@@ -1599,19 +1617,21 @@ async def run_status_endpoint(
         ],
         proposal_ids=proposal_ids,
         changeset_ids=changeset_ids,
-        approval_status=snapshot.approval_status,
+        approval_status=_optional_enum(ApprovalStatus, snapshot.approval_status),
         approval_request_id=snapshot.approval_request_id,
         checkpoint_id=snapshot.checkpoint_id,
         last_sequence=snapshot.last_sequence,
-        repair_status=snapshot.repair_status,
-        execution_readiness=snapshot.execution_readiness,
+        repair_status=_optional_enum(RepairStatus, snapshot.repair_status),
+        execution_readiness=_optional_enum(RepairStatus, snapshot.execution_readiness),
         degraded_reasons=snapshot.degraded_reasons,
         failure_reason=snapshot.failure_reason,
         # Named explicitly beside the reason because this response is built with
         # keyword arguments rather than validated from the snapshot: nothing here
         # is dropped silently, but nothing arrives without being written either,
         # which is how the reason itself was missed when it was first persisted.
-        provider_condition=snapshot.provider_condition,
+        provider_condition=_optional_enum(
+            ProviderCondition, snapshot.provider_condition
+        ),
         # The account of an operation that did not take on a run that is still
         # alive. Its writers decline to set the failure reason precisely because
         # the run survives, so without this line their account is durable and
@@ -2302,15 +2322,17 @@ def _safe_load_reason(exc: Exception) -> str:
     return f"preset failed to load ({type(exc).__name__})"
 
 
-def _preset_origin(preset_id: str, ws_root: Path | None, *, is_mock: bool) -> str:
+def _preset_origin(
+    preset_id: str, ws_root: Path | None, *, is_mock: bool
+) -> PresetOrigin:
     """Classify a preset's origin: test_mock, workspace, or bundled."""
     if is_mock:
-        return "test_mock"
+        return PresetOrigin.TEST_MOCK
     if ws_root is not None:
         workspace_toml = ws_root / ".vaultspec" / "teams" / f"{preset_id}.toml"
         if workspace_toml.is_file():
-            return "workspace"
-    return "bundled"
+            return PresetOrigin.WORKSPACE
+    return PresetOrigin.BUNDLED
 
 
 def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
@@ -2475,7 +2497,9 @@ async def service_state_endpoint(
             full, "worker_paired_gateway_lifetime"
         ),
         worker_generation=_string_field(full, "worker_reported_generation"),
-        worker_status=_string_field(full, "worker_status"),
+        worker_status=_optional_enum(
+            WorkerConnectionStatus, _string_field(full, "worker_status")
+        ),
         worker_connected=_bool_field(full, "worker_connected"),
         circuit_breaker=_string_field(full, "circuit_breaker"),
         database_backend=settings.resolved_database_backend,

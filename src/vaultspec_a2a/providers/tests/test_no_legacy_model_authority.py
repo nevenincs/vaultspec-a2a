@@ -66,7 +66,7 @@ def test_bundled_presets_declare_no_provider_or_model_policy() -> None:
 
 def test_retired_stored_key_is_only_a_fail_closed_detection_sentinel() -> None:
     source_root = Path(team_config.__file__).parents[1]
-    hits = []
+    hits: list[str] = []
     for path in source_root.rglob("*.py"):
         if "tests" in path.parts:
             continue

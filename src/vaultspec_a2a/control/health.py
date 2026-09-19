@@ -410,8 +410,7 @@ def assemble_health_status(
     )
     recovery_owner_error = (
         recovery_owner_error_value
-        if isinstance(recovery_owner_error_value, str)
-        and recovery_owner_error_value
+        if isinstance(recovery_owner_error_value, str) and recovery_owner_error_value
         else None
     )
 

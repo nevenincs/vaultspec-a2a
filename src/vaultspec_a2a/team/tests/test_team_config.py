@@ -103,34 +103,6 @@ class TestAgentConfigFromToml:
 # ---------------------------------------------------------------------------
 
 
-def _loadable(team_id: str) -> TeamConfig | None:
-    """Load a bundled team, or ``None`` when it is a deliberately-invalid fixture.
-
-    Several presets exist precisely to fail validation, so a sweep over the whole
-    bundled set has to tolerate them without swallowing a real regression: the
-    caller still asserts which teams it actually reached.
-    """
-    try:
-        return load_team_config(team_id)
-    except (ConfigError, ValidationError):
-        return None
-
-
-def _product_persona_ids() -> list[str]:
-    """Every bundled persona that is not an internal in-process test lane.
-
-    Globbed rather than listed so a persona added later is covered on arrival.
-    The ``mock-``/``deterministic-`` lanes are excluded because they are the one
-    category the catalog contract still permits to be fixture-pinned: they run
-    in-process, no catalog enumerates them, and their content is role-keyed.
-    """
-    return sorted(
-        path.stem
-        for path in _AGENTS_DIR.glob("*.toml")
-        if not path.stem.startswith(("mock-", "deterministic-"))
-    )
-
-
 class TestAgentIdValidation:
     """Verify that agent.id must be a valid Python identifier."""
 

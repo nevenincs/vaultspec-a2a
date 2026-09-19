@@ -27,7 +27,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 from dev.init.contract import CONTRACT_VERSION
 
@@ -166,11 +166,13 @@ def read(repo_root: Path) -> dict[str, str]:
         return {}
     if not isinstance(payload, dict):
         return {}
+    payload = cast("dict[str, object]", payload)
     if payload.get("contract_version") != CONTRACT_VERSION:
         return {}
     phases = payload.get("phases")
     if not isinstance(phases, dict):
         return {}
+    phases = cast("dict[str, object]", phases)
     return {str(key): str(value) for key, value in phases.items()}
 
 

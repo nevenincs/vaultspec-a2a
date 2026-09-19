@@ -12,7 +12,7 @@ first-class :class:`Denial`, keyed on ``denial_kind``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast, override
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +43,7 @@ class CommandEnvelope(BaseModel):
     idempotency_key: str
     payload: dict[str, Any] = Field(default_factory=dict)
 
+    @override
     def model_post_init(self, _context: object, /) -> None:
         """Validate the command kind and idempotency key against the id grammar."""
         validate_id(self.command, field="command")
@@ -82,38 +83,43 @@ def extract_denial(body: dict[str, Any]) -> Denial | None:
     A denial is a success-status (HTTP 200) envelope whose ``data.status`` is
     ``"denied"``; it is distinguished by value, not by transport status code.
     """
-    data = body.get("data")
-    if not isinstance(data, dict) or data.get("status") != "denied":
+    raw_data: object = body.get("data")
+    if not isinstance(raw_data, dict):
         return None
-    eligibility = data.get("eligibility")
+    data = cast("dict[str, object]", raw_data)
+    if data.get("status") != "denied":
+        return None
+    eligibility: object = data.get("eligibility")
     # The reason lives at the DATA top level for an eligibility denial
     # (`denial_value` emits `{status, command, allowed, reason}` flat), and only
     # nested under `eligibility` for the shapes that carry a sub-object. Prefer the
     # top-level field so a flat eligibility denial's reason is not dropped to None
     # (which masked the real apply-conflict reason as an opaque "unknown: None").
     reason: str | None = None
-    raw_reason = data.get("reason")
+    raw_reason: object = data.get("reason")
     if isinstance(raw_reason, str):
         reason = raw_reason
     elif isinstance(eligibility, dict):
-        nested_reason = eligibility.get("reason")
+        nested_reason: object = cast("dict[str, object]", eligibility).get("reason")
         reason = nested_reason if isinstance(nested_reason, str) else None
-    denial_kind = data.get("denial_kind")
-    tiers = body.get("tiers")
+    denial_kind: object = data.get("denial_kind")
+    tiers: object = body.get("tiers")
     return Denial(
         denial_kind=str(denial_kind) if denial_kind is not None else "unknown",
         reason=reason,
-        eligibility=eligibility if isinstance(eligibility, dict) else None,
-        tiers=tiers if isinstance(tiers, dict) else {},
+        eligibility=cast("dict[str, Any]", eligibility)
+        if isinstance(eligibility, dict)
+        else None,
+        tiers=cast("Tiers", tiers) if isinstance(tiers, dict) else {},
     )
 
 
 def decode_success_envelope(body: dict[str, Any]) -> AuthoringResponse:
     """Decode a shared success envelope into an :class:`AuthoringResponse`."""
-    next_cursor = body.get("next_cursor")
-    tiers = body.get("tiers")
+    next_cursor: object = body.get("next_cursor")
+    tiers: object = body.get("tiers")
     return AuthoringResponse(
         data=body.get("data"),
-        tiers=tiers if isinstance(tiers, dict) else {},
+        tiers=cast("Tiers", tiers) if isinstance(tiers, dict) else {},
         next_cursor=next_cursor if isinstance(next_cursor, str) else None,
     )

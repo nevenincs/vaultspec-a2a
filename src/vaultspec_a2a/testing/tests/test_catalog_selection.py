@@ -9,6 +9,8 @@ put an unnamed entry on a billable lane.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ..catalog_selection import (
@@ -26,7 +28,7 @@ def _lane(
     selectable: bool = True,
     entries: tuple[str, ...] = ("entry-a", "entry-b"),
     revision: str = "rev-1",
-) -> dict:
+) -> dict[str, Any]:
     return {
         "provider_id": provider_id,
         "execution_mode": execution_mode,
@@ -38,7 +40,7 @@ def _lane(
     }
 
 
-def _payload(*lanes: dict) -> dict:
+def _payload(*lanes: dict[str, Any]) -> dict[str, Any]:
     return {"providers": list(lanes)}
 
 
@@ -183,7 +185,8 @@ def test_a_named_lane_that_is_served_but_unselectable_is_refused() -> None:
 
 def test_a_malformed_payload_fails_loudly_rather_than_as_an_empty_search() -> None:
     """A shape change upstream must not read as "no lanes are served"."""
-    for payload in (None, {}, {"providers": "not-a-list"}, []):
+    malformed: tuple[Any, ...] = (None, {}, {"providers": "not-a-list"}, [])
+    for payload in malformed:
         with pytest.raises(NoSelectableLaneError, match="providers"):
             in_process_selection(payload)
 

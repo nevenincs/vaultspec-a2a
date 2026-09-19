@@ -36,6 +36,7 @@ from ..nodes.diverge import (
     WEB_LOCATOR_KIND,
     create_researcher_node,
 )
+from ._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -83,9 +84,11 @@ def _researcher_producer(tmp_path: Path, prose: str) -> ResearchFindingProducer:
     return _make_research_producer(model, "You are the researcher.")
 
 
-def _build_graph(producer: ResearchFindingProducer) -> StateGraph:
+def _build_graph(
+    producer: ResearchFindingProducer,
+) -> StateGraph[Any, None, Any, Any]:
     """Wire the real diverge stage around a single researcher branch."""
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
     dispatch = _wire_diverge_stage(
         builder,
         dispatch_name="research_dispatch",
@@ -98,7 +101,7 @@ def _build_graph(producer: ResearchFindingProducer) -> StateGraph:
     async def synthesis_node(state: TeamState) -> dict[str, Any]:
         return {"messages": [AIMessage(content="synthesised", name="synthesist")]}
 
-    builder.add_node("synthesis", synthesis_node)
+    add_test_node(builder, "synthesis", synthesis_node)
     builder.add_edge(START, dispatch)
     builder.add_edge("synthesis", END)
     return builder
@@ -117,18 +120,14 @@ async def _checkpointed_finding(tmp_path: Path, prose: str) -> dict[str, Any]:
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
         await saver.setup()
-        await (
-            _build_graph(producer)
-            .compile(checkpointer=saver)
-            .ainvoke(_base_state(), config=config)
-        )
+        graph = compile_test_graph(_build_graph(producer), checkpointer=saver)
+        await graph.ainvoke(_base_state(), config=config)
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as reopened:
-        replayed = (
-            await _build_graph(producer)
-            .compile(checkpointer=reopened)
-            .aget_state(config)
+        reopened_graph = compile_test_graph(
+            _build_graph(producer), checkpointer=reopened
         )
+        replayed = await reopened_graph.aget_state(config)
 
     findings = replayed.values["research_findings"]
     assert len(findings) == 1
@@ -416,12 +415,9 @@ async def test_control_over_cap_locator_count_is_refused_by_the_branch() -> None
 
 async def _run_branch(producer: ResearchFindingProducer) -> dict[str, Any]:
     """Drive one researcher branch through a real compiled graph."""
-    return await (
-        _build_graph(producer)
-        .compile(checkpointer=InMemorySaver())
-        .ainvoke(
-            _base_state(), config=cast("Any", {"configurable": {"thread_id": "r"}})
-        )
+    graph = compile_test_graph(_build_graph(producer), checkpointer=InMemorySaver())
+    return await graph.ainvoke(
+        _base_state(), config=cast("Any", {"configurable": {"thread_id": "r"}})
     )
 
 

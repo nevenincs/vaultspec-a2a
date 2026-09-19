@@ -58,9 +58,7 @@ async def test_parked_sse_is_cancelled_inside_the_server_shutdown_clock() -> Non
             await asyncio.sleep(0.01)
         async with (
             httpx.AsyncClient(timeout=5.0) as client,
-            client.stream(
-                "GET", f"http://127.0.0.1:{port}/stream"
-            ) as response,
+            client.stream("GET", f"http://127.0.0.1:{port}/stream") as response,
         ):
             assert response.status_code == 200
             iterator = response.aiter_bytes()

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, cast
+
 import httpx
 import pytest
 from fastapi import FastAPI, Request
@@ -24,11 +26,14 @@ from ..execution_authority import resolve_execution_authority
 from ..worker_management import LazyWorkerSpawner
 from ._catalog_authority import current_execution_metadata
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("complete", [True, False])
 async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
-    tmp_path, complete
+    tmp_path: Path, complete: bool
 ):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'run.db'}")
     configure_sqlite_transactions(engine)
@@ -112,7 +117,8 @@ async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
             assert delivered.dispatch_id == "accepted"
             assert delivered.recursion_limit == 37
             assert delivered.team_preset == "mock-success-single"
-            assert delivered.option_id == {"decision": "approved"}
+            delivered_option_id = cast("object", delivered.option_id)
+            assert delivered_option_id == {"decision": "approved"}
             assert delivered.model_assignment == accepted_dispatch.model_assignment
             assert delivered.require_graph_action_receipt() == receipt
         else:

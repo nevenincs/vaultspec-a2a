@@ -27,11 +27,17 @@ tree, and this file must not depend on their in-flight state.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
@@ -43,9 +49,14 @@ from ...thread.enums import ThreadStatus
 from ..event_handlers import _handle_terminal_event
 from ..thread_state_service import capture_thread_state
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
 
 @pytest_asyncio.fixture
-async def engine(tmp_path_factory: pytest.TempPathFactory):
+async def engine(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[AsyncEngine]:
     """Real SQLite-backed engine, isolated per test."""
     case_dir = tmp_path_factory.mktemp("terminal-sequence-capture-db")
     db_file = case_dir / "test.db"
@@ -56,13 +67,17 @@ async def engine(tmp_path_factory: pytest.TempPathFactory):
 
 
 @pytest_asyncio.fixture
-async def session_factory(engine):
+async def session_factory(
+    engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
     """Async session factory bound to the test engine."""
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest_asyncio.fixture
-async def checkpointer(tmp_path_factory: pytest.TempPathFactory):
+async def checkpointer(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> AsyncIterator[AsyncSqliteSaver]:
     """Real AsyncSqliteSaver, isolated per test (matches api/tests/conftest.py)."""
     case_dir = tmp_path_factory.mktemp("terminal-sequence-capture-checkpoints")
     db_file = case_dir / "test_checkpoints.db"
@@ -72,7 +87,7 @@ async def checkpointer(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.mark.asyncio
 async def test_the_sequence_is_captured_before_the_prune_discards_it(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Fails on unfixed code: the durable column reads 0, not the real count.
 
@@ -119,7 +134,7 @@ async def test_the_sequence_is_captured_before_the_prune_discards_it(
 
 @pytest.mark.asyncio
 async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
-    session_factory, checkpointer
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """The only read that matters -- after the run has already settled.
 
@@ -168,7 +183,7 @@ async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
 
 @pytest.mark.asyncio
 async def test_a_live_run_still_reads_the_aggregators_own_counter(
-    session_factory, checkpointer
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """Preservation: a non-terminal thread has no durable value to prefer yet.
 

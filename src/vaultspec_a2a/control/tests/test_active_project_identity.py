@@ -16,9 +16,10 @@ the worker's own cache-key former and registration seam.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
@@ -408,6 +409,16 @@ class TestAuthoringSubmitterIsBoundToTheProject:
             await manager._build_proposal_submitter(None)
 
 
+def _test_graph_definition_digest(team_preset: str) -> str:
+    """Deterministic stand-in for a frozen graph definition's digest.
+
+    These cache-key and registration-seam tests never compile or freeze a real
+    graph definition, so they need a digest-shaped value that still binds
+    consistently to the preset it stands in for.
+    """
+    return hashlib.sha256(team_preset.encode()).hexdigest()
+
+
 class TestOneWorkspaceOneGraphEntry:
     """S09 - the worker's graph cache holds one entry per workspace."""
 
@@ -434,31 +445,37 @@ class TestOneWorkspaceOneGraphEntry:
 
     def test_two_spellings_key_the_same_entry(self, workspace: Path) -> None:
         digest = model_assignment_digest({})
+        definition_digest = _test_graph_definition_digest("preset")
         assert graph_cache_key(
-            "preset", str(workspace), False, digest
-        ) == graph_cache_key("preset", _uncanonical_spelling(workspace), False, digest)
+            "preset", str(workspace), False, digest, definition_digest
+        ) == graph_cache_key(
+            "preset", _uncanonical_spelling(workspace), False, digest, definition_digest
+        )
 
     def test_a_project_less_key_is_still_a_key(self) -> None:
         """A run with no project still keys, so the mint cannot break cancel."""
         digest = model_assignment_digest({})
-        assert graph_cache_key("preset", None, True, digest) == (
+        definition_digest = _test_graph_definition_digest("preset")
+        assert graph_cache_key("preset", None, True, digest, definition_digest) == (
             "preset",
             None,
             True,
             digest,
+            definition_digest,
         )
 
     def test_model_assignment_identity_partitions_the_graph_cache(self) -> None:
         first = model_assignment_digest({"coder": {"model_name": "first"}})
         same = model_assignment_digest({"coder": {"model_name": "first"}})
         other = model_assignment_digest({"coder": {"model_name": "second"}})
+        definition_digest = _test_graph_definition_digest("preset")
 
-        assert graph_cache_key("preset", None, False, first) == graph_cache_key(
-            "preset", None, False, same
-        )
-        assert graph_cache_key("preset", None, False, first) != graph_cache_key(
-            "preset", None, False, other
-        )
+        assert graph_cache_key(
+            "preset", None, False, first, definition_digest
+        ) == graph_cache_key("preset", None, False, same, definition_digest)
+        assert graph_cache_key(
+            "preset", None, False, first, definition_digest
+        ) != graph_cache_key("preset", None, False, other, definition_digest)
 
     def test_two_threads_on_one_workspace_share_one_cached_graph(
         self, workspace: Path
@@ -472,6 +489,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager = self._manager()
         graph = self._graph()
 
+        definition_digest = _test_graph_definition_digest("preset")
         manager.register_compiled_graph(
             "run-1",
             (
@@ -479,6 +497,7 @@ class TestOneWorkspaceOneGraphEntry:
                 str(workspace),
                 False,
                 model_assignment_digest(_assignment("current")),
+                definition_digest,
             ),
             graph,
         )
@@ -489,6 +508,7 @@ class TestOneWorkspaceOneGraphEntry:
                 _uncanonical_spelling(workspace),
                 False,
                 model_assignment_digest(_assignment("current")),
+                definition_digest,
             ),
             graph,
         )
@@ -517,6 +537,7 @@ class TestOneWorkspaceOneGraphEntry:
                 str(workspace),
                 False,
                 model_assignment_digest(_assignment("current")),
+                _test_graph_definition_digest("preset"),
             ),
             graph,
         )
@@ -548,6 +569,7 @@ class TestOneWorkspaceOneGraphEntry:
                 str(workspace),
                 False,
                 model_assignment_digest(accepted),
+                _test_graph_definition_digest("preset"),
             ),
             graph,
         )
@@ -580,6 +602,7 @@ class TestOneWorkspaceOneGraphEntry:
                 str(workspace),
                 False,
                 model_assignment_digest(accepted),
+                _test_graph_definition_digest("preset"),
             ),
             self._graph(),
         )
@@ -616,6 +639,7 @@ class TestOneWorkspaceOneGraphEntry:
                 self.release = asyncio.Event()
                 self.compile_count = 0
 
+            @override
             async def _compile_graph(
                 self, req: DispatchRequest
             ) -> RegisteredCompiledGraph:
@@ -669,6 +693,7 @@ class TestOneWorkspaceOneGraphEntry:
                 self.release = asyncio.Event()
                 self.compile_count = 0
 
+            @override
             async def _compile_graph(
                 self, req: DispatchRequest
             ) -> RegisteredCompiledGraph:
@@ -713,6 +738,7 @@ class TestOneWorkspaceOneGraphEntry:
                 self.release = asyncio.Event()
                 self.compile_count = 0
 
+            @override
             async def _compile_graph(
                 self, req: DispatchRequest
             ) -> RegisteredCompiledGraph:
@@ -764,6 +790,7 @@ class TestOneWorkspaceOneGraphEntry:
                 self.release = asyncio.Event()
                 self.compile_count = 0
 
+            @override
             async def _compile_graph(
                 self, req: DispatchRequest
             ) -> RegisteredCompiledGraph:
@@ -880,6 +907,7 @@ class TestOneWorkspaceOneGraphEntry:
                 return SimpleNamespace(checkpoint={"channel_values": values})
 
         class CompileTrap(GraphLifecycleManager):
+            @override
             async def _compile_graph(
                 self, req: DispatchRequest
             ) -> RegisteredCompiledGraph:
@@ -923,6 +951,7 @@ class TestOneWorkspaceOneGraphEntry:
                 )
                 self.calls = 0
 
+            @override
             async def _compile_graph(
                 self, req: DispatchRequest
             ) -> RegisteredCompiledGraph:

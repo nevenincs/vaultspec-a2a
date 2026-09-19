@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from ..thread.enums import (
     VERDICT_APPROVED,
@@ -141,6 +141,7 @@ def parse_sse_frame(event_type: str, data: str) -> SseFrame | None:
         return None
     if not isinstance(payload, dict):
         return None
+    payload = cast("dict[str, Any]", payload)
 
     if event_type == "lifecycle":
         return _lifecycle_from_record(payload)
@@ -170,9 +171,10 @@ def _lifecycle_from_record(record: dict[str, Any]) -> LifecycleEvent | None:
     inner: dict[str, Any] = {}
     payload = record.get("payload")
     if isinstance(payload, dict):
+        payload = cast("dict[str, Any]", payload)
         data = payload.get("data")
         if isinstance(data, dict):
-            inner = data
+            inner = cast("dict[str, Any]", data)
     return LifecycleEvent(
         seq=seq,
         event_kind=str(record.get("event_kind", "")),

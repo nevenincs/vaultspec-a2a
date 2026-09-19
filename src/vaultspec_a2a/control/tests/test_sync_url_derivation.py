@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import pathlib
 import tomllib
+from typing import Protocol, cast
 
 import pytest
 from packaging.requirements import Requirement
@@ -28,6 +29,22 @@ from sqlalchemy import create_engine
 
 from ...control.config import Settings
 from ...testing import armed_environment as _environment
+
+
+class _SettingsEnvFileFactory(Protocol):
+    def __call__(self, *, _env_file: pathlib.Path | None) -> Settings: ...
+
+
+def _settings() -> Settings:
+    """Construct with dotenv discovery disabled, typed for basedpyright.
+
+    ``BaseSettings.__init__`` accepts ``_env_file``, but pydantic's
+    dataclass-transform ``__init__`` synthesis for subclasses hides it from
+    static analysis; the cast recovers the real constructor signature (the
+    same pattern used in ``test_absolute_path_requirement.py``).
+    """
+    return cast("_SettingsEnvFileFactory", Settings)(_env_file=None)
+
 
 # The synchronous drivers this project declares in pyproject.toml. psycopg2 is
 # absent from that list, and ``aiosqlite`` is asynchronous, so an engine landing on
@@ -61,9 +78,9 @@ def _literal_list_assignment(path: pathlib.Path, name: str) -> set[str]:
             isinstance(target, ast.Name) and target.id == name
             for target in statement.targets
         ):
-            value = ast.literal_eval(statement.value)
-            assert isinstance(value, list)
-            return set(value)
+            raw_value: object = ast.literal_eval(statement.value)
+            assert isinstance(raw_value, list)
+            return set(cast("list[str]", raw_value))
     raise AssertionError(f"{path} has no literal {name} assignment")
 
 
@@ -134,7 +151,7 @@ def test_postgres_database_sync_url_names_a_shipped_driver(
         VAULTSPEC_CHECKPOINT_DATABASE_URL=None,
         VAULTSPEC_DESKTOP_APP_HOME=None,
     ):
-        derived = Settings(_env_file=None).database_sync_url
+        derived = _settings().database_sync_url
 
     assert derived == expected
     _assert_synchronously_connectable(derived)
@@ -162,7 +179,7 @@ def test_postgres_checkpoint_sync_url_names_a_shipped_driver(
         VAULTSPEC_CHECKPOINT_DATABASE_URL=configured,
         VAULTSPEC_DESKTOP_APP_HOME=None,
     ):
-        derived = Settings(_env_file=None).checkpoint_sync_url
+        derived = _settings().checkpoint_sync_url
 
     assert derived == expected
     _assert_synchronously_connectable(derived)
@@ -193,7 +210,7 @@ def test_sqlite_sync_urls_drop_the_asynchronous_driver(
         VAULTSPEC_CHECKPOINT_DATABASE_URL=None,
         VAULTSPEC_DESKTOP_APP_HOME=None,
     ):
-        settings = Settings(_env_file=None)
+        settings = _settings()
         derived = settings.database_sync_url
         # With no dedicated checkpoint URL the checkpoint store shares the
         # application database, so the same conversion must hold there.
@@ -221,7 +238,7 @@ def test_conversion_does_not_corrupt_a_password_containing_the_driver_text() -> 
         VAULTSPEC_CHECKPOINT_DATABASE_URL=None,
         VAULTSPEC_DESKTOP_APP_HOME=None,
     ):
-        derived = Settings(_env_file=None).database_sync_url
+        derived = _settings().database_sync_url
 
     engine = create_engine(derived)
     try:
@@ -250,7 +267,7 @@ def test_an_unconvertible_url_fails_at_settings_construction() -> None:
             ValueError, match="VAULTSPEC_DATABASE_URL is not a parseable SQLAlchemy URL"
         ),
     ):
-        Settings(_env_file=None)
+        _settings()
 
 
 def test_a_backend_without_a_synchronous_driver_fails_at_construction() -> None:
@@ -265,7 +282,7 @@ def test_a_backend_without_a_synchronous_driver_fails_at_construction() -> None:
         ),
         pytest.raises(ValueError, match="VAULTSPEC_CHECKPOINT_DATABASE_URL"),
     ):
-        Settings(_env_file=None)
+        _settings()
 
 
 def test_the_construction_failure_never_echoes_the_credential() -> None:
@@ -286,7 +303,7 @@ def test_the_construction_failure_never_echoes_the_credential() -> None:
         ),
         pytest.raises(ValidationError) as raised,
     ):
-        Settings(_env_file=None)
+        _settings()
 
     messages = [error["msg"] for error in raised.value.errors()]
     assert any("not a parseable SQLAlchemy URL" in message for message in messages)
@@ -336,7 +353,7 @@ def test_the_shipped_postgres_example_yields_working_synchronous_urls() -> None:
     }, block
 
     with _environment(VAULTSPEC_DESKTOP_APP_HOME=None, **block):
-        settings = Settings(_env_file=None)
+        settings = _settings()
         _assert_synchronously_connectable(settings.database_sync_url)
         _assert_synchronously_connectable(settings.checkpoint_sync_url)
         # The LangGraph saver takes the driverless DSN form of the same URL.

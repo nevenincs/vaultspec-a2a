@@ -81,6 +81,7 @@ def _compile(team: Any, checkpointer: Any, pf: Any, submitter: Any) -> Any:
         agent_configs=_agent_configs(team),
         checkpointer=checkpointer,
         provider_factory=pf,
+        step_timeout=42.0,
         proposal_submitter=submitter,
         model_assignment=deterministic_model_assignment(team),
     )
@@ -180,6 +181,7 @@ def test_compiling_a_questionnaire_onto_a_topology_that_never_asks_is_refused(
             agent_configs=_agent_configs(moved),
             checkpointer=None,
             provider_factory=pf,
+            step_timeout=42.0,
             proposal_submitter=_FakeSubmitter(),
         )
 

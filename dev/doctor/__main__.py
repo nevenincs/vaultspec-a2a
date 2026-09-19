@@ -5,6 +5,7 @@ Usage::
     python -m dev.doctor required
     python -m dev.doctor docker
     python -m dev.doctor docker-optional
+    python -m dev.doctor pep561
     python -m dev.doctor check
 
 ``check`` is the everyday form: required tools gate, Docker only reports.
@@ -15,13 +16,24 @@ from __future__ import annotations
 import argparse
 
 from dev.doctor._docker import docker_optional, docker_required
+from dev.doctor._pep561 import repair_markers
 from dev.doctor._tools import required
+
+
+def _pep561() -> int:
+    """Restore the PEP 561 markers a namespace-rooted distribution published."""
+    created = repair_markers()
+    if created:
+        print(f"pep561: created {created} marker(s)")
+    return 0
+
 
 #: The selectable checks, mapped to the callable that performs each one.
 CHECKS = {
     "required": required,
     "docker": docker_required,
     "docker-optional": docker_optional,
+    "pep561": _pep561,
 }
 
 

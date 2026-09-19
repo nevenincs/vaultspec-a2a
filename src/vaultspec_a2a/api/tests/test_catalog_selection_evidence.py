@@ -21,19 +21,22 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
 
 from ...database import get_thread
-from .conftest import make_app
+from .conftest import SessionFactory, make_app
 from .test_gateway_live import _PRESET, _live_server, _run_fields
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_frozen_selection_survives_real_gateway_restart(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A frozen team selection persists across a real gateway restart.
 
@@ -85,7 +88,7 @@ async def test_frozen_selection_survives_real_gateway_restart(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_launch_freezes_the_served_catalog_entry(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The freeze reproduces exactly the catalog entry the picker was served.
 
@@ -148,7 +151,7 @@ async def test_launch_freezes_the_served_catalog_entry(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_refuses_every_retired_selection_surface_before_dispatch(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Retired policy, provider and mode inputs never reach construction."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -235,11 +238,11 @@ async def test_run_start_refuses_every_retired_selection_surface_before_dispatch
         )
         for label, path, field, value, retired_value, domain_reason in cases:
             fields = deepcopy(current)
-            target: object = fields
+            target: dict[str, object] = fields
             for key in path:
-                assert isinstance(target, dict)
-                target = target[key]
-            assert isinstance(target, dict)
+                nested = target[key]
+                assert isinstance(nested, dict)
+                target = cast("dict[str, object]", nested)
             target[field] = value
             response = await client.post(
                 "/v1/runs",
@@ -257,10 +260,13 @@ async def test_run_start_refuses_every_retired_selection_surface_before_dispatch
                 assert detail == domain_reason, label
             else:
                 assert isinstance(detail, list), label
+                detail_items = cast("list[object]", detail)
                 assert any(
-                    item.get("type") == "extra_forbidden"
-                    and item.get("loc") == ["body", *path, field]
-                    for item in detail
+                    isinstance(item, dict)
+                    and cast("dict[str, object]", item).get("type") == "extra_forbidden"
+                    and cast("dict[str, object]", item).get("loc")
+                    == ["body", *path, field]
+                    for item in detail_items
                 ), (label, detail)
             assert retired_value not in response.text, (label, response.text)
 
@@ -269,7 +275,7 @@ async def test_run_start_refuses_every_retired_selection_surface_before_dispatch
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_validation_errors_remain_actionable_without_reflecting_input(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The bounded 422 retains type, field location and a safe message."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -307,7 +313,7 @@ async def test_validation_errors_remain_actionable_without_reflecting_input(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_persists_no_secrets_in_db_row(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Actor tokens never land in the persisted run metadata DB row.
 

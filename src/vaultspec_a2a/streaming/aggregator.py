@@ -55,8 +55,13 @@ class EventAggregator:
             self._emitters.next_sequence,
         )
         # Wire up the circular reference: emitters needs buffering
-        self._emitters._buffering = self._buffering
+        self._emitters.bind_buffering(self._buffering)
         self._ingest = IngestManager(self._emitters, self._buffering, self._telemetry)
+
+    @property
+    def emitters(self) -> EventEmitters:
+        """Expose the underlying emitters for callers wiring interrupt detection."""
+        return self._emitters
 
     # -- Sequence management (delegates to emitters) --------------------
 
@@ -340,7 +345,7 @@ class EventAggregator:
         thread_id: str,
         agent_id: str,
         graph: StreamableGraph,
-        graph_input: dict[str, Any] | Command | None,
+        graph_input: dict[str, Any] | Command[Any] | None,
         config: dict[str, Any],
         *,
         on_graph_started: Callable[[], Awaitable[None]] | None = None,

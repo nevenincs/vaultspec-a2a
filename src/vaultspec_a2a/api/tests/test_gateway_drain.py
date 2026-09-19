@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
@@ -26,8 +27,13 @@ from ...database import get_thread
 from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ..routes.gateway import admission_gate
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import SessionFactory, async_catalog_run_fields, make_app
 from .test_gateway_live import _live_server
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 _PRESET = "mock-success-single"
 
@@ -40,7 +46,9 @@ _UNREACHABLE_WORKER = "http://127.0.0.1:9"
 _RUN_SEQ = itertools.count(1)
 
 
-async def _run_body(client: httpx.AsyncClient, *, run_id: str | None = None) -> dict:
+async def _run_body(
+    client: httpx.AsyncClient, *, run_id: str | None = None
+) -> dict[str, Any]:
     """One run-start body, carrying the selection run-start now requires.
 
     Takes an explicit *run_id* where a caller posts twice on purpose - a replay
@@ -57,7 +65,7 @@ async def _run_body(client: httpx.AsyncClient, *, run_id: str | None = None) -> 
     }
 
 
-def _terminal_envelope(run_id: str, status: str = "completed") -> dict:
+def _terminal_envelope(run_id: str, status: str = "completed") -> dict[str, Any]:
     """The worker-IPC envelope carrying one run's terminal event."""
     return {
         "type": "event",
@@ -79,7 +87,7 @@ async def _relay_terminal(client: httpx.AsyncClient, run_id: str) -> None:
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_admits_while_open_then_refuses_once_draining(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
@@ -114,7 +122,7 @@ async def test_run_start_admits_while_open_then_refuses_once_draining(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_admin_stop_closes_admission_and_refuses_new_runs(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The administrative stop path engages the drain gate.
 
@@ -157,7 +165,7 @@ async def test_admin_stop_closes_admission_and_refuses_new_runs(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_unexpected_run_start_failure_releases_admission_and_drain_quiesces(
-    tmp_path, checkpointer
+    tmp_path: Path, checkpointer: AsyncSqliteSaver
 ) -> None:
     """An unexpected run-start failure releases the admission so drain can quiesce.
 
@@ -201,7 +209,7 @@ async def test_unexpected_run_start_failure_releases_admission_and_drain_quiesce
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_client_run_id_replay_does_not_double_count_admission(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
@@ -221,7 +229,7 @@ async def test_client_run_id_replay_does_not_double_count_admission(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_normal_completion_releases_admission_and_drain_quiesces(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A run that starts and completes normally leaves the drain gate's active set.
 
@@ -275,7 +283,7 @@ async def test_normal_completion_releases_admission_and_drain_quiesces(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_dispatch_failure_that_marks_run_failed_releases_admission(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A start-path dispatch failure that settles the run FAILED releases it.
 
@@ -318,7 +326,7 @@ async def test_dispatch_failure_that_marks_run_failed_releases_admission(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_followup_dispatch_failure_keeps_the_live_run_admitted(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A follow-up whose acknowledgement is lost must not evict the live run.
 
@@ -379,7 +387,7 @@ async def test_followup_dispatch_failure_keeps_the_live_run_admitted(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Cancel plus repeated terminal events drop exactly the runs they name.
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+from typing import Any
 
 from ..app import create_app
 
@@ -29,7 +30,7 @@ _REGENERATE_COMMAND = (
 )
 
 
-def _live() -> dict:
+def _live() -> dict[str, Any]:
     return create_app().openapi()
 
 

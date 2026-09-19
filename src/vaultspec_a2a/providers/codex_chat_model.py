@@ -491,6 +491,10 @@ class _CodexAppServerClient:
         """Return the retained, redacted tail of the child's standard error."""
         return chr(10).join(self._stderr_tail)
 
+    async def unexpected_eof_error(self) -> _CodexProtocolError:
+        """Public accessor for :meth:`_unexpected_eof_error` (cross-class use)."""
+        return await self._unexpected_eof_error()
+
     async def _unexpected_eof_error(self) -> _CodexProtocolError:
         """Describe an EOF after collecting bounded, safe child diagnostics.
 
@@ -1024,9 +1028,7 @@ class CodexChatModel(BaseChatModel):
             )
 
         active.interrupt_in_flight = True
-        deadline = (
-            asyncio.get_running_loop().time() + _NATIVE_CONTROL_TIMEOUT_SECONDS
-        )
+        deadline = asyncio.get_running_loop().time() + _NATIVE_CONTROL_TIMEOUT_SECONDS
         try:
             await asyncio.wait_for(
                 active.client.request(
@@ -1284,7 +1286,7 @@ class CodexChatModel(BaseChatModel):
                     # bounded, redacted stderr tail. A bare "stream ended" here
                     # would describe the transport and throw away the only
                     # evidence of why the provider left.
-                    raise await client._unexpected_eof_error()
+                    raise await client.unexpected_eof_error()
             except TimeoutError:
                 # A lane that announced a retry and then went quiet has already
                 # told us why it was struggling. Reporting the silence instead

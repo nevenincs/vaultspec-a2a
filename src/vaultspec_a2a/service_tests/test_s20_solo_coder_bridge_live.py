@@ -90,8 +90,8 @@ _PROPOSE_TOOL = "mcp__vaultspec-authoring__propose_changeset"
 
 _CODER_ROLE = "vaultspec-coder"
 _SOLO_CODER_PRESET = "vaultspec-solo-coder"
-_JSON_OBJECT = TypeAdapter(JsonObject)
-_JSON_OBJECT_LIST = TypeAdapter(list[JsonObject])
+_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
+_JSON_OBJECT_LIST: TypeAdapter[list[JsonObject]] = TypeAdapter(list[JsonObject])
 
 
 def _items(value: object, *, at: str) -> list[JsonObject]:

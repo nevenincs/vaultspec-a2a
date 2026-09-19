@@ -32,7 +32,7 @@ import contextlib
 import os
 import socket
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -61,8 +61,8 @@ _GROUP_PREFIX = "res:"
 # This session's machine-global registration and the admission verdict, kept
 # for the report header and released at unconfigure. Module state rather than
 # config attributes so ty sees real types; one plugin instance per process.
-_SESSION_LEASE: object | None = None
-_ADMISSION_LINE: str = ""
+_session_lease: object | None = None
+_admission_line: str = ""
 
 
 def _send_completion_receipt(exitstatus: int) -> None:
@@ -108,7 +108,7 @@ def pytest_configure(config: pytest.Config) -> None:
     the machine's observed capacity split across live peer sessions - a
     concurrent suite degrades gracefully instead of multiplying load.
     """
-    global _SESSION_LEASE, _ADMISSION_LINE
+    global _session_lease, _admission_line
     config.addinivalue_line(
         "markers",
         f"{MARKER_NAME}(key, shared=False): declare that this test uses the "
@@ -128,19 +128,19 @@ def pytest_configure(config: pytest.Config) -> None:
         return  # xdist worker: the controller already registered this run.
     from .sessions import effective_worker_count, live_peer_sessions, register_session
 
-    _SESSION_LEASE = register_session()
+    _session_lease = register_session()
     peers = live_peer_sessions()
     if isinstance(numprocesses, int) and numprocesses > 0:
         admitted = effective_worker_count(numprocesses, peers=peers)
         if admitted < numprocesses:
             config.option.numprocesses = admitted
             config.option.tx = ["popen"] * admitted
-        _ADMISSION_LINE = (
+        _admission_line = (
             f"resource-aware admission: {peers} live peer test session(s); "
             f"workers {numprocesses} -> {admitted}"
         )
     else:
-        _ADMISSION_LINE = (
+        _admission_line = (
             f"resource-aware admission: {peers} live peer test session(s); serial run"
         )
 
@@ -148,15 +148,15 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_report_header(config: pytest.Config) -> str | None:
     """Surface the admission verdict where the operator reads run context."""
     del config
-    return _ADMISSION_LINE or None
+    return _admission_line or None
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     """Deregister this session; pid-death reclaim covers unclean exits."""
     del config
-    global _SESSION_LEASE
-    lease = _SESSION_LEASE
-    _SESSION_LEASE = None
+    global _session_lease
+    lease = _session_lease
+    _session_lease = None
     if lease is not None:
         from .leases import Lease
 
@@ -283,7 +283,8 @@ def _acquisition_budget_s(request: pytest.FixtureRequest) -> float:
     margin keeps the loud path reachable; the floor keeps a short clock from
     making acquisition impossible.
     """
-    marker = request.node.get_closest_marker("timeout")
+    node = cast("pytest.Item", request.node)
+    marker = node.get_closest_marker("timeout")
     limit: float | None = None
     if marker is not None and marker.args and isinstance(marker.args[0], int | float):
         limit = float(marker.args[0])
@@ -313,7 +314,8 @@ def resource_leases(request: pytest.FixtureRequest) -> Iterator[dict[str, Lease]
     """
     import time as _time
 
-    claims = declared_claims(request.node)
+    node = cast("pytest.Item", request.node)
+    claims = declared_claims(node)
     if not claims:
         yield {}
         return
@@ -329,7 +331,7 @@ def resource_leases(request: pytest.FixtureRequest) -> Iterator[dict[str, Lease]
                 hold_lease(
                     claim.spec.key,
                     shared=claim.shared,
-                    owner=request.node.nodeid,
+                    owner=node.nodeid,
                     acquire_timeout_s=remaining,
                 )
             )
@@ -337,10 +339,11 @@ def resource_leases(request: pytest.FixtureRequest) -> Iterator[dict[str, Lease]
 
 
 def _require_declaration(request: pytest.FixtureRequest, key: str) -> None:
-    claimed = {claim.spec.key for claim in declared_claims(request.node)}
+    node = cast("pytest.Item", request.node)
+    claimed = {claim.spec.key for claim in declared_claims(node)}
     if key not in claimed:
         pytest.fail(
-            f"{request.node.nodeid} requests a {key!r}-backed fixture without "
+            f"{node.nodeid} requests a {key!r}-backed fixture without "
             f"declaring it; add @pytest.mark.resource({key!r}) so the scheduler "
             "and the lease layer can see the dependency."
         )

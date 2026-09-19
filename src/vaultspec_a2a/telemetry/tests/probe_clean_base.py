@@ -23,12 +23,17 @@ def _initialize_profile(profile: str) -> dict[str, Any]:
             "clean-base probe requires opentelemetry.exporter to be absent"
         )
 
+    from ..instrumentation import configure_telemetry
+
     if profile == "gateway":
-        from ...api.app import configure_telemetry
+        # Importing the module exercises the same import path the real
+        # gateway process takes (route registration, startup wiring) before
+        # configure_telemetry runs, without re-exporting the symbol from it.
+        importlib.import_module("vaultspec_a2a.api.app")
 
         service_name = None
     else:
-        from ...worker.app import configure_telemetry
+        importlib.import_module("vaultspec_a2a.worker.app")
 
         service_name = "vaultspec-worker"
     config = configure_telemetry(service_name=service_name)

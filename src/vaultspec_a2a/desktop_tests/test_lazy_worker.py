@@ -160,8 +160,11 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
         # --- Concurrent first demand: exactly one real worker. ---
         # Four real, parallel, authenticated run-starts race into the single-flight
         # worker start. Each blocks until the worker is ready, so all resolve 201.
+        def _start_run_once(_index: int) -> int:
+            return _start_run(base, auth)
+
         with ThreadPoolExecutor(max_workers=4) as pool:
-            statuses = list(pool.map(lambda _: _start_run(base, auth), range(4)))
+            statuses = list(pool.map(_start_run_once, range(4)))
         assert statuses == [201, 201, 201, 201], statuses
 
         # A real worker now listens on its private port.

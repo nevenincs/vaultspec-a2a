@@ -20,6 +20,7 @@ from vaultspec_a2a.tests._write_authority import make_test_write_authority
 from ....conftest import materialize_schema
 from ....thread.state import TeamState
 from ...nodes.worker import create_worker_node
+from .._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -186,11 +187,11 @@ async def test_worker_resume_reinvokes_model_with_tool_result() -> None:
         name="coder",
     )
 
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
-    builder.add_node("coder", node)
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(builder, "coder", node)
     builder.set_entry_point("coder")
     builder.add_edge("coder", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = compile_test_graph(builder, checkpointer=InMemorySaver())
     config: RunnableConfig = {"configurable": {"thread_id": "test-worker-resume"}}
 
     first_result = await graph.ainvoke(_make_state(), config=config)
@@ -339,11 +340,11 @@ async def test_worker_dispatches_mark_complete_command_through_graph(
         task_queue_port=port,
     )
 
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
-    builder.add_node("coder", node)
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(builder, "coder", node)
     builder.set_entry_point("coder")
     builder.add_edge("coder", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = compile_test_graph(builder, checkpointer=InMemorySaver())
     config: RunnableConfig = {"configurable": {"thread_id": "worker-queue-run"}}
 
     state = _make_state()

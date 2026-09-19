@@ -33,12 +33,15 @@ class RecoveryDeadlineInvariantIncompatibleError(RuntimeError):
 
 
 def _require_empty_store() -> None:
-    populated = op.get_bind().execute(
-        sa.text(
-            "SELECT 1 FROM threads UNION ALL "
-            "SELECT 1 FROM control_actions LIMIT 1"
+    populated = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT 1 FROM threads UNION ALL SELECT 1 FROM control_actions LIMIT 1"
+            )
         )
-    ).first()
+        .first()
+    )
     if populated:
         raise RecoveryDeadlineInvariantIncompatibleError(
             "control-action deadline authority requires a fresh current "

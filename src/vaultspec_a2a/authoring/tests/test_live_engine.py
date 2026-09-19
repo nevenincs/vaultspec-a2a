@@ -18,7 +18,7 @@ key returns the same receipt.
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import pytest_asyncio
@@ -30,6 +30,14 @@ from ..catalog import CATALOG_SCHEMA_VERSION, execute_agent_tool, fetch_catalog
 
 if TYPE_CHECKING:
     from ..discovery import EngineEndpoint
+
+
+def _data(resp: AuthoringResponse) -> dict[str, object]:
+    """Narrow ``resp.data`` (``Any``) to a plain string-keyed dict."""
+    payload: object = resp.data
+    assert isinstance(payload, dict)
+    return cast("dict[str, object]", payload)
+
 
 _EXPECTED_TOOL_NAMES = {
     "read_context",
@@ -56,8 +64,7 @@ async def _authenticated_session(
     """Mint an actor token, bind it, open a session, and return it."""
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
     assert isinstance(minted, AuthoringResponse)
-    assert isinstance(minted.data, dict)
-    raw_token = minted.data.get("raw_token")
+    raw_token = _data(minted).get("raw_token")
     assert isinstance(raw_token, str) and raw_token
     client._actor_token = raw_token
     session = AuthoringSession(client, run_id)
@@ -89,9 +96,14 @@ def _whole_document_op(run_id: str) -> dict[str, Any]:
 @pytest.mark.asyncio
 async def test_catalog_schema_and_tools(client: AuthoringClient) -> None:
     catalog = await client.get("/v1/agent-tools")
-    assert isinstance(catalog.data, dict)
-    assert catalog.data.get("schema_version") == "authoring.semantic_tools.v1"
-    names = {tool["name"] for tool in catalog.data["tools"]}
+    data = _data(catalog)
+    assert data.get("schema_version") == "authoring.semantic_tools.v1"
+    tools = data["tools"]
+    assert isinstance(tools, list)
+    names: set[object] = set()
+    for tool in cast("list[object]", tools):
+        assert isinstance(tool, dict)
+        names.add(cast("dict[str, object]", tool)["name"])
     assert names == _EXPECTED_TOOL_NAMES
 
 
@@ -101,8 +113,7 @@ async def test_mint_actor_token_returns_raw_token(client: AuthoringClient) -> No
     run_id = f"s17-{uuid.uuid4().hex[:8]}"
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
     assert isinstance(minted, AuthoringResponse)
-    assert isinstance(minted.data, dict)
-    assert isinstance(minted.data.get("raw_token"), str)
+    assert isinstance(_data(minted).get("raw_token"), str)
 
 
 @pytest.mark.service
@@ -128,9 +139,9 @@ async def test_whole_document_proposal_creates_draft(
         operations=[_whole_document_op(run_id)],
     )
     assert isinstance(result, AuthoringResponse)
-    assert isinstance(result.data, dict)
-    assert result.data.get("status") == "draft"
-    assert isinstance(result.data.get("changeset_revision"), str)
+    data = _data(result)
+    assert data.get("status") == "draft"
+    assert isinstance(data.get("changeset_revision"), str)
     # The produced changeset id is cross-referenced for thread state.
     assert changeset_id in session.state_references()["authoring_changeset_ids"]
 
@@ -149,14 +160,14 @@ async def test_submit_captures_proposal_id_reference(
         operations=[_whole_document_op(run_id)],
     )
     assert isinstance(created, AuthoringResponse)
-    revision = created.data["changeset_revision"]
+    revision = _data(created)["changeset_revision"]
+    assert isinstance(revision, str)
 
     submitted = await session.submit(
         changeset_id=changeset_id, expected_revision=revision, summary="s17 submit"
     )
     assert isinstance(submitted, AuthoringResponse)
-    assert isinstance(submitted.data, dict)
-    proposal_id = submitted.data.get("proposal_id")
+    proposal_id = _data(submitted).get("proposal_id")
     assert isinstance(proposal_id, str) and proposal_id
     # The proposal id is minted at submit and cross-referenced into thread state.
     assert proposal_id in session.state_references()["authoring_proposal_ids"]
@@ -185,7 +196,7 @@ async def test_idempotent_replay_returns_same_receipt(
     )
     assert isinstance(first, AuthoringResponse)
     assert isinstance(second, AuthoringResponse)
-    assert first.data["receipt_id"] == second.data["receipt_id"]
+    assert _data(first)["receipt_id"] == _data(second)["receipt_id"]
 
 
 @pytest.mark.service
@@ -219,10 +230,12 @@ async def test_run_scoped_execute_of_read_tool(client: AuthoringClient) -> None:
         idempotency_key=f"idk-exec-{run_id}",
     )
     assert isinstance(result, AuthoringResponse)
-    assert isinstance(result.data, dict)
-    assert result.data.get("disposition") == "dispatched"
-    assert result.data.get("eligibility", {}).get("allowed") is True
-    assert result.data.get("tool") == "search_graph"
+    data = _data(result)
+    assert data.get("disposition") == "dispatched"
+    eligibility = data.get("eligibility", {})
+    assert isinstance(eligibility, dict)
+    assert cast("dict[str, object]", eligibility).get("allowed") is True
+    assert data.get("tool") == "search_graph"
 
 
 @pytest.mark.service
@@ -261,24 +274,31 @@ async def test_get_feedback_batch_reads_back_a_created_batch(
         idempotency_key=f"idk-fb-{run_id}",
     )
     assert isinstance(created, AuthoringResponse)
-    assert isinstance(created.data, dict)
-    batch_id = created.data["batch_id"]
+    batch_id = _data(created)["batch_id"]
     assert isinstance(batch_id, str) and batch_id.startswith("feedback-batch:")
 
     # The a2a read path reads the immutable batch back by id, verbatim. The engine
     # nests the batch under "batch" and names the id feedback_batch_id; the reader
     # tolerates that shape (render_feedback_batch unwraps it).
     read = await client.get_feedback_batch(batch_id)
-    assert isinstance(read.data, dict)
-    batch = read.data.get("batch")
-    assert isinstance(batch, dict), read.data
+    read_data = _data(read)
+    batch = read_data.get("batch")
+    assert isinstance(batch, dict), read_data
+    batch = cast("dict[str, object]", batch)
     assert batch["feedback_batch_id"] == batch_id
     assert batch["source_document"] == f"node:doc-{run_id}"
     items = batch["items"]
-    assert isinstance(items, list) and len(items) == 1
-    assert items[0]["comment_id"] == f"c1-{run_id}"
-    assert items[0]["body"] == "tighten the scope"
-    assert items[0]["anchor"]["heading_path"] == ["Overview"]
+    assert isinstance(items, list)
+    items = cast("list[object]", items)
+    assert len(items) == 1
+    item = items[0]
+    assert isinstance(item, dict)
+    item = cast("dict[str, object]", item)
+    assert item["comment_id"] == f"c1-{run_id}"
+    assert item["body"] == "tighten the scope"
+    anchor = item["anchor"]
+    assert isinstance(anchor, dict)
+    assert cast("dict[str, object]", anchor)["heading_path"] == ["Overview"]
 
     # The reader's pure render unwraps the nested batch into grounding text.
     from ..feedback_reader import render_feedback_batch
@@ -322,9 +342,13 @@ async def test_close_session_transitions_active_to_closed(
         idempotency_key=derive_idempotency_key(run_id, "close_session"),
     )
     assert isinstance(result, AuthoringResponse)
-    assert isinstance(result.data, dict)
-    assert result.data["status"] == "closed"
-    assert result.data["snapshot"]["session"]["status"] == "closed"
+    data = _data(result)
+    assert data["status"] == "closed"
+    snapshot = data["snapshot"]
+    assert isinstance(snapshot, dict)
+    session_snapshot = cast("dict[str, object]", snapshot)["session"]
+    assert isinstance(session_snapshot, dict)
+    assert cast("dict[str, object]", session_snapshot)["status"] == "closed"
 
     # Idempotent: a re-close (different key) is a 200 no-op, still closed.
     again = await close_authoring_session(
@@ -333,11 +357,13 @@ async def test_close_session_transitions_active_to_closed(
         idempotency_key=derive_idempotency_key(run_id, "close_session_again"),
     )
     assert isinstance(again, AuthoringResponse)
-    assert again.data["status"] == "closed"
+    assert _data(again)["status"] == "closed"
 
     # The durable snapshot reads back closed.
     snap = await client.get(f"/v1/sessions/{session.session_id}")
-    assert snap.data["session"]["status"] == "closed"
+    snap_session = _data(snap)["session"]
+    assert isinstance(snap_session, dict)
+    assert cast("dict[str, object]", snap_session)["status"] == "closed"
 
 
 @pytest.mark.service
@@ -366,7 +392,11 @@ async def test_close_session_is_a_benign_noop_on_a_cancelled_session(
     )
     assert isinstance(closed, AuthoringResponse)
     # Close on an already-cancelled session leaves it cancelled (no overwrite).
-    assert closed.data["snapshot"]["session"]["status"] == "cancelled"
+    closed_snapshot = _data(closed)["snapshot"]
+    assert isinstance(closed_snapshot, dict)
+    closed_session = cast("dict[str, object]", closed_snapshot)["session"]
+    assert isinstance(closed_session, dict)
+    assert cast("dict[str, object]", closed_session)["status"] == "cancelled"
 
 
 @pytest.mark.service

@@ -14,7 +14,7 @@ import subprocess
 import sys
 import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 
@@ -27,12 +27,12 @@ from ...lifecycle.registry import ProcRecord, now_ms, write_record
 from ...testing import settings_override
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
 
 @contextmanager
-def _a2a_home(path: Path) -> Iterator[None]:
+def _a2a_home(path: Path) -> Generator[None]:
     """Point ``settings.a2a_home`` at *path* for the duration, then restore it."""
     with settings_override(a2a_home=path):
         yield
@@ -50,6 +50,7 @@ def _make_handler() -> type[http.server.BaseHTTPRequestHandler]:
             self.send_header("Content-Length", "0")
             self.end_headers()
 
+        @override
         def log_message(self, format: str, *args: object) -> None:
             """Silence the default access log."""
 
@@ -57,7 +58,7 @@ def _make_handler() -> type[http.server.BaseHTTPRequestHandler]:
 
 
 @contextmanager
-def _foreign_worker() -> Iterator[int]:
+def _foreign_worker() -> Generator[int]:
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _make_handler())
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -98,12 +99,6 @@ async def test_evict_stale_worker_deletes_its_stderr_log_once_freed(
         )
         assert freed is True
         assert not torn_down_log.exists()
-
-
-def _dead_pid() -> int:
-    proc = subprocess.Popen([sys.executable, "-c", "pass"])
-    proc.wait()
-    return proc.pid
 
 
 def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(

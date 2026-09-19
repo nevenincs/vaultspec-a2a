@@ -16,6 +16,7 @@ reconstruction:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import pathlib
@@ -55,6 +56,16 @@ def _current_assignment() -> dict[str, dict[str, object]]:
     return resolve_execution_authority(
         current_execution_metadata(pathlib.Path.cwd())
     ).model_assignment
+
+
+def _test_graph_definition_digest(team_preset: str) -> str:
+    """Deterministic stand-in for a frozen graph definition's digest.
+
+    Injected graphs bypass compilation, so no ``ExecutableGraphDefinition`` is
+    ever frozen for them; the cache key still requires a digest-shaped value
+    to bind the injected entry to its owning preset.
+    """
+    return hashlib.sha256(team_preset.encode()).hexdigest()
 
 
 def _make_bridge() -> WorkerBridge:
@@ -110,6 +121,7 @@ def _install_probe_graph(
         None,
         False,
         model_assignment_digest(_current_assignment()),
+        _test_graph_definition_digest("token-preset"),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -186,6 +198,7 @@ def _install_interrupting_graph(
         None,
         False,
         model_assignment_digest(_current_assignment()),
+        _test_graph_definition_digest("gate-preset"),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 

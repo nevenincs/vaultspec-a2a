@@ -17,10 +17,10 @@ import pytest
 
 from ...graph.enums import ServerEventType
 from ..sse_frames import (
-    _ALWAYS_SAFE_KEYS,
-    _PROGRESS_CATALOG,
+    ALWAYS_SAFE_KEYS,
     MAX_PROGRESS_CONTENT_CHARS,
     MAX_SSE_FRAME_BYTES,
+    PROGRESS_CATALOG,
     encode_sse_frame,
     enforce_progress_allowlist,
 )
@@ -179,7 +179,7 @@ def test_a_frame_naming_no_type_is_degraded_too() -> None:
 
 def test_the_execution_state_projection_is_deliberately_uncatalogued() -> None:
     """It never reaches a subscriber queue; a leaked one degrades to identity."""
-    assert "execution_state_projection" not in _PROGRESS_CATALOG
+    assert "execution_state_projection" not in PROGRESS_CATALOG
 
     frame = enforce_progress_allowlist(
         {
@@ -381,7 +381,7 @@ def test_the_catalog_enumerates_exactly_the_frame_kinds_that_can_be_produced() -
     """
     projected = {kind.value for kind in ServerEventType}
 
-    assert set(_PROGRESS_CATALOG) == projected | _TRANSPORT_FRAME_KINDS
+    assert set(PROGRESS_CATALOG) == projected | _TRANSPORT_FRAME_KINDS
 
 
 # ---------------------------------------------------------------------------
@@ -393,14 +393,14 @@ def test_no_catalog_entry_admits_metadata() -> None:
     """The free-form envelope dict has no entry anywhere in the catalog."""
     admitting = [
         frame_type
-        for frame_type, fields in _PROGRESS_CATALOG.items()
+        for frame_type, fields in PROGRESS_CATALOG.items()
         if "metadata" in fields
     ]
     assert admitting == []
-    assert "metadata" not in _ALWAYS_SAFE_KEYS
+    assert "metadata" not in ALWAYS_SAFE_KEYS
 
 
-@pytest.mark.parametrize("frame_type", sorted(_PROGRESS_CATALOG))
+@pytest.mark.parametrize("frame_type", sorted(PROGRESS_CATALOG))
 def test_metadata_never_survives_any_catalogued_type(frame_type: str) -> None:
     """Every enumerated type drops the free-form dict, not just the old five."""
     frame = enforce_progress_allowlist(

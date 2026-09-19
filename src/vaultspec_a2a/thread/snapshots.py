@@ -11,7 +11,7 @@ import contextlib
 import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -56,8 +56,10 @@ __all__ = [
     "classify_transcript_availability",
     "coerce_provider",
     "derive_message_id",
+    "extract_checkpoint_fields",
     "extract_message_timestamp",
     "finalize_snapshot_replay_status",
+    "fold_pending_writes",
     "is_permission_event",
     "is_progress_event",
     "is_terminal_event",
@@ -245,15 +247,16 @@ def clarification_data_from_interrupt(
     payload = interrupt.payload
     if type(payload) is not dict:
         return None
-    raw_questions = payload.get("questions", [])
+    raw_questions: object = payload.get("questions", [])
     if not isinstance(raw_questions, list):
         return None
     questions: list[ClarificationQuestionData] = []
-    for raw in raw_questions:
+    for raw in cast("list[object]", raw_questions):
         if not isinstance(raw, dict):
             continue
-        qid = raw.get("id")
-        prompt = raw.get("prompt")
+        raw_map = cast("dict[str, object]", raw)
+        qid = raw_map.get("id")
+        prompt = raw_map.get("prompt")
         if (
             not isinstance(qid, str)
             or not qid
@@ -261,16 +264,20 @@ def clarification_data_from_interrupt(
             or not prompt
         ):
             continue
-        kind = raw.get("kind")
-        kind = kind if kind in ("choice", "text") else "text"
-        options = raw.get("options", [])
+        kind_raw = raw_map.get("kind")
+        kind = (
+            kind_raw
+            if isinstance(kind_raw, str) and kind_raw in ("choice", "text")
+            else "text"
+        )
+        options: object = raw_map.get("options", [])
         questions.append(
             ClarificationQuestionData(
                 id=qid,
                 prompt=prompt,
                 kind=kind,
-                required=bool(raw.get("required", False)),
-                options=[o for o in options if isinstance(o, str)]
+                required=bool(raw_map.get("required", False)),
+                options=[o for o in cast("list[object]", options) if isinstance(o, str)]
                 if isinstance(options, list)
                 else [],
             )
@@ -565,7 +572,7 @@ def _parse_checkpoint_created_at(value: object) -> datetime | None:
         return None
 
 
-def _extract_checkpoint_fields(
+def extract_checkpoint_fields(
     checkpoint_tuple: Any,
     *,
     thread_id: str,
@@ -577,38 +584,73 @@ def _extract_checkpoint_fields(
     that describe the checkpoint itself, not the pending work layered on it. The
     pending-write fold is a separate stage so the two concerns read apart.
     """
-    checkpoint = checkpoint_tuple.checkpoint
-    metadata = (
-        checkpoint_tuple.metadata if isinstance(checkpoint_tuple.metadata, dict) else {}
-    )
-    parent_config = (
-        checkpoint_tuple.parent_config
-        if isinstance(checkpoint_tuple.parent_config, dict)
+    checkpoint_raw: object = checkpoint_tuple.checkpoint
+    checkpoint = (
+        cast("dict[str, object]", checkpoint_raw)
+        if isinstance(checkpoint_raw, dict)
         else {}
     )
-    configurable_parent = parent_config.get("configurable", {})
-    checkpoint_id = checkpoint.get("id") or checkpoint_tuple.config.get(
-        "configurable", {}
-    ).get("checkpoint_id")
+    metadata_raw: object = checkpoint_tuple.metadata
+    metadata = (
+        cast("dict[str, object]", metadata_raw)
+        if isinstance(metadata_raw, dict)
+        else {}
+    )
+    parent_config_raw: object = checkpoint_tuple.parent_config
+    parent_config = (
+        cast("dict[str, object]", parent_config_raw)
+        if isinstance(parent_config_raw, dict)
+        else {}
+    )
+    configurable_parent_raw: object = parent_config.get("configurable", {})
+    configurable_parent = (
+        cast("dict[str, object]", configurable_parent_raw)
+        if isinstance(configurable_parent_raw, dict)
+        else {}
+    )
+    config_raw: object = checkpoint_tuple.config
+    config = (
+        cast("dict[str, object]", config_raw) if isinstance(config_raw, dict) else {}
+    )
+    config_configurable_raw: object = config.get("configurable", {})
+    config_configurable = (
+        cast("dict[str, object]", config_configurable_raw)
+        if isinstance(config_configurable_raw, dict)
+        else {}
+    )
+    checkpoint_id: object = checkpoint.get("id") or config_configurable.get(
+        "checkpoint_id"
+    )
+    channel_values_raw: object = checkpoint.get("channel_values", {})
+    channel_values = (
+        cast("dict[str, Any]", channel_values_raw)
+        if isinstance(channel_values_raw, dict)
+        else {}
+    )
+    parent_checkpoint_id_raw = configurable_parent.get("checkpoint_id")
+    checkpoint_source_raw = metadata.get("source")
+    checkpoint_step_raw = metadata.get("step")
     projection = CheckpointProjection(
-        channel_values=checkpoint.get("channel_values", {}),
+        channel_values=channel_values,
         config={"configurable": {"thread_id": thread_id}},
         checkpoint_id=str(checkpoint_id) if checkpoint_id is not None else None,
         checkpoint_created_at=_parse_checkpoint_created_at(checkpoint.get("ts")),
         checkpoint_parent_id=(
-            str(configurable_parent.get("checkpoint_id"))
-            if configurable_parent.get("checkpoint_id") is not None
+            str(parent_checkpoint_id_raw)
+            if parent_checkpoint_id_raw is not None
             else None
         ),
         checkpoint_source=(
-            str(metadata.get("source")) if metadata.get("source") is not None else None
+            str(checkpoint_source_raw) if checkpoint_source_raw is not None else None
         ),
         checkpoint_step=(
-            int(metadata["step"]) if isinstance(metadata.get("step"), int) else None
+            checkpoint_step_raw if isinstance(checkpoint_step_raw, int) else None
         ),
         checkpoint_updated_channels=[
             str(channel)
-            for channel in checkpoint.get("updated_channels") or []
+            for channel in cast(
+                "list[object]", checkpoint.get("updated_channels") or []
+            )
             if isinstance(channel, str)
         ],
         history_depth=history_depth,
@@ -618,7 +660,7 @@ def _extract_checkpoint_fields(
     return projection
 
 
-def _fold_pending_writes(
+def fold_pending_writes(
     projection: CheckpointProjection,
     checkpoint_tuple: Any,
     *,
@@ -632,7 +674,10 @@ def _fold_pending_writes(
     rather than returning a new one, because the base fields it builds on are
     already correct and only the pending-work view is being added.
     """
-    for index, pending_write in enumerate(checkpoint_tuple.pending_writes or []):
+    pending_writes: list[tuple[object, object, object]] = (
+        checkpoint_tuple.pending_writes or []
+    )
+    for index, pending_write in enumerate(pending_writes):
         _task_id, channel, value = pending_write
         projection.pending_write_count += 1
         if (
@@ -642,13 +687,18 @@ def _fold_pending_writes(
             projection.pending_write_channels.append(channel)
         if channel != "__interrupt__":
             continue
-        raw_interrupts = value if isinstance(value, list | tuple) else [value]
+        raw_interrupts: list[object] = (
+            list(cast("list[object] | tuple[object, ...]", value))
+            if isinstance(value, list | tuple)
+            else [value]
+        )
         for raw_interrupt in raw_interrupts:
-            payload = getattr(raw_interrupt, "value", raw_interrupt)
-            if not isinstance(payload, dict):
+            payload_raw: object = getattr(raw_interrupt, "value", raw_interrupt)
+            if not isinstance(payload_raw, dict):
                 if "interrupt_payload_unreadable" not in projection.degraded_reasons:
                     projection.degraded_reasons.append("interrupt_payload_unreadable")
                 continue
+            payload = cast("dict[str, Any]", payload_raw)
             interrupt_type = payload.get("type")
             if not isinstance(interrupt_type, str):
                 if "interrupt_payload_untyped" not in projection.degraded_reasons:
@@ -687,10 +737,10 @@ def project_checkpoint_tuple(
     own description separate from the pending work layered on it, so each reads
     and tests apart.
     """
-    projection = _extract_checkpoint_fields(
+    projection = extract_checkpoint_fields(
         checkpoint_tuple, thread_id=thread_id, history_depth=history_depth
     )
-    _fold_pending_writes(projection, checkpoint_tuple, thread_id=thread_id)
+    fold_pending_writes(projection, checkpoint_tuple, thread_id=thread_id)
     return projection
 
 
@@ -713,11 +763,15 @@ def classify_message_role(msg: Any) -> str:
 def extract_message_timestamp(msg: Any) -> datetime:
     """Extract message timestamp from response metadata; falls back to now()."""
     ts: datetime | None = None
-    for meta_src in (
-        getattr(msg, "response_metadata", None) or {},
-        getattr(msg, "additional_kwargs", None) or {},
-    ):
-        raw_ts = meta_src.get("created_at") or meta_src.get("timestamp")
+    response_metadata_raw: object = getattr(msg, "response_metadata", None) or {}
+    additional_kwargs_raw: object = getattr(msg, "additional_kwargs", None) or {}
+    for meta_src_raw in (response_metadata_raw, additional_kwargs_raw):
+        meta_src = (
+            cast("dict[str, object]", meta_src_raw)
+            if isinstance(meta_src_raw, dict)
+            else {}
+        )
+        raw_ts: object = meta_src.get("created_at") or meta_src.get("timestamp")
         if isinstance(raw_ts, datetime):
             ts = raw_ts
             break
@@ -743,11 +797,15 @@ def normalize_plan_entries(plan_raw: list[Any]) -> list[PlanEntry]:
     entries: list[PlanEntry] = []
     for entry in plan_raw:
         if isinstance(entry, dict):
+            entry_map = cast("dict[str, object]", entry)
+            content = entry_map.get("content", "")
+            status = entry_map.get("status", "pending")
+            priority = entry_map.get("priority", "medium")
             entries.append(
                 PlanEntry(
-                    content=entry.get("content", ""),
-                    status=entry.get("status", "pending"),
-                    priority=entry.get("priority", "medium"),
+                    content=content if isinstance(content, str) else str(content),
+                    status=status if isinstance(status, str) else str(status),
+                    priority=priority if isinstance(priority, str) else str(priority),
                 )
             )
         elif isinstance(entry, PlanEntry):
@@ -760,12 +818,13 @@ def normalize_artifacts(artifacts_raw: list[Any]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for art in artifacts_raw:
         if isinstance(art, dict):
+            art_map = cast("dict[str, object]", art)
             normalized.append(
                 {
-                    "artifact_id": art.get("artifact_id", ""),
-                    "filename": art.get("filename", ""),
-                    "content": art.get("content", ""),
-                    "complete": art.get("complete", True),
+                    "artifact_id": art_map.get("artifact_id", ""),
+                    "filename": art_map.get("filename", ""),
+                    "content": art_map.get("content", ""),
+                    "complete": art_map.get("complete", True),
                 }
             )
     return normalized

@@ -35,6 +35,7 @@ from ....graph.nodes.diverge import (
     researcher_node_name,
 )
 from ....thread.state import TeamState
+from .._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -161,11 +162,13 @@ async def test_compiled_researcher_forwards_config_to_config_aware_producer() ->
             "source_thread": spec["thread_id"],
         }
 
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
-    builder.add_node("researcher", create_researcher_node(spec, config_aware_producer))
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(
+        builder, "researcher", create_researcher_node(spec, config_aware_producer)
+    )
     builder.add_edge(START, "researcher")
     builder.add_edge("researcher", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = compile_test_graph(builder, checkpointer=InMemorySaver())
     config: RunnableConfig = {
         "callbacks": [passive_callback],
         "configurable": {"thread_id": "config-aware-run"},
@@ -211,7 +214,7 @@ async def test_diverge_stage_accumulates_findings_and_joins() -> None:
     The synthesis node runs once (the join), and by the time it runs every
     researcher branch's finding is visible through the reducer.
     """
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
 
     seen_at_synthesis: dict[str, list[dict[str, Any]]] = {}
 
@@ -227,10 +230,10 @@ async def test_diverge_stage_accumulates_findings_and_joins() -> None:
         make_researcher=lambda spec: create_researcher_node(spec, _fake_producer),
         researcher_metadata={},
     )
-    builder.add_node("synthesis", synthesis_node)
+    add_test_node(builder, "synthesis", synthesis_node)
     builder.add_edge(START, dispatch)
     builder.add_edge("synthesis", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = compile_test_graph(builder, checkpointer=InMemorySaver())
 
     result = await graph.ainvoke(
         _base_state(), config={"configurable": {"thread_id": "diverge-run"}}
@@ -246,7 +249,7 @@ async def test_diverge_stage_accumulates_findings_and_joins() -> None:
 async def test_wire_diverge_stage_rejects_empty_specs() -> None:
     from ....thread.errors import ConfigError
 
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
     with pytest.raises(ConfigError, match="at least one research thread spec"):
         _wire_diverge_stage(
             builder,
@@ -309,8 +312,8 @@ async def test_web_locators_reach_synthesis_and_survive_the_checkpoint(
         seen_at_synthesis["findings"] = list(state.get("research_findings") or [])
         return {"messages": [AIMessage(content="synthesised", name="synthesist")]}
 
-    def _build() -> StateGraph:
-        builder: StateGraph = StateGraph(cast("Any", TeamState))
+    def _build() -> StateGraph[Any, None, Any, Any]:
+        builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
         dispatch = _wire_diverge_stage(
             builder,
             dispatch_name="research_dispatch",
@@ -319,14 +322,14 @@ async def test_web_locators_reach_synthesis_and_survive_the_checkpoint(
             make_researcher=lambda spec: create_researcher_node(spec, _fake_producer),
             researcher_metadata={},
         )
-        builder.add_node("synthesis", synthesis_node)
+        add_test_node(builder, "synthesis", synthesis_node)
         builder.add_edge(START, dispatch)
         builder.add_edge("synthesis", END)
         return builder
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
         await saver.setup()
-        graph = _build().compile(checkpointer=saver)
+        graph = compile_test_graph(_build(), checkpointer=saver)
         result = await graph.ainvoke(_base_state(), config=config)
 
     expected_urls = sorted(
@@ -352,7 +355,8 @@ async def test_web_locators_reach_synthesis_and_survive_the_checkpoint(
     # Reopen the persisted checkpoint with a fresh connection and recompiled
     # graph: nothing from the first process-local run is in play here.
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as reopened:
-        replayed = await _build().compile(checkpointer=reopened).aget_state(config)
+        reopened_graph = compile_test_graph(_build(), checkpointer=reopened)
+        replayed = await reopened_graph.aget_state(config)
 
     restored = cast("list[dict[str, Any]]", replayed.values["research_findings"])
     assert sorted(_web_urls(restored)) == expected_urls

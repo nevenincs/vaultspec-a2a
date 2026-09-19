@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, Protocol, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 
 _FILE_READ_ATTRIBUTES = 0x00000080
@@ -139,8 +139,6 @@ def _directory_identity(path: Path) -> tuple[int, int]:
 
 def resolve_directory_authority(path: Path) -> DirectoryAuthority:
     """Resolve one real, non-link-like directory before leasing it."""
-    if not isinstance(path, Path):
-        raise TypeError("directory authority path must be a Path")
     if path_is_link_like(path):
         raise OSError(errno.ELOOP, "directory authority is link-like", path)
     before = _directory_identity(path)
@@ -300,7 +298,7 @@ def _windows_directory_lease(
     authority: DirectoryAuthority,
     *,
     publication: bool,
-) -> Iterator[DirectoryAuthority]:
+) -> Generator[DirectoryAuthority]:
     if sys.platform != "win32":
         raise OSError(errno.ENOSYS, "Windows directory leases require Windows")
     library = _windows_library()
@@ -358,7 +356,7 @@ def directory_lease(
     authority: DirectoryAuthority,
     *,
     publication: bool = False,
-) -> Iterator[DirectoryAuthority]:
+) -> Generator[DirectoryAuthority]:
     """Hold a live native lease for one directory identity."""
     assert_directory_authority(authority)
     if os.name == "nt":
@@ -386,8 +384,7 @@ def directory_lease(
 
 def _validate_relative_name(value: str) -> bytes:
     if (
-        not isinstance(value, str)
-        or value in {"", ".", ".."}
+        value in {"", ".", ".."}
         or "/" in value
         or "\\" in value
         or Path(value).name != value

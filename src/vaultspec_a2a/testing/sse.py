@@ -31,10 +31,10 @@ __all__ = ["read_frame"]
 
 async def read_frame(
     lines: AsyncIterator[str], *, wanted: str | None = None, timeout: float
-) -> tuple[dict, str]:
+) -> tuple[dict[str, object], str]:
     """Read SSE frames until one matches (or any non-heartbeat); return it + raw."""
 
-    async def _scan() -> tuple[dict, str]:
+    async def _scan() -> tuple[dict[str, object], str]:
         buffer: list[str] = []
         async for raw in lines:
             line = raw.rstrip("\r")

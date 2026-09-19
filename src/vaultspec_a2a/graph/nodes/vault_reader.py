@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import glob as _glob
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from langchain_core.messages.utils import count_tokens_approximately
 
@@ -20,7 +20,6 @@ from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from ...thread.state import TeamState
@@ -29,6 +28,21 @@ if TYPE_CHECKING:
 from ..tools.task_queue import render_queue_view
 
 __all__ = ["build_initial_vault_index", "create_mount_node"]
+
+
+class MountNode(Protocol):
+    """Node callable shape for the mount stage: state-only, no routing.
+
+    A plain ``Callable[[TeamState], Any]`` erases the ``state`` parameter name,
+    which langgraph's node protocols match on, not just position -- so this
+    named-parameter ``Protocol`` is what let ``add_node`` bind it without a
+    ``reportArgumentType`` mismatch at every call site.
+    """
+
+    async def __call__(self, state: TeamState) -> dict[str, Any]:
+        """Execute the mount pass, returning a state update."""
+        ...
+
 
 _logger = logging.getLogger(__name__)
 
@@ -113,7 +127,7 @@ def _select_paths(
 def create_mount_node(
     workspace_root: Path | None,
     task_queue_port: TaskQueuePort | None = None,
-) -> Callable:
+) -> MountNode:
     """Factory: returns a mount_node with a closure-scoped content cache.
 
     The cache is scoped to this factory call -- one cache per compiled graph,

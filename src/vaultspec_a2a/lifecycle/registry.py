@@ -23,7 +23,7 @@ import socket
 import time
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..utils.atomic_write import atomic_write_text
@@ -206,7 +206,7 @@ def _coerce_command(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     items: list[str] = []
-    for entry in value:
+    for entry in cast("list[object]", value):
         if not isinstance(entry, str):
             return []
         items.append(entry)
@@ -273,7 +273,7 @@ def read_record(path: Path) -> ProcRecord | None:
         return None
     if not isinstance(data, dict):
         return None
-    return _record_from_dict(data)
+    return _record_from_dict(cast("dict[str, Any]", data))
 
 
 def list_records(home: Path | None = None) -> list[ProcRecord]:
@@ -415,7 +415,9 @@ def allocate_port(
     """
     claimed = {rec.port for rec in list_records(home) if is_pid_alive(rec.pid)}
     reserved = _live_reservation_ports(home)
-    resident_ports = set(config.resident.values()) if config is not None else set()
+    resident_ports: set[int] = (
+        set(config.resident.values()) if config is not None else set()
+    )
     for candidate in role_config.band:
         if candidate in claimed or candidate in reserved or candidate in resident_ports:
             continue
@@ -507,7 +509,9 @@ def reserve_port(
     root = procs_home(home)
     root.mkdir(parents=True, exist_ok=True)
     claimed = {rec.port for rec in list_records(home) if is_pid_alive(rec.pid)}
-    resident_ports = set(config.resident.values()) if config is not None else set()
+    resident_ports: set[int] = (
+        set(config.resident.values()) if config is not None else set()
+    )
     for candidate in role_config.band:
         if candidate in claimed or candidate in resident_ports:
             continue

@@ -159,7 +159,7 @@ async def _relay(
 
     graph, config = await _park_on_clarification(thread_id, request_id)
     emitted = await emit_interrupt_events(
-        thread_id, "supervisor", graph, config, aggregator._emitters
+        thread_id, "supervisor", graph, config, aggregator.emitters
     )
     assert emitted
 
@@ -278,7 +278,7 @@ async def test_a_run_parked_on_nothing_emits_no_nudge() -> None:
         "supervisor",
         cast("StreamableGraph", graph),
         cast("dict[str, Any]", config),
-        aggregator._emitters,
+        aggregator.emitters,
     )
 
     assert not emitted

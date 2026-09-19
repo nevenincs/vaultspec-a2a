@@ -31,7 +31,7 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import psutil
@@ -60,7 +60,7 @@ from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
     from typing import Protocol
 
     from .._json_contract import FrozenJsonObject, JsonObject, JsonValue
@@ -68,7 +68,7 @@ if TYPE_CHECKING:
     class _BinaryCapture(Protocol):
         def flush(self) -> None: ...
 
-        def seek(self, offset: int) -> int: ...
+        def seek(self, offset: int, /) -> int: ...
 
         def read(self, size: int = -1, /) -> bytes: ...
 
@@ -214,9 +214,9 @@ async def _run_rag_cli(
     assert process is not None
     if process.returncode != 0:
         raise RuntimeError(rendered_stderr or rendered_stdout)
-    payload = json.loads(rendered_stdout)
-    assert isinstance(payload, dict), payload
-    return payload
+    raw_payload: object = json.loads(rendered_stdout)
+    assert isinstance(raw_payload, dict), raw_payload
+    return cast("dict[str, object]", raw_payload)
 
 
 def _loopback_port_is_closed(port: int) -> bool:
@@ -258,16 +258,21 @@ async def _private_endpoint_matches(owner: _OwnedRagService) -> bool:
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(f"http://127.0.0.1:{owner.port}/health")
-        payload = response.json()
+        raw_payload: object = response.json()
     except (httpx.HTTPError, json.JSONDecodeError):
         return False
-    token = payload.get("service_token") if isinstance(payload, dict) else None
+    payload = (
+        cast("dict[str, object]", raw_payload)
+        if isinstance(raw_payload, dict)
+        else None
+    )
+    token = payload.get("service_token") if payload is not None else None
     token_digest = (
         hashlib.sha256(token.encode()).hexdigest() if isinstance(token, str) else None
     )
-    return (
+    return bool(
         response.status_code == 200
-        and isinstance(payload, dict)
+        and payload is not None
         and payload.get("pid") == owner.process.pid
         and payload.get("port") == owner.port
         and token_digest == owner.service_token_sha256
@@ -406,7 +411,7 @@ async def _isolated_rag_service(
     cleanup_receipt: _CleanupReceipt | None = None,
     start_control_prefix: tuple[str, ...] = (),
     stop_control_prefix: tuple[str, ...] = (),
-) -> AsyncIterator[tuple[str, dict[str, str], _CleanupReceipt]]:
+) -> AsyncGenerator[tuple[str, dict[str, str], _CleanupReceipt]]:
     """Run the lockfile-selected RAG service behind owned state and cleanup."""
     requirement = _locked_rag_requirement(project_root)
     locked_version = requirement.rsplit("==", maxsplit=1)[1]
@@ -453,8 +458,10 @@ async def _isolated_rag_service(
             absolute_deadline=control_deadline,
         )
         assert start.get("ok") is True, start
-        start_data = start.get("data")
-        assert isinstance(start_data, dict) and start_data.get("port") == port, start
+        raw_start_data = start.get("data")
+        assert isinstance(raw_start_data, dict), start
+        start_data = cast("dict[str, object]", raw_start_data)
+        assert start_data.get("port") == port, start
         started = True
 
         owner = _read_private_service_owner(

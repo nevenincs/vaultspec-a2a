@@ -32,12 +32,12 @@ def estimate_tokens(messages: Sequence[BaseMessage]) -> int:
         content = msg.content
         if isinstance(content, str):
             total_chars += len(content)
-        elif isinstance(content, list):
+        else:
             # Multi-part content (e.g. vision messages with text blocks)
             for part in content:
                 if isinstance(part, str):
                     total_chars += len(part)
-                elif isinstance(part, dict):
+                else:
                     total_chars += len(part.get("text", ""))
     return total_chars // domain_config.chars_per_token
 
@@ -135,7 +135,7 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     return new_state
 
 
-def prepare_handoff(state: TeamState, target_agent: str) -> dict:
+def prepare_handoff(state: TeamState, target_agent: str) -> dict[str, object]:
     """Prepare a lean state dict for handing off to *target_agent*.
 
     Handoffs strip internal reasoning loops and pass only

@@ -8,7 +8,7 @@ and lookup tables only.
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from langgraph.types import Command
 
@@ -45,7 +45,7 @@ class StreamableGraph(Protocol):
 
     def astream_events(
         self,
-        graph_input: dict[str, Any] | Command | None,
+        graph_input: dict[str, Any] | Command[Any] | None,
         config: dict[str, Any],
         *,
         version: str,
@@ -211,10 +211,10 @@ def parse_action_detail(raw_args: object) -> dict[str, Any] | None:
     if not isinstance(raw_args, str) or not raw_args:
         return None
     try:
-        parsed = json.loads(raw_args)
+        parsed: object = json.loads(raw_args)
     except (TypeError, ValueError):
         return None
-    return parsed if isinstance(parsed, dict) else None
+    return cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else None
 
 
 def action_detail_projection(
@@ -238,12 +238,14 @@ def action_detail_projection(
         text = "\n".join(parts)
         return ([{"content_type": "text", "text": text}] if text else []), []
     if item_type == "fileChange":
-        changes = detail.get("changes")
+        changes: object = detail.get("changes")
         locations: list[dict[str, str | int | None]] = []
         if isinstance(changes, list):
-            for change in changes:
+            change_list = cast("list[object]", changes)
+            for change in change_list:
                 if isinstance(change, dict):
-                    path = change.get("path")
+                    change_map = cast("dict[str, object]", change)
+                    path = change_map.get("path")
                     if isinstance(path, str) and path:
                         locations.append({"path": path, "line": None})
         text = f"{len(locations)} file(s) changed" if locations else ""
@@ -331,7 +333,7 @@ def resolve_acp_option_kind(
     return _map_acp_option_kind(option_id)
 
 
-def evict_oldest(d: dict, max_entries: int) -> None:
+def evict_oldest[K](d: dict[K, float], max_entries: int) -> None:
     """Remove oldest entries (by value = timestamp) until at max_entries."""
     to_remove = len(d) - max_entries
     if to_remove <= 0:

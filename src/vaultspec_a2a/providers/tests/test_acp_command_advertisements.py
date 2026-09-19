@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -12,6 +12,9 @@ from .._acp_types import (
     AcpSessionContext,
     NativeCommandDisposition,
 )
+
+if TYPE_CHECKING:
+    from .._json_contract import JsonObject, JsonValue
 
 
 def _context() -> AcpSessionContext:
@@ -28,17 +31,17 @@ def _context() -> AcpSessionContext:
 
 
 def _update(
-    available_commands: object,
+    available_commands: JsonValue,
     *,
     field: str = "availableCommands",
     session_id: str = "session-1",
-) -> dict:
+) -> JsonObject:
     return {
         "sessionId": session_id,
         "update": {
             "sessionUpdate": "available_commands_update",
             field: available_commands,
-        }
+        },
     }
 
 
@@ -94,7 +97,7 @@ def test_lookup_is_blocked_until_the_session_advertises_commands() -> None:
         ["compact"],
     ],
 )
-def test_malformed_snapshot_blocks_command_execution(commands: object) -> None:
+def test_malformed_snapshot_blocks_command_execution(commands: JsonValue) -> None:
     ctx = _context()
     asyncio.run(handle_session_update(_update(commands), ctx))
 
@@ -122,9 +125,7 @@ def test_nonprotocol_legacy_commands_key_is_blocked() -> None:
     ctx = _context()
     asyncio.run(
         handle_session_update(
-            _update(
-                [{"name": "compact", "description": "Compact."}], field="commands"
-            ),
+            _update([{"name": "compact", "description": "Compact."}], field="commands"),
             ctx,
         )
     )

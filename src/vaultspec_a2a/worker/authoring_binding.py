@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 if TYPE_CHECKING:
     from ..providers._acp_authoring import AuthoringToolBinding
@@ -125,6 +125,7 @@ class AuthoringBindingProvider:
         ) as client:
             return await fetch_catalog(client)
 
+    @override
     def __repr__(self) -> str:
         """Redacted representation — reports only the engine origin."""
         return f"AuthoringBindingProvider(engine_base_url={self._engine_base_url!r})"

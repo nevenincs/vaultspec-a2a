@@ -20,7 +20,7 @@ each dict operation is atomic between them.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 if TYPE_CHECKING:
     from ..authoring import CatalogSnapshot
@@ -61,6 +61,7 @@ class RunCatalogStore:
         """Drop *thread_id*'s snapshot at run end. Idempotent."""
         self._snapshots.pop(thread_id, None)
 
+    @override
     def __repr__(self) -> str:
         """Report only the active-run count (mirrors RunTokenStore's redacting repr)."""
         return f"RunCatalogStore(active_runs={len(self._snapshots)})"

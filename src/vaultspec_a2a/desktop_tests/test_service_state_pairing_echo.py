@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
@@ -58,7 +58,7 @@ def _service_state(base: str) -> dict[str, Any]:
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert isinstance(body, dict), body
-    return body
+    return cast("dict[str, Any]", body)
 
 
 def test_service_state_reports_the_spawning_gateway_for_its_own_worker(

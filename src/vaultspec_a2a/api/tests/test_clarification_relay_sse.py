@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 import pytest
 from langchain_core.messages import HumanMessage
-from langgraph.graph import END, START, StateGraph
 
 from ...graph.nodes.clarification import (
     create_clarification_gate_node,
@@ -36,11 +35,15 @@ from ...thread.clarification import (
     ClarificationQuestion,
     ClarificationRequest,
 )
-from ...thread.state import TeamState
-from .conftest import _live_server, async_catalog_run_fields, make_app
+from .clarification_harness import new_state_graph
+from .conftest import SessionFactory, _live_server, async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
-    from ...streaming.types import StreamableGraph
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from ...streaming.aggregator import EventAggregator
+    from ...thread.state import TeamState
 
 _PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
@@ -49,12 +52,17 @@ _OPTIONS = ["dock-right", "dock-left"]
 _REQUEST_ID = "clarify-sse"
 
 
-async def _park_real_run(aggregator, checkpointer, *, thread_id: str) -> None:
+async def _park_real_run(
+    aggregator: EventAggregator, checkpointer: AsyncSqliteSaver, *, thread_id: str
+) -> None:
     """Park a real run on a real clarification and project it through the app.
 
     Uses the production node pair and the app's own checkpointer and aggregator,
     so the frame that reaches the socket is produced by the same seam a live run
-    goes through.
+    goes through. Builds its graph through the shared harness's typed
+    ``new_state_graph`` boundary rather than constructing ``StateGraph``
+    directly, matching the pattern already proven clean in
+    ``clarification_harness.py``.
     """
     request = ClarificationRequest(
         request_id=_REQUEST_ID,
@@ -69,12 +77,14 @@ async def _park_real_run(aggregator, checkpointer, *, thread_id: str) -> None:
     )
 
     async def _producer(state: TeamState) -> ClarificationRequest | None:
+        del state
         return request
 
-    async def proceed(state: TeamState) -> dict[str, Any]:
+    def _proceed(state: TeamState) -> dict[str, object]:
+        del state
         return {}
 
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     builder.add_node(
         "clarification_request",
         create_clarification_request_node(
@@ -84,32 +94,31 @@ async def _park_real_run(aggregator, checkpointer, *, thread_id: str) -> None:
     builder.add_node(
         "clarification_gate", create_clarification_gate_node(proceed_target="proceed")
     )
-    builder.add_node("proceed", proceed)
-    builder.add_edge(START, "clarification_request")
-    builder.add_edge("proceed", END)
+    builder.add_node("proceed", _proceed)
+    builder.add_edge("__start__", "clarification_request")
+    builder.add_edge("proceed", "__end__")
     graph = builder.compile(checkpointer=checkpointer)
 
-    config: Any = {"configurable": {"thread_id": thread_id}}
-    result = await graph.ainvoke(
-        {
-            "active_agent": "clarify",
-            "artifacts": [],
-            "current_plan": [],
-            "messages": [HumanMessage(content="Plan the monitor panel.")],
-            "next": "",
-            "thread_id": thread_id,
-            "active_feature": "agent-panel",
-            "token_usage": {},
-        },
-        config=config,
-    )
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    state: TeamState = {
+        "active_agent": "clarify",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [HumanMessage(content="Plan the monitor panel.")],
+        "next": "",
+        "thread_id": thread_id,
+        "active_feature": "agent-panel",
+        "token_usage": {},
+    }
+    result = await graph.ainvoke(state, config=config)
+    assert isinstance(result, dict)
     assert "__interrupt__" in result
 
     emitted = await emit_interrupt_events(
         thread_id,
         "supervisor",
-        cast("StreamableGraph", graph),
-        config,
+        graph,
+        cast("dict[str, Any]", config),
         aggregator._emitters,
     )
     assert emitted
@@ -117,7 +126,7 @@ async def _park_real_run(aggregator, checkpointer, *, thread_id: str) -> None:
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A subscriber really receives the frame, and it really is only a nudge.
 
@@ -169,7 +178,7 @@ async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_the_questions_live_on_run_status_not_on_the_relay(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The authority split, asserted as one property rather than two halves.
 

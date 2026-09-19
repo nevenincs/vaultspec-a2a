@@ -38,13 +38,13 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..lifecycle import is_pid_alive, procs_home
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
 __all__ = [
@@ -151,7 +151,7 @@ def _read_holder_pid(path: Path) -> int | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    pid = data.get("pid") if isinstance(data, dict) else None
+    pid = cast("dict[str, object]", data).get("pid") if isinstance(data, dict) else None
     return pid if isinstance(pid, int) and not isinstance(pid, bool) else None
 
 
@@ -162,6 +162,7 @@ def _holder_description(path: Path) -> str:
         return f"unreadable marker {path.name}"
     if not isinstance(data, dict):
         return f"malformed marker {path.name}"
+    data = cast("dict[str, object]", data)
     return (
         f"pid {data.get('pid')} owner {data.get('owner')!r} "
         f"since {data.get('acquired_at_ms')}"
@@ -397,7 +398,7 @@ def hold_lease(
     acquire_timeout_s: float | None = None,
     poll_interval_s: float = 0.25,
     refresh_interval_s: float = _REFRESH_INTERVAL_S,
-) -> Iterator[Lease]:
+) -> Generator[Lease]:
     """Context-managed :func:`acquire`; releases on exit even under failure."""
     lease = acquire(
         key,

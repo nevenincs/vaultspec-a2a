@@ -204,11 +204,13 @@ async def test_client_request_after_close_raises() -> None:
 @pytest.mark.asyncio
 async def test_native_interrupt_targets_one_exact_active_turn() -> None:
     class InterruptClient:
-        active: _ActiveCodexTurn
-        observed: tuple[str, JsonObject] | None = None
+        def __init__(self) -> None:
+            self.active: _ActiveCodexTurn | None = None
+            self.observed: tuple[str, JsonObject] | None = None
 
         async def request(self, method: str, params: JsonObject) -> JsonObject:
             self.observed = (method, params)
+            assert self.active is not None
             self.active.terminal_status = "interrupted"
             self.active.terminal_seen.set()
             return {}
@@ -233,9 +235,11 @@ async def test_native_interrupt_targets_one_exact_active_turn() -> None:
 @pytest.mark.asyncio
 async def test_native_interrupt_rejects_ack_without_interrupted_end() -> None:
     class CompletedClient:
-        active: _ActiveCodexTurn
+        def __init__(self) -> None:
+            self.active: _ActiveCodexTurn | None = None
 
         async def request(self, method: str, params: JsonObject) -> JsonObject:
+            assert self.active is not None
             self.active.terminal_status = "completed"
             self.active.terminal_seen.set()
             return {}
@@ -606,12 +610,18 @@ def test_the_codex_model_declares_a_permission_callback() -> None:
     that DECLARES ``permission_callback``; without the field a supervised Codex
     run silently skipped the rung altogether rather than failing.
     """
+
+    async def _noop_permission_callback(
+        tool_name: str, arguments: JsonObject, options: list[JsonObject]
+    ) -> str:
+        return ""
+
     model = CodexChatModel()
     assert hasattr(model, "permission_callback")
     assert model.permission_callback is None
     assert (
         model.model_copy(
-            update={"permission_callback": lambda *a: None}
+            update={"permission_callback": _noop_permission_callback}
         ).permission_callback
         is not None
     )
@@ -742,8 +752,7 @@ async def test_early_app_server_exit_reports_redacted_bounded_stderr_tail(
     )
     model = CodexChatModel(
         command=[sys.executable, "-c", command],
-        workspace_root=str(Path.cwd()),
-        cwd=str(tmp_path),
+        workspace_root=str(tmp_path),
         codex_home=str(codex_home),
         timeout=10.0,
     )

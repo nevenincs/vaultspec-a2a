@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -93,7 +94,11 @@ async def test_write_and_read_hashes_agree_for_an_uncanonical_spelling(
     )
     await session.commit()
 
-    result = await discover_active_runs(session, workspace_root=queried_as)
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
+        await checkpointer.setup()
+        result = await discover_active_runs(
+            session, checkpointer=checkpointer, workspace_root=queried_as
+        )
 
     assert [run.run_id for run in result.runs] == ["run-workspace-identity"]
 

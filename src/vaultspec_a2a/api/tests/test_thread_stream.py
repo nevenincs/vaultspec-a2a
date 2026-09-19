@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi.testclient import TestClient
 
@@ -25,7 +25,10 @@ from vaultspec_a2a.tests._write_authority import make_test_write_authority
 from ...database.thread_repository import create_thread, update_thread_status
 from ...providers.conditions import ProviderCondition
 from ...thread.enums import ThreadStatus
-from .conftest import make_app
+from .conftest import SessionFactory, make_app
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 
 def _sse_frames(body: str) -> list[tuple[str, dict[str, Any]]]:
@@ -48,7 +51,7 @@ class TestStreamThreadEvents:
     """Direct coverage of the SSE relay endpoint."""
 
     def test_stream_unknown_thread_returns_404(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Streaming an unknown thread id is a clean 404, not a hanging stream."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -57,7 +60,7 @@ class TestStreamThreadEvents:
         assert resp.status_code == 404
 
     def test_stream_terminal_thread_replays_terminal_frame(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A terminal thread replays a single ``thread_terminal`` SSE frame.
 
@@ -92,7 +95,7 @@ class TestStreamThreadEvents:
         assert "completed" in body
 
     def test_stream_terminal_failure_replays_its_reason_and_condition(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A client attaching after a failure learns why, not just that.
 
@@ -145,7 +148,7 @@ class TestStreamThreadEvents:
         assert terminal["error_detail"] == "RateLimitError: too many requests"
 
     def test_stream_terminal_failure_without_a_condition_falls_back_to_the_floor(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A row written before the condition column still replays its reason.
 
@@ -183,7 +186,7 @@ class TestStreamThreadEvents:
         assert frames[1][1]["error_detail"] == "ValueError: bad workspace root"
 
     def test_stream_terminal_success_replays_no_error_frame(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A completed run must not be reported as a failure on reconnect.
 

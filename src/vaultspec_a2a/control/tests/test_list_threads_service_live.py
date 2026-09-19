@@ -53,7 +53,9 @@ class _Checkpointer:
         return None
 
 
-async def _seed(session_factory, count: int) -> list[str]:
+async def _seed(
+    session_factory: async_sessionmaker[AsyncSession], count: int
+) -> list[str]:
     ids: list[str] = []
     async with session_factory() as session:
         for index in range(count):
@@ -73,7 +75,9 @@ async def _seed(session_factory, count: int) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_the_page_is_ordered_newest_first(session_factory) -> None:
+async def test_the_page_is_ordered_newest_first(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """Threads are listed most-recently-created first."""
     await _seed(session_factory, 4)
 
@@ -108,7 +112,9 @@ async def test_a_verified_absent_checkpoint_does_not_degrade_the_thread(
 
 
 @pytest.mark.asyncio
-async def test_an_uncertain_checkpoint_degrades_the_thread(session_factory) -> None:
+async def test_an_uncertain_checkpoint_degrades_the_thread(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """A read the batch deadline cut off degrades to checkpoint-unavailable.
 
     A slow store and a tight deadline force the uncertain path for every thread,

@@ -33,7 +33,7 @@ from ..routes.gateway import _summarize_preset
 
 def _real_preset_ids() -> list[str]:
     """Every bundled preset that loads, mocks included - they dispatch too."""
-    ids = []
+    ids: list[str] = []
     for preset_id in sorted(discover_team_preset_ids()):
         try:
             load_team_config(preset_id)

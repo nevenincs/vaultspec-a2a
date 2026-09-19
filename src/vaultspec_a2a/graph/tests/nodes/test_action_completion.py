@@ -16,8 +16,11 @@ from ....thread.action_receipts import (
 from ....thread.enums import ControlActionType
 from ....thread.state import TeamState
 from ...nodes.action_completion import GRAPH_COMPLETION_NODE, record_graph_completion
+from .._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from langchain_core.runnables import RunnableConfig
 
 
@@ -47,23 +50,26 @@ def _input(dispatch_id: str) -> dict[str, object]:
 
 
 def _gate(state: TeamState) -> dict[str, object]:
-    if state["active_graph_action_receipt"]["dispatch_id"] != "first":
+    receipt = state.get("active_graph_action_receipt") or {}
+    if receipt.get("dispatch_id") != "first":
         interrupt("approve")
     return {}
 
 
 @pytest.mark.asyncio
-async def test_completion_survives_restart_and_does_not_complete_next_action(tmp_path):
-    builder = StateGraph(cast("Any", TeamState))
-    builder.add_node("gate", _gate)
-    builder.add_node(GRAPH_COMPLETION_NODE, record_graph_completion)
+async def test_completion_survives_restart_and_does_not_complete_next_action(
+    tmp_path: Path,
+) -> None:
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(builder, "gate", _gate)
+    add_test_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(START, "gate")
     builder.add_edge("gate", GRAPH_COMPLETION_NODE)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     path = str(tmp_path / "completion.db")
     config: RunnableConfig = {"configurable": {"thread_id": "run"}}
     async with AsyncSqliteSaver.from_conn_string(path) as saver:
-        graph = builder.compile(checkpointer=saver)
+        graph = compile_test_graph(builder, checkpointer=saver)
         await graph.ainvoke(_input("first"), config)
         await graph.ainvoke(_input("second"), config)
         pending = await saver.aget_tuple(config)
@@ -72,7 +78,7 @@ async def test_completion_survives_restart_and_does_not_complete_next_action(tmp
         assert set(evidence) == {"first"}
         assert evidence["first"]["action"] == _receipt("first")
     async with AsyncSqliteSaver.from_conn_string(path) as reopened:
-        graph = builder.compile(checkpointer=reopened)
+        graph = compile_test_graph(builder, checkpointer=reopened)
         await graph.ainvoke(Command(resume="approved", update=_input("resume")), config)
         completed = await reopened.aget_tuple(config)
         assert completed is not None

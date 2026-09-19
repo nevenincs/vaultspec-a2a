@@ -785,16 +785,38 @@ BUILD = Verb(
             (
                 Cmd(
                     (
-                        "uv", "run", "--isolated", "--locked", "--group", "docs",
-                        "--group", "dev", "python", "-m",
-                        "vaultspec_a2a.testing.runner", "--", "docs/tests", "-q",
+                        "uv",
+                        "run",
+                        "--isolated",
+                        "--locked",
+                        "--group",
+                        "docs",
+                        "--group",
+                        "dev",
+                        "python",
+                        "-m",
+                        "vaultspec_a2a.testing.runner",
+                        "--",
+                        "docs/tests",
+                        "-q",
                     )
                 ),
                 Cmd(
                     (
-                        "uv", "run", "--isolated", "--locked", "--group", "docs",
-                        "sphinx-build", "-n", "-W", "--keep-going", "-b", "html",
-                        "docs", "docs/_build/html",
+                        "uv",
+                        "run",
+                        "--isolated",
+                        "--locked",
+                        "--group",
+                        "docs",
+                        "sphinx-build",
+                        "-n",
+                        "-W",
+                        "--keep-going",
+                        "-b",
+                        "html",
+                        "docs",
+                        "docs/_build/html",
                     )
                 ),
             ),
@@ -805,15 +827,26 @@ BUILD = Verb(
             (
                 Cmd(
                     (
-                        "uv", "run", "--no-sync", "--frozen",
-                        "--no-default-groups", "--group", "tooling", "python",
-                        "-m", "dev.doctor", "docker",
+                        "uv",
+                        "run",
+                        "--no-sync",
+                        "--frozen",
+                        "--no-default-groups",
+                        "--group",
+                        "tooling",
+                        "python",
+                        "-m",
+                        "dev.doctor",
+                        "docker",
                     )
                 ),
                 Cmd(
                     (
-                        "docker", "compose", "-f",
-                        "service/docker-compose.dev.yml", "build",
+                        "docker",
+                        "compose",
+                        "-f",
+                        "service/docker-compose.dev.yml",
+                        "build",
                     )
                 ),
             ),
@@ -824,21 +857,43 @@ BUILD = Verb(
             (
                 Cmd(
                     (
-                        "uv", "run", "--no-sync", "--frozen",
-                        "--no-default-groups", "--group", "tooling", "python",
-                        "-m", "dev.doctor", "docker",
+                        "uv",
+                        "run",
+                        "--no-sync",
+                        "--frozen",
+                        "--no-default-groups",
+                        "--group",
+                        "tooling",
+                        "python",
+                        "-m",
+                        "dev.doctor",
+                        "docker",
                     )
                 ),
                 Cmd(
                     (
-                        "docker", "build", "-t", "vaultspec-a2a-gateway", "-f",
-                        "service/docker/prod.Dockerfile", "--target", "gateway", ".",
+                        "docker",
+                        "build",
+                        "-t",
+                        "vaultspec-a2a-gateway",
+                        "-f",
+                        "service/docker/prod.Dockerfile",
+                        "--target",
+                        "gateway",
+                        ".",
                     )
                 ),
                 Cmd(
                     (
-                        "docker", "build", "-t", "vaultspec-a2a-worker", "-f",
-                        "service/docker/prod.Dockerfile", "--target", "worker", ".",
+                        "docker",
+                        "build",
+                        "-t",
+                        "vaultspec-a2a-worker",
+                        "-f",
+                        "service/docker/prod.Dockerfile",
+                        "--target",
+                        "worker",
+                        ".",
                     )
                 ),
             ),
@@ -849,8 +904,14 @@ BUILD = Verb(
             (
                 Cmd(
                     (
-                        "uv", "run", "--no-sync", "--frozen", "--no-default-groups",
-                        "python", "-m", "dev.repo.build_clean",
+                        "uv",
+                        "run",
+                        "--no-sync",
+                        "--frozen",
+                        "--no-default-groups",
+                        "python",
+                        "-m",
+                        "dev.repo.build_clean",
                     )
                 ),
             ),

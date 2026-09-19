@@ -17,6 +17,7 @@ a permitted-field assertion, so an empty or dropped frame cannot satisfy it.
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import pytest
@@ -28,7 +29,10 @@ from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
 from ...testing.sse import read_frame
 from ...thread.enums import ThreadStatus
-from .conftest import _live_server, make_app
+from .conftest import AppFixture, SessionFactory, _live_server, make_app
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 _SERVICE_TOKEN = "discovery-service-token"
 _ARTIFACT_BODY = "SECRET-ARTIFACT-BODY-8f21c9"
@@ -37,7 +41,11 @@ _METADATA_BODY = "SECRET-METADATA-VALUE-19dd73"
 _PLAN_BODY = "SECRET-PLAN-PROSE-64c1af"
 
 
-def _secured(session_factory, checkpointer, aggregator: EventAggregator):
+def _secured(
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    aggregator: EventAggregator,
+) -> AppFixture:
     """Build the real gateway fixture with its production bearer armed."""
     app, agg, worker, cp = make_app(session_factory, checkpointer, aggregator)
     app.state.v1_service_token = _SERVICE_TOKEN
@@ -45,7 +53,7 @@ def _secured(session_factory, checkpointer, aggregator: EventAggregator):
     return app, agg, worker, cp
 
 
-async def _seed_running_run(session_factory) -> str:
+async def _seed_running_run(session_factory: SessionFactory) -> str:
     from ...database.thread_repository import create_thread
 
     async with session_factory() as session:
@@ -69,7 +77,7 @@ async def _await_subscriber(agg: EventAggregator) -> None:
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """S27/S99: an artifact body cannot cross the authenticated edge; identity does."""
     app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
@@ -116,7 +124,7 @@ async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """S27/S99: an edit diff cannot cross; the tool-call metadata does."""
     app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
@@ -169,7 +177,7 @@ async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_authenticated_stream_bounds_the_token_delta(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """S159: a message frame's token content is bounded, not relayed whole."""
     app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
@@ -212,7 +220,7 @@ async def test_authenticated_stream_bounds_the_token_delta(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The catalog flip must not silence what the consumer actually renders.
 
@@ -294,8 +302,14 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
     assert "metadata" not in status_frame
     assert _METADATA_BODY not in status_raw
 
-    assert team_frame["agents"][0]["agent_id"] == "researcher_00"
-    assert team_frame["agents"][0]["state"] == "working"
+    team_agents_raw = team_frame.get("agents")
+    assert isinstance(team_agents_raw, list)
+    team_agents = cast("list[object]", team_agents_raw)
+    first_agent = team_agents[0]
+    assert isinstance(first_agent, dict)
+    first_agent_payload = cast("dict[str, object]", first_agent)
+    assert first_agent_payload["agent_id"] == "researcher_00"
+    assert first_agent_payload["state"] == "working"
     assert team_frame["active_thread_ids"] == [run_id]
     assert _METADATA_BODY not in team_raw
 
@@ -305,7 +319,7 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_authenticated_stream_degrades_an_uncatalogued_frame(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A type nobody enumerated crosses as identity keys only, not verbatim.
 
@@ -354,7 +368,7 @@ async def test_authenticated_stream_degrades_an_uncatalogued_frame(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Plan entries are rebuilt item by item; the model-authored text stays home."""
     app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
@@ -397,7 +411,7 @@ async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """S160 (global): the connection cap holds even behind a valid bearer."""
     limit = settings.max_stream_connections
@@ -426,7 +440,7 @@ async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_global_stream_quota_admits_the_authenticated_caller_below_capacity(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """S160 (global): the cap is the discriminator, not the bearer.
 

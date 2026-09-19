@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from uuid import uuid4
 
 from pydantic import (
@@ -120,7 +120,7 @@ class DispatchRequest(BaseModel):
     content: str | None = None
     # For resume: permission response option
     # (str for tool perms, dict for plan approval)
-    option_id: str | dict | None = None
+    option_id: str | dict[str, object] | None = None
     # For initial thread creation
     team_preset: str | None = None
     # The run's active project. Optional on the model because a cancel names no
@@ -224,27 +224,33 @@ class DispatchRequest(BaseModel):
         for lane in value.values():
             if set(lane) != primary:
                 raise ValueError("model_assignment lane has invalid fields")
-            provenance = lane.get("provenance")
-            if not isinstance(provenance, dict) or set(provenance) != {
-                "selection_source"
-            }:
+            provenance: object = lane.get("provenance")
+            if not isinstance(provenance, dict):
                 raise ValueError("model_assignment provenance has invalid fields")
-            candidates = [lane, *(lane.get("fallbacks") or [])]
-            for index, candidate in enumerate(candidates):
-                if not isinstance(candidate, dict):
+            if set(cast("dict[str, object]", provenance)) != {"selection_source"}:
+                raise ValueError("model_assignment provenance has invalid fields")
+            raw_fallbacks: object = lane.get("fallbacks") or []
+            if not isinstance(raw_fallbacks, list):
+                raise ValueError("model_assignment fallback is invalid")
+            candidates: list[object] = [lane, *cast("list[object]", raw_fallbacks)]
+            for index, raw_candidate in enumerate(candidates):
+                if not isinstance(raw_candidate, dict):
                     raise ValueError("model_assignment fallback is invalid")
+                candidate = cast("dict[str, object]", raw_candidate)
                 if index and (
                     not fallback.issubset(candidate)
                     or set(candidate) - fallback - lane_optional
                 ):
                     raise ValueError("model_assignment fallback has invalid fields")
-                controls = candidate.get("controls")
+                controls: object = candidate.get("controls")
                 if not isinstance(controls, list):
                     raise ValueError("model_assignment controls are invalid")
-                for selected in controls:
+                for raw_selected in cast("list[object]", controls):
+                    if not isinstance(raw_selected, dict):
+                        raise ValueError("model_assignment control has invalid fields")
+                    selected = cast("dict[str, object]", raw_selected)
                     if (
-                        not isinstance(selected, dict)
-                        or not control.issubset(selected)
+                        not control.issubset(selected)
                         or set(selected) - control - control_optional
                     ):
                         raise ValueError("model_assignment control has invalid fields")

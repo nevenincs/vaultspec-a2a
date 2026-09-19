@@ -12,7 +12,7 @@ actor token" without guessing from the status code alone (both are 401).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 __all__ = [
     "AuthoringError",
@@ -76,12 +76,12 @@ def raise_for_typed_error(status_code: int, body: dict[str, Any]) -> None:
     has_error = "error" in body
     if status_code < 400 and not has_error:
         return
-    tiers = body.get("tiers")
+    tiers: object = body.get("tiers")
     raise AuthoringTransportError(
         status_code=status_code,
         message=str(body["error"]) if has_error else "unknown authoring error",
         error_kind=(
             str(body["error_kind"]) if body.get("error_kind") is not None else None
         ),
-        tiers=tiers if isinstance(tiers, dict) else {},
+        tiers=cast("dict[str, Any]", tiers) if isinstance(tiers, dict) else {},
     )

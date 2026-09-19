@@ -197,7 +197,7 @@ def test_cancel_verb_routes_authenticated_and_reports_real_not_found(
 
 async def _open_terminal_frame(
     gateway: CertifiedGateway, run_id: str
-) -> tuple[dict, str]:
+) -> tuple[dict[str, object], str]:
     async with (
         gateway.async_client(timeout=30.0) as client,
         client.stream("GET", gateway.stream_path(run_id)) as response,

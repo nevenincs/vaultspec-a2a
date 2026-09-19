@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
@@ -90,7 +91,7 @@ def _record() -> ProviderRecord:
 
 
 def _selection(**changes: object) -> SelectionReference:
-    values = {
+    values: dict[str, object] = {
         "schema_version": 1,
         "provider_id": "codex",
         "execution_mode": "codex-app-server",
@@ -172,7 +173,7 @@ def test_persisted_selection_refuses_tampered_provider_value() -> None:
     ],
 )
 def test_persisted_selection_rejects_unknown_fields_without_digest_change(
-    path: tuple[object, ...], field: str
+    path: tuple[str | int, ...], field: str
 ) -> None:
     frozen = freeze_team_selection(
         selection=_selection(),
@@ -185,7 +186,12 @@ def test_persisted_selection_rejects_unknown_fields_without_digest_change(
     original_digest = record["digest"]
     target: object = record
     for key in path:
-        target = target[key]  # type: ignore[index]
+        if isinstance(key, str):
+            assert isinstance(target, dict)
+            target = cast("dict[str, object]", target)[key]
+        else:
+            assert isinstance(target, list)
+            target = cast("list[object]", target)[key]
     assert isinstance(target, dict)
     target[field] = "retired"
     assert record["digest"] == original_digest

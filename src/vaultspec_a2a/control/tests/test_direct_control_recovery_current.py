@@ -463,8 +463,7 @@ async def test_corrupt_accepted_input_is_atomically_quarantined(
     assert action is not None
     assert action.applied_at is not None
     assert (
-        action.result_status
-        == ControlActionResultStatus.REJECTED_INVALID_STATE.value
+        action.result_status == ControlActionResultStatus.REJECTED_INVALID_STATE.value
     )
     assert thread is not None
     assert thread.status == ThreadStatus.RECONCILING.value
@@ -511,8 +510,7 @@ async def test_missing_accepted_action_quarantines_its_exact_run(
     # election. The last proven status remains while readiness blocks execution.
     assert thread.status == ThreadStatus.RUNNING.value
     assert (
-        thread.execution_readiness
-        == RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+        thread.execution_readiness == RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
     )
     assert thread.repair_reason is not None
     assert thread.repair_reason.startswith("incompatible_state:")

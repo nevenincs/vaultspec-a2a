@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import pathlib
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 import httpx
 import pytest
@@ -39,10 +40,10 @@ from ...thread.enums import ThreadStatus
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 from .clarification_harness import new_state_graph
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import SessionFactory, async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator, Generator
     from pathlib import Path
 
     from ...thread.state import TeamState
@@ -63,7 +64,7 @@ _PRESET = "mock-success-multi"
 
 
 @contextlib.asynccontextmanager
-async def _live_server(app: object) -> AsyncIterator[str]:
+async def _live_server(app: object) -> AsyncGenerator[str]:
     config = uvicorn.Config(
         cast("Any", app), host="127.0.0.1", port=0, log_level="warning", lifespan="on"
     )
@@ -128,6 +129,7 @@ def _install_multirole_graph(executor: Executor, thread_id: str) -> None:
         None,
         False,
         "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        hashlib.sha256(_PRESET.encode()).hexdigest(),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -151,7 +153,7 @@ def _vault_write_events(vault_root: Path) -> list[str]:
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_multirole_run_status_recovery_and_zero_vault_writes(
-    session_factory, tmp_path
+    session_factory: SessionFactory, tmp_path: Path
 ) -> None:
     vault_root = tmp_path / ".vault"
     vault_root.mkdir()
@@ -180,6 +182,7 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
     async with AsyncSqliteSaver.from_conn_string(ckpt_path) as cp:
         await cp.setup()
         bridge = _bridge()
+        executor: Executor | None = None
         try:
             executor = Executor(checkpointer=cp, bridge=bridge)
             _install_multirole_graph(executor, thread_id)
@@ -196,7 +199,8 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
                 await executor.handle_dispatch(req)
         finally:
             await bridge.close()
-            await executor.shutdown()
+            if executor is not None:
+                await executor.shutdown()
 
         # No actor token appears in any log record captured during the run.
         _assert_no_token(records)
@@ -247,11 +251,12 @@ def _assert_no_token(records: list[logging.LogRecord]) -> None:
 
 
 @contextlib.contextmanager
-def caplog_all():
+def caplog_all() -> Generator[list[logging.LogRecord]]:
     """Capture every log record emitted on the root logger during the block."""
     records: list[logging.LogRecord] = []
 
     class _Sink(logging.Handler):
+        @override
         def emit(self, record: logging.LogRecord) -> None:
             records.append(record)
 
@@ -269,7 +274,7 @@ def caplog_all():
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_carries_no_token_into_logs(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """No actor token appears in captured logs across a dispatched run-start."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)

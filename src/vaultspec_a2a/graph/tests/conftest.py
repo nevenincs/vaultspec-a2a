@@ -89,7 +89,7 @@ def pf() -> ProviderFactoryProtocol:
 
 def deterministic_model_assignment(team_config: Any) -> dict[str, dict[str, Any]]:
     """Build exact schema-v1 assignments for topology-only graph tests."""
-    assignment = {
+    assignment: dict[str, Any] = {
         "provider": Provider.DETERMINISTIC.value,
         "execution_mode": "in-process-deterministic",
         "catalog_revision": "test-revision",

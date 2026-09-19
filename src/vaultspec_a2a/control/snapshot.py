@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, ToolMessage
 
@@ -36,6 +36,20 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
     from ..streaming.aggregator import EventAggregator
+
+
+def _is_valid_agent_descriptor(name: object, descriptor: object) -> bool:
+    """Validate one raw agent-descriptor entry before it is trusted as data."""
+    if not (isinstance(name, str) and 0 < len(name) <= 128):
+        return False
+    if not isinstance(descriptor, dict):
+        return False
+    fields = cast("dict[str, object]", descriptor)
+    if set(fields) != set(NODE_METADATA_FIELDS):
+        return False
+    return all(
+        isinstance(value, str) and len(value) <= 1024 for value in fields.values()
+    )
 
 
 def enrich_snapshot_from_state(
@@ -80,24 +94,22 @@ def enrich_snapshot_from_state(
     # The thread-scoped live cache is used only before that first checkpoint
     # lands; there is no process-global node-name fallback.
     agent_data: list[AgentData] = []
-    raw_descriptors = state.values.get("agent_descriptors")
+    raw_descriptors: object = state.values.get("agent_descriptors")
     node_summaries: list[dict[str, str]] = []
     if isinstance(raw_descriptors, dict):
+        descriptors = cast("dict[object, object]", raw_descriptors)
         descriptors_valid = all(
-            isinstance(name, str)
-            and 0 < len(name) <= 128
-            and isinstance(descriptor, dict)
-            and set(descriptor) == set(NODE_METADATA_FIELDS)
-            and all(
-                isinstance(value, str) and len(value) <= 1024
-                for value in descriptor.values()
-            )
-            for name, descriptor in raw_descriptors.items()
+            _is_valid_agent_descriptor(name, descriptor)
+            for name, descriptor in descriptors.items()
         )
         if descriptors_valid:
             node_summaries = [
-                {"node_name": name, "agent_id": name, **descriptor}
-                for name, descriptor in raw_descriptors.items()
+                {
+                    "node_name": cast("str", name),
+                    "agent_id": cast("str", name),
+                    **cast("dict[str, str]", descriptor),
+                }
+                for name, descriptor in descriptors.items()
             ]
         else:
             snapshot.snapshot_complete = False
@@ -158,11 +170,7 @@ def enrich_snapshot_from_state(
                 tc_name = tc.get("name", "unknown_tool")
                 checkpoint_tc_ids.add(tc_id)
                 tc_args = tc.get("args")
-                detail = (
-                    tc_args
-                    if isinstance(tc_args, dict) and "status" in tc_args
-                    else None
-                )
+                detail = tc_args if "status" in tc_args else None
                 if detail is not None:
                     content, locations = action_detail_projection(tc_name, detail)
                     tool_call_data.append(

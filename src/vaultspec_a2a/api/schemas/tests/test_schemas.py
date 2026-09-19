@@ -69,7 +69,7 @@ ENVELOPE: Envelope = {
     "sequence": 1,
 }
 
-server_event_adapter = TypeAdapter(ServerEvent)
+server_event_adapter: TypeAdapter[ServerEvent] = TypeAdapter(ServerEvent)
 
 
 # ---------------------------------------------------------------------------

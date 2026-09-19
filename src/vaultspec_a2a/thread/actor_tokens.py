@@ -17,6 +17,7 @@ state for a run's active window and are never checkpointed.
 from __future__ import annotations
 
 import re
+from typing import override
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -106,6 +107,7 @@ class ActorTokenBundle(BaseModel):
         """Return ``True`` when the bundle carries neither tokens nor a bearer."""
         return not self.tokens and self.engine_bearer is None
 
+    @override
     def __repr__(self) -> str:
         """Redacted representation — never leaks a raw token."""
         roles = ",".join(sorted(self.tokens))

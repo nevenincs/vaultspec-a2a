@@ -431,7 +431,11 @@ class TestClose:
         assert deferred is not None
         deferred.cancel()
         await asyncio.gather(deferred, return_exceptions=True)
-        bridge._flush_task = asyncio.create_task(bridge.flush_events())
+
+        async def _flush_now() -> None:
+            await bridge.flush_events()
+
+        bridge._flush_task = asyncio.create_task(_flush_now())
         await asyncio.wait_for(accepted.wait(), timeout=1.0)
 
         loop = asyncio.get_running_loop()

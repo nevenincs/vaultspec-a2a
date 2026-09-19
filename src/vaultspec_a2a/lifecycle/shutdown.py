@@ -7,11 +7,12 @@ import contextlib
 import inspect
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import uvicorn
 
 if TYPE_CHECKING:
+    import socket
     from collections.abc import Awaitable
 
     from fastapi import FastAPI
@@ -97,7 +98,8 @@ class ShutdownServer(uvicorn.Server):
         self._app = app
         self._total_seconds = total_seconds
 
-    async def shutdown(self, sockets: list | None = None) -> None:
+    @override
+    async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
         if getattr(self._app.state, "shutdown_deadline", None) is None:
             self._app.state.shutdown_deadline = ShutdownDeadline.start(
                 self._total_seconds

@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 from uuid import uuid4
 
 import anyio  # anyio: structured task groups for heartbeat + dispatch.
-import anyio.abc
 import httpx
 import uvicorn
 from anyio.to_thread import run_sync
@@ -179,7 +178,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # reachable *before* we accept dispatches. Logs ERROR if the
         # gateway cannot be contacted so operators notice immediately.
         try:
-            probe = await bridge._client.get("/health")
+            probe = await bridge.probe_health()
             if probe.status_code == 200:
                 logger.info(
                     "Gateway reachable at %s",

@@ -48,7 +48,7 @@ from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 _ATTACH = "attach-credential-admission-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-admission-fedcba0987654321"
@@ -68,7 +68,7 @@ def _running_gateway(
     *,
     log_name: str = "gateway.log",
     **extra_env: str,
-) -> Iterator[tuple[str, str]]:
+) -> Generator[tuple[str, str]]:
     """Run one gateway process over an already seated application home."""
     log_path = tmp_path / log_name
     log_handle = log_path.open("wb")
@@ -100,7 +100,7 @@ def _running_gateway(
 
 
 @contextmanager
-def _armed_gateway(tmp_path: Path, **extra_env: str) -> Iterator[tuple[str, str]]:
+def _armed_gateway(tmp_path: Path, **extra_env: str) -> Generator[tuple[str, str]]:
     """Seat and boot a real armed desktop gateway over a migrated app home."""
     app_home = tmp_path / "app-home"
     app_home.mkdir()
@@ -259,15 +259,12 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
         # --- Concurrent first demand: hard reservation bound, one worker. ---
         # Four real parallel prepares race into the single-flight worker start and
         # the bounded reservation table (capacity two).
+        def _prepare_capacity(index: int) -> tuple[int, int, dict[str, Any]]:
+            return (index, *_prepare(base, auth, run_id=f"run-capacity-{index}"))
+
         with ThreadPoolExecutor(max_workers=4) as pool:
-            outcomes = list(
-                pool.map(
-                    lambda index: (
-                        index,
-                        *_prepare(base, auth, run_id=f"run-capacity-{index}"),
-                    ),
-                    range(4),
-                )
+            outcomes: list[tuple[int, int, dict[str, Any]]] = list(
+                pool.map(_prepare_capacity, range(4))
             )
         statuses = sorted(status for _, status, _ in outcomes)
         assert statuses == [201, 201, 503, 503], statuses
@@ -394,13 +391,11 @@ def test_exact_commit_replay_role_binding_release_and_race_are_linearized(
         assert extra_status == 409
         assert _active_run_count(base, auth) == 0
 
+        def _commit_replay(_index: int) -> tuple[int, dict[str, Any]]:
+            return _commit(base, auth, reservation_id, run_id=run_id)
+
         with ThreadPoolExecutor(max_workers=2) as pool:
-            replays = list(
-                pool.map(
-                    lambda _: _commit(base, auth, reservation_id, run_id=run_id),
-                    range(2),
-                )
-            )
+            replays = list(pool.map(_commit_replay, range(2)))
         assert [item[0] for item in replays] == [201, 201]
         bodies = [item[1] for item in replays]
         assert len({body["run_id"] for body in bodies}) == 1

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..control.config import settings
 
@@ -110,11 +110,16 @@ def procs_config_path(path: str | os.PathLike[str] | None = None) -> Path:
 
 
 def _parse_band(role: str, raw: object) -> PortBand:
-    if not isinstance(raw, list) or len(raw) != 2:
+    if not isinstance(raw, list):
         raise ProcsConfigError(
             f"role {role!r} band must be a [start, end] pair of ints, got {raw!r}"
         )
-    start, end = raw
+    band_pair = cast("list[object]", raw)
+    if len(band_pair) != 2:
+        raise ProcsConfigError(
+            f"role {role!r} band must be a [start, end] pair of ints, got {raw!r}"
+        )
+    start, end = band_pair
     if (
         not isinstance(start, int)
         or isinstance(start, bool)
@@ -139,7 +144,7 @@ def _parse_command(role: str, key: str, raw: object) -> list[str]:
             f"role {role!r} {key} must be a list of strings, got {raw!r}"
         )
     items: list[str] = []
-    for value in raw:
+    for value in cast("list[object]", raw):
         if not isinstance(value, str):
             raise ProcsConfigError(
                 f"role {role!r} {key} must be a list of strings, got {raw!r}"
@@ -156,7 +161,7 @@ def _parse_env(role: str, raw: object) -> dict[str, str]:
             f"role {role!r} env must be a table of string -> string, got {raw!r}"
         )
     env: dict[str, str] = {}
-    for key, value in raw.items():
+    for key, value in cast("dict[object, object]", raw).items():
         if not isinstance(key, str) or not isinstance(value, str):
             raise ProcsConfigError(
                 f"role {role!r} env must be a table of string -> string, got {raw!r}"
@@ -170,14 +175,15 @@ def _parse_role(name: str, raw: object) -> RoleConfig:
         raise ProcsConfigError(
             f"role {name!r} must be a table, got {type(raw).__name__}"
         )
-    band = _parse_band(name, raw.get("band"))
-    heartbeat = raw.get("heartbeat", False)
+    role_table = cast("dict[str, object]", raw)
+    band = _parse_band(name, role_table.get("band"))
+    heartbeat: object = role_table.get("heartbeat", False)
     if not isinstance(heartbeat, bool):
         raise ProcsConfigError(f"role {name!r} heartbeat must be a bool")
-    staleness_ms = raw.get("staleness_ms", 120000)
+    staleness_ms: object = role_table.get("staleness_ms", 120000)
     if not isinstance(staleness_ms, int) or isinstance(staleness_ms, bool):
         raise ProcsConfigError(f"role {name!r} staleness_ms must be an int")
-    require_repo = raw.get("require_repo", False)
+    require_repo: object = role_table.get("require_repo", False)
     if not isinstance(require_repo, bool):
         raise ProcsConfigError(f"role {name!r} require_repo must be a bool")
     return RoleConfig(
@@ -185,9 +191,9 @@ def _parse_role(name: str, raw: object) -> RoleConfig:
         band=band,
         heartbeat=heartbeat,
         staleness_ms=staleness_ms,
-        build=_parse_command(name, "build", raw.get("build")),
-        serve=_parse_command(name, "serve", raw.get("serve")),
-        env=_parse_env(name, raw.get("env")),
+        build=_parse_command(name, "build", role_table.get("build")),
+        serve=_parse_command(name, "serve", role_table.get("serve")),
+        env=_parse_env(name, role_table.get("env")),
         require_repo=require_repo,
     )
 
@@ -225,8 +231,9 @@ def load_procs_config(path: str | os.PathLike[str] | None = None) -> ProcsConfig
     resident_raw = data.get("resident", {})
     if not isinstance(resident_raw, dict):
         raise ProcsConfigError("[resident] must be a table of service -> port")
+    resident_table = cast("dict[str, object]", resident_raw)
     resident: dict[str, int] = {}
-    for svc, port in resident_raw.items():
+    for svc, port in resident_table.items():
         if not isinstance(port, int) or isinstance(port, bool):
             raise ProcsConfigError(
                 f"resident {svc!r} port must be an int, got {port!r}"
@@ -236,7 +243,10 @@ def load_procs_config(path: str | os.PathLike[str] | None = None) -> ProcsConfig
     roles_raw = data.get("roles", {})
     if not isinstance(roles_raw, dict) or not roles_raw:
         raise ProcsConfigError("[roles.*] must declare at least one role")
-    roles = {name: _parse_role(name, raw_role) for name, raw_role in roles_raw.items()}
+    roles_table = cast("dict[str, object]", roles_raw)
+    roles = {
+        name: _parse_role(name, raw_role) for name, raw_role in roles_table.items()
+    }
 
     _validate_disjoint(roles, resident)
     return ProcsConfig(resident=resident, roles=roles)

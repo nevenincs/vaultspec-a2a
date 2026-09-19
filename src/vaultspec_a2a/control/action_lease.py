@@ -203,10 +203,7 @@ async def record_dispatch_failure(
         return DispatchFailureDisposition.AUTHORITY_LOST
     if action.applied_at is not None:
         return DispatchFailureDisposition.APPLICATION_WON
-    if (
-        action.recovery_deadline_at is None
-        or action.recovery_deadline_at <= instant
-    ):
+    if action.recovery_deadline_at is None or action.recovery_deadline_at <= instant:
         return DispatchFailureDisposition.DEADLINE_EXPIRED
     if claim.claim_token is None or action.claim_token != claim.claim_token:
         return DispatchFailureDisposition.AUTHORITY_LOST

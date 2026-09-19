@@ -26,7 +26,7 @@ import os
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import pytest
 
@@ -46,6 +46,15 @@ from ..lifecycle.singleton import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+class _ResidentHandle(TypedDict):
+    """Signal files and process handle for a spawned resident child."""
+
+    proc: subprocess.Popen[bytes]
+    ready: Path
+    stop: Path
+
 
 # A real resident: take the singleton, write an owner-restricted attach
 # credential file, publish the versioned discovery record naming it by path
@@ -87,7 +96,7 @@ def _spawn_resident(
     tag: str,
     *,
     protocol: tuple[int, int] = (1, 1),
-) -> dict:
+) -> _ResidentHandle:
     ready = tmp_path / f"{tag}.ready"
     stop = tmp_path / f"{tag}.stop"
     proc = subprocess.Popen(
@@ -117,7 +126,7 @@ def _await(path: Path, *, timeout: float = 25.0) -> str:
     raise AssertionError(f"timed out waiting for {path}")
 
 
-def _stop(handle: dict, *, timeout: float = 25.0) -> None:
+def _stop(handle: _ResidentHandle, *, timeout: float = 25.0) -> None:
     handle["stop"].touch()
     try:
         handle["proc"].wait(timeout=timeout)
@@ -196,7 +205,7 @@ def test_stale_discovery_quarantined_only_by_owner(tmp_path: Path) -> None:
     resident = _spawn_resident(tmp_path, app_home, "owner-a", 8403, "res")
     dead_pid = 0
     try:
-        dead_pid = json.loads(_await(resident["ready"]))["pid"]
+        dead_pid = cast("dict[str, int]", json.loads(_await(resident["ready"])))["pid"]
     finally:
         resident["proc"].terminate()
         resident["proc"].wait(timeout=25)

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, override
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..domain_config import domain_config
-from ..graph.compiler import _resolve_model_for_worker, compile_team_graph
+from ..graph.compiler import compile_team_graph, resolve_model_for_worker
 from ..ipc.schemas import canonical_project_root
 from ..providers.team_selection import model_assignment_digest
 from ..providers.warmup import warm_model_imports
@@ -164,7 +164,7 @@ def assert_armed_authoring_attachable(
         if agent_config is None:
             continue
         try:
-            model, _resolved_provider, _frozen_model = _resolve_model_for_worker(
+            model, _resolved_provider, _frozen_model = resolve_model_for_worker(
                 worker_ref,
                 agent_config,
                 team_config,
@@ -513,12 +513,14 @@ class GraphLifecycleManager:
         checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
         if not isinstance(checkpoint, dict):
             raise GraphCompilationError("durable checkpoint state is incompatible")
-        values = checkpoint.get("channel_values")
+        checkpoint_obj = cast("dict[str, object]", checkpoint)
+        values = checkpoint_obj.get("channel_values")
         if not isinstance(values, dict):
             raise GraphCompilationError("durable checkpoint state is incompatible")
+        values_obj = cast("dict[str, object]", values)
         digests: list[str] = []
         for field in ("model_assignment_digest", "graph_definition_digest"):
-            digest = values.get(field)
+            digest = values_obj.get(field)
             if (
                 not isinstance(digest, str)
                 or len(digest) != 64

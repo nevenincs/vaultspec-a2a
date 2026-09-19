@@ -14,7 +14,7 @@ from ..acp_chat_model import AcpChatModel
 if TYPE_CHECKING:
     from pathlib import Path
 
-_AGENT = r'''
+_AGENT = r"""
 import json
 import sys
 import time
@@ -71,7 +71,7 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": rpc_id, "result": {
             "stopReason": "end_turn"
         }})
-'''
+"""
 
 
 def _model(tmp_path: Path, mode: str) -> AcpChatModel:

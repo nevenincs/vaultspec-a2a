@@ -16,18 +16,20 @@ no worker double is exercised on the proven path.
 from __future__ import annotations
 
 import shutil
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
 
 from ...cli.provision import provision_workspace
 from ...team.team_config import load_team_config
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import SessionFactory, async_catalog_run_fields, make_app
 from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 _AUTHORING = "vaultspec-adr-research"
 
@@ -50,7 +52,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _full_bundle() -> dict:
+def _full_bundle() -> dict[str, Any]:
     """A complete per-role actor-token bundle so only the harness can refuse."""
     return {
         "tokens": {role: f"tok-{role}" for role in _authoring_roles()},
@@ -60,7 +62,7 @@ def _full_bundle() -> dict:
 
 async def _run_start_body(
     client: httpx.AsyncClient, workspace_root: Path, *, run_id: str
-) -> dict:
+) -> dict[str, Any]:
     """A body complete enough that only the HARNESS can refuse it.
 
     Only the ``selection`` is taken from the catalog helper: the ``metadata`` it
@@ -83,7 +85,7 @@ async def _run_start_body(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_unprovisioned_workspace_refused_at_run_start(
-    session_factory, checkpointer, tmp_path: Path
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver, tmp_path: Path
 ) -> None:
     """A complete request into a bare workspace is refused on the harness alone.
 
@@ -118,7 +120,7 @@ async def test_unprovisioned_workspace_refused_at_run_start(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_unprovisioned_preset_discovery_exposes_no_runtime_policy(
-    session_factory, checkpointer, tmp_path: Path
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver, tmp_path: Path
 ) -> None:
     """Preset discovery stays descriptive; run admission owns harness readiness."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
@@ -137,7 +139,7 @@ async def test_unprovisioned_preset_discovery_exposes_no_runtime_policy(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_provisioned_workspace_clears_the_harness_gate_at_run_start(
-    session_factory, checkpointer, tmp_path: Path
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver, tmp_path: Path
 ) -> None:
     """A real provision clears the harness gate; any refusal is not the harness."""
     ws = tmp_path / "ws"
@@ -163,7 +165,7 @@ async def test_provisioned_workspace_clears_the_harness_gate_at_run_start(
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_provisioned_preset_discovery_exposes_no_runtime_policy(
-    session_factory, checkpointer, tmp_path: Path
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver, tmp_path: Path
 ) -> None:
     """Provisioning does not add provider or model policy to preset discovery."""
     ws = tmp_path / "ws"
@@ -205,7 +207,7 @@ def test_probe_harness_is_none_for_non_authoring_without_workspace() -> None:
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_workspaceless_authoring_run_is_refused(
-    session_factory, checkpointer
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """An authoring run with a top-level feature but NO workspace is hard-refused.
 

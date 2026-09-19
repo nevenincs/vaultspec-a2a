@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
 from ...api.app import create_app
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from fastapi import FastAPI
 
 _TOKEN = "attach-credential-token-0123456789abcdef"
 
@@ -73,7 +79,7 @@ def _make_gated_app():
     """Create a real gateway app with attach enforced and a known credential."""
 
     @asynccontextmanager
-    async def _noop_lifespan(_app):
+    async def _noop_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         yield
 
     app = create_app(lifespan=_noop_lifespan)

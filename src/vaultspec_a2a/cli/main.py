@@ -19,7 +19,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 import httpx
@@ -305,8 +305,9 @@ def doctor(url: str | None) -> None:
 
     stale_resident = False
     if isinstance(body, dict):
+        body = cast("dict[str, Any]", body)
         expected = set(_expected_route_signature())
-        live = set(body["routes"]) if "routes" in body else set()
+        live: set[str] = set(body["routes"]) if "routes" in body else set()
         missing = sorted(expected - live) if "routes" in body else sorted(expected)
         stale_resident = bool(missing)
         body["stale_resident"] = stale_resident
@@ -362,22 +363,25 @@ def _resolve_catalog_selection(
     if resp.status_code != 200:
         _emit(resp)
         raise SystemExit(1)
-    providers = resp.json().get("providers", [])
+    body: dict[str, Any] = cast("dict[str, Any]", resp.json())
+    providers: list[dict[str, Any]] = body.get("providers", [])
     for record in providers:
         if (
             record.get("provider_id") != provider_id
             or record.get("execution_mode") != execution_mode
         ):
             continue
-        catalog = record.get("catalog") or {}
-        entries = catalog.get("models") or []
+        catalog: dict[str, Any] = record.get("catalog") or {}
+        entries: list[dict[str, Any]] = catalog.get("models") or []
         for entry in entries:
             if entry.get("entry_id") == entry_id:
                 return {
                     "schema_version": 1,
                     "provider_id": provider_id,
                     "execution_mode": execution_mode,
-                    "catalog_revision": (catalog.get("state") or {}).get("revision"),
+                    "catalog_revision": cast(
+                        "dict[str, Any]", catalog.get("state") or {}
+                    ).get("revision"),
                     "entry_id": entry_id,
                     "controls": {},
                 }
@@ -759,10 +763,17 @@ def procs_allocate(role: str) -> None:
     reservation so a concurrent allocator cannot pick the same one. Register the
     process (or let the reservation lapse) once bound.
     """
-    from ..lifecycle.manager import _load_config_or_empty
+    from ..lifecycle.procs_config import (
+        ProcsConfig,
+        ProcsConfigError,
+        load_procs_config,
+    )
     from ..lifecycle.registry import reserve_port
 
-    config = _load_config_or_empty()
+    try:
+        config = load_procs_config()
+    except ProcsConfigError:
+        config = ProcsConfig(resident={}, roles={})
     try:
         role_cfg = config.role(role)
         reservation = reserve_port(role, role_cfg, config=config)

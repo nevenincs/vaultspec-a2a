@@ -41,7 +41,7 @@ import pathlib
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 import httpx
@@ -244,7 +244,10 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
 
     baseline_snapshot = await client.recovery_snapshot(last_seq=0)
     assert isinstance(baseline_snapshot.data, dict)
-    baseline = baseline_snapshot.data["latest_outbox_seq"]
+    baseline_data = cast("dict[str, object]", baseline_snapshot.data)
+    raw_baseline = baseline_data["latest_outbox_seq"]
+    assert isinstance(raw_baseline, int)
+    baseline = raw_baseline
 
     session = AuthoringSession(client, run_id)
     await session.create_session(scope="repo", title=run_id)
@@ -425,7 +428,8 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
             messages = snap.values["messages"]
             assert isinstance(messages, list)
             assert any(
-                getattr(m, "content", "") == "resumed:approved" for m in messages
+                getattr(m, "content", "") == "resumed:approved"
+                for m in cast("list[object]", messages)
             ), "the finish node never observed the real resume"
 
             # The durable gate row resolved and the thread left

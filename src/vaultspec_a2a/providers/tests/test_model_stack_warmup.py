@@ -26,7 +26,7 @@ import psutil
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
 #: The control must block the loop by at least this much for the comparison to
@@ -78,7 +78,7 @@ def _probe(mode: str, workspace: Path) -> dict[str, Any]:
 
 
 @contextmanager
-def _representative_cpu_load() -> Iterator[list[psutil.Process]]:
+def _representative_cpu_load() -> Generator[list[psutil.Process]]:
     """Occupy the campaign's five worker slots with owned CPU-bound processes."""
     # On Windows a venv's ``sys.executable`` is a redirector that parents the
     # real interpreter. Measuring that idle redirector would make the load proof

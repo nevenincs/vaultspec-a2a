@@ -44,7 +44,7 @@ directly testable function of what the gateway said.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 __all__ = [
     "IN_PROCESS_PROVIDER_IDS",
@@ -75,12 +75,20 @@ class NoSelectableLaneError(RuntimeError):
 
 def _lanes(payload: Any) -> list[dict[str, Any]]:
     """Return the served provider records, or fail naming what arrived instead."""
-    if not isinstance(payload, dict) or not isinstance(payload.get("providers"), list):
+    if not isinstance(payload, dict):
         raise NoSelectableLaneError(
             "the provider-catalog payload has no 'providers' list; got "
             f"{type(payload).__name__}"
         )
-    return [record for record in payload["providers"] if isinstance(record, dict)]
+    payload = cast("dict[str, Any]", payload)
+    raw_providers = payload.get("providers")
+    if not isinstance(raw_providers, list):
+        raise NoSelectableLaneError(
+            "the provider-catalog payload has no 'providers' list; got "
+            f"{type(payload).__name__}"
+        )
+    providers = cast("list[Any]", raw_providers)
+    return [record for record in providers if isinstance(record, dict)]
 
 
 def _is_selectable(record: dict[str, Any]) -> bool:
@@ -93,15 +101,16 @@ def _is_selectable(record: dict[str, Any]) -> bool:
     """
     health = record.get("health")
     catalog = record.get("catalog")
-    return (
-        isinstance(health, dict)
-        and bool(health.get("selectable"))
-        and isinstance(catalog, dict)
-        and bool(catalog.get("models"))
-    )
+    if not isinstance(health, dict) or not isinstance(catalog, dict):
+        return False
+    health = cast("dict[str, Any]", health)
+    catalog = cast("dict[str, Any]", catalog)
+    return bool(health.get("selectable")) and bool(catalog.get("models"))
 
 
-def _reference(record: dict[str, Any], entry_id: str, controls: dict[str, str]) -> dict:
+def _reference(
+    record: dict[str, Any], entry_id: str, controls: dict[str, str]
+) -> dict[str, Any]:
     catalog = record["catalog"]
     state = catalog["state"]
     return {
@@ -205,8 +214,8 @@ def named_lane_selection(
             f"the lane {provider_id}/{execution_mode} is served but not currently "
             "selectable, or advertises no models"
         )
-    advertised = {
-        model.get("entry_id")
+    advertised: set[Any] = {
+        cast("dict[str, Any]", model).get("entry_id")
         for model in record["catalog"]["models"]
         if isinstance(model, dict)
     }

@@ -150,7 +150,7 @@ def test_a_refusal_emits_the_operational_counter() -> None:
     with pytest.raises(EventAggregatorError):
         aggregator.add_subscriber("one-client-too-many")
 
-    assert "aggregator.subscribers_refused" in hook._counters
+    assert hook.has_registered_counter("aggregator.subscribers_refused")
 
 
 def test_an_admitted_subscriber_emits_no_refusal_counter() -> None:
@@ -160,4 +160,4 @@ def test_an_admitted_subscriber_emits_no_refusal_counter() -> None:
 
     aggregator.add_subscriber("client-0")
 
-    assert "aggregator.subscribers_refused" not in hook._counters
+    assert not hook.has_registered_counter("aggregator.subscribers_refused")

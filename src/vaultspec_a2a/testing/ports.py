@@ -50,7 +50,7 @@ from ..lifecycle import (
 from ..lifecycle.discovery import port_has_listener
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
     from ..lifecycle import PortReservation
@@ -89,7 +89,7 @@ class PortAllocationError(AssertionError):
 @contextlib.contextmanager
 def reserved_port(
     *, home: Path | None = None, config: ProcsConfig | None = None
-) -> Iterator[int]:
+) -> Generator[int]:
     """Hold an exclusively-reserved scratch-band port while the caller uses it.
 
     The reservation marker stays held for the body's duration and is released
@@ -209,7 +209,7 @@ def allocate_free_ports(count: int) -> list[int]:
 _HELD_RESERVATIONS: list[PortReservation] = []
 _HELD_LOCK = threading.Lock()
 _HOLD_REFRESH_INTERVAL_S = 60.0
-_HOLD_REFRESH_STOP: threading.Event | None = None
+_hold_refresh_stop: threading.Event | None = None
 
 
 def _refresh_held_markers_once() -> None:
@@ -222,7 +222,7 @@ def _refresh_held_markers_once() -> None:
 
 
 def _release_held_reservations() -> None:
-    stop = _HOLD_REFRESH_STOP
+    stop = _hold_refresh_stop
     if stop is not None:
         stop.set()
     while _HELD_RESERVATIONS:
@@ -234,10 +234,10 @@ def hold_for_process_lifetime(reservation: PortReservation) -> None:
 
     Takes over ownership: the caller must not release the reservation itself.
     """
-    global _HOLD_REFRESH_STOP
-    if _HOLD_REFRESH_STOP is None:
+    global _hold_refresh_stop
+    if _hold_refresh_stop is None:
         stop = threading.Event()
-        _HOLD_REFRESH_STOP = stop
+        _hold_refresh_stop = stop
 
         def _refresh_loop() -> None:
             while not stop.wait(_HOLD_REFRESH_INTERVAL_S):

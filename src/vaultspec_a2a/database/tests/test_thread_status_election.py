@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from pathlib import Path
 
 from ...thread.enums import ControlActionType, InvalidTransitionError, ThreadStatus
 from ..models import Base, RunWriteAuthority
@@ -30,7 +31,7 @@ from ..thread_repository import (
 
 
 @pytest_asyncio.fixture
-async def engine(runtime_dir) -> AsyncIterator[AsyncEngine]:
+async def engine(runtime_dir: Path) -> AsyncIterator[AsyncEngine]:
     """Create a file-backed database so independent sessions share locks."""
     database = runtime_dir / "thread-status-election.sqlite"
     value = create_async_engine(f"sqlite+aiosqlite:///{database}")
@@ -172,9 +173,7 @@ async def test_winner_refreshes_same_session_identity_map(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "same-session-truth"
-    await _seed(
-        sessions, thread_id, ThreadStatus.RUNNING, "same-session-truth-receipt"
-    )
+    await _seed(sessions, thread_id, ThreadStatus.RUNNING, "same-session-truth-receipt")
     async with sessions() as session:
         loaded = await get_thread(session, thread_id)
         assert loaded is not None

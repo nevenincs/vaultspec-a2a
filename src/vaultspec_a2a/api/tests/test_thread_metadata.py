@@ -9,11 +9,27 @@ get_checkpointer and get_worker_client so tests never touch vaultspec.db.
 
 import tempfile
 from pathlib import Path
+from typing import cast
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from .conftest import catalog_run_fields
+from ...streaming.aggregator import EventAggregator
+from .conftest import SessionFactory, catalog_run_fields
 from .conftest import make_app as _make_app_4
+
+
+def _as_dict(body: object) -> dict[str, object]:
+    """Narrow a decoded JSON value to a string-keyed mapping.
+
+    A bare ``isinstance(x, dict)`` narrows ``Any``/``Unknown`` to an
+    unparameterized ``dict[Unknown, Unknown]``; this restores the type
+    parameters basedpyright drops, at the one call site every test routes
+    through, so downstream reads work against ``dict[str, object]``.
+    """
+    assert isinstance(body, dict)
+    return cast("dict[str, object]", body)
 
 
 def _run_workspace():
@@ -34,7 +50,11 @@ def _run_workspace():
     return tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 
 
-def _make_app(session_factory, checkpointer, aggregator=None):
+def _make_app(
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    aggregator: EventAggregator | None = None,
+) -> tuple[FastAPI, EventAggregator]:
     """Shim: forwards to shared make_app(), dropping extra returns."""
     app, agg, _worker, _cp = _make_app_4(
         session_factory, checkpointer, aggregator=aggregator
@@ -48,7 +68,9 @@ def _make_app(session_factory, checkpointer, aggregator=None):
 _BUNDLE_FREE_PRESET = "mock-success-single"
 
 
-def _list_summaries(session_factory, checkpointer) -> tuple[dict[str, dict], int]:
+def _list_summaries(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> tuple[dict[str, dict[str, object]], int]:
     """Return the history reading of the run listing, keyed by run id.
 
     The nickname, branch and callee these cases are about are carried on the
@@ -60,8 +82,19 @@ def _list_summaries(session_factory, checkpointer) -> tuple[dict[str, dict], int
     with TestClient(app, raise_server_exceptions=True) as client:
         resp = client.get("/v1/runs", params={"state": "all"})
     assert resp.status_code == 200, resp.text
-    body = resp.json()
-    return {run["run_id"]: run for run in body["runs"]}, body["total"]
+    body = _as_dict(resp.json())
+    runs = body["runs"]
+    assert isinstance(runs, list)
+    summaries: dict[str, dict[str, object]] = {}
+    for run in cast("list[object]", runs):
+        assert isinstance(run, dict)
+        run_payload = cast("dict[str, object]", run)
+        run_id = run_payload["run_id"]
+        assert isinstance(run_id, str)
+        summaries[run_id] = run_payload
+    total = body["total"]
+    assert isinstance(total, int)
+    return summaries, total
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +106,7 @@ class TestCreateThreadWithMetadata:
     """Tests for POST /v1/runs with metadata."""
 
     def test_create_thread_with_metadata_stores_in_db(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread created with metadata stores it in the DB."""
         with _run_workspace() as ws:
@@ -101,12 +134,12 @@ class TestCreateThreadWithMetadata:
                 )
 
             assert resp.status_code == 201
-            data = resp.json()
+            data = _as_dict(resp.json())
             assert "run_id" in data
             assert data["nickname"] is not None
 
     def test_create_thread_invalid_workspace_422(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Non-existent workspace_root returns 422."""
         app, _agg = _make_app(session_factory, checkpointer)
@@ -135,7 +168,7 @@ class TestCreateThreadWithMetadata:
         assert "existing directory" in resp.text
 
     def test_create_thread_auto_generates_nickname(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """When no nickname is provided, one is auto-generated."""
         with _run_workspace() as ws:
@@ -160,11 +193,13 @@ class TestCreateThreadWithMetadata:
                 )
 
             assert resp.status_code == 201
-            nick = resp.json()["nickname"]
-            assert nick is not None
+            nick = _as_dict(resp.json())["nickname"]
+            assert isinstance(nick, str)
             assert "auth-flow" in nick
 
-    def test_nickname_conflict_409(self, session_factory, checkpointer) -> None:
+    def test_nickname_conflict_409(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Duplicate nicknames return 409."""
         with _run_workspace() as ws:
             app, _agg = _make_app(session_factory, checkpointer)
@@ -202,7 +237,9 @@ class TestCreateThreadWithMetadata:
                 )
                 assert resp2.status_code == 409
 
-    def test_legacy_thread_backward_compat(self, session_factory, checkpointer) -> None:
+    def test_legacy_thread_backward_compat(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """A run that declares no nickname is auto-named rather than left null.
 
         This asserted a null nickname, which described a run carrying no
@@ -228,7 +265,7 @@ class TestCreateThreadWithMetadata:
             )
 
         assert resp.status_code == 201
-        data = resp.json()
+        data = _as_dict(resp.json())
         assert isinstance(data["nickname"], str) and data["nickname"], (
             "a run with no caller-supplied nickname must still be named"
         )
@@ -243,7 +280,7 @@ class TestListThreadsWithMetadata:
     """Tests for the run listing projection's metadata fields."""
 
     def test_list_threads_includes_metadata_fields(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread list includes nickname, feature_tag, etc. from metadata."""
         with _run_workspace() as ws:
@@ -277,7 +314,7 @@ class TestListThreadsWithMetadata:
             assert t["callee"] == "claude-cli"
 
     def test_list_threads_legacy_without_metadata(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Legacy threads without metadata omit metadata fields gracefully."""
         app, _agg = _make_app(session_factory, checkpointer)
@@ -314,7 +351,9 @@ class TestListThreadsWithMetadata:
 class TestGetMetadataEndpoint:
     """Tests for the metadata the versioned history verb carries."""
 
-    def test_get_metadata_endpoint(self, session_factory, checkpointer) -> None:
+    def test_get_metadata_endpoint(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Returns full ThreadMetadata for a thread with metadata."""
         with _run_workspace() as ws:
             app, _agg = _make_app(session_factory, checkpointer)
@@ -337,17 +376,20 @@ class TestGetMetadataEndpoint:
                         )["selection"],
                     },
                 )
-                thread_id = create_resp.json()["run_id"]
+                thread_id = _as_dict(create_resp.json())["run_id"]
+                assert isinstance(thread_id, str)
                 resp = client.get(f"/v1/runs/{thread_id}/history")
 
             assert resp.status_code == 200
-            data = resp.json()["metadata"]
+            metadata_val = _as_dict(resp.json())["metadata"]
+            assert isinstance(metadata_val, dict)
+            data = cast("dict[str, object]", metadata_val)
             assert data["workspace_root"] == ws
             assert data["feature_tag"] == "auth-flow"
             assert data["source_repo"] == "github.com/org/repo"
 
     def test_metadata_reads_back_minted_for_a_run_that_declared_none(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A run that declared nothing of its own reads back what was minted.
 
@@ -374,14 +416,19 @@ class TestGetMetadataEndpoint:
                 },
             )
             assert create_resp.status_code == 201, create_resp.text
-            thread_id = create_resp.json()["run_id"]
+            thread_id = _as_dict(create_resp.json())["run_id"]
+            assert isinstance(thread_id, str)
             resp = client.get(f"/v1/runs/{thread_id}/history")
 
         assert resp.status_code == 200
-        data = resp.json()["metadata"]
-        assert data is not None, "every admitted run carries minted metadata"
+        metadata_val = _as_dict(resp.json())["metadata"]
+        assert metadata_val is not None, "every admitted run carries minted metadata"
+        assert isinstance(metadata_val, dict)
+        data = cast("dict[str, object]", metadata_val)
+        workspace_root = data["workspace_root"]
+        assert isinstance(workspace_root, str)
         assert (
-            Path(data["workspace_root"]).resolve()
+            Path(workspace_root).resolve()
             == Path(fields["metadata"]["workspace_root"]).resolve()
         )
         assert data["nickname"]
@@ -391,7 +438,7 @@ class TestGetMetadataEndpoint:
         assert not data["callee"]
 
     def test_history_404_nonexistent_thread(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Returns 404 when the run itself does not exist."""
         app, _agg = _make_app(session_factory, checkpointer)
@@ -411,7 +458,7 @@ class TestAutoDiscovery:
     """Tests for .vault/ auto-discovery via metadata."""
 
     def test_auto_discovery_populates_context_refs(
-        self, session_factory, checkpointer
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Auto-discovery populates context_refs when feature_tag is set."""
         with _run_workspace() as ws:
@@ -443,13 +490,22 @@ class TestAutoDiscovery:
                         )["selection"],
                     },
                 )
-                thread_id = create_resp.json()["run_id"]
+                thread_id = _as_dict(create_resp.json())["run_id"]
+                assert isinstance(thread_id, str)
                 meta_resp = client.get(f"/v1/runs/{thread_id}/history")
 
             assert meta_resp.status_code == 200
-            meta_data = meta_resp.json()["metadata"]
+            meta_metadata_val = _as_dict(meta_resp.json())["metadata"]
+            assert isinstance(meta_metadata_val, dict)
+            meta_data = cast("dict[str, object]", meta_metadata_val)
             refs = meta_data["context_refs"]
-            assert len(refs) >= 2
-            stages = {r["stage"] for r in refs}
+            assert isinstance(refs, list)
+            refs_list = cast("list[object]", refs)
+            assert len(refs_list) >= 2
+            stages: set[object] = set()
+            for r in refs_list:
+                assert isinstance(r, dict)
+                r_payload = cast("dict[str, object]", r)
+                stages.add(r_payload["stage"])
             assert "research" in stages
             assert "plan" in stages

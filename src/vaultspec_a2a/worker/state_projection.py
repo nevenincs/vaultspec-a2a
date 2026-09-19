@@ -11,7 +11,7 @@ import asyncio
 import logging
 from collections.abc import Collection, Mapping
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
+from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, cast
 
 from ..domain_config import domain_config
 from ..ipc.schemas import (
@@ -34,6 +34,12 @@ if TYPE_CHECKING:
 __all__ = ["StateProjector"]
 
 logger = logging.getLogger(__name__)
+
+
+class _LogExtraFn(Protocol):
+    """Callable that builds a structured-logging ``extra`` mapping."""
+
+    def __call__(self, **kwargs: object) -> dict[str, object]: ...
 
 
 class _ExecutionStateSnapshot(Protocol):
@@ -173,6 +179,7 @@ def _checkpoint_id(config: Mapping[str, object] | None) -> str | None:
         return None
     if not isinstance(configurable, Mapping):
         raise TypeError("Checkpoint configurable metadata must be a mapping")
+    configurable = cast("Mapping[str, object]", configurable)
     # The canonical narrower is strict, so it refuses a Mapping that is not a
     # dict. This site is the one place that must not inherit that refusal: it
     # already tested for Mapping rather than dict, which is a statement that a
@@ -208,7 +215,7 @@ class StateProjector:
     ) -> None:
         self._checkpointer = checkpointer
         self._bridge = bridge
-        self._log_extra_fn = log_extra_fn or (lambda **kw: kw)
+        self._log_extra_fn: _LogExtraFn = log_extra_fn or (lambda **kw: kw)
 
     # ------------------------------------------------------------------
     # Pre-flight checkpoint inspection (reconciliation window guard)

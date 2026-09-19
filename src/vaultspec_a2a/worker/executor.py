@@ -11,7 +11,7 @@ import asyncio
 import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from langgraph.types import Command
 
@@ -306,7 +306,7 @@ class Executor:
 
     async def _emit_dispatch_application_receipt(self, req: DispatchRequest) -> None:
         """Report incorporation only after reading its committed checkpoint proof."""
-        if req.action not in {"ingest", "resume"}:
+        if req.action != "ingest" and req.action != "resume":
             return
         try:
             receipt = req.require_graph_action_receipt()
@@ -319,10 +319,12 @@ class Executor:
             if checkpoint is None or checkpoint.metadata.get("source") != "loop":
                 return
             values = checkpoint.checkpoint.get("channel_values", {})
-            receipts = values.get("graph_action_receipts")
+            receipts: object = values.get("graph_action_receipts")
             if not isinstance(receipts, dict):
                 return
-            if receipts.get(req.dispatch_id) != receipt.model_dump(mode="json"):
+            if cast("dict[str, object]", receipts).get(
+                req.dispatch_id
+            ) != receipt.model_dump(mode="json"):
                 return
             await self._bridge.send_event(
                 req.thread_id,
@@ -446,9 +448,11 @@ class Executor:
                 graph.aget_state(config),
                 timeout=domain_config.aget_state_timeout_seconds,
             )
-            values = getattr(snapshot, "values", None)
-            session_id = (
-                values.get("authoring_session_id") if isinstance(values, dict) else None
+            values: object = getattr(snapshot, "values", None)
+            session_id: object = (
+                cast("dict[str, object]", values).get("authoring_session_id")
+                if isinstance(values, dict)
+                else None
             )
             if not isinstance(session_id, str) or not session_id:
                 return  # non-authoring run — no engine session to close
@@ -732,14 +736,20 @@ class Executor:
                 thread_id=req.thread_id,
                 agent_id=req.agent_id or "supervisor",
             ) as span:
-                match req.action:
-                    case ControlActionType.INGEST:
+                # Matched as `object`: the wildcard branch below is a real
+                # defense against a caller-constructed request carrying an
+                # action outside the declared Literal, not dead code.
+                match cast("object", req.action):
+                    case "ingest":
                         await self._handle_ingest(req)
-                    case ControlActionType.RESUME:
+                    case "resume":
                         await self._handle_resume(req)
-                    case ControlActionType.CANCEL:
+                    case "cancel":
                         span.add_event("thread_cancelled")
-                        if req.dispatch_id is None:
+                        # `dispatch_id` is a required str field, but this guard
+                        # defends against a caller-constructed request that
+                        # bypassed the model's own validation.
+                        if cast("object", req.dispatch_id) is None:
                             raise ValueError(
                                 "cancel dispatch requires a stable identity"
                             )
@@ -1009,6 +1019,10 @@ class Executor:
             # Stays None unless the catch-all below fires, so a run that settles
             # normally offers no fallback and keeps whatever ingest classified.
             execution_failure_reason: str | None = None
+            # Pre-bound so `finally` always has a value to settle with, including
+            # for a BaseException that bypasses the `except Exception` clause
+            # below (e.g. cancellation) before `ingest` assigns its own outcome.
+            outcome: str = ThreadStatus.FAILED
 
             try:
                 span.add_event("starting_graph_execution")
@@ -1081,6 +1095,10 @@ class Executor:
             # Stays None unless the catch-all below fires, so a resume that
             # settles normally keeps whatever ingest classified.
             execution_failure_reason: str | None = None
+            # Pre-bound so `finally` always has a value to settle with, including
+            # for a BaseException that bypasses the `except Exception` clause
+            # below (e.g. cancellation) before `ingest` assigns its own outcome.
+            outcome: str = ThreadStatus.FAILED
 
             try:
                 span.add_event("resuming_graph_execution")

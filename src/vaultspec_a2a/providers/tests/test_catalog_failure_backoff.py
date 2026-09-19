@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import override
 
 import pytest
 
@@ -263,6 +264,7 @@ class _FailingLaneFactory(ProviderFactory):
         super().__init__()
         self.attempts = 0
 
+    @override
     def catalog_registrations(
         self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None
     ) -> tuple[ProviderCatalogRegistration, ...]:

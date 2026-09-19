@@ -20,7 +20,7 @@ from ...control.worker_management import (
     _build_worker_restart_detail,
     _worker_stderr_log_path,
 )
-from .conftest import make_app
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -29,8 +29,8 @@ if TYPE_CHECKING:
 
 @pytest.mark.asyncio
 async def test_v1_write_body_limit_rejects_declared_oversize(
-    session_factory,
-    checkpointer,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The production app rejects an oversized v1 body before model parsing."""
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
@@ -47,8 +47,8 @@ async def test_v1_write_body_limit_rejects_declared_oversize(
 
 @pytest.mark.asyncio
 async def test_v1_write_body_limit_rejects_streamed_oversize(
-    session_factory,
-    checkpointer,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Chunked input cannot bypass the same pre-parser memory bound."""
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
@@ -142,8 +142,8 @@ def test_worker_watchdog_keeps_stderr_log_path_null_when_auto_spawn_disabled() -
 
 @pytest.mark.asyncio
 async def test_health_reports_worker_stderr_log_path(
-    session_factory,
-    checkpointer,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """GET /health should expose the diagnostic stderr log location."""
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
@@ -170,8 +170,8 @@ async def test_health_reports_worker_stderr_log_path(
 
 @pytest.mark.asyncio
 async def test_health_ready_for_adopted_worker_without_heartbeat(
-    session_factory,
-    checkpointer,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A healthy adopted worker with no heartbeat push must report /health ready.
 
@@ -232,8 +232,8 @@ def test_build_sqlite_fallback_diagnostics_reports_wal_state(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_health_reports_sqlite_fallback_diagnostics(
-    session_factory,
-    checkpointer,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """GET /health should expose explicit SQLite fallback diagnostics."""
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
@@ -261,7 +261,7 @@ async def test_health_reports_sqlite_fallback_diagnostics(
 
 @pytest.mark.asyncio
 async def test_health_degrades_when_checkpointer_backend_is_unusable(
-    session_factory,
+    session_factory: SessionFactory,
     tmp_path: Path,
 ) -> None:
     """GET /health must fail closed when the checkpointer cannot be probed."""

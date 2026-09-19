@@ -871,7 +871,7 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
 
 
 async def _answered_rejection(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
     checkpointer: InMemorySaver,
     *,
     title: str,

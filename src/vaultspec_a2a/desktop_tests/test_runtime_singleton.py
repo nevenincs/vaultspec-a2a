@@ -21,7 +21,7 @@ import os
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from ..lifecycle.discovery import (
     DesktopDiscoveryState,
@@ -36,6 +36,23 @@ from ..lifecycle.singleton import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+class _GatewayHandle(TypedDict):
+    """Signal files and process handle for a spawned gateway child."""
+
+    proc: subprocess.Popen[bytes]
+    ready: Path
+    stop: Path
+    outcome: Path
+
+
+class _ReadyPayload(TypedDict):
+    """Payload a gateway child writes to its ``ready`` signal file."""
+
+    pid: int
+    port: int
+
 
 # A real "gateway": take the runtime singleton first (as the serve path does
 # before bind), then publish the versioned discovery record, then hold. On an
@@ -70,7 +87,7 @@ finally:
 
 def _spawn_gateway(
     tmp_path: Path, app_home: Path, owner: str, port: int, tag: str
-) -> dict:
+) -> _GatewayHandle:
     """Spawn a gateway child and return handles plus its signal files."""
     ready = tmp_path / f"{tag}.ready"
     stop = tmp_path / f"{tag}.stop"
@@ -103,7 +120,7 @@ def _await(path: Path, *, timeout: float = 25.0) -> str:
     raise AssertionError(f"timed out waiting for {path}")
 
 
-def _stop(handle: dict, *, timeout: float = 25.0) -> int:
+def _stop(handle: _GatewayHandle, *, timeout: float = 25.0) -> int:
     handle["stop"].touch()
     try:
         return handle["proc"].wait(timeout=timeout)
@@ -117,7 +134,7 @@ def test_second_gateway_cannot_own_or_overwrite_the_home(tmp_path: Path) -> None
     app_home = tmp_path / "app"
     first = _spawn_gateway(tmp_path, app_home, "owner-a", 8300, "first")
     try:
-        first_ready = json.loads(_await(first["ready"]))
+        first_ready = cast("_ReadyPayload", json.loads(_await(first["ready"])))
         # Certify via the published record's process identity, not the launch pid.
         record_before = read_desktop_discovery(service_json_path(app_home))
         assert record_before is not None
@@ -130,7 +147,7 @@ def test_second_gateway_cannot_own_or_overwrite_the_home(tmp_path: Path) -> None
         second = _spawn_gateway(tmp_path, app_home, "owner-b", 8301, "second")
         second_code = second["proc"].wait(timeout=25)
         assert second_code == 3
-        outcome = json.loads(second["outcome"].read_text())
+        outcome = cast("dict[str, str]", json.loads(second["outcome"].read_text()))
         assert outcome["result"] == "conflict"
 
         # The first gateway's record is untouched: the failed contender never
@@ -147,7 +164,7 @@ def test_owner_restart_after_real_kill_reclaims_via_stale(tmp_path: Path) -> Non
     first = _spawn_gateway(tmp_path, app_home, "owner-a", 8302, "first")
     first_pid = 0
     try:
-        first_pid = json.loads(_await(first["ready"]))["pid"]
+        first_pid = cast("_ReadyPayload", json.loads(_await(first["ready"])))["pid"]
     finally:
         first["proc"].terminate()
         first["proc"].wait(timeout=25)
@@ -160,7 +177,7 @@ def test_owner_restart_after_real_kill_reclaims_via_stale(tmp_path: Path) -> Non
     # A same-owner restart takes over and republishes its own discovery record.
     restart = _spawn_gateway(tmp_path, app_home, "owner-a", 8303, "restart")
     try:
-        restart_ready = json.loads(_await(restart["ready"]))
+        restart_ready = cast("_ReadyPayload", json.loads(_await(restart["ready"])))
         assert restart_ready["pid"] != first_pid
         new_state, new_record = classify_desktop_discovery(service_json_path(app_home))
         assert new_state is DesktopDiscoveryState.FRESH

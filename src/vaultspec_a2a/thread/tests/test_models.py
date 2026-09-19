@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from ..models import ArtifactRef, PlanStep, TokenUsageEntry
-from ..state import _append_validation_errors, _merge_vault_index
+from ..state import append_validation_errors, merge_vault_index
 
 # ---------------------------------------------------------------------------
 # TokenUsageEntry
@@ -161,44 +161,44 @@ class TestArtifactRef:
 
 
 # ---------------------------------------------------------------------------
-# _merge_vault_index reducer
+# merge_vault_index reducer
 # ---------------------------------------------------------------------------
 
 
 class TestMergeVaultIndex:
-    """Tests for the _merge_vault_index reducer."""
+    """Tests for the merge_vault_index reducer."""
 
     def test_appends_new_paths(self) -> None:
         existing: dict[str, list[str]] = {"research": ["a.md"]}
         new: dict[str, list[str]] = {"research": ["b.md"]}
-        result = _merge_vault_index(existing, new)
+        result = merge_vault_index(existing, new)
         assert result == {"research": ["a.md", "b.md"]}
 
     def test_deduplicates(self) -> None:
         existing: dict[str, list[str]] = {"adr": ["x.md", "y.md"]}
         new: dict[str, list[str]] = {"adr": ["y.md", "z.md"]}
-        result = _merge_vault_index(existing, new)
+        result = merge_vault_index(existing, new)
         assert result == {"adr": ["x.md", "y.md", "z.md"]}
 
     def test_preserves_existing_types(self) -> None:
         existing: dict[str, list[str]] = {"research": ["a.md"]}
         new: dict[str, list[str]] = {"plan": ["p.md"]}
-        result = _merge_vault_index(existing, new)
+        result = merge_vault_index(existing, new)
         assert result == {"research": ["a.md"], "plan": ["p.md"]}
 
 
 # ---------------------------------------------------------------------------
-# _append_validation_errors reducer
+# append_validation_errors reducer
 # ---------------------------------------------------------------------------
 
 
 class TestAppendValidationErrors:
-    """Tests for the _append_validation_errors reducer."""
+    """Tests for the append_validation_errors reducer."""
 
     def test_appends(self) -> None:
-        result = _append_validation_errors(["err1"], ["err2", "err3"])
+        result = append_validation_errors(["err1"], ["err2", "err3"])
         assert result == ["err1", "err2", "err3"]
 
     def test_clears_on_empty_new(self) -> None:
-        result = _append_validation_errors(["err1", "err2"], [])
+        result = append_validation_errors(["err1", "err2"], [])
         assert result == []

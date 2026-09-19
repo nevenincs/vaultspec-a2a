@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from pydantic import ValidationError
 
 from ..action_receipts import GraphActionReceipt, control_action_payload_fingerprint
 from ..enums import ControlActionType
-from ..state import TeamState
+from ._graph_helpers import add_node, compile_graph, new_builder
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
+
+    from ..state import TeamState
 
 
 def _receipt(dispatch_id: str, *, content: str) -> GraphActionReceipt:
@@ -44,12 +46,12 @@ async def test_checkpoint_preserves_receipts_and_refuses_conflicting_replay(
     first = _receipt("first", content="initial accepted input")
     second = _receipt("second", content="accepted follow-up")
     config: RunnableConfig = {"configurable": {"thread_id": "receipt-run"}}
-    builder = StateGraph(cast("Any", TeamState))
-    builder.add_node("finish", _finish)
+    builder = new_builder()
+    add_node(builder, "finish", _finish)
     builder.add_edge(START, "finish")
     builder.add_edge("finish", END)
     async with AsyncSqliteSaver.from_conn_string(path) as saver:
-        graph = builder.compile(checkpointer=saver)
+        graph = compile_graph(builder, checkpointer=saver)
         await graph.ainvoke(
             {
                 "active_agent": "worker",
@@ -68,7 +70,7 @@ async def test_checkpoint_preserves_receipts_and_refuses_conflicting_replay(
             config,
         )
     async with AsyncSqliteSaver.from_conn_string(path) as reopened:
-        graph = builder.compile(checkpointer=reopened)
+        graph = compile_graph(builder, checkpointer=reopened)
         restored = await graph.aget_state(config)
         assert restored.values["graph_action_receipts"] == {
             first.dispatch_id: first.model_dump(mode="json"),

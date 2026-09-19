@@ -129,8 +129,7 @@ def _bindings(
         for node in body:
             if isinstance(node, ast.TypeAlias):
                 # PEP 695 `type X = ...`; a declaration ast.Assign never sees.
-                if isinstance(node.name, ast.Name):
-                    local.add(node.name.id)
+                local.add(node.name.id)
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     bound = alias.asname or alias.name.split(".")[0]

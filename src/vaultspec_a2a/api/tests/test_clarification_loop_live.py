@@ -41,11 +41,12 @@ from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
 from ...control.action_lease import (
     CONTROL_ACTION_LEASE_TTL,
-    claim_control_action,
+    prepare_control_action_claim,
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.clarification_service import redrive_clarification_actions
 from ...control.execution_authority import resolve_execution_authority
+from ...control.graph_definition import read_accepted_graph_definition
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
@@ -85,12 +86,14 @@ async def _cache_key_for_thread(
     """Bind the registered real graph to the run's exact durable authority."""
     async with session_factory() as db:
         metadata_json = await get_thread_metadata(db, thread_id)
+        graph_definition = await read_accepted_graph_definition(db, thread_id)
     authority = resolve_execution_authority(metadata_json)
     return (
         _BUNDLE_FREE_PRESET,
         None,
         False,
         authority.model_assignment_digest,
+        graph_definition.digest(),
     )
 
 
@@ -440,13 +443,14 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
     idempotency_key = f"clarification-response:{request_id}"
 
     async with session_factory() as db:
-        lost_claim = await claim_control_action(
+        lost_claim = await prepare_control_action_claim(
             db,
             thread_id=thread_id,
             action_type=ControlActionType.RESUME,
             idempotency_key=idempotency_key,
             request_id=request_id,
             payload=resolution.as_resume_value(),
+            dispatch_id=idempotency_key,
             worker_generation=thread.repair_generation,
             now=datetime.now(UTC) - CONTROL_ACTION_LEASE_TTL - timedelta(seconds=1),
         )

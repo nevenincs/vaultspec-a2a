@@ -32,7 +32,7 @@ unproven, never as proven.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from langchain_core.messages import HumanMessage
@@ -119,7 +119,7 @@ async def test_zai_rejected_credential_carries_a_typed_error_kind(
         "lane carries no discriminator and its typing must degrade to unknown; "
         f"message was: {error.message}"
     )
-    kind = data.get("errorKind")
+    kind = cast("dict[str, object]", data).get("errorKind")
     assert isinstance(kind, str) and kind, (
         "Z.ai rejected the credential without an errorKind, so this lane "
         "discriminates by prose alone; message was: " + error.message

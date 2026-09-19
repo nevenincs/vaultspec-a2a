@@ -11,7 +11,12 @@ directly, so a payload is classifiable under whichever key names its type.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from ...thread.enums import ThreadStatus
 from ...thread.snapshots import (
@@ -72,7 +77,7 @@ def test_normalizing_is_idempotent() -> None:
     ],
 )
 def test_classifiers_agree_whichever_key_names_the_type(
-    event_type: str, classifier
+    event_type: str, classifier: Callable[[dict[str, Any]], bool] | None
 ) -> None:
     """The three relay predicates classify a payload identically under either key.
 

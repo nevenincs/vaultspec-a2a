@@ -54,7 +54,7 @@ from ..tests.gateway_boot import (
 
 if TYPE_CHECKING:
     import subprocess
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
 # ``GatewayBootError`` is raised here but declared by ``tests.gateway_boot``, which
@@ -289,7 +289,7 @@ def certified_gateway(
     settlement_url: str | None = None,
     log_name: str = "gateway.log",
     **extra_env: str,
-) -> Iterator[CertifiedGateway]:
+) -> Generator[CertifiedGateway]:
     """Boot one armed-desktop certification stack over *workdir* and reap it.
 
     Seats the dashboard credentials and a real migrated database under a fresh

@@ -353,11 +353,11 @@ def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
 
 def test_no_declared_event_kind_is_catalogued_under_a_hand_copied_literal() -> None:
     """No catalog entry is left stranded behind a respelling of its declaration."""
-    from ...streaming.sse_frames import _PROGRESS_CATALOG
+    from ...streaming.sse_frames import PROGRESS_CATALOG
 
-    assert ServerEventType.HEARTBEAT in _PROGRESS_CATALOG
+    assert ServerEventType.HEARTBEAT in PROGRESS_CATALOG
     declared = set(ServerEventType)
-    for key in _PROGRESS_CATALOG:
+    for key in PROGRESS_CATALOG:
         if key in declared:
             assert isinstance(key, ServerEventType), (
                 f"{key!r} is a declared event kind keyed by a hand-copied literal"

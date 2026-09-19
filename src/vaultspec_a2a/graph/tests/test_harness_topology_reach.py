@@ -162,6 +162,7 @@ def _compile(team: Any, factory: Any, workspace: Path) -> Any:
         provider_factory=factory,
         autonomous=True,
         workspace_root=workspace,
+        step_timeout=42.0,
         model_assignment=deterministic_model_assignment(team),
     )
 

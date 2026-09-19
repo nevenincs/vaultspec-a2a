@@ -9,7 +9,10 @@ from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 import pytest_asyncio
-from langchain_core.language_models.fake_chat_models import FakeChatModel
+from langchain_core.language_models.fake_chat_models import (
+    FakeChatModel,
+    FakeListChatModel,
+)
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
@@ -42,11 +45,12 @@ from ..compiler import (
     _loop_route,
     _make_research_producer,
     _parse_catalog_preferences,
-    _resolve_model_for_worker,
     _route_from_supervisor,
     _worker_retry_on,
     compile_team_graph,
+    resolve_model_for_worker,
 )
+from ._state_graph_helpers import add_test_node, compile_test_graph
 from .conftest import deterministic_model_assignment
 
 
@@ -156,7 +160,7 @@ def test_bundled_preset_workers_require_an_exact_frozen_selection(
     for worker_ref in team.workers:
         agent_config = load_agent_config(worker_ref.agent_id)
         with pytest.raises(ValueError, match="exact catalog-frozen selection"):
-            _resolve_model_for_worker(
+            resolve_model_for_worker(
                 worker_ref, agent_config, team, provider_factory=ProviderFactory()
             )
 
@@ -170,16 +174,18 @@ def test_valid_frozen_fallback_runs_only_after_runtime_unavailability() -> None:
         def __init__(self) -> None:
             self.calls: list[str] = []
 
-        def create(self, provider: Any, *, model: str, **kwargs: Any) -> FakeChatModel:
+        def create(
+            self, provider: Any, *, model: str, **kwargs: Any
+        ) -> FakeListChatModel:
             self.calls.append(model)
             if model == "primary":
                 raise ProviderRuntimeUnavailableError(
                     "current lane is temporarily unavailable"
                 )
-            return FakeChatModel(responses=["ok"])
+            return FakeListChatModel(responses=["ok"])
 
     factory = RuntimeFailingFactory()
-    lane = {
+    lane: dict[str, Any] = {
         "schema_version": 1,
         "provider": "codex",
         "execution_mode": "codex-app-server",
@@ -201,11 +207,11 @@ def test_valid_frozen_fallback_runs_only_after_runtime_unavailability() -> None:
             }
         ],
     }
-    _model, provider, model_name = _resolve_model_for_worker(
+    _model, provider, model_name = resolve_model_for_worker(
         worker,
         agent,
         team,
-        provider_factory=factory,  # type: ignore[arg-type]
+        provider_factory=factory,
         frozen_assignment={worker.agent_id: lane},
     )
     assert factory.calls == ["primary", "fallback"]
@@ -221,12 +227,14 @@ def test_impossible_frozen_fallback_refuses_before_primary_provider_contact() ->
     class RecordingFactory:
         calls = 0
 
-        def create(self, provider: Any, *, model: str, **kwargs: Any) -> FakeChatModel:
+        def create(
+            self, provider: Any, *, model: str, **kwargs: Any
+        ) -> FakeListChatModel:
             self.calls += 1
-            return FakeChatModel(responses=["must not run"])
+            return FakeListChatModel(responses=["must not run"])
 
     factory = RecordingFactory()
-    lane = {
+    lane: dict[str, Any] = {
         "schema_version": 1,
         "provider": "codex",
         "execution_mode": "codex-app-server",
@@ -249,11 +257,11 @@ def test_impossible_frozen_fallback_refuses_before_primary_provider_contact() ->
         ],
     }
     with pytest.raises(ValueError, match="cannot execute mode"):
-        _resolve_model_for_worker(
+        resolve_model_for_worker(
             worker,
             agent,
             team,
-            provider_factory=factory,  # type: ignore[arg-type]
+            provider_factory=factory,
             frozen_assignment={worker.agent_id: lane},
         )
     assert factory.calls == 0
@@ -317,9 +325,11 @@ async def test_compile_prevalidates_all_roles_before_any_provider_contact(
         def __init__(self) -> None:
             self.calls = 0
 
-        def create(self, provider: Any, *, model: str, **kwargs: Any) -> FakeChatModel:
+        def create(
+            self, provider: Any, *, model: str, **kwargs: Any
+        ) -> FakeListChatModel:
             self.calls += 1
-            return FakeChatModel(responses=["must not run"])
+            return FakeListChatModel(responses=["must not run"])
 
     factory = RecordingFactory()
     with pytest.raises(ValueError, match="cannot execute mode"):
@@ -327,7 +337,7 @@ async def test_compile_prevalidates_all_roles_before_any_provider_contact(
             team_config=team,
             agent_configs=agents,
             checkpointer=checkpointer,
-            provider_factory=factory,  # type: ignore[arg-type]
+            provider_factory=factory,
             model_assignment=assignment,
         )
     assert factory.calls == 0
@@ -379,9 +389,11 @@ async def test_compile_refuses_invalid_controls_before_any_provider_contact(
         def __init__(self) -> None:
             self.calls = 0
 
-        def create(self, provider: Any, *, model: str, **kwargs: Any) -> FakeChatModel:
+        def create(
+            self, provider: Any, *, model: str, **kwargs: Any
+        ) -> FakeListChatModel:
             self.calls += 1
-            return FakeChatModel(responses=["must not run"])
+            return FakeListChatModel(responses=["must not run"])
 
     factory = RecordingFactory()
     with pytest.raises(ValueError, match=r"native.?control"):
@@ -389,7 +401,7 @@ async def test_compile_refuses_invalid_controls_before_any_provider_contact(
             team_config=team,
             agent_configs=agents,
             checkpointer=checkpointer,
-            provider_factory=factory,  # type: ignore[arg-type]
+            provider_factory=factory,
             model_assignment=assignment,
         )
     assert factory.calls == 0
@@ -993,11 +1005,13 @@ def _counting_failure_graph(
             worker="coder", model="acp:test", message_count=1, cause=cause
         ) from cause
 
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
-    builder.add_node("coder", failing_node, retry_policy=policy)
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(builder, "coder", failing_node, retry_policy=policy)
     builder.add_edge(START, "coder")
     builder.add_edge("coder", END)
-    return builder.compile()
+    return compile_test_graph(
+        builder,
+    )
 
 
 async def _attempts_for(

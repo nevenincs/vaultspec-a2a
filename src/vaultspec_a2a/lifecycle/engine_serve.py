@@ -49,7 +49,7 @@ from .registration import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from types import FrameType
 
     from .registry import ProcRecord
@@ -172,7 +172,7 @@ class _EngineStopRequest:
 
 
 @contextlib.contextmanager
-def _engine_shutdown_signals() -> Iterator[_EngineStopRequest]:
+def _engine_shutdown_signals() -> Generator[_EngineStopRequest]:
     request = _EngineStopRequest()
 
     def request_stop(signum: int, _frame: FrameType | None) -> None:

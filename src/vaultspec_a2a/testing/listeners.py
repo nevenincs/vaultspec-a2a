@@ -32,7 +32,7 @@ import threading
 from typing import TYPE_CHECKING, Any, override
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 __all__ = ["health_listener"]
 
@@ -61,7 +61,7 @@ class _HealthHandler(http.server.BaseHTTPRequestHandler):
 
 
 @contextlib.contextmanager
-def health_listener() -> Iterator[int]:
+def health_listener() -> Generator[int]:
     """Serve ``/health`` on a loopback port for the body, then shut down.
 
     Yields the port. Threaded, so a caller whose code under test opens more than

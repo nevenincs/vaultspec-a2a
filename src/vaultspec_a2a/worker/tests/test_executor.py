@@ -11,6 +11,7 @@ No mock libraries.  No tautological tests.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import pathlib
@@ -46,7 +47,12 @@ from ...thread.action_receipts import (
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
-from ..executor import _INGEST_GUARDS, _RESUME_GUARDS, Executor
+from ..executor import (
+    _INGEST_GUARDS,
+    _RESUME_GUARDS,
+    DispatchCapacityReservation,
+    Executor,
+)
 from ..graph_lifecycle import (
     GraphCacheKey,
     GraphCompilationError,
@@ -128,12 +134,23 @@ def _current_assignment() -> dict[str, dict[str, object]]:
     ).model_assignment
 
 
+def _test_graph_definition_digest(team_preset: str) -> str:
+    """Deterministic stand-in for a frozen graph definition's digest.
+
+    Injected graphs bypass compilation, so no ``ExecutableGraphDefinition`` is
+    ever frozen for them; the cache key still requires a digest-shaped value
+    to bind the injected entry to its owning preset.
+    """
+    return hashlib.sha256(team_preset.encode()).hexdigest()
+
+
 # Default cache key for test graphs.
 _TEST_CACHE_KEY = (
     "test-preset",
     None,
     False,
     model_assignment_digest(_current_assignment()),
+    _test_graph_definition_digest("test-preset"),
 )
 
 # Every dispatch names an active project, as a real one does. This package's own
@@ -281,7 +298,7 @@ class TestIngestGating:
                 # slot to prove B remains counted and an additional dispatch is
                 # refused at the configured process bound.
                 assert await executor.release_dispatch_capacity(first) is False
-                others = []
+                others: list[DispatchCapacityReservation] = []
                 for index in range(domain_config.max_concurrent_threads - 1):
                     owned = await executor.reserve_dispatch_capacity(f"other-{index}")
                     assert owned is not None
@@ -1010,6 +1027,7 @@ class TestLazyRecompilation:
                     None,
                     False,
                     model_assignment_digest(_current_assignment()),
+                    _test_graph_definition_digest("vaultspec-solo-coder"),
                 )
                 _inject_graph(executor, "t-cache", cache_key=cache_key)
                 assert executor.graph_count == 1
@@ -1064,6 +1082,7 @@ class TestLazyRecompilation:
                     _WORKSPACE,
                     False,
                     model_assignment_digest(_current_assignment()),
+                    _test_graph_definition_digest("vaultspec-solo-coder"),
                 )
                 _inject_graph(executor, "t-preset", cache_key=cache_key)
                 assert executor.graph_count == 1
@@ -1370,6 +1389,7 @@ def _install_completing_graph(executor: Executor, thread_id: str) -> None:
         None,
         False,
         model_assignment_digest(_current_assignment()),
+        _test_graph_definition_digest("settle-preset"),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -1397,6 +1417,7 @@ def _install_gated_graph(executor: Executor, thread_id: str) -> None:
         None,
         False,
         model_assignment_digest(_current_assignment()),
+        _test_graph_definition_digest("settle-gated-preset"),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -2068,6 +2089,7 @@ class TestPreRunRefusalsCarryTheirReason:
                         None,
                         False,
                         model_assignment_digest(_current_assignment()),
+                        _test_graph_definition_digest("boom-preset"),
                     ),
                     graph,
                 )

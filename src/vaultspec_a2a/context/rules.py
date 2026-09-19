@@ -8,6 +8,7 @@ into LLM system prompts.
 import contextlib
 import logging
 from pathlib import Path
+from typing import cast
 
 import yaml
 
@@ -366,7 +367,7 @@ def _read_frontmatter(path: Path) -> dict[str, object]:
         meta = yaml.safe_load("\n".join(block))
     except yaml.YAMLError:
         return {}
-    return meta if isinstance(meta, dict) else {}
+    return cast("dict[str, object]", meta) if isinstance(meta, dict) else {}
 
 
 def _roles_from_meta(meta: dict[str, object]) -> frozenset[str]:
@@ -379,7 +380,9 @@ def _roles_from_meta(meta: dict[str, object]) -> frozenset[str]:
     if isinstance(roles, str):
         return frozenset({roles})
     if isinstance(roles, list):
-        return frozenset(item for item in roles if isinstance(item, str))
+        return frozenset(
+            item for item in cast("list[object]", roles) if isinstance(item, str)
+        )
     return frozenset()
 
 

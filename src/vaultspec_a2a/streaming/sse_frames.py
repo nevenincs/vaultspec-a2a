@@ -42,7 +42,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final, TypeGuard
+from typing import Final, TypeGuard, cast
 
 # The frame-kind vocabulary and the semantic-phase vocabulary are both owned by
 # graph.enums - one source of truth per vocabulary, not a per-layer copy. The
@@ -58,8 +58,10 @@ from ..thread.clarification import MAX_REQUEST_ID_CHARS
 from ..thread.snapshots import wire_event_type
 
 __all__ = [
+    "ALWAYS_SAFE_KEYS",
     "MAX_PROGRESS_CONTENT_CHARS",
     "MAX_SSE_FRAME_BYTES",
+    "PROGRESS_CATALOG",
     "SSE_FRAME_VERSION",
     "catalog_worst_case_frame_bytes",
     "encode_sse_frame",
@@ -99,7 +101,7 @@ MAX_PROGRESS_CONTENT_CHARS = 16 * 1024
 
 # Identity and lifecycle keys that are safe on every progress frame. These carry
 # no prompt, document, artifact, diff, or provider payload - only who/when/which.
-_ALWAYS_SAFE_KEYS: frozenset[str] = frozenset(
+ALWAYS_SAFE_KEYS: frozenset[str] = frozenset(
     {
         "api_version",
         "type",
@@ -230,7 +232,8 @@ def _string_keyed(source: object) -> dict[str, object] | None:
     """
     if not isinstance(source, Mapping):
         return None
-    return {key: value for key, value in source.items() if isinstance(key, str)}
+    mapping = cast("Mapping[object, object]", source)
+    return {key: value for key, value in mapping.items() if isinstance(key, str)}
 
 
 def _project_fields(
@@ -300,7 +303,7 @@ _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
 # frame kinds the stream itself mints, which no graph event produces and the enum
 # therefore does not declare. Their spelling here is the mixture reading
 # correctly, not a conversion left half finished.
-_PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
+PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     ServerEventType.MESSAGE_CHUNK: {
         "content": _Text(MAX_PROGRESS_CONTENT_CHARS),
         "finish_reason": _Text(64),
@@ -441,7 +444,7 @@ def catalog_worst_case_frame_bytes() -> int:
                 frame_type,
             )
         )
-        for frame_type, fields in _PROGRESS_CATALOG.items()
+        for frame_type, fields in PROGRESS_CATALOG.items()
     )
 
 
@@ -451,7 +454,7 @@ def enforce_progress_allowlist(
     """Project a progress frame onto the closed per-event catalog.
 
     The frame is rebuilt from the always-safe identity keys plus the fields its
-    ``type`` enumerates in :data:`_PROGRESS_CATALOG`, with each text field
+    ``type`` enumerates in :data:`PROGRESS_CATALOG`, with each text field
     truncated to its declared cap and each list bounded and rebuilt item by
     item. A frame whose type is absent from the catalog - or that names no type
     at all - keeps only the identity keys. Nothing is refused: prompts, document
@@ -464,9 +467,9 @@ def enforce_progress_allowlist(
     """
     frame_type = wire_event_type(payload)
     projected: dict[str, object] = {
-        key: value for key, value in payload.items() if key in _ALWAYS_SAFE_KEYS
+        key: value for key, value in payload.items() if key in ALWAYS_SAFE_KEYS
     }
-    fields = _PROGRESS_CATALOG.get(frame_type)
+    fields = PROGRESS_CATALOG.get(frame_type)
     if fields is not None:
         projected.update(_project_fields(payload, fields))
     return projected

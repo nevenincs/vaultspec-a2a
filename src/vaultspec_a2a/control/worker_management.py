@@ -958,7 +958,7 @@ async def _spawn_worker_owned(
         # One statement covers all three exits - failed spawn, raised spawn, and
         # the success that hands ownership on - because "release unless ownership
         # transferred" is the whole rule.
-        if not owned and containment is not None:
+        if not owned:
             containment.close()
 
 

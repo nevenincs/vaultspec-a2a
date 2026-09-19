@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,7 +22,7 @@ from ..tools.schema_normalize import normalize_tool_input_schema
 _CATALOG = json.loads((Path(__file__).parent / "catalog.json").read_text("utf-8"))
 
 
-def _schema_for(name: str) -> dict:
+def _schema_for(name: str) -> dict[str, Any]:
     for tool in _CATALOG["tools"]:
         if tool["name"] == name:
             return tool["input_schema"]
@@ -277,7 +278,7 @@ async def test_served_tools_carry_json_schema_object_over_real_mcp() -> None:
 
     snapshot = parse_catalog(_CATALOG)
 
-    async def _dispatch(name: str, arguments: dict) -> dict:
+    async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return {"tool": name, "arguments": arguments, "disposition": "dispatched"}
 
     server = build_authoring_mcp_server(snapshot, _dispatch)

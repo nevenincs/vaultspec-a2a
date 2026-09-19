@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
@@ -245,6 +245,7 @@ class _RelayWatch(BaseCallbackHandler):
     def __init__(self) -> None:
         self.relayed = False
 
+    @override
     def on_llm_new_token(
         self, token: str | list[str | dict[str, Any]], **kwargs: Any
     ) -> None:
@@ -271,7 +272,7 @@ def _config_with_relay_watch(
     if existing is None:
         merged["callbacks"] = [watch]
     elif isinstance(existing, list):
-        merged["callbacks"] = [*cast("list[BaseCallbackHandler]", existing), watch]
+        merged["callbacks"] = [*existing, watch]
     else:
         # A CallbackManager rather than a bare list; it owns the same protocol.
         existing.add_handler(watch, inherit=True)
@@ -386,12 +387,22 @@ async def _collect_mock_permission_result(
     for tool_call in response.tool_calls:
         if tool_call.get("name") != "session_request_permission":
             continue
-        tool_input = tool_call.get("args", {})
-        if not isinstance(tool_input, dict):
-            tool_input = {}
-        options = tool_input.get("options", [])
-        if not isinstance(options, list):
-            options = []
+        raw_tool_input = cast("object", tool_call.get("args", {}))
+        tool_input = (
+            cast("dict[str, Any]", raw_tool_input)
+            if isinstance(raw_tool_input, dict)
+            else {}
+        )
+        raw_options = cast("object", tool_input.get("options", []))
+        options: list[dict[str, Any]] = (
+            [
+                cast("dict[str, Any]", o)
+                for o in cast("list[object]", raw_options)
+                if isinstance(o, dict)
+            ]
+            if isinstance(raw_options, list)
+            else []
+        )
         selected_option = await _interrupt_permission_callback(
             "session_request_permission",
             tool_input,
@@ -737,7 +748,7 @@ def create_worker_node(
         if feedback_reader is not None:
             batch_id = state.get("feedback_batch_id")
             thread_id = state.get("thread_id")
-            if batch_id and isinstance(thread_id, str) and thread_id:
+            if batch_id and thread_id:
                 feedback_grounding = await feedback_reader.read(thread_id, batch_id)
 
         messages = _build_worker_messages(
@@ -759,7 +770,7 @@ def create_worker_node(
         authoring_binding = None
         if authoring_binding_provider is not None:
             thread_id = state.get("thread_id")
-            if isinstance(thread_id, str) and thread_id:
+            if thread_id:
                 authoring_binding = await authoring_binding_provider.binding_for(
                     thread_id, name
                 )

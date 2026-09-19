@@ -57,7 +57,7 @@ from ...providers._subprocess import spawn_acp_process
 from ...providers.codex_chat_model import CodexChatModel, _CodexAppServerClient
 from ...providers.deterministic_chat_model import DeterministicResearchAdrChatModel
 from ...thread.models import TokenUsageEntry
-from ...thread.state import _merge_token_usage
+from ...thread.state import merge_token_usage
 from ...worker.cost_port import SqlCostPort
 from ..artifact_repository import (
     append_cost_record,
@@ -758,7 +758,7 @@ class TestStateChannelIsFedNotBypassed:
 
     def test_emitted_deltas_accumulate_through_the_real_reducer(self) -> None:
         """Two turns must sum in the existing additive reducer."""
-        merged = _merge_token_usage(
+        merged = merge_token_usage(
             self._channel("coder-1", _ai_message(10, 2, 12)),
             self._channel("coder-1", _ai_message(5, 1, 6)),
         )

@@ -67,7 +67,7 @@ def _event_type(event: object) -> str | None:
             return None
 
 
-def sequenced_to_dict(sequenced: SequencedEvent) -> dict:
+def sequenced_to_dict(sequenced: SequencedEvent) -> dict[str, object]:
     """Serialise a ``SequencedEvent`` to a plain dict (for bridge relay)."""
     d = asdict(sequenced.event)
     if event_type := _event_type(sequenced.event):

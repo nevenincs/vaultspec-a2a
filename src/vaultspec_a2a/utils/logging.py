@@ -24,7 +24,7 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, override
 
 from opentelemetry import trace
 from opentelemetry.trace.span import format_span_id, format_trace_id
@@ -151,6 +151,7 @@ class LivenessPollFilter(logging.Filter):
     real events to reduce volume trades one blind spot for another.
     """
 
+    @override
     def filter(self, record: logging.LogRecord) -> bool:
         """Return ``False`` only for a 2xx access line on a liveness path."""
         if record.name != "uvicorn.access":
@@ -176,6 +177,7 @@ class LivenessPollFilter(logging.Filter):
 class OTelCorrelationFilter(logging.Filter):
     """Inject OTel correlation fields into log records when a span is active."""
 
+    @override
     def filter(self, record: logging.LogRecord) -> bool:
         """Populate correlation fields without overwriting caller-provided values."""
         span = trace.get_current_span()
@@ -209,6 +211,7 @@ class JSONFormatter(logging.Formatter):
     included in the JSON output, enabling structured correlation context.
     """
 
+    @override
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record as a single-line JSON string."""
         log_data: dict[str, Any] = {
@@ -256,10 +259,12 @@ class JSONFormatter(logging.Formatter):
         if not isinstance(exc_info, tuple):
             # A record assembled directly rather than through ``Logger._log``
             # never had its flag resolved; resolve it the way that would have.
-            exc_info = sys.exc_info()
-        if len(exc_info) != 3 or exc_info[0] is None:
+            resolved = sys.exc_info()
+        else:
+            resolved = cast("tuple[object, ...]", exc_info)
+        if len(resolved) != 3 or resolved[0] is None:
             return None
-        return self.formatException(cast("_ExcInfo", exc_info))
+        return self.formatException(cast("_ExcInfo", resolved))
 
 
 def reconfigure_console_utf8() -> None:
@@ -375,6 +380,7 @@ _EXPORT_FAILURE_LOGGERS: tuple[str, ...] = (
 class _DemoteToWarning(logging.Filter):
     """Rewrite ERROR records from a named logger down to WARNING in place."""
 
+    @override
     def filter(self, record: logging.LogRecord) -> bool:
         if record.levelno >= logging.ERROR:
             record.levelno = logging.WARNING

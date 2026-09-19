@@ -407,7 +407,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
     await close_db()
     await init_db(str(tmp_path / "retired-restart.db"))
     worker = _InProcessWorker()
-    retired_cases: tuple[tuple[str, tuple[object, ...], str, object], ...] = (
+    retired_cases: tuple[tuple[str, tuple[str, ...], str, object], ...] = (
         ("root-profile-id", (), "profile_id", "retired"),
         ("root-default-profile", (), "default_profile_id", "retired"),
         ("root-profile", (), "profile", {"id": "retired"}),
@@ -419,17 +419,19 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
     )
     try:
         metadata, _assignment = _current_metadata(tmp_path)
-        current = metadata["provider_catalog_selection"]
-        assert isinstance(current, dict)
+        current_raw = metadata["provider_catalog_selection"]
+        assert isinstance(current_raw, dict)
+        current = cast("dict[str, object]", current_raw)
         original_digest = current["digest"]
         session_factory = get_session_factory()
         async with session_factory() as session:
             for label, path, field, value in retired_cases:
                 record = deepcopy(current)
-                target: object = record
+                target: dict[str, object] = record
                 for key in path:
-                    target = target[key]  # type: ignore[index]
-                assert isinstance(target, dict)
+                    nested = target[key]
+                    assert isinstance(nested, dict)
+                    target = cast("dict[str, object]", nested)
                 target[field] = value
                 assert record["digest"] == original_digest
                 await create_thread(

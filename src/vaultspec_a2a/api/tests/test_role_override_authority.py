@@ -14,7 +14,7 @@ assignment the run will actually execute with.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -60,10 +60,16 @@ def _frozen_assignment(client: TestClient, run_id: str) -> dict[str, Any]:
     """Read back the assignment the run was frozen with."""
     response = client.get(f"/v1/runs/{run_id}")
     assert response.status_code == 200, response.text
-    body = response.json()
-    frozen = body.get("frozen_assignment") or body.get("assignments") or {}
+    body: object = response.json()
+    assert isinstance(body, dict)
+    body = cast("dict[str, object]", body)
+    empty_assignment: dict[str, object] = {}
+    frozen = (
+        body.get("frozen_assignment") or body.get("assignments") or empty_assignment
+    )
+    assert isinstance(frozen, dict)
     assert frozen, f"run-status disclosed no frozen selection: {sorted(body)}"
-    return frozen
+    return cast("dict[str, Any]", frozen)
 
 
 class TestRoleOverrideAuthority:

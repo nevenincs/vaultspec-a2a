@@ -39,6 +39,7 @@ import pytest_asyncio
 from alembic import command
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 from sqlalchemy import Connection, String, create_engine, inspect, select, text
 from sqlalchemy.ext.asyncio import (
@@ -478,14 +479,20 @@ class TestWorkspaceRootBoundIsTheColumn:
         """
         width = self._column_width()
 
-        await discover_active_runs(
-            session, workspace_root=Path(self._root_of_length(width))
-        )
-
-        with pytest.raises(ValueError, match="workspace_root must be between"):
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
+            await checkpointer.setup()
             await discover_active_runs(
-                session, workspace_root=Path(self._root_of_length(width + 1))
+                session,
+                checkpointer=checkpointer,
+                workspace_root=Path(self._root_of_length(width)),
             )
+
+            with pytest.raises(ValueError, match="workspace_root must be between"):
+                await discover_active_runs(
+                    session,
+                    checkpointer=checkpointer,
+                    workspace_root=Path(self._root_of_length(width + 1)),
+                )
 
 
 class TestFeatureTagBoundIsTheColumn:
@@ -590,10 +597,16 @@ class TestFeatureTagBoundIsTheColumn:
         """Discovery refuses at the edge rather than deep in a transaction."""
         width = self._column_width()
 
-        await discover_active_runs(session, feature_tag="f" * width)
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
+            await checkpointer.setup()
+            await discover_active_runs(
+                session, checkpointer=checkpointer, feature_tag="f" * width
+            )
 
-        with pytest.raises(ValueError, match="feature_tag must be between"):
-            await discover_active_runs(session, feature_tag="f" * (width + 1))
+            with pytest.raises(ValueError, match="feature_tag must be between"):
+                await discover_active_runs(
+                    session, checkpointer=checkpointer, feature_tag="f" * (width + 1)
+                )
 
     def test_the_wire_records_carry_a_tag_the_column_can_hold(self) -> None:
         """Every tag the column accepts survives onto the wire records.

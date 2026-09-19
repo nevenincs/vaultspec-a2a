@@ -297,6 +297,7 @@ async def test_the_compiled_run_tells_each_role_what_its_lane_may_claim(
         proposal_submitter=_RecordingSubmitter(),
         autonomous=True,
         workspace_root=workspace,
+        step_timeout=42.0,
         model_assignment=deterministic_model_assignment(team),
     )
 

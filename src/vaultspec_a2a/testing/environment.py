@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from ..control.config import settings as _settings
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
 __all__ = [
@@ -35,7 +35,7 @@ __all__ = [
 
 
 @contextlib.contextmanager
-def armed_environment(**values: str | None) -> Iterator[None]:
+def armed_environment(**values: str | None) -> Generator[None]:
     """Apply *values* to ``os.environ``, then restore the prior state.
 
     ``None`` removes a name for the duration of the block rather than setting
@@ -62,7 +62,7 @@ def armed_environment(**values: str | None) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def settings_override(**updates: object) -> Iterator[None]:
+def settings_override(**updates: object) -> Generator[None]:
     """Temporarily set attributes on the shared ``settings`` singleton.
 
     Restoration runs in the ``finally`` clause, so an assertion raised inside
@@ -82,7 +82,7 @@ def settings_override(**updates: object) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def armed_desktop_app_home(app_home: Path) -> Iterator[None]:
+def armed_desktop_app_home(app_home: Path) -> Generator[None]:
     """Arm the desktop profile on the shared ``settings`` singleton.
 
     ``desktop_profile_armed`` is a read-only property derived from

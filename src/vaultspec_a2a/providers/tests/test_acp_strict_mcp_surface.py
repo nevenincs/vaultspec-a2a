@@ -34,7 +34,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -88,21 +88,35 @@ def _ambient_user_server_names() -> list[str]:
     base = Path(override).expanduser() if override else Path.home()
     config_file = base / ".claude.json"
     try:
-        parsed = json.loads(config_file.read_text(encoding="utf-8"))
+        raw_parsed: object = json.loads(config_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    servers = parsed.get("mcpServers") if isinstance(parsed, dict) else None
-    return sorted(servers) if isinstance(servers, dict) else []
+    servers = (
+        cast("dict[str, object]", raw_parsed).get("mcpServers")
+        if isinstance(raw_parsed, dict)
+        else None
+    )
+    return (
+        sorted(cast("dict[str, object]", servers)) if isinstance(servers, dict) else []
+    )
 
 
 def _project_scope_server_names(workspace: Path) -> list[str]:
     """Names the workspace's own ``.mcp.json`` declares; best-effort."""
     try:
-        parsed = json.loads((workspace / ".mcp.json").read_text(encoding="utf-8"))
+        raw_parsed: object = json.loads(
+            (workspace / ".mcp.json").read_text(encoding="utf-8")
+        )
     except (OSError, ValueError):
         return []
-    servers = parsed.get("mcpServers") if isinstance(parsed, dict) else None
-    return sorted(servers) if isinstance(servers, dict) else []
+    servers = (
+        cast("dict[str, object]", raw_parsed).get("mcpServers")
+        if isinstance(raw_parsed, dict)
+        else None
+    )
+    return (
+        sorted(cast("dict[str, object]", servers)) if isinstance(servers, dict) else []
+    )
 
 
 async def _armed_model(workspace: Path, rule: ExternalPrerequisiteRule) -> AcpChatModel:

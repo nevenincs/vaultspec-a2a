@@ -24,7 +24,7 @@ from ...utils.process import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 # The gate makes job assignment precede descendant creation on Windows. The
 # descendant's ready message proves its signal handler is installed before teardown.
@@ -49,7 +49,7 @@ _STUBBORN_CHILD = (
 @contextlib.asynccontextmanager
 async def _owned_tree(
     child_source: str = _CHILD,
-) -> AsyncIterator[tuple[ProcessContainment, subprocess.Popen[str], int]]:
+) -> AsyncGenerator[tuple[ProcessContainment, subprocess.Popen[str], int]]:
     containment = ProcessContainment.create()
     parent: subprocess.Popen[str] | None = None
     child_pid: int | None = None

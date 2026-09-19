@@ -23,7 +23,7 @@ import zipfile
 from dataclasses import dataclass
 from importlib.metadata import PathDistribution
 from pathlib import Path, PurePosixPath
-from typing import Final
+from typing import Final, cast
 
 import pytest
 
@@ -217,14 +217,18 @@ def test_dashboard_fixture_pins_wheel_identity_without_claiming_release_binding(
     built_wheel: WheelEvidence,
 ) -> None:
     """The fixture crosses repositories only at the component-reference shape."""
-    document = json.loads(_RELEASE_FIXTURE.read_text(encoding="utf-8"))
+    document = cast(
+        "dict[str, object]", json.loads(_RELEASE_FIXTURE.read_text(encoding="utf-8"))
+    )
     assert document["fixture_only"] is True
 
-    pins = document["components"]
-    assert isinstance(pins, list) and len(pins) == 1
-    pin = pins[0]
+    raw_pins = document["components"]
+    assert isinstance(raw_pins, list)
+    pins = cast("list[object]", raw_pins)
+    assert len(pins) == 1
+    pin = cast("dict[str, object]", pins[0])
     fixture_identity = ComponentIdentity(
-        name=pin["name"],
-        version=pin["version"],
+        name=cast("str", pin["name"]),
+        version=cast("str", pin["version"]),
     )
     assert fixture_identity == built_wheel.identity

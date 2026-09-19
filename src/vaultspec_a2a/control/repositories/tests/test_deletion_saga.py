@@ -27,6 +27,7 @@ from ....control.repositories import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,
+    FinalizeOutcome,
     advance_deletion_cleanup_item,
     claim_deletion_saga,
     create_deletion_saga,
@@ -488,6 +489,7 @@ async def test_repeated_failures_abandon_the_item_and_release_the_saga(
         "artifact:a1", CleanupItemState.FAILED, detail="permission denied"
     )
     states: list[CleanupItemState] = []
+    outcome: FinalizeOutcome | None = None
     for _ in range(3):
         async with session_factory() as session:
             # Each pass re-runs the item, records the same failure, and refuses
@@ -500,6 +502,7 @@ async def test_repeated_failures_abandon_the_item_and_release_the_saga(
             states.append(deserialize_results(row.result_json)["artifact:a1"].state)
             outcome = await finalize_deletion_saga(session, thread_id=thread_id)
             await session.commit()
+    assert outcome is not None
 
     assert states == [
         CleanupItemState.FAILED,

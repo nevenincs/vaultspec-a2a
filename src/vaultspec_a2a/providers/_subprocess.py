@@ -19,7 +19,7 @@ import re
 import subprocess
 import sys
 from contextlib import suppress
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..utils import kill_pid_tree_async
 from ..utils.async_cleanup import complete_cleanup
@@ -116,7 +116,7 @@ def _retained_popen(
         raise ProcessContainmentError(
             f"Provider process {process.pid} has no retained subprocess handle"
         )
-    return popen
+    return cast("subprocess.Popen[bytes]", popen)
 
 
 def _metadata_extra(metadata: Mapping[str, object] | None) -> dict[str, object]:

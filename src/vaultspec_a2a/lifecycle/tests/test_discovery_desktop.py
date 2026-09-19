@@ -14,7 +14,7 @@ import json
 import os
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ...authoring.discovery import HEARTBEAT_STALE_MS
 from ...desktop._platform_acl import windows_file_is_restricted
@@ -191,13 +191,20 @@ def test_publication_is_atomic_under_a_racing_reader(tmp_path: Path) -> None:
                 continue
             if not raw:
                 continue
+            payload: object
             try:
                 payload = json.loads(raw)
             except ValueError:
                 failures.append(f"torn record: {raw[:48]!r}")
                 return
-            endpoint = payload.get("endpoint")
-            if not isinstance(endpoint, dict) or endpoint.get("port") != 8127:
+            if not isinstance(payload, dict):
+                failures.append(f"wrong record: {payload!r}")
+                return
+            endpoint = cast("dict[str, object]", payload).get("endpoint")
+            if not isinstance(endpoint, dict):
+                failures.append(f"wrong record: {payload!r}")
+                return
+            if cast("dict[str, object]", endpoint).get("port") != 8127:
                 failures.append(f"wrong record: {payload!r}")
                 return
 

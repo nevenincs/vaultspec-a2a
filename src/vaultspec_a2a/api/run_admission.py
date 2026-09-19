@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from fastapi import FastAPI
 
@@ -43,7 +43,7 @@ class _CommitSingleFlight:
         self._entries: dict[str, _CommitLockEntry] = {}
 
     @asynccontextmanager
-    async def hold(self, identity: str) -> AsyncIterator[None]:
+    async def hold(self, identity: str) -> AsyncGenerator[None]:
         async with self._guard:
             entry = self._entries.get(identity)
             if entry is None:

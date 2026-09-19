@@ -169,7 +169,7 @@ def clarification_graph(checkpointer: AsyncSqliteSaver) -> ClarificationGraph:
     builder.add_node("complete", _complete)
     builder.add_edge("__start__", "clarification_request")
     builder.add_edge("complete", "__end__")
-    return cast("ClarificationGraph", builder.compile(checkpointer=checkpointer))
+    return builder.compile(checkpointer=checkpointer)
 
 
 async def park_clarification(

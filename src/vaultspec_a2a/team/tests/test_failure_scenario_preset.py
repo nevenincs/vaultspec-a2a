@@ -68,10 +68,12 @@ def _compiled_graph() -> CompiledTeamGraph:
         "fallbacks": [],
         "provenance": {"selection_source": "team_selection"},
     }
+    step_timeout_seconds = team_config.graph.step_timeout_seconds
+    assert step_timeout_seconds is not None
     return compile_team_graph(
         team_config,
         agent_configs,
-        step_timeout=team_config.graph.step_timeout_seconds,
+        step_timeout=float(step_timeout_seconds),
         provider_factory=ProviderFactory(),
         workspace_root=Path.cwd(),
         model_assignment={ref.agent_id: dict(lane) for ref in team_config.workers},

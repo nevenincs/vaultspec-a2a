@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -15,6 +16,11 @@ from ...api.dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ...api.routes.gateway import admission_gate
 from ...control.drain import AdmissionState
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from fastapi import FastAPI
+
 _ATTACH = "attach-credential-token-1122334455667788"
 _CAPABILITY = "ownership-capability-token-99aabbccddeeff00"
 
@@ -23,7 +29,7 @@ def _make_app():
     """A real gateway app with both credential planes configured."""
 
     @asynccontextmanager
-    async def _noop_lifespan(_app):
+    async def _noop_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         yield
 
     app = create_app(lifespan=_noop_lifespan)

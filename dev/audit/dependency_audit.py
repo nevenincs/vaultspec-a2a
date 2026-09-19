@@ -63,7 +63,7 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 #: See the module docstring: these mirror ``dev/exit_codes.py`` (lane L9).
@@ -174,29 +174,35 @@ def _read_uv_lock(path: Path) -> list[Coordinate]:
 
 def _read_package_lock(path: Path) -> list[Coordinate]:
     """Return every version pinned by an npm ``package-lock.json``."""
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = cast("dict[str, Any]", json.loads(path.read_text(encoding="utf-8")))
     rel = path.relative_to(REPO_ROOT).as_posix()
     out: list[Coordinate] = []
     packages = data.get("packages")
     if isinstance(packages, dict):
+        packages = cast("dict[str, Any]", packages)
         for key, entry in packages.items():
             if not key or not isinstance(entry, dict):
                 continue  # "" is the root project itself.
-            name = entry.get("name") or key.rsplit("node_modules/", 1)[-1]
-            version = entry.get("version")
+            entry = cast("dict[str, Any]", entry)
+            name: str | None = entry.get("name") or key.rsplit("node_modules/", 1)[-1]
+            version: str | None = entry.get("version")
             if name and version and not entry.get("link"):
                 out.append(Coordinate("npm", name, version, rel))
     else:  # lockfileVersion 1
 
         def recurse(deps: dict[str, Any]) -> None:
-            for name, entry in deps.items():
-                if isinstance(entry, dict) and entry.get("version"):
-                    out.append(Coordinate("npm", name, entry["version"], rel))
-                    nested = entry.get("dependencies")
-                    if isinstance(nested, dict):
-                        recurse(nested)
+            for name, raw_entry in deps.items():
+                if not isinstance(raw_entry, dict):
+                    continue
+                entry = cast("dict[str, Any]", raw_entry)
+                if not entry.get("version"):
+                    continue
+                out.append(Coordinate("npm", name, entry["version"], rel))
+                nested = entry.get("dependencies")
+                if isinstance(nested, dict):
+                    recurse(cast("dict[str, Any]", nested))
 
-        recurse(data.get("dependencies") or {})
+        recurse(cast("dict[str, Any]", data.get("dependencies") or {}))
     return out
 
 
@@ -385,10 +391,10 @@ def query_osv(coordinates: list[Coordinate]) -> dict[str, set[Coordinate]]:
             response = _post_json(_OSV_QUERYBATCH, payload)
         except (AuditError, OSError, ValueError) as error:
             raise AuditError(f"OSV is unreachable: {error}") from error
-        results = response.get("results", [])
+        results = cast("list[dict[str, Any]]", response.get("results", []))
         for coord, result in zip(chunk, results, strict=False):
-            for vuln in (result or {}).get("vulns", ()):
-                identifier = vuln.get("id")
+            for vuln in cast("list[dict[str, Any]]", (result or {}).get("vulns", ())):
+                identifier = cast("str | None", vuln.get("id"))
                 if identifier:
                     hits.setdefault(identifier, set()).add(coord)
     return hits
@@ -405,10 +411,10 @@ def describe(identifier: str) -> dict[str, Any]:
     except (AuditError, OSError, ValueError):
         # Detail is a nicety; the advisory id alone carries the verdict.
         return {"summary": "", "aliases": [], "severity": ""}
-    text = (record.get("summary") or record.get("details") or "").strip()
+    text = cast("str", record.get("summary") or record.get("details") or "").strip()
     summary = text.splitlines()[0][:200] if text else ""
-    specific = record.get("database_specific") or {}
-    severity = str(specific.get("severity") or "") if isinstance(specific, dict) else ""
+    specific: dict[str, Any] = record.get("database_specific") or {}
+    severity = str(specific.get("severity") or "")
     return {
         "summary": summary,
         "aliases": sorted(record.get("aliases") or []),

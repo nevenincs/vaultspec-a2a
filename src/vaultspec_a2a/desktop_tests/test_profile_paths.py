@@ -39,7 +39,7 @@ from ..providers.factory import (
 from ..testing import armed_environment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 _APP_HOME_ENV = "VAULTSPEC_DESKTOP_APP_HOME"
 _CAPSULE_ENV = "VAULTSPEC_CAPSULE_ASSETS"
@@ -57,14 +57,14 @@ def _build_capsule(root: Path) -> Path:
 
 
 @contextmanager
-def _armed_env(app_home: str, capsule_root: str) -> Iterator[None]:
+def _armed_env(app_home: str, capsule_root: str) -> Generator[None]:
     """Arm the desktop environment variables, restoring the prior values after."""
     with armed_environment(**{_APP_HOME_ENV: app_home, _CAPSULE_ENV: capsule_root}):
         yield
 
 
 @contextmanager
-def _working_directory(target: Path) -> Iterator[None]:
+def _working_directory(target: Path) -> Generator[None]:
     """Change the process working directory, always restoring the origin."""
     origin = Path.cwd()
     os.chdir(target)

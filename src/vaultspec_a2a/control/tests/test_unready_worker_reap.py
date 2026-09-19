@@ -338,7 +338,7 @@ async def test_spawner_cooperates_then_reaps_the_remaining_owned_tree(
         assert not is_pid_alive(child_pid), "owned descendant survived escalation"
         assert spawner.process is None and spawner.containment is None
     finally:
-        child_pids = []
+        child_pids: list[int] = []
         if marker.exists():
             child_pids.append(int(marker.read_text(encoding="utf-8")))
         await _force_cleanup([process.pid, *child_pids])
@@ -395,7 +395,7 @@ async def test_shutdown_reaps_child_created_after_cooperative_request(
         assert process.poll() is not None
         assert not is_pid_alive(child_pid), "late descendant survived root exit"
     finally:
-        child_pids = []
+        child_pids: list[int] = []
         if marker.exists():
             child_pids.append(int(marker.read_text(encoding="utf-8")))
         await _force_cleanup([process.pid, *child_pids])
@@ -446,7 +446,7 @@ async def test_spawner_snapshots_uncontained_tree_before_root_exits(
         assert process.poll() is not None
         assert not is_pid_alive(child_pid), "uncontained descendant survived teardown"
     finally:
-        child_pids = []
+        child_pids: list[int] = []
         if marker.exists():
             child_pids.append(int(marker.read_text(encoding="utf-8")))
         await _force_cleanup([process.pid, *child_pids])

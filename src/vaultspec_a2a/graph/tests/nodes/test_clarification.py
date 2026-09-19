@@ -54,6 +54,10 @@ from ....thread.clarification import (
     pending_clarification,
 )
 from ....thread.state import TeamState
+from .._state_graph_helpers import (
+    add_test_node,
+    compile_test_graph,
+)
 
 # The truncation target the coercion actually promises: what the wire model
 # ITSELF admits, read the same way graph.nodes.clarification._annotated_max_length
@@ -125,24 +129,27 @@ def _base_state() -> TeamState:
 
 def _clarify_graph(producer: ClarificationQuestionProducer) -> Any:
     """Build START -> clarify_request -> clarify_gate -> proceed -> END."""
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
 
     async def proceed(state: TeamState) -> dict[str, Any]:
         return {}
 
-    builder.add_node(
+    add_test_node(
+        builder,
         "clarify_request",
         create_clarification_request_node(
             producer, gate_target="clarify_gate", proceed_target="proceed"
         ),
     )
-    builder.add_node(
-        "clarify_gate", create_clarification_gate_node(proceed_target="proceed")
+    add_test_node(
+        builder,
+        "clarify_gate",
+        create_clarification_gate_node(proceed_target="proceed"),
     )
-    builder.add_node("proceed", proceed)
+    add_test_node(builder, "proceed", proceed)
     builder.add_edge(START, "clarify_request")
     builder.add_edge("proceed", END)
-    return builder.compile(checkpointer=InMemorySaver())
+    return compile_test_graph(builder, checkpointer=InMemorySaver())
 
 
 @pytest.mark.asyncio
@@ -357,12 +364,13 @@ async def test_parked_questionnaire_is_readable_from_the_real_checkpoint() -> No
     graph is actually waiting on.
     """
     saver = InMemorySaver()
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
 
     async def proceed(state: TeamState) -> dict[str, Any]:
         return {}
 
-    builder.add_node(
+    add_test_node(
+        builder,
         "clarify_request",
         create_clarification_request_node(
             _CountingProducer(_request("clarify-recover")),
@@ -370,13 +378,15 @@ async def test_parked_questionnaire_is_readable_from_the_real_checkpoint() -> No
             proceed_target="proceed",
         ),
     )
-    builder.add_node(
-        "clarify_gate", create_clarification_gate_node(proceed_target="proceed")
+    add_test_node(
+        builder,
+        "clarify_gate",
+        create_clarification_gate_node(proceed_target="proceed"),
     )
-    builder.add_node("proceed", proceed)
+    add_test_node(builder, "proceed", proceed)
     builder.add_edge(START, "clarify_request")
     builder.add_edge("proceed", END)
-    graph = builder.compile(checkpointer=saver)
+    graph = compile_test_graph(builder, checkpointer=saver)
 
     config: Any = {"configurable": {"thread_id": "clarify-checkpoint"}}
     await graph.ainvoke(_base_state(), config=config)
@@ -471,35 +481,39 @@ async def test_second_questionnaire_does_not_erase_the_first_answers() -> None:
         async def __call__(self, state: TeamState) -> ClarificationRequest | None:
             return self.remaining.pop(0) if self.remaining else None
 
-    builder: StateGraph = StateGraph(cast("Any", TeamState))
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
     producer = _TwoShotProducer()
 
-    builder.add_node(
+    add_test_node(
+        builder,
         "clarify_request",
         create_clarification_request_node(
             producer, gate_target="clarify_gate", proceed_target="second_request"
         ),
     )
-    builder.add_node(
-        "clarify_gate", create_clarification_gate_node(proceed_target="second_request")
+    add_test_node(
+        builder,
+        "clarify_gate",
+        create_clarification_gate_node(proceed_target="second_request"),
     )
-    builder.add_node(
+    add_test_node(
+        builder,
         "second_request",
         create_clarification_request_node(
             producer, gate_target="second_gate", proceed_target="proceed"
         ),
     )
-    builder.add_node(
-        "second_gate", create_clarification_gate_node(proceed_target="proceed")
+    add_test_node(
+        builder, "second_gate", create_clarification_gate_node(proceed_target="proceed")
     )
 
     async def proceed(state: TeamState) -> dict[str, Any]:
         return {}
 
-    builder.add_node("proceed", proceed)
+    add_test_node(builder, "proceed", proceed)
     builder.add_edge(START, "clarify_request")
     builder.add_edge("proceed", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = compile_test_graph(builder, checkpointer=InMemorySaver())
 
     config: Any = {"configurable": {"thread_id": "clarify-twice"}}
     await graph.ainvoke(_base_state(), config=config)

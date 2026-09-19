@@ -7,6 +7,8 @@ import logging.handlers
 import sys
 from collections.abc import Generator
 from pathlib import Path
+from types import TracebackType
+from typing import Any, cast
 
 import pytest
 from opentelemetry.sdk.resources import Resource
@@ -22,6 +24,12 @@ from ..logging import (
     _DemoteToWarning,
     configure_logging,
     reconfigure_console_utf8,
+)
+
+type _RawSysExcInfo = (
+    tuple[type[BaseException], BaseException, TracebackType | None]
+    | tuple[None, None, None]
+    | None
 )
 
 
@@ -60,7 +68,9 @@ def test_service_kind_json_to_stderr_and_rotating_file(tmp_path: Path) -> None:
 
     root = logging.getLogger()
     assert root.level == logging.DEBUG
-    stream_handlers = [h for h in root.handlers if isinstance(h, logging.StreamHandler)]
+    stream_handlers: list[logging.StreamHandler[Any]] = [
+        h for h in root.handlers if isinstance(h, logging.StreamHandler)
+    ]
     file_handlers = [
         h for h in root.handlers if isinstance(h, logging.handlers.RotatingFileHandler)
     ]
@@ -281,7 +291,10 @@ def test_json_formatter_renders_every_exc_info_shape() -> None:
             lineno=1,
             msg="boom",
             args=(),
-            exc_info=exc_info,  # ty: ignore[invalid-argument-type]
+            # Deliberately malformed shapes are exercised here (the module under
+            # test must resolve them); the boundary cast states the stdlib
+            # parameter's own declared type rather than widening to Any.
+            exc_info=cast("_RawSysExcInfo", exc_info),
         )
         return json.loads(formatter.format(record))
 

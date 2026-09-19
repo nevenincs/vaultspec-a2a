@@ -124,7 +124,7 @@ async def build_team_status(
         | {permission.thread_id for permission in nonterminal_durable_pending}
     )
 
-    agents = []
+    agents: list[AgentData] = []
     for thread_id in active_threads:
         agent_states = aggregator.get_agent_states(thread_id)
         agents.extend(

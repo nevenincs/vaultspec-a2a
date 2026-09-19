@@ -56,7 +56,7 @@ to drift from the wire-side one.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, get_args
+from typing import TYPE_CHECKING, Any, Protocol, cast, get_args
 
 from annotated_types import MaxLen
 from langchain_core.messages import HumanMessage
@@ -173,6 +173,7 @@ def _coerce_question(raw: object) -> ClarificationQuestion | None:
     """
     if not isinstance(raw, dict):
         return None
+    raw = cast("dict[str, object]", raw)
 
     try:
         kind = ClarificationKind(raw.get("kind"))
@@ -184,7 +185,8 @@ def _coerce_question(raw: object) -> ClarificationQuestion | None:
         options = []
         proposed = raw.get("options")
         if isinstance(proposed, list):
-            for candidate in proposed[:MAX_OPTIONS_PER_QUESTION]:
+            proposed_options = cast("list[object]", proposed)
+            for candidate in proposed_options[:MAX_OPTIONS_PER_QUESTION]:
                 label = _bounded_text(candidate, _OPTION_MAX_CHARS)
                 if label and label not in options:
                     options.append(label)
@@ -285,7 +287,7 @@ def create_clarification_request_node(
         straight on with both cleared.
     """
 
-    async def clarification_request_node(state: TeamState) -> Command:
+    async def clarification_request_node(state: TeamState) -> Command[Any]:
         """Decide what to ask, commit it, and route into the gate."""
         request = await producer(state)
 
@@ -334,7 +336,7 @@ def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
         pending question is cleared.
     """
 
-    async def clarification_gate_node(state: TeamState) -> Command:
+    async def clarification_gate_node(state: TeamState) -> Command[Any]:
         """Pause for the committed question set's answers, then route on."""
         request = _committed_request(state)
         if request is None:

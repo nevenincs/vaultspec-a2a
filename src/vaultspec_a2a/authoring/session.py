@@ -14,7 +14,7 @@ append_draft, replace_draft, submit_for_review, rebase. Reads
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
 
 from ._envelope import AuthoringResponse
@@ -389,7 +389,8 @@ class AuthoringSession:
             idempotency_key=self._resolve_key("create_session", idempotency_key),
         )
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
-            session_id = result.data.get("session_id")
+            data = cast("dict[str, Any]", result.data)
+            session_id = data.get("session_id")
             if isinstance(session_id, str):
                 self._session_id = session_id
         return result
@@ -414,7 +415,8 @@ class AuthoringSession:
             idempotency_key=self._resolve_key("start_prompt_turn", idempotency_key),
         )
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
-            run_id = result.data.get("run_id")
+            data = cast("dict[str, Any]", result.data)
+            run_id = data.get("run_id")
             if isinstance(run_id, str):
                 self._engine_run_id = run_id
         return result
@@ -538,7 +540,8 @@ class AuthoringSession:
             idempotency_key=self._resolve_key("submit_for_review", idempotency_key),
         )
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
-            proposal_id = result.data.get("proposal_id")
+            data = cast("dict[str, Any]", result.data)
+            proposal_id = data.get("proposal_id")
             if isinstance(proposal_id, str) and proposal_id not in self._proposal_ids:
                 self._proposal_ids.append(proposal_id)
         return result

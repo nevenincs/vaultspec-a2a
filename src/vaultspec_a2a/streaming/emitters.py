@@ -10,7 +10,7 @@ import logging
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 from uuid import uuid4
 
 from ..domain_config import domain_config
@@ -202,6 +202,19 @@ class EventEmitters:
             for evt, _ts in self._pending_permissions.values()
             if evt.thread_id == thread_id
         ]
+
+    def bind_buffering(self, buffering: BufferingManager) -> None:
+        """Wire the buffering manager after both sides finish constructing.
+
+        ``EventEmitters`` and ``BufferingManager`` reference each other, so the
+        aggregator constructs one with a placeholder and completes the wiring
+        through this setter once both instances exist.
+        """
+        self._buffering = buffering
+
+    def has_pending_permission(self, request_id: str) -> bool:
+        """Report whether ``request_id`` already has a tracked pending permission."""
+        return request_id in self._pending_permissions
 
     def clear_thread_state(self, thread_id: str) -> None:
         """Purge all emitter-owned state scoped to ``thread_id``."""
@@ -686,12 +699,13 @@ class EventEmitters:
         self.next_sequence(thread_id)
 
     def _sync_graph_registered(self, thread_id: str, payload: dict[str, Any]) -> None:
-        nodes = payload.get("nodes", {})
-        if isinstance(nodes, dict):
+        nodes_raw: object = payload.get("nodes", {})
+        if isinstance(nodes_raw, dict):
+            nodes = cast("dict[str, object]", nodes_raw)
             self._subscribers.set_node_metadata(
                 thread_id,
                 {
-                    name: node_metadata_fields(meta)
+                    name: node_metadata_fields(cast("dict[str, object]", meta))
                     for name, meta in nodes.items()
                     if isinstance(meta, dict)
                 },

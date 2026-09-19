@@ -99,7 +99,12 @@ def _whole_document_op(feature: str) -> dict[str, Any]:
 async def _mint(client: AuthoringClient, actor_id: str, kind: str) -> str:
     minted = await mint_actor_token(client, actor_id=actor_id, kind=kind)
     assert isinstance(minted, AuthoringResponse), f"mint denied: {minted}"
-    token = minted.data.get("raw_token") if isinstance(minted.data, dict) else None
+    raw_data: object = minted.data
+    token = (
+        cast("dict[str, object]", raw_data).get("raw_token")
+        if isinstance(raw_data, dict)
+        else None
+    )
     assert isinstance(token, str) and token
     return token
 
@@ -107,11 +112,19 @@ async def _mint(client: AuthoringClient, actor_id: str, kind: str) -> str:
 def _find_review_item(data: object, changeset_id: str) -> dict[str, Any]:
     """Return the review-queue item's ``proposal`` object for *changeset_id*."""
     assert isinstance(data, dict), f"review-queue response is not an object: {data!r}"
+    data = cast("dict[str, object]", data)
     items = data.get("items")
     assert isinstance(items, list), f"review-queue response carries no items: {data!r}"
-    for entry in items:
-        proposal = entry.get("proposal") if isinstance(entry, dict) else None
-        if isinstance(proposal, dict) and proposal.get("changeset_id") == changeset_id:
+    for raw_entry in cast("list[object]", items):
+        proposal = (
+            cast("dict[str, object]", raw_entry).get("proposal")
+            if isinstance(raw_entry, dict)
+            else None
+        )
+        if (
+            isinstance(proposal, dict)
+            and cast("dict[str, object]", proposal).get("changeset_id") == changeset_id
+        ):
             return cast("dict[str, Any]", proposal)
     raise AssertionError(f"no review-queue item found for changeset {changeset_id!r}")
 

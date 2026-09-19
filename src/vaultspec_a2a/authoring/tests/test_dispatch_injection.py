@@ -12,7 +12,7 @@ import json
 import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -57,7 +57,7 @@ _CATALOG = {
 
 @dataclass
 class _EngineState:
-    requests: list[dict] = field(default_factory=list)
+    requests: list[dict[str, object]] = field(default_factory=list)
 
 
 def _make_handler(state: _EngineState) -> type[JsonReplyHandler]:
@@ -71,7 +71,7 @@ def _make_handler(state: _EngineState) -> type[JsonReplyHandler]:
             length = int(self.headers.get("Content-Length", "0") or "0")
             raw = self.rfile.read(length) if length else b"{}"
             try:
-                body = json.loads(raw)
+                body: object = json.loads(raw)
             except ValueError:
                 body = {}
             state.requests.append({"path": self.path, "body": body})
@@ -100,12 +100,25 @@ def engine() -> Iterator[tuple[str, _EngineState]]:
         thread.join(timeout=5.0)
 
 
-def _execute_inputs(state: _EngineState) -> list[dict]:
-    return [
-        r["body"]["payload"]["input"]
-        for r in state.requests
-        if r["path"].endswith("/agent-tools/execute")
-    ]
+def _str(value: object) -> str:
+    assert isinstance(value, str)
+    return value
+
+
+def _dict(value: object) -> dict[str, object]:
+    assert isinstance(value, dict)
+    return cast("dict[str, object]", value)
+
+
+def _execute_inputs(state: _EngineState) -> list[dict[str, object]]:
+    inputs: list[dict[str, object]] = []
+    for r in state.requests:
+        if not _str(r["path"]).endswith("/agent-tools/execute"):
+            continue
+        body = _dict(r["body"])
+        payload = _dict(body["payload"])
+        inputs.append(_dict(payload["input"]))
+    return inputs
 
 
 @pytest.mark.asyncio
@@ -148,7 +161,7 @@ async def test_dispatch_injects_and_sanitizes_the_proposal_lifecycle(
 
     # create: injected session + generated changeset (HACKED overwritten), content kept.
     assert create["session_id"] == "sess:loop"
-    assert create["changeset_id"].startswith("cs:thread-xyz:")
+    assert _str(create["changeset_id"]).startswith("cs:thread-xyz:")
     assert create["changeset_id"] != "HACKED"
     assert create["summary"] == "a summary"
     assert create["operation"] == "create"
@@ -166,5 +179,7 @@ async def test_dispatch_injects_and_sanitizes_the_proposal_lifecycle(
     assert append["summary"] == "more content"
 
     # Exactly ONE session was ensured across all proposal calls.
-    session_posts = [r for r in state.requests if r["path"].endswith("/v1/sessions")]
+    session_posts = [
+        r for r in state.requests if _str(r["path"]).endswith("/v1/sessions")
+    ]
     assert len(session_posts) == 1

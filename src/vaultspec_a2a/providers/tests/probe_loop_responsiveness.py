@@ -173,6 +173,7 @@ async def _measure(mode: str, workspace: Path) -> dict[str, float | str]:
     ticker = asyncio.create_task(heartbeat.run())
     await asyncio.sleep(0.1)
     started = heartbeat.begin_window()
+    result: dict[str, float | str] | None = None
     if mode == "on-loop":
         warm_model_imports()
     elif mode == "offloaded":
@@ -198,6 +199,7 @@ async def _measure(mode: str, workspace: Path) -> dict[str, float | str]:
     if mode != "idle" and "langchain_openai" not in sys.modules:
         raise RuntimeError("the measured work did not load the model stack")
 
+    assert result is not None
     result["ticks"] = heartbeat.ticks
     return result
 

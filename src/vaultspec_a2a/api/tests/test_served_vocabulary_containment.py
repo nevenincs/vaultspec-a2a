@@ -24,7 +24,7 @@ membership of whatever the implementation actually returns.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -104,14 +104,17 @@ def test_narrowed_run_status_accepts_every_captured_combination() -> None:
     """
     for repair in sorted(LIVE_REPAIR_STATUS):
         for phase in sorted(LIVE_SEMANTIC_PHASE):
+            # The captured values are raw strings on purpose: this proves the
+            # response model still validates and coerces them via StrEnum, the
+            # same as a route handler forwarding a database column would see.
             response = RunStatusResponse(
                 run_id="captured-run",
                 status=ThreadStatus.COMPLETED,
-                semantic_phase=phase,
+                semantic_phase=cast("SemanticPhase", phase),
                 topology=TopologyPosition(),
-                repair_status=repair,
-                execution_readiness=repair,
-                provider_condition="unknown",
+                repair_status=cast("RepairStatus", repair),
+                execution_readiness=cast("RepairStatus", repair),
+                provider_condition=cast("ProviderCondition", "unknown"),
                 degraded_reasons=sorted(LIVE_DEGRADED_REASON),
             )
             assert response.repair_status is RepairStatus(repair)
@@ -123,7 +126,10 @@ def test_narrowed_preset_and_service_accept_the_captured_values() -> None:
     for topology in sorted(LIVE_TOPOLOGY):
         for origin in sorted(LIVE_ORIGIN):
             preset = PresetSummary(
-                id="captured", loadable=True, topology=topology, origin=origin
+                id="captured",
+                loadable=True,
+                topology=cast("TopologyType", topology),
+                origin=cast("PresetOrigin", origin),
             )
             assert preset.topology is TopologyType(topology)
             assert preset.origin is PresetOrigin(origin)
@@ -135,7 +141,7 @@ def test_narrowed_preset_and_service_accept_the_captured_values() -> None:
             ready=True,
             can_accept_run=True,
             gateway_pid=1,
-            worker_status=status,
+            worker_status=cast("WorkerConnectionStatus", status),
         )
         assert service.worker_status is WorkerConnectionStatus(status)
 

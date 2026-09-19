@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from ..control.recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
 from ..domain_config import domain_config
 from ..thread.enums import ThreadStatus
+from .permission_repository import prune_repair_journal
 from .thread_repository import list_non_terminal_threads
 
 if TYPE_CHECKING:
@@ -17,12 +18,22 @@ if TYPE_CHECKING:
 
 __all__ = ["reconcile_threads_on_startup"]
 
+_REPAIR_ROWS_PER_BOOT = 2
+"""Each boot appends one ``repair_started``/``repair_finished`` pair per thread."""
+
 
 async def reconcile_threads_on_startup(
     session: AsyncSession,
     checkpointer: Checkpointer,
+    *,
+    retain_repair_boots: int = 0,
 ) -> dict[str, int]:
-    """Request bounded checkpoint settlement before any worker demand gate."""
+    """Request bounded checkpoint settlement before any worker demand gate.
+
+    ``retain_repair_boots`` bounds the startup-repair journal to its newest N
+    boots' worth of ``repair_started``/``repair_finished`` pairs, once settled.
+    Zero (the default) disables pruning, preserving unbounded journal growth.
+    """
     rows = await list_non_terminal_threads(session)
     thread_ids = [row.id for row in rows]
     await session.commit()
@@ -45,6 +56,12 @@ async def reconcile_threads_on_startup(
         settled += int(observed.status is ThreadStatus.COMPLETED)
         paused += int(observed.status is ThreadStatus.INPUT_REQUIRED)
         unavailable += int(observed.condition == "checkpoint_unavailable")
+    if retain_repair_boots > 0 and thread_ids:
+        await prune_repair_journal(
+            session,
+            thread_ids=thread_ids,
+            keep_rows=retain_repair_boots * _REPAIR_ROWS_PER_BOOT,
+        )
     return {
         "repair_backlog": len(thread_ids) - settled,
         "paused_resumable": paused,

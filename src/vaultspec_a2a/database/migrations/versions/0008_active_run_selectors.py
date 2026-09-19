@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import cast
 
 import sqlalchemy as sa
 from alembic import op
@@ -40,8 +41,9 @@ def _selectors(raw: str | None) -> tuple[str | None, str | None]:
         return None, None
     if not isinstance(value, dict):
         return None, None
-    workspace = value.get("workspace_root")
-    feature = value.get("feature_tag")
+    value_obj = cast("dict[str, object]", value)
+    workspace = value_obj.get("workspace_root")
+    feature = value_obj.get("feature_tag")
     if (
         not isinstance(workspace, str)
         or not os.path.isabs(workspace)
@@ -80,7 +82,7 @@ def upgrade() -> None:
         sa.text("SELECT id, thread_metadata FROM threads ORDER BY id")
     )
     while rows := cursor.fetchmany(_BACKFILL_PAGE):
-        updates = []
+        updates: list[dict[str, object]] = []
         for row in rows:
             workspace, feature = _selectors(row.thread_metadata)
             updates.append(

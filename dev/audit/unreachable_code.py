@@ -745,7 +745,7 @@ def self_references(module: SourceModule) -> frozenset[str]:
         ``Depends(gateway_bearer_scheme)`` sat twelve lines below it.
     """
     literal = _export_list(module.tree)
-    exported_strings = (
+    exported_strings: frozenset[int] = (
         frozenset(id(element) for element in literal.elts) if literal else frozenset()
     )
 
@@ -827,8 +827,10 @@ def find_symbol_findings(
         module's own finding, and reporting both doubles one defect.
     """
     shipped_use, test_use = _consumers(corpus)
-    dev_use = (
-        frozenset().union(*(imported_symbols(m) for m in corpus.outside.values()))
+    dev_use: frozenset[tuple[str, str]] = (
+        frozenset[tuple[str, str]]().union(
+            *(imported_symbols(m) for m in corpus.outside.values())
+        )
         if corpus.outside
         else frozenset()
     )

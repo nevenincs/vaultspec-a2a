@@ -49,7 +49,7 @@ def set_service_json() -> Iterator[Callable[[Path], None]]:
             os.environ[SERVICE_JSON_ENV] = previous
 
 
-def _versioned_record(port: int, *, credential_reference: str) -> dict:
+def _versioned_record(port: int, *, credential_reference: str) -> dict[str, object]:
     return {
         "version": DESKTOP_RECORD_VERSION,
         "profile": "desktop",

@@ -75,7 +75,7 @@ async def _project(
     graph, config = await _suspend_on_permission(thread_id, acp_options)
 
     emitted = await emit_interrupt_events(
-        thread_id, "coder", graph, config, aggregator._emitters
+        thread_id, "coder", graph, config, aggregator.emitters
     )
     assert emitted
 

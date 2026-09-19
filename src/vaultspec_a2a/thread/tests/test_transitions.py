@@ -11,7 +11,7 @@ from ..enums import (
     InvalidTransitionError,
     ThreadStatus,
 )
-from ..transitions import _VALID_TRANSITIONS, validate_transition
+from ..transitions import VALID_TRANSITIONS, validate_transition
 
 
 def test_valid_transition_submitted_to_running() -> None:
@@ -66,9 +66,9 @@ def test_invalid_transition_submitted_to_archived() -> None:
 
 
 def test_every_status_has_transitions_defined() -> None:
-    """Every ThreadStatus member should appear as a key in _VALID_TRANSITIONS."""
+    """Every ThreadStatus member should appear as a key in VALID_TRANSITIONS."""
     for status in ThreadStatus:
-        assert status in _VALID_TRANSITIONS, f"{status} missing from transition table"
+        assert status in VALID_TRANSITIONS, f"{status} missing from transition table"
 
 
 def test_discovery_statuses_explicitly_classify_the_lifecycle_vocabulary() -> None:
@@ -79,7 +79,7 @@ def test_discovery_statuses_explicitly_classify_the_lifecycle_vocabulary() -> No
 
 def test_no_self_loops_in_transition_table() -> None:
     """The transition table should never list a status as its own target."""
-    for source, targets in _VALID_TRANSITIONS.items():
+    for source, targets in VALID_TRANSITIONS.items():
         assert source not in targets, (
             f"{source} has a self-loop in the transition table"
         )
@@ -87,7 +87,7 @@ def test_no_self_loops_in_transition_table() -> None:
 
 def test_terminal_states_lead_only_to_archived_or_nothing() -> None:
     for status in TERMINAL_STATUSES:
-        targets = _VALID_TRANSITIONS[status]
+        targets = VALID_TRANSITIONS[status]
         assert targets <= {ThreadStatus.ARCHIVED}, (
             f"{status} should only transition to ARCHIVED, got {targets}"
         )

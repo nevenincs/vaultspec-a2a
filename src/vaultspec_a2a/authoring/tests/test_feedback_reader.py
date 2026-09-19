@@ -13,7 +13,7 @@ from __future__ import annotations
 from ..feedback_reader import render_feedback_batch
 
 
-def _item(comment_id: str, body: str, heading_path: list[str]) -> dict:
+def _item(comment_id: str, body: str, heading_path: list[str]) -> dict[str, object]:
     return {
         "comment_id": comment_id,
         "body": body,
@@ -21,7 +21,7 @@ def _item(comment_id: str, body: str, heading_path: list[str]) -> dict:
     }
 
 
-def _read(batch: dict) -> dict:
+def _read(batch: dict[str, object]) -> dict[str, object]:
     """Wrap a batch record in the served read envelope shape (``data.batch``)."""
     return {"batch": batch}
 

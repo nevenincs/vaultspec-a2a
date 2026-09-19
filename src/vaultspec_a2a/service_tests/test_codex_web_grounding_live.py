@@ -732,6 +732,7 @@ async def test_production_research_chain_lands_a_typed_web_locator(
         "token_usage": {},
     }
     update = await node(state)
+    assert isinstance(update, dict)
 
     findings = update["research_findings"]
     assert len(findings) == 1

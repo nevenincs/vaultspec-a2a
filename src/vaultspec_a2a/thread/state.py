@@ -4,6 +4,7 @@ Every field must be JSON-serializable (primitives + dicts + lists only)
 so the SQLite checkpointer can persist state without pickle errors.
 """
 
+from collections.abc import Mapping
 from typing import Annotated, Any, NotRequired
 
 from langchain_core.messages import BaseMessage
@@ -15,7 +16,17 @@ from .action_receipts import (
     merge_graph_completion_receipts,
 )
 
-__all__ = ["TeamState"]
+__all__ = [
+    "TeamState",
+    "append_artifacts",
+    "append_research_findings",
+    "append_validation_errors",
+    "merge_token_usage",
+    "merge_unique_strs",
+    "merge_vault_index",
+    "read_untrusted_state_value",
+    "replace_plan",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -23,7 +34,7 @@ __all__ = ["TeamState"]
 # ---------------------------------------------------------------------------
 
 
-def _append_artifacts(
+def append_artifacts(
     existing: list[dict[str, str]],
     new: list[dict[str, str]],
 ) -> list[dict[str, str]]:
@@ -37,7 +48,7 @@ def _append_artifacts(
     return merged
 
 
-def _merge_token_usage(
+def merge_token_usage(
     existing: dict[str, dict[str, int]],
     new: dict[str, dict[str, int]],
 ) -> dict[str, dict[str, int]]:
@@ -57,7 +68,7 @@ def _merge_token_usage(
     return merged
 
 
-def _replace_plan(
+def replace_plan(
     existing: list[dict[str, str]],
     new: list[dict[str, str]] | None,
 ) -> list[dict[str, str]]:
@@ -68,7 +79,7 @@ def _replace_plan(
     return new if new is not None else existing
 
 
-def _merge_vault_index(
+def merge_vault_index(
     existing: dict[str, list[str]],
     new: dict[str, list[str]],
 ) -> dict[str, list[str]]:
@@ -84,7 +95,7 @@ def _merge_vault_index(
     return merged
 
 
-def _append_validation_errors(
+def append_validation_errors(
     existing: list[str],
     new: list[str],
 ) -> list[str]:
@@ -94,7 +105,7 @@ def _append_validation_errors(
     return existing + new
 
 
-def _merge_unique_strs(
+def merge_unique_strs(
     existing: list[str],
     new: list[str],
 ) -> list[str]:
@@ -139,7 +150,7 @@ def _merge_clarification_resolution_receipts(
     return {**existing, **new}
 
 
-def _append_research_findings(
+def append_research_findings(
     existing: list[dict[str, Any]],
     new: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -151,6 +162,25 @@ def _append_research_findings(
     synthesis stage to consume. Findings are appended and never removed.
     """
     return [*existing, *new]
+
+
+# ---------------------------------------------------------------------------
+# Untrusted reads
+# ---------------------------------------------------------------------------
+
+
+def read_untrusted_state_value(state: Mapping[str, object], key: str) -> object:
+    """Read one checkpointed state key as untrusted data.
+
+    The annotations on :class:`TeamState` describe what a reducer PRODUCES, not
+    what the checkpointer GUARANTEES on load. Values are hydrated from persisted
+    JSON, and anything assembling a checkpoint directly - a migration, a repair,
+    a test - bypasses the reducers that would have enforced the shape. A consumer
+    must therefore still narrow what it reads, and reading through this boundary
+    is what keeps the declared type from narrowing those checks away into
+    tautologies.
+    """
+    return state.get(key)
 
 
 # ---------------------------------------------------------------------------
@@ -170,10 +200,10 @@ class TeamState(TypedDict):
     active_agent: str
 
     # --- artifacts: append-only, deduplicated by id ---
-    artifacts: Annotated[list[dict[str, str]], _append_artifacts]
+    artifacts: Annotated[list[dict[str, str]], append_artifacts]
 
     # --- plan: full-replacement on each supervisor cycle ---
-    current_plan: Annotated[list[dict[str, str]], _replace_plan]
+    current_plan: Annotated[list[dict[str, str]], replace_plan]
 
     # --- pipeline_loop iteration guard ---
     # Plain last-write-wins int, incremented by the _loop_node_with_counter wrapper
@@ -208,8 +238,8 @@ class TeamState(TypedDict):
     # when the run is not feedback-driven.
     feedback_batch_id: NotRequired[str | None]
     pipeline_phase: NotRequired[str | None]
-    vault_index: NotRequired[Annotated[dict[str, list[str]], _merge_vault_index]]
-    validation_errors: NotRequired[Annotated[list[str], _append_validation_errors]]
+    vault_index: NotRequired[Annotated[dict[str, list[str]], merge_vault_index]]
+    validation_errors: NotRequired[Annotated[list[str], append_validation_errors]]
 
     # --- transient: mounted .vault/ document content ---
     # Populated by mount_node before worker invocation;
@@ -229,8 +259,8 @@ class TeamState(TypedDict):
     # session id and the changeset/proposal ids, never document content. Ids
     # are appended and de-duplicated as proposals are created and submitted.
     authoring_session_id: NotRequired[str | None]
-    authoring_changeset_ids: NotRequired[Annotated[list[str], _merge_unique_strs]]
-    authoring_proposal_ids: NotRequired[Annotated[list[str], _merge_unique_strs]]
+    authoring_changeset_ids: NotRequired[Annotated[list[str], merge_unique_strs]]
+    authoring_proposal_ids: NotRequired[Annotated[list[str], merge_unique_strs]]
 
     # --- plan approval gate ---
     # Durable approval-state linkage for execution approval, and the sole key
@@ -248,7 +278,7 @@ class TeamState(TypedDict):
     # accumulated list. NotRequired because only the research_adr topology
     # populates it.
     research_findings: NotRequired[
-        Annotated[list[dict[str, Any]], _append_research_findings]
+        Annotated[list[dict[str, Any]], append_research_findings]
     ]
     # gate_phase / gate_verdict: the most recent document phase-gate outcome.
     # The phase-gate node records the phase it gated and the reviewer verdict
@@ -308,4 +338,4 @@ class TeamState(TypedDict):
     workspace_root: NotRequired[str | None]
 
     # --- token accounting: additive merge per agent ---
-    token_usage: Annotated[dict[str, dict[str, int]], _merge_token_usage]
+    token_usage: Annotated[dict[str, dict[str, int]], merge_token_usage]

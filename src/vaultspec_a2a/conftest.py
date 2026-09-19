@@ -709,7 +709,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 # Schema materialization - one DDL run per session, not one per test
 # ---------------------------------------------------------------------------
 
-_SCHEMA_TEMPLATE: Path | None = None
+_schema_template: Path | None = None
 
 
 def schema_template() -> Path:
@@ -726,8 +726,8 @@ def schema_template() -> Path:
     the way the schema is MATERIALIZED changes - a 5ms file copy instead of a
     340ms DDL replay.
     """
-    global _SCHEMA_TEMPLATE
-    if _SCHEMA_TEMPLATE is None:
+    global _schema_template
+    if _schema_template is None:
         import tempfile
 
         from sqlalchemy import create_engine
@@ -744,8 +744,8 @@ def schema_template() -> Path:
             Base.metadata.create_all(engine)
         finally:
             engine.dispose()
-        _SCHEMA_TEMPLATE = target
-    return _SCHEMA_TEMPLATE
+        _schema_template = target
+    return _schema_template
 
 
 def materialize_schema(db_path: Path) -> Path:

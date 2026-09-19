@@ -2,13 +2,14 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from ...control.config import settings
-from ...graph.compiler import _resolve_model_for_worker
+from ...graph.compiler import resolve_model_for_worker
 from ...graph.enums import Provider
 from ...team.team_config import load_agent_config, load_team_config
 from ...thread.errors import ConfigError
@@ -489,7 +490,7 @@ def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable()
     team = load_team_config("vaultspec-solo-coder")
     worker_ref = team.workers[0]
     agent = load_agent_config(worker_ref.agent_id)
-    assignment = {
+    assignment: dict[str, dict[str, Any]] = {
         worker_ref.agent_id: {
             "schema_version": 1,
             "provider": "codex",
@@ -515,7 +516,7 @@ def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable()
     }
 
     with pytest.raises(ValueError, match="cannot execute mode"):
-        _resolve_model_for_worker(
+        resolve_model_for_worker(
             worker_ref,
             agent,
             team,

@@ -28,6 +28,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from starlette.requests import Request
@@ -90,7 +91,9 @@ _LANGSMITH_TRACING_ENV = (
 )
 
 
-def _run_telemetry_probe(tmp_path: Path, env_overrides: dict[str, str]) -> dict:
+def _run_telemetry_probe(
+    tmp_path: Path, env_overrides: dict[str, str]
+) -> dict[str, Any]:
     """Run ``configure_telemetry`` in a spawned child with a controlled env.
 
     The parent starts from its own environment, strips the telemetry toggles so
@@ -137,7 +140,7 @@ def _make_test_app(*, excluded: frozenset[str] | None = None) -> Starlette:
         Route("/health", health),
     ]
     app = Starlette(routes=routes)
-    kwargs: dict = {} if excluded is None else {"excluded_paths": excluded}
+    kwargs: dict[str, Any] = {} if excluded is None else {"excluded_paths": excluded}
     app.add_middleware(cast("Any", TelemetryMiddleware), **kwargs)
     return app
 
@@ -359,7 +362,15 @@ def test_the_langsmith_symbols_we_delegate_to_still_exist() -> None:
     lifespan startup, taking down gateway and worker boot for the sake of one
     reported field. This converts that into a failing test on the dependency bump.
     """
-    from langsmith.utils import get_tracer_project, tracing_is_enabled
+    import langsmith.utils as _langsmith_utils
+
+    # langsmith's own signature leaves this partially untyped; bound to an
+    # explicit `Callable[[], object]` local so the untyped boundary is confined
+    # to this one seam. The test still calls langsmith's real function directly.
+    tracing_is_enabled = cast(
+        "Callable[[], object]", _langsmith_utils.tracing_is_enabled
+    )
+    get_tracer_project = _langsmith_utils.get_tracer_project
 
     enabled = tracing_is_enabled()
     assert isinstance(enabled, bool) or enabled == "local", (
@@ -721,7 +732,7 @@ _EXPORTER_SELECTION_PROBE_SCRIPT = textwrap.dedent(
 
 def _run_exporter_selection_probe(
     tmp_path: Path, env_overrides: dict[str, str]
-) -> dict:
+) -> dict[str, Any]:
     """Configure telemetry in a child with a controlled exporter selection."""
     script = tmp_path / "exporter_selection_probe.py"
     script.write_text(_EXPORTER_SELECTION_PROBE_SCRIPT, encoding="utf-8")

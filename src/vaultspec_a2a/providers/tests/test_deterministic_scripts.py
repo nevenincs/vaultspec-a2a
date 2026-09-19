@@ -23,6 +23,11 @@ from ...database import create_thread, seed_task_queue
 from ...database.models import Base
 from ...graph.enums import Provider
 from ...graph.nodes.worker import create_worker_node
+from ...graph.tests._state_graph_helpers import (
+    add_test_node,
+    ainvoke_test_graph,
+    compile_test_graph,
+)
 from ...team.team_config import AgentConfig, load_agent_config, load_team_config
 from ...thread.state import TeamState
 from ...worker.task_queue_port import SqlTaskQueuePort
@@ -110,6 +115,7 @@ async def test_deterministic_tool_call_advances_real_task_queue(tmp_path: Path) 
 
         result = await node(state)
 
+        assert isinstance(result, dict)
         assert result["current_task_id"] == "D-2"
         assert (
             result["messages"][0].content == "Deterministic task queue update settled."
@@ -128,14 +134,16 @@ async def test_deterministic_permission_pause_resumes_generic_callback() -> None
         system_prompt=agent.persona.system_prompt,
         name=agent.id,
     )
-    builder = StateGraph(cast("Any", TeamState))
-    builder.add_node("coder", node)
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(builder, "coder", node)
     builder.set_entry_point("coder")
     builder.add_edge("coder", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = compile_test_graph(builder, checkpointer=InMemorySaver())
     config: RunnableConfig = {"configurable": {"thread_id": "deterministic-permission"}}
 
-    first = await graph.ainvoke(_state("deterministic-permission"), config=config)
+    first = await ainvoke_test_graph(
+        graph, cast("dict[str, Any]", _state("deterministic-permission")), config
+    )
 
     assert "__interrupt__" in first
     pause = first["__interrupt__"][0].value
@@ -146,8 +154,8 @@ async def test_deterministic_permission_pause_resumes_generic_callback() -> None
         "deny_once",
     }
 
-    resumed = await graph.ainvoke(
-        Command(resume={"option_id": "allow_once"}), config=config
+    resumed = await ainvoke_test_graph(
+        graph, Command(resume={"option_id": "allow_once"}), config
     )
 
     assert resumed["messages"][-1].content == (
@@ -208,7 +216,7 @@ async def test_deterministic_relay_burst_crosses_replay_window() -> None:
     model, _agent = _scenario_model("deterministic-relay-burst")
 
     stream = model.astream([HumanMessage(content="burst")])
-    content_chunks = []
+    content_chunks: list[AIMessageChunk] = []
     async for chunk in stream:
         if str(chunk.content):
             content_chunks.append(chunk)

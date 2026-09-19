@@ -37,7 +37,7 @@ to ``validation_errors`` so the writer has a concrete revise signal.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langgraph.types import Command, interrupt
 
@@ -109,8 +109,9 @@ def parse_verdict(resume_value: object) -> tuple[str | None, str | None]:
     """
     if not isinstance(resume_value, dict):
         return None, None
-    verdict = resume_value.get("verdict")
-    notes = resume_value.get("notes")
+    resume_dict = cast("dict[str, object]", resume_value)
+    verdict = resume_dict.get("verdict")
+    notes = resume_dict.get("notes")
     verdict_str = verdict if isinstance(verdict, str) else None
     notes_str = notes if isinstance(notes, str) else None
     return verdict_str, notes_str
@@ -161,7 +162,7 @@ def create_phase_submit_node(
         writer with the specific check notes.
     """
 
-    async def phase_submit_node(state: TeamState) -> Command:
+    async def phase_submit_node(state: TeamState) -> Command[Any]:
         """Propose+submit (idempotent), commit the ids, route into the gate."""
         try:
             proposal_id = await submitter(state, phase)
@@ -216,7 +217,7 @@ def create_phase_gate_node(
         via ``Command.goto`` with the verdict recorded in ``gate_verdict``.
     """
 
-    async def phase_gate_node(state: TeamState) -> Command:
+    async def phase_gate_node(state: TeamState) -> Command[Any]:
         """Pause for the committed proposal's verdict, then route."""
         proposal_id = state.get("gate_pending_proposal_id")
         resume_value = interrupt(

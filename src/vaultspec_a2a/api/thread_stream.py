@@ -23,10 +23,8 @@ from ..database import get_thread
 from ..graph.enums import ServerEventType
 from ..providers.conditions import ProviderCondition
 from ..streaming.sse_frames import encode_sse_frame
-from ..streaming.types import SequencedEvent
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..thread.errors import EventAggregatorError
-from ..thread.snapshots import normalize_wire_event_type
 from .event_adapter import sequenced_to_positive_payload
 from .schemas.events import HeartbeatEvent
 
@@ -166,14 +164,11 @@ async def _stream_thread_events(
                 )
                 continue
 
-            if isinstance(item, SequencedEvent):
-                # In-process events are projected onto the positive progress
-                # allowlist here; relayed worker payloads were already projected
-                # at the relay seam. The encode boundary re-applies the allowlist
-                # to both, so a forbidden body cannot cross by either path.
-                payload = sequenced_to_positive_payload(item)
-            else:
-                payload = normalize_wire_event_type(item)
+            # In-process events are projected onto the positive progress
+            # allowlist here; relayed worker payloads were already projected
+            # at the relay seam. The encode boundary re-applies the allowlist
+            # to both, so a forbidden body cannot cross by either path.
+            payload = sequenced_to_positive_payload(item)
 
             event_type = payload.get("type")
             yield encode_sse_frame(

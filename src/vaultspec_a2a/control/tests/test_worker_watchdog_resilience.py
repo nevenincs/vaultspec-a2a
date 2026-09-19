@@ -25,7 +25,7 @@ import logging
 import subprocess
 import sys
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 
@@ -40,7 +40,7 @@ from ...control.worker_management import (
 from ...testing.ports import free_port
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
 _POLL = 0.05
@@ -57,12 +57,13 @@ class _Collector(logging.Handler):
         super().__init__(level=logging.DEBUG)
         self.records: list[logging.LogRecord] = []
 
+    @override
     def emit(self, record: logging.LogRecord) -> None:
         self.records.append(record)
 
 
 @contextlib.contextmanager
-def _captured() -> Iterator[list[logging.LogRecord]]:
+def _captured() -> Generator[list[logging.LogRecord]]:
     """Collect the watchdog's own log records, attached to its own logger.
 
     Attached directly rather than through ``caplog`` so the assertion is about
@@ -82,7 +83,7 @@ def _captured() -> Iterator[list[logging.LogRecord]]:
 
 
 @contextlib.contextmanager
-def _fast_polling() -> Iterator[None]:
+def _fast_polling() -> Generator[None]:
     """Shorten the watchdog poll interval; a real attribute swap, restored after."""
     original = settings.watchdog_poll_interval_seconds
     settings.watchdog_poll_interval_seconds = _POLL
@@ -93,7 +94,7 @@ def _fast_polling() -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _runtime_home(home: Path) -> Iterator[None]:
+def _runtime_home(home: Path) -> Generator[None]:
     """Point the machine-global runtime directory at *home*; a real swap, restored.
 
     The watchdog derives the worker's stderr log path from this setting, so a

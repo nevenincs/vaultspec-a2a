@@ -136,6 +136,7 @@ def test_concurrent_identical_capacity_dispatches_replay_one_acceptance(
                     for _ in range(2)
                 ]
                 deadline = time.monotonic() + 5
+                waiters = 0
                 while time.monotonic() < deadline:
                     waiters = portal.call(
                         lambda: len(getattr(admission_lock, "_waiters", ()) or ())
@@ -222,6 +223,7 @@ def test_concurrent_distinct_same_thread_dispatch_retains_capacity_refusal(
                     for dispatch_id in ("distinct-a", "distinct-b")
                 ]
                 deadline = time.monotonic() + 5
+                waiters = 0
                 while time.monotonic() < deadline:
                     waiters = portal.call(
                         lambda: len(getattr(admission_lock, "_waiters", ()) or ())

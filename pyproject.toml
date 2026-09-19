@@ -146,6 +146,10 @@ tooling = [
   "shellcheck-py==0.11.0.1",
   "tenacity>=9.0.0",
   "tomlkit>=0.15.0",
+  # Typeshed stubs for jsonschema, which ships no py.typed of its own. The
+  # desktop contract test validates against a real Draft202012Validator, and
+  # without these its calls type as Unknown.
+  "types-jsonschema>=4.26",
   "ty>=0.0.15",
   "vaultspec-core>=0.1.56,<0.3",
   # Dead-code detection. Advisory: it infers reachability it cannot always see,
@@ -495,9 +499,36 @@ reportIgnoreCommentWithoutRule = "error"
 # violation, and this is the non-underscore half of that boundary.
 reportPrivateLocalImportUsage = "error"
 
+# A test reaching a module's private helper is white-box access to the unit it
+# owns, not a trust-boundary violation: the test and the helper ship and change
+# together. The rule stays an error everywhere else, which is where a second
+# module reaching past a private name actually costs something.
 executionEnvironments = [
+  # extraPaths keeps the repo root on this environment's import path: declaring
+  # an executionEnvironment resets resolution for that directory, and `dev.*` is
+  # imported as a top-level package from the repo root.
+  { root = "dev/tests", extraPaths = ["."], reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/api/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/authoring/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/cli/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/context/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/control/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/database/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/desktop/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/desktop_tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/graph/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/ipc/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/lifecycle/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/protocols/mcp/tests", reportPrivateUsage = false },
   { root = "src/vaultspec_a2a/providers/tests", reportPrivateUsage = false },
   { root = "src/vaultspec_a2a/service_tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/streaming/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/team/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/telemetry/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/testing/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/thread/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/utils/tests", reportPrivateUsage = false },
+  { root = "src/vaultspec_a2a/worker/tests", reportPrivateUsage = false },
 ]
 
 # ── Cognitive complexity ─────────────────────────────────────────────────────

@@ -45,7 +45,7 @@ from ._catalog import catalog_selection
 from .test_run_admission import _ATTACH, _OWNERSHIP
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 _GATEWAY = gateway_script(log_level="info")
 
@@ -87,7 +87,7 @@ HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 @contextmanager
 def _squatter(
     tmp_path: Path, port: int, body: dict[str, Any]
-) -> Iterator[tuple[subprocess.Popen[bytes], Path]]:
+) -> Generator[tuple[subprocess.Popen[bytes], Path]]:
     """Run a real stranger process serving *body* on the worker port."""
     log_path = tmp_path / f"squatter-{port}.log"
     log_path.write_text("", encoding="utf-8")
@@ -115,7 +115,7 @@ def _squatter(
 @contextmanager
 def _armed_gateway_on_worker_port(
     tmp_path: Path, worker_port: int, *, home_name: str = "app-home"
-) -> Iterator[tuple[str, str, Path]]:
+) -> Generator[tuple[str, str, Path]]:
     """Boot a real armed gateway whose private worker port is pinned.
 
     Unlike the general boot helper this pins ``VAULTSPEC_WORKER_PORT`` so the

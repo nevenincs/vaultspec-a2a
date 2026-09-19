@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 _FORBIDDEN_BODY_KEYS = ("prompt", "document", "diff", "old_text", "new_text")
 
 
-def _assert_positive_frame(payload: dict, raw: str) -> None:
+def _assert_positive_frame(payload: dict[str, object], raw: str) -> None:
     """Assert one frame is a positive DTO carrying no forbidden body."""
     for forbidden in _FORBIDDEN_BODY_KEYS:
         assert forbidden not in payload, f"forbidden field {forbidden!r} crossed"
@@ -74,8 +74,10 @@ async def test_terminal_replay_is_idempotent_across_reconnects_and_reconciles(
                 response.aiter_lines(), wanted="thread_terminal", timeout=30.0
             )
         _assert_positive_frame(frame, raw)
-        assert frame["status"] in TERMINAL_STATUS_VALUES
-        statuses.append(frame["status"])
+        status = frame["status"]
+        assert status in TERMINAL_STATUS_VALUES
+        assert isinstance(status, str)
+        statuses.append(status)
 
     assert statuses[0] == statuses[1]
     assert statuses[0] == authoritative["status"]

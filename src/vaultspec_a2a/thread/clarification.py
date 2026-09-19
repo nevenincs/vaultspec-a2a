@@ -327,10 +327,11 @@ class ClarificationRequest(BaseModel):
         """
         if not isinstance(payload, dict):
             return None
-        if payload.get("type") != CLARIFICATION_INTERRUPT_TYPE:
+        payload_map = cast("dict[str, object]", payload)
+        if payload_map.get("type") != CLARIFICATION_INTERRUPT_TYPE:
             return None
         try:
-            return cls.model_validate(payload)
+            return cls.model_validate(payload_map)
         except ValueError:
             return None
 

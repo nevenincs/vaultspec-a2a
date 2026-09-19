@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:81f0c91f0b0b3ecfb123982b95df6ec475e77dab590e4561d062033838502683'
+body_hash: 'sha256:e0b0348a49cfe2092e9bb26516892be18802c3d236000182ad71b9a3c1d96d66'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3112,3 +3112,7 @@ The service rerun resolved the permission conflict test but found a second high-
 ### 2026-09-19 cancellation lock collision review pass
 
 The next full service run passed the Compose and permission cases but surfaced one medium-severity concurrency defect: a running thread's cancel request returned HTTP 500 when its SQLite control-action insert collided with a concurrent event write (`sqlite3.OperationalError: database is locked`). The cancel service now rolls back and retries only this specific SQLite lock error at the pre-dispatch claim boundary, with four bounded retries and a fresh durable authority read each time. A direct control lease test injects the collision once and proves one worker dispatch; the focused live cancel test and the direct lease package pass. Review found the retry boundary precedes the accepted action and external dispatch, so the failed attempt cannot duplicate worker work. It also found low-severity module documentation drift: the header denied commits although this service commits durable transitions; the header now states the actual contract. The complete service rerun and strict findings remain open until their gates finish.
+
+### 2026-09-19 complete service gate result
+
+The full `just test-service` gate now exits successfully: 121 passed, 68 skipped, 4,574 deselected, and one warning in 182.76 seconds. The declared skips require live engine/provider credentials or a separately served mock backend; none is a failing test. The production Compose image, worker startup, permission conflict, and cancellation cases all pass in this run. This closes the high-severity image/import defects and the medium-severity cancellation lock collision at the service-gate cadence. The strict complexity, nested-block, Pylint shape, and unconsumed-export findings remain open and prevent completion of the requested zero-issue quality pass.

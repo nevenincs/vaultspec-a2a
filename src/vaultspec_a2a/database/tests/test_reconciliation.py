@@ -10,6 +10,10 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...conftest import materialize_schema
+from ...control.tests._catalog_authority import current_execution_metadata
+from ...control.tests.test_dispatch_failure_transitions import (
+    _seed_accepted_initial_action,
+)
 from ...database import (
     create_thread,
     get_thread,
@@ -41,6 +45,10 @@ async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
                 session,
                 write_authority=make_test_write_authority(),
                 thread_id="thread-missing-checkpoint",
+                metadata=current_execution_metadata(runtime_dir),
+            )
+            await _seed_accepted_initial_action(
+                session, thread.id, workspace=runtime_dir
             )
             await record_permission_request(
                 session,
@@ -65,13 +73,12 @@ async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
             repaired = await get_thread(session, "thread-missing-checkpoint")
 
     assert summary["paused_resumable"] == 0
-    assert summary["checkpoint_unavailable"] == 1
+    assert summary["checkpoint_unavailable"] == 0
     assert repaired is not None
-    assert repaired.status == "repair_needed"
-    assert repaired.repair_status == "checkpoint_unavailable"
-    assert repaired.execution_readiness == "checkpoint_unavailable"
-    assert repaired.recovery_epoch == 1
-    assert repaired.repair_generation == 1
+    assert repaired.status == "reconciling"
+    assert repaired.repair_status == "needs_reconciliation"
+    assert repaired.execution_readiness == "needs_reconciliation"
+    assert repaired.repair_reason == "checkpoint_absent"
 
     await engine.dispose()
 
@@ -93,11 +100,15 @@ async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         async with session_factory() as session:
-            await create_thread(
+            thread = await create_thread(
                 session,
                 write_authority=make_test_write_authority(),
                 thread_id="thread-cancelling-missing-checkpoint",
                 status="cancelling",
+                metadata=current_execution_metadata(runtime_dir),
+            )
+            await _seed_accepted_initial_action(
+                session, thread.id, workspace=runtime_dir
             )
             await session.commit()
 
@@ -110,13 +121,12 @@ async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
             )
 
     assert summary["paused_resumable"] == 0
-    assert summary["checkpoint_unavailable"] == 1
+    assert summary["checkpoint_unavailable"] == 0
     assert repaired is not None
-    assert repaired.status == "repair_needed"
-    assert repaired.repair_status == "checkpoint_unavailable"
-    assert repaired.execution_readiness == "checkpoint_unavailable"
-    assert repaired.recovery_epoch == 1
-    assert repaired.repair_generation == 1
+    assert repaired.status == "reconciling"
+    assert repaired.repair_status == "needs_reconciliation"
+    assert repaired.execution_readiness == "needs_reconciliation"
+    assert repaired.repair_reason == "checkpoint_absent"
 
     await engine.dispose()
 
@@ -234,6 +244,10 @@ async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
                 write_authority=make_test_write_authority(),
                 thread_id="thread-answered-pending-apply-reconcile",
                 status="running",
+                metadata=current_execution_metadata(runtime_dir),
+            )
+            await _seed_accepted_initial_action(
+                session, thread.id, workspace=runtime_dir
             )
             await record_permission_request(
                 session,
@@ -265,7 +279,7 @@ async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
     assert repaired.status == "reconciling"
     assert repaired.repair_status == "needs_reconciliation"
     assert repaired.execution_readiness == "needs_reconciliation"
-    assert repaired.recovery_epoch == 1
-    assert repaired.repair_generation == 1
+    assert repaired.recovery_epoch == 0
+    assert repaired.repair_generation == 0
 
     await engine.dispose()

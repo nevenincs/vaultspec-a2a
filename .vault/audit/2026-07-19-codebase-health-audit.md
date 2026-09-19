@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:4a366143def6fc2f25601f05073388ea820f714a6d02e86c4f879e078d4f31d9'
+body_hash: 'sha256:6587bf4ec0f6b04e29ae53c0692dd738254ac3f55cb383b65b13db8d56f9dc3d'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3042,3 +3042,13 @@ Type: test contract drift. The next non-service run reached 1,255 passes before 
 ### 2026-09-19 full control-suite review | medium | fixed in implementation
 
 Type: test contract drift. The full control test package now reports 502 passed and six marker-deselected after the receipt, deadline, initial-authority, checkpoint, deletion-journal, and vanished-workspace fixture updates. Review confirmed the tests still exercise their original state transitions and refusal behavior through current durable authority. No new production issue appeared in the full control run. The repository-wide non-service suite and strict structural/export gate remain queued.
+
+### 2026-09-19 database gate review pass
+
+The database package exposed stale fixtures after current write-authority and graph-recovery contracts became mandatory. This pass supplied complete authority columns and matching accepted action receipts, required recovery deadlines, and current execution metadata; it also changed reboot and retention assertions to the current checkpoint recovery behavior. Focused affected tests pass, and the package was reduced from ten immediate failures to three later fixture failures. The final three have been corrected and focused tests pass; a complete package rerun remains in the queue.
+
+Review findings and queue:
+
+- **Medium, test contract:** The full database package and repository suite must be rerun after the last fixture corrections; a focused pass cannot prove the whole gate. Open until both are green.
+- **Medium, test maintainability:** Database reconciliation tests import `_seed_accepted_initial_action` from a control test module. Move the shared authority seeding helper into a neutral test support module if this dependency causes fixture drift or import-order issues. Open.
+- **High, quality gate:** `just check-strict` still has outstanding Ruff, nesting, Pylint, and export findings. Burn down the complete strict output; open.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -224,12 +225,13 @@ async def test_runtime_runner_accepts_populated_valid_current_schema(
             action_type=ControlActionType.INGEST,
             idempotency_key="valid-current-ingest",
             dispatch_id=receipt,
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         await session.commit()
     await engine.dispose()
 
     await run_migrations(url)
-    assert _version(db) == "0017"
+    assert _version(db) == "0021"
 
 
 def test_populated_current_store_cannot_erase_authority(runtime_dir: Path) -> None:

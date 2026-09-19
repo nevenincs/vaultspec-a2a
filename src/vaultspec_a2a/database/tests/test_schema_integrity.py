@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -316,6 +316,7 @@ class TestStatusDefaultsComeFromEnums:
                 action_type="ingest",
                 idempotency_key="ingest:1",
                 requested_at=datetime.now(UTC),
+                recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             )
         )
         await session.flush()

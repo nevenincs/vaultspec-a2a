@@ -26,6 +26,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import respond_to_permission
+from ...control.tests._catalog_authority import current_execution_metadata
+from ...control.tests.test_dispatch_failure_transitions import (
+    _seed_accepted_initial_action,
+)
 from ...control.worker_management import LazyWorkerSpawner
 from ...graph.enums import PermissionType
 from ...streaming.aggregator import EventAggregator
@@ -105,6 +109,7 @@ async def _pause_run(
     sessions: async_sessionmaker[AsyncSession],
     thread_id: str,
     *,
+    workspace: Path,
     pause_reason_type: str,
     tool_call: str | None,
     options: list[dict[str, object]],
@@ -117,6 +122,7 @@ async def _pause_run(
             write_authority=make_test_write_authority(),
             thread_id=thread_id,
             status=ThreadStatus.INPUT_REQUIRED,
+            metadata=current_execution_metadata(workspace),
         )
         await record_permission_request(
             db,
@@ -127,6 +133,7 @@ async def _pause_run(
             allowed_options=options,
             tool_call=tool_call,
         )
+        await _seed_accepted_initial_action(db, thread_id, workspace=workspace)
         await db.commit()
     return request_id
 
@@ -174,6 +181,7 @@ async def test_approving_a_tool_call_records_a_durable_audit_row(
     request_id = await _pause_run(
         sessions,
         thread_id,
+        workspace=tmp_path,
         pause_reason_type="bash",
         tool_call="bash",
         options=_TOOL_OPTIONS,
@@ -213,6 +221,7 @@ async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
     request_id = await _pause_run(
         sessions,
         thread_id,
+        workspace=tmp_path,
         pause_reason_type="bash",
         tool_call="bash",
         options=_TOOL_OPTIONS,
@@ -244,6 +253,7 @@ async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
     request_id = await _pause_run(
         sessions,
         thread_id,
+        workspace=tmp_path,
         pause_reason_type="plan_approval_request",
         tool_call=None,
         options=_APPROVAL_OPTIONS,
@@ -278,6 +288,7 @@ async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
     request_id = await _pause_run(
         sessions,
         thread_id,
+        workspace=tmp_path,
         pause_reason_type="bash",
         tool_call="bash",
         options=_TOOL_OPTIONS,
@@ -311,6 +322,7 @@ async def test_a_client_retry_records_one_decision_not_two(
     request_id = await _pause_run(
         sessions,
         thread_id,
+        workspace=tmp_path,
         pause_reason_type="bash",
         tool_call="bash",
         options=_TOOL_OPTIONS,

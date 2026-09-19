@@ -5,7 +5,7 @@ tags:
 date: '2026-09-19'
 modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:f85e58d162cccbdd2cc1f606cc214aa0e20fbda5b7ce9c988b4106e3096ec88a'
+body_hash: 'sha256:22375ea496d49eb2bf0f4301a22c03226db3bf3a756eb4842725ac22fdca1aca'
 related:
   - "[[2026-08-02-resource-aware-test-execution-adr]]"
 ---
@@ -174,3 +174,23 @@ detached service, waits for failure, fells the process tree, and proves that no
 live resident was published, but now uses a three-second deadline. Two focused
 runs completed in 3.18s and 5.31s, retaining a small variable tree-cleanup tail
 without idling for the production startup budget.
+
+The next comparable full non-RAG lane completed in 376.43s: 4,536 passed, one
+skipped, and the previously reproduced permission-response lease race failed.
+That is 9.68s faster than the preceding 386.11s lane and 33.25s faster than the
+earlier 409.68s lane. CLI failed-start and WAL maintenance were both absent from
+the fifty slowest cases. The 37.69s model entry is the deliberately unchanged
+five-process loaded campaign; the single shared cold-compile fixture appeared
+once as a 10.72s setup under lane contention.
+
+## Provider idle-window optimization — 2026-09-20
+
+The next duration table exposed six real-subprocess timeout controls whose
+6-15-second observation windows dominated their assertions. The Codex pair and
+ACP quartet took 47.33s in an isolated baseline. Scaling the short injected
+deadline to 0.75s and the observation window to 3s retains a fourfold separation
+between expiry and the control window, while the long controls remain 600 or
+3,600 seconds. The stderr proof now emits every 0.1s to keep resetting the same
+production deadline. Two complete focused runs passed in 23.69s and 24.76s, a
+roughly 48% reduction with the real agent processes and production wait paths
+unchanged.

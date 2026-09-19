@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-19'
 body_schema: 'body-v1'
-body_hash: 'sha256:eb7b0c18eb7634dbef4dbe5ba394b425c24abe3ab8384f300acda93358692251'
+body_hash: 'sha256:7c4ba647a7e9bb2b7c1f75801c21505f463643d35a2c942fbd9bbaf266418cac'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -434,6 +434,28 @@ deadline changed. No production timeout or process semantics changed. Ruff, ty,
 BasedPyright, the five-test model-stack module, repeated CLI failure calls, and
 the complete service-verb module pass. The high-severity desktop readiness and
 permission-response races remain separately queued.
+
+### provider-idle-control-windows-were-oversized | low | resolved
+
+Type: process handling and idle time. Six Codex/ACP deadline proofs correctly
+used real silent subprocesses and opposing timeout configurations, but waited
+6-15 seconds per control even though only the ordering of the injected limits
+is material. The focused pair of modules took 47.33s. Their short deadline is
+now 0.75s and their observation window is 3s; the fourfold separation preserves
+the discriminating deadline-versus-still-waiting outcomes. The stderr-liveness
+agent emits every 0.1s so it continues to demonstrate repeated deadline resets.
+Two post-change runs passed in 23.69s and 24.76s. Status: resolved.
+
+### timeout-window-optimization-review-2026-09-20 | low | PASS
+
+Review result: PASS. Only test-injected durations changed. All six proofs still
+spawn real agents, traverse the production Codex or ACP wait path, and retain
+their inverse controls; no production default or cleanup budget changed. The
+latest full non-RAG lane before this final focused change completed in 376.43s
+with 4,536 passes, one skip, and only the already queued permission-response
+lease race failing. WAL and CLI failed-start tests were absent from its fifty
+slowest cases. The two Windows unclosed-transport warnings remain open cleanup
+evidence rather than a regression from this pass.
 
 ## Recommendations
 

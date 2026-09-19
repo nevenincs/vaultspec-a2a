@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:8ce85c457ee6290ae11001e84c2da448bf529b80b99a54ed40260f63bb2496bb'
+body_hash: 'sha256:36a2cb0684b8b5fef9165e48fa0ac5b441fb3a512e0e7e967922f13b7df46ea7'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3174,3 +3174,9 @@ Four medium-severity strict structure findings in the named-CHECK parser were re
 ### 2026-09-20 internal event relay shape review pass
 
 The internal worker-event relay had one low-severity strict argument-count finding: the aggregator, durable store, checkpointer, drain gate, and transport traveled separately through three ingress paths. They now travel as one frozen relay context. Review checked that WebSocket transport attribution, HTTP relay readiness, batch ordering, projection bypass for dispatch receipts, and durable relay arguments retain their values. All 44 focused internal API tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 290 to 289. No new review findings were surfaced. The remaining 289 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 anchoring context structure review pass
+
+One medium-severity cyclomatic finding in contextual anchoring came from rendering vault-index entries within the same function as feature-state summary fields. A focused helper now renders document labels, capped paths, and remainder counts. Review checked that field ordering, empty-index omission, path cap, and validation-error placement stay the same. All 14 anchoring tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 289 to 288. No new review findings were surfaced.
+
+The latest complete `just check-strict` run remains red and confirms the broader open gate: 155 radon cyclomatic findings, 13 module-length findings, 24 function-length findings, 109 parameter-count findings, six code-health nesting findings, plus strict Ruff, nested-block, and Pylint shape findings. These are still in the audit queue; passing the regular gate and strict type checker does not close them.

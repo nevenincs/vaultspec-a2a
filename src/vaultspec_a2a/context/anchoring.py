@@ -17,6 +17,25 @@ from ..domain_config import domain_config
 __all__ = ["build_anchoring_context"]
 
 
+def _vault_document_lines(vault_index: dict[str, list[str]]) -> list[str]:
+    if not vault_index:
+        return []
+    lines = [
+        "\n### Available Vault Documents",
+        "CONSULT these documents as PRIMARY references before acting. "
+        "Read their content using your filesystem capabilities.",
+    ]
+    for doc_type, paths in vault_index.items():
+        lines.append(f"\n**{doc_type.upper()}**")
+        visible = paths[: domain_config.anchor_path_cap]
+        for path in visible:
+            lines.append(f"  - `{path}`")
+        remainder = len(paths) - len(visible)
+        if remainder > 0:
+            lines.append(f"  - (+ {remainder} more)")
+    return lines
+
+
 def build_anchoring_context(state: TeamState) -> str | None:
     """Produce a per-invocation anchoring summary from TeamState.
 
@@ -45,20 +64,7 @@ def build_anchoring_context(state: TeamState) -> str | None:
         lines.append(f"- **Routing Note:** {routing_error}")
 
     vault_index: dict[str, list[str]] = state.get("vault_index") or {}
-    if vault_index:
-        lines.append("\n### Available Vault Documents")
-        lines.append(
-            "CONSULT these documents as PRIMARY references before acting. "
-            "Read their content using your filesystem capabilities."
-        )
-        for doc_type, paths in vault_index.items():
-            lines.append(f"\n**{doc_type.upper()}**")
-            visible = paths[: domain_config.anchor_path_cap]
-            for p in visible:
-                lines.append(f"  - `{p}`")
-            remainder = len(paths) - len(visible)
-            if remainder > 0:
-                lines.append(f"  - (+ {remainder} more)")
+    lines.extend(_vault_document_lines(vault_index))
 
     errors: list[str] = state.get("validation_errors") or []
     if errors:

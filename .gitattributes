@@ -37,6 +37,7 @@ src/ui/dist/** -diff linguist-generated
 * text=auto eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
+.vault/exec/**/*-ledger.md merge=union
 # <<< vaultspec-managed <<<
 
 # ── Binary files (never normalise) ──────────────────────────────────

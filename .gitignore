@@ -86,6 +86,7 @@ Python/
 /.codex/config.toml.lock
 /.gitignore.lock
 /.mcp.json.lock
+/.pre-commit-config.yaml.lock
 # <<< vaultspec-managed <<<
 
 # Frozen-binary build output (reproducible via scripts/build_binary.py)

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:876f265f9c36c547000cf94c99a091d1f0f1f1ac991af02d484bfb8316148822'
+body_hash: 'sha256:b2b529d03f1854b8871b09d0a3f587cab584e778c549351bc61a37f2206153bf'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3128,3 +3128,7 @@ The remaining 95 unconsumed published names were reviewed against repository imp
 ### 2026-09-19 strict argument shape review pass
 
 The strict Ruff pass found a low-severity excessive-argument issue in the deterministic completion review-bundle helper: six pieces of one run-bound evidence record crossed its call boundary separately. They now travel as a frozen typed `_ReviewBundleInput`, with the same fields and one unchanged call site. The focused Ruff shape and format checks and Ty pass; the acceptance test itself still requires its declared live engine and durable evidence directory. The strict Ruff structure count falls from 323 to 322. The remaining 322 structure errors, 33 nested-block errors, and Pylint shape findings remain open.
+
+### 2026-09-19 gateway auth case-shape review pass
+
+Two low-severity strict argument-shape findings came from gateway auth tests unpacking one parameterized route case into four pytest arguments alongside fixtures. The route case now crosses each test boundary as one typed tuple and is unpacked inside the test; all 25 gateway auth cases pass, and focused Ruff and format checks pass. The strict Ruff structure count falls from 322 to 320. The remaining 320 structure errors, 33 nested-block errors, and 60 Pylint shape findings remain open.

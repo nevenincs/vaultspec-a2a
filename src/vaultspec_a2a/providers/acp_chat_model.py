@@ -420,30 +420,7 @@ class AcpChatModel(BaseChatModel):
         finally:
             self._session_busy = False
 
-    async def _astream_session(
-        self,
-        messages: list[BaseMessage],
-        *,
-        run_manager: AsyncCallbackManagerForLLMRun | None,
-        native_command: _NativeCommandRequest | None,
-    ) -> AsyncIterator[ChatGenerationChunk]:
-        """Run one ordinary prompt or one negotiated native command."""
-        prompt_blocks: list[JsonObject] = []
-        for msg in messages:
-            if isinstance(
-                msg,
-                (HumanMessage, SystemMessage, ChatMessage, AIMessage, AIMessageChunk),
-            ):
-                prompt_blocks.append({"type": "text", "text": str(msg.content)})
-
-        # The child inherits the ambient environment (resolve_env_vars passes it
-        # through, minus this service's own infra tokens) so the spawned CLI
-        # authenticates however the operator ambiently does - a logged-in CLI
-        # session, an API key in the environment, either. This layer implements
-        # NO authentication: it expresses no preference, reads no credential,
-        # and strips none. Provider-specific config (e.g. Z.ai's
-        # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN retarget) rides self.env_vars
-        # as an additive overlay from ProviderFactory.
+    async def _acp_environment(self) -> dict[str, str]:
         _ws_path = require_workspace_root(
             self.workspace_root, surface="ACP environment resolution"
         )
@@ -514,6 +491,68 @@ class AcpChatModel(BaseChatModel):
                     self._config.mcp_servers, exclude=AUTHORING_MCP_SERVER_NAME
                 )
             )
+        return env
+
+    async def _native_prompt_blocks(
+        self,
+        ctx: AcpSessionContext,
+        native_command: _NativeCommandRequest | None,
+        prompt_blocks: list[JsonObject],
+        session_id: str,
+    ) -> list[JsonObject]:
+        if native_command is not None:
+            catalog = ctx.native_commands_for(session_id)
+            if not catalog.received:
+                try:
+                    await asyncio.wait_for(
+                        catalog.updated.wait(),
+                        timeout=_COMMAND_ADVERTISEMENT_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    raise _NativeCommandUnavailableError(
+                        native_command.name,
+                        NativeCommandDisposition.BLOCKED,
+                        ("the provider did not advertise commands before the deadline"),
+                    ) from None
+            availability = catalog.resolve(native_command.name)
+            if availability.disposition is not NativeCommandDisposition.SUPPORTED:
+                raise _NativeCommandUnavailableError(
+                    native_command.name,
+                    availability.disposition,
+                    availability.reason or "native command is unavailable",
+                )
+            text = f"/{native_command.name}"
+            if native_command.arguments:
+                text = f"{text} {native_command.arguments}"
+            prompt_blocks = [{"type": "text", "text": text}]
+            ctx.effects_may_have_occurred = True
+        return prompt_blocks
+
+    async def _astream_session(
+        self,
+        messages: list[BaseMessage],
+        *,
+        run_manager: AsyncCallbackManagerForLLMRun | None,
+        native_command: _NativeCommandRequest | None,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        """Run one ordinary prompt or one negotiated native command."""
+        prompt_blocks: list[JsonObject] = []
+        for msg in messages:
+            if isinstance(
+                msg,
+                (HumanMessage, SystemMessage, ChatMessage, AIMessage, AIMessageChunk),
+            ):
+                prompt_blocks.append({"type": "text", "text": str(msg.content)})
+
+        # The child inherits the ambient environment (resolve_env_vars passes it
+        # through, minus this service's own infra tokens) so the spawned CLI
+        # authenticates however the operator ambiently does - a logged-in CLI
+        # session, an API key in the environment, either. This layer implements
+        # NO authentication: it expresses no preference, reads no credential,
+        # and strips none. Provider-specific config (e.g. Z.ai's
+        # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN retarget) rides self.env_vars
+        # as an additive overlay from ProviderFactory.
+        env = await self._acp_environment()
 
         # The spawn and session setup run INSIDE the try so the finally below
         # is the single cleanup path: a spawn-time raise (missing binary,
@@ -586,35 +625,9 @@ class AcpChatModel(BaseChatModel):
             self._stdin = ctx.stdin
             self._stdin_lock = ctx.stdin_lock
             self._response_futures = ctx.response_futures
-            if native_command is not None:
-                catalog = ctx.native_commands_for(self._active_session_id)
-                if not catalog.received:
-                    try:
-                        await asyncio.wait_for(
-                            catalog.updated.wait(),
-                            timeout=_COMMAND_ADVERTISEMENT_TIMEOUT_SECONDS,
-                        )
-                    except TimeoutError:
-                        raise _NativeCommandUnavailableError(
-                            native_command.name,
-                            NativeCommandDisposition.BLOCKED,
-                            (
-                                "the provider did not advertise commands before "
-                                "the deadline"
-                            ),
-                        ) from None
-                availability = catalog.resolve(native_command.name)
-                if availability.disposition is not NativeCommandDisposition.SUPPORTED:
-                    raise _NativeCommandUnavailableError(
-                        native_command.name,
-                        availability.disposition,
-                        availability.reason or "native command is unavailable",
-                    )
-                text = f"/{native_command.name}"
-                if native_command.arguments:
-                    text = f"{text} {native_command.arguments}"
-                prompt_blocks = [{"type": "text", "text": text}]
-                ctx.effects_may_have_occurred = True
+            prompt_blocks = await self._native_prompt_blocks(
+                ctx, native_command, prompt_blocks, result.session_id
+            )
             prompt_future = await setup_prompt(
                 ctx,
                 self._config,
@@ -765,31 +778,7 @@ class AcpChatModel(BaseChatModel):
             try:
                 chunk = await asyncio.wait_for(ctx.chunk_queue.get(), timeout=0.1)
                 if chunk is None:
-                    if ctx.interrupt_exc:
-                        raise ctx.interrupt_exc[0]
-                    if prompt_future.done():
-                        resp = prompt_future.result()
-                        if "error" in resp:
-                            _raise_prompt_error(
-                                resp,
-                                effects_may_have_occurred=(
-                                    ctx.effects_may_have_occurred
-                                ),
-                            )
-                    logger.warning(
-                        "ACP subprocess exited before end_turn",
-                        extra=runtime_log_extra(
-                            self._config,
-                            process=ctx.process,
-                            handshake_step="session/prompt",
-                            stderr_event_count=ctx.stderr_event_count,
-                            exit_code=ctx.process.returncode,
-                        ),
-                    )
-                    raise AcpError(
-                        "ACP subprocess exited before end_turn",
-                        effects_may_have_occurred=ctx.effects_may_have_occurred,
-                    )
+                    self._raise_for_early_exit(ctx, prompt_future)
                 if run_manager:
                     token = chunk.message.content
                     await run_manager.on_llm_new_token(
@@ -797,13 +786,7 @@ class AcpChatModel(BaseChatModel):
                     )
                 yield chunk
             except TimeoutError:
-                if prompt_future.done():
-                    resp = prompt_future.result()
-                    if "error" in resp:
-                        _raise_prompt_error(
-                            resp,
-                            effects_may_have_occurred=ctx.effects_may_have_occurred,
-                        )
+                self._raise_if_prompt_future_error(ctx, prompt_future)
                 self._enforce_turn_deadline(ctx)
                 continue
 
@@ -824,6 +807,38 @@ class AcpChatModel(BaseChatModel):
             ctx.prompt_stop_reason,
             effects_may_have_occurred=ctx.effects_may_have_occurred,
         )
+
+    def _raise_for_early_exit(
+        self, ctx: AcpSessionContext, prompt_future: AcpResponseFuture
+    ) -> Never:
+        if ctx.interrupt_exc:
+            raise ctx.interrupt_exc[0]
+        self._raise_if_prompt_future_error(ctx, prompt_future)
+        logger.warning(
+            "ACP subprocess exited before end_turn",
+            extra=runtime_log_extra(
+                self._config,
+                process=ctx.process,
+                handshake_step="session/prompt",
+                stderr_event_count=ctx.stderr_event_count,
+                exit_code=ctx.process.returncode,
+            ),
+        )
+        raise AcpError(
+            "ACP subprocess exited before end_turn",
+            effects_may_have_occurred=ctx.effects_may_have_occurred,
+        )
+
+    @staticmethod
+    def _raise_if_prompt_future_error(
+        ctx: AcpSessionContext, prompt_future: AcpResponseFuture
+    ) -> None:
+        if prompt_future.done():
+            resp = prompt_future.result()
+            if "error" in resp:
+                _raise_prompt_error(
+                    resp, effects_may_have_occurred=ctx.effects_may_have_occurred
+                )
 
     async def _cleanup_session(
         self,

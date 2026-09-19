@@ -241,11 +241,8 @@ async def dispatch_packet(
         await handle_session_update(params, ctx)
 
 
-async def handle_client_response(
-    data: JsonObject,
-    ctx: AcpSessionContext,
-) -> None:
-    """Resolve response futures, detect end_turn, enqueue error sentinels."""
+def _resolve_response_future(data: JsonObject, ctx: AcpSessionContext) -> int | None:
+    """Settle the matching JSON-RPC future and return its numeric request id."""
     raw_id = data.get("id")
     rid = raw_id if isinstance(raw_id, int) and not isinstance(raw_id, bool) else None
     if rid in ctx.response_futures:
@@ -259,6 +256,15 @@ async def handle_client_response(
                 logger.debug(
                     "Response for rpc_id=%r arrived after timeout; discarding", rid
                 )
+    return rid
+
+
+async def handle_client_response(
+    data: JsonObject,
+    ctx: AcpSessionContext,
+) -> None:
+    """Resolve response futures, detect end_turn, enqueue error sentinels."""
+    rid = _resolve_response_future(data, ctx)
 
     is_prompt_response = bool(ctx.prompt_id_ref) and rid == ctx.prompt_id_ref[0]
     if is_prompt_response and ctx.prompt_done.is_set():
@@ -272,6 +278,11 @@ async def handle_client_response(
         return
     if not is_prompt_response or "result" not in data:
         return
+    _finish_prompt_response(data, ctx)
+
+
+def _finish_prompt_response(data: JsonObject, ctx: AcpSessionContext) -> None:
+    """Validate a terminal prompt result and settle its stop reason."""
     result = data.get("result")
     if not isinstance(result, dict):
         ctx.interrupt_exc.append(

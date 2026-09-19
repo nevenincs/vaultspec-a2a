@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:7c0dec837401e0d12898b7f4625f4d762fb38acca57a3a235775c1b4f9d6fbb4'
+body_hash: 'sha256:0da09108e6a7c2445b7c7e7931ef1eccee20395b6bafa26e0b33485c2bd02f3b'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3188,3 +3188,7 @@ The graph ingest path had four medium-severity strict Ruff findings: excessive a
 ### 2026-09-20 ACP protocol dispatch structure review pass
 
 Four medium-severity strict Ruff structure findings in ACP stdout dispatch, server-RPC argument shape, and session-update branching were resolved. One parsed stdout line now has a focused dispatch helper; server-RPC method/id/params travel as a typed request; native-command advertisement and streamed tool-argument chunks have focused handlers. Review checked that activity is still stamped before parsing, malformed frames and queue overflow remain local, batch packet order remains intact, capability refusals still answer the agent, and command advertisements still validate session identity before replacing the catalog. Fifty-seven focused protocol and process-lifetime tests pass; `just check-all`, `just check-type-strict`, and focused Ruff pass. Strict Ruff structure falls from 284 to 280. The pre-existing medium-severity cognitive-complexity finding in `handle_client_response` remains open; this pass did not change that function. No new review findings were surfaced. The remaining 280 Ruff structure, 32 nested-block, and Pylint/health findings remain open.
+
+### 2026-09-20 ACP response complexity review pass
+
+The ACP response handler had one medium-severity cognitive-complexity finding after the dispatch cleanup. Future settlement and terminal prompt-result validation now have focused helpers, preserving duplicate-terminal refusal, late-future handling, error sentinel behavior, and stop-reason validation order. Thirty-four focused response and process-lifetime tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. No new review findings were surfaced. The module has no remaining complexipy offender; the repository-wide strict backlog remains open.

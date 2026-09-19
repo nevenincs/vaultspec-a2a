@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:7d10c51ace33f54c5c5b348a296d171aae742b41e114df8f2aeb0855d7fab26b'
+body_hash: 'sha256:020de786a236f4f9a1395290326aae2b6b1c9b47e99730cd6c41be7014065042'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3088,3 +3088,7 @@ Open queue: a broad xdist run still reported one other late failure before activ
 Review of the resume guard against live clarification tests found a medium-severity compatibility regression: an accepted parked graph can be registered with a real checkpoint that predates the two digest fields. The bound resume path now checks checkpoint presence under the existing deadline and trusts the exact registered cache binding; the cold recompile path still requires and validates both digests. Current clarification fixtures supply both digests when representing current checkpoints, while the older accepted case remains undigested. All four live clarification tests, the no-checkpoint worker refusal, and the normal gated resume pass. The full lifecycle package passed 146 tests under four workers.
 
 The structural-duplication gate found identical interrupt graph helpers in executor and token tests. The token tests now import the existing helper; five token tests and the structural gate pass. These are resolved medium-severity test contract findings. The broad xdist lifecycle failure did not reproduce in the isolated package and remains a medium-severity concurrency/flakiness finding for a complete repository rerun. `just check-all` passed. The strict structural/export gate and accelerator-dependent service harness remain open.
+
+### 2026-09-19 complete nonservice repository run
+
+A four-worker `pytest -m "not service"` run, excluding the accelerator-dependent provider harness file, completed with 4,535 passed, 1 skipped, and 2 Windows Proactor transport warnings in 375.57 seconds. No test failed. This closes the previously open unnamed broad-suite and lifecycle concurrency failures at the four-worker cadence. The skip is the acceptance proof requiring a reachable loopback authoring engine; the two warnings are unclosed transport finalizers on Windows. They remain medium-severity environment/test-cleanup findings rather than being counted as passing quality work. The strict structural, Pylint, and export gate findings and accelerator-dependent harness remain high-priority open queue items.

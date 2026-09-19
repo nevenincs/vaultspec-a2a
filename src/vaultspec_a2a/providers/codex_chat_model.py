@@ -433,6 +433,15 @@ class _ActiveCodexTurn:
     terminal_seen: asyncio.Event = field(default_factory=asyncio.Event)
 
 
+@dataclass(slots=True)
+class _TurnStreamState:
+    """Keep retry evidence and cumulative usage until the turn settles once."""
+
+    deferred: _CodexProtocolError | None = None
+    usage: UsageMetadata | None = None
+    effects_may_have_occurred: bool = False
+
+
 class _CodexAppServerClient:
     """Minimal JSON-RPC-over-stdio client for a spawned ``codex app-server``.
 
@@ -599,23 +608,7 @@ class _CodexAppServerClient:
             self._send({"id": msg_id, "error": {"code": -32601, "message": method}})
             return
         if msg_id is not None:
-            future = self._pending.pop(msg_id, None)
-            if future is None or future.done():
-                return
-            if "error" in message:
-                future.set_exception(
-                    _CodexProtocolError(_response_error_message(message["error"]))
-                )
-                return
-            result = message.get("result")
-            if not isinstance(result, dict):
-                future.set_exception(
-                    _CodexProtocolError(
-                        "codex app-server response field 'result' must be an object"
-                    )
-                )
-                return
-            future.set_result(result)
+            self._dispatch_reply(msg_id, message)
             return
         if method:
             # Observed before the turn consumer sees it: the approval request for
@@ -626,6 +619,25 @@ class _CodexAppServerClient:
                     method, lenient_json_object(message.get("params"))
                 )
             self.notifications.put_nowait(message)
+
+    def _dispatch_reply(self, msg_id: int, message: JsonObject) -> None:
+        future = self._pending.pop(msg_id, None)
+        if future is None or future.done():
+            return
+        if "error" in message:
+            future.set_exception(
+                _CodexProtocolError(_response_error_message(message["error"]))
+            )
+            return
+        result = message.get("result")
+        if not isinstance(result, dict):
+            future.set_exception(
+                _CodexProtocolError(
+                    "codex app-server response field 'result' must be an object"
+                )
+            )
+            return
+        future.set_result(result)
 
     def _schedule_elicitation_decision(self, msg_id: int, message: JsonObject) -> None:
         """Decide one tool-approval request off the reader loop, then answer it.
@@ -991,14 +1003,9 @@ class CodexChatModel(BaseChatModel):
         """Return the exact Codex thread/turn pairs this instance currently owns."""
         return tuple(sorted(self._active_turns))
 
-    async def execute_native_control(
-        self,
-        name: str,
-        *,
-        thread_id: str,
-        turn_id: str,
-    ) -> NativeCommandResult:
-        """Execute one proven Codex control against one exact active turn."""
+    def _native_control_admission(
+        self, name: str, thread_id: str, turn_id: str
+    ) -> _ActiveCodexTurn | NativeCommandResult:
         if name != "interrupt":
             return NativeCommandResult(
                 name=name,
@@ -1026,6 +1033,20 @@ class CodexChatModel(BaseChatModel):
                 outcome=NativeCommandOutcome.BUSY,
                 reason="an interrupt request already owns this exact Codex turn",
             )
+        return active
+
+    async def execute_native_control(
+        self,
+        name: str,
+        *,
+        thread_id: str,
+        turn_id: str,
+    ) -> NativeCommandResult:
+        """Execute one proven Codex control against one exact active turn."""
+        admission = self._native_control_admission(name, thread_id, turn_id)
+        if isinstance(admission, NativeCommandResult):
+            return admission
+        active = admission
 
         active.interrupt_in_flight = True
         deadline = asyncio.get_running_loop().time() + _NATIVE_CONTROL_TIMEOUT_SECONDS
@@ -1231,6 +1252,94 @@ class CodexChatModel(BaseChatModel):
             )
             await run_independent_cleanups(*cleanup_steps)
 
+    async def _next_turn_message(
+        self,
+        client: _CodexAppServerClient,
+        idle_limit: float,
+        state: _TurnStreamState,
+    ) -> JsonObject:
+        try:
+            message = await asyncio.wait_for(
+                client.notifications.get(),
+                timeout=idle_limit if idle_limit > 0 else None,
+            )
+            if message is _STREAM_CLOSED:
+                # Prefer the lane's last stated retry failure to a bare EOF.
+                if state.deferred is not None:
+                    state.deferred.effects_may_have_occurred |= (
+                        state.effects_may_have_occurred
+                    )
+                    raise _carry_condition(state.deferred, None)
+                raise await client.unexpected_eof_error()
+        except TimeoutError:
+            # A stated retry failure is more useful than later silence.
+            if state.deferred is not None:
+                state.deferred.effects_may_have_occurred |= (
+                    state.effects_may_have_occurred
+                )
+                raise state.deferred from None
+            raise
+        if client.pending_interrupt is not None:
+            raise client.pending_interrupt
+        return message
+
+    @staticmethod
+    def _turn_item_chunks(
+        method: object, params: JsonObject, state: _TurnStreamState
+    ) -> list[ChatGenerationChunk]:
+        if method == "item/agentMessage/delta":
+            delta = params.get("delta")
+            if isinstance(delta, str) and delta:
+                return [ChatGenerationChunk(message=AIMessageChunk(content=delta))]
+        elif method == "item/started":
+            item = lenient_json_object(params.get("item"))
+            if item.get("type") in _ACTION_ITEM_TYPES:
+                state.effects_may_have_occurred = True
+        elif method == "item/completed":
+            action = _completed_action_chunk(params)
+            if action is not None:
+                state.effects_may_have_occurred = True
+                return [action]
+        return []
+
+    @staticmethod
+    def _record_turn_error(params: JsonObject, state: _TurnStreamState) -> None:
+        failure = _turn_failure(params.get("error"), will_retry=params.get("willRetry"))
+        failure.effects_may_have_occurred = state.effects_may_have_occurred
+        if failure.will_retry:
+            # Preserve the most useful attempted failure while the lane retries.
+            if (
+                state.deferred is None
+                or state.deferred.condition is ProviderCondition.UNKNOWN
+            ):
+                state.deferred = failure
+            return
+        raise _carry_condition(failure, state.deferred)
+
+    @staticmethod
+    def _complete_turn(
+        params: JsonObject,
+        active_turn: _ActiveCodexTurn | None,
+        state: _TurnStreamState,
+    ) -> ChatGenerationChunk | None:
+        turn = _required_object_field(
+            params, "turn", context="turn/completed notification"
+        )
+        status = turn.get("status")
+        if active_turn is not None:
+            active_turn.terminal_status = status if isinstance(status, str) else None
+            active_turn.terminal_seen.set()
+        if status != "completed":
+            failure = _failed_turn_error(turn, status)
+            failure.effects_may_have_occurred = state.effects_may_have_occurred
+            raise _carry_condition(failure, state.deferred)
+        if state.usage is not None:
+            # The empty content preserves the accumulated message text.
+            return ChatGenerationChunk(
+                message=AIMessageChunk(content="", usage_metadata=state.usage)
+            )
+        return None
+
     async def _consume_turn(
         self,
         client: _CodexAppServerClient,
@@ -1254,105 +1363,30 @@ class CodexChatModel(BaseChatModel):
         Zero or less disables the backstop, matching the setting's contract.
         """
         idle_limit = settings.acp_turn_idle_timeout_seconds
-        # The last error the lane announced it would retry past. Held rather
-        # than raised: see the `error` branch below.
-        deferred: _CodexProtocolError | None = None
-        # Latest thread-cumulative token usage seen this turn. The thread is
-        # started ``ephemeral`` immediately before a single ``turn/start``, so
-        # its cumulative total IS this invocation's usage - and unlike the
-        # per-request ``last`` breakdown it stays correct when a turn makes
-        # several model requests behind a tool loop. Held and emitted once at
-        # completion rather than per frame, because chunk addition SUMS usage
-        # metadata and would otherwise multiply-count the same tokens.
-        usage: UsageMetadata | None = None
-        effects_may_have_occurred = False
+        state = _TurnStreamState()
         while True:
-            try:
-                message = await asyncio.wait_for(
-                    client.notifications.get(),
-                    timeout=idle_limit if idle_limit > 0 else None,
-                )
-                if message is _STREAM_CLOSED:
-                    # The provider is gone and never stated a result. If it
-                    # announced a retry on the way out, that attempt is the
-                    # truest thing anyone said about this turn - report it
-                    # rather than a bare "stream ended", which describes the
-                    # transport and not the failure the operator is chasing.
-                    if deferred is not None:
-                        deferred.effects_may_have_occurred |= effects_may_have_occurred
-                        raise _carry_condition(deferred, None)
-                    # Otherwise reuse the SAME diagnostic the request path
-                    # builds for an early exit: the child's real status and its
-                    # bounded, redacted stderr tail. A bare "stream ended" here
-                    # would describe the transport and throw away the only
-                    # evidence of why the provider left.
-                    raise await client.unexpected_eof_error()
-            except TimeoutError:
-                # A lane that announced a retry and then went quiet has already
-                # told us why it was struggling. Reporting the silence instead
-                # would replace a typed, actionable refusal with a bare timeout.
-                if deferred is not None:
-                    deferred.effects_may_have_occurred |= effects_may_have_occurred
-                    raise deferred from None
-                raise
-            # A supervised rung that suspended the graph did so to ask a human,
-            # and the answer cannot arrive inside this turn. Surface it here
-            # rather than streaming on: the provider has already been freed with
-            # a decline, so continuing would report a refused tool call as the
-            # turn's own outcome and lose the pending question entirely.
-            if client.pending_interrupt is not None:
-                raise client.pending_interrupt
+            message = await self._next_turn_message(client, idle_limit, state)
 
             method = message.get("method")
             raw_params = message.get("params")
             params = lenient_json_object(raw_params)
 
-            if method == "item/agentMessage/delta":
-                if params.get("threadId") not in (None, thread_id):
-                    continue
-                delta = params.get("delta")
-                if isinstance(delta, str) and delta:
-                    yield ChatGenerationChunk(message=AIMessageChunk(content=delta))
-            elif method == "item/started":
-                if params.get("threadId") not in (None, thread_id):
-                    continue
-                item = lenient_json_object(params.get("item"))
-                if item.get("type") in _ACTION_ITEM_TYPES:
-                    effects_may_have_occurred = True
-            elif method == "item/completed":
-                if params.get("threadId") not in (None, thread_id):
-                    continue
-                action = _completed_action_chunk(params)
-                if action is not None:
-                    effects_may_have_occurred = True
-                    yield action
+            if method != "error" and params.get("threadId") not in (
+                None,
+                thread_id,
+            ):
+                continue
+            if method in (
+                "item/agentMessage/delta",
+                "item/started",
+                "item/completed",
+            ):
+                for chunk in self._turn_item_chunks(method, params, state):
+                    yield chunk
             elif method == "error":
-                failure = _turn_failure(
-                    params.get("error"), will_retry=params.get("willRetry")
-                )
-                failure.effects_may_have_occurred = effects_may_have_occurred
-                if failure.will_retry:
-                    # The lane stated it is about to try again, so this frame
-                    # announces an attempt rather than an outcome. Raising here
-                    # both cancelled a retry the provider was already making and
-                    # reported the attempt's own wording as the failure - which
-                    # is how a refused credential came to be described as
-                    # "Reconnecting... 1/5". Hold it as the fallback for a stream
-                    # that ends without ever stating a result, and keep reading.
-                    # An attempt that named a condition is kept over one that did
-                    # not, since it is the only frame that may ever carry the
-                    # provider's forwarded status.
-                    if (
-                        deferred is None
-                        or deferred.condition is ProviderCondition.UNKNOWN
-                    ):
-                        deferred = failure
-                    continue
-                raise _carry_condition(failure, deferred)
+                self._record_turn_error(params, state)
             elif method == "thread/tokenUsage/updated":
-                if params.get("threadId") not in (None, thread_id):
-                    continue
-                usage = _usage_metadata(
+                state.usage = _usage_metadata(
                     _required_object_field(
                         _required_object_field(
                             params,
@@ -1364,25 +1398,7 @@ class CodexChatModel(BaseChatModel):
                     )
                 )
             elif method == "turn/completed":
-                if params.get("threadId") not in (None, thread_id):
-                    continue
-                turn = _required_object_field(
-                    params, "turn", context="turn/completed notification"
-                )
-                status = turn.get("status")
-                if active_turn is not None:
-                    active_turn.terminal_status = (
-                        status if isinstance(status, str) else None
-                    )
-                    active_turn.terminal_seen.set()
-                if status != "completed":
-                    failure = _failed_turn_error(turn, status)
-                    failure.effects_may_have_occurred = effects_may_have_occurred
-                    raise _carry_condition(failure, deferred)
-                if usage is not None:
-                    # Empty content so the accumulated message text is unchanged;
-                    # this frame exists only to carry the turn's accounting.
-                    yield ChatGenerationChunk(
-                        message=AIMessageChunk(content="", usage_metadata=usage)
-                    )
+                final_chunk = self._complete_turn(params, active_turn, state)
+                if final_chunk is not None:
+                    yield final_chunk
                 return

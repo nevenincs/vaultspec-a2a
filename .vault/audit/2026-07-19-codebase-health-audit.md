@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:e20c55d1b1df5456a41dad46014b8df078f47a1179c86da8573ddda085b4bec6'
+body_hash: 'sha256:8d5d013acc3df4a088797878a287b30c72047111390f2cd42500120f014b1e2b'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3228,3 +3228,7 @@ Five medium-severity strict Ruff findings in the cancel workflow were resolved. 
 ### 2026-09-20 ACP session and chunk structure review pass
 
 Five medium-severity strict Ruff complexity, branch, and statement findings in the ACP chat model were resolved. Environment preparation and harness contract probing now have a focused method; native-command advertisement and prompt construction have a focused method; early subprocess exit and completed prompt-error checks have focused helpers. Review checked that the environment is still prepared before spawn, all session and reader cleanup remains in the same finally path, native commands are refused before prompting when not advertised, interrupt errors retain precedence over prompt errors on early exit, and timeout polling still enforces the turn deadline. One extracted helper initially lost the session-id type narrowing; the review fixed it by passing the exact initialized session id. One hundred nine focused provider tests pass. Two service-marked strict-MCP tests were run separately and skipped because no current live provider lane was selected. `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 230 to 225; code-health function-length findings fall from 17 to 16. No unresolved new review findings were surfaced. The remaining 225 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 Codex provider turn structure review pass
+
+Five medium-severity strict Ruff return, complexity, branch, and statement findings in Codex app-server response routing, native-control admission, and turn streaming were resolved. The turn now keeps deferred retry evidence, cumulative token usage, and side-effect evidence in one state object; notification wait, item projection, retry errors, and terminal settlement have focused functions. Review checked that only the exact thread's item, usage, and terminal frames are honored, retry errors remain deferred until final failure/EOF/idle timeout, a supervised permission interrupt still escapes before frame projection, cumulative usage is emitted once, and terminal status is stamped before a failed-turn exception. Review surfaced one low-severity malformed-frame risk: set membership on an untrusted JSON method could raise for a list or object. It was fixed before commit by using safe tuple comparisons. Eighty-three focused provider tests pass. The one service-marked live Codex turn was attempted and skipped because no current provider lane was selected. `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 225 to 220; code-health function-length findings fall from 16 to 15 and worst nesting depth from eight to seven. No unresolved new review findings were surfaced. The remaining 220 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.

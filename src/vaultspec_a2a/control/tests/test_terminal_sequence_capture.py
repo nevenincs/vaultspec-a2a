@@ -26,11 +26,13 @@ tree, and this file must not depend on their in-flight state.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
+from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -40,11 +42,17 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...conftest import materialize_schema
-from ...database import create_thread
+from ...database import create_control_action, create_thread
 from ...database.models import ThreadModel
+from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
+from ...team.team_config import load_team_config
 from ...tests._write_authority import make_test_write_authority
+from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.enums import ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
+from ..accepted_input import freeze_accepted_input
+from ..dispatch_receipts import prepare_graph_action_receipt
 from ..event_handlers import _handle_terminal_event
 from ..thread_state_service import capture_thread_state
 
@@ -84,9 +92,75 @@ async def checkpointer(
         yield cp
 
 
+async def _seed_completed_authority(
+    session: AsyncSession, checkpointer: AsyncSqliteSaver, *, title: str
+) -> tuple[str, GraphActionReceipt]:
+    authority = make_test_write_authority()
+    workspace = Path.cwd()
+    thread = await create_thread(
+        session,
+        write_authority=authority,
+        status=ThreadStatus.RUNNING,
+        title=title,
+    )
+    dispatch = DispatchRequest(
+        dispatch_id=authority.action_receipt_id,
+        action="ingest",
+        thread_id=thread.id,
+        content="sequence fixture",
+        workspace_root=str(workspace),
+        team_preset="mock-success-single",
+        graph_definition=freeze_graph_definition(
+            load_team_config("mock-success-single", workspace_root=workspace),
+            workspace_root=workspace,
+        ),
+        recursion_limit=25,
+    )
+    await create_control_action(
+        session,
+        thread_id=thread.id,
+        action_type=authority.action_type,
+        idempotency_key=f"thread-create:{thread.id}",
+        dispatch_id=authority.action_receipt_id,
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+        payload=freeze_accepted_input(dispatch, intent={"content": "sequence fixture"}),
+    )
+    receipt = await prepare_graph_action_receipt(
+        session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
+    )
+    assert receipt is not None
+    await session.commit()
+    checkpoint = empty_checkpoint()
+    checkpoint["id"] = f"cp-{thread.id}"
+    checkpoint["channel_values"] = {
+        "active_graph_action_receipt": receipt.model_dump(mode="json"),
+        "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
+        "graph_completion_receipts": {
+            receipt.dispatch_id: GraphCompletionReceipt(
+                schema_version="graph-completion-v1",
+                action=receipt,
+                outcome="completed",
+            ).model_dump(mode="json")
+        },
+    }
+    checkpoint["channel_versions"] = {
+        "active_graph_action_receipt": 1,
+        "graph_action_receipts": 1,
+        "graph_completion_receipts": 1,
+    }
+    await checkpointer.aput(
+        {"configurable": {"thread_id": thread.id, "checkpoint_ns": ""}},
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        checkpoint["channel_versions"],
+    )
+    return thread.id, receipt
+
+
 @pytest.mark.asyncio
 async def test_the_sequence_is_captured_before_the_prune_discards_it(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Fails on unfixed code: the durable column reads 0, not the real count.
 
@@ -100,14 +174,9 @@ async def test_the_sequence_is_captured_before_the_prune_discards_it(
     the defect.
     """
     async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            status=ThreadStatus.RUNNING,
-            title="terminal sequence capture",
+        thread_id, _receipt = await _seed_completed_authority(
+            session, checkpointer, title="terminal sequence capture"
         )
-        await session.commit()
-        thread_id = thread.id
 
     aggregator = EventAggregator()
     for _ in range(7):
@@ -119,6 +188,7 @@ async def test_the_sequence_is_captured_before_the_prune_discards_it(
         {"event_type": "thread_terminal", "status": "completed"},
         aggregator=aggregator,
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     # The prune genuinely ran: the live counter is gone.
@@ -144,14 +214,9 @@ async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
     copy is long gone.
     """
     async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            status=ThreadStatus.RUNNING,
-            title="reconnect after settle",
+        thread_id, _receipt = await _seed_completed_authority(
+            session, checkpointer, title="reconnect after settle"
         )
-        await session.commit()
-        thread_id = thread.id
 
     aggregator = EventAggregator()
     for _ in range(3):
@@ -162,6 +227,7 @@ async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
         {"event_type": "thread_terminal", "status": "completed"},
         aggregator=aggregator,
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     # The live copy is gone -- this is the state a client's REST reconnect

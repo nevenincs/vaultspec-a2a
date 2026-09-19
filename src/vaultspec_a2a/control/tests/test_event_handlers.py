@@ -106,6 +106,7 @@ async def _seed_unapplied_leased_action(
         request_id=request_id,
         dispatch_id=dispatch_id,
         payload=freeze_accepted_input(dispatch, intent=intent),
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     thread = await session.get(ThreadModel, thread_id)
     assert thread is not None
@@ -319,6 +320,7 @@ async def _seed_current_cancel(
                 ),
                 intent={"cancel": True},
             ),
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         acquired = await acquire_control_action_lease(
             session,
@@ -639,6 +641,7 @@ async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
             request_id=request_id,
             idempotency_key=f"permission-response:{request_id}",
             payload={"option_id": "allow"},
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         assert response.dispatch_id is not None
         election = await elect_thread_status(

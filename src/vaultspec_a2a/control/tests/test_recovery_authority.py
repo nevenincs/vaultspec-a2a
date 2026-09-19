@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -70,6 +71,7 @@ async def durable_run(
             action_type=ControlActionType.INGEST,
             idempotency_key="thread-create:run",
             dispatch_id="accepted",
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             payload=freeze_accepted_input(
                 DispatchRequest(
                     action="ingest",

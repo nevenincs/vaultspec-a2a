@@ -26,6 +26,7 @@ from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
 from ._catalog_authority import current_execution_metadata
+from .test_dispatch_failure_transitions import _seed_accepted_initial_action
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,6 +61,7 @@ async def _run_case(runtime_dir: Path, bodies: list[tuple[str, str | None]]):
             description="Allow the operation?",
             allowed_options=_OPTIONS,
         )
+        await _seed_accepted_initial_action(session, thread.id, workspace=runtime_dir)
         await session.commit()
         thread_id = thread.id
 

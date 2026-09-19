@@ -12,6 +12,7 @@ assert on the rows and checkpoints that survive.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,7 +40,12 @@ from ...control.repositories import (
     finalize_deletion_saga,
 )
 from ...control.thread_service import DeleteResult, delete_thread_service
-from ...database import create_artifact, create_thread, get_thread
+from ...database import (
+    create_artifact,
+    create_control_action,
+    create_thread,
+    get_thread,
+)
 from ...database.models import ThreadDeletionSagaModel
 from ...thread.enums import CleanupKind, ThreadStatus
 
@@ -88,6 +94,27 @@ async def _checkpoint_present(checkpointer: AsyncSqliteSaver, thread_id: str) ->
     return await checkpointer.aget_tuple(_config(thread_id)) is not None
 
 
+async def _create_terminal_thread(
+    session: AsyncSession, thread_id: str, *, metadata: str | None = None
+) -> None:
+    authority = make_test_write_authority()
+    await create_thread(
+        session,
+        write_authority=authority,
+        thread_id=thread_id,
+        status=ThreadStatus.COMPLETED,
+        metadata=metadata,
+    )
+    await create_control_action(
+        session,
+        thread_id=thread_id,
+        action_type=authority.action_type,
+        dispatch_id=authority.action_receipt_id,
+        idempotency_key=f"thread-create:{thread_id}",
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+
+
 @pytest.mark.asyncio
 async def test_delete_removes_checkpoint_and_artifact_end_to_end(
     session_factory: async_sessionmaker[AsyncSession],
@@ -102,11 +129,9 @@ async def test_delete_removes_checkpoint_and_artifact_end_to_end(
 
     await _write_checkpoint(checkpointer, "t-e2e", "cp-e2e")
     async with session_factory() as session:
-        await create_thread(
+        await _create_terminal_thread(
             session,
-            write_authority=make_test_write_authority(),
-            thread_id="t-e2e",
-            status=ThreadStatus.COMPLETED,
+            "t-e2e",
             metadata=json.dumps({"workspace_root": workspace.as_posix()}),
         )
         await create_artifact(
@@ -137,12 +162,7 @@ async def test_delete_is_idempotent_under_retry(
     """A second delete of an already-deleted thread reports it not found."""
     await _write_checkpoint(checkpointer, "t-retry", "cp-retry")
     async with session_factory() as session:
-        await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            thread_id="t-retry",
-            status=ThreadStatus.COMPLETED,
-        )
+        await _create_terminal_thread(session, "t-retry")
         await session.commit()
 
     async with session_factory() as session:
@@ -168,12 +188,7 @@ async def test_crash_recovery_resumes_a_partial_saga(
     # A crashed first pass: the thread is deleting and the saga exists with its
     # checkpoint item still outstanding.
     async with session_factory() as session:
-        await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            thread_id="t-crash",
-            status=ThreadStatus.COMPLETED,
-        )
+        await _create_terminal_thread(session, "t-crash")
         await create_deletion_saga(
             session,
             thread_id="t-crash",
@@ -211,12 +226,7 @@ async def test_a_delete_racing_a_live_pass_does_not_run_a_second_teardown(
     """
     await _write_checkpoint(checkpointer, "t-race", "cp-race")
     async with session_factory() as session:
-        await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            thread_id="t-race",
-            status=ThreadStatus.COMPLETED,
-        )
+        await _create_terminal_thread(session, "t-race")
         await create_deletion_saga(
             session,
             thread_id="t-race",
@@ -261,12 +271,7 @@ async def test_a_permanently_failing_item_stops_wedging_the_thread(
     service against the real stores.
     """
     async with session_factory() as session:
-        await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            thread_id="t-wedge",
-            status=ThreadStatus.COMPLETED,
-        )
+        await _create_terminal_thread(session, "t-wedge")
         await create_deletion_saga(
             session,
             thread_id="t-wedge",
@@ -316,12 +321,7 @@ async def test_control_rows_survive_until_cleanup_finishes(
     """
     await _write_checkpoint(checkpointer, "t-pending", "cp-pending")
     async with session_factory() as session:
-        await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            thread_id="t-pending",
-            status=ThreadStatus.COMPLETED,
-        )
+        await _create_terminal_thread(session, "t-pending")
         await create_deletion_saga(
             session,
             thread_id="t-pending",

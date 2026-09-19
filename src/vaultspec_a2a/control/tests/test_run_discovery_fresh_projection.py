@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -19,7 +20,9 @@ from ...database import (
 from ...database.models import Base, RunWriteAuthority
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
+from ...team.team_config import load_team_config
 from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ..accepted_input import freeze_accepted_input
 from ..run_discovery_service import discover_active_runs
 
@@ -56,6 +59,7 @@ async def test_discovery_discards_projection_captured_before_terminal_winner(
                 action_type=ControlActionType.INGEST,
                 idempotency_key="accepted",
                 dispatch_id="accepted",
+                recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 payload=freeze_accepted_input(
                     DispatchRequest(
                         action="ingest",
@@ -63,6 +67,13 @@ async def test_discovery_discards_projection_captured_before_terminal_winner(
                         content="work",
                         workspace_root=str(tmp_path),
                         recursion_limit=25,
+                        team_preset="mock-success-single",
+                        graph_definition=freeze_graph_definition(
+                            load_team_config(
+                                "mock-success-single", workspace_root=tmp_path
+                            ),
+                            workspace_root=tmp_path,
+                        ),
                     ),
                     intent={"content": "work"},
                 ),

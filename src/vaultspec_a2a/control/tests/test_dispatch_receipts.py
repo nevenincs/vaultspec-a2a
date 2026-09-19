@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -66,6 +67,7 @@ async def _seed(sessions: async_sessionmaker[AsyncSession]) -> ThreadWriteExpect
             idempotency_key="initial",
             dispatch_id="initial",
             payload={"content": "first"},
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         witness = thread_write_expectation(thread)
         await db.commit()

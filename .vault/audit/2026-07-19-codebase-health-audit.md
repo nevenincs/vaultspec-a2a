@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:7f127e2f22e4dc82c5accf33f390341296329874e08f32af3baa590fb2a71407'
+body_hash: 'sha256:4a366143def6fc2f25601f05073388ea820f714a6d02e86c4f879e078d4f31d9'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3034,3 +3034,11 @@ Type: gate burndown and production concurrency. The resource-aware parallel unit
 ### 2026-09-19 desktop gate follow-up review | high | fixed in implementation
 
 Type: production admission and lifecycle harness. The high concurrent SQLite start finding above is closed by retrying a transient SQLite lock on a fresh transaction, resolving a committed same-ID winner as a replay or conflict, and bounding attempts. The real four-request lazy-worker test returns four 201 responses and confirms a single worker spawn. Thirty live gateway tests, including same-ID insert races and different-body conflicts, pass. Review risk: a sustained SQLite lock beyond four attempts still propagates an error and merits a typed busy response in a later pass. The lifecycle owner in the gateway boot helper now binds its Uvicorn server, allowing the receipt-owned shutdown route to perform a real graceful stop; the process-tree shutdown test passes. The terminal child context fixture gained the session closing field; its real process-tree test passes. Focused run-admission desktop suite: nine passed, while two owner-tree tests were subsequently repaired. No open finding remains from these focused desktop failures. The wider unit gate and structural/export gates remain OPEN.
+
+### 2026-09-19 unit control authority review | medium | fixed in implementation
+
+Type: test contract drift. The next non-service run reached 1,255 passes before a control-test cluster stopped the bounded run. Actual review traced each failure to the accepted-action imports and current durable schema: follow-up and permission fixtures needed the initial frozen graph action under `thread-create:<id>`; receipt, event-handler, recovery, and verdict fixtures needed recovery deadlines; discovery needed a frozen graph definition; completed terminal-sequence tests needed the exact graph action and checkpoint completion proof; deletion tests needed a matching journal row before election. These fixtures now use the current contracts, and their focused groups pass. The vanished-workspace expectation was updated to the current dispatch refusal. Remaining queue: full control and non-service reruns, structural strict findings, export findings, and subscriber queue typing. No new production failure was established by these control clusters.
+
+### 2026-09-19 full control-suite review | medium | fixed in implementation
+
+Type: test contract drift. The full control test package now reports 502 passed and six marker-deselected after the receipt, deadline, initial-authority, checkpoint, deletion-journal, and vanished-workspace fixture updates. Review confirmed the tests still exercise their original state transitions and refusal behavior through current durable authority. No new production issue appeared in the full control run. The repository-wide non-service suite and strict structural/export gate remain queued.

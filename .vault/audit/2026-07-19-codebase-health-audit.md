@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:6587bf4ec0f6b04e29ae53c0692dd738254ac3f55cb383b65b13db8d56f9dc3d'
+body_hash: 'sha256:a10f5af5441cefe5dd323c53a9acdd8d2e55ddfd957852dd2bab7817675eb411'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3052,3 +3052,9 @@ Review findings and queue:
 - **Medium, test contract:** The full database package and repository suite must be rerun after the last fixture corrections; a focused pass cannot prove the whole gate. Open until both are green.
 - **Medium, test maintainability:** Database reconciliation tests import `_seed_accepted_initial_action` from a control test module. Move the shared authority seeding helper into a neutral test support module if this dependency causes fixture drift or import-order issues. Open.
 - **High, quality gate:** `just check-strict` still has outstanding Ruff, nesting, Pylint, and export findings. Burn down the complete strict output; open.
+
+### 2026-09-19 graph compiler and compile probe review pass
+
+Review of the implemented fixtures confirms that inline graph teams now carry the required positive step timeout, node assertions include the structural completion recorder, and the cold compile probe supplies the exact frozen graph definition required by the worker. The graph package passed 365 tests (2 deselected); the focused cold compile responsiveness test passed. Ruff and formatting passed. These are medium-severity test contract drift findings, resolved in this pass.
+
+Remaining queue: the full repository suite is not yet green. A broad parallel run exposed more failures and stalled in accelerator-dependent provider harness startup (`service_env_no_gpu`); the first isolated provider compile failure and graph compiler failures are resolved, but the rest of the suite requires separate inventory runs. The strict gate remains high-severity open with 323 Ruff findings, 33 nesting findings, Pylint shape findings, and 110 unconsumed exports. The service harness accelerator requirement is a medium-severity environment/test-portability finding and remains open.

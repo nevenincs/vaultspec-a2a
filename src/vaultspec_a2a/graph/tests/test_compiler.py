@@ -30,6 +30,7 @@ from ...providers.conditions import condition_from_acp_error, condition_is_retry
 from ...providers.factory import ProviderFactory, ProviderRuntimeUnavailableError
 from ...team.team_config import (
     TeamConfig,
+    TeamGraphConfig,
     TopologyConfig,
     TopologyType,
     WorkerRef,
@@ -84,6 +85,7 @@ def _make_team(
         id=team_id,
         display_name=team_id,
         topology=topology,
+        graph=TeamGraphConfig(step_timeout_seconds=120),
         workers=[WorkerRef(agent_id=aid) for aid in worker_ids],
     )
 
@@ -309,6 +311,7 @@ async def test_compile_team_graph_accepts_workspace_root(
         "mount_vaultspec-plan-author",
         "mount_vaultspec-coder",
         "mount_vaultspec-doc-reviewer",
+        "_record_graph_completion",
     } == node_keys
 
 
@@ -444,7 +447,7 @@ async def test_compile_interrupt_before_always_empty(
         "vaultspec-doc-reviewer",
     }
     mount_ids = {f"mount_{wid}" for wid in worker_ids}
-    assert worker_ids | mount_ids == node_keys
+    assert worker_ids | mount_ids | {"_record_graph_completion"} == node_keys
 
 
 # ---------------------------------------------------------------------------
@@ -1128,6 +1131,7 @@ _POLICY_FREE_NODE_NAMES: frozenset[str] = frozenset(
         "adr_gate",
         "plan_submit",
         "plan_gate",
+        "_record_graph_completion",
     }
 )
 

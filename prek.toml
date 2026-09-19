@@ -79,10 +79,39 @@ repo = "local"
   pass_filenames = false
   types = ["markdown"]
 
-  [[repos.hooks]]
-  always_run = true
-  entry = "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec-core check-providers"
-  id = "check-provider-artifacts"
-  language = "system"
-  name = "Check provider artifacts"
-  pass_filenames = false
+# >>> vaultspec-managed hooks (do not edit this block) >>>
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "vault-fix"
+name = "Vault gate"
+entry = "uv run --no-sync vaultspec-core vault check all"
+types = ["markdown"]
+language = "system"
+pass_filenames = false
+
+[[repos.hooks]]
+id = "vault-sanitize-annotations"
+name = "Vault sanitize annotations"
+entry = "uv run --no-sync vaultspec-core vault sanitize annotations"
+types = ["markdown"]
+language = "system"
+pass_filenames = false
+
+[[repos.hooks]]
+id = "check-provider-artifacts"
+name = "Check provider artifacts"
+entry = "uv run --no-sync vaultspec-core check-providers"
+always_run = true
+language = "system"
+pass_filenames = false
+
+[[repos.hooks]]
+id = "spec-check"
+name = "Spec check"
+entry = "uv run --no-sync vaultspec-core spec doctor --gate-errors"
+types = ["markdown"]
+language = "system"
+pass_filenames = false
+# <<< vaultspec-managed hooks <<<

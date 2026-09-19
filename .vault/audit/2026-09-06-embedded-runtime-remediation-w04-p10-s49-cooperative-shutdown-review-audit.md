@@ -3,13 +3,12 @@ tags:
   - '#audit'
   - '#embedded-runtime-remediation'
 date: '2026-09-06'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
 body_hash: 'sha256:5f6a6c66e024d8a3b47c69c31cbef3dc0a5a2e3331d6ca265cfdb03b7d615f51'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-adr]]"
-  - "[[2026-09-05-embedded-runtime-remediation-W04-P10-S49]]"
 ---
 
 # `embedded-runtime-remediation` audit: `W04.P10.S49 cooperative shutdown formal review`

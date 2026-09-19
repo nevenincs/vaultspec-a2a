@@ -3,7 +3,7 @@ tags:
   - '#audit'
   - '#embedded-runtime-remediation'
 date: '2026-09-06'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
 body_hash: 'sha256:79d9f84dd59ac3f180d258dc2b211c9f40d7be611b431557093334f2964a8089'
 related:
@@ -11,7 +11,6 @@ related:
   - "[[2026-08-05-served-capability-contract-state-truthfulness-adr]]"
   - "[[2026-09-05-embedded-runtime-remediation-research]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s09-atomic-election-review-audit]]"
-  - "[[2026-09-05-embedded-runtime-remediation-W02-P03-S09]]"
 ---
 # embedded-runtime-remediation audit: W02.P03.S09 identity refresh correction rereview
 

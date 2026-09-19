@@ -3,14 +3,13 @@ tags:
   - '#audit'
   - '#embedded-runtime-remediation'
 date: '2026-09-06'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
 body_hash: 'sha256:7c3365184a61c257bb59ff7979aa4af1b5e19d1bd6c359bf158472a24a48cb68'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-09-05-embedded-runtime-remediation-adr]]"
   - "[[2026-09-06-embedded-runtime-remediation-w04-p10-s49-cooperative-shutdown-review-audit]]"
-  - "[[2026-09-05-embedded-runtime-remediation-W04-P10-S49]]"
 ---
 
 # `embedded-runtime-remediation` audit: `W04.P10.S49 containment correction formal rereview`

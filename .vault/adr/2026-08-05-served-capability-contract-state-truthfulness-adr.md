@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#served-capability-contract'
 date: '2026-08-05'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v1'
-body_hash: 'sha256:763ccf4515866f7edf320decb3de9d23a2fba98cb9c95065a189af2b18814d10'
+body_hash: 'sha256:d4e0fd8ac3491d8584c968c5bbe1cc3d5954fec71d4a2fb5751c849588b2e63e'
 related:
   - "[[2026-08-05-served-capability-contract-gateway-contract-audit]]"
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
@@ -214,7 +214,6 @@ argued.
   currently one of the entries the client guide cannot write.
 
 ## Open questions
-
 
 - **What is the compatibility relation for each health field?** T4 forbids
   contradiction but the specific incompatible combinations are per-field and are

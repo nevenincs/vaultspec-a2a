@@ -3,12 +3,11 @@ tags:
   - '#audit'
   - '#embedded-runtime-remediation'
 date: '2026-09-06'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
 body_hash: 'sha256:3e2cff9d40cb9e24611d856f9c72ef898608efb8a14f81f73d30608e8d94deb8'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
-  - "[[2026-09-05-embedded-runtime-remediation-W02-P03-S76]]"
   - "[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s76-write-authority-review-audit]]"
   - "[[2026-08-05-served-capability-contract-state-truthfulness-adr]]"

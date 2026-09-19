@@ -3,13 +3,11 @@ tags:
   - '#audit'
   - '#desktop-product-profile'
 date: '2026-09-06'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
 body_hash: 'sha256:79d22de0443706f714591e39321425fdd66a56388df6a1a99c0697330dcebbec'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
-  - "[[2026-07-18-desktop-product-profile-W04-P11-S60]]"
-  - "[[2026-07-18-desktop-product-profile-W04-P11-summary]]"
   - "[[2026-09-05-codebase-health-process-resource-lifetimes-audit]]"
   - "[[2026-09-06-desktop-product-profile-s60-atomic-provider-containment-review-audit]]"
   - "[[2026-09-06-desktop-product-profile-s60-atomic-provider-containment-rereview-audit]]"

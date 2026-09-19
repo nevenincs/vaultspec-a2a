@@ -3,7 +3,7 @@ tags:
   - '#audit'
   - '#embedded-runtime-remediation'
 date: '2026-09-06'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
 body_hash: 'sha256:36218ce35013eca0bf48e675226be76385e0daf7bf7351868fbd8fb642dd6b38'
 related:
@@ -11,7 +11,6 @@ related:
   - "[[2026-08-05-served-capability-contract-state-truthfulness-adr]]"
   - "[[2026-09-05-embedded-runtime-remediation-research]]"
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
-  - "[[2026-09-05-embedded-runtime-remediation-W02-P03-S77]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s77-current-schema-review-audit]]"
 ---
 # `embedded-runtime-remediation` audit: `W02 P03 S77 schema fingerprint rereview`

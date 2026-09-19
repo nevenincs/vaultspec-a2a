@@ -3,14 +3,13 @@ tags:
   - '#audit'
   - '#desktop-product-profile'
 date: '2026-09-06'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
 body_hash: 'sha256:eedb793cd60b078f63d5460b74636742ea485dc4681763049264d33109ba02e8'
 related:
   - "[[2026-07-18-desktop-product-profile-adr]]"
   - "[[2026-07-18-desktop-product-profile-research]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
-  - "[[2026-07-18-desktop-product-profile-W04-P11-S60]]"
   - "[[2026-09-05-codebase-health-process-resource-lifetimes-audit]]"
 ---
 # `desktop-product-profile` audit: `S60 atomic provider containment formal review`

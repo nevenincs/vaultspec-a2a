@@ -246,15 +246,20 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from vaultspec_a2a.streaming.aggregator import EventAggregator
 
+
 class State(TypedDict):
     marker: str
+
 
 async def work(state):
     return state
 
+
 async def main():
     with tempfile.TemporaryDirectory(prefix="a2a-audit-receipt-") as d:
-        async with AsyncSqliteSaver.from_conn_string(str(Path(d) / "checkpoint.sqlite")) as saver:
+        async with AsyncSqliteSaver.from_conn_string(
+            str(Path(d) / "checkpoint.sqlite")
+        ) as saver:
             builder = StateGraph(State)
             builder.add_node("work", work)
             builder.add_edge(START, "work")
@@ -262,17 +267,42 @@ async def main():
             graph = builder.compile(checkpointer=saver)
             config = {"configurable": {"thread_id": "audit-receipt"}}
             observations = []
+
             async def receipt():
                 checkpoint = await saver.aget_tuple(config)
-                observations.append({"checkpoint_exists_at_application_receipt": checkpoint is not None,
-                                     "values": checkpoint.checkpoint["channel_values"] if checkpoint else None})
+                observations.append(
+                    {
+                        "checkpoint_exists_at_application_receipt": checkpoint
+                        is not None,
+                        "values": checkpoint.checkpoint["channel_values"]
+                        if checkpoint
+                        else None,
+                    }
+                )
+
             agg = EventAggregator()
-            outcome = await agg.ingest("audit-receipt", "supervisor", graph,
-                                      {"marker": "accepted-message"}, config, on_graph_started=receipt)
+            outcome = await agg.ingest(
+                "audit-receipt",
+                "supervisor",
+                graph,
+                {"marker": "accepted-message"},
+                config,
+                on_graph_started=receipt,
+            )
             final = await saver.aget_tuple(config)
-            print(json.dumps({"observations": observations, "outcome": outcome,
-                              "final_marker": final.checkpoint["channel_values"].get("marker")}))
+            print(
+                json.dumps(
+                    {
+                        "observations": observations,
+                        "outcome": outcome,
+                        "final_marker": final.checkpoint["channel_values"].get(
+                            "marker"
+                        ),
+                    }
+                )
+            )
             await agg.shutdown()
+
 
 asyncio.run(main())
 ```
@@ -284,11 +314,18 @@ import asyncio, json, tempfile
 from pathlib import Path
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.database.thread_repository import create_thread, get_thread, update_thread_status
+from vaultspec_a2a.database.thread_repository import (
+    create_thread,
+    get_thread,
+    update_thread_status,
+)
+
 
 async def main():
     with tempfile.TemporaryDirectory(prefix="a2a-audit-terminal-") as d:
-        engine = create_async_engine("sqlite+aiosqlite:///" + str(Path(d) / "db.sqlite"))
+        engine = create_async_engine(
+            "sqlite+aiosqlite:///" + str(Path(d) / "db.sqlite")
+        )
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
         sessions = async_sessionmaker(engine, expire_on_commit=False)
@@ -304,9 +341,18 @@ async def main():
             await second.commit()
         async with sessions() as session:
             final = await get_thread(session, "audit-terminal")
-            print(json.dumps({"first_committed": "completed", "second_stale_source": "running",
-                              "second_committed": final.status, "both_commits_succeeded": True}))
+            print(
+                json.dumps(
+                    {
+                        "first_committed": "completed",
+                        "second_stale_source": "running",
+                        "second_committed": final.status,
+                        "both_commits_succeeded": True,
+                    }
+                )
+            )
         await engine.dispose()
+
 
 asyncio.run(main())
 ```
@@ -316,31 +362,70 @@ M05/M06/M08 (combines independently executed bounded inputs):
 ```python
 import json
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from vaultspec_a2a.context.token_budget import compact_context, estimate_tokens, should_compact
+from vaultspec_a2a.context.token_budget import (
+    compact_context,
+    estimate_tokens,
+    should_compact,
+)
 from vaultspec_a2a.graph.nodes.worker import _build_worker_messages
 from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.providers.acp_exceptions import AcpSessionError
 from vaultspec_a2a.providers.conditions import condition_from_acp_error
 
 budget = domain_config.context_limit_tokens
-small = {"messages": [HumanMessage(content="task")], "mounted_context": "z" * (budget * 5)}
+small = {
+    "messages": [HumanMessage(content="task")],
+    "mounted_context": "z" * (budget * 5),
+}
 built = _build_worker_messages(state=small, system_prompt="system", workspace_root=None)
-print(json.dumps({"configured_limit": budget, "compaction_requested": should_compact(small, budget),
-                  "actual_built_estimate": estimate_tokens(built)}))
-call = AIMessage(content="", tool_calls=[{"id": "t1", "name": "read", "args": {"query": "x" * 1000}}])
+print(
+    json.dumps(
+        {
+            "configured_limit": budget,
+            "compaction_requested": should_compact(small, budget),
+            "actual_built_estimate": estimate_tokens(built),
+        }
+    )
+)
+call = AIMessage(
+    content="", tool_calls=[{"id": "t1", "name": "read", "args": {"query": "x" * 1000}}]
+)
 print(json.dumps({"tool_args_estimated_tokens": estimate_tokens([call])}))
-messages = [HumanMessage(content="task"),
-            HumanMessage(content="REQUIRED_FACT_1=amber\n" + "x" * 1000),
-            AIMessage(content="x" * 400, tool_calls=[{"id": "t1", "name": "read", "args": {}}]),
-            ToolMessage(content="y" * 360, tool_call_id="t1")]
+messages = [
+    HumanMessage(content="task"),
+    HumanMessage(content="REQUIRED_FACT_1=amber\n" + "x" * 1000),
+    AIMessage(content="x" * 400, tool_calls=[{"id": "t1", "name": "read", "args": {}}]),
+    ToolMessage(content="y" * 360, tool_call_id="t1"),
+]
 compacted = compact_context({"messages": messages}, 150)["messages"]
-print(json.dumps({"types": [m.type for m in compacted],
-                  "fact_preserved": any("REQUIRED_FACT_1" in str(m.content) for m in compacted),
-                  "tool_calls": [t["id"] for m in compacted if isinstance(m, AIMessage) for t in m.tool_calls],
-                  "tool_results": [m.tool_call_id for m in compacted if isinstance(m, ToolMessage)]}))
+print(
+    json.dumps(
+        {
+            "types": [m.type for m in compacted],
+            "fact_preserved": any(
+                "REQUIRED_FACT_1" in str(m.content) for m in compacted
+            ),
+            "tool_calls": [
+                t["id"]
+                for m in compacted
+                if isinstance(m, AIMessage)
+                for t in m.tool_calls
+            ],
+            "tool_results": [
+                m.tool_call_id for m in compacted if isinstance(m, ToolMessage)
+            ],
+        }
+    )
+)
 error = AcpSessionError("authentication required", code=-32000)
-print(json.dumps({"session_error_condition": error.condition,
-                  "mapping_for_same_code": condition_from_acp_error({"code": -32000})}))
+print(
+    json.dumps(
+        {
+            "session_error_condition": error.condition,
+            "mapping_for_same_code": condition_from_acp_error({"code": -32000}),
+        }
+    )
+)
 ```
 
 M07:
@@ -350,20 +435,48 @@ import asyncio, json, sys
 from vaultspec_a2a.providers._acp_types import AcpSessionContext
 from vaultspec_a2a.providers._acp_protocol import handle_client_response
 
+
 async def main():
-    process = await asyncio.create_subprocess_exec(sys.executable, "-c", "pass",
-        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "pass",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+    )
     results = []
-    for reason in ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"]:
+    for reason in [
+        "end_turn",
+        "max_tokens",
+        "max_turn_requests",
+        "refusal",
+        "cancelled",
+    ]:
         future = asyncio.get_running_loop().create_future()
-        context = AcpSessionContext(process=process, stdin=process.stdin, stdout=process.stdout,
-            response_futures={3: future}, chunk_queue=asyncio.Queue(),
-            prompt_done=asyncio.Event(), prompt_id_ref=[3], interrupt_exc=[])
-        await handle_client_response({"id": 3, "result": {"stopReason": reason}}, context)
-        results.append({"stopReason": reason, "response_done": future.done(),
-                        "prompt_done": context.prompt_done.is_set(), "queued_events": context.chunk_queue.qsize()})
+        context = AcpSessionContext(
+            process=process,
+            stdin=process.stdin,
+            stdout=process.stdout,
+            response_futures={3: future},
+            chunk_queue=asyncio.Queue(),
+            prompt_done=asyncio.Event(),
+            prompt_id_ref=[3],
+            interrupt_exc=[],
+        )
+        await handle_client_response(
+            {"id": 3, "result": {"stopReason": reason}}, context
+        )
+        results.append(
+            {
+                "stopReason": reason,
+                "response_done": future.done(),
+                "prompt_done": context.prompt_done.is_set(),
+                "queued_events": context.chunk_queue.qsize(),
+            }
+        )
     await process.wait()
     print(json.dumps(results))
+
 
 asyncio.run(main())
 ```
@@ -372,15 +485,20 @@ M09 (the production stop executes only in the new child):
 
 ```python
 import subprocess, sys
-code = '''from vaultspec_a2a.api.routes.admin import _stop_this_process
+
+code = """from vaultspec_a2a.api.routes.admin import _stop_this_process
 print("entered", flush=True)
 try:
     _stop_this_process()
 finally:
     print("finally-ran", flush=True)
-'''
-result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=45)
-print({"exit_code": result.returncode, "stdout": result.stdout, "stderr": result.stderr})
+"""
+result = subprocess.run(
+    [sys.executable, "-c", code], capture_output=True, text=True, timeout=45
+)
+print(
+    {"exit_code": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
+)
 ```
 
 M14 (requires the M12 build; save this block as a local temporary Python file and run with `uv run --no-sync python PATH`; it writes disposable credentials/stores and starts/reaps only its own gateway tree):
@@ -402,39 +520,95 @@ from vaultspec_a2a.tests.gateway_boot import (
     spawn_until_ready,
 )
 
-binary = (Path.cwd() / 'tmp/embedded-runtime-audit-binary/vaultspec-a2a/vaultspec-a2a.exe').resolve()
-with tempfile.TemporaryDirectory(prefix='a2a-audit-frozen-') as temporary:
+binary = (
+    Path.cwd() / "tmp/embedded-runtime-audit-binary/vaultspec-a2a/vaultspec-a2a.exe"
+).resolve()
+with tempfile.TemporaryDirectory(prefix="a2a-audit-frozen-") as temporary:
     root = Path(temporary)
-    app_home = root / 'home'
-    seed_credentials(app_home, attach='audit-disposable-attach', ownership='audit-disposable-owner')
-    environment = clean_subprocess_environment()
-    environment['PATH'] = str(Path(os.environ['SystemRoot']) / 'System32')
-    migration = subprocess.run(
-        [str(binary), 'migrate', '--app-home', str(app_home)],
-        cwd=root, env=environment, capture_output=True, text=True, timeout=180,
+    app_home = root / "home"
+    seed_credentials(
+        app_home, attach="audit-disposable-attach", ownership="audit-disposable-owner"
     )
-    print(json.dumps({'migration_exit': migration.returncode, 'migration_output': migration.stdout.strip()}), flush=True)
+    environment = clean_subprocess_environment()
+    environment["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+    migration = subprocess.run(
+        [str(binary), "migrate", "--app-home", str(app_home)],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    print(
+        json.dumps(
+            {
+                "migration_exit": migration.returncode,
+                "migration_output": migration.stdout.strip(),
+            }
+        ),
+        flush=True,
+    )
     if migration.returncode:
         print(migration.stderr[-2000:], flush=True)
         raise SystemExit(migration.returncode)
-    log_path = root / 'gateway.log'
-    with log_path.open('wb') as output:
+    log_path = root / "gateway.log"
+    with log_path.open("wb") as output:
+
         def spawn(gateway_port, worker_port):
-            env = armed_gateway_env(app_home, gateway_port=gateway_port, worker_port=worker_port)
-            for name in ('PYTHONHOME', 'PYTHONPATH', 'UV_PROJECT_ENVIRONMENT', 'VIRTUAL_ENV'):
+            env = armed_gateway_env(
+                app_home, gateway_port=gateway_port, worker_port=worker_port
+            )
+            for name in (
+                "PYTHONHOME",
+                "PYTHONPATH",
+                "UV_PROJECT_ENVIRONMENT",
+                "VIRTUAL_ENV",
+            ):
                 env.pop(name, None)
-            env['PATH'] = environment['PATH']
-            env['OTEL_TRACES_EXPORTER'] = 'none'
-            env['OTEL_METRICS_EXPORTER'] = 'none'
-            return subprocess.Popen([str(binary), 'serve'], cwd=root, env=env, stdout=output, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
+            env["PATH"] = environment["PATH"]
+            env["OTEL_TRACES_EXPORTER"] = "none"
+            env["OTEL_METRICS_EXPORTER"] = "none"
+            return subprocess.Popen(
+                [str(binary), "serve"],
+                cwd=root,
+                env=env,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+
         proc = None
         try:
             proc, _, _, base = spawn_until_ready(spawn, log_path=log_path, timeout=90)
-            with httpx.Client(base_url=base, timeout=30, headers={'Authorization':'Bearer audit-disposable-attach'}) as client:
-                health = client.get('/health')
-                state = client.get('/v1/service')
+            with httpx.Client(
+                base_url=base,
+                timeout=30,
+                headers={"Authorization": "Bearer audit-disposable-attach"},
+            ) as client:
+                health = client.get("/health")
+                state = client.get("/v1/service")
                 body = state.json()
-                print(json.dumps({'health_http':health.status_code,'service_http':state.status_code, **{key:body.get(key) for key in ('service_version','worker_connected','worker_ready','worker_status','worker_generation','database_ready','checkpoint_ready')}}), flush=True)
+                print(
+                    json.dumps(
+                        {
+                            "health_http": health.status_code,
+                            "service_http": state.status_code,
+                            **{
+                                key: body.get(key)
+                                for key in (
+                                    "service_version",
+                                    "worker_connected",
+                                    "worker_ready",
+                                    "worker_status",
+                                    "worker_generation",
+                                    "database_ready",
+                                    "checkpoint_ready",
+                                )
+                            },
+                        }
+                    ),
+                    flush=True,
+                )
         finally:
             if proc is not None:
                 reap_gateway(proc)
@@ -599,17 +773,25 @@ M21 exact scanner logic, run while the disposable M19 directory existed, is repr
 ```python
 from pathlib import Path
 import json
-root = Path('C:/Users/hello/AppData/Local/Temp/a2a-audit-soak-7lo6qehj')
-logs = [root / 'gateway.log', root / 'home/runtime/worker.log']
+
+root = Path("C:/Users/hello/AppData/Local/Temp/a2a-audit-soak-7lo6qehj")
+logs = [root / "gateway.log", root / "home/runtime/worker.log"]
 data = [path.read_bytes() for path in logs]
-print(json.dumps({
-    'scope': 'audit-owned live log snapshots',
-    'log_bytes': [len(blob) for blob in data],
-    'literal_credential_occurrences': {
-        name: sum(blob.count((root / 'home/credentials' / name).read_bytes().strip()) for blob in data)
-        for name in ['attach.cred', 'ownership.cap', 'worker-ipc.cred']
-    },
-}))
+print(
+    json.dumps(
+        {
+            "scope": "audit-owned live log snapshots",
+            "log_bytes": [len(blob) for blob in data],
+            "literal_credential_occurrences": {
+                name: sum(
+                    blob.count((root / "home/credentials" / name).read_bytes().strip())
+                    for blob in data
+                )
+                for name in ["attach.cred", "ownership.cap", "worker-ipc.cred"]
+            },
+        }
+    )
+)
 ```
 
 ## Remediation planning handoff

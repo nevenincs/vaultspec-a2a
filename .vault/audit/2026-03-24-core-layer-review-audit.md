@@ -238,7 +238,7 @@ production presets.
 
 ```python
 _PRESET_AGENTS_DIR = Path(__file__).parent / "presets" / "agents"
-_PRESET_TEAMS_DIR  = Path(__file__).parent / "presets" / "teams"
+_PRESET_TEAMS_DIR = Path(__file__).parent / "presets" / "teams"
 ```
 
 Since `__file__` resolves to `src/vaultspec_a2a/team/team_config.py`, both paths land at
@@ -250,7 +250,9 @@ Since `__file__` resolves to `src/vaultspec_a2a/team/team_config.py`, both paths
 
 ```python
 from vaultspec_a2a.thread.errors import (
-    AgentConfigNotFoundError, ConfigError, TeamConfigNotFoundError,
+    AgentConfigNotFoundError,
+    ConfigError,
+    TeamConfigNotFoundError,
 )
 ```
 

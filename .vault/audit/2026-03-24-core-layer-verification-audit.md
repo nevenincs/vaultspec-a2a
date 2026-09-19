@@ -246,10 +246,10 @@ comments in `compiler.py` (lines 383 and 519) are unrelated to
 the file (lines 50-53):
 
 ```python
-ToolCallContent,
-ToolCallContentDiff,
-ToolCallContentTerminal,
-ToolCallContentText,
+(ToolCallContent,)
+(ToolCallContentDiff,)
+(ToolCallContentTerminal,)
+(ToolCallContentText,)
 ```
 
 The `_content_to_wire()` helper (line 67) branches on content type:

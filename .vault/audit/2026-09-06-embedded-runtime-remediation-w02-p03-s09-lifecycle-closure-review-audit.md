@@ -3,12 +3,11 @@ tags:
   - '#audit'
   - '#embedded-runtime-remediation'
 date: '2026-09-06'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
 body_hash: 'sha256:98eaae4e1b0e3765ceef5ebd1aa7e93251ca3bab3c23833bac1a47df4b2973c3'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
-  - "[[2026-09-05-embedded-runtime-remediation-W02-P03-S09]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s09-atomic-election-review-audit]]"
   - "[[2026-09-06-embedded-runtime-remediation-w02-p03-s09-identity-refresh-rereview-audit]]"
   - "[[2026-09-05-embedded-runtime-remediation-implementation-review-audit]]"

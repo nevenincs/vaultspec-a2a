@@ -203,6 +203,7 @@ becomes `type: "agent_status"` in TypeScript.
 1. Export JSON Schema at build time:
    ```python
    from pydantic import TypeAdapter
+
    schema = TypeAdapter(ServerEvent).json_schema()
    # Write to src/ui/schemas/server-event.schema.json
    ```
@@ -368,6 +369,7 @@ Before committing to the JSON Schema pipeline, one experiment must be run:
 from pydantic import TypeAdapter
 from vaultspec_a2a.api.schemas.events import ServerEvent
 import json
+
 schema = TypeAdapter(ServerEvent).json_schema()
 print(json.dumps(schema, indent=2))
 ```

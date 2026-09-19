@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-09-03'
+modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:47024be92983b9ed0f93dff829ddebc926b94f81df206d352b9c762ae3b28c5a'
+body_hash: 'sha256:d13ffead5ee1f03c1280535bd8c14fc8bfce43fd6f98d323df7bc74659da9946'
 related:
   - "[[2026-07-19-codebase-health-plan]]"
 ---
@@ -152,3 +152,177 @@ related:
 - `S181` `T` `src/vaultspec_a2a/control/thread_service.py`
 - `S183` `T` `src/vaultspec_a2a/api/routes/gateway.py`
 - `S183` `T` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S184` `M` `src/vaultspec_a2a/control/worker_management.py`
+- `S184` `M` `src/vaultspec_a2a/control/tests/test_unready_worker_reap.py`
+- `S184` `M` `src/vaultspec_a2a/lifecycle/engine_serve.py`
+- `S184` `M` `src/vaultspec_a2a/lifecycle/tests/test_engine_serve.py`
+- `S184` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S184` `M` `src/vaultspec_a2a/providers/_acp_types.py`
+- `S184` `M` `src/vaultspec_a2a/providers/_cleanup.py`
+- `S184` `M` `src/vaultspec_a2a/providers/_codex_config_home.py`
+- `S184` `M` `src/vaultspec_a2a/providers/_subprocess.py`
+- `S184` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S184` `M` `src/vaultspec_a2a/providers/antigravity_catalog.py`
+- `S184` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S184` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S184` `M` `src/vaultspec_a2a/providers/tests/test_cleanup.py`
+- `S184` `A` `src/vaultspec_a2a/providers/tests/test_resource_lifetimes.py`
+- `S184` `A` `src/vaultspec_a2a/providers/tests/test_antigravity_catalog_cleanup.py`
+- `S184` `M` `src/vaultspec_a2a/utils/process.py`
+- `S184` `A` `src/vaultspec_a2a/utils/async_cleanup.py`
+- `S184` `M` `src/vaultspec_a2a/utils/tests/test_process_containment.py`
+- `S184` `A` `src/vaultspec_a2a/utils/tests/test_async_cleanup.py`
+- `S184` `M` `.vault/plan/2026-07-19-codebase-health-plan.md`
+- `S184` `M` `.vault/index/codebase-health.index.md`
+- `S184` `A` `.vault/research/2026-09-05-codebase-health-process-resource-lifetimes-research.md`
+- `S184` `A` `.vault/audit/2026-09-05-codebase-health-process-resource-lifetimes-audit.md`
+- `S184` `A` `.vault/exec/2026-07-19-codebase-health/2026-07-19-codebase-health-W03-P10-S184.md`
+- `S184` `A` `.vault/exec/2026-07-19-codebase-health/2026-07-19-codebase-health-W03-P10-summary.md`
+- `S04` `M` `src/vaultspec_a2a/lifecycle/manager.py`
+- `S04` `M` `src/vaultspec_a2a/lifecycle/registry.py`
+- `S05` `M` `src/vaultspec_a2a/lifecycle/manager.py`
+- `S05` `M` `src/vaultspec_a2a/utils/process.py`
+- `S07` `D` `tests/lifecycle`
+- `S07` `M` `src/vaultspec_a2a/desktop_tests`
+- `S101` `D` `tests`
+- `S101` `M` `src/vaultspec_a2a`
+- `S102` `D` `tests`
+- `S102` `M` `src/vaultspec_a2a`
+- `S103` `D` `tests`
+- `S103` `M` `src/vaultspec_a2a`
+- `S104` `D` `tests`
+- `S104` `M` `src/vaultspec_a2a`
+- `S105` `M` `src/vaultspec_a2a`
+- `S105` `D` `tests`
+- `S107` `M` `src/vaultspec_a2a/lifecycle/manager.py`
+- `S107` `M` `src/vaultspec_a2a/lifecycle/registry.py`
+- `S114` `D` `tests/providers`
+- `S114` `D` `tests/mcp`
+- `S115` `D` `tests/providers`
+- `S115` `D` `tests/mcp`
+- `S116` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S117` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S118` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S119` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S119` `M` `src/vaultspec_a2a/providers/_acp_auth.py`
+- `S120` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S121` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S122` `D` `tests/providers`
+- `S122` `M` `src/vaultspec_a2a/desktop_tests`
+- `S123` `D` `tests/providers`
+- `S123` `M` `src/vaultspec_a2a/desktop_tests`
+- `S124` `D` `tests/providers`
+- `S124` `M` `src/vaultspec_a2a/desktop_tests`
+- `S125` `M` `src/vaultspec_a2a/thread/tests/test_errors.py`
+- `S126` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
+- `S139` `M` `.vault/adr`
+- `S139` `M` `.vault/audit`
+- `S139` `M` `.vault/plan`
+- `S139` `M` `.vault/research`
+- `S140` `M` `.vault/plan`
+- `S140` `M` `.vault/index`
+- `S149` `D` `tests/lifecycle`
+- `S149` `M` `src/vaultspec_a2a/desktop_tests`
+- `S150` `D` `tests/lifecycle`
+- `S150` `M` `src/vaultspec_a2a/desktop_tests`
+- `S151` `M` `src/vaultspec_a2a/lifecycle/manager.py`
+- `S151` `M` `src/vaultspec_a2a/lifecycle/registry.py`
+- `S151` `M` `src/vaultspec_a2a/utils/process.py`
+- `S152` `D` `tests/lifecycle/test_manager_processes.py`
+- `S152` `M` `src/vaultspec_a2a/desktop_tests`
+- `S161` `D` `tests/authoring`
+- `S174` `M` `src/vaultspec_a2a/workspace/concurrency.py`
+- `S174` `D` `src/vaultspec_a2a/workspace/git_manager.py`
+- `S174` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S174` `M` `src/vaultspec_a2a/providers/tests/test_acp_authoring.py`
+- `S174` `M` `src/vaultspec_a2a/workspace/tests/test_workspace.py`
+- `S21` `D` `tests/api`
+- `S21` `D` `tests/control`
+- `S22` `M` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S22` `M` `src/vaultspec_a2a/streaming`
+- `S41` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S42` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S42` `M` `src/vaultspec_a2a/providers/_acp_auth.py`
+- `S43` `D` `tests/providers`
+- `S43` `M` `src/vaultspec_a2a/desktop_tests`
+- `S44` `M` `.vault/audit`
+- `S44` `M` `.vault/exec`
+- `S45` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
+- `S45` `M` `.vault/exec`
+- `S47` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S52` `M` `src/vaultspec_a2a/control/dispatch.py`
+- `S53` `M` `src/vaultspec_a2a/streaming/subscribers.py`
+- `S54` `M` `src/vaultspec_a2a/lifecycle/discovery.py`
+- `S63` `D` `src/vaultspec_a2a/workspace/git_manager.py`
+- `S63` `M` `src/vaultspec_a2a/workspace/__init__.py`
+- `S63` `M` `src/vaultspec_a2a/workspace/tests`
+- `S63` `M` `src/vaultspec_a2a/thread/errors.py`
+- `S63` `M` `src/vaultspec_a2a/thread/__init__.py`
+- `S63` `M` `src/vaultspec_a2a/thread/tests/test_errors.py`
+- `S67` `M` `src/vaultspec_a2a/providers/_acp_mcp.py`
+- `S67` `D` `tests/providers`
+- `S68` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S68` `D` `tests/control`
+- `S70` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S70` `D` `tests/control`
+- `S72` `M` `src/vaultspec_a2a`
+- `S72` `D` `tests`
+- `S72` `M` `.vault/audit`
+- `S74` `M` `.vault/index`
+- `S96` `M` `src/vaultspec_a2a/lifecycle/manager.py`
+- `S96` `M` `src/vaultspec_a2a/lifecycle/registry.py`
+- `S96` `M` `src/vaultspec_a2a/utils/process.py`
+- `S97` `D` `tests/lifecycle/test_manager_processes.py`
+- `S97` `M` `src/vaultspec_a2a/desktop_tests`
+
+## Notes
+
+- `S04` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S05` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S07` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S101` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S102` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S103` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S104` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S105` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S107` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S114` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S115` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S116` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S117` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S118` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S119` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S120` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S121` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S122` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S123` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S124` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S125` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S126` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S139` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S140` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S149` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S150` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S151` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S152` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S161` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S174` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S21` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S22` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S41` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S42` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S43` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S44` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S45` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S47` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S52` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S53` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S54` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S63` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S67` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S68` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S70` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S72` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S74` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S96` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S97` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.

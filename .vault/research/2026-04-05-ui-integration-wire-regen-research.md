@@ -161,7 +161,7 @@ compliant schemas. This creates a potential bridge:
 
 **Python side:**
 ```python
-schema = ServerEvent.model_json_schema(mode='serialization')
+schema = ServerEvent.model_json_schema(mode="serialization")
 # Produces full JSON Schema with $defs, oneOf discriminators, etc.
 ```
 

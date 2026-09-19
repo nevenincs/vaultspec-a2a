@@ -3,14 +3,13 @@ tags:
   - '#audit'
   - '#embedded-runtime-remediation'
 date: '2026-09-06'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
 body_hash: 'sha256:dff0091a1186eb5fc955eab2c249ce3f39ae27e000b9cfb61ac56ec1051e1eb8'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
   - "[[2026-08-05-served-capability-contract-state-truthfulness-adr]]"
   - "[[2026-09-05-embedded-runtime-remediation-research]]"
-  - "[[2026-09-05-embedded-runtime-remediation-W02-P03-S09]]"
 ---
 # embedded-runtime-remediation audit: W02.P03.S09 atomic lifecycle election formal review
 

@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#provider-model-catalog'
 date: '2026-08-02'
-modified: '2026-09-03'
+modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:ecc44b9627187806b8004bde44087114e43275d55979270491fa5f93c0ce1218'
+body_hash: 'sha256:5b337480b54e9a5104ea10e06055bcb918034a06b9c6550c14349bbcbe6e9b06'
 related:
   - "[[2026-08-02-provider-model-catalog-plan]]"
 ---
@@ -61,3 +61,140 @@ related:
 - `S16` `T` `Y:/code/vaultspec-dashboard-worktrees/main/frontend/src/app/agent/`
 - `S17` `T` `frontend/src/stores/server/agent/a2aTeam.ts`
 - `S17` `T` `frontend/src/app/agent/TeamRunHeader.tsx`
+- `S10` `M` `openapi.json`
+- `S10` `M` `src/vaultspec_a2a/acceptance/_harness.py`
+- `S10` `M` `src/vaultspec_a2a/acceptance/tests/test_deterministic_completion.py`
+- `S10` `M` `src/vaultspec_a2a/api/event_adapter.py`
+- `S10` `M` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S10` `M` `src/vaultspec_a2a/api/schemas/enums.py`
+- `S10` `M` `src/vaultspec_a2a/api/schemas/events.py`
+- `S10` `M` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S10` `M` `src/vaultspec_a2a/api/schemas/snapshots.py`
+- `S10` `M` `src/vaultspec_a2a/api/schemas/tests/test_schemas.py`
+- `S10` `M` `src/vaultspec_a2a/api/schemas/tests/test_snapshot_parity.py`
+- `S10` `A` `src/vaultspec_a2a/api/tests/test_catalog_selection_evidence.py`
+- `S10` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S10` `M` `src/vaultspec_a2a/api/tests/test_harness_gateway.py`
+- `S10` `D` `src/vaultspec_a2a/api/tests/test_model_profiles_evidence.py`
+- `S10` `M` `src/vaultspec_a2a/api/tests/test_preset_role_contract.py`
+- `S10` `M` `src/vaultspec_a2a/api/tests/test_provider_catalog_route.py`
+- `S10` `M` `src/vaultspec_a2a/api/tests/test_served_vocabulary_containment.py`
+- `S10` `M` `src/vaultspec_a2a/api/tests/test_team_status_descriptor.py`
+- `S10` `M` `src/vaultspec_a2a/artifacts/tests/test_declared_seams.py`
+- `S10` `M` `src/vaultspec_a2a/conftest.py`
+- `S10` `M` `src/vaultspec_a2a/control/config.py`
+- `S10` `M` `src/vaultspec_a2a/control/dispatch.py`
+- `S10` `M` `src/vaultspec_a2a/control/health.py`
+- `S10` `M` `src/vaultspec_a2a/control/tests/test_provider_catalog_settings.py`
+- `S10` `M` `src/vaultspec_a2a/control/tests/test_provider_eligibility_credentials.py`
+- `S10` `M` `src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py`
+- `S10` `M` `src/vaultspec_a2a/control/tests/test_untrusted_list_fields.py`
+- `S10` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S10` `M` `src/vaultspec_a2a/database/tests/test_database.py`
+- `S10` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S10` `M` `src/vaultspec_a2a/graph/enums.py`
+- `S10` `M` `src/vaultspec_a2a/graph/protocols.py`
+- `S10` `M` `src/vaultspec_a2a/graph/tests/conftest.py`
+- `S10` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S10` `M` `src/vaultspec_a2a/graph/tests/test_research_adr_clarification.py`
+- `S10` `M` `src/vaultspec_a2a/ipc/schemas.py`
+- `S10` `A` `src/vaultspec_a2a/ipc/tests/test_model_assignment_schema.py`
+- `S10` `M` `src/vaultspec_a2a/providers/_acp_auth.py`
+- `S10` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S10` `M` `src/vaultspec_a2a/providers/_acp_session.py`
+- `S10` `M` `src/vaultspec_a2a/providers/_subprocess.py`
+- `S10` `M` `src/vaultspec_a2a/providers/acp_catalog.py`
+- `S10` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S10` `M` `src/vaultspec_a2a/providers/codex_catalog.py`
+- `S10` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S10` `D` `src/vaultspec_a2a/providers/gemini_auth.py`
+- `S10` `M` `src/vaultspec_a2a/providers/in_process_catalog.py`
+- `S10` `M` `src/vaultspec_a2a/providers/lane_admission.py`
+- `S10` `D` `src/vaultspec_a2a/providers/model_profiles.py`
+- `S10` `M` `src/vaultspec_a2a/providers/provider_catalog_service.py`
+- `S10` `A` `src/vaultspec_a2a/providers/provider_readiness.py`
+- `S10` `M` `src/vaultspec_a2a/providers/team_selection.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/probe_loop_responsiveness.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_acp_catalog.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_catalog_registration_live.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_codex_catalog.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_codex_turn_idle_timeout.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_deterministic_chat_model.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_deterministic_scripts.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S10` `D` `src/vaultspec_a2a/providers/tests/test_gemini_auth.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_in_process_catalog.py`
+- `S10` `D` `src/vaultspec_a2a/providers/tests/test_lane_admission.py`
+- `S10` `A` `src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`
+- `S10` `D` `src/vaultspec_a2a/providers/tests/test_model_profiles.py`
+- `S10` `A` `src/vaultspec_a2a/providers/tests/test_no_legacy_model_authority.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_persisted_bound_authority.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_team_selection.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_zai_error_fidelity_live.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_zai_fidelity.py`
+- `S10` `M` `src/vaultspec_a2a/service_tests/harness.py`
+- `S10` `M` `src/vaultspec_a2a/service_tests/test_clarification_loop_stitched.py`
+- `S10` `M` `src/vaultspec_a2a/service_tests/test_dispatch_assignment_agreement.py`
+- `S10` `M` `src/vaultspec_a2a/streaming/node_metadata.py`
+- `S10` `M` `src/vaultspec_a2a/streaming/sse_frames.py`
+- `S10` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S10` `M` `src/vaultspec_a2a/streaming/tests/test_node_metadata.py`
+- `S10` `M` `src/vaultspec_a2a/streaming/tests/test_progress_allowlist.py`
+- `S10` `M` `src/vaultspec_a2a/streaming/tests/test_sse_frames.py`
+- `S10` `M` `src/vaultspec_a2a/team/__init__.py`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/deterministic-cancel-window.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/deterministic-failure.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/deterministic-permission-pause.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/deterministic-relay-burst.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/deterministic-tool-call.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/mock-coder-fail-tool.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/mock-coder-human.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/mock-coder-invalid.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/mock-coder-loop.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/mock-coder-success.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/mock-planner.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/agents/mock-reviewer.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/deterministic-cancel-window.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/deterministic-failure.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/deterministic-permission-pause.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/deterministic-relay-burst.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/deterministic-tool-call.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/mock-autonomous.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/mock-failure-tool.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/mock-human-in-loop.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/mock-invalid.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/mock-looping.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/mock-success-multi.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/mock-success-single.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/mock-supervisor-human-in-loop.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research-clarify.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research-deterministic.toml`
+- `S10` `M` `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research-mock.toml`
+- `S10` `M` `src/vaultspec_a2a/team/team_config.py`
+- `S10` `M` `src/vaultspec_a2a/team/tests/test_failure_scenario_preset.py`
+- `S10` `A` `src/vaultspec_a2a/team/tests/test_preset_capability_claims.py`
+- `S10` `D` `src/vaultspec_a2a/team/tests/test_preset_web_claims.py`
+- `S10` `M` `src/vaultspec_a2a/team/tests/test_team_config.py`
+- `S10` `M` `src/vaultspec_a2a/testing/catalog_selection.py`
+- `S10` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S10` `M` `src/vaultspec_a2a/thread/tests/test_snapshots.py`
+- `S10` `M` `src/vaultspec_a2a/utils/atomic_write.py`
+- `S10` `M` `src/vaultspec_a2a/utils/tests/test_enums.py`
+- `S10` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S10` `M` `src/vaultspec_a2a/workspace/environment.py`
+- `S10` `M` `src/vaultspec_a2a/workspace/tests/test_workspace.py`
+- `S10` `verify:` `pytest <final focused selection/factory/admission/IPC/redispatch/catalog-restart set>` -> `pass (139 passed)`
+- `S10` `verify:` `pytest <final provider/team/graph/IPC/redispatch/catalog-restart domain set>` -> `pass (1378 passed, 38 deselected)`
+- `S10` `verify:` `ruff check + ruff format --check <changed Python paths>` -> `pass`
+- `S10` `verify:` `ty check <changed runtime paths>` -> `pass`
+- `S10` `verify:` `python -m vaultspec_a2a.api.tests.test_openapi_artifact` -> `pass (6 passed)`
+- `S10` `verify:` `vaultspec-core vault check all -f provider-model-catalog --no-hints` -> `pass`
+- `S11` `T`
+- `S08` `M` `src/vaultspec_a2a/api/routes/gateway.py`
+
+## Notes
+
+- `S08` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.

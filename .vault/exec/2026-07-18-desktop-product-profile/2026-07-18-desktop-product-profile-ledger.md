@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#desktop-product-profile'
 date: '2026-07-18'
-modified: '2026-09-03'
+modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:1399789ae61f4463fd4d3856a0cb615570f4552769a912d55ef41ffb8b98656f'
+body_hash: 'sha256:b996255cce66543d499ebadb0e7b57d9f17a36d66b6befde4cac1ccadb92d77e'
 related:
   - "[[2026-07-18-desktop-product-profile-plan]]"
 ---
@@ -225,3 +225,30 @@ related:
 - `S120` `T` `src/vaultspec_a2a/desktop/artifacts.py`
 - `S120` `T` `src/vaultspec_a2a/desktop/capsule_descriptor.py`
 - `S120` `T` `src/vaultspec_a2a/desktop/capsule_preparation.py`
+- `S60` `M` `src/vaultspec_a2a/providers/_subprocess.py`
+- `S60` `M` `src/vaultspec_a2a/utils/process.py`
+- `S60` `M` `src/vaultspec_a2a/control/worker_management.py`
+- `S60` `M` `src/vaultspec_a2a/providers/tests/test_provider_containment.py`
+- `S60` `M` `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`
+- `S60` `M` `.vault/audit/2026-09-05-codebase-health-process-resource-lifetimes-audit.md`
+- `S60` `M` `.vault/research/2026-09-05-codebase-health-process-resource-lifetimes-research.md`
+- `S60` `M` `.vault/exec/2026-07-18-desktop-product-profile/2026-07-18-desktop-product-profile-W04-P11-S60.md`
+- `S60` `M` `.vault/exec/2026-07-18-desktop-product-profile/2026-07-18-desktop-product-profile-W04-P11-summary.md`
+- `S60` `verify:` `.venv/Scripts/python.exe -m pytest <S60 focused modules> -o addopts='' -q` -> `pass`
+- `S60` `verify:` `.venv/Scripts/python.exe -m pytest src/vaultspec_a2a/providers/tests/test_provider_containment.py -m service -q` -> `pass`
+- `S60` `verify:` `.venv/Scripts/python.exe -m pytest src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py -k provider -o addopts='' -q` -> `pass`
+- `S60` `verify:` `.venv/Scripts/python.exe -m pytest <corrected S60 focused modules> -o addopts='' -q` -> `pass`
+- `S116` `D` `src/vaultspec_a2a/desktop/capsule_input_authoring.py`
+- `S116` `D` `scripts/desktop_capsule_inputs.toml`
+- `S116` `D` `src/vaultspec_a2a/desktop/tests/test_capsule_license_derivation.py`
+- `S118` `D` `src/vaultspec_a2a/desktop/closure_inventory.py`
+- `S118` `D` `src/vaultspec_a2a/desktop/package_archives.py`
+- `S118` `D` `src/vaultspec_a2a/desktop/capsule_input_authoring.py`
+- `S118` `D` `scripts/desktop_capsule_inputs.toml`
+
+## Notes
+
+- `S60` Formal review `b931b804` failed the initial correction because psutil recursive child discovery builds a machine-wide parent map, and because `ProcessContainment` retained an unreachable unassigned-PID fallback. The correction restores the S49 worker implementation unchanged, removes the shared psutil path, and proves failed provider assignment reaps only the exact suspended root before its first instruction. The broad integrated owned-tree run surfaced two persistent test-fixture failures outside S60: `test_terminal_child_tree_contained_and_reaped` omits the current `AcpSessionContext.closing` field, and `test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown` launches a gateway without binding the current lifecycle owner. Both remain queued for their current-contract test owners. An invalid first root-exit proof awaited pipe drain while a descendant intentionally retained stdout; it timed out after 10 seconds despite root return code 0 and was corrected to observe root exit before production containment closes the descendant and transport. Pytest startup also spent about 23 seconds before collection with zero peer sessions; this separate developer-time delay is queued under resource-aware test execution.
+- `S60` Formal rereview `fa653cf6` passes correction `b5e6a25f` after preserving initial implementation `412c5532` and formal FAIL `b931b804`. Core closes only S60. The zero-peer pytest startup delay, both current-context integrated fixture failures, and POSIX supervision limitation remain open under their recorded owners. Closure adds no runtime or compatibility behavior.
+- `S116` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S118` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.

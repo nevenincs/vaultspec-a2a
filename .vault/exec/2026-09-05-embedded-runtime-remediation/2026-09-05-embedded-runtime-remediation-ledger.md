@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#embedded-runtime-remediation'
 date: '2026-09-05'
-modified: '2026-09-07'
+modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:f580448f568a5e4b1d79f9cdabe224e1ce4838b28f860dd2a6f3bf2d1f10ea8a'
+body_hash: 'sha256:0c0992ef5fe9768cb4af5149354fef82501c39bd8a8da139b5393727219dbeda'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
 ---
@@ -62,3 +62,575 @@ related:
 - `S83` `M` `src/vaultspec_a2a/team/presets/teams/vaultspec-solo-coder.toml`
 - `S83` `M` `src/vaultspec_a2a/control/health.py`
 - `S83` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S01` `A` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S01` `A` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W01-P01-S01.md`
+- `S01` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S01` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S01` `A` `.vault/reference/2026-09-05-embedded-runtime-remediation-qualification-inputs-reference.md`
+- `S01` `verify:` `uv run --locked --group freeze python scripts/build_binary.py --dist tmp/embedded-runtime-remediation-s01-binary` -> `pass`
+- `S01` `verify:` `ProviderFactory().catalog_registrations(Path.cwd(), serve_in_process_lanes=False)` -> `is_catalog_lane_admissible` -> `uv run --locked python` -> `pass`
+- `S01` `verify:` `uv run --locked python` -> `pass`
+- `S01` `verify:` `uv run --locked python -m pytest src/vaultspec_a2a/providers/tests/test_lane_admission.py src/vaultspec_a2a/desktop_tests/test_component_contract.py -q` -> `pass`
+- `S01` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S02` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S02` `A` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W01-P01-S02.md`
+- `S02` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S02` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S02` `verify:` `uv run --locked python -m pytest src/vaultspec_a2a/lifecycle/tests/test_discovery_desktop.py src/vaultspec_a2a/api/tests/test_engine_edge_bounds_agreement.py src/vaultspec_a2a/api/tests/test_admin_shutdown_auth.py src/vaultspec_a2a/api/tests/test_lifecycle_capability_dependency.py src/vaultspec_a2a/api/tests/test_v1_attach_whitelist.py -q` -> `pass`
+- `S02` `verify:` `cargo test -p vaultspec-product discovery` -> `pass`
+- `S02` `verify:` `cargo test -p vaultspec-api a2a_lifecycle` -> `pass`
+- `S02` `verify:` `cargo test -p vaultspec-api ops::a2a` -> `pass`
+- `S02` `verify:` `uv run --locked python -` -> `pass`
+- `S02` `verify:` `python -` -> `pass`
+- `S03` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S03` `A` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W01-P01-S03.md`
+- `S03` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S03` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S03` `A` `.vault/reference/2026-09-05-embedded-runtime-remediation-provider-selection-prerequisites-reference.md`
+- `S03` `verify:` `uv run --locked python -` -> `pass` -> `94A91AE6A4D9C4BB450BE9D9A35C26B1487248772A0E854196B509BF21877593`
+- `S03` `verify:` `PowerShell source-manifest capture` -> `pass` -> `2525AAD195A153019183D3898D36C1634E502A6AE4AAEC06FCE7973417FABA47`
+- `S03` `verify:` `uv run --locked python -m pytest src/vaultspec_a2a/providers/tests/test_lane_admission.py src/vaultspec_a2a/providers/tests/test_provider_capabilities.py src/vaultspec_a2a/providers/tests/test_in_process_catalog.py src/vaultspec_a2a/api/tests/test_provider_catalog_route.py -q` -> `fail`
+- `S03` `verify:` `uv run --locked python -m pytest src/vaultspec_a2a/providers/tests/test_lane_admission.py src/vaultspec_a2a/providers/tests/test_provider_capabilities.py src/vaultspec_a2a/providers/tests/test_in_process_catalog.py src/vaultspec_a2a/api/tests/test_provider_catalog_route.py -q -k "not test_authenticated_route_serves_all_registered_lanes_in_order"` -> `pass`
+- `S04` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S04` `M` `.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md`
+- `S04` `M` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W01-P02-S04.md`
+- `S04` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S04` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S04` `M` `pyproject.toml`
+- `S04` `M` `src/vaultspec_a2a/control/tests/test_sync_url_derivation.py`
+- `S04` `verify:` `server-env` -> `pass` -> `72A2469C6A2956EC43258544492963DEF6F246AB3DD6DC3D409DDDCEBE6D9EBD`
+- `S04` `verify:` `freeze-env` -> `pass` -> `F4EAE3C18DA15E33EA94FE9FE7ED240D1213D0726F75ABAA7D2EBFD493B4FCDF`
+- `S04` `verify:` `build-env` -> `pass` -> `C33782735C1BD675894952BBE93752946A103AAE4EC480A588D750B2DF94DA56`
+- `S04` `verify:` `PYZ-00.toc` -> `pass` -> `A0D70509F1B8FE6233C4B5CA7B70E511A01DF345649BBEAA19E303DF5B49B059`
+- `S04` `verify:` `pass` -> `15CBFE69856D5EFD6490C62455E955663A558D5D1F005D667D682B73B8C849DB`
+- `S04` `verify:` `pass`
+- `S04` `verify:` `uv lock --check` -> `ruff format --check` -> `ruff check` -> `ty check` -> `pass`
+- `S05` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S05` `M` `.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md`
+- `S05` `A` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W01-P02-S05.md`
+- `S05` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S05` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S05` `verify:` `pass`
+- `S05` `verify:` `uv run pytest -q src/vaultspec_a2a/api/tests/test_provider_catalog_route.py` -> `pass`
+- `S05` `verify:` `pass`
+- `S05` `verify:` `pass`
+- `S05` `verify:` `test_provider_catalog_route.py` -> `pass`
+- `S05` `verify:` `3ed2ccdc0342f34e623cb507b914b68dba5f2f8c` -> `pass`
+- `S06` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S06` `M` `.vault/audit/2026-08-02-provider-model-catalog-implementation-review-audit.md`
+- `S06` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S06` `M` `.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md`
+- `S06` `A` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W01-P02-S06.md`
+- `S06` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S06` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S06` `verify:` `9d56e23e` -> `14ae6ddf` -> `f7a9b14d` -> `02edd63c` -> `1d3f99e9` -> `1322d4ef` -> `785029d5` -> `47f54120` -> `79c01caa` -> `613d23e2`
+- `S06` `verify:` `uv run pytest -q --tb=short --no-showlocals src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py` -> `pass`
+- `S06` `verify:` `pass`
+- `S06` `verify:` `pass`
+- `S06` `verify:` `git diff --check` -> `pass`
+- `S06` `verify:` `pass`
+- `S06` `verify:` `pass`
+- `S06` `verify:` `613d23e2b5e73eaa948cc49c745743d328c074ea` -> `pass`
+- `S07` `M` `src/vaultspec_a2a/providers/tests/probe_loop_responsiveness.py`
+- `S07` `M` `src/vaultspec_a2a/providers/tests/test_model_stack_warmup.py`
+- `S07` `M` `.vault/research/2026-09-05-embedded-runtime-remediation-research.md`
+- `S07` `M` `.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md`
+- `S07` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S07` `A` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W01-P02-S07.md`
+- `S07` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S07` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S07` `verify:` `76cb91e5` -> `691f62cc` -> `82c8e518` -> `6c742790`
+- `S07` `verify:` `fail`
+- `S07` `verify:` `pass`
+- `S07` `verify:` `C=5` -> `pass`
+- `S07` `verify:` `fail` -> `W04.P10.S49`
+- `S07` `verify:` `pass`
+- `S07` `verify:` `pass`
+- `S07` `verify:` `git diff --check` -> `pass`
+- `S07` `verify:` `pass`
+- `S07` `verify:` `pass`
+- `S07` `verify:` `6c742790f42b21d433c371ed6db738c866d0fcd7` -> `pass`
+- `S08` `M` `pyproject.toml`
+- `S08` `M` `uv.lock`
+- `S08` `M` `.vault/research/2026-09-05-embedded-runtime-remediation-research.md`
+- `S08` `A` `.vault/reference/2026-09-06-embedded-runtime-remediation-starlette-blocking-portal-dependency-reference.md`
+- `S08` `M` `.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md`
+- `S08` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S08` `A` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W01-P02-S08.md`
+- `S08` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S08` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S08` `verify:` `17095d27ca7e8727ec205155a7a209de5b58d0b5` -> `333080e4a351b9450158c8b8375d9beb301a98a1`
+- `S08` `verify:` `pass` -> `direct_url.json` -> `bbee894422c6cc1306327335ae385b901ccfec13`
+- `S08` `verify:` `pass`
+- `S08` `verify:` `pass` -> `anyio.from_thread.BlockingPortal` -> `anyio.abc.BlockingPortal`
+- `S08` `verify:` `pass`
+- `S08` `verify:` `fail` -> `W05.P13.S67` -> `W02.P03.S78` -> `W02.P03.S13`
+- `S08` `verify:` `pass`
+- `S08` `verify:` `open`
+- `S08` `verify:` `pass`
+- `S08` `verify:` `git diff --check` -> `pass`
+- `S08` `verify:` `fail` -> `W06.P14.S72`
+- `S08` `verify:` `pass`
+- `S08` `verify:` `pass`
+- `S08` `verify:` `333080e4a351b9450158c8b8375d9beb301a98a1` -> `pass`
+- `S09` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S09` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S09` `M` `.vault/research/2026-09-05-embedded-runtime-remediation-research.md`
+- `S09` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S09` `M` `src/vaultspec_a2a/database/thread_repository.py`
+- `S09` `A` `src/vaultspec_a2a/database/tests/test_thread_status_election.py`
+- `S09` `M` `src/vaultspec_a2a/thread/tests/test_transitions.py`
+- `S09` `M` `src/vaultspec_a2a/thread/transitions.py`
+- `S09` `verify:` `pytest atomic-election and transition gate` -> `pass`
+- `S09` `verify:` `pytest retained status-update discriminator` -> `pass`
+- `S09` `verify:` `ruff check` -> `pass`
+- `S09` `verify:` `ty check` -> `pass`
+- `S09` `verify:` `pytest same-session correction gate` -> `pass`
+- `S09` `verify:` `pass` -> `8c37f800` -> `7aa096ec` -> `2fab08a4` -> `586ce1b9`
+- `S09` `verify:` `pass`
+- `S10` `M` `src/vaultspec_a2a/control/cancel_service.py`
+- `S10` `M` `src/vaultspec_a2a/control/direct_control_recovery.py`
+- `S10` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S10` `M` `src/vaultspec_a2a/control/repositories/deletion_saga.py`
+- `S10` `M` `src/vaultspec_a2a/control/repositories/tests/test_deletion_saga.py`
+- `S10` `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`
+- `S10` `M` `src/vaultspec_a2a/control/tests/test_direct_control_recovery.py`
+- `S10` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S10` `M` `src/vaultspec_a2a/control/tests/test_thread_service_tokens.py`
+- `S10` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S10` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S10` `M` `src/vaultspec_a2a/database/thread_repository.py`
+- `S10` `verify:` `uv run --no-sync python -m pytest <focused S10 nodes> -q --timeout=30` -> `pass`
+- `S10` `verify:` `uv run --no-sync ruff check <S10 paths>` -> `pass`
+- `S10` `verify:` `uv run --no-sync ty check <S10 paths>` -> `pass`
+- `S10` `verify:` `uv run --no-sync python -m pytest <three S10 formal-review correction nodes> -q --timeout=30` -> `pass`
+- `S10` `verify:` `uv run --no-sync python -m pytest <valid-newer and stale-older recovery nodes> -q --timeout=30` -> `pass`
+- `S10` `verify:` `uv run --no-sync python -m pytest <deletion refusal and archive contention nodes> -q --timeout=30` -> `pass`
+- `S10` `verify:` `uv run --no-sync python -m pytest <four exact-current recovery and race nodes> -q --timeout=30` -> `pass`
+- `S11` `M` `src/vaultspec_a2a/control/dispatch.py`
+- `S11` `M` `src/vaultspec_a2a/control/run_discovery_service.py`
+- `S11` `M` `src/vaultspec_a2a/control/tests/test_reconciling_abandonment.py`
+- `S11` `M` `src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py`
+- `S11` `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-audit.md`
+- `S11` `A` `.vault/research/2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research.md`
+- `S11` `verify:` `focused 14-case S11 pytest gate` -> `pass`
+- `S11` `verify:` `two exact post-adjustment nodes` -> `pass`
+- `S11` `verify:` `uv run ruff check <S11 paths>` -> `pass`
+- `S11` `verify:` `uv run ty check <S11 paths>` -> `pass`
+- `S12` `M` `src/vaultspec_a2a/control/action_lease.py`
+- `S12` `M` `src/vaultspec_a2a/database/session.py`
+- `S12` `M` `src/vaultspec_a2a/control/clarification_service.py`
+- `S12` `M` `src/vaultspec_a2a/control/direct_control_recovery.py`
+- `S12` `M` `src/vaultspec_a2a/control/dispatch.py`
+- `S12` `M` `src/vaultspec_a2a/control/dispatch_receipts.py`
+- `S12` `M` `src/vaultspec_a2a/control/message_service.py`
+- `S12` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S12` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S12` `M` `src/vaultspec_a2a/control/verdict_subscriber.py`
+- `S12` `M` `src/vaultspec_a2a/control/tests/test_dispatch_receipts.py`
+- `S12` `M` `src/vaultspec_a2a/control/tests/test_thread_service_tokens.py`
+- `S12` `M` `src/vaultspec_a2a/database/models.py`
+- `S12` `M` `src/vaultspec_a2a/database/graph_receipt_repository.py`
+- `S12` `M` `src/vaultspec_a2a/database/migrations/versions/0018_graph_action_receipts.py`
+- `S12` `M` `src/vaultspec_a2a/ipc/schemas.py`
+- `S12` `M` `src/vaultspec_a2a/thread/action_receipts.py`
+- `S12` `M` `src/vaultspec_a2a/thread/tests/test_action_receipts.py`
+- `S12` `M` `src/vaultspec_a2a/worker/app.py`
+- `S12` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S12` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S12` `verify:` `bounded runner: initial admission, receipt ownership and real worker incorporation` -> `pass`
+- `S13` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S13` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S13` `verify:` `.venv/Scripts/python.exe -m vaultspec_a2a.testing.runner --run-timeout 60 --exit-timeout 5 -- src/vaultspec_a2a/control/tests/test_event_handlers.py -q -k cancellation -o addopts=` -> `pass`
+- `S13` `verify:` `.venv/Scripts/python.exe -m vaultspec_a2a.testing.runner --run-timeout 60 --exit-timeout 5 -- src/vaultspec_a2a/control/tests/test_event_handlers.py src/vaultspec_a2a/worker/tests/test_state_projection.py -q -o addopts=` -> `pass`
+- `S13` `verify:` `focused Ruff and Ty for event handler, its tests, and executor source` -> `pass`
+- `S31` `M` `src/vaultspec_a2a/providers/_acp_session.py`
+- `S31` `M` `src/vaultspec_a2a/providers/tests/test_acp_model_selection.py`
+- `S31` `verify:` `uv run python -m vaultspec_a2a.testing.runner --run-timeout 120 --exit-timeout 5 -- src/vaultspec_a2a/providers/tests/test_acp_model_selection.py -q` -> `pass`
+- `S32` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S32` `M` `src/vaultspec_a2a/providers/_acp_types.py`
+- `S32` `M` `src/vaultspec_a2a/providers/tests/test_acp_handler_failure.py`
+- `S32` `verify:` `uv run python -m vaultspec_a2a.testing.runner --run-timeout 90 --exit-timeout 5 -- src/vaultspec_a2a/providers/tests/test_acp_handler_failure.py -q` -> `pass`
+- `S33` `T`
+- `S34` `T`
+- `S37` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S37` `M` `src/vaultspec_a2a/providers/_acp_types.py`
+- `S37` `A` `src/vaultspec_a2a/providers/tests/test_acp_command_advertisements.py`
+- `S37` `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-native-command-advertisement-review-audit.md`
+- `S37` `verify:` `uv run python -m vaultspec_a2a.testing.runner --run-timeout 60 --exit-timeout 5 -- -q src/vaultspec_a2a/providers/tests/test_acp_command_advertisements.py src/vaultspec_a2a/providers/tests/test_acp_stop_outcomes.py src/vaultspec_a2a/providers/tests/test_acp_handler_failure.py` -> `pass`
+- `S37` `verify:` `uv run --no-sync ruff check src/vaultspec_a2a/providers/_acp_types.py src/vaultspec_a2a/providers/_acp_protocol.py src/vaultspec_a2a/providers/tests/test_acp_command_advertisements.py` -> `pass`
+- `S37` `verify:` `uv run --no-sync ty check src/vaultspec_a2a/providers/_acp_types.py src/vaultspec_a2a/providers/_acp_protocol.py src/vaultspec_a2a/providers/tests/test_acp_command_advertisements.py` -> `pass`
+- `S38` `T`
+- `S47` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S47` `M` `.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md`
+- `S47` `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-review-audit.md`
+- `S47` `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-w04-p10-s47-cooperative-server-owner-rereview-audit.md`
+- `S47` `M` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W04-P10-S47.md`
+- `S47` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S47` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S47` `M` `.vault/research/2026-09-05-embedded-runtime-remediation-research.md`
+- `S47` `M` `src/vaultspec_a2a/api/app.py`
+- `S47` `M` `src/vaultspec_a2a/api/routes/admin.py`
+- `S47` `M` `src/vaultspec_a2a/api/tests/test_admin_shutdown_auth.py`
+- `S47` `M` `src/vaultspec_a2a/api/tests/test_gateway_drain.py`
+- `S47` `verify:` `uv run --locked ruff check src/vaultspec_a2a/api/app.py src/vaultspec_a2a/api/routes/admin.py src/vaultspec_a2a/api/tests/test_admin_shutdown_auth.py src/vaultspec_a2a/api/tests/test_gateway_drain.py` -> `pass`
+- `S47` `verify:` `uv run --locked ty check src/vaultspec_a2a/api/app.py src/vaultspec_a2a/api/routes/admin.py src/vaultspec_a2a/api/tests/test_admin_shutdown_auth.py` -> `pass`
+- `S47` `verify:` `uv run --locked python -m pytest src/vaultspec_a2a/api/tests/test_admin_shutdown_auth.py src/vaultspec_a2a/api/tests/test_gateway_drain.py -q` -> `pass`
+- `S47` `verify:` `24dab547465e2bb846dfba0f8b9d87e95c41b7e8` -> `b80e843ba63ae48f45c322957b23f98e70e2aa94` -> `b83ad5ba87c00d9aeb82af39cd677f5f2acd2030` -> `2279eb52d529ee338661006779a0143095003ce7`
+- `S47` `verify:` `pass` -> `should_exit`
+- `S47` `verify:` `pass`
+- `S47` `verify:` `pass`
+- `S47` `verify:` `git diff --check` -> `pass`
+- `S47` `verify:` `pass`
+- `S49` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S49` `M` `.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md`
+- `S49` `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-w04-p10-s49-cooperative-shutdown-review-audit.md`
+- `S49` `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-w04-p10-s49-containment-rereview-audit.md`
+- `S49` `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-w04-p10-s49-assignment-failure-rereview-audit.md`
+- `S49` `M` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W04-P10-S49.md`
+- `S49` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S49` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S49` `M` `.vault/research/2026-09-05-embedded-runtime-remediation-research.md`
+- `S49` `M` `src/vaultspec_a2a/api/app.py`
+- `S49` `M` `src/vaultspec_a2a/control/config.py`
+- `S49` `M` `src/vaultspec_a2a/control/tests/test_unready_worker_reap.py`
+- `S49` `M` `src/vaultspec_a2a/control/worker_management.py`
+- `S49` `A` `src/vaultspec_a2a/lifecycle/shutdown.py`
+- `S49` `A` `src/vaultspec_a2a/lifecycle/tests/test_shutdown.py`
+- `S49` `M` `src/vaultspec_a2a/utils/process.py`
+- `S49` `M` `src/vaultspec_a2a/worker/app.py`
+- `S49` `M` `src/vaultspec_a2a/worker/ipc.py`
+- `S49` `M` `src/vaultspec_a2a/worker/tests/test_app.py`
+- `S49` `M` `src/vaultspec_a2a/worker/tests/test_ipc.py`
+- `S49` `verify:` `uv run --locked ruff check <S49 paths>` -> `pass`
+- `S49` `verify:` `uv run --locked ty check <S49 production paths>` -> `pass`
+- `S49` `verify:` `uv run --locked python -m pytest <focused shutdown modules> -q` -> `pass`
+- `S49` `verify:` `uv run --locked python -m pytest src/vaultspec_a2a/worker/tests/test_app.py src/vaultspec_a2a/worker/tests/test_ipc.py -q` -> `pass`
+- `S49` `verify:` `uv run --locked python -m pytest src/vaultspec_a2a/control/tests/test_unready_worker_reap.py src/vaultspec_a2a/control/tests/test_spawn_containment_ownership.py -q` -> `pass`
+- `S49` `verify:` `uv run --locked python -m pytest <complete S49 focused modules> -q` -> `pass`
+- `S49` `verify:` `uv run --locked python -m pytest <late-child and process-containment modules> -q` -> `pass`
+- `S49` `verify:` `uv run --locked python -m pytest test_catalog_restart_redispatch.py::test_current_schema_restart_reaches_a_fresh_production_worker -vv -s --timeout=90 --timeout-method=thread` -> `fail`
+- `S76` `M` `src/vaultspec_a2a/database/models.py`
+- `S76` `A` `src/vaultspec_a2a/database/tests/test_run_write_authority_model.py`
+- `S76` `M` `.vault/research/2026-09-05-embedded-runtime-remediation-research.md`
+- `S76` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S76` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S76` `verify:` `uv run --no-sync pytest src/vaultspec_a2a/database/tests/test_run_write_authority_model.py src/vaultspec_a2a/database/tests/test_schema_parity.py src/vaultspec_a2a/database/tests/test_database.py -q` -> `pass`
+- `S76` `verify:` `uv run --no-sync ruff check src/vaultspec_a2a/database/models.py src/vaultspec_a2a/database/tests/test_run_write_authority_model.py` -> `pass`
+- `S76` `verify:` `uv run --no-sync ty check src/vaultspec_a2a/database/models.py src/vaultspec_a2a/database/tests/test_run_write_authority_model.py` -> `pass`
+- `S76` `verify:` `uv run --no-sync vaultspec-core vault check all --feature embedded-runtime-remediation` -> `pass`
+- `S76` `verify:` `8551069913f393a55cf9e5fe3c1bd33e9e6ff907` -> `821409d1`
+- `S76` `verify:` `pass`
+- `S76` `verify:` `pass` -> `W02.P03.S76` -> `W02.P03.S77`
+- `S76` `verify:` `pass`
+- `S77` `M` `.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md`
+- `S77` `M` `.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md`
+- `S77` `M` `.vault/research/2026-09-05-embedded-runtime-remediation-research.md`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_acceptance_five_verb.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_active_run_discovery_live.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_catalog_restart_redispatch.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_clarification_loop_live.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_internal.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_progress_allowlist.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_projection.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_team_status_descriptor.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_thread_deletion_saga.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `S77` `M` `src/vaultspec_a2a/api/tests/test_thread_stream.py`
+- `S77` `M` `src/vaultspec_a2a/control/cleanup/tests/test_cleanup_containment.py`
+- `S77` `M` `src/vaultspec_a2a/control/repositories/tests/test_deletion_saga.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_authoring_completion_check.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_deleting_thread_visibility.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_direct_control_recovery.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_list_threads_service_live.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_permission_leases.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_permission_rejection_journal.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_reconciling_abandonment.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_repair_transition_map_parity.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_stored_workspace_root_agreement.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_terminal_sequence_capture.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_thread_deletion_saga.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_thread_service_tokens.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_verdict_loop_live.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber.py`
+- `S77` `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py`
+- `S77` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S77` `M` `src/vaultspec_a2a/database/compatibility.py`
+- `S77` `M` `src/vaultspec_a2a/database/migrate.py`
+- `S77` `M` `src/vaultspec_a2a/database/migrations/env.py`
+- `S77` `M` `src/vaultspec_a2a/database/models.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_admin.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_compatibility.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_control_action_lease_composability.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_control_action_leases.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_cost_tracking.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_database.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_migrations.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_permission_audit_log.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_reconciliation.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_reconciliation_batching.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_reconciliation_epoch_reboot.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_repair_journal_retention.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_run_write_authority_model.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_schema_integrity.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_task_queue_repository.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_wal_maintenance.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_workspace_identity_seam.py`
+- `S77` `M` `src/vaultspec_a2a/database/thread_repository.py`
+- `S77` `M` `src/vaultspec_a2a/graph/tests/nodes/test_vault_reader.py`
+- `S77` `M` `src/vaultspec_a2a/graph/tests/nodes/test_vault_write_isolation.py`
+- `S77` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+- `S77` `M` `src/vaultspec_a2a/graph/tests/test_task_queue.py`
+- `S77` `M` `src/vaultspec_a2a/providers/tests/test_deterministic_scripts.py`
+- `S77` `A` `src/vaultspec_a2a/database/migrations/versions/0017_thread_write_authority.py`
+- `S77` `A` `src/vaultspec_a2a/database/tests/test_thread_write_authority_migration.py`
+- `S77` `A` `src/vaultspec_a2a/tests/_write_authority.py`
+- `S77` `M` `.vault/index/embedded-runtime-remediation.index.md`
+- `S77` `A` `.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W02-P03-S77.md`
+- `S77` `verify:` `python AST explicit-authority scan` -> `pass` -> `create_thread` -> `ThreadModel`
+- `S77` `verify:` `pytest` -> `pass`
+- `S77` `verify:` `pytest src/vaultspec_a2a/database/tests/test_thread_write_authority_migration.py -q` -> `pass`
+- `S77` `verify:` `pytest src/vaultspec_a2a/database/tests/test_run_write_authority_model.py -q` -> `pass`
+- `S77` `verify:` `pytest src/vaultspec_a2a/database/tests/test_compatibility.py -q` -> `fail`
+- `S77` `verify:` `ruff check` -> `pass`
+- `S77` `verify:` `ty check` -> `pass`
+- `S77` `M` `src/vaultspec_a2a/database/compatibility.py`
+- `S77` `M` `src/vaultspec_a2a/database/migrations/env.py`
+- `S77` `M` `src/vaultspec_a2a/database/models.py`
+- `S77` `A` `src/vaultspec_a2a/database/write_authority_schema.py`
+- `S77` `A` `src/vaultspec_a2a/database/tests/_write_authority_schema_cases.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_compatibility.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_thread_write_authority_migration.py`
+- `S77` `A` `src/vaultspec_a2a/database/tests/test_write_authority_schema.py`
+- `S77` `verify:` `pytest` -> `pass`
+- `S77` `verify:` `pytest` -> `pass`
+- `S77` `verify:` `pytest` -> `pass`
+- `S77` `verify:` `pytest src/vaultspec_a2a/database/tests/test_write_authority_schema.py -q` -> `pass`
+- `S77` `M` `src/vaultspec_a2a/database/write_authority_schema.py`
+- `S77` `M` `src/vaultspec_a2a/database/migrations/env.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/_write_authority_schema_cases.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_write_authority_schema.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_compatibility.py`
+- `S77` `M` `src/vaultspec_a2a/database/tests/test_thread_write_authority_migration.py`
+- `S77` `verify:` `pytest src/vaultspec_a2a/database/tests/test_write_authority_schema.py -q` -> `pass`
+- `S77` `verify:` `pass`
+- `S77` `verify:` `pass`
+- `S77` `verify:` `pass`
+- `S77` `verify:` `7586f2ee` -> `da7cd035` -> `9ec2396d` -> `e52bd82e` -> `48c661c2` -> `9ca08596`
+- `S77` `verify:` `pass`
+- `S77` `verify:` `pass`
+- `S77` `verify:` `pass` -> `W02.P03.S77` -> `W02.P03.S09`
+- `S77` `verify:` `pass`
+- `S78` `A` `src/vaultspec_a2a/thread/action_receipts.py`
+- `S78` `M` `src/vaultspec_a2a/thread/state.py`
+- `S78` `A` `src/vaultspec_a2a/thread/tests/test_action_receipts.py`
+- `S78` `A` `.vault/audit/2026-09-06-embedded-runtime-remediation-recovery-architecture-audit.md`
+- `S78` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S78` `verify:` `two real-checkpoint receipt tests with bounded process ownership` -> `pass`
+- `S78` `verify:` `Ruff and Ty on three changed source/test paths` -> `pass`
+- `S80` `T`
+- `S81` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S81` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S81` `verify:` `.venv/Scripts/python.exe -m vaultspec_a2a.testing.runner --run-timeout 90 --exit-timeout 5 -- src/vaultspec_a2a/providers/tests/test_codex_chat_model.py -q` -> `pass`
+- `S81` `verify:` `.venv/Scripts/python.exe -m vaultspec_a2a.testing.runner --run-timeout 45 --exit-timeout 5 -- src/vaultspec_a2a/providers/tests/test_codex_chat_model.py -q -k "native_interrupt or native_control"` -> `pass`
+- `S81` `verify:` `.venv/Scripts/python.exe -m ruff check src/vaultspec_a2a/providers/codex_chat_model.py src/vaultspec_a2a/providers/tests/test_codex_chat_model.py` -> `pass`
+- `S81` `verify:` `.venv/Scripts/python.exe -m ty check src/vaultspec_a2a/providers/codex_chat_model.py src/vaultspec_a2a/providers/tests/test_codex_chat_model.py` -> `pass`
+- `S83` `A` `src/vaultspec_a2a/control/recovery.py`
+- `S83` `A` `src/vaultspec_a2a/control/tests/test_recovery_attempt_repository.py`
+- `S83` `A` `src/vaultspec_a2a/database/migrations/versions/0019_recovery_attempts.py`
+- `S83` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S83` `M` `src/vaultspec_a2a/database/_helpers.py`
+- `S83` `M` `src/vaultspec_a2a/database/admin.py`
+- `S83` `verify:` `complete current direct-control recovery module, three cases in 21.63 seconds` -> `pass`
+- `S83` `verify:` `strengthened permanent project-refusal discriminator, one case in 5.27 seconds` -> `pass`
+- `S83` `verify:` `durable recovery repository, three real SQLite cases in 3.17 seconds` -> `pass`
+- `S83` `verify:` `model-to-migration parity, 56 cases in 8.77 seconds` -> `pass`
+- `S83` `verify:` `focused Ruff and Ty` -> `pass`
+- `S83` `verify:` `combined repository, parity and migration-authority lane` -> `fail: owner reaped at 60 seconds after 65 emitted cases without a session result; no emitted case counted`
+- `S84` `D` `src/vaultspec_a2a/control/tests/test_reconciling_abandonment.py`
+- `S85` `A` `src/vaultspec_a2a/testing/runner.py`
+- `S85` `A` `src/vaultspec_a2a/testing/runner_child.py`
+- `S85` `M` `src/vaultspec_a2a/testing/plugin.py`
+- `S85` `A` `src/vaultspec_a2a/testing/tests/_runner_exit_probe.py`
+- `S85` `A` `src/vaultspec_a2a/testing/tests/_runner_descendant_probe.py`
+- `S85` `A` `src/vaultspec_a2a/testing/tests/test_runner.py`
+- `S85` `M` `src/vaultspec_a2a/utils/process.py`
+- `S85` `M` `dev/toolchain.py`
+- `S85` `M` `dev/just/test.just`
+- `S85` `M` `dev/just/build.just`
+- `S85` `M` `dev/tests/test_ci_contract.py`
+- `S85` `verify:` `uv run python -m vaultspec_a2a.testing.runner --run-timeout 120 --exit-timeout 5 -- src/vaultspec_a2a/testing/tests/test_runner.py dev/tests/test_ci_contract.py -q` -> `pass`
+- `S86` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S86` `M` `src/vaultspec_a2a/control/tests/test_thread_service_tokens.py`
+- `S86` `M` `.vault/adr/2026-08-02-control-action-leases-adr.md`
+- `S86` `M` `.vault/research/2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research.md`
+- `S86` `M` `.vault/audit/2026-09-06-embedded-runtime-remediation-recovery-architecture-audit.md`
+- `S86` `M` `.vault/plan/2026-09-05-embedded-runtime-remediation-plan.md`
+- `S86` `verify:` `resource-aware runner: six thread-service admission and race tests` -> `pass`
+- `S86` `verify:` `Ruff and Ty on the two changed source/test paths` -> `pass`
+- `S87` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S87` `A` `src/vaultspec_a2a/graph/nodes/action_completion.py`
+- `S87` `A` `src/vaultspec_a2a/graph/tests/nodes/test_action_completion.py`
+- `S87` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S87` `M` `src/vaultspec_a2a/thread/action_receipts.py`
+- `S87` `M` `src/vaultspec_a2a/thread/state.py`
+- `S87` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S87` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S87` `verify:` `bounded runner: interruption/reopen, topology routes and worker active-action input` -> `pass`
+- `S88` `T`
+- `S89` `T`
+- `S90` `M` `src/vaultspec_a2a/control/worker_management.py`
+- `S90` `M` `src/vaultspec_a2a/control/tests/test_worker_provenance.py`
+- `S90` `verify:` `.venv/Scripts/python.exe -m vaultspec_a2a.testing.runner --run-timeout 60 --exit-timeout 5 -- src/vaultspec_a2a/control/tests/test_worker_provenance.py -q -k "attaches_to_a_same_gateway or refuses_missing_or_blank or auto_spawn_does_not_evict"` -> `pass`
+- `S90` `verify:` `.venv/Scripts/python.exe -m ruff check src/vaultspec_a2a/control/worker_management.py src/vaultspec_a2a/control/tests/test_worker_provenance.py` -> `pass`
+- `S90` `verify:` `.venv/Scripts/python.exe -m ty check src/vaultspec_a2a/control/worker_management.py src/vaultspec_a2a/control/tests/test_worker_provenance.py` -> `pass`
+
+## Notes
+
+- `S01` `cargo test -p vaultspec-product gateway_drain` and `cargo test -p vaultspec-api a2a_lifecycle` could not start because Cargo resolves to `C:\ci-shared\cargo\bin\cargo.exe` and Windows reports that no application is associated with the specified file. This is queued as `dashboard-rust-toolchain-unlaunchable` (low, validation environment, open/non-blocking) for repair and rerun before S02 consumer-contract verification; it is not recorded as a product-test failure.
+- `S02` The authoritative coordinated contract is Dashboard reference `2026-09-05-a2a-integration-verification-embedded-runtime-coordinated-contract-reference` at Dashboard commit `89706fb2641bd5482667437ae1e4abf2d8194fd8`. Runtime wire behavior remains assigned to `S43`-`S50`.
+- `S03` The excluded route test reads checkout-local `.env` settings and expected OpenAI to be unavailable although this host resolved it available. The rolling audit records the test-isolation defect under `provider-catalog-route-host-state-leak`; no credential value was captured. The passing local tests and historical admission citations are structural checks only and do not satisfy provider-model-catalog `P03.S19` or `P03.S20`.
+- `S04` The original evidence used an unsupported no-op environment option and placeholder probes. The correction uses task-specific `UV_PROJECT_ENVIRONMENT` directories, explicit locked synchronization, and `uv run --no-sync`; the shared `.venv` is outside every corrected command.
+- `S04` ### Server profile and URL/engine suite
+- `S04` Run from `Y:\code\vaultspec-a2a-worktrees\main`:
+- `S04` ```powershell
+- `S04` $env:UV_PROJECT_ENVIRONMENT=[IO.Path]::GetFullPath((Join-Path (Get-Location) 'tmp/embedded-runtime-remediation-s04/server-env'))
+- `S04` uv sync --locked --no-default-groups --extra server --group tooling
+- `S04` @"
+- `S04` import hashlib,importlib.metadata as md,json,subprocess,sys,tomllib
+- `S04` from pathlib import Path
+- `S04` root=Path.cwd(); project=tomllib.loads((root/'pyproject.toml').read_text(encoding='utf-8'))
+- `S04` def version(dist):
+- `S04` try: return md.version(dist)
+- `S04` except md.PackageNotFoundError: return None
+- `S04` out={'profile':'server','project_root':str(root.resolve()),'environment':str(Path(sys.prefix).resolve()),'head':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'server_requirements':project['project']['optional-dependencies']['server'],'freeze_requirements':project['dependency-groups']['freeze'],'installed':{dist:version(dist) for dist in ('asyncpg','psycopg','psycopg-binary','psycopg-pool','langgraph-checkpoint-postgres','pytest','vaultspec-a2a')}}
+- `S04` raw=json.dumps(out,sort_keys=True,separators=(',',':')); print(raw); print(hashlib.sha256(raw.encode()).hexdigest().upper())
+- `S04` "@ | uv run --no-sync python -
+- `S04` uv run --no-sync python -m pytest src/vaultspec_a2a/control/tests/test_sync_url_derivation.py -q
+- `S04` Remove-Item Env:UV_PROJECT_ENVIRONMENT
+- `S04` ```
+- `S04` ```json
+- `S04` {"environment":"Y:\\code\\vaultspec-a2a-worktrees\\main\\tmp\\embedded-runtime-remediation-s04\\server-env","freeze_requirements":["pyinstaller>=6.11","vaultspec-core>=0.1.56,<0.2"],"head":"5e8cbb7b78d990f269e03c3dfe2a27ddb7a72ff8","installed":{"asyncpg":"0.31.0","langgraph-checkpoint-postgres":"3.1.2","psycopg":"3.3.5","psycopg-binary":"3.3.5","psycopg-pool":"3.3.1","pytest":"9.1.1","vaultspec-a2a":"0.3.0"},"profile":"server","project_root":"Y:\\code\\vaultspec-a2a-worktrees\\main","server_requirements":["asyncpg>=0.30.0","langgraph-checkpoint-postgres>=2.0.0","opentelemetry-exporter-otlp-proto-grpc>=1.39.1","psycopg[binary,pool]>=3.2.9"]}
+- `S04` ```
+- `S04` SHA-256 `72A2469C6A2956EC43258544492963DEF6F246AB3DD6DC3D409DDDCEBE6D9EBD`; pytest: 15 passed.
+- `S04` ### Freeze-only driver absence
+- `S04` ```powershell
+- `S04` $env:UV_PROJECT_ENVIRONMENT=[IO.Path]::GetFullPath((Join-Path (Get-Location) 'tmp/embedded-runtime-remediation-s04/freeze-env'))
+- `S04` uv sync --locked --no-default-groups --group freeze
+- `S04` @"
+- `S04` import hashlib,importlib.metadata as md,importlib.util,json,subprocess,sys,tomllib
+- `S04` from pathlib import Path
+- `S04` root=Path.cwd(); project=tomllib.loads((root/'pyproject.toml').read_text(encoding='utf-8'))
+- `S04` def version(dist):
+- `S04` try: return md.version(dist)
+- `S04` except md.PackageNotFoundError: return None
+- `S04` blocked=('asyncpg','psycopg','langgraph.checkpoint.postgres')
+- `S04` out={'profile':'freeze','project_root':str(root.resolve()),'environment':str(Path(sys.prefix).resolve()),'head':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'freeze_requirements':project['dependency-groups']['freeze'],'server_requirements':project['project']['optional-dependencies']['server'],'blocked_imports':{name:importlib.util.find_spec(name) is not None for name in blocked},'installed':{dist:version(dist) for dist in ('pyinstaller','vaultspec-core','vaultspec-a2a','asyncpg','psycopg','langgraph-checkpoint-postgres')}}
+- `S04` raw=json.dumps(out,sort_keys=True,separators=(',',':')); print(raw); print(hashlib.sha256(raw.encode()).hexdigest().upper()); assert not any(out['blocked_imports'].values()); assert all(out['installed'][name] is None for name in ('asyncpg','psycopg','langgraph-checkpoint-postgres'))
+- `S04` "@ | uv run --no-sync python -
+- `S04` Remove-Item Env:UV_PROJECT_ENVIRONMENT
+- `S04` ```
+- `S04` ```json
+- `S04` {"blocked_imports":{"asyncpg":false,"langgraph.checkpoint.postgres":false,"psycopg":false},"environment":"Y:\\code\\vaultspec-a2a-worktrees\\main\\tmp\\embedded-runtime-remediation-s04\\freeze-env","freeze_requirements":["pyinstaller>=6.11","vaultspec-core>=0.1.56,<0.2"],"head":"5e8cbb7b78d990f269e03c3dfe2a27ddb7a72ff8","installed":{"asyncpg":null,"langgraph-checkpoint-postgres":null,"psycopg":null,"pyinstaller":"6.22.2","vaultspec-a2a":"0.3.0","vaultspec-core":"0.1.73"},"profile":"freeze","project_root":"Y:\\code\\vaultspec-a2a-worktrees\\main","server_requirements":["asyncpg>=0.30.0","langgraph-checkpoint-postgres>=2.0.0","opentelemetry-exporter-otlp-proto-grpc>=1.39.1","psycopg[binary,pool]>=3.2.9"]}
+- `S04` ```
+- `S04` SHA-256 `F4EAE3C18DA15E33EA94FE9FE7ED240D1213D0726F75ABAA7D2EBFD493B4FCDF`.
+- `S04` ### Server-equipped build and blocked-module scan
+- `S04` ```powershell
+- `S04` $env:UV_PROJECT_ENVIRONMENT=[IO.Path]::GetFullPath((Join-Path (Get-Location) 'tmp/embedded-runtime-remediation-s04/build-env'))
+- `S04` uv sync --locked --no-default-groups --extra server --group freeze
+- `S04` @"
+- `S04` import hashlib,importlib.metadata as md,json,subprocess,sys
+- `S04` from pathlib import Path
+- `S04` def version(dist):
+- `S04` try: return md.version(dist)
+- `S04` except md.PackageNotFoundError: return None
+- `S04` root=Path.cwd(); out={'profile':'server+freeze-build','project_root':str(root.resolve()),'environment':str(Path(sys.prefix).resolve()),'head':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'installed':{dist:version(dist) for dist in ('pyinstaller','vaultspec-core','vaultspec-a2a','asyncpg','psycopg','psycopg-binary','psycopg-pool','langgraph-checkpoint-postgres')}}
+- `S04` raw=json.dumps(out,sort_keys=True,separators=(',',':')); print(raw); print(hashlib.sha256(raw.encode()).hexdigest().upper())
+- `S04` "@ | uv run --no-sync python -
+- `S04` uv run --no-sync python scripts/build_binary.py --dist tmp/embedded-runtime-remediation-s04/dist
+- `S04` @"
+- `S04` import ast,hashlib,json,re,sys
+- `S04` from pathlib import Path
+- `S04` root=Path.cwd().resolve(); artifact=(root/'tmp/embedded-runtime-remediation-s04/dist/vaultspec-a2a').resolve(); toc=(root/'build/vaultspec-a2a/PYZ-00.toc').resolve(); binary=artifact/'vaultspec-a2a.exe'
+- `S04` blocked_roots=('asyncpg','psycopg','langgraph.checkpoint.postgres')
+- `S04` parsed=ast.literal_eval(toc.read_text(encoding='utf-8')); modules=sorted(row[0] for row in parsed[1]); blocked_modules=sorted(name for name in modules if any(name==base or name.startswith(base+'.') for base in blocked_roots))
+- `S04` files=sorted(path for path in artifact.rglob('*') if path.is_file()); relatives=[path.relative_to(artifact).as_posix() for path in files]; path_pattern=re.compile(r'(?i)(^|/)(?:asyncpg|psycopg)(?:[._/-]|$)|(^|/)langgraph/checkpoint/postgres(?:[._/-]|$)'); blocked_paths=sorted(name for name in relatives if path_pattern.search(name))
+- `S04` manifest=hashlib.sha256()
+- `S04` for path,name in zip(files,relatives,strict=True): manifest.update(name.encode()); manifest.update(b'\0'); manifest.update(hashlib.sha256(path.read_bytes()).digest())
+- `S04` out={'environment':str(Path(sys.prefix).resolve()),'artifact_root':str(artifact),'pyz_toc':str(toc),'module_match_grammar':'name == root or name.startswith(root + dot); roots=asyncpg,psycopg,langgraph.checkpoint.postgres','path_match_grammar':path_pattern.pattern,'pyz_module_count':len(modules),'artifact_file_count':len(files),'blocked_modules':blocked_modules,'blocked_paths':blocked_paths,'pyz_toc_sha256':hashlib.sha256(toc.read_bytes()).hexdigest().upper(),'artifact_manifest_sha256':manifest.hexdigest().upper(),'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest().upper()}
+- `S04` raw=json.dumps(out,sort_keys=True,separators=(',',':')); print(raw); print(hashlib.sha256(raw.encode()).hexdigest().upper()); assert not blocked_modules and not blocked_paths
+- `S04` "@ | uv run --no-sync python -
+- `S04` Remove-Item Env:UV_PROJECT_ENVIRONMENT
+- `S04` ```
+- `S04` Build-profile output:
+- `S04` ```json
+- `S04` {"environment":"Y:\\code\\vaultspec-a2a-worktrees\\main\\tmp\\embedded-runtime-remediation-s04\\build-env","head":"5e8cbb7b78d990f269e03c3dfe2a27ddb7a72ff8","installed":{"asyncpg":"0.31.0","langgraph-checkpoint-postgres":"3.1.2","psycopg":"3.3.5","psycopg-binary":"3.3.5","psycopg-pool":"3.3.1","pyinstaller":"6.22.2","vaultspec-a2a":"0.3.0","vaultspec-core":"0.1.73"},"profile":"server+freeze-build","project_root":"Y:\\code\\vaultspec-a2a-worktrees\\main"}
+- `S04` ```
+- `S04` SHA-256 `C33782735C1BD675894952BBE93752946A103AAE4EC480A588D750B2DF94DA56`.
+- `S04` Scan output:
+- `S04` ```json
+- `S04` {"artifact_file_count":2746,"artifact_manifest_sha256":"1AE311B54FFCE2672E67F0AA34F12F72C5860E0897A3F54E8A2B9026E4097D73","artifact_root":"Y:\\code\\vaultspec-a2a-worktrees\\main\\tmp\\embedded-runtime-remediation-s04\\dist\\vaultspec-a2a","binary_sha256":"474B0E685AF45C6070D1C96E9792832F15D0D1A4E9ADCE750CCFD8191C6BF9DD","blocked_modules":[],"blocked_paths":[],"environment":"Y:\\code\\vaultspec-a2a-worktrees\\main\\tmp\\embedded-runtime-remediation-s04\\build-env","module_match_grammar":"name == root or name.startswith(root + dot); roots=asyncpg,psycopg,langgraph.checkpoint.postgres","path_match_grammar":"(?i)(^|/)(?:asyncpg|psycopg)(?:[._/-]|$)|(^|/)langgraph/checkpoint/postgres(?:[._/-]|$)","pyz_module_count":5720,"pyz_toc":"Y:\\code\\vaultspec-a2a-worktrees\\main\\build\\vaultspec-a2a\\PYZ-00.toc","pyz_toc_sha256":"06AA128FA3F0723EA4772C10D45132D16C6F5FAEEEAD29E03538F14724755DBA"}
+- `S04` ```
+- `S04` SHA-256 `A0D70509F1B8FE6233C4B5CA7B70E511A01DF345649BBEAA19E303DF5B49B059`.
+- `S04` The build again exposed the existing `frozen-binary-collects-test-modules` finding. It remains medium/open under `W04.P10.S50`, with proof at `W05.P13.S65`. This diagnostic build ran while unrelated shared-worktree changes were present; it is not a release artifact.
+- `S04` ### Source and working-tree boundary
+- `S04` The replay input hashes are `pyproject.toml` `053DD14A...`, `uv.lock` `CEE4A33B...`, the PyInstaller spec `8F68285D...`, `scripts/build_binary.py` `6B07B8EA...`, and the URL test `8D0C6DE5...`. The canonical source/status capture at head `5e8cbb7b78d990f269e03c3dfe2a27ddb7a72ff8` hashes to `15CBFE69856D5EFD6490C62455E955663A558D5D1F005D667D682B73B8C849DB`; it lists the S04 plan/pyproject changes and every concurrent codebase-health/runtime path, all preserved outside this commit.
+- `S04` ### Removed-option assertion
+- `S04` ```powershell
+- `S04` $removedOption='--'+'isolated'
+- `S04` $files=@('pyproject.toml','src/vaultspec_a2a/control/tests/test_sync_url_derivation.py','.vault/audit/2026-09-05-embedded-runtime-robustness-audit.md','.vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md','.vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W01-P02-S04.md')
+- `S04` $matches=@(Select-String -LiteralPath $files -SimpleMatch $removedOption)
+- `S04` $raw=([ordered]@{files=$files;match_count=$matches.Count}|ConvertTo-Json -Compress)
+- `S04` $raw
+- `S04` [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($raw)))
+- `S04` if($matches.Count -ne 0){$matches|ForEach-Object{"$($_.Path):$($_.LineNumber):$($_.Line)"};exit 1}
+- `S04` ```
+- `S04` ```json
+- `S04` {"files":["pyproject.toml","src/vaultspec_a2a/control/tests/test_sync_url_derivation.py",".vault/audit/2026-09-05-embedded-runtime-robustness-audit.md",".vault/audit/2026-09-05-embedded-runtime-remediation-implementation-review-audit.md",".vault/exec/2026-09-05-embedded-runtime-remediation/2026-09-05-embedded-runtime-remediation-W01-P02-S04.md"],"match_count":0}
+- `S04` ```
+- `S04` SHA-256 `8735358CD9B1B5698509F0F9953DB772001638670CF8638839C8E7C532EDEE93`.
+- `S10` The full deletion module reached its bound without process exit during formal review. The reviewer terminated only its exact owned process tree and verified no survivor; no full-module pass is claimed. A paired cancel test command also reached 100 percent before hanging after suite completion; its exact session was interrupted, and both nodes later passed as separate normal-exit runs.
+- `S10` `verify:` `uv run --no-sync python -m pytest <four exact-current recovery and race nodes> -q --timeout=30` -> `pass`
+- `S11` Commit `4001cc77` is a partial implementation and received formal **FAIL**. Active discovery can serve one pre-election `reconciling` projection after a newer terminal writer wins, and the test checks only durable state. The plan and binding ADRs now replace split recovery ownership with one durable coordinator covering conditions 1-16. The Step remains open.
+- `S11` The focused pytest command emitted `14 passed in 25.05s` but did not exit naturally by 30 seconds. Exact session `74355` was interrupted and no matching pytest process survived. Condition 17 is now explicit plan Step S85 under the verification lifecycle owner.
+- `S12` Partial S12 implementation. Continuing verification: atomic acceptance and database bootstrap passed four tests in 39.19 seconds with bounded runner exit 0. Cancellation cessation/no-op evidence, atomic follow-up admission and complete receipt consumption remain open in the recovery architecture audit. S12 remains unchecked; these focused passes do not establish complete recovery or a green worker suite.
+- `S13` This partial S13 increment moves exact cancellation settlement behind the durable writer election. Valid `cancellation-evidence-v1` must name the current cancellation receipt while the thread remains under that exact cancelling authority. The election, terminal projection, permission cleanup, exact action disposition and repair projection commit in one transaction. Stale or mismatched evidence changes nothing and does not release the drain gate.
+- `S13` Formal review findings:
+- `S13` HIGH / stale terminal overwrite: cancellation evidence previously validated action identity but still reached an unconditional lifecycle write, allowing an obsolete worker terminal to overwrite newer authority -> resolved for evidence-bearing cancellation terminals.
+- `S13` HIGH / non-atomic settlement: lifecycle state and exact cancellation action effects were not elected and committed as one winner -> resolved for evidence-bearing cancellation terminals.
+- `S13` HIGH / unauthorised generic terminal: cancelled events without cancellation evidence, and completed or failed events, still use the unconditional terminal writer -> open in S13.
+- `S13` HIGH / incomplete receipt validation: progress-event application settlement still trusts dispatch identity without validating the complete durable receipt -> open in S13.
+- `S13` MEDIUM / duplicate evidence observation: replay after the first cancellation commit is refused as stale rather than acknowledged as an idempotent duplicate -> open for S13 review with the durable delivery owner.
+- `S13` Evidence exited naturally: four focused cancellation cases passed in 5.85 seconds, then the complete event-handler and state-projection modules passed 24 cases in 3.22 seconds. The Step remains open.
+- `S47` Formal review `b80e843b` failed the first implementation; correction `b83ad5ba` resolved all five findings and formal rereview `2279eb52` passed. S47 owns `_bind_server_shutdown_owner` and its `main` call in `api/app.py`. S49 separately owns the total deadline, stream drain, owned-child cleanup and forced escalation around that seam; ER15 remains open only for that S49 closure. S48 discovery remains unchanged.
+- `S49` S47's prerequisite cooperative server owner is isolated in implementation `24dab547` and formal-FAIL correction `b83ad5ba`. S48 discovery ownership is unchanged, and S50 retains full frozen-worker lifecycle proof. The bridge's undelivered event remains only in memory, so durable terminal delivery stays HIGH/open under W02.P03.S14.
+- `S49` The instrumented production restart check crossed real catalog discovery but timed out with three current-schema runs still reconciling and the demand run still running. It never initiated shutdown. The separate HIGH recovery hang has the currently open correction owner `2026-08-05-served-capability-contract-plan W04.P08.S56`; this plan's open W02.P03.S11 owns verification and atomic-election integration. Exact last state and zero-process-residue evidence are retained in the audits and research.
+- `S49` Formal review `dcac3b27` failed S49 on a late child created inside the cooperative request after the original identity snapshot. The correction makes containment mandatory for every gateway spawn, seats restored uncontained roots before cooperation, skips cooperation when seating cannot be established, and runs forced cleanup plus handle release in a cancellation-safe `finally`. Real initially uncontained/then-seated and precontained late-child variants both exit root and child within the original four-second deadline without a host-wide scan or reused-pid risk. S49 stays open for rereview.
+- `S76` The HIGH persistence dependency remains open under `W02.P03.S77`: it must atomically install and map all four required authority fields and refuse populated pre-current or unknown stores without nullable fields, defaults, backfill, translation, substitution or execution.
+- `S76` The independent 131-case database command emitted `[100%]` but did not terminate within 90 seconds. Review session `71187` was interrupted and returned with no retained session; no separately retained child identity was exposed. This MEDIUM developer-time blocker remains open under the `resource-aware-test-execution` follow-up in `src/vaultspec_a2a/testing`. Its emitted case lines are not counted as an independent completed pass; the implementation author's completed 131-pass run remains separate evidence.
+- `S77` The compatibility rerun reached all 15 passing nodes and 100% before the separately queued pytest teardown stall. Session `62322` was interrupted immediately; its exact command-line process was absent. The completed four-case discriminator is the terminal pytest pass for S77.
+- `S77` Formal rereview `e52bd82e` found that the initial balanced extractor could count required constraint text hidden in SQLite comments. The correction lexes SQLite table DDL, excludes comments, literals and quoted identifiers from discovery and balancing, preserves actual predicate literals, and fails closed on malformed or duplicate declarations. S77 remains open for another formal rereview; the live PostgreSQL catalog evidence and test teardown findings remain open.
+- `S77` Formal PASS `9ca08596` accepts correction `48c661c2` and the complete S77 chain. Both HIGH schema-integrity findings are closed. Live PostgreSQL catalog and future-migration evidence remains MEDIUM/open under the locked PostgreSQL server-profile evidence follow-up. The post-result pytest teardown hang remains MEDIUM/open under `resource-aware-test-execution` in `src/vaultspec_a2a/testing`, with sessions `62322`, `96385`, and `50170` retained as evidence. Lifecycle closure adds no runtime behavior or legacy, deprecated, default, backfill, translation, alias, fallback, or compatibility path.
+- `S78` Production receipt producers remain under S12. No recovery condition is closed by this declaration step.
+- `S81` Codex compaction remains unavailable because the current per-generation ephemeral thread lifecycle cannot provide durable context-state effect proof. Consumer exposure remains assigned to W04.P09.S42 and W04.P09.S45.
+- `S83` The first S83 increment removed the permanent-refusal retry loop. An impossible exact current accepted action is locked, revalidated, moved to RECONCILING when needed, settled as `rejected_invalid_state`, and marked `operator_intervention_required` with its typed refusal reason.
+- `S83` The second increment installs the durable schedule authority. `recovery_attempts` carries an exact current writer identity, closed condition, positive attempt count, next eligibility, mandatory immutable deadline, renewable claim and settlement timestamp. Database constraints reject incomplete claims, invalid ordering, unknown conditions, unsupported action kinds and malformed receipt identities. The producer locks and revalidates the current thread and accepted action before creating or advancing the one row allowed for that writer. Due work is claimed with a bounded compare-and-set page; reschedule and settlement require the exact claim token. Migration 0019 refuses a populated store because missing retry history and deadlines cannot be reconstructed.
+- `S83` Formal review findings:
+- `S83` HIGH / infinite permanent-refusal loop: recovery made an impossible accepted action immediately eligible forever -> resolved in `955ede7b`.
+- `S83` HIGH / missing durable schedule authority: no row could name classification, attempt, eligibility, deadline or lease ownership -> resolved in the current schema increment.
+- `S83` HIGH / fabricated or stale retry identity: an unvalidated caller could otherwise create retry work for a writer that did not own the thread -> resolved by locked exact thread and action revalidation.
+- `S83` HIGH / runtime producer adoption: dispatch failures do not yet create or advance the durable schedule -> open in S83.
+- `S83` HIGH / missing ordinary-operation owner: the gateway still runs startup recovery plus at most one lease-delay retry -> open in S83/S14.
+- `S83` HIGH / permanent classification queryability: the refusal type is still durable only in repair prose until permanent outcomes write a settled attempt -> open in S83.
+- `S83` MEDIUM / settled-ledger retention: settled attempts are retained with the permanent run record and currently have no independent bound -> queued for the storage-retention work after scheduler adoption establishes required history.
+- `S83` MEDIUM / recovery precedence: checkpoint-proven completion may supersede a project refusal -> intentional durable truth precedence; the scheduler matrix still needs the explicit proof in S84.
+- `S83` S83 remains open.
+- `S86` A preceding six-case attempt printed case dots but exceeded its 60-second process deadline; it was terminated with zero survivors and remains failed verification evidence. The bounded resource-aware rerun completed naturally: six passed in 3.54 seconds, exit 0. Recovery consumption remains under S11/S12/S83.
+- `S88` The filesystem cleanup overwrite and nested self-test pipe hang are resolved. The separately classified medium finding for pre-result startup and collection deadlines remains queued in the audit.
+- `S90` The full provenance file emitted eight passing case markers but did not produce a pytest session result within 90 seconds. The bounded owner reported `tree_reaped=true`; that invocation is retained as FAIL. The three changed adoption and refusal cases passed in 2.47 seconds and exited naturally.

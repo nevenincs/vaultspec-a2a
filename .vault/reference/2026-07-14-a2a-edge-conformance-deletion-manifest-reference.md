@@ -44,10 +44,14 @@ code imported from it by the backend.
 
   ```python
   if settings.ui_build_dir.is_dir():
-      app.mount("/", StaticFiles(directory=str(settings.ui_build_dir), html=True), name="ui")
+      app.mount(
+          "/", StaticFiles(directory=str(settings.ui_build_dir), html=True), name="ui"
+      )
       logger.info("Mounted React SPA from %s", settings.ui_build_dir)
   else:
-      logger.warning("SPA build not found at %s -- UI will not be served", settings.ui_build_dir)
+      logger.warning(
+          "SPA build not found at %s -- UI will not be served", settings.ui_build_dir
+      )
   ```
 
   Delete this whole `if/else` block, the `StaticFiles` import

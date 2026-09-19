@@ -4,24 +4,10 @@ tags:
   - '#index'
   - '#desktop-product-profile'
 date: '2026-07-22'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:ae0d13a621dd27c815504b335b802046e50256857242972b8e5675d32c5969b7'
+body_hash: 'sha256:4ce19e332990bb2164629f6fb45e91c26061df0ef4b45c585343fbcbe0d14eb3'
 related:
-  - '[[2026-07-18-desktop-product-profile-W01-P01-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W01-P02-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W02-P04-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W02-P05-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W02-P06-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W03-P07-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W03-P08-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W03-P09-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W04-P10-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W04-P11-S60]]'
-  - '[[2026-07-18-desktop-product-profile-W04-P11-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W04-P12-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W05-P13-summary]]'
-  - '[[2026-07-18-desktop-product-profile-W05-P14-summary]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-certification-audit]]'
   - '[[2026-07-18-desktop-product-profile-ledger]]'
@@ -61,20 +47,6 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 ### exec
 
 - `2026-07-18-desktop-product-profile-ledger` - `desktop-product-profile` ledger
-- `2026-07-18-desktop-product-profile-W01-P01-summary` - `desktop-product-profile` `W01.P01` summary
-- `2026-07-18-desktop-product-profile-W01-P02-summary` - `desktop-product-profile` `W01.P02` summary
-- `2026-07-18-desktop-product-profile-W02-P04-summary` - `desktop-product-profile` `W02.P04` summary
-- `2026-07-18-desktop-product-profile-W02-P05-summary` - `desktop-product-profile` `W02.P05` summary
-- `2026-07-18-desktop-product-profile-W02-P06-summary` - `desktop-product-profile` `W02.P06` summary
-- `2026-07-18-desktop-product-profile-W03-P07-summary` - `desktop-product-profile` `W03.P07` summary
-- `2026-07-18-desktop-product-profile-W03-P08-summary` - `desktop-product-profile` `W03.P08` summary
-- `2026-07-18-desktop-product-profile-W03-P09-summary` - `desktop-product-profile` `W03.P09` summary
-- `2026-07-18-desktop-product-profile-W04-P10-summary` - `desktop-product-profile` `W04.P10` summary
-- `2026-07-18-desktop-product-profile-W04-P11-summary` - `desktop-product-profile` `W04.P11` summary
-- `2026-07-18-desktop-product-profile-W04-P12-summary` - `desktop-product-profile` `W04.P12` summary
-- `2026-07-18-desktop-product-profile-W05-P13-summary` - `desktop-product-profile` `W05.P13` summary
-- `2026-07-18-desktop-product-profile-W05-P14-summary` - `desktop-product-profile` `W05.P14` summary
-- `2026-07-18-desktop-product-profile-W04-P11-S60` - Spawn each run-owned ACP or Codex provider root in a POSIX new session and owned process group or an assigned Windows Job Object or equivalently proven OS-owned job or tree before descendant work; correct empty-containment false success and prove assignment-failure cleanup through the exact retained provider identity before returning the spawn
 
 ### plan
 

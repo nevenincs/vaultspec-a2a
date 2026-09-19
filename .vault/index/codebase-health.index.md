@@ -4,11 +4,10 @@ tags:
   - '#index'
   - '#codebase-health'
 date: '2026-08-05'
-modified: '2026-09-05'
+modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:3b425b6397e39fedec70eb28a371667c8ede8767428b18eb63e5c4478105297b'
+body_hash: 'sha256:eb0162f5bb16310bd916e448b2d778c32c96aa011c63100c5624b5f0e3b5a2ff'
 related:
-  - '[[2026-07-19-codebase-health-W03-P10-S184]]'
   - '[[2026-07-19-codebase-health-W03-P10-summary]]'
   - '[[2026-07-19-codebase-health-adr]]'
   - '[[2026-07-19-codebase-health-audit]]'
@@ -47,7 +46,6 @@ Auto-generated index of all documents tagged with `#codebase-health`.
 ### exec
 
 - `2026-07-19-codebase-health-ledger` - `codebase-health` ledger
-- `2026-07-19-codebase-health-W03-P10-S184` - Repair cross-platform owned-process termination cancellation and terminal admission races, prove real descendant and handle cleanup, and record the rolling review findings
 - `2026-07-19-codebase-health-W03-P10-summary` - `codebase-health` `W03.P10` summary
 
 ### plan

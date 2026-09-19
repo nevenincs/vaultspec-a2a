@@ -4,12 +4,10 @@ tags:
   - '#index'
   - '#provider-model-catalog'
 date: '2026-08-05'
-modified: '2026-09-06'
+modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:bf8a96b4fe03dababa53ab29ebe8d7e559a13f78bbdf8a0aaa0d1f5ccb169574'
+body_hash: 'sha256:df67612e25a15918191c5722d0e8326afc51fd661dfe70ab735a0153e0f1a65c'
 related:
-  - '[[2026-08-02-provider-model-catalog-P01-S10]]'
-  - '[[2026-08-02-provider-model-catalog-P01-S11]]'
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-08-02-provider-model-catalog-catalog-registration-p01s06-review-audit]]'
   - '[[2026-08-02-provider-model-catalog-dashboard-health-p02s16-audit]]'
@@ -61,8 +59,6 @@ Auto-generated index of all documents tagged with `#provider-model-catalog`.
 ### exec
 
 - `2026-08-02-provider-model-catalog-ledger` - `provider-model-catalog` ledger
-- `2026-08-02-provider-model-catalog-P01-S10` - Remove every product provider/model/profile authority, static external model map, deprecated provider alias, legacy reader/writer/DTO and legacy restart or redispatch branch; remove the ACP `models.availableModels` compatibility fallback and retire the complete `gemini/gemini-cli-acp` provider, execution-mode, settings, auth, provisioning, permission, preset, factory, catalog and wire surface; reject retired input and stored state with a typed unsupported/incompatible outcome before construction or dispatch, without translation, migration or substitution
-- `2026-08-02-provider-model-catalog-P01-S11` - Prove current provider catalog behavior, exact frozen restart and typed retirement refusal
 
 ### plan
 

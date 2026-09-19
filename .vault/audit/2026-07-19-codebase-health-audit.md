@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:0853fca0964cf6ccc96ee16f8cdc5eb3a8f6b4d40623af4e4fd3c6be6474ca82'
+body_hash: 'sha256:e03e6b2b33bf2e8734534e21b29692832e2e0510a56235fe7a1c04e30bc0235c'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3144,3 +3144,9 @@ Two low-severity strict argument-shape findings were resolved in tests. The comp
 ### 2026-09-20 complete combined-branch nonservice result
 
 The four-worker nonservice repository suite completed after the resource-aware test changes and strict test-shape edits: 4,536 passed, one declared live-engine skip, and two Windows Proactor transport warnings in 402.43 seconds. No test failed. This closes the prior need for a combined-branch nonservice rerun. The warnings and live-engine prerequisite remain recorded environment/test-cleanup items; the strict structure, nesting, and Pylint findings remain open.
+
+### 2026-09-20 startup redispatch structure review pass
+
+The strict gate found three medium-severity structure findings and one nested-block finding in the startup reconciliation sweep. The sweep now delegates metadata parsing, incompatible-authority refusal, missing-project refusal, accepted-action restoration, and batch failure summarization to focused helpers. Review checked that each refusal still commits before continuing, malformed metadata remains local to its thread, accepted dispatch remains bound to the stored authority, and each failure ladder category retains all thread IDs. Thirteen real redispatch tests pass, including fresh-worker restart, stale authority, missing project, and repeated circuit-open behavior. `just check-all`, `just check-type-strict`, and complexipy for the module pass. Strict Ruff structure falls from 316 to 313 and nested-block findings fall from 33 to 32.
+
+Strict typing also exposed one low-severity test import-boundary finding from the earlier cancellation retry proof: it read a non-exported claim helper through `cancel_service`. The test now imports that helper from its owning `action_lease` module; its focused test and the full strict type gate pass. The remaining 313 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.

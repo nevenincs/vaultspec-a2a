@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from ...api.tests.clarification_harness import new_state_graph
 from ...control import cancel_service
 from ...control.accepted_input import freeze_accepted_input
+from ...control.action_lease import prepare_control_action_claim
 from ...control.cancel_service import CancelResult, cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
@@ -476,7 +477,7 @@ async def test_cancel_retries_sqlite_lock_before_claim(
 ) -> None:
     thread_id = "locked-cancel-thread"
     await _running_thread(session_factory, thread_id)
-    original_claim = cancel_service.prepare_control_action_claim
+    original_claim = prepare_control_action_claim
     attempts = 0
 
     async def locked_once(*args: Any, **kwargs: Any) -> Any:

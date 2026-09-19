@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -30,9 +31,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
+from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
@@ -249,6 +249,7 @@ async def _seed_parked_thread(
                 action_type=authority.action_type,
                 idempotency_key=f"thread-create:{thread_id}",
                 dispatch_id=authority.action_receipt_id,
+                recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 payload=freeze_accepted_input(
                     dispatch, intent={"content": "seed accepted graph authority"}
                 ),

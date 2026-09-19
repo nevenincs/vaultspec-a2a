@@ -28,15 +28,15 @@ import os
 import sqlite3
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
-
-from ..models import Base, ThreadModel
+from ...tests._write_authority import make_test_thread_authority_columns
+from ..models import Base, ControlActionModel, ThreadModel
 from ..session import (
     CheckpointMode,
     WalCheckpointResult,
@@ -436,11 +436,22 @@ def _write_threads(database: Path, count: int) -> None:
     try:
         with Session(engine) as session:
             for index in range(count):
+                authority = make_test_thread_authority_columns()
                 session.add(
                     ThreadModel(
-                        **make_test_thread_authority_columns(),
+                        **authority,
                         id=f"t{index}",
                         status="running",
+                    )
+                )
+                session.add(
+                    ControlActionModel(
+                        id=f"action-t{index}",
+                        thread_id=f"t{index}",
+                        action_type=str(authority["writer_action_type"]),
+                        idempotency_key=f"ingest-t{index}",
+                        dispatch_id=str(authority["writer_action_receipt_id"]),
+                        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                     )
                 )
                 session.commit()

@@ -80,7 +80,7 @@ from ..graph.nodes.diverge import WEB_LOCATOR_KIND
 from ..providers._json_contract import JsonObject
 from ..providers.conditions import ProviderCondition, condition_from_acp_error
 from ..team.team_config import load_team_config
-from ..testing.payloads import json_object, json_object_list
+from ..testing.tests._support.payloads import json_object, json_object_list
 from .test_pw7_acceptance import (
     _GATEWAY_AUTH_HEADERS,
     _MODE_MANUAL,

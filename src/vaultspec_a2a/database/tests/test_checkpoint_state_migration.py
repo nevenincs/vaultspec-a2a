@@ -11,7 +11,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ..checkpoint_schema import (
     install_checkpoint_schema_identity,
-    validate_checkpoint_schema_identity,
+    open_checkpoint_read_only,
+    validate_checkpoint_schema_connection,
 )
 from ..migrations import (
     CheckpointStateMigrationError,
@@ -51,6 +52,15 @@ async def _write_start_staging_checkpoint(path: Path) -> RunnableConfig:
         return await checkpointer.aput(config, checkpoint, {}, {})
 
 
+def _validate_checkpoint_schema(path: Path) -> None:
+    """Run the live read-only schema authority against *path*."""
+    connection = open_checkpoint_read_only(path)
+    try:
+        validate_checkpoint_schema_connection(connection)
+    finally:
+        connection.close()
+
+
 @pytest.mark.asyncio
 async def test_real_serialized_checkpoint_is_backfilled_before_stamp(
     tmp_path: Path,
@@ -63,7 +73,7 @@ async def test_real_serialized_checkpoint_is_backfilled_before_stamp(
     assert count_pending_sdd_backfill(checkpoint_path) == 0
 
     install_checkpoint_schema_identity(checkpoint_path)
-    validate_checkpoint_schema_identity(checkpoint_path)
+    _validate_checkpoint_schema(checkpoint_path)
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         stored = await checkpointer.aget_tuple(config)

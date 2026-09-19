@@ -1,7 +1,7 @@
-"""Probes for the tools every workflow in this repository needs.
+"""Probes for the host tools used by repository workflows.
 
-``just``, ``uv``, Node.js, and npm are required: without any one of them there
-is no harness to run. Each probe reports the resolved version on success so a
+``just`` and ``uv`` are required for Python setup. Node.js and npm are required
+for the Claude ACP runtime. Each probe reports the resolved version so a
 green ``doctor`` run is evidence of what was checked rather than silence.
 """
 
@@ -65,7 +65,7 @@ def _check_uv() -> int:
     return 0
 
 
-def _check_node() -> int:
+def node() -> int:
     """Verify Node.js against the repository pin, then verify npm."""
     if which("node") is None:
         return fail(
@@ -87,7 +87,7 @@ def _check_node() -> int:
 
 
 def required() -> int:
-    """Verify Just, uv, Node.js, and npm and report their resolved versions.
+    """Verify Just and uv and report their resolved versions.
 
     Every check runs even after one fails, so a single invocation reports the
     complete state of the toolchain rather than only the first thing missing.
@@ -96,7 +96,7 @@ def required() -> int:
         0 when every required tool is present and new enough, otherwise 1.
     """
     worst = 0
-    for check in (_check_just, _check_uv, _check_node):
+    for check in (_check_just, _check_uv):
         code = check()
         if code != 0:
             worst = code

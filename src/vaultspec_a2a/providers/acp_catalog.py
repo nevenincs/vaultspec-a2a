@@ -15,8 +15,6 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from pydantic import TypeAdapter
-
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -58,7 +56,6 @@ _MAX_FRAME_BYTES: Final = 1_048_576
 _MAX_FRAMES: Final = 64
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _SUPPORTED_CONTROL_CATEGORIES: Final = frozenset({"thought_level", "model_config"})
-_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
 
 class AcpCatalogProtocolError(AcpSessionError):

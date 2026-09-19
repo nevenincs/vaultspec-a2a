@@ -1,12 +1,8 @@
-"""Boot-reboot reconciliation over a paused_resumable thread — the epoch bug.
+"""Repeated startup reconciliation preserves exact graph authority.
 
-Real SQLite database and a real langgraph checkpointer, no mocks. Pins the fix
-for the crash where a paused_resumable repair never advanced ``recovery_epoch``:
-the second boot re-derived the same ``startup-repair:{tid}:{epoch}`` idempotency
-key and the control_actions INSERT died on the UNIQUE constraint, taking the whole
-app down. The epoch must now advance every applied outcome, and a duplicate
-idempotency key must replay as a no-op rather than crash - so both freshly-written
-and pre-fix historical rows survive a reboot.
+Current recovery uses the accepted graph action and checkpoint evidence. An
+unfinished checkpoint leaves the run reconciling without appending a repair
+journal row, so a second boot and historical repair key stay harmless.
 """
 
 from __future__ import annotations
@@ -18,9 +14,11 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
+from ...control.tests._catalog_authority import current_execution_metadata
+from ...control.tests.test_dispatch_failure_transitions import (
+    _seed_accepted_initial_action,
+)
 from ...database import (
     create_thread,
     get_thread,
@@ -32,6 +30,7 @@ from ...database.permission_repository import (
     get_or_create_control_action,
 )
 from ...database.reconciliation import reconcile_threads_on_startup
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType
 
 
@@ -41,7 +40,9 @@ async def _seed_paused_thread(session: AsyncSession, tid: str) -> None:
         write_authority=make_test_write_authority(),
         thread_id=tid,
         status="running",
+        metadata=current_execution_metadata(Path.cwd()),
     )
+    await _seed_accepted_initial_action(session, tid, workspace=Path.cwd())
     await record_permission_request(
         session,
         request_id=f"{thread.id}:perm-1",
@@ -68,10 +69,10 @@ async def _put_checkpoint(checkpointer: AsyncSqliteSaver, tid: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_paused_resumable_survives_reboot_and_advances_epoch(
+async def test_unfinished_graph_survives_reboot_without_repair_journal_growth(
     runtime_dir: Path,
 ) -> None:
-    """A paused_resumable thread reconciled twice must not crash on the 2nd boot."""
+    """Repeated recovery leaves the accepted graph action unchanged."""
     tid = "thread-paused-reboot"
     db_file = runtime_dir / "reconciliation-reboot.db"
     materialize_schema(Path(db_file))
@@ -95,11 +96,12 @@ async def test_paused_resumable_survives_reboot_and_advances_epoch(
             started1 = await get_control_action_by_idempotency_key(
                 session, thread_id=tid, idempotency_key=f"startup-repair:{tid}:1"
             )
-        assert summary1["paused_resumable"] == 1
+        assert summary1["paused_resumable"] == 0
         assert after1 is not None
-        assert after1.repair_status == "paused_resumable"
-        assert after1.recovery_epoch == 1
-        assert started1 is not None
+        assert after1.status == "reconciling"
+        assert after1.repair_status == "needs_reconciliation"
+        assert after1.recovery_epoch == 0
+        assert started1 is None
 
         # Boot 2: the reboot that used to crash with an IntegrityError.
         async with session_factory() as session:
@@ -110,22 +112,20 @@ async def test_paused_resumable_survives_reboot_and_advances_epoch(
                 session, thread_id=tid, idempotency_key=f"startup-repair:{tid}:2"
             )
 
-    assert summary2["paused_resumable"] == 1
+    assert summary2["paused_resumable"] == 0
     assert after2 is not None
-    assert after2.repair_status == "paused_resumable"
-    # Epoch advanced again — the second boot derived a fresh idempotency key.
-    assert after2.recovery_epoch == 2
-    assert started2 is not None
+    assert after2.repair_status == "needs_reconciliation"
+    assert after2.recovery_epoch == 0
+    assert started2 is None
 
     await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_historical_stuck_row_self_heals_without_crashing(
+async def test_historical_repair_row_does_not_crash_graph_recovery(
     runtime_dir: Path,
 ) -> None:
-    """A pre-fix row (epoch 0 with startup-repair:{tid}:1 already journaled) must
-    replay as a no-op and advance, not crash the boot."""
+    """A historical repair row does not collide with current recovery."""
     tid = "thread-historical-stuck"
     db_file = runtime_dir / "reconciliation-historical.db"
     materialize_schema(Path(db_file))
@@ -156,10 +156,10 @@ async def test_historical_stuck_row_self_heals_without_crashing(
             await session.commit()
             healed = await get_thread(session, tid)
 
-    assert summary["paused_resumable"] == 1
+    assert summary["paused_resumable"] == 0
     assert healed is not None
-    # The stuck epoch advanced, so the NEXT boot will derive a fresh, uncollided key.
-    assert healed.recovery_epoch == 1
+    assert healed.status == "reconciling"
+    assert healed.recovery_epoch == 0
 
     await engine.dispose()
 

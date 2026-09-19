@@ -14,28 +14,34 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
+from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ...database.models import ThreadModel
 
+from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.dispatch import (
     _REDISPATCH_LOG_EVERY_N,
     redispatch_reconciling_threads,
 )
+from ...control.dispatch_receipts import prepare_graph_action_receipt
+from ...control.execution_authority import (
+    ExecutionAuthorityError,
+    resolve_execution_authority,
+)
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import create_control_action, create_thread, get_thread
 from ...database.session import close_db, get_session_factory, init_db
+from ...ipc.schemas import DispatchRequest
 from ...providers.provider_catalog import (
     AdmissionState,
     AuthenticationState,
@@ -50,7 +56,9 @@ from ...providers.provider_catalog import (
     StructuredProviderHealth,
 )
 from ...providers.team_selection import freeze_team_selection
+from ...team.team_config import load_team_config
 from ...thread.enums import ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 
 _LOGGER_NAME = "vaultspec_a2a.control.dispatch"
 
@@ -72,12 +80,41 @@ async def _create_reconciling_thread_with_receipt(
         team_preset=team_preset,
         metadata=metadata,
     )
+    parsed = json.loads(metadata)
+    workspace = Path(parsed.get("workspace_root") or Path.cwd())
+    if not workspace.is_absolute():
+        workspace = Path.cwd()
+    try:
+        assignment = resolve_execution_authority(metadata).model_assignment
+    except ExecutionAuthorityError:
+        assignment = {}
+    dispatch = DispatchRequest(
+        action="ingest",
+        thread_id=thread.id,
+        content="recover",
+        workspace_root=str(workspace),
+        recursion_limit=25,
+        team_preset=team_preset,
+        graph_definition=freeze_graph_definition(
+            load_team_config(team_preset, workspace_root=workspace),
+            workspace_root=workspace,
+        ),
+        model_assignment=assignment,
+    )
     await create_control_action(
         session,
         thread_id=thread_id,
         action_type=authority.action_type,
         idempotency_key=f"{thread_id}-ingest",
         dispatch_id=authority.action_receipt_id,
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+        payload=freeze_accepted_input(dispatch, intent={"content": "recover"}),
+    )
+    assert (
+        await prepare_graph_action_receipt(
+            session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
+        )
+        is not None
     )
     return thread
 
@@ -469,11 +506,9 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
         session_factory = get_session_factory()
         async with session_factory() as session:
             for thread_id in thread_ids:
-                await create_thread(
+                await _create_reconciling_thread_with_receipt(
                     session,
-                    write_authority=make_test_write_authority(),
                     thread_id=thread_id,
-                    status=ThreadStatus.RECONCILING,
                     team_preset="mock-success-single",
                     metadata=json.dumps(_current_metadata(str(tmp_path))),
                 )
@@ -542,10 +577,9 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
     try:
         session_factory = get_session_factory()
         async with session_factory() as session:
-            await create_thread(
+            await _create_reconciling_thread_with_receipt(
                 session,
-                write_authority=make_test_write_authority(),
-                status=ThreadStatus.RECONCILING,
+                thread_id="single-failure",
                 team_preset="mock-success-single",
                 metadata=json.dumps(_current_metadata(str(tmp_path))),
             )

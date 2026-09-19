@@ -18,11 +18,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
 from ...control.thread_service import list_threads_service
 from ...database import create_thread
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import RepairStatus
 
 

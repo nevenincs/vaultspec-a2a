@@ -134,6 +134,14 @@ def _current_assignment() -> dict[str, dict[str, object]]:
     ).model_assignment
 
 
+def _mock_assignment() -> dict[str, dict[str, object]]:
+    return resolve_execution_authority(
+        current_execution_metadata(
+            pathlib.Path.cwd(), required_roles=("mock-coder-success",)
+        )
+    ).model_assignment
+
+
 def _test_graph_definition_digest(team_preset: str) -> str:
     """Deterministic stand-in for a frozen graph definition's digest.
 
@@ -173,7 +181,7 @@ def _current_ingest_dispatch(thread_id: str) -> DispatchRequest:
         team_preset="mock-success-single",
         graph_definition=definition,
         recursion_limit=10,
-        model_assignment=_current_assignment(),
+        model_assignment=_mock_assignment(),
     )
     accepted = freeze_accepted_input(request, intent={"content": "build it"})
     receipt = GraphActionReceipt(
@@ -185,6 +193,46 @@ def _current_ingest_dispatch(thread_id: str) -> DispatchRequest:
         dispatch_id=request.dispatch_id,
         run_revision=0,
         writer_generation=1,
+    )
+    return request.model_copy(update={"graph_action_receipt": receipt})
+
+
+def _graph_input_request(request: DispatchRequest) -> DispatchRequest:
+    """Supply the accepted program needed by the graph input projection."""
+    assert request.workspace_root is not None
+    workspace = pathlib.Path(request.workspace_root)
+    preset = request.team_preset or "vaultspec-solo-coder"
+    definition = freeze_graph_definition(
+        load_team_config(preset, workspace_root=workspace),
+        workspace_root=workspace,
+    )
+    return request.model_copy(
+        update={"team_preset": preset, "graph_definition": definition}
+    )
+
+
+def _current_resume_dispatch(
+    ingest: DispatchRequest, *, option_id: str
+) -> DispatchRequest:
+    request = ingest.model_copy(
+        update={
+            "action": "resume",
+            "dispatch_id": f"{ingest.thread_id}-resume-dispatch",
+            "content": None,
+            "option_id": option_id,
+            "graph_action_receipt": None,
+        }
+    )
+    accepted = freeze_accepted_input(request, intent={"option_id": option_id})
+    receipt = GraphActionReceipt(
+        schema_version="graph-action-v1",
+        thread_id=request.thread_id,
+        action_id=f"{request.thread_id}-resume-action",
+        action_type=ControlActionType.RESUME,
+        payload_fingerprint=control_action_payload_fingerprint(accepted),
+        dispatch_id=request.dispatch_id,
+        run_revision=1,
+        writer_generation=2,
     )
     return request.model_copy(update={"graph_action_receipt": receipt})
 
@@ -487,14 +535,7 @@ class TestIngestGating:
             await cp.lock.acquire()
             try:
                 requests = [
-                    DispatchRequest(
-                        action="ingest",
-                        thread_id=f"held-{index}",
-                        team_preset="mock-success-single",
-                        workspace_root=_WORKSPACE,
-                        recursion_limit=25,
-                        model_assignment=_current_assignment(),
-                    )
+                    _current_ingest_dispatch(f"held-{index}")
                     for index in range(domain_config.max_concurrent_threads + 3)
                 ]
                 tasks = [
@@ -528,14 +569,7 @@ class TestIngestGating:
                 checkpoint_read_timeout_seconds=1.0,
             )
             await cp.lock.acquire()
-            request = DispatchRequest(
-                action="ingest",
-                thread_id="cancel-held",
-                team_preset="mock-success-single",
-                workspace_root=_WORKSPACE,
-                recursion_limit=25,
-                model_assignment=_current_assignment(),
-            )
+            request = _current_ingest_dispatch("cancel-held")
             task = asyncio.create_task(executor.handle_dispatch(request))
             try:
                 while executor.active_ingest_count == 0:
@@ -664,10 +698,10 @@ class TestHandleDispatch:
                 await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_ingest_without_graph_or_preset_logs_warning(
+    async def test_ingest_without_graph_authority_logs_refusal(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Ingest on a thread with no compiled graph and no preset logs a warning."""
+        """An ingest lacking accepted graph authority cannot settle a run."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
@@ -689,22 +723,24 @@ class TestHandleDispatch:
                 record = next(
                     rec
                     for rec in caplog.records
-                    if "No graph for thread" in rec.message
+                    if "Refusing terminal settlement without accepted graph authority"
+                    in rec.message
                 )
                 assert record.__dict__["thread_id"] == "t-no-graph"
                 assert record.__dict__["dispatch_id"] == req.dispatch_id
                 assert record.__dict__["dispatch_action"] == "ingest"
-                assert record.__dict__["runtime_mode"] == "ingest"
                 assert record.__dict__["worker_id"] == "test-worker"
-                assert record.__dict__["action"] == "graph_missing"
+                assert (
+                    record.__dict__["action"] == "dispatch_rejected_without_authority"
+                )
             finally:
                 await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_resume_without_graph_logs_warning(
+    async def test_resume_without_graph_authority_logs_refusal(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Resume on a thread with no compiled graph logs a warning."""
+        """A resume lacking accepted graph authority cannot settle a run."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
@@ -725,14 +761,16 @@ class TestHandleDispatch:
                 record = next(
                     rec
                     for rec in caplog.records
-                    if "No graph for thread" in rec.message
+                    if "Refusing terminal settlement without accepted graph authority"
+                    in rec.message
                 )
                 assert record.__dict__["thread_id"] == "t-no-graph"
                 assert record.__dict__["dispatch_id"] == req.dispatch_id
                 assert record.__dict__["dispatch_action"] == "resume"
-                assert record.__dict__["runtime_mode"] == "resume"
                 assert record.__dict__["worker_id"] == "test-worker"
-                assert record.__dict__["action"] == "graph_missing"
+                assert (
+                    record.__dict__["action"] == "dispatch_rejected_without_authority"
+                )
             finally:
                 await bridge.close()
 
@@ -860,7 +898,9 @@ class TestGraphInputBuilding:
             team_preset="vaultspec-solo-coder",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=True
+        )
 
         required_fields = {
             "messages",
@@ -889,7 +929,9 @@ class TestGraphInputBuilding:
             content="Follow-up question",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=False
+        )
 
         # These keys must NOT be present -- their absence lets LangGraph
         # preserve checkpoint values rather than triggering reducers.
@@ -910,7 +952,9 @@ class TestGraphInputBuilding:
             content="test",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=False
+        )
         assert inp["thread_id"] == "thread-xyz"
 
     def test_sdd_fields_included_on_first_ingest_when_provided(self) -> None:
@@ -928,7 +972,9 @@ class TestGraphInputBuilding:
             validation_errors=["missing tests"],
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=True
+        )
 
         assert inp["active_feature"] == "auth-flow"
         # feedback-loop: the opaque batch id rides the SDD blackboard the same way.
@@ -947,7 +993,9 @@ class TestGraphInputBuilding:
             team_preset="vaultspec-solo-coder",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=True
+        )
 
         assert inp["active_feature"] is None
         assert inp["feedback_batch_id"] is None
@@ -967,7 +1015,9 @@ class TestGraphInputBuilding:
             context_preamble="You are a helpful assistant.",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=False
+        )
 
         msgs = inp["messages"]
         assert len(msgs) == 2
@@ -984,7 +1034,9 @@ class TestGraphInputBuilding:
             thread_id="t-empty",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=False
+        )
         assert inp["messages"] == []
 
     def test_sdd_fields_not_included_on_followup_even_if_provided(self) -> None:
@@ -1000,7 +1052,9 @@ class TestGraphInputBuilding:
             pipeline_phase="implement",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=False
+        )
 
         assert "active_feature" not in inp
         assert "pipeline_phase" not in inp
@@ -1035,10 +1089,10 @@ class TestLazyRecompilation:
                 await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_resume_without_graph_or_preset_logs_warning(
+    async def test_resume_without_graph_or_preset_refuses_settlement(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Resume drops with warning when graph is missing and no preset available."""
+        """A receiptless resume cannot settle without accepted authority."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
@@ -1058,14 +1112,16 @@ class TestLazyRecompilation:
                 record = next(
                     rec
                     for rec in caplog.records
-                    if "No graph for thread" in rec.message
+                    if "Refusing terminal settlement without accepted graph authority"
+                    in rec.message
                 )
                 assert record.__dict__["thread_id"] == "t-no-graph"
                 assert record.__dict__["dispatch_id"] == req.dispatch_id
                 assert record.__dict__["dispatch_action"] == "resume"
-                assert record.__dict__["runtime_mode"] == "resume"
                 assert record.__dict__["worker_id"] == "test-worker"
-                assert record.__dict__["action"] == "graph_missing"
+                assert (
+                    record.__dict__["action"] == "dispatch_rejected_without_authority"
+                )
             finally:
                 await bridge.close()
 
@@ -1370,7 +1426,7 @@ def _make_observing_bridge(
     return bridge
 
 
-def _install_completing_graph(executor: Executor, thread_id: str) -> None:
+def _install_completing_graph(executor: Executor, request: DispatchRequest) -> None:
     """Compile a real one-node graph that runs straight to a COMPLETED outcome."""
 
     async def worker_node(state: Any) -> dict[str, Any]:
@@ -1385,16 +1441,16 @@ def _install_completing_graph(executor: Executor, thread_id: str) -> None:
     )
 
     cache_key = (
-        "settle-preset",
-        None,
-        False,
-        model_assignment_digest(_current_assignment()),
-        _test_graph_definition_digest("settle-preset"),
+        request.require_graph_definition().team_id,
+        request.workspace_root,
+        request.autonomous,
+        model_assignment_digest(request.model_assignment),
+        request.require_graph_definition().digest(),
     )
-    executor.register_compiled_graph(thread_id, cache_key, graph)
+    executor.register_compiled_graph(request.thread_id, cache_key, graph)
 
 
-def _install_gated_graph(executor: Executor, thread_id: str) -> None:
+def _install_gated_graph(executor: Executor, request: DispatchRequest) -> None:
     """Compile a real one-node graph that parks on an interrupt, then completes."""
 
     async def gate_node(state: Any) -> dict[str, Any]:
@@ -1413,13 +1469,13 @@ def _install_gated_graph(executor: Executor, thread_id: str) -> None:
     )
 
     cache_key = (
-        "settle-gated-preset",
-        None,
-        False,
-        model_assignment_digest(_current_assignment()),
-        _test_graph_definition_digest("settle-gated-preset"),
+        request.require_graph_definition().team_id,
+        request.workspace_root,
+        request.autonomous,
+        model_assignment_digest(request.model_assignment),
+        request.require_graph_definition().digest(),
     )
-    executor.register_compiled_graph(thread_id, cache_key, graph)
+    executor.register_compiled_graph(request.thread_id, cache_key, graph)
 
 
 class TestSettleOrdering:
@@ -1458,20 +1514,15 @@ class TestSettleOrdering:
             executor = Executor(checkpointer=cp, bridge=bridge)
             holder["executor"] = executor
             try:
-                _install_completing_graph(executor, thread_id)
-                await executor.handle_dispatch(
-                    DispatchRequest(
-                        dispatch_id="stable-message-dispatch",
-                        graph_action_receipt=receipt,
-                        workspace_root=_WORKSPACE,
-                        action="ingest",
-                        thread_id=thread_id,
-                        content="continue",
-                        team_preset="settle-preset",
-                        recursion_limit=10,
-                        model_assignment=_current_assignment(),
-                    )
+                request = _current_ingest_dispatch(thread_id).model_copy(
+                    update={
+                        "dispatch_id": "stable-message-dispatch",
+                        "graph_action_receipt": receipt,
+                        "content": "continue",
+                    }
                 )
+                _install_completing_graph(executor, request)
+                await executor.handle_dispatch(request)
 
                 checkpoint = await cp.aget_tuple(
                     {"configurable": {"thread_id": thread_id}}
@@ -1513,20 +1564,15 @@ class TestSettleOrdering:
             executor = Executor(checkpointer=cp, bridge=bridge)
             holder["executor"] = executor
             try:
-                _install_completing_graph(executor, thread_id)
-                req = DispatchRequest(
-                    action="ingest",
-                    workspace_root=_WORKSPACE,
-                    thread_id=thread_id,
-                    content="build it",
-                    team_preset="settle-preset",
-                    recursion_limit=10,
-                    model_assignment=_current_assignment(),
-                    actor_tokens=ActorTokenBundle(
-                        tokens={"vaultspec-synthesist": "settle-token"},
-                        engine_bearer="settle-bearer",
-                    ),
+                req = _current_ingest_dispatch(thread_id).model_copy(
+                    update={
+                        "actor_tokens": ActorTokenBundle(
+                            tokens={"vaultspec-synthesist": "settle-token"},
+                            engine_bearer="settle-bearer",
+                        )
+                    }
                 )
+                _install_completing_graph(executor, req)
                 await executor.handle_dispatch(req)
 
                 kinds = [obs["kind"] for obs in observations]
@@ -1564,37 +1610,21 @@ class TestSettleOrdering:
             executor = Executor(checkpointer=cp, bridge=bridge)
             holder["executor"] = executor
             try:
-                _install_gated_graph(executor, thread_id)
                 bundle = ActorTokenBundle(
                     tokens={"vaultspec-synthesist": "settle-token"},
                     engine_bearer="settle-bearer",
                 )
-                await executor.handle_dispatch(
-                    DispatchRequest(
-                        action="ingest",
-                        workspace_root=_WORKSPACE,
-                        thread_id=thread_id,
-                        content="build it",
-                        team_preset="settle-gated-preset",
-                        recursion_limit=10,
-                        model_assignment=_current_assignment(),
-                        actor_tokens=bundle,
-                    )
+                ingest = _current_ingest_dispatch(thread_id).model_copy(
+                    update={"actor_tokens": bundle}
                 )
+                _install_gated_graph(executor, ingest)
+                await executor.handle_dispatch(ingest)
                 # Parked at the gate: not terminal, so the tokens survive.
                 assert executor.token_store.has(thread_id) is True
                 observations.clear()
 
                 await executor.handle_dispatch(
-                    DispatchRequest(
-                        action="resume",
-                        thread_id=thread_id,
-                        option_id="approve",
-                        team_preset="settle-gated-preset",
-                        recursion_limit=10,
-                        model_assignment=_current_assignment(),
-                        actor_tokens=bundle,
-                    )
+                    _current_resume_dispatch(ingest, option_id="approve")
                 )
 
                 kinds = [obs["kind"] for obs in observations]
@@ -1811,14 +1841,7 @@ class TestUnhandledDispatchTerminal:
                 reservation = await executor.reserve_dispatch_capacity(thread_id)
                 assert reservation is not None
                 await executor._fail_unhandled_dispatch(
-                    DispatchRequest(
-                        action="ingest",
-                        workspace_root=_WORKSPACE,
-                        thread_id=thread_id,
-                        content="build it",
-                        recursion_limit=10,
-                        model_assignment=_current_assignment(),
-                    ),
+                    _current_ingest_dispatch(thread_id),
                     _wrapped_failure(),
                     reservation,
                 )
@@ -1918,12 +1941,7 @@ class TestPreRunRefusalsCarryTheirReason:
                 )
                 await bridge.flush_events()
 
-                terminals = _frames_of(relayed, "thread_terminal")
-                assert len(terminals) == 1
-                assert terminals[0]["status"] == ThreadStatus.FAILED
-                assert terminals[0]["error_detail"] == (
-                    "No graph to run: the dispatch named no team preset"
-                )
+                assert _frames_of(relayed, "thread_terminal") == []
 
                 errors = _frames_of(relayed, "error")
                 assert len(errors) == 1
@@ -2035,12 +2053,8 @@ class TestPreRunRefusalsCarryTheirReason:
             executor = Executor(checkpointer=cp, bridge=bridge)
             try:
                 await executor.handle_dispatch(
-                    DispatchRequest(
-                        action="resume",
-                        thread_id=thread_id,
-                        option_id="allow_once",
-                        recursion_limit=10,
-                        model_assignment=_current_assignment(),
+                    _current_resume_dispatch(
+                        _current_ingest_dispatch(thread_id), option_id="allow_once"
                     )
                 )
                 await bridge.flush_events()
@@ -2082,27 +2096,19 @@ class TestPreRunRefusalsCarryTheirReason:
                 builder.add_edge("__start__", "boom")
                 builder.add_edge("boom", "__end__")
                 graph: RegisteredCompiledGraph = builder.compile(checkpointer=cp)
+                first = _current_ingest_dispatch(thread_id)
                 executor.register_compiled_graph(
                     thread_id,
                     (
-                        "boom-preset",
-                        None,
-                        False,
-                        model_assignment_digest(_current_assignment()),
-                        _test_graph_definition_digest("boom-preset"),
+                        first.require_graph_definition().team_id,
+                        first.workspace_root,
+                        first.autonomous,
+                        model_assignment_digest(first.model_assignment),
+                        first.require_graph_definition().digest(),
                     ),
                     graph,
                 )
 
-                first = DispatchRequest(
-                    action="ingest",
-                    workspace_root=_WORKSPACE,
-                    thread_id=thread_id,
-                    content="build it",
-                    team_preset="boom-preset",
-                    recursion_limit=10,
-                    model_assignment=_current_assignment(),
-                )
                 await executor.handle_dispatch(first)
                 await bridge.flush_events()
                 assert executor._graph_lifecycle.thread_binding_count == 0
@@ -2155,15 +2161,14 @@ class TestPreRunRefusalsCarryTheirReason:
                     exc = GraphCompilationError(str(cause))
                     exc.__cause__ = cause
 
+                ingest = _current_ingest_dispatch(thread_id)
+                request = (
+                    ingest
+                    if guards.runtime_mode == "ingest"
+                    else _current_resume_dispatch(ingest, option_id="allow_once")
+                )
                 await executor._reject_compile_failure(
-                    DispatchRequest(
-                        action=guards.runtime_mode,
-                        workspace_root=_WORKSPACE,
-                        thread_id=thread_id,
-                        content="build it",
-                        option_id="allow_once",
-                        recursion_limit=10,
-                    ),
+                    request,
                     _recording_span(),
                     exc,
                     guards,

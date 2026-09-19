@@ -7,7 +7,8 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..database import list_active_thread_page, normalize_workspace_identity
+from ..database import list_active_thread_page
+from ..database import normalize_workspace_identity as normalize_workspace_identity
 from ..domain_config import domain_config
 from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import ThreadStatus

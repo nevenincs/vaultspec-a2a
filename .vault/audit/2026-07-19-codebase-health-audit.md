@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-08-02'
-body_hash: 'sha256:22b62723da613e4f864bad3efd09ffe445d5a6d187144e9fa5b5f0aeffe6efc2'
+modified: '2026-09-19'
+body_hash: 'sha256:3caa36b14a5ed767e752f54b042e625ab3c892d8869ddd1e04b4629b77c9a3c6'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -14,7 +14,6 @@ related:
   - "[[2026-07-17-kimi-provider-dedup-audit]]"
   - '[[2026-07-19-codebase-health-research]]'
 ---
-
 # `codebase-health` audit: `repository-wide health and dashboard contract`
 
 ## Scope
@@ -2862,3 +2861,224 @@ Whole-tree lint and type gates clean. The full package passes 2,784 tests with n
 over twenty minutes of real processes and stores, taken while no other writer was touching
 the tree - which is what makes the real-process suites trustworthy here rather than
 contended. The consuming product passes 376 native and 281 interface tests.
+### 2026-09-19 dead-code measurement pass | low | three private constants removed; reachability leads queued
+
+Type: maintenance. Status: three confirmed removals closed; broader scan open for triage. The repository's Vulture scan measured 525 findings over 794 offered Python modules (8 high-confidence heuristic hits). The entry-point reachability scan measured 8 unreachable modules, 52 unused top-level symbols, and 2 orphaned tests over 302 shipped modules. Manual reference checks confirmed `_STALE_MS` in `authoring/discovery.py` and `_JSON_OBJECT` in both `providers/acp_catalog.py` and `providers/codex_catalog.py` had no consumers. After removal, the unused-symbol count is 49. Ruff and ty pass on the touched files.
+
+Follow-up queue: classify the remaining 49 symbols and 8 modules against installed entry points, dynamic registration, tests, and dev harness consumers before deleting any. In particular, `providers/lane_admission.py` exports `lane_admission_reason` and `unproven_lanes_in` with no current in-tree callers; public exports need compatibility review. The 2 catalog-selection orphaned tests need ownership review. Vulture's highest-confidence import hits are type-annotation imports and its two variable hits are protocol/framework parameters, so they are false positives for deletion. The supplied `Scripts/github-audit` tool measures GitHub security settings, workflows, and secrets rather than dead code. The root Node manifest is an ACP dependency host with no application JavaScript source or Knip enrollment; no Node dead-code denominator exists here.
+
+Review result: PASS for the focused three-constant removal. Type: follow-up investigation; severity low; status open for the remaining reachability leads. No behavioral interface changed by this pass.
+### 2026-09-19 test-only dead-code burndown review | medium | scan reaches zero after entry-point corrections
+
+Result: PASS for the dead-code removal and signal correction; observed environment and contract test failures remain queued below. Type: implementation review. The entry-point reachability signal began at 8 unreachable modules, 49 unused symbols, and 2 orphaned tests (59 total) over 302 shipped modules. The `just audit-dead-code-burndown` command prints the integer and fails on scan error. The current signal is 0 after removals and corrected root modeling. Vulture's advisory count moved from 525 to 493; its eight high-confidence hits remain annotation imports and required callback/protocol parameters, not removal evidence. The root Node manifest is an ACP dependency host with no application JavaScript to run Knip against. The supplied `Scripts/github-audit` tool measures GitHub settings, workflows, and secrets, not dead code.
+
+#### scanner-missed-public-entry-points | high | type: measurement correctness | closed
+
+`database.admin` is a documented `python -m vaultspec_a2a.database.admin` CLI, referenced from `alembic.ini`; `lifecycle.engine_serve` is imported by `scripts/engine_serve.py`, which `procs.toml` launches. Both were initially reported unreachable. Their modules and behavior tests were preserved. `dev/audit/unreachable_code.py` now treats modules with a main guard and imports from configured Python scripts as runtime roots, with real-tree regression tests. Pytest hooks in the configured root plugin are also recognized as framework calls, while an ordinary unused helper in that plugin remains a finding.
+
+#### test-support-placement | medium | type: packaging | resolved by user direction
+
+Five shared helpers under `testing/` were imported by many live-behavior tests. Deleting them broke 54 type-check imports. The user chose moving them into the excluded test tree; their consumers were repointed and the live behavior tests remain. `acceptance/_harness.py` is moving beside its tests for the same reason. The test-only `artifacts` declaration package and its declaration-only tests were removed; two independent ACP ownership checks were retained under provider tests.
+
+#### artifact-declaration-proposal-drift | medium | type: decision/code conflict | open
+
+The `2026-07-21-ecosystem-artifact-lifecycle-adr` is **proposed**, not accepted. Its proposed requirement for declaration objects beside artifact creators conflicts with their removal under the user's test-only-code rule. Runtime artifact creation and cleanup paths remain. This proposed decision needs reconciliation before acceptance; the removed declarations cannot be cited as implemented evidence.
+
+#### external-api-compatibility | low | type: public surface | open
+
+Some deleted helpers were listed in `__all__` but had no production or development callers found by the scan. An external consumer could have imported them. No external consumer inventory is available in this pass; the change is a deliberate removal under the user's rule, and release review should treat it as an API change.
+
+#### existing-verification-failures | medium | type: test/contract | open
+
+A focused real-install provision test fails because the installed workspace lacks required `exec-step` and `exec-summary` templates, though those templates exist in this checkout. Admin/migration focused tests had one database `pause` check-constraint failure, and WAL tests had two write-authority rejection failures. A graph web-composition test reached an ACP `initialize` response with a missing or malformed `protocolVersion`; its 12 downstream cases failed. A provider live test requiring `vaultspec-rag` found no CUDA/MPS backend. These failures are recorded as observed, not attributed to this dead-code change without a baseline comparison. The focused tests that passed are reported in the execution summary when the integrated pass closes.
+#### integrated-verification | low | type: validation | closed
+
+The integrated pass reports 0 scanner findings. Ruff lint and format, ty, reachability, unused-symbol coverage, and 270 governed import-load probes pass. Focused test groups passed across the scanner, testing support, authoring, provider, service, control, API, desktop, and lifecycle scopes. Pytest collected 4,757 of 4,759 tests (two live proofs withheld by configured prerequisites); the collection recipe returned exit 4 despite listing the tree, so its harness exit behavior remains a medium open validation issue. The real-install, database authority, graph ACP, and GPU failures remain open as listed above. The review found no unqueued new issue from the merged cleanup.
+
+### 2026-09-19 relative-import gate review | low | absolute package imports removed
+
+Type: import discipline. Status: RESOLVED. The package-relative import gate
+found 85 absolute self-imports, chiefly in test support modules. All were
+converted to equivalent relative imports. Ruff, formatting, just check-all,
+and pytest collection pass; selected database and test-support tests pass.
+The conversion preserves imported symbols and leaves runtime modules unchanged.
+
+### 2026-09-19 strict-type packaging review | medium | LangGraph namespace typing repaired
+
+Type: dependency typing. Status: RESOLVED. Basedpyright reported 19 missing
+type-stub diagnostics for langgraph.graph and langgraph.graph.message
+despite the installed namespace root carrying py.typed. A local typing
+overlay under typings/langgraph/graph declares the same public graph exports,
+message reducer, and message-state shape as the locked runtime package.
+just check-type-strict now reports zero diagnostics.
+
+### 2026-09-19 shared normalizer export review | low | read seam export made explicit
+
+Type: typing boundary. Status: RESOLVED. The workspace-identity parity test
+consumes the exact normalizer object exposed by control/run_discovery_service.py.
+An explicit re-export preserves that identity and removes the private-local-
+import diagnostic. The targeted database test passes.
+
+### 2026-09-19 strict structural gates | high | complexity and shape debt remains
+
+Type: maintainability. Status: OPEN. The strict aggregate remains red after
+typing and import cleanup. The 2026-09-19 health census counts 162 functions
+over the cyclomatic limit, 13 modules over the length limit, 27 functions over
+the statement limit, 119 callables over the parameter limit, and 9 functions
+over the nesting limit. just check-strict also reports cognitive-complexity
+and pylint design findings; Ruff reports 324 shape and complexity errors
+and 35 nesting errors in the same strict run. Repository-tooling-hardening
+plan W07.P13 and
+W07.P14 own decomposition; W08 promotion remains blocked until each sentinel
+has zero findings. No threshold, exclusion, or suppression was changed.
+
+### 2026-09-19 strict export gate | medium | unconsumed public names remain
+
+Type: API surface. Status: OPEN. just check-exports reports 111 unconsumed
+published names across 1,220 names. Each export needs a consumer check before
+removal; some may be intentional external API. The strict gate cannot graduate
+while the count is nonzero. Follow-up belongs in the repository tooling
+hardening queue before W08 closure.
+
+### 2026-09-19 default-suite follow-up behavior | high | dispatch receipt does not settle applied action
+
+Type: behavior. Status: OPEN. A non-service suite run after the import changes
+reached api/tests/test_endpoints.py::TestSendMessage::test_followup_dispatch_marks_message_followup_as_applied;
+it fails with last_applied_action == "ingest" after a follow-up receipt, where
+the test expects message_followup_applied. This is a real state-transition
+finding, independent of import spelling. Record it for control-action
+investigation and real-behavior regression proof.
+
+### 2026-09-19 accepted-dispatch recovery | high | unauthorized test dispatch leaves run status running
+
+Type: acceptance contract and failure settlement. Status: OPEN. The full
+non-service suite stops at
+api/tests/test_acceptance_five_verb.py::test_multirole_run_status_recovery_and_zero_vault_writes.
+Its direct DispatchRequest omits graph_definition, graph_action_receipt, and
+model_assignment, which are now mandatory accepted execution authority. The
+worker correctly rejects the missing definition, but the rejection path calls
+emit_terminal_status(FAILED) without GraphFailureEvidence because
+_failure_evidence returns None for a request without a receipt. The state
+projector rejects that terminal, a second exception is logged, and run-status
+still reports RUNNING with no checkpoint. The acceptance fixture must exercise
+a real accepted dispatch; the receipt-less rejection path also needs an
+authority-consistent terminal policy so it does not double-fault. Do not mint
+a fake receipt or weaken the state-projector invariant.
+
+### 2026-09-19 startup re-dispatch accepted authority | high | fixed in implementation
+
+Type: production recovery contract. Review found that `redispatch_reconciling_threads` rebuilt an ingest request from thread metadata and omitted the accepted graph definition and receipt. A real production gateway restart stayed RECONCILING because worker admission rejected the request. The dispatch now restores the exact accepted input by durable action receipt ID, verifies its model assignment and workspace against the thread metadata, and binds the committed graph receipt before delivery. Missing or incompatible evidence is classified per thread so one bad row does not abort the sweep. The production restart proof and 12 adjacent re-dispatch cases pass. The accepted-dispatch fixture and terminal-evidence fixtures were also updated to exercise current authority; the separate receipt-less worker double-fault from the earlier high finding remains OPEN and still requires a production fix.
+### 2026-09-19 clarification recovery fixture | medium | fixed in implementation
+
+Type: test contract drift. The API sweep found the clarification restart proof created a RUNNING thread without its initial accepted graph action and receipt. After that was seeded, the resume fixture also lacked a valid accepted-input payload, a recovery deadline, an exact write expectation, and a committed lease. The fixture now persists both accepted actions and the test passes against the real checkpointer and worker. Review found no production behavior change in this pass. The full API and repository suites remain in progress, so this closure applies only to the focused regression.
+### 2026-09-19 follow-up application receipt correction | medium | fixed in implementation
+
+Type: audit correction and test contract drift. The earlier note near the accepted-dispatch finding classified `test_followup_dispatch_marks_message_followup_as_applied` as a possible production state-transition defect. Review of `_handle_progress_event` showed that production requires both the exact graph-action receipt and a named checkpoint incorporating it before settlement. The test sent neither, so `last_applied_action` correctly remained `ingest`. The test now records the matching checkpoint and relays both evidence fields; its focused run passes. The earlier production-defect inference is superseded by this evidence.
+
+### 2026-09-19 team status liveness fixture | low | fixed in implementation
+
+Type: test contract drift. Team status includes node metadata only for active threads, and an aggregator event by itself does not make a thread active. The node-summary route test now registers and subscribes a live reader before requesting team status. The focused test passes; review found no production defect in this path.
+
+### 2026-09-19 permission rejection deadline | high | fixed in implementation
+
+Type: production journal invariant. Rejected and duplicate permission-response actions used `create_control_action` without the recovery deadline required for that action type by the current database schema. Invalid responses raised `ValueError` instead of returning their typed conflict. Both non-executing journal writes now carry a finite deadline; the malformed-row test fixture does too. All 11 permission-response endpoint tests pass. The deadline is required by the persisted action-type invariant even though these terminal results are not redriven.
+
+### 2026-09-19 terminal deletion fixture authority | medium | fixed in implementation
+
+Type: test contract drift. Two deletion tests created terminal threads with writer receipt columns but no matching control action, so the deletion election correctly refused them. The fixtures now seed matching journal rows and both focused deletion tests pass.
+
+### 2026-09-19 API batch follow-up | high | open
+
+Type: gate burndown. A broader API run stopped after 20 failures at 212 passing tests. Beyond the resolved permission-response and deletion clusters, remaining groups include cancel non-delivery state expectations, terminal checkpoint proof in gateway-drain tests, gateway live stream fixtures, and harness template discovery. These are queued for implementation and review; the repository-wide green gate has not been reached.
+
+### 2026-09-19 live stream queue shape | high | fixed in implementation
+
+Type: production streaming contract. `EventAggregator.relay_payload` queues a positive-projected dictionary for worker events, while `_stream_thread_events` passed every queue item to `sequenced_to_positive_payload`, which requires a `SequencedEvent`. A live stream crashed with `AttributeError` after a relayed progress event. The stream now distinguishes sequenced in-process events from already-projected worker dictionaries and applies the existing SSE encode boundary to both. Three focused live stream tests pass. The live gateway fixture also now seeds accepted graph authority, and the reconnect-cursor test records real completion evidence before asserting the terminal cursor.
+
+### 2026-09-19 cancel and drain recovery expectations | medium | fixed in implementation
+
+Type: test contract drift. The cancellation and drain tests expected an unreachable worker or a capacity refusal to restore pre-dispatch status or fail an accepted run. The current durable recovery contract preserves accepted work for redrive and requires matching terminal evidence before releasing admission. Updated tests assert the live recovery state and seed the required checkpoint/cancellation proof. All 8 gateway-drain and 11 endpoint delete/cancel tests pass.
+
+### 2026-09-19 installed harness template drift | high | fixed in implementation
+
+Type: installed dependency contract. The pinned `vaultspec-core install` provides `exec-ledger.md` but no `exec-step.md` or `exec-summary.md`, so `provision_workspace` always reported a newly provisioned authoring workspace as unready. The verifier now requires the installed ledger template. The bundled coder prompt was also updated from an obsolete per-Step document instruction to Core's `vault exec log` command and ledger template. All 18 gateway and harness tests pass. Review confirms this is a served authoring-path repair, not a test-only relaxation.
+
+### 2026-09-19 missing-transcript proof fixture | medium | fixed in implementation
+
+Type: test contract drift. Two history tests tried to settle COMPLETED without the graph completion checkpoint now required by production. They now complete with exact accepted evidence, delete the checkpoint, and verify that the wide read reports the resulting transcript loss. All 5 history transcript availability tests pass. The test retains its original failure-mode proof while following the current terminal contract.
+
+### 2026-09-19 served degradation vocabulary | medium | fixed in implementation
+
+Type: public contract drift. The snapshot producer emits `invalid_agent_descriptors` and `incompatible_execution_authority`, but neither token was declared in `DegradedReason`. Both members are now declared, the containment sweep passes (21 tests), and the committed OpenAPI artifact was regenerated from the live schema (6 tests pass).
+
+### 2026-09-19 deletion saga endpoint authority | medium | fixed in implementation
+
+Type: test contract drift. Eight endpoint saga tests seeded thread writer receipts without matching control actions. The deletion election correctly refused terminal seeds. A shared helper now seeds a matching journal row; all 8 endpoint saga cases pass.
+
+### 2026-09-19 internal relay evidence backlog | high | open
+
+Type: test and worker contract drift. The second API batch reached 446 passing tests before 20 failures; after resolving OpenAPI, history transcript, vocabulary, and deletion fixtures, the remaining dominant cluster is `api/tests/test_internal.py`. Its terminal tests relay COMPLETED with no checkpoint or FAILED with no exact action evidence, which current production correctly refuses. The worker-rejection case also exposes the previously recorded high receipt-less double-fault. These require current accepted-action fixtures and evidence-aware assertions, plus a production rejection fix.
+
+### 2026-09-19 subscriber queue annotation | medium | open
+
+Type: typing contract. Review of the SSE fix found `SubscriberManager` annotates subscriber queues as containing only `SequencedEvent`, while `relay_payload` inserts projected dictionaries and can pass through other objects for malformed input. The stream reader now decodes both runtime shapes through an explicit `object` boundary and strict typing passes. The queue's producer/consumer type should be reconciled across the aggregator, WebSocket readers, fanout, and tests so the shared annotation itself is truthful; a broad queue-type change currently surfaces many downstream assumptions. This is queued separately from the fixed live stream crash.
+
+### 2026-09-19 internal relay evidence and receipt-less worker review | high | fixed in implementation
+
+Type: production terminal authority and test contract drift. Review traced the internal relay tests through the accepted action, graph receipt, and checkpoint imports. Forty-four relay tests now pass with exact accepted dispatch evidence, including valid failure evidence and completed checkpoint proof. Malformed failure details and unknown provider conditions are refused without changing durable status. A direct receipt-less Executor rejection previously tried to project FAILED without GraphFailureEvidence, then entered a second unhandled-failure path; both paths now skip unproven terminal settlement. The worker still emits a condition for observability and releases its local slot. API suite: 525 passed; strict typing: green. Remaining queue: subscriber queue type mismatch, structural strict gate, export gate, repository-wide tests, and the unraisable Windows transport warning observed during API tests.
+
+### 2026-09-19 full unit gate first failure batch | high | partial fixes, queue open
+
+Type: gate burndown and production concurrency. The resource-aware parallel unit run reached 1,096 passing tests before stopping after 26 failures. Review classified 19 deletion-saga failures as a fixture missing the current ingest recovery deadline (fixed; 19 focused cases pass), five graph-input failures and adjacent cache cases as missing accepted frozen definitions or outdated bound-authority messages (fixed; 48 focused cases pass), and one Core parity assertion as stale after Core changed active-plan rules (fixed; two focused cases pass). Startup reconciliation was spawning a worker before checking whether a reconciling row exists; the worker spawn now follows the empty-row check. The desktop lazy-worker test then exposed a separate high production issue: four concurrent run starts produce three SQLite `database is locked` 500 responses while one succeeds. The first writer holds the database long enough for other request inserts to fail. This remains OPEN for transaction-boundary/concurrency repair; a journal-mode read experiment did not resolve it and was reverted. The failure batch also contains desktop ownership/admission failures that remain OPEN pending focused review. Structural strict and export gates remain OPEN.
+
+### 2026-09-19 desktop gate follow-up review | high | fixed in implementation
+
+Type: production admission and lifecycle harness. The high concurrent SQLite start finding above is closed by retrying a transient SQLite lock on a fresh transaction, resolving a committed same-ID winner as a replay or conflict, and bounding attempts. The real four-request lazy-worker test returns four 201 responses and confirms a single worker spawn. Thirty live gateway tests, including same-ID insert races and different-body conflicts, pass. Review risk: a sustained SQLite lock beyond four attempts still propagates an error and merits a typed busy response in a later pass. The lifecycle owner in the gateway boot helper now binds its Uvicorn server, allowing the receipt-owned shutdown route to perform a real graceful stop; the process-tree shutdown test passes. The terminal child context fixture gained the session closing field; its real process-tree test passes. Focused run-admission desktop suite: nine passed, while two owner-tree tests were subsequently repaired. No open finding remains from these focused desktop failures. The wider unit gate and structural/export gates remain OPEN.
+
+### 2026-09-19 unit control authority review | medium | fixed in implementation
+
+Type: test contract drift. The next non-service run reached 1,255 passes before a control-test cluster stopped the bounded run. Actual review traced each failure to the accepted-action imports and current durable schema: follow-up and permission fixtures needed the initial frozen graph action under `thread-create:<id>`; receipt, event-handler, recovery, and verdict fixtures needed recovery deadlines; discovery needed a frozen graph definition; completed terminal-sequence tests needed the exact graph action and checkpoint completion proof; deletion tests needed a matching journal row before election. These fixtures now use the current contracts, and their focused groups pass. The vanished-workspace expectation was updated to the current dispatch refusal. Remaining queue: full control and non-service reruns, structural strict findings, export findings, and subscriber queue typing. No new production failure was established by these control clusters.
+
+### 2026-09-19 full control-suite review | medium | fixed in implementation
+
+Type: test contract drift. The full control test package now reports 502 passed and six marker-deselected after the receipt, deadline, initial-authority, checkpoint, deletion-journal, and vanished-workspace fixture updates. Review confirmed the tests still exercise their original state transitions and refusal behavior through current durable authority. No new production issue appeared in the full control run. The repository-wide non-service suite and strict structural/export gate remain queued.
+
+### 2026-09-19 database gate review pass
+
+The database package exposed stale fixtures after current write-authority and graph-recovery contracts became mandatory. This pass supplied complete authority columns and matching accepted action receipts, required recovery deadlines, and current execution metadata; it also changed reboot and retention assertions to the current checkpoint recovery behavior. Focused affected tests pass, and the package was reduced from ten immediate failures to three later fixture failures. The final three have been corrected and focused tests pass; a complete package rerun remains in the queue.
+
+Review findings and queue:
+
+- **Medium, test contract:** The full database package and repository suite must be rerun after the last fixture corrections; a focused pass cannot prove the whole gate. Open until both are green.
+- **Medium, test maintainability:** Database reconciliation tests import `_seed_accepted_initial_action` from a control test module. Move the shared authority seeding helper into a neutral test support module if this dependency causes fixture drift or import-order issues. Open.
+- **High, quality gate:** `just check-strict` still has outstanding Ruff, nesting, Pylint, and export findings. Burn down the complete strict output; open.
+
+### 2026-09-19 graph compiler and compile probe review pass
+
+Review of the implemented fixtures confirms that inline graph teams now carry the required positive step timeout, node assertions include the structural completion recorder, and the cold compile probe supplies the exact frozen graph definition required by the worker. The graph package passed 365 tests (2 deselected); the focused cold compile responsiveness test passed. Ruff and formatting passed. These are medium-severity test contract drift findings, resolved in this pass.
+
+Remaining queue: the full repository suite is not yet green. A broad parallel run exposed more failures and stalled in accelerator-dependent provider harness startup (`service_env_no_gpu`); the first isolated provider compile failure and graph compiler failures are resolved, but the rest of the suite requires separate inventory runs. The strict gate remains high-severity open with 323 Ruff findings, 33 nesting findings, Pylint shape findings, and 110 unconsumed exports. The service harness accelerator requirement is a medium-severity environment/test-portability finding and remains open.
+
+### 2026-09-19 worker authority fixture review pass
+
+Review of the worker changes confirms that dispatch ID concurrency tests now send graph definitions and matching action receipts with model selections for their actual mock role; held-checkpoint tests reuse an accepted ingest fixture; graph-input projection tests supply a frozen program; receiptless rejection tests assert the current warning and do not invent terminal settlement. Focused dispatch ID, held-checkpoint, graph-input, and receiptless tests pass. These were medium-severity test contract drift issues, resolved here.
+
+Open review findings: nine `worker/tests/test_executor.py` tests still fail in settle ordering and pre-run refusal coverage. The settle fixtures use synthetic preset and cache digests without accepted graph definitions, while refusal fixtures still expect terminal evidence from receiptless dispatches. This is high-severity test contract drift because the suite cannot verify terminal behavior until those requests carry valid authority. The full nonservice suite remains open; a timed broad run was interrupted after the worker cluster. The strict gate findings remain open as recorded above.
+
+### 2026-09-19 worker resume and executor review pass
+
+The executor file passed all 59 tests after accepted graph receipts and exact cache digests were supplied to settle and refusal fixtures. Review found a high-severity production bug: a resume with no durable checkpoint could compile a new graph and continue. The worker graph lifecycle now reads checkpoint authority on every resume and returns the existing missing-graph refusal when absent; a normal gated resume and the no-checkpoint refusal both pass. This is a behavior fix, not only a fixture update. The full worker package then reported 139 passing and four failing actor-token lifecycle tests.
+
+Open queue: convert the four actor-token lifecycle tests from synthetic preset/cache digests and receiptless graph dispatches to accepted graph authority, then rerun the worker package and broad nonservice suite. Review risk: the extra checkpoint read on resume may increase read latency; preserve the existing deadline and verify checkpoint lock/capacity tests in the package rerun. The strict gate and accelerator-dependent harness findings remain open.
+
+### 2026-09-19 actor-token lifecycle review pass
+
+The four remaining worker failures were synthetic fixture drift: token tests registered injected graphs under fake preset and definition digests, then sent receiptless ingest/resume requests. This pass froze the current mock graph program, minted exact action receipts, and keyed the injected graphs from those requests. Review confirms the tests still assert token isolation, interrupt retention, terminal disposal, durable checkpoint secrecy, and log secrecy. The focused lifecycle file passed 5 tests; the full worker package passed 143 tests (2 deselected); Ruff and strict typing passed. These medium-severity test contract findings are resolved.
+
+Open queue: rerun the full nonservice inventory without the accelerator-dependent harness, then address any remaining failures. `just check-strict` structural, Pylint, and export findings and the service harness accelerator prerequisite remain open.
+
+### 2026-09-19 TeamState schema review pass
+
+The late thread, utils, and workspace serial inventory found one medium-severity test contract drift: `TestTeamStateStructure` asserted an exact field set without the current agent descriptor, model assignment digest, graph definition digest, and three graph receipt fields. The expectation now includes those six fields; the focused test passes. The earlier late inventory had 403 passing and one failing test, so rerun that inventory and the full nonservice suite to close it. Review found no production change in this pass; the exact schema assertion remains useful for detecting future drift.
+
+Open queue: a broad xdist run still reported one other late failure before active workers stalled, but it yielded no named summary. Run the full nonservice inventory serially to identify it. The service harness and strict structural/export findings remain open.

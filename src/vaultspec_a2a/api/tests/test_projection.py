@@ -8,8 +8,6 @@ from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
 from ...control.projection import (
     apply_checkpoint_projection,
@@ -25,6 +23,7 @@ from ...database import (
     set_thread_repair_state,
 )
 from ...database.models import ThreadExecutionStateModel
+from ...tests._write_authority import make_test_write_authority
 from ...thread.snapshots import (
     CheckpointProjection,
     ExecutionStateProjection,

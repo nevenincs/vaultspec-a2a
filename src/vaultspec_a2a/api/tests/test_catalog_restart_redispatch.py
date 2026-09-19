@@ -15,14 +15,21 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 import pytest
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
+from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.dispatch import redispatch_reconciling_threads
+from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.worker_management import LazyWorkerSpawner
-from ...database import close_db, get_session_factory, get_thread, init_db
+from ...database import (
+    close_db,
+    create_control_action,
+    get_session_factory,
+    get_thread,
+    init_db,
+)
 from ...database.thread_repository import create_thread
 from ...desktop.profile import derive_state_paths
+from ...ipc.schemas import DispatchRequest
 from ...providers.in_process_catalog import discover_in_process_catalog
 from ...providers.provider_catalog import (
     AdmissionState,
@@ -45,7 +52,9 @@ from ...providers.team_selection import (
     freeze_team_selection,
     model_assignment_digest,
 )
-from ...testing.catalog_selection import in_process_selection
+from ...team.team_config import load_team_config
+from ...testing.tests._support.catalog_selection import in_process_selection
+from ...tests._write_authority import make_test_write_authority
 from ...tests.gateway_boot import (
     armed_gateway_env,
     gateway_script,
@@ -56,6 +65,7 @@ from ...tests.gateway_boot import (
     spawn_until_ready,
 )
 from ...thread.enums import ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ..schemas.gateway import FrozenTeamAssignmentSummary
 from .conftest import _InProcessWorker
 
@@ -238,30 +248,57 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
         await init_db(str(database_path))
         try:
             async with get_session_factory()() as session:
-                await create_thread(
-                    session,
-                    write_authority=make_test_write_authority(),
-                    thread_id="current-schema-restart",
-                    status=ThreadStatus.RECONCILING,
-                    team_preset="mock-success-single",
-                    metadata=json.dumps(metadata),
+                definition = freeze_graph_definition(
+                    load_team_config("mock-success-single", workspace_root=workspace),
+                    workspace_root=workspace,
                 )
-                await create_thread(
-                    session,
-                    write_authority=make_test_write_authority(),
-                    thread_id="same-assignment-restart",
-                    status=ThreadStatus.RECONCILING,
-                    team_preset="mock-success-single",
-                    metadata=json.dumps(metadata),
-                )
-                await create_thread(
-                    session,
-                    write_authority=make_test_write_authority(),
-                    thread_id="other-assignment-restart",
-                    status=ThreadStatus.RECONCILING,
-                    team_preset="mock-success-single",
-                    metadata=json.dumps(other_metadata),
-                )
+                for thread_id, thread_metadata, selection in (
+                    ("current-schema-restart", metadata, frozen_selection),
+                    ("same-assignment-restart", metadata, frozen_selection),
+                    (
+                        "other-assignment-restart",
+                        other_metadata,
+                        other_frozen_selection,
+                    ),
+                ):
+                    authority = make_test_write_authority()
+                    await create_thread(
+                        session,
+                        write_authority=authority,
+                        thread_id=thread_id,
+                        status=ThreadStatus.RECONCILING,
+                        team_preset="mock-success-single",
+                        metadata=json.dumps(thread_metadata),
+                    )
+                    dispatch = DispatchRequest(
+                        action="ingest",
+                        thread_id=thread_id,
+                        content="recover after restart",
+                        workspace_root=str(workspace),
+                        recursion_limit=25,
+                        team_preset="mock-success-single",
+                        graph_definition=definition,
+                        model_assignment=selection.compiler_map(),
+                    )
+                    await create_control_action(
+                        session,
+                        thread_id=thread_id,
+                        action_type=authority.action_type,
+                        idempotency_key=f"thread-create:{thread_id}",
+                        dispatch_id=authority.action_receipt_id,
+                        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+                        payload=freeze_accepted_input(
+                            dispatch, intent={"content": "recover after restart"}
+                        ),
+                    )
+                    assert (
+                        await prepare_graph_action_receipt(
+                            session,
+                            thread_id=thread_id,
+                            dispatch_id=authority.action_receipt_id,
+                        )
+                        is not None
+                    )
                 await session.commit()
         finally:
             await close_db()
@@ -434,10 +471,12 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                     target = cast("dict[str, object]", nested)
                 target[field] = value
                 assert record["digest"] == original_digest
+                authority = make_test_write_authority()
+                thread_id = f"retired-durable-{label}"
                 await create_thread(
                     session,
-                    write_authority=make_test_write_authority(),
-                    thread_id=f"retired-durable-{label}",
+                    write_authority=authority,
+                    thread_id=thread_id,
                     status=ThreadStatus.RECONCILING,
                     team_preset="mock-success-single",
                     metadata=json.dumps(
@@ -447,9 +486,18 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                         }
                     ),
                 )
+                await create_control_action(
+                    session,
+                    thread_id=thread_id,
+                    action_type=authority.action_type,
+                    idempotency_key=f"thread-create:{thread_id}",
+                    dispatch_id=authority.action_receipt_id,
+                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+                )
+            authority = make_test_write_authority()
             await create_thread(
                 session,
-                write_authority=make_test_write_authority(),
+                write_authority=authority,
                 thread_id="retired-durable-model-profile-sentinel",
                 status=ThreadStatus.RECONCILING,
                 team_preset="mock-success-single",
@@ -459,6 +507,14 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                         "model_profile": {"provider": "gemini", "model": "secret"},
                     }
                 ),
+            )
+            await create_control_action(
+                session,
+                thread_id="retired-durable-model-profile-sentinel",
+                action_type=authority.action_type,
+                idempotency_key="thread-create:retired-durable-model-profile-sentinel",
+                dispatch_id=authority.action_receipt_id,
+                recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             )
             await session.commit()
 

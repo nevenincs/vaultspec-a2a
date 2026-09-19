@@ -22,10 +22,8 @@ from .. import (
 # Module object used for __all__ introspection
 from .. import errors as _errors_module
 
-# GitWorkspaceError and describe_exception live in errors but are NOT
-# re-exported by the thread facade
+# The description helpers live in errors but are not re-exported by the thread facade.
 from ..errors import (
-    GitWorkspaceError,
     describe_exception,
     describe_exception_chain,
 )
@@ -41,14 +39,6 @@ class TestInheritanceHierarchy:
     def test_vaultspec_error_is_exception(self) -> None:
         """VaultspecError is a subclass of Exception."""
         assert issubclass(VaultspecError, Exception)
-
-    def test_git_workspace_error_is_exception(self) -> None:
-        """GitWorkspaceError is a subclass of Exception."""
-        assert issubclass(GitWorkspaceError, Exception)
-
-    def test_git_workspace_error_not_vaultspec(self) -> None:
-        """GitWorkspaceError is a separate tree from VaultspecError."""
-        assert not issubclass(GitWorkspaceError, VaultspecError)
 
     @pytest.mark.parametrize(
         "exc_cls",
@@ -354,7 +344,6 @@ class TestAllExports:
             "ContextOverflowError",
             "DatabaseError",
             "EventAggregatorError",
-            "GitWorkspaceError",
             "HarnessToolContractError",
             "NicknameConflictError",
             "PermissionDeniedError",

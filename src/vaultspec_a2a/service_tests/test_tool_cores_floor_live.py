@@ -60,7 +60,7 @@ import pytest
 from ..control.run_start_policy import required_role_ids
 from ..graph.enums import ServerEventType
 from ..team.team_config import load_team_config
-from ..testing.payloads import json_object
+from ..testing.tests._support.payloads import json_object
 from .test_pw7_acceptance import (
     _PRESET_LIVE,
     AcceptanceCase,

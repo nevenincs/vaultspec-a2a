@@ -69,6 +69,10 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
             batch.append(
                 {
                     "id": f"history-{index:06d}",
+                    "run_revision": 0,
+                    "writer_generation": 1,
+                    "writer_action_type": "ingest",
+                    "writer_action_receipt_id": f"accepted-{index:06d}",
                     "created_at": created_at,
                     "updated_at": created_at,
                     # Saturate the active index with nonmatching selectors. This

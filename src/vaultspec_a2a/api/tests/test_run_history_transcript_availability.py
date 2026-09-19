@@ -66,13 +66,14 @@ async def test_a_completed_run_without_a_checkpoint_reports_the_transcript_lost(
     contract the endpoint answered 200 with ``messages: []`` and nothing else,
     which reads as a run that never spoke.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-lost-01")
-        await _relay_terminal(client, run_id)
+        await _relay_terminal(client, run_id, checkpointer, worker, session_factory)
+        await checkpointer.adelete_thread(run_id)
 
         history = await client.get(f"/v1/runs/{run_id}/history")
         assert history.status_code == 200, history.text
@@ -107,13 +108,14 @@ async def test_an_archived_run_without_a_checkpoint_still_answers_the_durable_re
     the absence waved through. It is driven here through the real archive verb,
     and the read must still say the transcript is not part of what it returned.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-archived-01")
-        await _relay_terminal(client, run_id)
+        await _relay_terminal(client, run_id, checkpointer, worker, session_factory)
+        await checkpointer.adelete_thread(run_id)
         archived = await client.post(f"/v1/runs/{run_id}/archive")
         assert archived.status_code == 200, archived.text
 

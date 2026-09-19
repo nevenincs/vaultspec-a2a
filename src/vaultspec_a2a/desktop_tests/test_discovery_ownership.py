@@ -34,7 +34,6 @@ from ..lifecycle.discovery import (
     DesktopDiscoveryState,
     classify_desktop_discovery,
     desktop_record_process_is_live,
-    read_desktop_discovery,
     service_json_path,
 )
 from ..lifecycle.singleton import (
@@ -167,7 +166,7 @@ def test_live_incompatible_resident_is_immutable_conflict(tmp_path: Path) -> Non
     )
     try:
         _await(resident["ready"])
-        record = read_desktop_discovery(service_json_path(app_home))
+        record = classify_desktop_discovery(service_json_path(app_home))[1]
         assert record is not None
         # A protocol-1 contender is incompatible: it must not attach.
         assert record.supports_protocol(1) is False
@@ -213,7 +212,7 @@ def test_stale_discovery_quarantined_only_by_owner(tmp_path: Path) -> None:
     # The heartbeat is still recent, so the filesystem-only classifier reads
     # FRESH — but the recorded process is provably dead, which the ownership
     # layer detects.
-    record = read_desktop_discovery(service_json_path(app_home))
+    record = classify_desktop_discovery(service_json_path(app_home))[1]
     assert record is not None and record.pid == dead_pid
     assert desktop_record_process_is_live(record) is False
     assert classify_app_home(app_home, owner="owner-a")[0] is SingletonState.STALE

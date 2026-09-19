@@ -182,85 +182,91 @@ async def _translate_tool_call_chunks(
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _ModelStreamProjection:
+    thread_id: str
+    agent_id: str
+    run_id: str
+    emitters: EventEmitters
+    buffering: BufferingManager
+
+
 async def _translate_chat_model_stream(
-    event_data: dict[str, Any],
-    thread_id: str,
-    effective_agent_id: str,
-    run_id: str,
-    emitters: EventEmitters,
-    buffering: BufferingManager,
+    event_data: dict[str, Any], projection: _ModelStreamProjection
 ) -> None:
     chunk: object = _data_field(event_data).get("chunk")
-    if chunk is not None:
-        await _translate_tool_call_chunks(
-            chunk, thread_id, effective_agent_id, emitters
+    if chunk is None:
+        return
+    await _translate_tool_call_chunks(
+        chunk, projection.thread_id, projection.agent_id, projection.emitters
+    )
+    content: object = getattr(chunk, "content", "")
+    if isinstance(content, list):
+        await _translate_content_blocks(cast("list[object]", content), projection)
+        return
+    if isinstance(content, str) and content:
+        await projection.buffering.buffer_message_chunk(
+            thread_id=projection.thread_id,
+            agent_id=projection.agent_id,
+            content=content,
+            message_id=projection.run_id,
         )
-        content: object = getattr(chunk, "content", "")
-        if isinstance(content, list):
-            content_blocks = cast("list[object]", content)
-            for block in content_blocks:
-                if isinstance(block, dict):
-                    block_map = cast("dict[str, object]", block)
-                    if block_map.get("type") == "reasoning":
-                        reasoning_text = _text_field(
-                            block_map, "content"
-                        ) or _text_field(block_map, "text")
-                        if reasoning_text:
-                            await emitters.emit_thought_chunk(
-                                thread_id=thread_id,
-                                agent_id=effective_agent_id,
-                                content=reasoning_text,
-                                message_id=run_id,
-                            )
-                    elif block_map.get("type") in ("text", "text_delta"):
-                        text = _text_field(block_map, "text") or _text_field(
-                            block_map, "content"
-                        )
-                        if text:
-                            await buffering.buffer_message_chunk(
-                                thread_id=thread_id,
-                                agent_id=effective_agent_id,
-                                content=text,
-                                message_id=run_id,
-                            )
-        elif isinstance(content, str) and content:
-            await buffering.buffer_message_chunk(
-                thread_id=thread_id,
-                agent_id=effective_agent_id,
-                content=content,
-                message_id=run_id,
+    await _emit_additional_reasoning(chunk, projection)
+
+
+async def _translate_content_blocks(
+    content_blocks: list[object], projection: _ModelStreamProjection
+) -> None:
+    for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
+        block_map = cast("dict[str, object]", block)
+        if block_map.get("type") == "reasoning":
+            reasoning_text = _text_field(block_map, "content") or _text_field(
+                block_map, "text"
             )
-        if not isinstance(content, list):
-            additional_kwargs_raw = getattr(chunk, "additional_kwargs", {}) or {}
-            additional_kwargs = cast(
-                "dict[str, object]",
-                additional_kwargs_raw
-                if isinstance(additional_kwargs_raw, dict)
-                else {},
-            )
-            reasoning = (
-                _text_field(additional_kwargs, "reasoning")
-                or _text_field(additional_kwargs, "reasoning_content")
-                or ""
-            )
-            if reasoning:
-                await emitters.emit_thought_chunk(
-                    thread_id=thread_id,
-                    agent_id=effective_agent_id,
-                    content=reasoning,
-                    message_id=run_id,
+            if reasoning_text:
+                await projection.emitters.emit_thought_chunk(
+                    thread_id=projection.thread_id,
+                    agent_id=projection.agent_id,
+                    content=reasoning_text,
+                    message_id=projection.run_id,
+                )
+        elif block_map.get("type") in ("text", "text_delta"):
+            text = _text_field(block_map, "text") or _text_field(block_map, "content")
+            if text:
+                await projection.buffering.buffer_message_chunk(
+                    thread_id=projection.thread_id,
+                    agent_id=projection.agent_id,
+                    content=text,
+                    message_id=projection.run_id,
                 )
 
 
-async def _translate_chat_model_end(
-    event_data: dict[str, Any],
-    thread_id: str,
-    effective_agent_id: str,
-    run_id: str,
-    emitters: EventEmitters,
-    buffering: BufferingManager,
+async def _emit_additional_reasoning(
+    chunk: object, projection: _ModelStreamProjection
 ) -> None:
-    await buffering.flush_chunk_buffer(thread_id)
+    additional_kwargs_raw = getattr(chunk, "additional_kwargs", {}) or {}
+    additional_kwargs = cast(
+        "dict[str, object]",
+        additional_kwargs_raw if isinstance(additional_kwargs_raw, dict) else {},
+    )
+    reasoning = _text_field(additional_kwargs, "reasoning") or _text_field(
+        additional_kwargs, "reasoning_content"
+    )
+    if reasoning:
+        await projection.emitters.emit_thought_chunk(
+            thread_id=projection.thread_id,
+            agent_id=projection.agent_id,
+            content=reasoning,
+            message_id=projection.run_id,
+        )
+
+
+async def _translate_chat_model_end(
+    event_data: dict[str, Any], projection: _ModelStreamProjection
+) -> None:
+    await projection.buffering.flush_chunk_buffer(projection.thread_id)
     output: object = _data_field(event_data).get("output")
     finish_reason: str | None = None
     if output is not None:
@@ -273,11 +279,11 @@ async def _translate_chat_model_end(
             resp_meta, "stop_reason"
         )
     if finish_reason:
-        await emitters.emit_message_chunk(
-            thread_id=thread_id,
-            agent_id=effective_agent_id,
+        await projection.emitters.emit_message_chunk(
+            thread_id=projection.thread_id,
+            agent_id=projection.agent_id,
             content="",
-            message_id=run_id,
+            message_id=projection.run_id,
             finish_reason=finish_reason,
         )
 
@@ -428,7 +434,6 @@ async def _translate_custom_event(
 
 async def _translate_node_boundary(
     event_data: dict[str, Any],
-    event_kind: str,
     thread_id: str,
     effective_agent_id: str,
     node: str,
@@ -436,6 +441,7 @@ async def _translate_node_boundary(
 ) -> None:
     # The dispatcher only calls this under ``and node``, so node is never None
     # here - typed accordingly so the agent-status calls type-check.
+    event_kind = event_data.get("event", "")
     if event_kind == "on_chain_start":
         await emitters.emit_agent_status(
             thread_id=thread_id,
@@ -450,44 +456,9 @@ async def _translate_node_boundary(
             node_name=node,
             state=AgentLifecycleState.IDLE,
         )
-        output: object = _data_field(event_data).get("output")
-        if isinstance(output, dict):
-            output_map = cast("dict[str, object]", output)
-            raw_plan = output_map.get("current_plan")
-            if raw_plan and isinstance(raw_plan, list):
-                raw_plan_entries = cast("list[object]", raw_plan)
-                entries: list[dict[str, str]] = [
-                    {
-                        "content": _text_field(entry_map, "content"),
-                        "status": _text_field(entry_map, "status") or "pending",
-                        "priority": _text_field(entry_map, "priority") or "medium",
-                    }
-                    for entry in raw_plan_entries
-                    if isinstance(entry, dict)
-                    for entry_map in (cast("dict[str, object]", entry),)
-                    if entry_map.get("content")
-                ]
-                if entries:
-                    await emitters.emit_plan_update(thread_id, entries)
-            raw_artifacts = output_map.get("artifacts")
-            if raw_artifacts and isinstance(raw_artifacts, list):
-                raw_artifact_entries = cast("list[object]", raw_artifacts)
-                for artifact in raw_artifact_entries:
-                    if isinstance(artifact, dict):
-                        artifact_map = cast("dict[str, object]", artifact)
-                    else:
-                        continue
-                    if artifact_map.get("id"):
-                        await emitters.emit_artifact_update(
-                            thread_id=thread_id,
-                            artifact_id=str(artifact_map["id"]),
-                            filename=str(
-                                artifact_map.get(
-                                    "filename", artifact_map.get("path", "")
-                                )
-                            ),
-                            content=str(artifact_map.get("content", "")),
-                        )
+        await _emit_chain_output(
+            _data_field(event_data).get("output"), thread_id, emitters
+        )
     elif event_kind == "on_chain_error":
         error_data = event_data.get("data", {})
         error_msg = str(error_data.get("error", "Node execution failed"))
@@ -504,6 +475,56 @@ async def _translate_node_boundary(
             state=AgentLifecycleState.FAILED,
             detail=error_msg[:200],
         )
+
+
+async def _emit_chain_output(
+    output: object, thread_id: str, emitters: EventEmitters
+) -> None:
+    if not isinstance(output, dict):
+        return
+    output_map = cast("dict[str, object]", output)
+    await _emit_chain_plan(output_map.get("current_plan"), thread_id, emitters)
+    await _emit_chain_artifacts(output_map.get("artifacts"), thread_id, emitters)
+
+
+async def _emit_chain_plan(
+    raw_plan: object, thread_id: str, emitters: EventEmitters
+) -> None:
+    if not isinstance(raw_plan, list) or not raw_plan:
+        return
+    entries: list[dict[str, str]] = [
+        {
+            "content": _text_field(entry_map, "content"),
+            "status": _text_field(entry_map, "status") or "pending",
+            "priority": _text_field(entry_map, "priority") or "medium",
+        }
+        for entry in cast("list[object]", raw_plan)
+        if isinstance(entry, dict)
+        for entry_map in (cast("dict[str, object]", entry),)
+        if entry_map.get("content")
+    ]
+    if entries:
+        await emitters.emit_plan_update(thread_id, entries)
+
+
+async def _emit_chain_artifacts(
+    raw_artifacts: object, thread_id: str, emitters: EventEmitters
+) -> None:
+    if not isinstance(raw_artifacts, list) or not raw_artifacts:
+        return
+    for artifact in cast("list[object]", raw_artifacts):
+        if not isinstance(artifact, dict):
+            continue
+        artifact_map = cast("dict[str, object]", artifact)
+        if artifact_map.get("id"):
+            await emitters.emit_artifact_update(
+                thread_id=thread_id,
+                artifact_id=str(artifact_map["id"]),
+                filename=str(
+                    artifact_map.get("filename", artifact_map.get("path", ""))
+                ),
+                content=str(artifact_map.get("content", "")),
+            )
 
 
 async def process_langgraph_event(
@@ -527,14 +548,16 @@ async def process_langgraph_event(
     effective_agent_id = node or agent_id
 
     if event_kind == "on_chat_model_stream":
-        await _translate_chat_model_stream(
-            event_data, thread_id, effective_agent_id, run_id, emitters, buffering
+        projection = _ModelStreamProjection(
+            thread_id, effective_agent_id, run_id, emitters, buffering
         )
+        await _translate_chat_model_stream(event_data, projection)
         return
     if event_kind == "on_chat_model_end":
-        await _translate_chat_model_end(
-            event_data, thread_id, effective_agent_id, run_id, emitters, buffering
+        projection = _ModelStreamProjection(
+            thread_id, effective_agent_id, run_id, emitters, buffering
         )
+        await _translate_chat_model_end(event_data, projection)
         return
     if event_kind == "on_tool_start":
         await _translate_tool_start(
@@ -558,7 +581,7 @@ async def process_langgraph_event(
         return
     if event_kind in NODE_BOUNDARY_EVENTS and node:
         await _translate_node_boundary(
-            event_data, event_kind, thread_id, effective_agent_id, node, emitters
+            event_data, thread_id, effective_agent_id, node, emitters
         )
         return
 

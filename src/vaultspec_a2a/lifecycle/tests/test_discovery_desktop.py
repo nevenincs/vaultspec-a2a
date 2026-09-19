@@ -23,7 +23,6 @@ from ...lifecycle.discovery import (
     DesktopDiscoveryState,
     classify_desktop_discovery,
     desktop_record_process_is_live,
-    read_desktop_discovery,
     write_desktop_discovery,
 )
 
@@ -74,7 +73,8 @@ def test_round_trip_preserves_every_field(tmp_path: Path) -> None:
         protocol_min=1,
         protocol_max=1,
     )
-    read = read_desktop_discovery(path)
+    state, read = classify_desktop_discovery(path)
+    assert state is DesktopDiscoveryState.FRESH
     assert read is not None
     assert read == written
     assert read.version == DESKTOP_DISCOVERY_VERSION
@@ -156,7 +156,7 @@ def test_legacy_record_is_malformed_to_the_desktop_classifier(tmp_path: Path) ->
         encoding="utf-8",
     )
     assert classify_desktop_discovery(path)[0] is DesktopDiscoveryState.MALFORMED
-    assert read_desktop_discovery(path) is None
+    assert classify_desktop_discovery(path)[1] is None
 
 
 def test_process_liveness_uses_recorded_identity(tmp_path: Path) -> None:

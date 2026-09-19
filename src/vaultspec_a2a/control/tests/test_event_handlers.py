@@ -17,8 +17,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
 from ...control.accepted_input import freeze_accepted_input
@@ -46,6 +44,7 @@ from ...database.models import ControlActionModel, RunWriteAuthority, ThreadMode
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
@@ -107,6 +106,7 @@ async def _seed_unapplied_leased_action(
         request_id=request_id,
         dispatch_id=dispatch_id,
         payload=freeze_accepted_input(dispatch, intent=intent),
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     thread = await session.get(ThreadModel, thread_id)
     assert thread is not None
@@ -320,6 +320,7 @@ async def _seed_current_cancel(
                 ),
                 intent={"cancel": True},
             ),
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         acquired = await acquire_control_action_lease(
             session,
@@ -640,6 +641,7 @@ async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
             request_id=request_id,
             idempotency_key=f"permission-response:{request_id}",
             payload={"option_id": "allow"},
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         assert response.dispatch_id is not None
         election = await elect_thread_status(

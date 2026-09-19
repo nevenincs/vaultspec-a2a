@@ -8,7 +8,7 @@
     "/admin/shutdown": {
       "post": {
         "summary": "Shutdown Endpoint",
-        "description": "Initiate graceful server shutdown.\n\nAdministrative shutdown is a receipt-bound lifecycle operation: it requires\nboth authenticated runtime control (the attach credential) and receipt\nownership (the lifecycle capability that discovery never references), so a\nforeign attachment that can reach the product surface still cannot stop the\ngateway.\n\nRun admission is closed first, so the gateway admits no new run while it\ndrains; the in-process stop is then deferred briefly so this 202 flushes\nbefore the SIGINT-driven graceful shutdown - which drains and reaps the owned\nworker and run descendants in the lifespan - begins.",
+        "description": "Initiate graceful server shutdown.\n\nAdministrative shutdown is a receipt-bound lifecycle operation: it requires\nboth authenticated runtime control (the attach credential) and receipt\nownership (the lifecycle capability that discovery never references), so a\nforeign attachment that can reach the product surface still cannot stop the\ngateway.\n\nRun admission is closed first, so the gateway admits no new run while it\ndrains; the in-process stop is then deferred briefly so this 202 flushes\nbefore the owning Uvicorn server begins its deadline-bound connection drain\nand application lifespan teardown.",
         "operationId": "shutdown_endpoint_admin_shutdown_post",
         "security": [
           {

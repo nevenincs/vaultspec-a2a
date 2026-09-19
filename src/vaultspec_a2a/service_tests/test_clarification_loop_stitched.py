@@ -72,14 +72,14 @@ import httpx
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from ..acceptance import certified_gateway
+from ..acceptance.tests._harness import certified_gateway
 from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
 from ..team.team_config import load_team_config
-from ..testing.catalog_selection import (
+from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
 )
-from ..testing.payloads import (
+from ..testing.tests._support.payloads import (
     json_object,
     json_object_list,
     required_bool,
@@ -94,7 +94,7 @@ from ._provider_catalog_live import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from ..acceptance import CertifiedGateway
+    from ..acceptance.tests._harness import CertifiedGateway
     from ..conftest import ExternalPrerequisiteRule
     from ..providers._json_contract import JsonObject
 

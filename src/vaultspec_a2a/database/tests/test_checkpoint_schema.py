@@ -13,7 +13,8 @@ from ..checkpoint_schema import (
     CHECKPOINT_SCHEMA_VERSION,
     CheckpointSchemaError,
     install_checkpoint_schema_identity,
-    validate_checkpoint_schema_identity,
+    open_checkpoint_read_only,
+    validate_checkpoint_schema_connection,
 )
 
 if TYPE_CHECKING:
@@ -37,16 +38,25 @@ def _schema_dump(path: Path) -> list[tuple[object, ...]]:
         connection.close()
 
 
+def _validate_checkpoint_schema(path: Path) -> None:
+    """Run the live read-only schema authority against *path*."""
+    connection = open_checkpoint_read_only(path)
+    try:
+        validate_checkpoint_schema_connection(connection)
+    finally:
+        connection.close()
+
+
 @pytest.mark.asyncio
 async def test_exact_unstamped_store_is_rejected_then_installed(tmp_path: Path) -> None:
     checkpoint = tmp_path / "checkpoints.db"
     await _create_langgraph_store(checkpoint)
 
     with pytest.raises(CheckpointSchemaError, match="object closure"):
-        validate_checkpoint_schema_identity(checkpoint)
+        _validate_checkpoint_schema(checkpoint)
 
     await asyncio.to_thread(install_checkpoint_schema_identity, checkpoint)
-    validate_checkpoint_schema_identity(checkpoint)
+    _validate_checkpoint_schema(checkpoint)
 
     connection = sqlite3.connect(str(checkpoint))
     try:
@@ -75,7 +85,7 @@ async def test_validation_is_read_only_and_ignores_sqlite_ddl_cookie(
         connection.close()
     before = _schema_dump(checkpoint)
 
-    validate_checkpoint_schema_identity(checkpoint)
+    _validate_checkpoint_schema(checkpoint)
 
     assert _schema_dump(checkpoint) == before
 
@@ -162,4 +172,4 @@ async def test_identity_rejects_foreign_indexes_and_triggers(
         connection.close()
 
     with pytest.raises(CheckpointSchemaError, match="object closure"):
-        validate_checkpoint_schema_identity(checkpoint)
+        _validate_checkpoint_schema(checkpoint)

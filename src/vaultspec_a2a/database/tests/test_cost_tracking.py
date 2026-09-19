@@ -42,8 +42,6 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.schema import CreateTable
 
-from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
-
 from ...graph.compiler import compile_team_graph
 from ...graph.nodes.worker import (
     _describe_worker_model,
@@ -56,6 +54,7 @@ from ...graph.protocols import CostPort
 from ...providers._subprocess import spawn_acp_process
 from ...providers.codex_chat_model import CodexChatModel, _CodexAppServerClient
 from ...providers.deterministic_chat_model import DeterministicResearchAdrChatModel
+from ...tests._write_authority import make_test_thread_authority_columns
 from ...thread.models import TokenUsageEntry
 from ...thread.state import merge_token_usage
 from ...worker.cost_port import SqlCostPort

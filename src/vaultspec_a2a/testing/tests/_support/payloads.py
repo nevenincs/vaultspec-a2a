@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter, ValidationError
 
-from ..providers._json_contract import JsonObject
+from ....providers._json_contract import JsonObject
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

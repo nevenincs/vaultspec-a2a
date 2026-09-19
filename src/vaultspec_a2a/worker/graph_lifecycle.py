@@ -393,10 +393,16 @@ class GraphLifecycleManager:
         assignment_digest = model_assignment_digest(req.model_assignment)
         compilation_digests = (assignment_digest, definition_digest)
         bound = self._thread_compilation_digests.get(req.thread_id)
-        if bound is None:
-            checkpoint_digest = await self._checkpoint_compilation_digests(
+        checkpoint_digest = (
+            await self._checkpoint_compilation_digests(
                 req.thread_id, checkpoint_deadline=checkpoint_deadline
             )
+            if bound is None or req.action == "resume"
+            else None
+        )
+        if req.action == "resume" and checkpoint_digest is None:
+            return None
+        if bound is None:
             if (
                 checkpoint_digest is not None
                 and checkpoint_digest != compilation_digests
@@ -408,6 +414,10 @@ class GraphLifecycleManager:
         elif bound != compilation_digests:
             raise GraphCompilationError(
                 "dispatch compilation authority does not match the bound run"
+            )
+        elif checkpoint_digest is not None and checkpoint_digest != compilation_digests:
+            raise GraphCompilationError(
+                "dispatch compilation authority does not match the durable run"
             )
 
         # Check if thread already has a cached graph. A thread's accepted

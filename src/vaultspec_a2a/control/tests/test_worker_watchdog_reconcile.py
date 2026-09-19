@@ -25,8 +25,8 @@ from ...control.worker_management import (
     WorkerState,
     WorkerWatchdog,
 )
-from ...testing.listeners import health_listener
 from ...testing.ports import free_port
+from ...testing.tests._support.listeners import health_listener
 
 
 def _stale_app_state(**singletons: object) -> SimpleNamespace:

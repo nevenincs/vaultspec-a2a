@@ -83,6 +83,8 @@ async def _run_compile(
     from ...database.checkpoints import open_checkpointer
     from ...ipc.schemas import DispatchRequest
     from ...streaming.aggregator import EventAggregator
+    from ...team.team_config import load_team_config
+    from ...thread.executable_graph import freeze_graph_definition
     from ...worker.catalog_store import RunCatalogStore
     from ...worker.graph_lifecycle import GraphLifecycleManager
     from ...worker.ipc import WorkerBridge
@@ -109,6 +111,12 @@ async def _run_compile(
                     agent_id="mock-coder-success",
                     content="probe",
                     team_preset="mock-success-single",
+                    graph_definition=freeze_graph_definition(
+                        load_team_config(
+                            "mock-success-single", workspace_root=workspace
+                        ),
+                        workspace_root=workspace,
+                    ),
                     workspace_root=str(workspace),
                     recursion_limit=10,
                     model_assignment={

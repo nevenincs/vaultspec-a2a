@@ -7,7 +7,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from ..testing.payloads import (
+from ..testing.tests._support.payloads import (
     json_object,
     json_object_list,
     required_bool,

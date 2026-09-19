@@ -25,8 +25,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import respond_to_permission
@@ -39,6 +37,7 @@ from ...database import (
 )
 from ...database.models import ControlActionModel
 from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionResultStatus, ThreadStatus
 
 _CONFLICT = 409

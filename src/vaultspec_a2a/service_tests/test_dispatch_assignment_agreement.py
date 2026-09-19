@@ -52,15 +52,15 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from ..acceptance import certified_gateway
-from ..testing.catalog_selection import (
+from ..acceptance.tests._harness import certified_gateway
+from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
 )
 from ._net import tape_server_listening
 
 if TYPE_CHECKING:
-    from ..acceptance import CertifiedGateway
+    from ..acceptance.tests._harness import CertifiedGateway
 
 _TAPE_SERVER_DEFAULT = "http://127.0.0.1:8100"
 _TAPE_SERVER_ENV = "MOCK_API_BASE"

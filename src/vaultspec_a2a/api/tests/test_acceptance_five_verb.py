@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import logging
 import pathlib
 from typing import TYPE_CHECKING, Any, cast, override
@@ -31,12 +30,21 @@ from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
+from ...control.accepted_input import freeze_accepted_input
+from ...control.execution_authority import resolve_execution_authority
+from ...control.tests._catalog_authority import current_execution_metadata
 from ...database.thread_repository import create_thread
 from ...ipc.schemas import DispatchRequest
+from ...providers.team_selection import model_assignment_digest
+from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
+from ...thread.action_receipts import (
+    GraphActionReceipt,
+    control_action_payload_fingerprint,
+)
 from ...thread.actor_tokens import ActorTokenBundle
-from ...thread.enums import ThreadStatus
+from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 from .clarification_harness import new_state_graph
@@ -102,7 +110,12 @@ def _bridge() -> WorkerBridge:
     return bridge
 
 
-def _install_multirole_graph(executor: Executor, thread_id: str) -> None:
+def _install_multirole_graph(
+    executor: Executor,
+    thread_id: str,
+    definition: FrozenGraphDefinition,
+    model_assignment: dict[str, dict[str, Any]],
+) -> None:
     """A real two-role graph: a coder then a reviewer, each attributing a message."""
 
     async def coder(state: TeamState) -> dict[str, Any]:
@@ -126,10 +139,10 @@ def _install_multirole_graph(executor: Executor, thread_id: str) -> None:
 
     cache_key = (
         _PRESET,
-        None,
+        _WORKSPACE,
         False,
-        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-        hashlib.sha256(_PRESET.encode()).hexdigest(),
+        model_assignment_digest(model_assignment),
+        definition.digest(),
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -178,6 +191,17 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
         tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
         engine_bearer=_BEARER,
     )
+    workspace = pathlib.Path(_WORKSPACE)
+    definition = freeze_graph_definition(
+        load_team_config(_PRESET, workspace_root=workspace),
+        workspace_root=workspace,
+    )
+    model_assignment = resolve_execution_authority(
+        current_execution_metadata(
+            workspace,
+            required_roles=("mock-planner", "mock-coder-success", "mock-reviewer"),
+        )
+    ).model_assignment
 
     async with AsyncSqliteSaver.from_conn_string(ckpt_path) as cp:
         await cp.setup()
@@ -185,16 +209,32 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
         executor: Executor | None = None
         try:
             executor = Executor(checkpointer=cp, bridge=bridge)
-            _install_multirole_graph(executor, thread_id)
+            _install_multirole_graph(executor, thread_id, definition, model_assignment)
             req = DispatchRequest(
                 action="ingest",
                 workspace_root=_WORKSPACE,
                 thread_id=thread_id,
                 content="build and review",
                 team_preset=_PRESET,
+                graph_definition=definition,
+                model_assignment=model_assignment,
                 recursion_limit=10,
                 actor_tokens=bundle,
             )
+            accepted = freeze_accepted_input(
+                req, intent={"content": "build and review"}
+            )
+            receipt = GraphActionReceipt(
+                schema_version="graph-action-v1",
+                thread_id=thread_id,
+                action_id=f"{thread_id}-action",
+                action_type=ControlActionType.INGEST,
+                payload_fingerprint=control_action_payload_fingerprint(accepted),
+                dispatch_id=req.dispatch_id,
+                run_revision=0,
+                writer_generation=1,
+            )
+            req = req.model_copy(update={"graph_action_receipt": receipt})
             with caplog_all() as records:
                 await executor.handle_dispatch(req)
         finally:

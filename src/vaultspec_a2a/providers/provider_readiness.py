@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ProviderReadiness",
-    "probe_engine_reachable",
     "probe_harness_ready",
     "probe_provider_readiness",
 ]
@@ -144,18 +143,6 @@ def _command_readiness(provider: Provider) -> ProviderReadiness:
             reason="provider launch command is not installed or resolvable",
         )
     return ProviderReadiness(provider=provider, ready=True)
-
-
-def probe_engine_reachable() -> bool:
-    """Return whether the authoring backend is reachable via the discovery contract.
-
-    Uses the same ``resolve_engine`` attach-never-own discovery + liveness probe
-    the subscriber uses; no secret is returned, only a boolean. Blocking (file
-    read + a short ``/health`` probe); callers on an event loop should offload it.
-    """
-    from ..authoring import resolve_engine
-
-    return resolve_engine() is not None
 
 
 def probe_harness_ready(

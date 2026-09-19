@@ -85,7 +85,7 @@ from ..providers._codex_config_home import (
     cleanup_codex_config_home,
     resolve_codex_web_search_mode,
 )
-from ..providers._json_contract import JsonObject, json_list, json_object, json_text
+from ..providers._json_contract import JsonObject, json_object
 from ..providers._subprocess import spawn_acp_process
 from ..providers.codex_chat_model import (
     _CAPABILITIES,
@@ -95,6 +95,7 @@ from ..providers.codex_chat_model import (
 )
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import is_web_lane_proven
+from ..testing.tests._support.json_contract import json_list, json_text
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
 

@@ -100,12 +100,6 @@ def describe_exception_chain(exc: BaseException) -> str:
 # ---------------------------------------------------------------------------
 
 
-class GitWorkspaceError(Exception):
-    """Base exception for all Git Workspace operations."""
-
-    __slots__ = ()
-
-
 class VaultspecError(Exception):
     """Base exception for all Vaultspec operations.
 
@@ -340,7 +334,6 @@ __all__ = [
     "ContextOverflowError",
     "DatabaseError",
     "EventAggregatorError",
-    "GitWorkspaceError",
     "HarnessToolContractError",
     "NicknameConflictError",
     "PermissionDeniedError",

@@ -55,8 +55,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import (
     AuthoringClient,
@@ -90,6 +88,7 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ...worker.app import create_worker_app

@@ -37,7 +37,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
@@ -62,6 +62,7 @@ from ...control.run_start_policy import (
 from ...control.team_service import build_team_status
 from ...control.thread_service import (
     ThreadCreationRequest,
+    ThreadCreationResult,
     archive_thread,
     create_and_dispatch_thread,
     delete_thread_service,
@@ -526,27 +527,62 @@ async def _create_run_core(
     persisted = False
     try:
         try:
-            result = await create_and_dispatch_thread(
-                db,
-                ThreadCreationRequest(
-                    thread_id=run_id,
-                    title=body.title,
-                    initial_message=body.message,
-                    team_preset=body.team_preset,
-                    autonomous=body.autonomous,
-                    nickname=nickname,
-                    metadata=metadata,
-                    metadata_json=metadata_json,
-                    workspace_root=ws_root,
-                    actor_tokens=body.actor_tokens,
-                    model_assignment=frozen.compiler_map(),
-                ),
-                circuit_breaker=circuit_breaker,
-                worker_spawner=worker_spawner,
-                worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
-                trace_headers=trace_headers(),
+            creation_request = ThreadCreationRequest(
+                thread_id=run_id,
+                title=body.title,
+                initial_message=body.message,
+                team_preset=body.team_preset,
+                autonomous=body.autonomous,
+                nickname=nickname,
+                metadata=metadata,
+                metadata_json=metadata_json,
+                workspace_root=ws_root,
+                actor_tokens=body.actor_tokens,
+                model_assignment=frozen.compiler_map(),
             )
+            result: ThreadCreationResult | None = None
+            for attempt in range(4):
+                try:
+                    result = await create_and_dispatch_thread(
+                        db,
+                        creation_request,
+                        circuit_breaker=circuit_breaker,
+                        worker_spawner=worker_spawner,
+                        worker_client=worker_client,
+                        recursion_limit=domain_config.graph_recursion_limit,
+                        trace_headers=trace_headers(),
+                    )
+                    break
+                except OperationalError as exc:
+                    if (
+                        db.get_bind().dialect.name != "sqlite"
+                        or "database is locked" not in str(exc).lower()
+                        or attempt == 3
+                    ):
+                        raise
+                    # A concurrent SQLite writer can invalidate the snapshot
+                    # opened by the replay lookup. A new transaction either
+                    # sees the committed winner or can retry its own insert.
+                    await db.rollback()
+                    winner = await get_thread(db, run_id)
+                    if winner is not None:
+                        persisted = True
+                        _replay_identity_or_conflict(
+                            winner.id, winner.thread_metadata, body
+                        )
+                        return _RunDispatchResult(
+                            thread_id=winner.id,
+                            status=winner.status,
+                            nickname=winner.nickname,
+                            frozen=_read_persisted_team_selection(
+                                winner.thread_metadata
+                            ),
+                            replayed=True,
+                        )
+                    await db.rollback()
+                    await asyncio.sleep(0.05 * (attempt + 1))
+            if result is None:
+                raise RuntimeError("run admission retry exhausted without a result")
         except NicknameConflictError as exc:
             # No durable run was created; the finally drops the unused admission.
             raise HTTPException(

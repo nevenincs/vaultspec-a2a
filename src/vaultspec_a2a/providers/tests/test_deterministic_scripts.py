@@ -17,8 +17,6 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...database import create_thread, seed_task_queue
 from ...database.models import Base
 from ...graph.enums import Provider
@@ -29,6 +27,7 @@ from ...graph.tests._state_graph_helpers import (
     compile_test_graph,
 )
 from ...team.team_config import AgentConfig, load_agent_config, load_team_config
+from ...tests._write_authority import make_test_write_authority
 from ...thread.state import TeamState
 from ...worker.task_queue_port import SqlTaskQueuePort
 from ..deterministic_chat_model import DeterministicResearchAdrChatModel

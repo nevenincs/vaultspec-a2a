@@ -5,7 +5,7 @@ both have live readers. The rule that keeps them in step had three near-copies,
 and the normaliser could repair only one direction, so the same event
 classified differently depending only on which producer built it.
 
-These tests bind the normaliser and the three relay predicates to that rule
+These tests bind the normaliser and the remaining relay predicates to that rule
 directly, so a payload is classifiable under whichever key names its type.
 """
 
@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 from ...thread.enums import ThreadStatus
 from ...thread.snapshots import (
     is_permission_event,
-    is_progress_event,
     is_terminal_event,
     normalize_wire_event_type,
 )
@@ -73,16 +72,15 @@ def test_normalizing_is_idempotent() -> None:
     [
         ("thread_terminal", None),
         ("permission_request", is_permission_event),
-        ("agent_status", is_progress_event),
     ],
 )
 def test_classifiers_agree_whichever_key_names_the_type(
     event_type: str, classifier: Callable[[dict[str, Any]], bool] | None
 ) -> None:
-    """The three relay predicates classify a payload identically under either key.
+    """The relay predicates classify a payload identically under either key.
 
     They previously read different keys - terminal read ``event_type``, the other
-    two read ``type`` - so the same event classified differently depending only
+    one read ``type`` - so the same event classified differently depending only
     on which producer built it.
     """
     under_type = {"type": event_type, "status": ThreadStatus.FAILED.value}

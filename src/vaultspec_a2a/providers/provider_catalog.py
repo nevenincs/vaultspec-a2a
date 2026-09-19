@@ -58,10 +58,10 @@ def required_text(
 ) -> str:
     """Return *value* as a non-blank, already-normalized, bounded string, or raise.
 
-    Public because :mod:`provider_capabilities` shares this exact dataclass
-    invariant - a plain ``ValueError`` naming the field, not a lane's own
-    protocol-error dialect - and both modules would otherwise carry
-    identical bodies rather than a caller-side ``max_length`` override.
+    Public so every catalog dataclass shares one invariant: a plain
+    ``ValueError`` naming the field, not a lane's own protocol-error dialect.
+    The optional ``max_length`` override keeps display fields bounded more
+    tightly than identifiers and reasons.
     """
     if not value or value != value.strip():
         raise ValueError(f"{field_name} must be non-blank and already normalized")

@@ -136,10 +136,15 @@ default:
 # environment `init-python` creates. The report still lists every phase, with
 # the ones that were not attempted naming the failure that stopped them.
 
-# Initialize a fresh clone or worktree: dependencies, ACP runtime, enrollment, hooks.
+# Initialize a fresh clone or worktree for Python development.
 [group('setup')]
 init:
     uv run --no-project --python 3.13 -- python -m dev.init all
+
+# Initialize Python development and the pinned Claude ACP Node runtime.
+[group('setup')]
+init-full:
+    uv run --no-project --python 3.13 -- python -m dev.init full
 
 # Resolve the locked tooling and server dependency profiles into .venv.
 [group('setup')]
@@ -160,6 +165,11 @@ init-tools:
 [group('setup')]
 init-check:
     uv run --no-project --python 3.13 -- python -m dev.init check
+
+# Verify Python, tools, and the pinned Claude ACP Node runtime without mutation.
+[group('setup')]
+init-full-check:
+    uv run --no-project --python 3.13 -- python -m dev.init check-full
 
 # Resolve the base runtime profile from the project lock.
 [group('setup')]
@@ -217,10 +227,15 @@ deps-upgrade:
 doctor-check:
     uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.doctor check
 
-# Verify Just, uv, Node.js, and npm and report their resolved versions.
+# Verify Just and uv for the Python development environment.
 [group('setup')]
 doctor-required:
     uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.doctor required
+
+# Verify the pinned Node.js and npm runtime for Claude and Z.ai ACP.
+[group('setup')]
+doctor-node:
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.doctor node
 
 # Report Docker support without failing non-container workflows.
 [group('setup')]
@@ -443,6 +458,11 @@ audit-duplication:
 [group('audit')]
 audit-reachability:
     {{dev}} audit reachability
+
+# Print the reachability burndown as one integer; scan failures return nonzero.
+[group('audit')]
+audit-dead-code-burndown:
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.audit.dead_code_burndown
 
 # Print every type diagnostic verbatim, behind the grouped gate's summary.
 [group('audit')]

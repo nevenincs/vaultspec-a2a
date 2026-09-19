@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from ..catalog_selection import (
+from ._support.catalog_selection import (
     IN_PROCESS_PROVIDER_IDS,
     NoSelectableLaneError,
     in_process_selection,

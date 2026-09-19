@@ -3,10 +3,12 @@
 Usage, one form per justfile recipe::
 
     python -m dev.init all      # just init
+    python -m dev.init full     # just init-full
     python -m dev.init python   # just init-python
     python -m dev.init node     # just init-node
     python -m dev.init tools    # just init-tools
     python -m dev.init check    # just init-check
+    python -m dev.init check-full  # just init-full-check
 
 The recipes are argument-free, so the two modifiers are environment variables
 as well as flags: ``VAULTSPEC_INIT_JSON=1`` for the NDJSON event stream and
@@ -84,7 +86,8 @@ from dev.init.stamp import (
 
 #: The selectors the justfile recipes pass, mapped to the phases they run.
 SELECTIONS = {
-    "all": PHASES,
+    "all": ("python", "tools"),
+    "full": PHASES,
     "python": ("python",),
     "node": ("node",),
     "tools": ("tools",),
@@ -116,6 +119,8 @@ def _truthy(name: str) -> bool:
 def _preflight(
     repo_root: Path,
     emitter: Emitter,
+    *,
+    node_required: bool,
 ) -> tuple[list[StepResult], int, list[str]]:
     """Run the steps that must happen before any phase, and probe the host.
 
@@ -127,7 +132,7 @@ def _preflight(
     therefore fixes it, not only ``init-tools``, and it is fixed before any
     phase runs rather than after the longest one.
 
-    The second is the host-tool probe. A missing `uv` or `node` is not a step
+    The second is the host-tool probe. A missing required tool is not a step
     failure to be discovered halfway through a sync; it is a precondition, and
     reporting the complete list of what the workstation lacks before touching
     anything is worth more than failing fast on the first one.
@@ -143,7 +148,12 @@ def _preflight(
     remediation: list[str] = []
     results: list[StepResult] = []
 
-    findings = check_all(plan.REQUIREMENTS)
+    requirements = tuple(
+        requirement
+        for requirement in plan.REQUIREMENTS
+        if node_required or requirement.command not in {"node", "npm"}
+    )
+    findings = check_all(requirements)
     blocking = [item for item in findings if not item.ok and not item.advisory]
     for finding in findings:
         emitter.say(f"  host: {finding.message}")
@@ -156,6 +166,15 @@ def _preflight(
         )
         if not finding.ok:
             remediation.append(finding.message)
+        if node_required and finding.command == "node" and finding.ok:
+            pin = (repo_root / ".node-version").read_text(encoding="utf-8").strip()
+            if finding.found != pin:
+                message = (
+                    f"Node.js {pin} is required; found {finding.found or 'unknown'}."
+                )
+                emitter.say(f"  host: {message}")
+                remediation.append(message)
+                blocking.append(finding)
     if blocking:
         return results, INIT_HOST_TOOL_MISSING, remediation
 
@@ -231,6 +250,8 @@ def _run_phase(
 def _check(
     repo_root: Path,
     emitter: Emitter,
+    *,
+    selected: tuple[str, ...],
 ) -> tuple[list[PhaseResult], int, list[str]]:
     """Report whether the worktree is initialized, changing nothing.
 
@@ -241,9 +262,22 @@ def _check(
     Returns:
         The per-phase results, the exit code, and the remediation lines.
     """
-    stale = dict(staleness(repo_root, plan.PHASE_PLAN.values()))
+    stale = dict(staleness(repo_root, (plan.PHASE_PLAN[name] for name in selected)))
+    if "node" in selected:
+        node_findings = check_all(
+            requirement
+            for requirement in plan.REQUIREMENTS
+            if requirement.command in {"node", "npm"}
+        )
+        for finding in node_findings:
+            if not finding.ok:
+                stale["node"] = finding.message
+        if "node" not in stale:
+            version_step, code = run_step(plan.NODE.steps[0], cwd=repo_root, echo=False)
+            if code != OK:
+                stale["node"] = version_step.output_tail
     results: list[PhaseResult] = []
-    for name in PHASES:
+    for name in selected:
         phase = plan.PHASE_PLAN[name]
         if not phase.steps:
             status, reason = SKIPPED, phase.skip_reason or "nothing to do"
@@ -255,10 +289,11 @@ def _check(
         emitter.event("phase", name=name, status=status, reason=reason)
         results.append(PhaseResult(name=name, status=status, reason=reason))
     if stale:
+        recipe = "just init-full" if "node" in selected else "just init"
         return (
             results,
             INIT_STALE,
-            [f"run `just init` ({name}: {why})" for name, why in stale.items()],
+            [f"run `{recipe}` ({name}: {why})" for name, why in stale.items()],
         )
     return results, OK, []
 
@@ -279,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "selection",
-        choices=[*SELECTIONS, "check"],
+        choices=[*SELECTIONS, "check", "check-full"],
         nargs="?",
         default="all",
     )
@@ -301,11 +336,12 @@ def main(argv: list[str] | None = None) -> int:
 
     emitter.event("run-start", repo=repo_root.name, selection=args.selection)
 
-    if args.selection == "check":
-        checked, code, remediation = _check(repo_root, emitter)
+    if args.selection in {"check", "check-full"}:
+        selected = SELECTIONS["full" if args.selection == "check-full" else "all"]
+        checked, code, remediation = _check(repo_root, emitter, selected=selected)
         report = build_report(
             repo_root=repo_root,
-            selection=["check"],
+            selection=[args.selection],
             phases=checked,
             outcome=Outcome(FRESH if code == OK else STALE, code),
             remediation=remediation,
@@ -314,7 +350,9 @@ def main(argv: list[str] | None = None) -> int:
         return code
 
     selection = SELECTIONS[args.selection]
-    preflight, code, remediation = _preflight(repo_root, emitter)
+    preflight, code, remediation = _preflight(
+        repo_root, emitter, node_required="node" in SELECTIONS[args.selection]
+    )
     phases: list[PhaseResult] = []
     if preflight:
         phases.append(

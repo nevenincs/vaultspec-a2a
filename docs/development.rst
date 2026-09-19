@@ -14,7 +14,8 @@ Install these prerequisites:
 * `Just 1.31 or later <https://just.systems/man/en/packages.html>`_
 * `uv <https://docs.astral.sh/uv/getting-started/installation/>`_
 * Python 3.13 or later; the project selects Python 3.13
-* `Node.js <https://nodejs.org/>`_ 26 with npm; ``.node-version`` selects the hosted version
+* `Node.js <https://nodejs.org/>`_ with npm for Claude and Z.ai ACP workflows;
+  ``.node-version`` selects the required version
 * Docker, only for container workflows
 
 Clone the repository and prepare its selected Python series:
@@ -31,16 +32,19 @@ Diagnose the host tools before synchronizing dependencies:
 
    just doctor-check
 
-``just doctor-check`` enforces Just 1.31 or later and Node.js 26, requires ``uv`` and
-``npm``, and reports Docker as optional. It doesn't validate Git, Python,
+``just doctor-check`` enforces Just 1.31 or later, requires ``uv``, and reports
+Docker as optional. ``just doctor-node`` checks the pinned Node and npm runtime.
+It doesn't validate Git, Python,
 dependencies, framework enrollment, or application health.
 
 Install the continuous integration (CI) contributor environment:
 
 .. code-block:: console
 
-   uv sync --locked --no-default-groups --extra server --group all
-   just deps-node
+   just init
+
+For Claude or Z.ai ACP work, run ``just init-full`` instead. It restores the
+Node dependency graph as well as the Python environment and tooling.
 
 The ``base`` profile contains runtime dependencies. The ``tooling`` profile
 supports hooks and narrower repository checks. The composed ``all`` group adds

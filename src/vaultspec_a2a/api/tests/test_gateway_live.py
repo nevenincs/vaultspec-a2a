@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
@@ -27,11 +28,18 @@ import httpx
 import pytest
 import uvicorn
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
-from ...database import list_threads
+from ...control.accepted_input import freeze_accepted_input
+from ...control.dispatch_receipts import prepare_graph_action_receipt
+from ...control.execution_authority import resolve_execution_authority
+from ...control.tests._catalog_authority import current_execution_metadata
+from ...database import create_control_action, create_thread, list_threads
+from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
-from ...testing.catalog_selection import in_process_selection
+from ...team.team_config import load_team_config
+from ...testing.tests._support.catalog_selection import in_process_selection
+from ...tests._write_authority import make_test_write_authority
+from ...thread.enums import ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ..routes.gateway import admission_gate
 from .conftest import make_app
 
@@ -41,6 +49,8 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+    from ...thread.action_receipts import GraphActionReceipt
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonValue = bool | int | float | str | list[JsonValue] | JsonObject | None
@@ -80,6 +90,54 @@ async def _apply_sql_trace_callback(
 
 
 _PRESET = "mock-success-single"
+
+
+async def _seed_live_thread(
+    session_factory: SessionFactory, *, title: str
+) -> tuple[str, GraphActionReceipt]:
+    """Create a live run with the accepted action startup recovery requires."""
+    workspace = Path.cwd()
+    metadata = current_execution_metadata(workspace)
+    authority = make_test_write_authority()
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=authority,
+            status=ThreadStatus.RUNNING,
+            team_preset=_PRESET,
+            title=title,
+            metadata=metadata,
+        )
+        dispatch = DispatchRequest(
+            action="ingest",
+            thread_id=thread.id,
+            content="live stream fixture",
+            workspace_root=str(workspace),
+            recursion_limit=25,
+            team_preset=_PRESET,
+            graph_definition=freeze_graph_definition(
+                load_team_config(_PRESET, workspace_root=workspace),
+                workspace_root=workspace,
+            ),
+            model_assignment=resolve_execution_authority(metadata).model_assignment,
+        )
+        await create_control_action(
+            session,
+            thread_id=thread.id,
+            action_type=authority.action_type,
+            idempotency_key=f"thread-create:{thread.id}",
+            dispatch_id=authority.action_receipt_id,
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+            payload=freeze_accepted_input(
+                dispatch, intent={"content": "live stream fixture"}
+            ),
+        )
+        receipt = await prepare_graph_action_receipt(
+            session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
+        )
+        assert receipt is not None
+        await session.commit()
+        return thread.id, receipt
 
 
 async def _in_process_catalog_selection(
@@ -712,19 +770,36 @@ async def test_run_status_carries_reconnect_cursor(
     since a reconnecting client only ever reads run-status after a run has
     already ended.
     """
-    from ...control.event_handlers import _handle_terminal_event
-    from ...database.thread_repository import create_thread
-    from ...thread.enums import ThreadStatus
+    from langgraph.checkpoint.base import empty_checkpoint
 
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            status=ThreadStatus.RUNNING,
-            title="cursor",
-        )
-        await session.commit()
-        run_id = thread.id
+    from ...control.event_handlers import _handle_terminal_event
+    from ...thread.action_receipts import GraphCompletionReceipt
+
+    run_id, receipt = await _seed_live_thread(session_factory, title="cursor")
+    checkpoint = empty_checkpoint()
+    checkpoint["id"] = f"cp-{run_id}"
+    checkpoint["channel_values"] = {
+        "active_graph_action_receipt": receipt.model_dump(mode="json"),
+        "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
+        "graph_completion_receipts": {
+            receipt.dispatch_id: GraphCompletionReceipt(
+                schema_version="graph-completion-v1",
+                action=receipt,
+                outcome="completed",
+            ).model_dump(mode="json")
+        },
+    }
+    checkpoint["channel_versions"] = {
+        "active_graph_action_receipt": 1,
+        "graph_action_receipts": 1,
+        "graph_completion_receipts": 1,
+    }
+    await checkpointer.aput(
+        {"configurable": {"thread_id": run_id, "checkpoint_ns": ""}},
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        checkpoint["channel_versions"],
+    )
 
     app, agg, _worker, _cp = make_app(session_factory, checkpointer)
     for _ in range(5):
@@ -735,6 +810,7 @@ async def test_run_status_carries_reconnect_cursor(
         {"event_type": "thread_terminal", "status": "completed"},
         aggregator=agg,
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
     # The prune genuinely ran: the live in-memory counter is gone, matching
     # what a reconnecting client's HTTP read below has to contend with.
@@ -1149,21 +1225,9 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
 async def test_sse_stream_delivers_versioned_event_mid_stream(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    from ...database.thread_repository import create_thread
-    from ...thread.enums import ThreadStatus
-
     aggregator = EventAggregator()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            status=ThreadStatus.RUNNING,
-            title="live",
-        )
-        await session.commit()
-        run_id = thread.id
+    run_id, _receipt = await _seed_live_thread(session_factory, title="live")
 
     async with (
         _live_server(app) as base,
@@ -1227,22 +1291,12 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     that is oversized through an identity key the catalog passes verbatim still
     degrades to the droppable sentinel at the byte cap.
     """
-    from ...database.thread_repository import create_thread
     from ...streaming.sse_frames import MAX_SSE_FRAME_BYTES
-    from ...thread.enums import ThreadStatus
 
     aggregator = EventAggregator()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
 
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            status=ThreadStatus.RUNNING,
-            title="live",
-        )
-        await session.commit()
-        run_id = thread.id
+    run_id, _receipt = await _seed_live_thread(session_factory, title="live")
 
     async with (
         _live_server(app) as base,
@@ -1332,21 +1386,9 @@ async def test_run_stream_verb_reserves_versioned_frames(
     edge sees the identical api_version stamp, mid-stream delivery, and
     terminal-replay-then-close semantics - no second code path.
     """
-    from ...database.thread_repository import create_thread
-    from ...thread.enums import ThreadStatus
-
     aggregator = EventAggregator()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            status=ThreadStatus.RUNNING,
-            title="run",
-        )
-        await session.commit()
-        run_id = thread.id
+    run_id, _receipt = await _seed_live_thread(session_factory, title="run")
 
     async with (
         _live_server(app) as base,

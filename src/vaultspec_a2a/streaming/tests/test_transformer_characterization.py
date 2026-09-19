@@ -123,6 +123,34 @@ def test_a_reasoning_block_chunk_emits_a_thought_chunk() -> None:
     assert thoughts[0]["content"] == "thinking about it"
 
 
+def test_text_delta_block_is_buffered_as_message_content() -> None:
+    emitted = _run(
+        [
+            _stream(AIMessageChunk(content=[{"type": "text_delta", "text": "hello"}])),
+            _end(),
+        ]
+    )
+
+    messages = [payload for name, payload in emitted if name == "MessageChunk"]
+    assert any(payload["content"] == "hello" for payload in messages)
+
+
+def test_additional_reasoning_emits_once_without_content_blocks() -> None:
+    emitted = _run(
+        [
+            _stream(
+                AIMessageChunk(
+                    content="",
+                    additional_kwargs={"reasoning_content": "thinking separately"},
+                )
+            )
+        ]
+    )
+
+    thoughts = [payload for name, payload in emitted if name == "ThoughtChunk"]
+    assert [payload["content"] for payload in thoughts] == ["thinking separately"]
+
+
 def test_an_event_without_a_node_and_no_family_emits_nothing() -> None:
     """A sub-runnable event with no matching family is filtered out."""
     emitted = _run(

@@ -33,7 +33,9 @@ from ...database.thread_repository import normalize_workspace_identity
 from ...ipc.schemas import DispatchRequest, canonical_project_root
 from ...providers.team_selection import model_assignment_digest
 from ...streaming.aggregator import EventAggregator
+from ...team.team_config import load_team_config
 from ...thread.errors import ConfigError
+from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...thread.state import TeamState
 from ...worker.catalog_store import RunCatalogStore
 from ...worker.graph_lifecycle import (
@@ -74,6 +76,13 @@ def _assignment(model_name: str) -> dict[str, dict[str, object]]:
             "schema_version": 1,
         }
     }
+
+
+def _definition(workspace: Path) -> FrozenGraphDefinition:
+    return freeze_graph_definition(
+        load_team_config("mock-success-single", workspace_root=workspace),
+        workspace_root=workspace,
+    )
 
 
 @pytest.fixture
@@ -299,10 +308,11 @@ class TestGraphStateNamesTheProject:
         return DispatchRequest(
             action="ingest",
             thread_id="run-1",
-            team_preset="preset",
+            team_preset="mock-success-single",
             workspace_root=_uncanonical_spelling(workspace),
             content=content,
             recursion_limit=25,
+            graph_definition=_definition(workspace),
         )
 
     def test_the_first_turn_carries_the_minted_project(self, workspace: Path) -> None:
@@ -445,7 +455,7 @@ class TestOneWorkspaceOneGraphEntry:
 
     def test_two_spellings_key_the_same_entry(self, workspace: Path) -> None:
         digest = model_assignment_digest({})
-        definition_digest = _test_graph_definition_digest("preset")
+        definition_digest = _definition(workspace).digest()
         assert graph_cache_key(
             "preset", str(workspace), False, digest, definition_digest
         ) == graph_cache_key(
@@ -493,7 +503,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-1",
             (
-                "preset",
+                "mock-success-single",
                 str(workspace),
                 False,
                 model_assignment_digest(_assignment("current")),
@@ -504,7 +514,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-2",
             (
-                "preset",
+                "mock-success-single",
                 _uncanonical_spelling(workspace),
                 False,
                 model_assignment_digest(_assignment("current")),
@@ -533,11 +543,11 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-1",
             (
-                "preset",
+                "mock-success-single",
                 str(workspace),
                 False,
                 model_assignment_digest(_assignment("current")),
-                _test_graph_definition_digest("preset"),
+                _definition(workspace).digest(),
             ),
             graph,
         )
@@ -545,10 +555,11 @@ class TestOneWorkspaceOneGraphEntry:
         follow_up = DispatchRequest(
             action="ingest",
             thread_id="run-2",
-            team_preset="preset",
+            team_preset="mock-success-single",
             workspace_root=_uncanonical_spelling(workspace),
             recursion_limit=25,
             model_assignment=_assignment("current"),
+            graph_definition=_definition(workspace),
         )
         resolved = await manager.get_or_compile_graph(follow_up)
 
@@ -565,27 +576,28 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-1",
             (
-                "preset",
+                "mock-success-single",
                 str(workspace),
                 False,
                 model_assignment_digest(accepted),
-                _test_graph_definition_digest("preset"),
+                _definition(workspace).digest(),
             ),
             graph,
         )
 
         with pytest.raises(
             GraphCompilationError,
-            match="model assignment does not match the bound run",
+            match="dispatch compilation authority does not match the bound run",
         ):
             await manager.get_or_compile_graph(
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-1",
-                    team_preset="preset",
+                    team_preset="mock-success-single",
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("changed"),
+                    graph_definition=_definition(workspace),
                 )
             )
 
@@ -598,11 +610,11 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-1",
             (
-                "preset",
+                "mock-success-single",
                 str(workspace),
                 False,
                 model_assignment_digest(accepted),
-                _test_graph_definition_digest("preset"),
+                _definition(workspace).digest(),
             ),
             self._graph(),
         )
@@ -613,10 +625,11 @@ class TestOneWorkspaceOneGraphEntry:
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-1",
-                    team_preset="preset",
+                    team_preset="mock-success-single",
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("changed"),
+                    graph_definition=_definition(workspace),
                 )
             )
 
@@ -655,10 +668,11 @@ class TestOneWorkspaceOneGraphEntry:
             return DispatchRequest(
                 action="ingest",
                 thread_id="run-race",
-                team_preset="preset",
+                team_preset="mock-success-single",
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=assignment,
+                graph_definition=_definition(workspace),
             )
 
         first = asyncio.create_task(
@@ -707,10 +721,11 @@ class TestOneWorkspaceOneGraphEntry:
         req = DispatchRequest(
             action="ingest",
             thread_id="run-equal-race",
-            team_preset="preset",
+            team_preset="mock-success-single",
             workspace_root=str(workspace),
             recursion_limit=25,
             model_assignment=_assignment("same"),
+            graph_definition=_definition(workspace),
         )
         first = asyncio.create_task(manager.get_or_compile_graph(req))
         await manager.started.wait()
@@ -754,10 +769,11 @@ class TestOneWorkspaceOneGraphEntry:
             return DispatchRequest(
                 action="ingest",
                 thread_id=thread_id,
-                team_preset="preset",
+                team_preset="mock-success-single",
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=_assignment("same"),
+                graph_definition=_definition(workspace),
             )
 
         first = asyncio.create_task(manager.get_or_compile_graph(request("run-a")))
@@ -807,10 +823,11 @@ class TestOneWorkspaceOneGraphEntry:
             return DispatchRequest(
                 action="ingest",
                 thread_id=thread_id,
-                team_preset="preset",
+                team_preset="mock-success-single",
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=_assignment(model_name),
+                graph_definition=_definition(workspace),
             )
 
         first = asyncio.create_task(
@@ -849,10 +866,11 @@ class TestOneWorkspaceOneGraphEntry:
                         DispatchRequest(
                             action="ingest",
                             thread_id="held-read",
-                            team_preset="preset",
+                            team_preset="mock-success-single",
                             workspace_root=str(workspace),
                             recursion_limit=25,
                             model_assignment=_assignment("current"),
+                            graph_definition=_definition(workspace),
                         )
                     )
             finally:
@@ -882,15 +900,18 @@ class TestOneWorkspaceOneGraphEntry:
             token_store=RunTokenStore(),
             catalog_store=RunCatalogStore(),
         )
-        with pytest.raises(GraphCompilationError, match="durable run"):
+        with pytest.raises(
+            GraphCompilationError, match="durable compilation authority is incompatible"
+        ):
             await manager.get_or_compile_graph(
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-fresh-worker",
-                    team_preset="preset",
+                    team_preset="mock-success-single",
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("changed"),
+                    graph_definition=_definition(workspace),
                 )
             )
 
@@ -927,10 +948,11 @@ class TestOneWorkspaceOneGraphEntry:
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-noncurrent-checkpoint",
-                    team_preset="preset",
+                    team_preset="mock-success-single",
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("current"),
+                    graph_definition=_definition(workspace),
                 )
             )
 
@@ -965,10 +987,11 @@ class TestOneWorkspaceOneGraphEntry:
         req = DispatchRequest(
             action="ingest",
             thread_id="run-retry",
-            team_preset="preset",
+            team_preset="mock-success-single",
             workspace_root=str(workspace),
             recursion_limit=25,
             model_assignment=_assignment("same"),
+            graph_definition=_definition(workspace),
         )
         with pytest.raises(GraphCompilationError, match="controlled compile failure"):
             await manager.get_or_compile_graph(req)

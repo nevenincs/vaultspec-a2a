@@ -58,8 +58,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import (
     AuthoringClient,
@@ -85,6 +83,7 @@ from ...database import (
 from ...graph.nodes.phase_gate import create_phase_gate_node
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition

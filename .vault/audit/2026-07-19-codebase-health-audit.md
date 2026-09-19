@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:871e05884b9469d9f9d8efe4739e9f354bb9b8f3f2d5bf0b668337a784a50d9e'
+body_hash: 'sha256:461b00b0ba1fa2399abf6e5dde4d1b3ecaadc4a23af60a439204f12d776787bd'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3166,3 +3166,7 @@ The domain-to-wire adapter had three medium-severity strict structure findings f
 ### 2026-09-20 MCP schema normalization structure review pass
 
 Four medium-severity strict structure findings in recursive injected-field removal and older-engine oneOf translation were resolved by extracting property, child, discriminator, and branch-guidance operations. Review checked that nested property/required removal, oneOf/anyOf/allOf traversal, discriminator order and deduplication, opaque payload/alias handling, and required-set intersection retain their behavior. All 20 schema-normalization tests pass, including the real MCP serving case; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 298 to 294. No new review findings were surfaced. The remaining 294 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 write-authority SQL parser structure review pass
+
+Four medium-severity strict structure findings in the named-CHECK parser were resolved by extracting SQL token advancement, named-CHECK header parsing, and balanced predicate scanning. Review checked that comments and quoted content remain ignored, malformed quotes/comments/parentheses still reject the whole parse, duplicate names still reject, and the original predicate slice is preserved. All 16 schema parser tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 294 to 290. No new review findings were surfaced. The remaining 290 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.

@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
     from ..streaming.aggregator import EventAggregator
+    from ..thread.action_receipts import GraphActionReceipt
     from .drain import DrainGate
 
 __all__ = [
@@ -368,6 +369,164 @@ async def _read_run_lease(
     return lease_id if isinstance(lease_id, str) and lease_id else None
 
 
+async def _confirm_completed_terminal(
+    thread_id: str,
+    factory: async_sessionmaker[AsyncSession] | None,
+    checkpointer: Checkpointer | None,
+    last_sequence: int | None,
+) -> bool:
+    if factory is None:
+        _skip_without_database("the completion reconciliation", thread_id)
+        return False
+    if checkpointer is None:
+        logger.warning(
+            "Refusing completion for %s: no checkpointer is available",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "completion_proof_unavailable"},
+        )
+        return False
+    from ..domain_config import domain_config
+    from .recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
+
+    async with factory() as db:
+        observation = await reconcile_run_checkpoint(
+            db,
+            checkpointer,
+            thread_id,
+            trigger=RecoveryTrigger.WORKER_EVENT,
+            checkpoint_timeout_seconds=domain_config.aget_state_timeout_seconds,
+            last_sequence=last_sequence,
+        )
+    if observation.status is not ThreadStatus.COMPLETED:
+        logger.warning(
+            "Refusing unproven completion for %s: %s",
+            thread_id,
+            observation.condition,
+            extra={
+                "thread_id": thread_id,
+                "condition": observation.condition,
+                "action": "unproven_completion",
+            },
+        )
+        return False
+    return True
+
+
+async def _confirm_cancelled_terminal(
+    thread_id: str,
+    raw_evidence: object,
+    factory: async_sessionmaker[AsyncSession] | None,
+    last_sequence: int | None,
+) -> bool:
+    if raw_evidence is None:
+        logger.warning(
+            "Refusing cancellation without exact cessation evidence for %s",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "missing_cancellation_evidence"},
+        )
+        return False
+    try:
+        evidence = CancellationEvidence.model_validate(raw_evidence)
+    except ValidationError:
+        logger.warning(
+            "Refusing invalid cancellation evidence for thread %s",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "invalid_cancellation_evidence"},
+        )
+        return False
+    if factory is None:
+        _skip_without_database("the cancellation terminal election", thread_id)
+        return False
+    accepted = await _persist_proven_cancellation(
+        factory,
+        thread_id=thread_id,
+        evidence=evidence,
+        last_sequence=last_sequence,
+    )
+    if not accepted:
+        logger.warning(
+            "Refusing stale cancellation evidence for thread %s",
+            thread_id,
+            extra={
+                "thread_id": thread_id,
+                "dispatch_id": evidence.dispatch_id,
+                "action": "stale_cancellation_evidence",
+            },
+        )
+    return accepted
+
+
+def _parse_failure_terminal(
+    thread_id: str, payload: dict[str, object]
+) -> tuple[GraphFailureEvidence, str, ProviderCondition] | None:
+    raw_evidence = payload.get("failure_evidence")
+    if raw_evidence is None:
+        logger.warning(
+            "Refusing failure without exact action evidence for %s",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "missing_failure_evidence"},
+        )
+        return None
+    try:
+        evidence = GraphFailureEvidence.model_validate(raw_evidence)
+    except ValidationError:
+        logger.warning(
+            "Refusing invalid failure evidence for thread %s",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "invalid_failure_evidence"},
+        )
+        return None
+    error_detail = payload.get("error_detail")
+    raw_condition = payload.get("provider_condition")
+    if not isinstance(error_detail, str) or not error_detail:
+        return None
+    try:
+        condition = ProviderCondition(raw_condition)
+    except (TypeError, ValueError):
+        return None
+    if (
+        evidence.detail_fingerprint != failure_detail_fingerprint(error_detail)
+        or evidence.provider_condition != condition.value
+    ):
+        logger.warning(
+            "Refusing mismatched failure evidence for thread %s",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "mismatched_failure_evidence"},
+        )
+        return None
+    return evidence, error_detail, condition
+
+
+async def _confirm_failed_terminal(
+    thread_id: str,
+    payload: dict[str, object],
+    factory: async_sessionmaker[AsyncSession] | None,
+    last_sequence: int | None,
+) -> bool:
+    parsed = _parse_failure_terminal(thread_id, payload)
+    if parsed is None:
+        return False
+    evidence, error_detail, provider_condition = parsed
+    if factory is None:
+        _skip_without_database("the failure terminal election", thread_id)
+        return False
+    accepted = await _persist_proven_failure(
+        factory,
+        thread_id=thread_id,
+        evidence=evidence,
+        failure_reason=error_detail,
+        provider_condition=provider_condition,
+        last_sequence=last_sequence,
+    )
+    if not accepted:
+        logger.warning(
+            "Refusing stale failure evidence for thread %s",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "stale_failure_evidence"},
+        )
+    return accepted
+
+
 async def _handle_terminal_event(
     thread_id: str,
     payload: dict[str, object],
@@ -377,30 +536,10 @@ async def _handle_terminal_event(
     checkpointer: Checkpointer | None = None,
     drain_gate: DrainGate | None = None,
 ) -> None:
-    """Update thread DB status when a ``thread_terminal`` event arrives.
-
-    Called from both the WS and HTTP POST relay paths.  Imports are kept
-    local to avoid circular dependencies at module level.
-
-    When *aggregator* is provided, prune stale permissions and sequence
-    counters for the terminated thread.
-
-    When *drain_gate* is provided, this is the run's primary release site: a
-    validated terminal event is the end of the run's execution, so the run
-    leaves the drain gate's active set here and a drain can finally quiesce.
-    """
+    """Settle a proven terminal event, then release drain and aggregator state."""
     if not is_terminal_event(payload):
         return
-    # Captured HERE, before anything else runs, and never re-read later: the
-    # ordering is the whole fix (F19). aggregator.clear_thread_state below (in
-    # the finally block, after the durable write commits) prunes this exact
-    # thread's counter from the aggregator's in-memory _sequences dict, so a
-    # value read after that point is always the pruned default (0) -- which is
-    # what a REST client reading run-status after a run settles always saw,
-    # since that read is the only moment its reconnect-cursor comparison
-    # matters. Capturing before the durable write below, rather than near it,
-    # means a future reordering of the write can never accidentally re-open
-    # this race by moving the read closer to the prune.
+    # Capture before the durable write and before aggregator state is pruned.
     last_sequence = (
         aggregator.get_sequence(thread_id) if aggregator is not None else None
     )
@@ -413,179 +552,39 @@ async def _handle_terminal_event(
     if not status_str:
         return
     terminal_status = ThreadStatus(status_str)
-    factory = _session_factory(session_factory)
-    raw_cancellation_evidence = payload.get("cancellation_evidence")
-    raw_failure_evidence = payload.get("failure_evidence")
-    if (
-        raw_cancellation_evidence is not None
-        and terminal_status is not ThreadStatus.CANCELLED
-    ):
+    raw_cancellation = payload.get("cancellation_evidence")
+    raw_failure = payload.get("failure_evidence")
+    if raw_cancellation is not None and terminal_status is not ThreadStatus.CANCELLED:
         logger.warning(
             "Refusing cancellation evidence on non-cancelled terminal for %s",
             thread_id,
         )
         return
-    if raw_failure_evidence is not None and terminal_status is not ThreadStatus.FAILED:
+    if raw_failure is not None and terminal_status is not ThreadStatus.FAILED:
         logger.warning(
-            "Refusing failure evidence on non-failed terminal for %s",
-            thread_id,
+            "Refusing failure evidence on non-failed terminal for %s", thread_id
         )
         return
+    factory = _session_factory(session_factory)
     if terminal_status is ThreadStatus.COMPLETED:
-        if factory is None:
-            _skip_without_database("the completion reconciliation", thread_id)
-            return
-        if checkpointer is None:
-            logger.warning(
-                "Refusing completion for %s: no checkpointer is available",
-                thread_id,
-                extra={
-                    "thread_id": thread_id,
-                    "action": "completion_proof_unavailable",
-                },
-            )
-            return
-        from ..domain_config import domain_config
-        from .recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
-
-        async with factory() as db:
-            observation = await reconcile_run_checkpoint(
-                db,
-                checkpointer,
-                thread_id,
-                trigger=RecoveryTrigger.WORKER_EVENT,
-                checkpoint_timeout_seconds=domain_config.aget_state_timeout_seconds,
-                last_sequence=last_sequence,
-            )
-        if observation.status is not ThreadStatus.COMPLETED:
-            logger.warning(
-                "Refusing unproven completion for %s: %s",
-                thread_id,
-                observation.condition,
-                extra={
-                    "thread_id": thread_id,
-                    "condition": observation.condition,
-                    "action": "unproven_completion",
-                },
-            )
-            return
-        _schedule_terminal_settlement(thread_id, terminal_status, factory)
-        if drain_gate is not None:
-            await drain_gate.release(thread_id)
-        if aggregator is not None:
-            aggregator.clear_thread_state(thread_id)
-        return
-    if raw_cancellation_evidence is not None:
-        try:
-            cancellation_evidence = CancellationEvidence.model_validate(
-                raw_cancellation_evidence
-            )
-        except ValidationError:
-            logger.warning(
-                "Refusing invalid cancellation evidence for thread %s",
-                thread_id,
-                extra={
-                    "thread_id": thread_id,
-                    "action": "invalid_cancellation_evidence",
-                },
-            )
-            return
-        cancellation_factory = _session_factory(session_factory)
-        if cancellation_factory is None:
-            _skip_without_database("the cancellation terminal election", thread_id)
-            return
-        accepted = await _persist_proven_cancellation(
-            cancellation_factory,
-            thread_id=thread_id,
-            evidence=cancellation_evidence,
-            last_sequence=last_sequence,
+        accepted = await _confirm_completed_terminal(
+            thread_id, factory, checkpointer, last_sequence
         )
-        if not accepted:
-            logger.warning(
-                "Refusing stale cancellation evidence for thread %s",
-                thread_id,
-                extra={
-                    "thread_id": thread_id,
-                    "dispatch_id": cancellation_evidence.dispatch_id,
-                    "action": "stale_cancellation_evidence",
-                },
-            )
-            return
-        _schedule_terminal_settlement(
-            thread_id, ThreadStatus.CANCELLED, cancellation_factory
+    elif terminal_status is ThreadStatus.CANCELLED:
+        accepted = await _confirm_cancelled_terminal(
+            thread_id, raw_cancellation, factory, last_sequence
         )
-        if drain_gate is not None:
-            await drain_gate.release(thread_id)
-        if aggregator is not None:
-            aggregator.clear_thread_state(thread_id)
-        return
-    if terminal_status is ThreadStatus.CANCELLED:
-        logger.warning(
-            "Refusing cancellation without exact cessation evidence for %s",
-            thread_id,
-            extra={"thread_id": thread_id, "action": "missing_cancellation_evidence"},
+    else:
+        accepted = await _confirm_failed_terminal(
+            thread_id, payload, factory, last_sequence
         )
+    if not accepted or factory is None:
         return
-    if terminal_status is ThreadStatus.FAILED:
-        if raw_failure_evidence is None:
-            logger.warning(
-                "Refusing failure without exact action evidence for %s",
-                thread_id,
-                extra={"thread_id": thread_id, "action": "missing_failure_evidence"},
-            )
-            return
-        try:
-            failure_evidence = GraphFailureEvidence.model_validate(raw_failure_evidence)
-        except ValidationError:
-            logger.warning(
-                "Refusing invalid failure evidence for thread %s",
-                thread_id,
-                extra={"thread_id": thread_id, "action": "invalid_failure_evidence"},
-            )
-            return
-        error_detail = payload.get("error_detail")
-        raw_condition = payload.get("provider_condition")
-        if not isinstance(error_detail, str) or not error_detail:
-            return
-        try:
-            provider_condition = ProviderCondition(raw_condition)
-        except (TypeError, ValueError):
-            return
-        if (
-            failure_evidence.detail_fingerprint
-            != failure_detail_fingerprint(error_detail)
-            or failure_evidence.provider_condition != provider_condition.value
-        ):
-            logger.warning(
-                "Refusing mismatched failure evidence for thread %s",
-                thread_id,
-                extra={"thread_id": thread_id, "action": "mismatched_failure_evidence"},
-            )
-            return
-        if factory is None:
-            _skip_without_database("the failure terminal election", thread_id)
-            return
-        accepted = await _persist_proven_failure(
-            factory,
-            thread_id=thread_id,
-            evidence=failure_evidence,
-            failure_reason=error_detail,
-            provider_condition=provider_condition,
-            last_sequence=last_sequence,
-        )
-        if not accepted:
-            logger.warning(
-                "Refusing stale failure evidence for thread %s",
-                thread_id,
-                extra={"thread_id": thread_id, "action": "stale_failure_evidence"},
-            )
-            return
-        _schedule_terminal_settlement(thread_id, terminal_status, factory)
-        if drain_gate is not None:
-            await drain_gate.release(thread_id)
-        if aggregator is not None:
-            aggregator.clear_thread_state(thread_id)
-        return
+    _schedule_terminal_settlement(thread_id, terminal_status, factory)
+    if drain_gate is not None:
+        await drain_gate.release(thread_id)
+    if aggregator is not None:
+        aggregator.clear_thread_state(thread_id)
 
 
 _PERMISSION_REQUEST_EVENT_TYPES = frozenset(
@@ -827,27 +826,12 @@ async def _handle_permission_event(
         await db.commit()
 
 
-async def _handle_progress_event(
-    thread_id: str,
-    payload: dict[str, object],
-    *,
-    session_factory: async_sessionmaker[AsyncSession] | None = None,
-    checkpointer: Checkpointer | None = None,
-) -> str | None:
-    """Settle one exact control action from a private worker receipt."""
+def _validated_application_receipt(
+    thread_id: str, payload: dict[str, object]
+) -> DispatchApplicationReceiptPayload | None:
     if payload.get("type") != "dispatch_applied":
-        return
-    from ..database import (
-        ControlActionModel,
-        ThreadModel,
-        get_control_action_by_dispatch_id,
-        get_thread,
-        mark_control_action_applied,
-        update_thread_status,
-    )
-    from ..thread.checkpoint_evidence import read_checkpoint_evidence
+        return None
     from ..thread.enums import ControlActionType
-    from .repair_transitions import mark_message_followup_applied
 
     try:
         application = DispatchApplicationReceiptPayload.model_validate(payload)
@@ -857,7 +841,7 @@ async def _handle_progress_event(
             thread_id,
             extra={"thread_id": thread_id, "action": "invalid_application_receipt"},
         )
-        return
+        return None
     if application.graph_action_receipt.thread_id != thread_id:
         logger.warning(
             "Refusing cross-thread dispatch application receipt for thread %s",
@@ -867,15 +851,12 @@ async def _handle_progress_event(
                 "action": "cross_thread_application_receipt",
             },
         )
-        return
+        return None
     receipt_action = application.graph_action_receipt.action_type
     expected_transport_action = (
         "ingest"
         if receipt_action
-        in {
-            ControlActionType.INGEST,
-            ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-        }
+        in {ControlActionType.INGEST, ControlActionType.MESSAGE_FOLLOWUP_REQUESTED}
         else "resume"
     )
     if application.action != expected_transport_action:
@@ -884,112 +865,159 @@ async def _handle_progress_event(
             thread_id,
             extra={"thread_id": thread_id, "action": "mismatched_application_verb"},
         )
-        return
+        return None
+    return application
 
+
+async def _proven_application_receipt(
+    db: AsyncSession,
+    thread_id: str,
+    application: DispatchApplicationReceiptPayload,
+    checkpointer: Checkpointer,
+) -> GraphActionReceipt | None:
+    from ..database import get_control_action_by_dispatch_id, get_thread
+    from ..thread.checkpoint_evidence import read_checkpoint_evidence
+    from .dispatch_receipts import validate_current_graph_receipt
+
+    action = await get_control_action_by_dispatch_id(
+        db, thread_id=thread_id, dispatch_id=application.dispatch_id
+    )
+    thread = await get_thread(db, thread_id)
+    if action is None or thread is None or action.applied_at is not None:
+        return None
+    stored_receipt = validate_current_graph_receipt(thread, action)
+    if stored_receipt != application.graph_action_receipt:
+        logger.warning(
+            "Refusing non-current dispatch application receipt for thread %s",
+            thread_id,
+            extra={
+                "thread_id": thread_id,
+                "dispatch_id": application.dispatch_id,
+                "action": "non_current_application_receipt",
+            },
+        )
+        return None
+    if stored_receipt is None:
+        return None
+    await db.commit()
+    from ..domain_config import domain_config
+
+    evidence = await read_checkpoint_evidence(
+        checkpointer,
+        stored_receipt,
+        timeout_seconds=domain_config.aget_state_timeout_seconds,
+        checkpoint_id=application.checkpoint_id,
+    )
+    if not evidence.incorporated:
+        logger.warning(
+            "Refusing %s dispatch application receipt for thread %s",
+            evidence.kind.value,
+            thread_id,
+            extra={
+                "thread_id": thread_id,
+                "dispatch_id": application.dispatch_id,
+                "checkpoint_id": application.checkpoint_id,
+                "condition": evidence.kind.value,
+                "action": "unincorporated_application_receipt",
+            },
+        )
+        return None
+    return stored_receipt
+
+
+async def _commit_proven_application(
+    db: AsyncSession,
+    thread_id: str,
+    application: DispatchApplicationReceiptPayload,
+    stored_receipt: GraphActionReceipt,
+) -> str | None:
+    from sqlalchemy import select
+
+    from ..database import (
+        ControlActionModel,
+        ThreadModel,
+        mark_control_action_applied,
+        update_thread_status,
+    )
+    from ..thread.enums import ControlActionType
+    from .dispatch_receipts import validate_current_graph_receipt
+    from .repair_transitions import mark_message_followup_applied
+
+    thread = await db.scalar(
+        select(ThreadModel)
+        .where(ThreadModel.id == thread_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    action = await db.scalar(
+        select(ControlActionModel)
+        .where(
+            ControlActionModel.thread_id == thread_id,
+            ControlActionModel.dispatch_id == application.dispatch_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if (
+        action is None
+        or thread is None
+        or action.applied_at is not None
+        or validate_current_graph_receipt(thread, action) != stored_receipt
+    ):
+        return None
+    if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
+        await mark_control_action_applied(db, action.id)
+        await mark_message_followup_applied(db, thread_id)
+        await db.commit()
+        return None
+    if (
+        action.action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
+        and action.request_id is not None
+    ):
+        await _apply_permission_resolution(
+            db, thread_id, {"request_id": action.request_id}
+        )
+        await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
+        await db.commit()
+        return action.request_id
+    from .verdict_subscriber import settle_verdict_dispatch_receipt
+
+    if await settle_verdict_dispatch_receipt(db, action):
+        await db.commit()
+    return None
+
+
+async def _handle_progress_event(
+    thread_id: str,
+    payload: dict[str, object],
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    checkpointer: Checkpointer | None = None,
+) -> str | None:
+    """Settle one exact control action from a private worker receipt."""
+    application = _validated_application_receipt(thread_id, payload)
+    if application is None:
+        return None
     factory = _session_factory(session_factory)
     if factory is None:
         _skip_without_database("the control-action settlement", thread_id)
-        return
+        return None
     if checkpointer is None:
         logger.warning(
             "Skipping application receipt for %s: no checkpointer is available",
             thread_id,
             extra={"thread_id": thread_id, "action": "checkpoint_proof_unavailable"},
         )
-        return
+        return None
     async with factory() as db:
-        action = await get_control_action_by_dispatch_id(
-            db,
-            thread_id=thread_id,
-            dispatch_id=application.dispatch_id,
+        stored_receipt = await _proven_application_receipt(
+            db, thread_id, application, checkpointer
         )
-        thread = await get_thread(db, thread_id)
-        if action is None or thread is None or action.applied_at is not None:
-            return
-        from .dispatch_receipts import validate_current_graph_receipt
-
-        stored_receipt = validate_current_graph_receipt(thread, action)
-        if stored_receipt != application.graph_action_receipt:
-            logger.warning(
-                "Refusing non-current dispatch application receipt for thread %s",
-                thread_id,
-                extra={
-                    "thread_id": thread_id,
-                    "dispatch_id": application.dispatch_id,
-                    "action": "non_current_application_receipt",
-                },
-            )
-            return
         if stored_receipt is None:
-            return
-        await db.commit()
-        from ..domain_config import domain_config
-
-        evidence = await read_checkpoint_evidence(
-            checkpointer,
-            stored_receipt,
-            timeout_seconds=domain_config.aget_state_timeout_seconds,
-            checkpoint_id=application.checkpoint_id,
+            return None
+        return await _commit_proven_application(
+            db, thread_id, application, stored_receipt
         )
-        if not evidence.incorporated:
-            logger.warning(
-                "Refusing %s dispatch application receipt for thread %s",
-                evidence.kind.value,
-                thread_id,
-                extra={
-                    "thread_id": thread_id,
-                    "dispatch_id": application.dispatch_id,
-                    "checkpoint_id": application.checkpoint_id,
-                    "condition": evidence.kind.value,
-                    "action": "unincorporated_application_receipt",
-                },
-            )
-            return
-        from sqlalchemy import select
-
-        thread = await db.scalar(
-            select(ThreadModel)
-            .where(ThreadModel.id == thread_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-        action = await db.scalar(
-            select(ControlActionModel)
-            .where(
-                ControlActionModel.thread_id == thread_id,
-                ControlActionModel.dispatch_id == application.dispatch_id,
-            )
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-        if (
-            action is None
-            or thread is None
-            or action.applied_at is not None
-            or validate_current_graph_receipt(thread, action) != stored_receipt
-        ):
-            return
-        if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
-            await mark_control_action_applied(db, action.id)
-            await mark_message_followup_applied(db, thread_id)
-            await db.commit()
-            return
-        if (
-            action.action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
-            and action.request_id is not None
-        ):
-            await _apply_permission_resolution(
-                db,
-                thread_id,
-                {"request_id": action.request_id},
-            )
-            await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
-            await db.commit()
-            return action.request_id
-        from .verdict_subscriber import settle_verdict_dispatch_receipt
-
-        if await settle_verdict_dispatch_receipt(db, action):
-            await db.commit()
 
 
 async def _handle_execution_state_event(

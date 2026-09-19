@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:983e71c9cf27aceb5d2bb4ab0e46be7fccdf802a0f30850c19cb1a5f044cf63b'
+body_hash: 'sha256:c4a05d9f4c896b8d9783bc46e238b40aa724d13dca4b928ebc9e81f2c57fb165'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3200,3 +3200,7 @@ Six medium-severity strict Ruff structure findings in lifecycle discovery were r
 ### 2026-09-20 worker management structure review pass
 
 Twelve medium-severity strict Ruff findings across worker spawn admission, readiness polling, exact-tree reaping, shutdown, and watchdog reconciliation were resolved. Desktop and shared-port pairing decisions now have separate predicates; retained process signaling is shared by exact-tree and descendant cleanup; cooperative shutdown and live-descendant capture are focused helpers; readiness inputs travel as one typed specification; and the watchdog separates probe reconciliation from restart. Review checked that only an owned worker is adopted or restarted, an unauthorized or unidentifiable occupant is never evicted, a failed eviction refuses spawn, containment cleanup still runs in nested finally blocks, and restart cooldown still stamps failed attempts. Forty-one focused spawn, provenance, and watchdog tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 274 to 262; worker-management has no remaining Ruff or complexipy findings. The latest code-health gate reports 23 function-length, 104 parameter-count, and four nesting findings (from 24, 109, and six at the prior complete strict run), while the module-length finding for this 1,746-line file remains open. Radon complexity is 145 over the threshold across the repository, down from 155 at the prior complete strict run. No new review findings were surfaced. The remaining 262 Ruff structure, 31 nested-block, and Pylint/health findings remain open.
+
+### 2026-09-20 terminal and application event structure review pass
+
+Seven medium-severity strict Ruff complexity, branch, return, and statement findings in terminal and dispatch-application handling were resolved. Completion, cancellation, and failure terminals now have separate proof checks; the terminal handler releases the drain gate and prunes aggregator state only after one proof accepts. Dispatch application now validates the private receipt, proves checkpoint incorporation, then reloads the current action under row locks before settlement. Review checked that sequence capture still precedes pruning, mismatched or stale evidence still refuses settlement, the intermediate database commit still precedes checkpoint inspection, and permission response resolution still returns its request id to the aggregator. Sixty-four focused control and API tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 262 to 255; code-health function-length findings fall from 23 to 21 and radon findings from 145 to 144. No new review findings were surfaced. Three excessive-argument signatures and the module-length finding remain open in this module; the remaining 255 Ruff structure, 31 nested-block, and Pylint/health findings remain open.

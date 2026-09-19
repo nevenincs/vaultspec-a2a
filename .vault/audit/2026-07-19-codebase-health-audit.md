@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:c8b1a2fa622fc3cef1b43b690baa93be23fc214c67f9bde7f048e7dd95bbc6a0'
+body_hash: 'sha256:c1c70c416d7ac408c85bc8408a4e69e77591eab4491f54952a478daf94522e09'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3256,3 +3256,7 @@ One medium-severity strict Ruff C901 finding and two medium-severity cognitive-c
 ### 2026-09-20 provider factory admission decomposition review pass
 
 The high-severity maintainability cluster in `ProviderFactory.create` remains open while its admission logic is decomposed. Frozen execution-mode validation, native-control validation, and option extraction now have focused helpers; the factory cyclomatic score falls from 53 to 41 without changing the repository-wide 138-offender count. Review checked that timeout, execution mode, and native controls are popped from the same mutable kwargs before model admission, frozen ACP backend conflicts still refuse construction, native control types and provider support still fail before construction, and the existing provider-specific paths receive the same values. Eighty-seven focused factory, in-process catalog, and Z.ai tests pass; `just check-all`, focused Ty, and diff check pass. No new review findings were surfaced. The remaining five strict Ruff findings and cognitive-complexity finding in this module stay open alongside the repository-wide strict backlog.
+
+### 2026-09-20 provider factory construction review pass
+
+Five medium-severity strict Ruff complexity, branch, statement, return, and parameter findings in provider construction were resolved. Codex, Claude, Z.ai, Kimi, in-process, and OpenAI-compatible constructors now have focused functions; Kimi's independent home variable is composed after temporary-model validation. Review checked the frozen model and backend authority, exact native controls, lazy model imports, ambient Claude auth, Z.ai token injection, Kimi command and temporary-provider values, and OpenAI/Zhipu credential precedence. Review surfaced two low-severity private-helper risks: permissive fallback to another provider, fixed by exact provider refusals; the first full check also caught an unused import, removed before the final run. One hundred thirty-five focused provider tests pass, with three deselected by the project marker policy; 46 focused factory tests pass after the review fix. `just check-all`, `just check-type-strict`, strict Ruff for the module, complexipy, and diff check pass. Repository strict Ruff structure falls from 215 after the prior team-selection pass to 210; radon findings fall from 138 to 136; code-health function-length falls from 15 to 14 and parameter-count from 94 to 93. No unresolved new review findings were surfaced. The factory still has a medium-severity module-length finding; the remaining 210 Ruff structure and other strict backlog stay open in the audit queue.

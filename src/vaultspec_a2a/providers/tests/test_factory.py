@@ -22,6 +22,7 @@ from ..factory import (
     _build_kimi_env,
     _build_zai_env,
     _classify_acp_command,
+    _kimi_home_env,
     classify_provider_command,
     kimi_temporary_model_configuration_reason,
 )
@@ -303,12 +304,12 @@ def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
         assert model.auth_mode == "persisted_config"
     assert "KIMI_API_KEY" not in model.env_vars
     assert "KIMI_BASE_URL" not in model.env_vars
+    if settings.kimi_code_home and settings.kimi_code_home.strip():
+        assert model.env_vars["KIMI_CODE_HOME"] == settings.kimi_code_home.strip()
 
 
 def test_kimi_persisted_configuration_injects_no_temporary_definition() -> None:
-    assert _build_kimi_env(kimi_code_home="C:/kimi-home") == {
-        "KIMI_CODE_HOME": "C:/kimi-home"
-    }
+    assert _kimi_home_env("C:/kimi-home") == {"KIMI_CODE_HOME": "C:/kimi-home"}
 
 
 def test_complete_kimi_temporary_definition_uses_current_names() -> None:

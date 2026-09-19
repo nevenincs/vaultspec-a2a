@@ -15,6 +15,7 @@ wiring is the thing under test, so the wiring is what these tests exercise.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import anyio
@@ -60,6 +61,17 @@ _APPROVAL_OPTIONS: list[dict[str, object]] = [
     {"option_id": "approve", "name": "Approve Plan", "kind": "allow_once"},
     {"option_id": "reject", "name": "Reject - Revise Plan", "kind": "reject_once"},
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class _PauseSpec:
+    reason: str
+    tool_call: str | None
+    options: list[dict[str, object]]
+
+
+_TOOL_PAUSE = _PauseSpec("bash", "bash", _TOOL_OPTIONS)
+_APPROVAL_PAUSE = _PauseSpec("plan_approval_request", None, _APPROVAL_OPTIONS)
 
 
 @pytest_asyncio.fixture
@@ -110,9 +122,7 @@ async def _pause_run(
     thread_id: str,
     *,
     workspace: Path,
-    pause_reason_type: str,
-    tool_call: str | None,
-    options: list[dict[str, object]],
+    pause: _PauseSpec,
 ) -> str:
     """Park a real run on a real durable permission request."""
     request_id = f"{thread_id}:permission"
@@ -128,10 +138,10 @@ async def _pause_run(
             db,
             request_id=request_id,
             thread_id=thread_id,
-            pause_reason_type=pause_reason_type,
+            pause_reason_type=pause.reason,
             description="Allow the command?",
-            allowed_options=options,
-            tool_call=tool_call,
+            allowed_options=pause.options,
+            tool_call=pause.tool_call,
         )
         await _seed_accepted_initial_action(db, thread_id, workspace=workspace)
         await db.commit()
@@ -182,9 +192,7 @@ async def test_approving_a_tool_call_records_a_durable_audit_row(
         sessions,
         thread_id,
         workspace=tmp_path,
-        pause_reason_type="bash",
-        tool_call="bash",
-        options=_TOOL_OPTIONS,
+        pause=_TOOL_PAUSE,
     )
     assert await _audit_rows(sessions, thread_id) == []
 
@@ -222,9 +230,7 @@ async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
         sessions,
         thread_id,
         workspace=tmp_path,
-        pause_reason_type="bash",
-        tool_call="bash",
-        options=_TOOL_OPTIONS,
+        pause=_TOOL_PAUSE,
     )
 
     async with _worker(tmp_path / "audit-reject-checkpoints.db") as worker_client:
@@ -254,9 +260,7 @@ async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
         sessions,
         thread_id,
         workspace=tmp_path,
-        pause_reason_type="plan_approval_request",
-        tool_call=None,
-        options=_APPROVAL_OPTIONS,
+        pause=_APPROVAL_PAUSE,
     )
 
     async with _worker(tmp_path / "audit-plan-checkpoints.db") as worker_client:
@@ -289,9 +293,7 @@ async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
         sessions,
         thread_id,
         workspace=tmp_path,
-        pause_reason_type="bash",
-        tool_call="bash",
-        options=_TOOL_OPTIONS,
+        pause=_TOOL_PAUSE,
     )
 
     async with _worker(tmp_path / "audit-refused-checkpoints.db") as worker_client:
@@ -323,9 +325,7 @@ async def test_a_client_retry_records_one_decision_not_two(
         sessions,
         thread_id,
         workspace=tmp_path,
-        pause_reason_type="bash",
-        tool_call="bash",
-        options=_TOOL_OPTIONS,
+        pause=_TOOL_PAUSE,
     )
 
     async with _worker(tmp_path / "audit-retry-checkpoints.db") as worker_client:

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:7cc9e44c1a2433593ecf3eab531bc86c74f89ba7fad6fe64f6d10cb98b4e3f06'
+body_hash: 'sha256:9ff0bdc2a29de2f26fbbb5a8f2c6d1afa482cd97b10e876e943bec47ed0a43fc'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3136,3 +3136,7 @@ Two low-severity strict argument-shape findings came from gateway auth tests unp
 ### 2026-09-19 harness and authoring seed shape review pass
 
 Two low-severity strict argument-shape findings in test helpers were resolved. Harness corpus provisioning now uses one explicit agent-state choice (`complete`, `empty`, or `missing`) and a separate MCP-corpus step; this removes conflicting boolean combinations. The authoring completion tests now pass one typed thread seed holding the run identity, preset, authoring IDs, and status. All 11 harness and four authoring completion tests pass, and focused Ruff checks pass. The strict Ruff structure count falls from 320 to 318. The remaining 318 structure errors, 33 nested-block errors, and 60 Pylint shape findings remain open. A full four-worker nonservice run on the combined branch is in progress.
+
+### 2026-09-19 parameterized compiler and permission audit review pass
+
+Two low-severity strict argument-shape findings were resolved in tests. The compiler structure test now receives its preset/topology/worker expectation as one parameterized case; the permission audit seed helper receives an explicit pause specification instead of three loosely related fields. The focused compiler test and all five durable permission-audit tests pass; Ruff's focused argument rule passes for both files. The strict Ruff structure count falls from 318 to 316. The remaining 316 structure errors, 33 nested-block errors, and 60 Pylint shape findings remain open.

@@ -107,19 +107,17 @@ _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("preset", "topology", "expected_workers", "has_supervisor"),
+    "case",
     _PRESET_CASES,
     ids=[c[0] for c in _PRESET_CASES],
 )
 async def test_compile_graph_structure(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
-    preset: str,
-    topology: str,
-    expected_workers: set[str],
-    has_supervisor: bool,
+    case: tuple[str, str, set[str], bool],
 ) -> None:
     """Compiled graph has the correct node set and empty interrupt_before."""
+    preset, topology, expected_workers, has_supervisor = case
     team = load_team_config(preset)
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     supervisor_cfg = (

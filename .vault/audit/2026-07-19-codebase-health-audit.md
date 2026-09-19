@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:6b66fabaa64d7d8a55875df8665be271b531c8eb2984f76d1cc3ebd5e4b8030c'
+body_hash: 'sha256:983e71c9cf27aceb5d2bb4ab0e46be7fccdf802a0f30850c19cb1a5f044cf63b'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3196,3 +3196,7 @@ The ACP response handler had one medium-severity cognitive-complexity finding af
 ### 2026-09-20 discovery credential and desktop parsing review pass
 
 Six medium-severity strict Ruff structure findings in lifecycle discovery were resolved. The desktop record parser combines equivalent invalidity checks; credential reading and private publication now use focused helpers for leased reads, source claims, existing-file refusal, POSIX identity verification, and platform publication. Review checked that the credential remains owner-restricted, link-like paths and changed identities remain refused, source cleanup still runs after publication failure, Windows ACL hardening still follows publication, and malformed desktop records still fail closed. Twenty-five lifecycle and desktop ownership tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 280 to 274. The two public discovery writer signatures still have low-severity excessive-argument findings; their call contracts remain in the open queue. No new review findings were surfaced. The remaining 274 Ruff structure, 32 nested-block, and Pylint/health findings remain open.
+
+### 2026-09-20 worker management structure review pass
+
+Twelve medium-severity strict Ruff findings across worker spawn admission, readiness polling, exact-tree reaping, shutdown, and watchdog reconciliation were resolved. Desktop and shared-port pairing decisions now have separate predicates; retained process signaling is shared by exact-tree and descendant cleanup; cooperative shutdown and live-descendant capture are focused helpers; readiness inputs travel as one typed specification; and the watchdog separates probe reconciliation from restart. Review checked that only an owned worker is adopted or restarted, an unauthorized or unidentifiable occupant is never evicted, a failed eviction refuses spawn, containment cleanup still runs in nested finally blocks, and restart cooldown still stamps failed attempts. Forty-one focused spawn, provenance, and watchdog tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 274 to 262; worker-management has no remaining Ruff or complexipy findings. The latest code-health gate reports 23 function-length, 104 parameter-count, and four nesting findings (from 24, 109, and six at the prior complete strict run), while the module-length finding for this 1,746-line file remains open. Radon complexity is 145 over the threshold across the repository, down from 155 at the prior complete strict run. No new review findings were surfaced. The remaining 262 Ruff structure, 31 nested-block, and Pylint/health findings remain open.

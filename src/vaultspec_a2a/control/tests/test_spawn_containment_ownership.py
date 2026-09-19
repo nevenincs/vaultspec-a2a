@@ -29,6 +29,7 @@ import pytest
 from ...control.worker_management import (
     GATEWAY_LIFETIME_ID,
     LazyWorkerSpawner,
+    WorkerReadySpec,
     _await_worker_ready,
     _spawn_worker_owned,
 )
@@ -251,11 +252,13 @@ async def test_a_cancelled_readiness_wait_reaps_the_worker_tree(
                 process,
                 containment,
                 # Nothing answers here, so the wait stays in its poll loop.
-                worker_url="http://127.0.0.1:9",
-                worker_port=9,
-                generation=1,
-                worker_command=["python", "-c", "<stand-in worker>"],
-                stderr_log_path=tmp_path / "worker.stderr.log",
+                WorkerReadySpec(
+                    "http://127.0.0.1:9",
+                    9,
+                    1,
+                    ["python", "-c", "<stand-in worker>"],
+                    tmp_path / "worker.stderr.log",
+                ),
             )
         )
         # Let the wait reach its first poll before cancelling it, so the

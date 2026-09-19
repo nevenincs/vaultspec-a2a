@@ -26,8 +26,6 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...api.tests.clarification_harness import new_state_graph
 from ...control.accepted_input import freeze_accepted_input
 from ...control.cancel_service import CancelResult, cancel_thread
@@ -54,6 +52,7 @@ from ...database.models import Base, RecoveryAttemptModel
 from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition

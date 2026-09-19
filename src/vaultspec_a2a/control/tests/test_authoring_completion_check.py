@@ -24,12 +24,11 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
 from ...control.thread_state_service import capture_thread_state
 from ...database import create_thread
 from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:

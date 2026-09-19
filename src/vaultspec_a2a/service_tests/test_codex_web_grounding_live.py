@@ -75,8 +75,6 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage
 
-from vaultspec_a2a.testing.tests._support.json_contract import json_list, json_text
-
 from ..graph.compiler import _make_research_producer
 from ..graph.enums import Provider
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND, create_researcher_node
@@ -97,6 +95,7 @@ from ..providers.codex_chat_model import (
 )
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import is_web_lane_proven
+from ..testing.tests._support.json_contract import json_list, json_text
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
 

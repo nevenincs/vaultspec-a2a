@@ -49,10 +49,9 @@ import httpx
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from vaultspec_a2a.testing.tests._support.payloads import json_object
-
 from ..graph.enums import ServerEventType
 from ..providers._json_contract import JsonObject
+from ..testing.tests._support.payloads import json_object
 from .test_pw7_acceptance import (
     _MODE_AUTONOMOUS,
     AcceptanceCase,

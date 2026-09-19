@@ -19,8 +19,6 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from starlette.testclient import TestClient
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...control.worker_management import WorkerLiveness
 from ...database import (
     create_thread,
@@ -30,6 +28,7 @@ from ...database import (
 )
 from ...database.models import ThreadExecutionStateModel
 from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
 

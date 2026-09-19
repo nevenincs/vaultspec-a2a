@@ -24,13 +24,12 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage
 
-from vaultspec_a2a.testing.tests._support.sse import read_frame
-
 from ...graph.nodes.clarification import (
     create_clarification_gate_node,
     create_clarification_request_node,
 )
 from ...streaming.transformer import emit_interrupt_events
+from ...testing.tests._support.sse import read_frame
 from ...thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,

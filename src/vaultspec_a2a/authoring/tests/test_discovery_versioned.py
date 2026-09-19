@@ -17,8 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.testing.tests._support.listeners import health_listener
-
+from ...testing.tests._support.listeners import health_listener
 from ..discovery import (
     DESKTOP_RECORD_VERSION,
     SERVICE_JSON_ENV,

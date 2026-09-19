@@ -20,10 +20,9 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi.testclient import TestClient
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...database.thread_repository import create_thread, update_thread_status
 from ...providers.conditions import ProviderCondition
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from .conftest import SessionFactory, make_app
 

@@ -18,8 +18,6 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
 from ...database import (
     create_thread,
@@ -32,6 +30,7 @@ from ...database.permission_repository import (
     get_or_create_control_action,
 )
 from ...database.reconciliation import reconcile_threads_on_startup
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType
 
 

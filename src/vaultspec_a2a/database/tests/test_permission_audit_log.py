@@ -24,13 +24,12 @@ import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
 from ...graph.enums import PermissionType
 from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ApprovalStatus, ThreadStatus
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor

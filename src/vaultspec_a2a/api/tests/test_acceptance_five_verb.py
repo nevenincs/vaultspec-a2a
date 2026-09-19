@@ -31,10 +31,9 @@ from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...database.thread_repository import create_thread
 from ...ipc.schemas import DispatchRequest
+from ...tests._write_authority import make_test_write_authority
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ThreadStatus
 from ...worker.executor import Executor

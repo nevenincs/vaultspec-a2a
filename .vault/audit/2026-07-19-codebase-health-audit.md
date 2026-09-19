@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:bfc592c1ad60a5013182220aa2830defd2b35f81e0bbfc593660150ef155b2dc'
+body_hash: 'sha256:046d40e7344da5bc6e21c8fb4b4811e69bf931ffc9dffccaed5194d5804d7d0f'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -14,7 +14,6 @@ related:
   - "[[2026-07-17-kimi-provider-dedup-audit]]"
   - '[[2026-07-19-codebase-health-research]]'
 ---
-
 # `codebase-health` audit: `repository-wide health and dashboard contract`
 
 ## Scope
@@ -2895,3 +2894,57 @@ A focused real-install provision test fails because the installed workspace lack
 #### integrated-verification | low | type: validation | closed
 
 The integrated pass reports 0 scanner findings. Ruff lint and format, ty, reachability, unused-symbol coverage, and 270 governed import-load probes pass. Focused test groups passed across the scanner, testing support, authoring, provider, service, control, API, desktop, and lifecycle scopes. Pytest collected 4,757 of 4,759 tests (two live proofs withheld by configured prerequisites); the collection recipe returned exit 4 despite listing the tree, so its harness exit behavior remains a medium open validation issue. The real-install, database authority, graph ACP, and GPU failures remain open as listed above. The review found no unqueued new issue from the merged cleanup.
+
+### 2026-09-19 relative-import gate review | low | absolute package imports removed
+
+Type: import discipline. Status: RESOLVED. The package-relative import gate
+found 85 absolute self-imports, chiefly in test support modules. All were
+converted to equivalent relative imports. Ruff, formatting, just check-all,
+and pytest collection pass; selected database and test-support tests pass.
+The conversion preserves imported symbols and leaves runtime modules unchanged.
+
+### 2026-09-19 strict-type packaging review | medium | LangGraph namespace typing repaired
+
+Type: dependency typing. Status: RESOLVED. Basedpyright reported 19 missing
+type-stub diagnostics for langgraph.graph and langgraph.graph.message
+despite the installed namespace root carrying py.typed. A local typing
+overlay under typings/langgraph/graph declares the same public graph exports,
+message reducer, and message-state shape as the locked runtime package.
+just check-type-strict now reports zero diagnostics.
+
+### 2026-09-19 shared normalizer export review | low | read seam export made explicit
+
+Type: typing boundary. Status: RESOLVED. The workspace-identity parity test
+consumes the exact normalizer object exposed by control/run_discovery_service.py.
+An explicit re-export preserves that identity and removes the private-local-
+import diagnostic. The targeted database test passes.
+
+### 2026-09-19 strict structural gates | high | complexity and shape debt remains
+
+Type: maintainability. Status: OPEN. The strict aggregate remains red after
+typing and import cleanup. The 2026-09-19 health census counts 162 functions
+over the cyclomatic limit, 13 modules over the length limit, 27 functions over
+the statement limit, 119 callables over the parameter limit, and 9 functions
+over the nesting limit. just check-strict also reports cognitive-complexity
+and pylint design findings; Ruff reports 324 shape and complexity errors
+and 35 nesting errors in the same strict run. Repository-tooling-hardening
+plan W07.P13 and
+W07.P14 own decomposition; W08 promotion remains blocked until each sentinel
+has zero findings. No threshold, exclusion, or suppression was changed.
+
+### 2026-09-19 strict export gate | medium | unconsumed public names remain
+
+Type: API surface. Status: OPEN. just check-exports reports 111 unconsumed
+published names across 1,220 names. Each export needs a consumer check before
+removal; some may be intentional external API. The strict gate cannot graduate
+while the count is nonzero. Follow-up belongs in the repository tooling
+hardening queue before W08 closure.
+
+### 2026-09-19 default-suite follow-up behavior | high | dispatch receipt does not settle applied action
+
+Type: behavior. Status: OPEN. A non-service suite run after the import changes
+reached api/tests/test_endpoints.py::TestSendMessage::test_followup_dispatch_marks_message_followup_as_applied;
+it fails with last_applied_action == "ingest" after a follow-up receipt, where
+the test expects message_followup_applied. This is a real state-transition
+finding, independent of import spelling. Record it for control-action
+investigation and real-behavior regression proof.

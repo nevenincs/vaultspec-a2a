@@ -59,13 +59,12 @@ from typing import TYPE_CHECKING
 import pytest
 import yaml
 
-from vaultspec_a2a.testing.tests._support.payloads import json_object, json_object_list
-
 from ..acceptance.tests._harness import (
     DEFAULT_REQUIRED_ROLE,
     DEFAULT_TEAM_PRESET,
     certified_gateway,
 )
+from ..testing.tests._support.payloads import json_object, json_object_list
 from ._net import tape_server_listening
 
 if TYPE_CHECKING:

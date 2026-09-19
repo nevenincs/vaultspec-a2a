@@ -17,8 +17,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...api.tests.clarification_harness import park_clarification
 from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -31,6 +29,7 @@ from ...database import (
     get_thread,
 )
 from ...providers.conditions import ProviderCondition
+from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus

@@ -16,14 +16,13 @@ import pytest
 from sqlalchemy import String
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import (
-    make_test_thread_authority_columns,
-    make_test_write_authority,
-)
-
 from ...database.models import ThreadModel
 from ...database.thread_repository import create_thread
 from ...testing.ports import free_port
+from ...tests._write_authority import (
+    make_test_thread_authority_columns,
+    make_test_write_authority,
+)
 from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:

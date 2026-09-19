@@ -16,8 +16,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from vaultspec_a2a.testing.tests._support.http_handlers import JsonReplyHandler
-
+from ...testing.tests._support.http_handlers import JsonReplyHandler
 from .. import AuthoringClient
 from ..catalog import make_tool_dispatch, parse_catalog
 

@@ -16,8 +16,7 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 
-from vaultspec_a2a.testing.tests._support.listeners import health_listener
-
+from ...testing.tests._support.listeners import health_listener
 from ..discovery import SERVICE_JSON_ENV, EngineEndpoint, resolve_engine
 
 if TYPE_CHECKING:

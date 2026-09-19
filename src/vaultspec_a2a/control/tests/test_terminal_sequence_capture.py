@@ -39,12 +39,11 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
 from ...database import create_thread
 from ...database.models import ThreadModel
 from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..event_handlers import _handle_terminal_event
 from ..thread_state_service import capture_thread_state

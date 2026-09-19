@@ -37,8 +37,6 @@ import pytest
 from httpx import ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...control.action_lease import (
     CONTROL_ACTION_LEASE_TTL,
     prepare_control_action_claim,
@@ -54,6 +52,7 @@ from ...database import (
     get_control_action_by_idempotency_key,
     get_thread_metadata,
 )
+from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
     ClarificationAnswers,

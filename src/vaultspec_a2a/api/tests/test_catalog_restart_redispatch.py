@@ -15,9 +15,6 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 import pytest
 
-from vaultspec_a2a.testing.tests._support.catalog_selection import in_process_selection
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.dispatch import redispatch_reconciling_threads
 from ...control.worker_management import LazyWorkerSpawner
@@ -46,6 +43,8 @@ from ...providers.team_selection import (
     freeze_team_selection,
     model_assignment_digest,
 )
+from ...testing.tests._support.catalog_selection import in_process_selection
+from ...tests._write_authority import make_test_write_authority
 from ...tests.gateway_boot import (
     armed_gateway_env,
     gateway_script,

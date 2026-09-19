@@ -9,8 +9,6 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import (
     permission_response_action_key,
@@ -24,6 +22,7 @@ from ...database import (
 )
 from ...database.models import Base
 from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
 from ._catalog_authority import current_execution_metadata

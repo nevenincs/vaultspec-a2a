@@ -11,8 +11,6 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
 from ...control.thread_state_service import capture_thread_state
 from ...database import (
@@ -27,6 +25,7 @@ from ...database.models import (
 )
 from ...graph.events import PermissionRequest
 from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
     from ...thread.snapshots import ThreadStateData

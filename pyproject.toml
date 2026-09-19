@@ -481,6 +481,7 @@ root = [".", "src"]
 [tool.basedpyright]
 include = ["src", "dev"]
 exclude = ["**/__pycache__", "**/node_modules", ".venv"]
+stubPath = "typings"
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 

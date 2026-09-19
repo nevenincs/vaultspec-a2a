@@ -36,13 +36,12 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.testing.tests._support.catalog_selection import in_process_selection
-
 from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner
 from ...streaming.aggregator import EventAggregator
+from ...testing.tests._support.catalog_selection import in_process_selection
 from ..app import create_app
 
 if TYPE_CHECKING:

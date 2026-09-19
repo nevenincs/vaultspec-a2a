@@ -17,8 +17,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, inspect, text
 
-from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
-
+from ...tests._write_authority import make_test_thread_authority_columns
 from ..admin import _CHECKPOINT_TABLES, _CLEAR_ORDER, _administrative_engine
 from ..models import (
     ArtifactModel,

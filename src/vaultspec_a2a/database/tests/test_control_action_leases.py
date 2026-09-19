@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
+from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
     from pathlib import Path

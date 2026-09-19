@@ -49,11 +49,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import (
-    make_test_thread_authority_columns,
-    make_test_write_authority,
-)
-
 from ...api.schemas.events import (
     MAX_TOOL_CALL_CHARS,
     PermissionRequestEvent,
@@ -66,6 +61,10 @@ from ...api.schemas.gateway import (
 )
 from ...control.run_discovery_service import discover_active_runs
 from ...graph.enums import ServerEventType
+from ...tests._write_authority import (
+    make_test_thread_authority_columns,
+    make_test_write_authority,
+)
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, RepairStatus, ThreadStatus
 from ..migrate import build_migration_config

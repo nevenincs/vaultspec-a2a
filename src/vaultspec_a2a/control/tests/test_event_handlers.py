@@ -17,8 +17,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
 from ...control.accepted_input import freeze_accepted_input
@@ -46,6 +44,7 @@ from ...database.models import ControlActionModel, RunWriteAuthority, ThreadMode
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus

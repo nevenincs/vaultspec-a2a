@@ -376,7 +376,7 @@ async def test_the_shared_frame_reader_skips_heartbeats_under_either_wire_key(
     under the other as untyped - which means it neither skips the keep-alive it
     was asked to skip nor recognises the frame it was asked to wait for.
     """
-    from vaultspec_a2a.testing.tests._support.sse import read_frame
+    from ...testing.tests._support.sse import read_frame
 
     frames = [
         json.dumps({key: ServerEventType.HEARTBEAT.value, "server_uptime_seconds": 1}),

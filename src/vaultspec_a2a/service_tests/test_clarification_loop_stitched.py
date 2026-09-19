@@ -72,20 +72,19 @@ import httpx
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from vaultspec_a2a.testing.tests._support.catalog_selection import (
+from ..acceptance.tests._harness import certified_gateway
+from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
+from ..team.team_config import load_team_config
+from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
 )
-from vaultspec_a2a.testing.tests._support.payloads import (
+from ..testing.tests._support.payloads import (
     json_object,
     json_object_list,
     required_bool,
     required_text,
 )
-
-from ..acceptance.tests._harness import certified_gateway
-from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
-from ..team.team_config import load_team_config
 from ._provider_catalog_live import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     live_provider_catalog_selector_is_configured,

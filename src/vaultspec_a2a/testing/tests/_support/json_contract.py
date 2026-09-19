@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vaultspec_a2a.providers._json_contract import JsonValue
+    from ....providers._json_contract import JsonValue
 
 __all__ = ["json_list", "json_text"]
 

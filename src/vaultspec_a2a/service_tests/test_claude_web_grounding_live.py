@@ -75,13 +75,12 @@ import httpx
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from vaultspec_a2a.testing.tests._support.payloads import json_object, json_object_list
-
 from ..control.run_start_policy import required_role_ids
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND
 from ..providers._json_contract import JsonObject
 from ..providers.conditions import ProviderCondition, condition_from_acp_error
 from ..team.team_config import load_team_config
+from ..testing.tests._support.payloads import json_object, json_object_list
 from .test_pw7_acceptance import (
     _GATEWAY_AUTH_HEADERS,
     _MODE_MANUAL,

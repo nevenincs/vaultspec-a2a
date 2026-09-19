@@ -57,11 +57,10 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from vaultspec_a2a.testing.tests._support.payloads import json_object
-
 from ..control.run_start_policy import required_role_ids
 from ..graph.enums import ServerEventType
 from ..team.team_config import load_team_config
+from ..testing.tests._support.payloads import json_object
 from .test_pw7_acceptance import (
     _PRESET_LIVE,
     AcceptanceCase,

@@ -34,8 +34,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
-
+from ...tests._write_authority import make_test_thread_authority_columns
 from ..models import Base, ThreadModel
 from ..session import (
     CheckpointMode,

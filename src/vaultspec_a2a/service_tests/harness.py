@@ -16,14 +16,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
-from vaultspec_a2a.testing.tests._support.catalog_selection import (
-    NoSelectableLaneError,
-    in_process_selection,
-)
-
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
 from ..testing.ports import free_port
+from ..testing.tests._support.catalog_selection import (
+    NoSelectableLaneError,
+    in_process_selection,
+)
 from ..tests.gateway_boot import GatewayBootError
 from ..utils.process import detached_spawn_kwargs
 

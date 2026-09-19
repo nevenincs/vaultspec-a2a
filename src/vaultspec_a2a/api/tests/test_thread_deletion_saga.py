@@ -27,14 +27,13 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...control.repositories import (
     CleanupItem,
     create_deletion_saga,
 )
 from ...database import create_artifact, create_thread, get_thread
 from ...database.models import ThreadDeletionSagaModel
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import CleanupKind
 from .conftest import SessionFactory, make_app
 

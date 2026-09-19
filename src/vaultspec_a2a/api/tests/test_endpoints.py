@@ -27,8 +27,6 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...control.config import settings
 from ...control.permission_service import permission_response_action_key
 from ...database import (
@@ -47,6 +45,7 @@ from ...database.models import (
     ThreadModel,
 )
 from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from .conftest import catalog_run_fields, make_app
 

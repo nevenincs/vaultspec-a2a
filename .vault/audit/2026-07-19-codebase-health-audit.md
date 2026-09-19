@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:a10f5af5441cefe5dd323c53a9acdd8d2e55ddfd957852dd2bab7817675eb411'
+body_hash: 'sha256:e855b479ebea933868cd0a48a5cfa6b706a3a17f17e7ef98f961de8d3a5ed533'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3058,3 +3058,9 @@ Review findings and queue:
 Review of the implemented fixtures confirms that inline graph teams now carry the required positive step timeout, node assertions include the structural completion recorder, and the cold compile probe supplies the exact frozen graph definition required by the worker. The graph package passed 365 tests (2 deselected); the focused cold compile responsiveness test passed. Ruff and formatting passed. These are medium-severity test contract drift findings, resolved in this pass.
 
 Remaining queue: the full repository suite is not yet green. A broad parallel run exposed more failures and stalled in accelerator-dependent provider harness startup (`service_env_no_gpu`); the first isolated provider compile failure and graph compiler failures are resolved, but the rest of the suite requires separate inventory runs. The strict gate remains high-severity open with 323 Ruff findings, 33 nesting findings, Pylint shape findings, and 110 unconsumed exports. The service harness accelerator requirement is a medium-severity environment/test-portability finding and remains open.
+
+### 2026-09-19 worker authority fixture review pass
+
+Review of the worker changes confirms that dispatch ID concurrency tests now send graph definitions and matching action receipts with model selections for their actual mock role; held-checkpoint tests reuse an accepted ingest fixture; graph-input projection tests supply a frozen program; receiptless rejection tests assert the current warning and do not invent terminal settlement. Focused dispatch ID, held-checkpoint, graph-input, and receiptless tests pass. These were medium-severity test contract drift issues, resolved here.
+
+Open review findings: nine `worker/tests/test_executor.py` tests still fail in settle ordering and pre-run refusal coverage. The settle fixtures use synthetic preset and cache digests without accepted graph definitions, while refusal fixtures still expect terminal evidence from receiptless dispatches. This is high-severity test contract drift because the suite cannot verify terminal behavior until those requests carry valid authority. The full nonservice suite remains open; a timed broad run was interrupted after the worker cluster. The strict gate findings remain open as recorded above.

@@ -189,6 +189,20 @@ def _current_ingest_dispatch(thread_id: str) -> DispatchRequest:
     return request.model_copy(update={"graph_action_receipt": receipt})
 
 
+def _graph_input_request(request: DispatchRequest) -> DispatchRequest:
+    """Supply the accepted program needed by the graph input projection."""
+    assert request.workspace_root is not None
+    workspace = pathlib.Path(request.workspace_root)
+    preset = request.team_preset or "vaultspec-solo-coder"
+    definition = freeze_graph_definition(
+        load_team_config(preset, workspace_root=workspace),
+        workspace_root=workspace,
+    )
+    return request.model_copy(
+        update={"team_preset": preset, "graph_definition": definition}
+    )
+
+
 def _inject_graph(
     executor: Executor, thread_id: str, *, cache_key: GraphCacheKey = _TEST_CACHE_KEY
 ) -> None:
@@ -487,14 +501,7 @@ class TestIngestGating:
             await cp.lock.acquire()
             try:
                 requests = [
-                    DispatchRequest(
-                        action="ingest",
-                        thread_id=f"held-{index}",
-                        team_preset="mock-success-single",
-                        workspace_root=_WORKSPACE,
-                        recursion_limit=25,
-                        model_assignment=_current_assignment(),
-                    )
+                    _current_ingest_dispatch(f"held-{index}")
                     for index in range(domain_config.max_concurrent_threads + 3)
                 ]
                 tasks = [
@@ -528,14 +535,7 @@ class TestIngestGating:
                 checkpoint_read_timeout_seconds=1.0,
             )
             await cp.lock.acquire()
-            request = DispatchRequest(
-                action="ingest",
-                thread_id="cancel-held",
-                team_preset="mock-success-single",
-                workspace_root=_WORKSPACE,
-                recursion_limit=25,
-                model_assignment=_current_assignment(),
-            )
+            request = _current_ingest_dispatch("cancel-held")
             task = asyncio.create_task(executor.handle_dispatch(request))
             try:
                 while executor.active_ingest_count == 0:
@@ -664,10 +664,10 @@ class TestHandleDispatch:
                 await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_ingest_without_graph_or_preset_logs_warning(
+    async def test_ingest_without_graph_authority_logs_refusal(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Ingest on a thread with no compiled graph and no preset logs a warning."""
+        """An ingest lacking accepted graph authority cannot settle a run."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
@@ -689,22 +689,24 @@ class TestHandleDispatch:
                 record = next(
                     rec
                     for rec in caplog.records
-                    if "No graph for thread" in rec.message
+                    if "Refusing terminal settlement without accepted graph authority"
+                    in rec.message
                 )
                 assert record.__dict__["thread_id"] == "t-no-graph"
                 assert record.__dict__["dispatch_id"] == req.dispatch_id
                 assert record.__dict__["dispatch_action"] == "ingest"
-                assert record.__dict__["runtime_mode"] == "ingest"
                 assert record.__dict__["worker_id"] == "test-worker"
-                assert record.__dict__["action"] == "graph_missing"
+                assert (
+                    record.__dict__["action"] == "dispatch_rejected_without_authority"
+                )
             finally:
                 await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_resume_without_graph_logs_warning(
+    async def test_resume_without_graph_authority_logs_refusal(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Resume on a thread with no compiled graph logs a warning."""
+        """A resume lacking accepted graph authority cannot settle a run."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
@@ -725,14 +727,16 @@ class TestHandleDispatch:
                 record = next(
                     rec
                     for rec in caplog.records
-                    if "No graph for thread" in rec.message
+                    if "Refusing terminal settlement without accepted graph authority"
+                    in rec.message
                 )
                 assert record.__dict__["thread_id"] == "t-no-graph"
                 assert record.__dict__["dispatch_id"] == req.dispatch_id
                 assert record.__dict__["dispatch_action"] == "resume"
-                assert record.__dict__["runtime_mode"] == "resume"
                 assert record.__dict__["worker_id"] == "test-worker"
-                assert record.__dict__["action"] == "graph_missing"
+                assert (
+                    record.__dict__["action"] == "dispatch_rejected_without_authority"
+                )
             finally:
                 await bridge.close()
 
@@ -860,7 +864,9 @@ class TestGraphInputBuilding:
             team_preset="vaultspec-solo-coder",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=True
+        )
 
         required_fields = {
             "messages",
@@ -889,7 +895,9 @@ class TestGraphInputBuilding:
             content="Follow-up question",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=False
+        )
 
         # These keys must NOT be present -- their absence lets LangGraph
         # preserve checkpoint values rather than triggering reducers.
@@ -910,7 +918,9 @@ class TestGraphInputBuilding:
             content="test",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=False
+        )
         assert inp["thread_id"] == "thread-xyz"
 
     def test_sdd_fields_included_on_first_ingest_when_provided(self) -> None:
@@ -928,7 +938,9 @@ class TestGraphInputBuilding:
             validation_errors=["missing tests"],
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=True
+        )
 
         assert inp["active_feature"] == "auth-flow"
         # feedback-loop: the opaque batch id rides the SDD blackboard the same way.
@@ -947,7 +959,9 @@ class TestGraphInputBuilding:
             team_preset="vaultspec-solo-coder",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=True
+        )
 
         assert inp["active_feature"] is None
         assert inp["feedback_batch_id"] is None
@@ -967,7 +981,9 @@ class TestGraphInputBuilding:
             context_preamble="You are a helpful assistant.",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=False
+        )
 
         msgs = inp["messages"]
         assert len(msgs) == 2
@@ -984,7 +1000,9 @@ class TestGraphInputBuilding:
             thread_id="t-empty",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=False
+        )
         assert inp["messages"] == []
 
     def test_sdd_fields_not_included_on_followup_even_if_provided(self) -> None:
@@ -1000,7 +1018,9 @@ class TestGraphInputBuilding:
             pipeline_phase="implement",
             recursion_limit=25,
         )
-        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(
+            _graph_input_request(req), is_first_ingest=False
+        )
 
         assert "active_feature" not in inp
         assert "pipeline_phase" not in inp
@@ -1035,10 +1055,10 @@ class TestLazyRecompilation:
                 await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_resume_without_graph_or_preset_logs_warning(
+    async def test_resume_without_graph_or_preset_refuses_settlement(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Resume drops with warning when graph is missing and no preset available."""
+        """A receiptless resume cannot settle without accepted authority."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
@@ -1058,14 +1078,16 @@ class TestLazyRecompilation:
                 record = next(
                     rec
                     for rec in caplog.records
-                    if "No graph for thread" in rec.message
+                    if "Refusing terminal settlement without accepted graph authority"
+                    in rec.message
                 )
                 assert record.__dict__["thread_id"] == "t-no-graph"
                 assert record.__dict__["dispatch_id"] == req.dispatch_id
                 assert record.__dict__["dispatch_action"] == "resume"
-                assert record.__dict__["runtime_mode"] == "resume"
                 assert record.__dict__["worker_id"] == "test-worker"
-                assert record.__dict__["action"] == "graph_missing"
+                assert (
+                    record.__dict__["action"] == "dispatch_rejected_without_authority"
+                )
             finally:
                 await bridge.close()
 

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:d36de31a7ea512b47394d8c8f55335a6c3cdfae112789c8c3fc3a88b3dee69d2'
+body_hash: 'sha256:7c0dec837401e0d12898b7f4625f4d762fb38acca57a3a235775c1b4f9d6fbb4'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3184,3 +3184,7 @@ The latest complete `just check-strict` run remains red and confirms the broader
 ### 2026-09-20 stream ingest structure review pass
 
 The graph ingest path had four medium-severity strict Ruff findings: excessive argument count, cyclomatic complexity, branch count, and statement count. The internal ingest request now carries its run inputs as one typed value; graph-stream failure classification delegates bounded graph failures and provider failures to focused reporters. Review checked the original precedence of provider cancellation, graph interrupt, recursion limit, ingest stall, step timeout, and provider condition; the durable failure reason/condition writes and emitted codes remain tied to those branches. The 81 focused aggregator and transformer tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 288 to 284. The pre-existing overlong `ingest` function remains one medium-severity code-health finding; the extraction did not add another overlong function. No new review findings were surfaced. The remaining 284 Ruff structure, 32 nested-block, and Pylint/health findings remain open.
+
+### 2026-09-20 ACP protocol dispatch structure review pass
+
+Four medium-severity strict Ruff structure findings in ACP stdout dispatch, server-RPC argument shape, and session-update branching were resolved. One parsed stdout line now has a focused dispatch helper; server-RPC method/id/params travel as a typed request; native-command advertisement and streamed tool-argument chunks have focused handlers. Review checked that activity is still stamped before parsing, malformed frames and queue overflow remain local, batch packet order remains intact, capability refusals still answer the agent, and command advertisements still validate session identity before replacing the catalog. Fifty-seven focused protocol and process-lifetime tests pass; `just check-all`, `just check-type-strict`, and focused Ruff pass. Strict Ruff structure falls from 284 to 280. The pre-existing medium-severity cognitive-complexity finding in `handle_client_response` remains open; this pass did not change that function. No new review findings were surfaced. The remaining 280 Ruff structure, 32 nested-block, and Pylint/health findings remain open.

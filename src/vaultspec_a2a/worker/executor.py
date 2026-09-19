@@ -534,15 +534,24 @@ class Executor:
             reason,
             recoverable=False,
         )
-        await self._state_projector.emit_terminal_status(
-            req.thread_id,
-            ThreadStatus.FAILED,
-            error_detail=reason,
-            provider_condition=_EXECUTOR_CONDITION,
-            failure_evidence=self._failure_evidence(
-                req, detail=reason, condition=_EXECUTOR_CONDITION
-            ),
+        failure_evidence = self._failure_evidence(
+            req, detail=reason, condition=_EXECUTOR_CONDITION
         )
+        if failure_evidence is not None:
+            await self._state_projector.emit_terminal_status(
+                req.thread_id,
+                ThreadStatus.FAILED,
+                error_detail=reason,
+                provider_condition=_EXECUTOR_CONDITION,
+                failure_evidence=failure_evidence,
+            )
+        else:
+            logger.warning(
+                "Refusing terminal settlement without accepted graph authority",
+                extra=self._dispatch_log_extra(
+                    req, action="dispatch_rejected_without_authority"
+                ),
+            )
         self._graph_lifecycle.release_thread(req.thread_id)
         self._aggregator.remove_node_metadata(req.thread_id)
         reservation = self._dispatch_reservation.get()
@@ -874,15 +883,17 @@ class Executor:
                 reason,
                 recoverable=False,
             )
-            await self._state_projector.emit_terminal_status(
-                req.thread_id,
-                ThreadStatus.FAILED,
-                error_detail=reason,
-                provider_condition=condition,
-                failure_evidence=self._failure_evidence(
-                    req, detail=reason, condition=condition
-                ),
+            failure_evidence = self._failure_evidence(
+                req, detail=reason, condition=condition
             )
+            if failure_evidence is not None:
+                await self._state_projector.emit_terminal_status(
+                    req.thread_id,
+                    ThreadStatus.FAILED,
+                    error_detail=reason,
+                    provider_condition=condition,
+                    failure_evidence=failure_evidence,
+                )
             if owns_slot:
                 await self._mark_ingest_done(
                     req.thread_id, ThreadStatus.FAILED, reservation

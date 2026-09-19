@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:08e0a9104f0cfd6a5f49be00adc561ba31c428d89b4a363debe0fed8b55669e0'
+body_hash: 'sha256:ab40b6d6aab1b31c6016a71f3c68161af74356cd3142bf39d83aecdeeff69be0'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3022,3 +3022,7 @@ Type: test and worker contract drift. The second API batch reached 446 passing t
 ### 2026-09-19 subscriber queue annotation | medium | open
 
 Type: typing contract. Review of the SSE fix found `SubscriberManager` annotates subscriber queues as containing only `SequencedEvent`, while `relay_payload` inserts projected dictionaries and can pass through other objects for malformed input. The stream reader now decodes both runtime shapes through an explicit `object` boundary and strict typing passes. The queue's producer/consumer type should be reconciled across the aggregator, WebSocket readers, fanout, and tests so the shared annotation itself is truthful; a broad queue-type change currently surfaces many downstream assumptions. This is queued separately from the fixed live stream crash.
+
+### 2026-09-19 internal relay evidence and receipt-less worker review | high | fixed in implementation
+
+Type: production terminal authority and test contract drift. Review traced the internal relay tests through the accepted action, graph receipt, and checkpoint imports. Forty-four relay tests now pass with exact accepted dispatch evidence, including valid failure evidence and completed checkpoint proof. Malformed failure details and unknown provider conditions are refused without changing durable status. A direct receipt-less Executor rejection previously tried to project FAILED without GraphFailureEvidence, then entered a second unhandled-failure path; both paths now skip unproven terminal settlement. The worker still emits a condition for observability and releases its local slot. API suite: 525 passed; strict typing: green. Remaining queue: subscriber queue type mismatch, structural strict gate, export gate, repository-wide tests, and the unraisable Windows transport warning observed during API tests.

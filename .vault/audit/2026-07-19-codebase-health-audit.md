@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:461b00b0ba1fa2399abf6e5dde4d1b3ecaadc4a23af60a439204f12d776787bd'
+body_hash: 'sha256:8ce85c457ee6290ae11001e84c2da448bf529b80b99a54ed40260f63bb2496bb'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3170,3 +3170,7 @@ Four medium-severity strict structure findings in recursive injected-field remov
 ### 2026-09-20 write-authority SQL parser structure review pass
 
 Four medium-severity strict structure findings in the named-CHECK parser were resolved by extracting SQL token advancement, named-CHECK header parsing, and balanced predicate scanning. Review checked that comments and quoted content remain ignored, malformed quotes/comments/parentheses still reject the whole parse, duplicate names still reject, and the original predicate slice is preserved. All 16 schema parser tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 294 to 290. No new review findings were surfaced. The remaining 290 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 internal event relay shape review pass
+
+The internal worker-event relay had one low-severity strict argument-count finding: the aggregator, durable store, checkpointer, drain gate, and transport traveled separately through three ingress paths. They now travel as one frozen relay context. Review checked that WebSocket transport attribution, HTTP relay readiness, batch ordering, projection bypass for dispatch receipts, and durable relay arguments retain their values. All 44 focused internal API tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 290 to 289. No new review findings were surfaced. The remaining 289 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.

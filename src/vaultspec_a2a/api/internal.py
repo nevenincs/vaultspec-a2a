@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any, cast
 
 from fastapi import (
@@ -161,15 +162,17 @@ internal_router = APIRouter(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _RelayContext:
+    agg: Any
+    session_factory: Any
+    checkpointer: Any
+    drain_gate: Any
+    transport: str = "http"
+
+
 async def _relay_single_event(
-    thread_id: str,
-    payload: dict[str, Any],
-    *,
-    agg: Any,
-    session_factory: Any,
-    checkpointer: Any,
-    drain_gate: Any = None,
-    transport: str = "http",
+    thread_id: str, payload: dict[str, Any], context: _RelayContext
 ) -> None:
     """Aggregate and relay a single worker event.
 
@@ -183,7 +186,7 @@ async def _relay_single_event(
     payload = normalize_wire_event_type(payload)
     if payload.get("type") == "execution_state_projection":
         await _handle_execution_state_event(
-            thread_id, payload, session_factory=session_factory
+            thread_id, payload, session_factory=context.session_factory
         )
         return
     if payload.get("type") == "dispatch_applied":
@@ -193,15 +196,15 @@ async def _relay_single_event(
         await relay_event(
             thread_id,
             payload,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
-            drain_gate=drain_gate,
+            session_factory=context.session_factory,
+            checkpointer=context.checkpointer,
+            drain_gate=context.drain_gate,
         )
         return
 
-    if agg is not None:
-        agg.relay_payload(thread_id, payload)
-        agg.sync_worker_event(thread_id, payload)
+    if context.agg is not None:
+        context.agg.relay_payload(thread_id, payload)
+        context.agg.sync_worker_event(thread_id, payload)
     else:
         logger.warning(
             "No relay target available -- dropping event for %s",
@@ -209,17 +212,17 @@ async def _relay_single_event(
             extra={
                 "thread_id": thread_id,
                 "event_type": str(payload.get("event_type", payload.get("type", ""))),
-                "transport": transport,
+                "transport": context.transport,
                 "action": "relay_drop_event",
             },
         )
     await relay_event(
         thread_id,
         payload,
-        aggregator=agg,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-        drain_gate=drain_gate,
+        aggregator=context.agg,
+        session_factory=context.session_factory,
+        checkpointer=context.checkpointer,
+        drain_gate=context.drain_gate,
     )
 
 
@@ -253,11 +256,7 @@ async def _relay_worker_event(
     await _relay_single_event(
         thread_id,
         payload,
-        agg=agg,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-        drain_gate=drain_gate,
-        transport="ws",
+        _RelayContext(agg, session_factory, checkpointer, drain_gate, "ws"),
     )
 
 
@@ -381,10 +380,12 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     await _relay_single_event(
         thread_id,
         payload,
-        agg=agg,
-        session_factory=_app_session_factory(request.app),
-        checkpointer=getattr(request.app.state, "checkpointer", None),
-        drain_gate=getattr(request.app.state, "drain_gate", None),
+        _RelayContext(
+            agg,
+            _app_session_factory(request.app),
+            getattr(request.app.state, "checkpointer", None),
+            getattr(request.app.state, "drain_gate", None),
+        ),
     )
     return {"status": "ok"}
 
@@ -449,10 +450,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
         await _relay_single_event(
             thread_id,
             payload,
-            agg=agg,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
-            drain_gate=drain_gate,
+            _RelayContext(agg, session_factory, checkpointer, drain_gate),
         )
 
     return {"status": "ok"}

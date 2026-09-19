@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:7873df5f9ebd85536778e45e6d5b753a02b511246d1b3234fb9f91cd84e7a2f1'
+body_hash: 'sha256:7104cc617df03db9e8179245efc39c55e9c76daa17e8717c5b5f9642153fbff6'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -2964,3 +2964,29 @@ still reports RUNNING with no checkpoint. The acceptance fixture must exercise
 a real accepted dispatch; the receipt-less rejection path also needs an
 authority-consistent terminal policy so it does not double-fault. Do not mint
 a fake receipt or weaken the state-projector invariant.
+
+### 2026-09-19 startup re-dispatch accepted authority | high | fixed in implementation
+
+Type: production recovery contract. Review found that `redispatch_reconciling_threads` rebuilt an ingest request from thread metadata and omitted the accepted graph definition and receipt. A real production gateway restart stayed RECONCILING because worker admission rejected the request. The dispatch now restores the exact accepted input by durable action receipt ID, verifies its model assignment and workspace against the thread metadata, and binds the committed graph receipt before delivery. Missing or incompatible evidence is classified per thread so one bad row does not abort the sweep. The production restart proof and 12 adjacent re-dispatch cases pass. The accepted-dispatch fixture and terminal-evidence fixtures were also updated to exercise current authority; the separate receipt-less worker double-fault from the earlier high finding remains OPEN and still requires a production fix.
+### 2026-09-19 clarification recovery fixture | medium | fixed in implementation
+
+Type: test contract drift. The API sweep found the clarification restart proof created a RUNNING thread without its initial accepted graph action and receipt. After that was seeded, the resume fixture also lacked a valid accepted-input payload, a recovery deadline, an exact write expectation, and a committed lease. The fixture now persists both accepted actions and the test passes against the real checkpointer and worker. Review found no production behavior change in this pass. The full API and repository suites remain in progress, so this closure applies only to the focused regression.
+### 2026-09-19 follow-up application receipt correction | medium | fixed in implementation
+
+Type: audit correction and test contract drift. The earlier note near the accepted-dispatch finding classified `test_followup_dispatch_marks_message_followup_as_applied` as a possible production state-transition defect. Review of `_handle_progress_event` showed that production requires both the exact graph-action receipt and a named checkpoint incorporating it before settlement. The test sent neither, so `last_applied_action` correctly remained `ingest`. The test now records the matching checkpoint and relays both evidence fields; its focused run passes. The earlier production-defect inference is superseded by this evidence.
+
+### 2026-09-19 team status liveness fixture | low | fixed in implementation
+
+Type: test contract drift. Team status includes node metadata only for active threads, and an aggregator event by itself does not make a thread active. The node-summary route test now registers and subscribes a live reader before requesting team status. The focused test passes; review found no production defect in this path.
+
+### 2026-09-19 permission rejection deadline | high | fixed in implementation
+
+Type: production journal invariant. Rejected and duplicate permission-response actions used `create_control_action` without the recovery deadline required for that action type by the current database schema. Invalid responses raised `ValueError` instead of returning their typed conflict. Both non-executing journal writes now carry a finite deadline; the malformed-row test fixture does too. All 11 permission-response endpoint tests pass. The deadline is required by the persisted action-type invariant even though these terminal results are not redriven.
+
+### 2026-09-19 terminal deletion fixture authority | medium | fixed in implementation
+
+Type: test contract drift. Two deletion tests created terminal threads with writer receipt columns but no matching control action, so the deletion election correctly refused them. The fixtures now seed matching journal rows and both focused deletion tests pass.
+
+### 2026-09-19 API batch follow-up | high | open
+
+Type: gate burndown. A broader API run stopped after 20 failures at 212 passing tests. Beyond the resolved permission-response and deletion clusters, remaining groups include cancel non-delivery state expectations, terminal checkpoint proof in gateway-drain tests, gateway live stream fixtures, and harness template discovery. These are queued for implementation and review; the repository-wide green gate has not been reached.

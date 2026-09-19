@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypeIs
 
 from ..database import (
@@ -274,6 +275,7 @@ async def _journal_rejection(
         idempotency_key=_permission_rejection_action_key(idempotency_key),
         payload=_rejected_payload(option_id, error_detail),
         result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     await db.commit()
     return PermissionResult(
@@ -545,6 +547,7 @@ async def _authorize_permission_response(
             idempotency_key=f"permission-duplicate:{resolved_idempotency_key}",
             payload={"option_id": option_id},
             result_status=ControlActionResultStatus.DUPLICATE,
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         await db.commit()
         return PermissionResult(

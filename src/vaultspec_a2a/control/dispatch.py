@@ -22,20 +22,21 @@ import httpx
 from ..database import (
     ThreadStatusElectionOutcome,
     elect_thread_status,
+    get_control_action_by_dispatch_id,
     get_session_factory,
     list_threads,
     successor_thread_write_authority,
     thread_write_expectation,
 )
-from ..domain_config import domain_config
 from ..ipc.schemas import (
     DispatchRequest,
     DispatchResponse,
-    to_dispatch_action,
 )
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import ThreadStatus
 from ..utils.coercion import coerce_object_mapping
 from ._thread_metadata import workspace_root_from_metadata
+from .accepted_input import AcceptedActionInput, restore_accepted_dispatch
+from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 
 if TYPE_CHECKING:
@@ -395,14 +396,36 @@ async def redispatch_reconciling_threads(
                         thread.id,
                     )
                     continue
-                dispatch = DispatchRequest(
-                    action=to_dispatch_action(ControlActionType.INGEST),
+                authority = thread_write_expectation(thread).authority
+                action = await get_control_action_by_dispatch_id(
+                    db,
                     thread_id=thread.id,
-                    team_preset=thread.team_preset,
-                    workspace_root=workspace_root,
-                    recursion_limit=domain_config.graph_recursion_limit,
-                    model_assignment=frozen_map,
+                    dispatch_id=authority.action_receipt_id,
                 )
+                if action is None or action.payload_json is None:
+                    logger.warning(
+                        "No accepted action for reconciling thread %s", thread.id
+                    )
+                    continue
+                try:
+                    accepted = AcceptedActionInput.model_validate_json(
+                        action.payload_json
+                    )
+                    dispatch = restore_accepted_dispatch(
+                        accepted, dispatch_id=authority.action_receipt_id
+                    )
+                    if dispatch.model_assignment != frozen_map or str(
+                        dispatch.workspace_root
+                    ) != str(workspace_root):
+                        raise ValueError(
+                            "accepted execution authority differs from thread metadata"
+                        )
+                    dispatch = await bind_graph_action_receipt(db, dispatch)
+                except ValueError as exc:
+                    logger.warning(
+                        "Invalid accepted action for thread %s: %s", thread.id, exc
+                    )
+                    continue
                 headers = trace_headers_fn() if trace_headers_fn else {}
                 try:
                     await dispatch_to_worker(
@@ -428,6 +451,7 @@ async def redispatch_reconciling_threads(
                     )
                     continue
                 except (
+                    IncompatibleDispatchAuthorityError,
                     WorkerAtCapacityError,
                     WorkerDispatchRejectedError,
                     WorkerUnreachableError,

@@ -26,13 +26,29 @@ idempotent verb must not fail a request purely for being the second one.
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
+from langgraph.graph import END, START, StateGraph
 
+from ...graph.compiler import _add_node, _compile_graph
+from ...graph.nodes.action_completion import (
+    GRAPH_COMPLETION_NODE,
+    record_graph_completion,
+)
+from ...providers import ProviderCondition
+from ...thread.action_receipts import GraphActionReceipt
+from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ThreadStatus
-from .conftest import SessionFactory, async_catalog_run_fields, make_app
+from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ...thread.state import TeamState
+from .conftest import (
+    SessionFactory,
+    _InProcessWorker,
+    async_catalog_run_fields,
+    make_app,
+)
 from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:
@@ -79,11 +95,64 @@ async def _start_run(client: httpx.AsyncClient) -> str:
     return resp.json()["run_id"]
 
 
-async def _settle(client: httpx.AsyncClient, run_id: str, status: str) -> None:
-    """Drive *run_id* terminal through the real worker relay, then confirm it."""
-    resp = await client.post(
-        "/internal/events", json=_terminal_envelope(run_id, status)
+async def _complete_checkpoint(
+    checkpointer: AsyncSqliteSaver, receipt: GraphActionReceipt
+) -> None:
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
+    builder.add_edge(START, GRAPH_COMPLETION_NODE)
+    builder.add_edge(GRAPH_COMPLETION_NODE, END)
+    graph = _compile_graph(builder, checkpointer=checkpointer, interrupt_before=None)
+    await graph.ainvoke(
+        {
+            "active_graph_action_receipt": receipt.model_dump(mode="json"),
+            "graph_action_receipts": {
+                receipt.dispatch_id: receipt.model_dump(mode="json")
+            },
+        },
+        {"configurable": {"thread_id": receipt.thread_id}},
     )
+
+
+async def _settle(
+    client: httpx.AsyncClient,
+    run_id: str,
+    status: str,
+    checkpointer: AsyncSqliteSaver,
+    worker: _InProcessWorker,
+) -> None:
+    """Drive *run_id* terminal through the real worker relay, then confirm it."""
+    envelope = _terminal_envelope(run_id, status)
+    payload = cast("dict[str, object]", envelope["payload"])
+    if status == ThreadStatus.COMPLETED.value:
+        receipt = GraphActionReceipt.model_validate(
+            worker.dispatches[0]["graph_action_receipt"]
+        )
+        await _complete_checkpoint(checkpointer, receipt)
+    elif status == ThreadStatus.FAILED.value:
+        receipt = GraphActionReceipt.model_validate(
+            worker.dispatches[0]["graph_action_receipt"]
+        )
+        reason = "accepted worker action failed"
+        condition = ProviderCondition.UNKNOWN
+        payload.update(
+            error_detail=reason,
+            provider_condition=condition.value,
+            failure_evidence=GraphFailureEvidence(
+                schema_version="graph-failure-v1",
+                action=receipt,
+                outcome="failed",
+                detail_fingerprint=failure_detail_fingerprint(reason),
+                provider_condition=condition.value,
+            ).model_dump(mode="json"),
+        )
+    elif status == ThreadStatus.CANCELLED.value:
+        payload["cancellation_evidence"] = CancellationEvidence(
+            schema_version="cancellation-evidence-v1",
+            dispatch_id=str(worker.dispatches[-1]["dispatch_id"]),
+            outcome="no_active_work",
+        ).model_dump(mode="json")
+    resp = await client.post("/internal/events", json=envelope)
     assert resp.status_code == 200, resp.text
     snapshot = await client.get(f"/v1/runs/{run_id}")
     assert snapshot.status_code == 200, snapshot.text
@@ -106,13 +175,13 @@ async def test_cancelling_a_settled_run_is_a_conflict_not_a_bad_gateway(
     answer must not be 502, because a caller reading 502 goes looking for a
     broken worker that is not broken.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client)
-        await _settle(client, run_id, settled_status)
+        await _settle(client, run_id, settled_status, checkpointer, worker)
 
         cancel = await client.post(f"/v1/runs/{run_id}/cancel")
 
@@ -136,7 +205,7 @@ async def test_cancelling_an_already_cancelled_run_succeeds_idempotently(
     to report as an error. Answering 409 here would make an idempotent verb fail
     on repetition, which is the shape of a verb that is not idempotent at all.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
@@ -148,7 +217,9 @@ async def test_cancelling_an_already_cancelled_run_succeeds_idempotently(
 
         # The worker acknowledges the cancellation; only now is the run CANCELLED
         # rather than merely CANCELLING, which is the state under test.
-        await _settle(client, run_id, ThreadStatus.CANCELLED.value)
+        await _settle(
+            client, run_id, ThreadStatus.CANCELLED.value, checkpointer, worker
+        )
 
         second = await client.post(f"/v1/runs/{run_id}/cancel")
 

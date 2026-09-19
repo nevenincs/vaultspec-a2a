@@ -37,27 +37,35 @@ import pytest
 from httpx import ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ...control.accepted_input import freeze_accepted_input
 from ...control.action_lease import (
     CONTROL_ACTION_LEASE_TTL,
+    finalize_control_action_acceptance,
     prepare_control_action_claim,
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.clarification_service import redrive_clarification_actions
+from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.graph_definition import read_accepted_graph_definition
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
+    create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
     get_thread_metadata,
+    thread_write_expectation,
 )
+from ...ipc.schemas import DispatchRequest
+from ...team.team_config import load_team_config
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
     ClarificationAnswers,
 )
 from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from .clarification_harness import loopback_callback_bridge, park_clarification
@@ -419,12 +427,44 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
     dispatching again.
     """
     async with session_factory() as db:
+        authority = make_test_write_authority()
+        metadata = current_execution_metadata(Path.cwd())
         thread = await create_thread(
             db,
-            write_authority=make_test_write_authority(),
+            write_authority=authority,
             status=ThreadStatus.RUNNING,
             team_preset=_BUNDLE_FREE_PRESET,
-            metadata=current_execution_metadata(Path.cwd()),
+            metadata=metadata,
+        )
+        dispatch = DispatchRequest(
+            action="ingest",
+            thread_id=thread.id,
+            content="initial clarification run",
+            workspace_root=str(Path.cwd()),
+            recursion_limit=25,
+            team_preset=_BUNDLE_FREE_PRESET,
+            graph_definition=freeze_graph_definition(
+                load_team_config(_BUNDLE_FREE_PRESET, workspace_root=Path.cwd()),
+                workspace_root=Path.cwd(),
+            ),
+            model_assignment=resolve_execution_authority(metadata).model_assignment,
+        )
+        await create_control_action(
+            db,
+            thread_id=thread.id,
+            action_type=authority.action_type,
+            idempotency_key=f"thread-create:{thread.id}",
+            dispatch_id=authority.action_receipt_id,
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+            payload=freeze_accepted_input(
+                dispatch, intent={"content": "initial clarification run"}
+            ),
+        )
+        assert (
+            await prepare_graph_action_receipt(
+                db, thread_id=thread.id, dispatch_id=authority.action_receipt_id
+            )
+            is not None
         )
         await db.commit()
         thread_id = thread.id
@@ -442,17 +482,33 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
     idempotency_key = f"clarification-response:{request_id}"
 
     async with session_factory() as db:
+        definition = await read_accepted_graph_definition(db, thread_id)
+        resume = DispatchRequest(
+            action="resume",
+            thread_id=thread_id,
+            option_id=resolution.as_resume_value(),
+            workspace_root=str(Path.cwd()),
+            recursion_limit=100,
+            team_preset=_BUNDLE_FREE_PRESET,
+            graph_definition=definition,
+            model_assignment=resolve_execution_authority(metadata).model_assignment,
+        )
         lost_claim = await prepare_control_action_claim(
             db,
             thread_id=thread_id,
             action_type=ControlActionType.RESUME,
             idempotency_key=idempotency_key,
             request_id=request_id,
-            payload=resolution.as_resume_value(),
+            payload=freeze_accepted_input(resume, intent=resolution.as_resume_value()),
             dispatch_id=idempotency_key,
+            write_expectation=thread_write_expectation(thread),
             worker_generation=thread.repair_generation,
             now=datetime.now(UTC) - CONTROL_ACTION_LEASE_TTL - timedelta(seconds=1),
+            recovery_timeout_seconds=300,
         )
+        assert lost_claim.acquired is True
+        await finalize_control_action_acceptance(db, lost_claim)
+        await db.commit()
     assert lost_claim.acquired is True
 
     async with loopback_callback_bridge() as bridge:

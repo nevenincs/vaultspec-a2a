@@ -15,7 +15,7 @@ helper in `conftest.py` so tests never touch the production `vaultspec.db`.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -1470,6 +1470,36 @@ class TestSendMessage:
             assert before_applied != ControlActionType.MESSAGE_FOLLOWUP_APPLIED.value
             assert before_stamp is None
 
+            # The application event is proof only when its named checkpoint
+            # incorporates the same durable graph action receipt.
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            graph_receipt = cast(
+                "dict[str, object]", worker.dispatches[0]["graph_action_receipt"]
+            )
+            assert isinstance(graph_receipt, dict)
+            checkpoint_id = "cp-followup-applied"
+
+            async def _record_applied_checkpoint() -> None:
+                checkpoint = empty_checkpoint()
+                checkpoint["id"] = checkpoint_id
+                checkpoint["channel_values"] = {
+                    "active_graph_action_receipt": graph_receipt,
+                    "graph_action_receipts": {dispatch_id: graph_receipt},
+                }
+                checkpoint["channel_versions"] = {
+                    "active_graph_action_receipt": 1,
+                    "graph_action_receipts": 1,
+                }
+                await checkpointer.aput(
+                    _checkpoint_config(thread_id, ""),
+                    checkpoint,
+                    {"source": "loop", "step": 1, "parents": {}},
+                    checkpoint["channel_versions"],
+                )
+
+            asyncio.run(_record_applied_checkpoint())
+
             receipt = client.post(
                 "/internal/events",
                 json={
@@ -1478,6 +1508,8 @@ class TestSendMessage:
                         "type": "dispatch_applied",
                         "dispatch_id": dispatch_id,
                         "action": "ingest",
+                        "graph_action_receipt": graph_receipt,
+                        "checkpoint_id": checkpoint_id,
                     },
                 },
             )
@@ -1903,6 +1935,8 @@ class TestTeamStatus:
                 },
             },
         )
+        agg.add_subscriber("team-status-reader")
+        agg.subscribe("team-status-reader", ["team-status-node-metadata"])
 
         app, _agg, _worker, _cp = make_app(
             session_factory, checkpointer, aggregator=agg
@@ -2390,6 +2424,7 @@ class TestPermissionRespond:
                     idempotency_key="same-invalid-response",
                     payload={"option_id": "hostile-option"},
                     result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
+                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )
                 stored = await session.get(ControlActionModel, action.id)
                 assert stored is not None
@@ -2760,11 +2795,20 @@ class TestDeleteThread:
                 {},
             )
             async with session_factory() as session:
+                authority = make_test_write_authority()
                 await create_thread(
                     session,
-                    write_authority=make_test_write_authority(),
+                    write_authority=authority,
                     thread_id="thread-delete-terminal",
                     status="completed",
+                )
+                await create_control_action(
+                    session,
+                    thread_id="thread-delete-terminal",
+                    action_type=authority.action_type,
+                    idempotency_key="thread-create:thread-delete-terminal",
+                    dispatch_id=authority.action_receipt_id,
+                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )
                 await session.commit()
 
@@ -2809,9 +2853,10 @@ class TestDeleteThread:
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_text("artifact body", encoding="utf-8")
             async with session_factory() as session:
+                authority = make_test_write_authority()
                 await create_thread(
                     session,
-                    write_authority=make_test_write_authority(),
+                    write_authority=authority,
                     thread_id="thread-delete-artifacts",
                     status="completed",
                     metadata=(
@@ -2825,6 +2870,14 @@ class TestDeleteThread:
                     thread_id="thread-delete-artifacts",
                     artifact_type="file",
                     path="outputs/report.md",
+                )
+                await create_control_action(
+                    session,
+                    thread_id="thread-delete-artifacts",
+                    action_type=authority.action_type,
+                    idempotency_key="thread-create:thread-delete-artifacts",
+                    dispatch_id=authority.action_receipt_id,
+                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )
                 await session.commit()
 

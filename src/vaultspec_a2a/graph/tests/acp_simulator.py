@@ -144,6 +144,7 @@ def main() -> None:
                 "jsonrpc": "2.0",
                 "id": msg_id,
                 "result": {
+                    "protocolVersion": 1,
                     "agentCapabilities": {"streaming": True},
                     "authMethods": [],
                 },

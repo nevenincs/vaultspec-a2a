@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:046d40e7344da5bc6e21c8fb4b4811e69bf931ffc9dffccaed5194d5804d7d0f'
+body_hash: 'sha256:7873df5f9ebd85536778e45e6d5b753a02b511246d1b3234fb9f91cd84e7a2f1'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -2948,3 +2948,19 @@ it fails with last_applied_action == "ingest" after a follow-up receipt, where
 the test expects message_followup_applied. This is a real state-transition
 finding, independent of import spelling. Record it for control-action
 investigation and real-behavior regression proof.
+
+### 2026-09-19 accepted-dispatch recovery | high | unauthorized test dispatch leaves run status running
+
+Type: acceptance contract and failure settlement. Status: OPEN. The full
+non-service suite stops at
+api/tests/test_acceptance_five_verb.py::test_multirole_run_status_recovery_and_zero_vault_writes.
+Its direct DispatchRequest omits graph_definition, graph_action_receipt, and
+model_assignment, which are now mandatory accepted execution authority. The
+worker correctly rejects the missing definition, but the rejection path calls
+emit_terminal_status(FAILED) without GraphFailureEvidence because
+_failure_evidence returns None for a request without a receipt. The state
+projector rejects that terminal, a second exception is logged, and run-status
+still reports RUNNING with no checkpoint. The acceptance fixture must exercise
+a real accepted dispatch; the receipt-less rejection path also needs an
+authority-consistent terminal policy so it does not double-fault. Do not mint
+a fake receipt or weaken the state-projector invariant.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-19'
 modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:b22704b5ed46e2cbc6a90a3609a1295205046f8cd1395f886513bdcbe42fea86'
+body_hash: 'sha256:20b844bebc477abc413c9198de1df7f42fd9c874799aeea2de3af61cb4e3f067'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -29,6 +29,17 @@ Type: maintainability. Status: OPEN. The changed translator no longer contribute
 
 Type: behavior/test contract. Status: OPEN. A broader aggregator selection ran 73 tests; four provider-condition tests failed because the scripted ACP initialize response lacks a usable protocolVersion, yielding provider condition `unknown` where the tests expect a classified refusal. This failure is outside the changed transformation branches and needs an end-to-end provider condition investigation before the suite can be green. The 76 stream-specific tests passed when the two affected provider-condition classes were excluded from the focused regression run.
 
+### provider-failure-condition-closeout | low | ACP simulator negotiates protocol version 1
+
+Type: test contract. Status: RESOLVED. The simulator response in
+src/vaultspec_a2a/graph/tests/acp_simulator.py omitted protocolVersion.
+The production client correctly rejected the missing negotiation before
+session/prompt, so the four failures never exercised their intended provider
+refusal. The real subprocess now returns protocolVersion 1, matching the
+request and accepted ACP negotiation contract. All five provider-condition
+tests pass, and the full aggregator plus worker integration selection passes
+79 tests. The failure assertions were not weakened.
+
 ## Recommendations
 
-Continue W07.P13.S31 on the remaining translator and ingest hotspots. Diagnose the ACP initialize fixture and production condition mapping without weakening the four failing assertions. Re-run the full non-service suite and strict aggregate before promoting any sentinel or marking the Step complete.
+Continue W07.P13.S31 on the remaining translator and ingest hotspots. Re-run the full non-service suite and strict aggregate before promoting any sentinel or marking the Step complete.

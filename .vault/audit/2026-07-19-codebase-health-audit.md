@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-19'
-body_hash: 'sha256:9ff0bdc2a29de2f26fbbb5a8f2c6d1afa482cd97b10e876e943bec47ed0a43fc'
+body_hash: 'sha256:0853fca0964cf6ccc96ee16f8cdc5eb3a8f6b4d40623af4e4fd3c6be6474ca82'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3140,3 +3140,7 @@ Two low-severity strict argument-shape findings in test helpers were resolved. H
 ### 2026-09-19 parameterized compiler and permission audit review pass
 
 Two low-severity strict argument-shape findings were resolved in tests. The compiler structure test now receives its preset/topology/worker expectation as one parameterized case; the permission audit seed helper receives an explicit pause specification instead of three loosely related fields. The focused compiler test and all five durable permission-audit tests pass; Ruff's focused argument rule passes for both files. The strict Ruff structure count falls from 318 to 316. The remaining 316 structure errors, 33 nested-block errors, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 complete combined-branch nonservice result
+
+The four-worker nonservice repository suite completed after the resource-aware test changes and strict test-shape edits: 4,536 passed, one declared live-engine skip, and two Windows Proactor transport warnings in 402.43 seconds. No test failed. This closes the prior need for a combined-branch nonservice rerun. The warnings and live-engine prerequisite remain recorded environment/test-cleanup items; the strict structure, nesting, and Pylint findings remain open.

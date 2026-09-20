@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:7fc1b9b80683422e2dd2de9068c3ec8517bb470904d067c525e3da7fb0fe8bb3'
+body_hash: 'sha256:4c460d49b5f486d82f7d244b5eed2e58b8776b343ba392e9b92edc875a0093fc'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3905,3 +3905,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding (high, type regression): the executor split initially left moved private dispatch symbols unavailable to existing typed importers. Explicit exports and a moved failure-evidence helper fixed all 12 strict type diagnostics while keeping `executor.py` below 1000 lines. The affected executor failure/settle tests passed.
 - Review finding (medium, export hygiene): `DetachedSpawnFlags` was published from `utils.process` without a consumer. Removed that redundant facade export; the unconsumed-export guard and governed import-load probe now report zero findings.
 - Remaining work: the module-length gate has 7 oversized modules, and strict shape, Ruff, preview nesting, and Pylint findings remain in the queue.
+
+### 2026-09-20 provider factory module-length review
+
+- Implementation: moved provider command resolution, capsule asset paths, and explicit subprocess environment builders into `_factory_commands.py`; the factory re-exports its established import surface. Both modules remain below 1000 lines, and command resolution still reads the shared settings instance.
+- Verification: 56 focused factory, capsule resolution, and catalog registration tests passed. Target Ruff, Ty, basedpyright, formatting, and diff checks passed. Import loadability and unconsumed-export coverage report zero findings. The module-length gate fell from 7 to 6 offenders.
+- Review finding (medium, code health): six oversized modules and the other strict findings remain; continue the existing burn-down queue. No new functional defect was found in this pass.

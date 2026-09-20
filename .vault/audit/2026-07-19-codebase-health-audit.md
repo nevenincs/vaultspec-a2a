@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:5b65182d8431506fa2e04a1a2ba4dda54c8fe6d2ff63449f691c6b7cf6a14416'
+body_hash: 'sha256:5ecefa082a8995c5642976e1a1fc019b1ba79f6b1ee7e9fbb2562e87971d1688'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4329,3 +4329,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 
 - Review finding, medium severity, CI automation: on `15285b4f`, the Claude review action passed workflow validation and initialized Claude Sonnet 5, but the SDK emitted no review result after initialization and the 30-minute job timeout cancelled it. No inline findings were posted. This is an incomplete automated review, not a clean review result; its cause is unproven from the hidden SDK output. A successful actual review or an independently completed review is still required before claiming that review gate passed.
 - Verification: the current source passes `just check-strict` with zero required findings and both focused real-gateway admission tests. The full local unit gate passed 4,583 tests, with two declared prerequisite skips and 197 service tests deselected. Current CodeQL, migration, and language analysis checks pass; CodeQL has zero open alerts. Workflow lint and Linux canonical CI were still queued behind the same Linux x64 runner at this audit entry. Review result is REVISION REQUIRED pending remote gates and review completion.
+
+### 2026-09-20 CI review permission and scheduling diagnosis
+
+- Review finding, medium severity, CI permission policy: isolated rerun of the Claude review on `073d5f77` passed OIDC exchange and actor authorization but failed after two model turns. The SDK reported `is_error:true` and 28 tool permission denials; no review findings or inline comments were posted. This narrows the prior timeout finding to review-action tool authorization or configuration, not Python application logic. The hidden SDK output does not identify the denied tools, so granting broad Bash or write privileges would be unjustified. The [action's published PR-review example](https://github.com/anthropics/claude-code-action/blob/main/examples/pr-review-comprehensive.yml) explicitly allowlists read-only `gh pr view`/`gh pr diff` and its inline-comment MCP tool; a scoped default-branch workflow repair with diagnostic output is the next proof. Anthropic's workflow identity check prevents validating a changed workflow on this PR before it lands on the default branch.
+- Review finding, low severity, CI scheduling: PR `synchronize` starts both the review and Tests workflows on the only Linux x64 runner. The first review held the runner until its 30-minute timeout; the audit-only synchronize then cancelled a queued Tests attempt and started another review. This is a runner-allocation and trigger-order problem. The current rerun was deferred until after code gates completed to keep review diagnostics from starving code verification.
+- Verification: on current source and audit head `073d5f77`, Linux canonical CI passed 4,567 tests with 16 declared prerequisite/platform skips and 197 service tests deselected; source and wheel builds passed. All strict sentinels, workflow lint, CodeQL, migration, language analysis, hosted Compose regression, three-platform desktop service matrix, and provider prerequisite gates passed. Local full unit passed 4,583 tests with two declared prerequisite skips and 197 service tests deselected. CodeQL has zero open alerts. The code-quality gates are green; automated review remains REVISION REQUIRED because its permission-denied run produced no review result.

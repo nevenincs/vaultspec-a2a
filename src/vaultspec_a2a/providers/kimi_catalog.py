@@ -291,6 +291,60 @@ async def _read_bounded(
     return bytes(body)
 
 
+async def _cleanup_kimi_process(
+    process: asyncio.subprocess.Process,
+    metadata: Mapping[str, object] | None,
+    stdout_task: asyncio.Task[bytes],
+    stderr_task: asyncio.Task[bytes],
+) -> list[tuple[str, Exception]]:
+    cleanup_steps: list[CleanupStep] = []
+    if process.stdin is not None:
+        cleanup_steps.append(("kimi-catalog-stdin", process.stdin.close))
+    cleanup_steps.extend(
+        [
+            ("kimi-catalog-process", lambda: kill_process_tree(process, metadata)),
+            ("kimi-catalog-stdout", lambda: cancel_task(stdout_task)),
+            ("kimi-catalog-stderr", lambda: cancel_task(stderr_task)),
+        ]
+    )
+    return await run_independent_cleanups(*cleanup_steps)
+
+
+def _finish_kimi_discovery(
+    outcome: KimiCatalogDiscovery | None,
+    failure: BaseException | None,
+    cleanup_failures: list[tuple[str, Exception]],
+) -> KimiCatalogDiscovery:
+    if failure is not None:
+        output_failure = next(
+            (
+                exc
+                for _, exc in cleanup_failures
+                if isinstance(exc, KimiCatalogProtocolError)
+            ),
+            None,
+        )
+        if output_failure is not None:
+            output_failure.add_note(
+                f"Kimi discovery also failed with {type(failure).__name__}"
+            )
+            raise output_failure
+        if cleanup_failures:
+            failure.add_note(
+                "Kimi catalog cleanup also failed: "
+                + ", ".join(name for name, _ in cleanup_failures)
+            )
+        raise failure
+    if cleanup_failures:
+        raise RuntimeError(
+            "Kimi catalog cleanup failed: "
+            + ", ".join(name for name, _ in cleanup_failures)
+        )
+    if outcome is None:
+        raise RuntimeError("Kimi catalog discovery completed without an outcome")
+    return outcome
+
+
 async def discover_kimi_catalog(
     command_prefix: tuple[str, ...],
     *,
@@ -335,42 +389,7 @@ async def discover_kimi_catalog(
     except BaseException as exc:
         failure = exc
 
-    cleanup_steps: list[CleanupStep] = []
-    if process.stdin is not None:
-        cleanup_steps.append(("kimi-catalog-stdin", process.stdin.close))
-    cleanup_steps.extend(
-        [
-            ("kimi-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("kimi-catalog-stdout", lambda: cancel_task(stdout_task)),
-            ("kimi-catalog-stderr", lambda: cancel_task(stderr_task)),
-        ]
+    cleanup_failures = await _cleanup_kimi_process(
+        process, metadata, stdout_task, stderr_task
     )
-    cleanup_failures = await run_independent_cleanups(*cleanup_steps)
-    if failure is not None:
-        output_failure = next(
-            (
-                exc
-                for _, exc in cleanup_failures
-                if isinstance(exc, KimiCatalogProtocolError)
-            ),
-            None,
-        )
-        if output_failure is not None:
-            output_failure.add_note(
-                f"Kimi discovery also failed with {type(failure).__name__}"
-            )
-            raise output_failure
-        if cleanup_failures:
-            failure.add_note(
-                "Kimi catalog cleanup also failed: "
-                + ", ".join(name for name, _ in cleanup_failures)
-            )
-        raise failure
-    if cleanup_failures:
-        raise RuntimeError(
-            "Kimi catalog cleanup failed: "
-            + ", ".join(name for name, _ in cleanup_failures)
-        )
-    if outcome is None:
-        raise RuntimeError("Kimi catalog discovery completed without an outcome")
-    return outcome
+    return _finish_kimi_discovery(outcome, failure, cleanup_failures)

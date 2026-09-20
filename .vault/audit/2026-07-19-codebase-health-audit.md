@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:9f94da942df443bfc4819b0e56a162ef7ca6bb5b5528f59dbd835d66c10b2661'
+body_hash: 'sha256:3cbbff7c4b032a40ae5fd539af4394a9b3402dae762824f2fd32c7811b79e3f9'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3609,3 +3609,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted resume checkpoint presence and compilation-digest binding from locked graph lookup. The digest, durable checkpoint, and cached graph checks run in their original order. The former 17-path function measures 7; cyclomatic findings fell from 43 to 42, with worst value 15.
 - Review finding (moderate, code health; queued): 42 cyclomatic findings and 132 selected Ruff design findings remain. Kimi catalog discovery is now the highest cyclomatic finding at 15.
 - Verification: four frozen graph authority tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 42 findings.
+
+### 2026-09-20 Kimi catalog cleanup review pass
+
+- Implementation: extracted process cleanup sequencing and outcome/error precedence from Kimi catalog discovery. Cleanup order, output-budget error precedence, exception notes, and return behavior remain unchanged. The original 15-path discovery function measures 5, with helpers at 2 and 10. Cyclomatic findings fell from 42 to 41 and selected Ruff design findings from 132 to 131.
+- Review finding (moderate, code health; queued): 41 cyclomatic and 131 selected Ruff design findings remain. Worst cyclomatic value is now 14.
+- Verification: seven Kimi catalog unit tests and three real subprocess output/timeout/cleanup tests passed; `just check-all`, `just check-type-strict`, focused Linux Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 41 findings.

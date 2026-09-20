@@ -54,6 +54,16 @@ type JsonValue = str | int | float | bool | list[JsonValue] | JsonObject | None
 type JsonObject = dict[str, JsonValue]
 
 
+def _close_on_testclient_loop(
+    client: TestClient, async_client: httpx.AsyncClient
+) -> None:
+    """Close an injected client on the loop that opened its Windows transport."""
+
+    portal = client.portal
+    assert portal is not None
+    portal.call(async_client.aclose)
+
+
 def _checkpoint_config(
     thread_id: str, checkpoint_ns: str | None = None
 ) -> RunnableConfig:
@@ -3171,10 +3181,14 @@ class TestDeleteThread:
 
             worker.dispatches.clear()
             app.state.worker_client = failing_client
-            first = client.post(
-                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
-                json={"option_id": "allow_once"},
-            )
+            try:
+                first = client.post(
+                    f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
+                    json={"option_id": "allow_once"},
+                )
+            finally:
+                app.state.worker_client = original_client
+                _close_on_testclient_loop(client, failing_client)
             assert first.status_code == 502
 
             async def _assert_retained() -> None:
@@ -3196,13 +3210,10 @@ class TestDeleteThread:
 
             # The worker is reachable again, yet the identical retry must still
             # not produce a second resume for the same accepted answer.
-            app.state.worker_client = original_client
             second = client.post(
                 f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
-
-        asyncio.run(failing_client.aclose())
 
         assert second.status_code == 200
         assert second.json()["accepted"] is True
@@ -3482,6 +3493,7 @@ class TestCancelThread:
         """
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
         failing_client = httpx.AsyncClient(base_url="http://127.0.0.1:9")
+        original_client = app.state.worker_client
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -3497,7 +3509,11 @@ class TestCancelThread:
             thread_id = create_resp.json()["run_id"]
 
             app.state.worker_client = failing_client
-            cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
+            try:
+                cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
+            finally:
+                app.state.worker_client = original_client
+                _close_on_testclient_loop(client, failing_client)
 
             async def _assert_cancelling() -> None:
                 async with session_factory() as session:
@@ -3506,8 +3522,6 @@ class TestCancelThread:
                     assert thread.status == ThreadStatus.CANCELLING.value
 
             asyncio.run(_assert_cancelling())
-
-        asyncio.run(failing_client.aclose())
 
         assert cancel_resp.status_code == 200
         assert cancel_resp.json()["status"] == ThreadStatus.CANCELLING.value

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v2'
-body_hash: 'sha256:ff5b5552bd5947caafbc207f64d358084a9919c7d80a10421c77d7e3f1b1e6d0'
+body_hash: 'sha256:6e1752e5c1b4c7028e030c64e90e523d442c69492dc2c339576810cc59554898'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -72,3 +72,10 @@ related:
 - `S26` `verify:` `110 deterministic + 12 installed provider proofs` -> `pass`
 - `S26` `by:` `root`
 - `S26` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`
+- `S27` `M` `.vault/plan/2026-08-02-resource-aware-test-execution-plan.md`
+- `S27` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S27` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `S27` `verify:` `five asyncio-debug transport-owner repeats` -> `pass`
+- `S27` `by:` `root`
+- `S27` `verify:` `75 endpoint tests with unraisable warnings as errors` -> `pass`
+- `S27` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`

@@ -13,7 +13,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
 modified: '2026-09-20'
-body_hash: 'sha256:58beab95ded855d9f8ed4c77c4f0f56ef3063d10fbebe059848f8ddc48d22d24'
+body_hash: 'sha256:9b1689b8133494f8bbf688c42aaab11f822bfa2b2d18765006319eef9ef23083'
 ---
 
 # `resource-aware-test-execution` plan
@@ -66,7 +66,7 @@ resolution, closing the audited harness-registry gap.
 - [x] `S24` - Move prompt-free external provider discovery behind an explicit non-unit resource lane; `src/vaultspec_a2a/testing/resources.py, src/vaultspec_a2a/api/tests/test_provider_catalog_route.py, src/vaultspec_a2a/testing/tests`.
 - [x] `S25` - Prove ACP session isolation and safely amortize child-process setup where loop and mutable state allow; `src/vaultspec_a2a/providers/tests/conftest.py, src/vaultspec_a2a/providers/tests`.
 - [x] `S26` - Replace raw test binary guards with canonical platform-aware provider resolvers; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/providers`.
-- [ ] `S27` - Close Windows subprocess transport ownership warnings at their production lifecycle boundary; `src/vaultspec_a2a/providers, src/vaultspec_a2a/api/tests/test_endpoints.py`.
+- [x] `S27` - Close Windows injected-client transport ownership warnings on their owning TestClient loop; `src/vaultspec_a2a/api/tests/test_endpoints.py`.
 - [ ] `S28` - Reduce the serialized desktop test tail without weakening real-process coverage; `src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/testing`.
 
 ## Parallelization

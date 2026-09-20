@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v1'
-body_hash: 'sha256:1b219e3d4ab0706d46091d155ae67e91f4b3dc6127853854df268737d7395143'
+body_hash: 'sha256:58e1a9cd594b88cf4825bd59063afcb61c4f7a2fcc5badbd65979d2056a53c7f'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -558,6 +558,26 @@ Antigravity retains its separate canonical installer-aware resolver. The helper
 rejects API-only providers and returns no credential or secret material. Ruff,
 ty, BasedPyright, deterministic coverage, and installed Windows service proofs
 pass. No new finding remains from S26.
+### windows-cross-loop-client-transports | medium | resolved
+
+Type: test cleanup and event-loop ownership. Two endpoint cases injected an
+`httpx.AsyncClient` into an app running on TestClient's background Proactor loop,
+then closed the client later through a new `asyncio.run()` loop. The two clients
+matched the two delayed Windows transport finalizer warnings in broad runs. Each
+case now restores the application client and closes the injected client through
+TestClient's owning portal in `finally`. The ACP fixture correction in S25 also
+joins its shared subprocess writer and process on their owning module loop. Five
+repeated asyncio-debug runs of both endpoint cases and the complete 75-test
+endpoint module pass with unraisable warnings promoted to errors. Status:
+resolved.
+
+### s27-windows-transport-review-2026-09-20 | low | PASS
+
+Review result: PASS. The repair changes only test-owned injected-client cleanup;
+production dispatch behavior and ambiguity assertions are unchanged. Cleanup is
+exception-safe, restores the original pooled client before closure, and runs on
+the loop that opened the transport. Ruff, ty, BasedPyright, five debug repeats,
+and the full endpoint module pass. No new finding remains from S27.
 ## Recommendations
 
 - Migrate the outlying live suites (CLI live tests, authoring discovery retry

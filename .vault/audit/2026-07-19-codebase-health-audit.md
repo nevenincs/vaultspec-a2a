@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:488465392eab01a8f5d589b7a8a076dfcc15d0f4d7474050717d8409febbd9e8'
+body_hash: 'sha256:0042afe3d409a7a7e4f9f6f57895fa1771cc05a486c06b89523c8674797d3975'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4100,3 +4100,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: removed three thin compiler wrappers whose only consumers were tests. The graph, streaming, and service tests now import the research implementations directly from `_compiler_research`, and the unused-symbol gate no longer reports those compiler symbols.
 - Review finding, low severity, private import path: the test imports change path but exercise the same implementation. A repository-wide search found no remaining imports through compiler; public `compile_team_graph` remains there. No production caller consumed the wrappers.
 - Verification: 28 research ADR and clarification relay tests passed; scoped Ruff passed after import sorting. Other strict findings remain open.
+
+### 2026-09-20 service follow-up locals review
+
+- Implementation: moved the existing approval callback, initial SSE read, and approval assertions into a helper, closing the stream follow-up test's locals-count finding.
+- Review finding, low severity, test setup: the callback still runs after the same delay inside the stream context; its errors and response are asserted before checking the terminal event. No timeout, request, or state assertion changed.
+- Verification: the real service follow-up test passed, and scoped Ruff, preview locals, and basedpyright passed. Remaining preview locals findings stay open.

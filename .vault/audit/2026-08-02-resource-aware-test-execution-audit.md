@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v1'
-body_hash: 'sha256:88863f826164f170d6776f2c27194de3545eb4229ca8a6fa30f549092c4c89a0'
+body_hash: 'sha256:590dbd5dcec7744ed017f2e6033df636c053dc69c9d2b274628562268f2511e9'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -501,6 +501,25 @@ readiness fallback coverage proves that only a seated live worker benefits from
 an indeterminate observation. Ruff, ty, BasedPyright, six focused readiness tests,
 and five repeated real desktop race runs pass. No new finding remains from S23.
 
+### unit-gate-launches-live-provider-discovery | medium | resolved
+
+Type: lane isolation. The one route proof that composes every production catalog
+registration now declares the service tier and the exclusive
+`provider-catalog-discovery` resource. The default non-service lane retains all
+ten deterministic route, validation, bounds, and cache tests but no longer
+launches installed Antigravity, Kimi, Claude, or other external adapters. The
+service lane retains the real prompt-free catalog proof and accepts unavailable
+provider catalogs as production does. Focused collection shows a 10/1 split,
+and both sides pass. Status: resolved.
+
+### s24-provider-discovery-lane-review-2026-09-20 | low | PASS
+
+Review result: PASS. Only the production-adapter composition proof moved lanes;
+no catalog assertion or adapter behavior changed. The new resource has no
+presence prerequisite because provider absence is part of the catalog contract,
+but it serializes installed-host discovery across sessions. Ruff, ty,
+BasedPyright, resource-vocabulary tests, collection proofs, and both execution
+selections pass. No new finding remains from S24.
 ## Recommendations
 
 - Migrate the outlying live suites (CLI live tests, authoring discovery retry

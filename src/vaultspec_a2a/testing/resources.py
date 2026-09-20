@@ -99,6 +99,14 @@ _CATALOG: tuple[ResourceSpec, ...] = (
         backstop_s=1800,
     ),
     ResourceSpec(
+        key="provider-catalog-discovery",
+        description=(
+            "prompt-free discovery across installed external provider adapters; "
+            "one catalog boot per host at a time"
+        ),
+        backstop_s=1800,
+    ),
+    ResourceSpec(
         key="claude-cli-lane",
         description="the Claude Code ACP CLI's live usage window",
         prerequisite_id="claude-cli",

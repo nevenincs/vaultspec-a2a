@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v2'
-body_hash: 'sha256:b9bc23b6bea1c65d2ab4e1b18ee154351090c433d538916fba3d6e4a30eeea54'
+body_hash: 'sha256:026740a3ab2d15d80459e509cf00f7a10606e6de195979b670d8e5d7989d65fb'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -49,3 +49,10 @@ related:
 - `S23` `by:` `root`
 - `S23` `verify:` `desktop race process proof x5` -> `pass`
 - `S23` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`
+- `S24` `M` `.vault/plan/2026-08-02-resource-aware-test-execution-plan.md`
+- `S24` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S24` `M` `src/vaultspec_a2a/testing/resources.py`
+- `S24` `M` `src/vaultspec_a2a/api/tests/test_provider_catalog_route.py`
+- `S24` `verify:` `unit/service collection split and focused execution` -> `pass`
+- `S24` `by:` `root`
+- `S24` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`

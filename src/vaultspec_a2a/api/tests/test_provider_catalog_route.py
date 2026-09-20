@@ -117,6 +117,8 @@ async def test_route_rejects_refresh_and_duplicate_workspace_queries(
 
 
 @pytest.mark.asyncio
+@pytest.mark.service
+@pytest.mark.resource("provider-catalog-discovery")
 async def test_authenticated_route_serves_all_registered_lanes_in_order(
     tmp_path: Path,
 ) -> None:

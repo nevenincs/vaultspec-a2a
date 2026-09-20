@@ -32,6 +32,11 @@ _DEFAULT_RELATIVE = ("AppData", "Local", "agy", "bin", "agy.exe")
 _POSIX_RELATIVE = (".local", "share", "agy", "bin", "agy")
 
 
+def _home_root(home: str | None) -> Path:
+    explicit_home = (home or "").strip()
+    return Path(explicit_home) if explicit_home else Path.home()
+
+
 def resolve_antigravity_command(
     *, cli_path: str | None = None, home: str | None = None
 ) -> Path | None:
@@ -50,7 +55,7 @@ def resolve_antigravity_command(
     if found is not None:
         return Path(found)
 
-    root = Path((home or "").strip()) if (home or "").strip() else Path.home()
+    root = _home_root(home)
     for relative in (_DEFAULT_RELATIVE, _POSIX_RELATIVE):
         candidate = root.joinpath(*relative)
         if candidate.is_file():

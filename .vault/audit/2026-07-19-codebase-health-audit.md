@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:8719158c71ee78320546260601c8f0175202dc7cf4635147c366c22e6a622a06'
+body_hash: 'sha256:dc14aeda80f08c3f217496682d9709dbc72680ac3c4f1fd27c9ecd820e02347f'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3591,3 +3591,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted initialization result and authentication-method validation from `initialize_session`. Validation order, error codes, messages, and resume capability requirement remain the same. Cyclomatic findings fell from 46 to 45; selected Ruff design findings remain 132.
 - Review finding (moderate, code health; queued): 45 cyclomatic findings remain, led by supervisor response evaluation and worker graph compilation (17 each). The ACP initialization finding is closed.
 - Verification: 27 ACP model selection, Kimi conditioning, and strict MCP tests passed (two live tests deselected); `just check-all`, `just check-type-strict`, and `git diff --check` passed. Radon gate remains red at 45 findings.
+
+### 2026-09-20 Antigravity command resolution review pass
+
+- Implementation: extracted explicit-home normalization from the Antigravity executable resolver. Override, PATH, and installer-location precedence remains unchanged. Cyclomatic findings fell from 45 to 44.
+- Review finding (moderate, code health; queued): 44 cyclomatic findings remain; the resolver finding is closed. Selected Ruff design findings remain 132.
+- Verification: four Antigravity catalog cleanup tests, focused Ruff and Linux Ty, and `git diff --check` passed. The cyclomatic gate remains red at 44 findings.

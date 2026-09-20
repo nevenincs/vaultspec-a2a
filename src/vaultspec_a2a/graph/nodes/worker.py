@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast, override
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, override
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
@@ -448,14 +448,17 @@ def _parse_mock_permission_call(
     return tool_input, options
 
 
+class _WorkerToolCallOptions(TypedDict):
+    messages: list[BaseMessage]
+    response: BaseMessage
+    queue_tool: BaseTool | None
+    model: BaseChatModel
+    autonomous: bool
+    config: RunnableConfig | None
+
+
 async def _resolve_worker_tool_calls(
-    *,
-    messages: list[BaseMessage],
-    response: BaseMessage,
-    queue_tool: BaseTool | None,
-    model: BaseChatModel,
-    autonomous: bool,
-    config: RunnableConfig | None,
+    **options: Unpack[_WorkerToolCallOptions],
 ) -> tuple[BaseMessage, dict[str, Any]]:
     """Resolve every node-owned tool call in one response, in one follow-up turn.
 
@@ -470,6 +473,12 @@ async def _resolve_worker_tool_calls(
     Returns ``(final_response, state_patch)``, passing the response through
     untouched with an empty patch when neither lane produced a result.
     """
+    messages = options["messages"]
+    response = options["response"]
+    queue_tool = options["queue_tool"]
+    model = options["model"]
+    autonomous = options["autonomous"]
+    config = options["config"]
     permission_results = await _collect_mock_permission_result(
         response=response, model=model, autonomous=autonomous
     )

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:e44ad4f31ebd4b5bcd2a6cffc46e26e06c9afcc90d513d77e0a6fb04edcc6719'
+body_hash: 'sha256:25a3137344f75b343b6bca4dae04e9299899ac59ed1807305312802ac9f0b084'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4153,3 +4153,11 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, prerequisite: one service test could not reach its assertion because the external Jaeger service list was empty. Repeat that test with its service prerequisite available; the failure does not establish a code regression.
 - Review finding, medium severity, quality: the strict census still reports 37 production parameter-count findings and four maintainability-index findings. Preview Ruff also reports test-local and argument findings. Continue the queue until every gate is zero.
 - Verification: `just check-all` and `just check-type-strict` passed; focused dispatch, event, database, graph, discovery, ACP MCP, MCP contract, and stdio tests passed in the implementation pass. Diff review found no introduced high-severity issue.
+
+### 2026-09-20 parser and interrupt module review
+
+- Implementation: moved the named SQL CHECK parser and graph interrupt projection into focused private modules, preserving the public import paths; changed atomic write and worker tool-call controls to typed keyword contracts.
+- Review finding, low severity, compatibility: runtime signature inspection of atomic write and worker tool-call helpers now sees typed variadic keyword options. Existing callers use the same positional and keyword names and focused tests pass. Retain this sensitivity in the queue for full integration review.
+- Review finding, low severity, module move: parser and interrupt code now have new private homes. Import loadability, export-home guard, structural duplication guard, and focused schema/streaming tests pass; repeat the broad unit suite after the full burn down.
+- Review finding, medium severity, quality: strict health has two maintainability-index offenders and 31 production parameter-count offenders; preview Ruff still reports test locals and argument findings. Keep them open in this audit queue.
+- Verification: 72 schema tests, 80 streaming tests, 11 atomic-write tests, and 25 worker web-tool tests passed. `just check-all`, `just check-type-strict`, and import loadability passed. No new high-severity finding surfaced in diff review.

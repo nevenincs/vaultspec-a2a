@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:92985808f0f3908a9df7443a29d1275699faadb44234b834cc5dbd16e75ddff4'
+body_hash: 'sha256:9f94da942df443bfc4819b0e56a162ef7ca6bb5b5528f59dbd835d66c10b2661'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3603,3 +3603,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: separated phase-prerequisite and plan-approval decisions from supervisor response routing. Decision ordering, warnings, routing errors, and approval payload remain the same. The original routing function fell from 17 to 7 paths; both helpers measure 7. Cyclomatic findings fell from 44 to 43.
 - Review finding (moderate, code health; queued): 43 cyclomatic findings and 132 selected Ruff design findings remain. The highest remaining cyclomatic function is worker graph compilation at 17 paths. The strict aggregate gate remains red.
 - Verification: 29 supervisor tests, `just check-all`, `just check-type-strict`, focused Ty, Ruff, and `git diff --check` passed. Full `just check-strict` before this edit returned nonzero from remaining strict dimensions.
+
+### 2026-09-20 worker graph authority review pass
+
+- Implementation: extracted resume checkpoint presence and compilation-digest binding from locked graph lookup. The digest, durable checkpoint, and cached graph checks run in their original order. The former 17-path function measures 7; cyclomatic findings fell from 43 to 42, with worst value 15.
+- Review finding (moderate, code health; queued): 42 cyclomatic findings and 132 selected Ruff design findings remain. Kimi catalog discovery is now the highest cyclomatic finding at 15.
+- Verification: four frozen graph authority tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 42 findings.

@@ -373,6 +373,59 @@ class GraphLifecycleManager:
             else:
                 self._thread_compile_lock_users[req.thread_id] = users
 
+    async def _resume_checkpoint_missing(
+        self,
+        req: DispatchRequest,
+        bound: tuple[str, str] | None,
+        checkpoint_digest: tuple[str, str] | None,
+        checkpoint_deadline: float | None,
+    ) -> bool:
+        if req.action != "resume" or checkpoint_digest is not None:
+            return False
+        if bound is None:
+            return True
+        return not await self._checkpoint_present(
+            req.thread_id, checkpoint_deadline=checkpoint_deadline
+        )
+
+    async def _bind_compilation_authority(
+        self,
+        req: DispatchRequest,
+        compilation_digests: tuple[str, str],
+        checkpoint_deadline: float | None,
+    ) -> bool:
+        """Verify durable and bound compilation identities before cache lookup."""
+        bound = self._thread_compilation_digests.get(req.thread_id)
+        checkpoint_digest = (
+            await self._checkpoint_compilation_digests(
+                req.thread_id, checkpoint_deadline=checkpoint_deadline
+            )
+            if bound is None
+            else None
+        )
+        if await self._resume_checkpoint_missing(
+            req, bound, checkpoint_digest, checkpoint_deadline
+        ):
+            return False
+        if bound is None:
+            if (
+                checkpoint_digest is not None
+                and checkpoint_digest != compilation_digests
+            ):
+                raise GraphCompilationError(
+                    "dispatch compilation authority does not match the durable run"
+                )
+            self._thread_compilation_digests[req.thread_id] = compilation_digests
+        elif bound != compilation_digests:
+            raise GraphCompilationError(
+                "dispatch compilation authority does not match the bound run"
+            )
+        elif checkpoint_digest is not None and checkpoint_digest != compilation_digests:
+            raise GraphCompilationError(
+                "dispatch compilation authority does not match the durable run"
+            )
+        return True
+
     async def _get_or_compile_graph_locked(
         self,
         req: DispatchRequest,
@@ -391,42 +444,10 @@ class GraphLifecycleManager:
         definition_digest = definition.digest()
         assignment_digest = model_assignment_digest(req.model_assignment)
         compilation_digests = (assignment_digest, definition_digest)
-        bound = self._thread_compilation_digests.get(req.thread_id)
-        checkpoint_digest = (
-            await self._checkpoint_compilation_digests(
-                req.thread_id, checkpoint_deadline=checkpoint_deadline
-            )
-            if bound is None
-            else None
-        )
-        if (
-            req.action == "resume"
-            and checkpoint_digest is None
-            and (
-                bound is None
-                or not await self._checkpoint_present(
-                    req.thread_id, checkpoint_deadline=checkpoint_deadline
-                )
-            )
+        if not await self._bind_compilation_authority(
+            req, compilation_digests, checkpoint_deadline
         ):
             return None
-        if bound is None:
-            if (
-                checkpoint_digest is not None
-                and checkpoint_digest != compilation_digests
-            ):
-                raise GraphCompilationError(
-                    "dispatch compilation authority does not match the durable run"
-                )
-            self._thread_compilation_digests[req.thread_id] = compilation_digests
-        elif bound != compilation_digests:
-            raise GraphCompilationError(
-                "dispatch compilation authority does not match the bound run"
-            )
-        elif checkpoint_digest is not None and checkpoint_digest != compilation_digests:
-            raise GraphCompilationError(
-                "dispatch compilation authority does not match the durable run"
-            )
 
         # Check if thread already has a cached graph. A thread's accepted
         # assignment is immutable; changing it under the same identity is a

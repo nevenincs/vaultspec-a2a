@@ -63,6 +63,8 @@ from .repair_transitions import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -464,6 +466,42 @@ async def _deduplicate_permission_response(
     return None
 
 
+def _document_approval_refusal(
+    permission: PermissionRequestModel, request_id: str, thread_id: str
+) -> PermissionResult | None:
+    if (
+        permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
+        and permission.pause_reason_type not in LOCALLY_RESPONDABLE_PAUSE_CAUSES
+    ):
+        logger.warning(
+            "Permission respond refused: request %s pauses on %r, which only "
+            "the engine review surface may decide",
+            request_id,
+            permission.pause_reason_type,
+            extra={
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "action": "permission_response",
+                "pause_reason_type": permission.pause_reason_type,
+            },
+        )
+        return PermissionResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            error_detail=(
+                "Document-approval pauses are decided by the engine review "
+                "surface, not this route; the run resumes only through the "
+                "verdict subscriber."
+            ),
+            error_status_code=403,
+        )
+
+    return None
+
+
 async def _authorize_permission_response(
     db: AsyncSession,
     *,
@@ -529,35 +567,9 @@ async def _authorize_permission_response(
     # contract — no second approval authority in A2A). Refusing here, before
     # the idempotency and transition logic runs, means no control action is
     # journalled and no resume value is ever constructed for this call.
-    if (
-        permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
-        and permission.pause_reason_type not in LOCALLY_RESPONDABLE_PAUSE_CAUSES
-    ):
-        logger.warning(
-            "Permission respond refused: request %s pauses on %r, which only "
-            "the engine review surface may decide",
-            request_id,
-            permission.pause_reason_type,
-            extra={
-                "thread_id": thread_id,
-                "request_id": request_id,
-                "action": "permission_response",
-                "pause_reason_type": permission.pause_reason_type,
-            },
-        )
-        return PermissionResult(
-            request_id=request_id,
-            thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            error_detail=(
-                "Document-approval pauses are decided by the engine review "
-                "surface, not this route; the run resumes only through the "
-                "verdict subscriber."
-            ),
-            error_status_code=403,
-        )
+    document_refusal = _document_approval_refusal(permission, request_id, thread_id)
+    if document_refusal is not None:
+        return document_refusal
 
     # ------------------------------------------------------------------
     # 2. Idempotency deduplication
@@ -582,6 +594,28 @@ async def _authorize_permission_response(
         PermissionInput(request_id, option_id, idempotency_key, notes),
         resolved_idempotency_key,
     )
+
+
+def _active_permission_request_id(
+    permission: PermissionRequestModel,
+    thread_record: ThreadModel,
+    pending_permissions: Sequence[PermissionRequestModel],
+    request_id: str,
+) -> str | None:
+    if permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES:
+        active_plan_permissions = [
+            pending.request_id
+            for pending in pending_permissions
+            if pending.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
+        ]
+        return (
+            active_plan_permissions[-1]
+            if active_plan_permissions
+            else thread_record.approval_request_id or request_id
+        )
+    if pending_permissions:
+        return pending_permissions[-1].request_id
+    return None
 
 
 async def _authorize_pending_permission(
@@ -665,21 +699,10 @@ async def _authorize_pending_permission(
             error_status_code=409,
         )
 
-    active_request_id: str | None = None
     pending_permissions = await get_pending_permission_requests(db, thread_id=thread_id)
-    if permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES:
-        active_plan_permissions = [
-            pending.request_id
-            for pending in pending_permissions
-            if pending.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
-        ]
-        active_request_id = (
-            active_plan_permissions[-1]
-            if active_plan_permissions
-            else thread_record.approval_request_id or request_id
-        )
-    elif pending_permissions:
-        active_request_id = pending_permissions[-1].request_id
+    active_request_id = _active_permission_request_id(
+        permission, thread_record, pending_permissions, request_id
+    )
 
     if active_request_id is not None and active_request_id != request_id:
         error_detail, error_status_code = _rejected_permission_error(
@@ -996,6 +1019,20 @@ async def _record_permission_transition(
     )
 
 
+def _permission_dispatch_error(
+    outcome: DispatchOutcome, *, is_circuit_open: bool, should_mark_failed: bool
+) -> tuple[str, int | None]:
+    detail = outcome.detail or "Worker dispatch failed"
+    if is_circuit_open:
+        return outcome.detail or "Circuit breaker open", 503
+    if should_mark_failed:
+        http_code = getattr(outcome.exception, "status_code", 0)
+        if http_code:
+            detail = f"Worker dispatch failed (HTTP {http_code})"
+        return detail, 502
+    return detail, None
+
+
 async def _failed_permission_dispatch(
     db: AsyncSession,
     authorized: _AuthorizedPermission,
@@ -1026,17 +1063,11 @@ async def _failed_permission_dispatch(
             reason=outcome.detail or "Worker dispatch failed",
         )
 
-    error_detail: str | None = outcome.detail or "Worker dispatch failed"
-    error_status_code: int | None = None
-    if policy.is_circuit_open:
-        error_detail = outcome.detail or "Circuit breaker open"
-        error_status_code = 503
-    elif policy.should_mark_failed:
-        exc = outcome.exception
-        http_code = getattr(exc, "status_code", 0)
-        if http_code:
-            error_detail = f"Worker dispatch failed (HTTP {http_code})"
-        error_status_code = 502
+    error_detail, error_status_code = _permission_dispatch_error(
+        outcome,
+        is_circuit_open=policy.is_circuit_open,
+        should_mark_failed=policy.should_mark_failed,
+    )
 
     await db.commit()
     return PermissionResult(

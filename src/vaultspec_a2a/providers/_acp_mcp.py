@@ -187,6 +187,56 @@ RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
 CORE_MCP_REQUIREMENT = "vaultspec-core"
 
 
+def _validate_registry_entry(name: str, value: JsonValue) -> None:
+    """Validate one declared server before registry freezing."""
+    if not isinstance(value, dict):
+        raise ConfigError(f"harness registry entry {name!r} must be a JSON object")
+    for axis in _TRUST_AXES:
+        if not isinstance(value.get(axis), bool):
+            raise ConfigError(
+                f"harness registry entry {name!r} does not declare {axis!r}; "
+                "all three trust axes (local write, network egress, root pin) "
+                "must be declared explicitly per entry - none is inferred from "
+                "another, and omission is never read as permission"
+            )
+    if _ROOT_PIN_AXIS not in value:
+        raise ConfigError(
+            f"harness registry entry {name!r} does not declare "
+            f"{_ROOT_PIN_AXIS!r}; state the environment variable a launching "
+            "host pins the run's project through, or state null to declare the "
+            "server unpinnable - a server whose project is chosen per call is "
+            "not constrained by the other two axes, and omission is never read "
+            "as permission"
+        )
+    pin = value[_ROOT_PIN_AXIS]
+    if pin is not None and (not isinstance(pin, str) or not pin):
+        raise ConfigError(
+            f"harness registry entry {name!r} declares {_ROOT_PIN_AXIS!r} as "
+            f"{pin!r}; the axis names the environment variable carrying the "
+            "pin, or is null when the server cannot be pinned"
+        )
+    if not isinstance(value.get(_EXACT_SURFACE_AXIS), bool):
+        raise ConfigError(
+            f"harness registry entry {name!r} does not declare "
+            f"{_EXACT_SURFACE_AXIS!r}; state whether the server's safety rests "
+            "on a RESTRICTED LAUNCH, in which case the contract check asserts "
+            "served-equals-declared so a lost restricting argument is a refused "
+            "launch rather than a silently widened surface - omission is never "
+            "read as permission"
+        )
+    if _ENV_FIELD in value:
+        raise ConfigError(
+            f"harness registry entry {name!r} declares {_ENV_FIELD!r}; the "
+            "registry cannot carry an environment because the two transports "
+            "shape it irreconcilably - the ACP stdio spec takes a list of "
+            "name/value pairs and the Codex block takes a flat mapping, so "
+            "either shape reaches the other transport wrong, and the flat one "
+            "reaches an unpinned ACP session wrong WITHOUT complaint. State a "
+            "run's project through the root-pin axis, which both transports "
+            "render for themselves"
+        )
+
+
 def _declare_registry(
     entries: JsonObject,
 ) -> FrozenJsonObject:
@@ -227,52 +277,7 @@ def _declare_registry(
             non-empty string or ``None``, or declares ``env``.
     """
     for name, value in entries.items():
-        if not isinstance(value, dict):
-            raise ConfigError(f"harness registry entry {name!r} must be a JSON object")
-        for axis in _TRUST_AXES:
-            if not isinstance(value.get(axis), bool):
-                raise ConfigError(
-                    f"harness registry entry {name!r} does not declare {axis!r}; "
-                    "all three trust axes (local write, network egress, root pin) "
-                    "must be declared explicitly per entry - none is inferred from "
-                    "another, and omission is never read as permission"
-                )
-        if _ROOT_PIN_AXIS not in value:
-            raise ConfigError(
-                f"harness registry entry {name!r} does not declare "
-                f"{_ROOT_PIN_AXIS!r}; state the environment variable a launching "
-                "host pins the run's project through, or state null to declare the "
-                "server unpinnable - a server whose project is chosen per call is "
-                "not constrained by the other two axes, and omission is never read "
-                "as permission"
-            )
-        pin = value[_ROOT_PIN_AXIS]
-        if pin is not None and (not isinstance(pin, str) or not pin):
-            raise ConfigError(
-                f"harness registry entry {name!r} declares {_ROOT_PIN_AXIS!r} as "
-                f"{pin!r}; the axis names the environment variable carrying the "
-                "pin, or is null when the server cannot be pinned"
-            )
-        if not isinstance(value.get(_EXACT_SURFACE_AXIS), bool):
-            raise ConfigError(
-                f"harness registry entry {name!r} does not declare "
-                f"{_EXACT_SURFACE_AXIS!r}; state whether the server's safety rests "
-                "on a RESTRICTED LAUNCH, in which case the contract check asserts "
-                "served-equals-declared so a lost restricting argument is a refused "
-                "launch rather than a silently widened surface - omission is never "
-                "read as permission"
-            )
-        if _ENV_FIELD in value:
-            raise ConfigError(
-                f"harness registry entry {name!r} declares {_ENV_FIELD!r}; the "
-                "registry cannot carry an environment because the two transports "
-                "shape it irreconcilably - the ACP stdio spec takes a list of "
-                "name/value pairs and the Codex block takes a flat mapping, so "
-                "either shape reaches the other transport wrong, and the flat one "
-                "reaches an unpinned ACP session wrong WITHOUT complaint. State a "
-                "run's project through the root-pin axis, which both transports "
-                "render for themselves"
-            )
+        _validate_registry_entry(name, value)
     frozen = freeze_json(entries)
     if not isinstance(frozen, MappingProxyType):
         raise ConfigError("harness MCP registry must freeze to a JSON object")
@@ -1206,6 +1211,28 @@ def codex_mcp_server_specs(
     return specs
 
 
+def _desktop_unavailable_attached_names(
+    model: BaseChatModel, *, profile: HarnessMcpRuntimeProfile, lane: str | None
+) -> set[str]:
+    attached_names = {
+        name
+        for spec in (getattr(model, "mcp_servers", []) or [])
+        if isinstance(name := spec.get("name"), str) and name in _KNOWN_MCP_SERVERS
+    }
+    attached_names.update(
+        name
+        for name in (getattr(model, "harness_mcp_servers", []) or [])
+        if name in _KNOWN_MCP_SERVERS
+    )
+    if not attached_names:
+        return set()
+    # Use the same lane as the outer resolution for already attached servers.
+    attached_resolution = resolve_harness_mcp_capabilities(
+        sorted(attached_names), profile=profile, lane=lane
+    )
+    return {item.capability for item in attached_resolution.unavailable}
+
+
 def _resolve_harness_composition(
     model: BaseChatModel,
     names: Sequence[str],
@@ -1236,33 +1263,9 @@ def _resolve_harness_composition(
         unavailable.capability for unavailable in resolution.unavailable
     }
     if profile is HarnessMcpRuntimeProfile.DESKTOP:
-        attached_names = {
-            name
-            for spec in (getattr(model, "mcp_servers", []) or [])
-            if isinstance(name := spec.get("name"), str) and name in _KNOWN_MCP_SERVERS
-        }
-        attached_names.update(
-            name
-            for name in (getattr(model, "harness_mcp_servers", []) or [])
-            if name in _KNOWN_MCP_SERVERS
+        unavailable_names.update(
+            _desktop_unavailable_attached_names(model, profile=profile, lane=lane)
         )
-        if attached_names:
-            # The SAME lane the outer resolution was asked about. This inner call
-            # asks which already-attached servers the CURRENT profile prohibits,
-            # so it must be asked under the run's current lane too. Omitting it
-            # is fail-closed - an absent lane is never read as permission - but
-            # fail-closed for the WRONG REASON: an egressing server would be
-            # stripped from a proven desktop lane, and the served explanation
-            # would blame the lane rather than the argument nobody passed.
-            attached_resolution = resolve_harness_mcp_capabilities(
-                sorted(attached_names),
-                profile=profile,
-                lane=lane,
-            )
-            unavailable_names.update(
-                unavailable.capability
-                for unavailable in attached_resolution.unavailable
-            )
     resolved = [
         _launch_spec(name, _registry_entry(name))
         for name in resolution.available_servers
@@ -1333,19 +1336,78 @@ def compose_harness_mcp_servers(
         return model
     return _project_composition_onto_model(
         model,
-        resolution,
-        unavailable_names,
-        resolved,
+        _ResolvedMcpComposition(resolution, unavailable_names, resolved),
         allowed_tools=allowed_tools,
         profile=profile,
     )
 
 
-def _project_composition_onto_model(
+@dataclass(frozen=True, slots=True)
+class _ResolvedMcpComposition:
+    resolution: HarnessMcpResolution
+    unavailable_names: set[str]
+    resolved: list[JsonObject]
+
+
+def _project_codex_composition(
     model: BaseChatModel,
     resolution: HarnessMcpResolution,
     unavailable_names: set[str],
-    resolved: list[JsonObject],
+    profile: HarnessMcpRuntimeProfile,
+) -> BaseChatModel:
+    codex_attach = getattr(model, "with_harness_mcp_servers", None)
+    if codex_attach is None:
+        return model
+    if profile is HarnessMcpRuntimeProfile.DESKTOP:
+        existing_names = [
+            name
+            for name in (getattr(model, "harness_mcp_servers", []) or [])
+            if name not in unavailable_names
+        ]
+        seen_names = set(existing_names)
+        existing_names.extend(
+            name for name in resolution.available_servers if name not in seen_names
+        )
+        return codex_attach(existing_names)
+    return codex_attach(resolution.available_servers)
+
+
+def _combined_mcp_specs(
+    model: BaseChatModel, resolved: list[JsonObject], unavailable_names: set[str]
+) -> list[JsonObject]:
+    existing = [
+        spec
+        for spec in (getattr(model, "mcp_servers", []) or [])
+        if spec.get("name") not in unavailable_names
+    ]
+    seen = {spec.get("name") for spec in existing}
+    return existing + [spec for spec in resolved if spec.get("name") not in seen]
+
+
+def _admitted_mcp_tools(
+    model: BaseChatModel,
+    resolution: HarnessMcpResolution,
+    unavailable_names: set[str],
+    allowed_tools: Sequence[str] | None,
+    profile: HarnessMcpRuntimeProfile,
+) -> tuple[list[str], list[str]]:
+    existing_allowed = [
+        tool
+        for tool in (getattr(model, "allowed_tools", []) or [])
+        if not any(tool.startswith(f"mcp__{name}__") for name in unavailable_names)
+    ]
+    resolved_allowed = set(
+        harness_allowed_tool_names(resolution.available_servers, profile=profile)
+    )
+    admitted_tools = [
+        tool for tool in (allowed_tools or ()) if tool in resolved_allowed
+    ]
+    return existing_allowed, admitted_tools
+
+
+def _project_composition_onto_model(
+    model: BaseChatModel,
+    composition: _ResolvedMcpComposition,
     *,
     allowed_tools: Sequence[str] | None,
     profile: HarnessMcpRuntimeProfile,
@@ -1361,44 +1423,21 @@ def _project_composition_onto_model(
     """
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
-        # Codex lane: no ACP session surface, but its own config.toml delivery.
-        codex_attach = getattr(model, "with_harness_mcp_servers", None)
-        if codex_attach is not None:
-            if profile is HarnessMcpRuntimeProfile.DESKTOP:
-                existing_names = [
-                    name
-                    for name in (getattr(model, "harness_mcp_servers", []) or [])
-                    if name not in unavailable_names
-                ]
-                seen_names = set(existing_names)
-                existing_names.extend(
-                    name
-                    for name in resolution.available_servers
-                    if name not in seen_names
-                )
-                return codex_attach(existing_names)
-            return codex_attach(resolution.available_servers)
-        return model
-    existing = [
-        spec
-        for spec in (getattr(model, "mcp_servers", []) or [])
-        if spec.get("name") not in unavailable_names
-    ]
-    seen = {s.get("name") for s in existing}
-    combined = existing + [s for s in resolved if s.get("name") not in seen]
-    existing_allowed = [
-        tool
-        for tool in (getattr(model, "allowed_tools", []) or [])
-        if not any(tool.startswith(f"mcp__{name}__") for name in unavailable_names)
-    ]
-    resolved_allowed = set(
-        harness_allowed_tool_names(resolution.available_servers, profile=profile)
+        return _project_codex_composition(
+            model, composition.resolution, composition.unavailable_names, profile
+        )
+    combined = _combined_mcp_specs(
+        model, composition.resolved, composition.unavailable_names
     )
-    admitted_tools = [
-        tool for tool in (allowed_tools or ()) if tool in resolved_allowed
-    ]
+    existing_allowed, admitted_tools = _admitted_mcp_tools(
+        model,
+        composition.resolution,
+        composition.unavailable_names,
+        allowed_tools,
+        profile,
+    )
     if not admitted_tools:
-        if unavailable_names:
+        if composition.unavailable_names:
             return attach(combined, existing_allowed)
         return attach(combined)
     allow_seen = set(existing_allowed)
@@ -1608,6 +1647,15 @@ _require_declared_native_egress(NATIVE_READ_TOOL_NAMES)
 _require_bounds_match_the_egress_axis(NATIVE_TOOL_EGRESS, NATIVE_WEB_TOOL_BOUNDS)
 
 
+def _declared_native_tool_names(extra_tool_names: Sequence[str] | None) -> list[str]:
+    composed_names = list(NATIVE_READ_TOOL_NAMES)
+    composed_names += [
+        name for name in (extra_tool_names or ()) if name not in composed_names
+    ]
+    _require_declared_native_egress(composed_names)
+    return composed_names
+
+
 def compose_native_read_tools(
     model: BaseChatModel,
     *,
@@ -1648,11 +1696,7 @@ def compose_native_read_tools(
     mutate only the ACP session's advertised surface and allowlist, so they live
     together rather than in the graph node that sequences them.
     """
-    composed_names = list(NATIVE_READ_TOOL_NAMES)
-    composed_names += [
-        name for name in (extra_tool_names or ()) if name not in composed_names
-    ]
-    _require_declared_native_egress(composed_names)
+    composed_names = _declared_native_tool_names(extra_tool_names)
     if not autonomous or not is_document_authoring_role(role):
         return model
     attach = getattr(model, "with_mcp_servers", None)

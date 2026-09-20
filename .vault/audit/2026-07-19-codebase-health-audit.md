@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:229f908c819b7d570a4cb71a45e0a30fcadefda8a3c6134e11a93c8b2c2976de'
+body_hash: 'sha256:c236cde18d70ada1d713a2124d22d6aff3d3040fe1515b2d56173463399d6c83'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3386,3 +3386,10 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: extracted request-metadata copying, legacy lease-id validation, follow-up dispatch failure mapping, and service degradation reasons into focused helpers. Existing admission, lease, error-status, and health behavior remains in the same order.
 - Review: inspected the diff; 65 gateway/digest/drain tests, routine checks, strict type checking, focused Ruff/Pylint passed. The gateway module has no radon function above 10. Severity: none for this change; type: no contract drift found.
 - Queue: four prior radon offenders in `api/routes/gateway.py` are closed. Existing Pylint module-length and five strict Ruff endpoint parameter-count findings remain open. Repository-wide cyclomatic gate still has 107 offenders.
+
+### 2026-09-20 ACP MCP composition review pass
+
+- Implementation: extracted per-entry registry validation, attached desktop capability resolution, Codex/ACP composition projections, and native tool declaration. Grouped resolved projection inputs for the private projection function. Existing validation order, lane propagation, allowlist union, and local import conventions remain intact.
+- Review: inspected the moved branches; 81 ACP MCP composition tests, 31 pinning tests without real-service startup, 12 contract/surface tests, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for the code change; type: no contract drift found.
+- Verification finding (environment dependency, severity medium): four real-service pinning tests failed because the installed service interpreter reports `service_env_no_gpu` (CUDA and MPS unavailable). They remain queued for execution on a supported accelerator host or a supported service configuration; 112 other tests in that run passed. This is not evidence that the four tests are green.
+- Queue: four prior radon offenders and one private PLR0913 finding in `_acp_mcp.py` are closed. Its public composition parameter-count finding and Pylint module-length finding remain open. Repository-wide cyclomatic gate still has 103 offenders, with other strict findings open.

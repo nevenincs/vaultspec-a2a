@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:800d4382fd86baa19db8c1c7acc98807a97a52f4685d4391d436477043ac4b70'
+body_hash: 'sha256:38c707936b7e1f7e12bb73f584dc8fba9db849805327b0a723b5cfe10f361ffb'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3917,3 +3917,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: the four tests that boot and control a private `vaultspec-rag` data-plane service now carry the `service` marker and an exclusive `rag-service-control` resource declaration. The deterministic unit lane retains the module's 31 pure contract tests and deselects the four live proofs.
 - Verification: focused collection selected 31 of 35 tests under `-m "not service"`; Ruff passed. The resource suite reached 69 passes before an unrelated concurrent `InfraConfig` `NameError` prevented an isolated subprocess from loading the repository plugin.
 - Review finding (medium, test isolation): RESOLVED. Private service startup had been reachable from the unit lane, consumed up to 120 seconds per proof, and attempted accelerator-backed RAG startup on machines that cannot provide it. No RAG process is now required or started by the unit lane.
+
+### 2026-09-20 infrastructure settings module-length review
+
+- Implementation: moved infrastructure settings fields, endpoint constants, and path/URL helpers into `control/infra_config.py`. `Settings` still composes that class with domain settings in `control/config.py`, and the consumed config constants remain explicitly re-exported.
+- Verification: 47 focused configuration and desktop profile tests passed. Target Ruff, Ty, basedpyright, formatting, diff, import-load, and unconsumed-export checks passed. The module-length gate fell from 6 to 5 offenders.
+- Review finding (medium, code health): five oversized modules and other strict findings remain; continue the existing burn-down queue. No new functional defect was found in this pass.

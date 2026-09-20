@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..control.action_lease import (
+    ControlActionClaimRequest,
     DispatchFailureDisposition,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -178,15 +179,17 @@ async def send_followup_message(
     )
     claim = await prepare_control_action_claim(
         db,
-        thread_id=thread_id,
-        action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-        idempotency_key=resolved_idempotency_key,
-        payload=freeze_accepted_input(
-            dispatch, intent={"content": content, "agent_id": agent_id}
+        request=ControlActionClaimRequest(
+            thread_id=thread_id,
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            idempotency_key=resolved_idempotency_key,
+            payload=freeze_accepted_input(
+                dispatch, intent={"content": content, "agent_id": agent_id}
+            ),
+            dispatch_id=dispatch.dispatch_id,
+            write_expectation=write_expectation,
+            recovery_timeout_seconds=graph_definition.run_timeout_seconds,
         ),
-        dispatch_id=dispatch.dispatch_id,
-        write_expectation=write_expectation,
-        recovery_timeout_seconds=graph_definition.run_timeout_seconds,
     )
     if not claim.authority_matches:
         return MessageResult(

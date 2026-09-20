@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:eaa4bbc49d03f6404f4415c739fd8d6e6f86d71846bbd4ce8b20e96fbf6bafba'
+body_hash: 'sha256:2321ce617c07966ea5c01b1ce2e541903e59ec97d7ba81fa361abd2a198f8afc'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3434,3 +3434,7 @@ Implementation: separated child creation, containment assignment, root and sessi
 ### 2026-09-20 control action lease review pass
 
 Implementation: separated recovery deadline validation, reservation lease acquisition, and failed-dispatch authority checks into typed helpers. Review of the actual diff found no new behavioral defect: deadline refusal order, rollback-before-projection behavior, token matching, and failure disposition precedence remain intact. Verification: 21 focused control tests passed; routine checks, strict Ty and Basedpyright, Ruff, and diff checks passed. The cyclomatic gate fell from 86 to 84 offenders; this module has zero radon offenders, down from two, and its return-count Ruff finding is cleared. The public `prepare_control_action_claim` parameter-count finding remains open alongside the repository strict structure queue, severity medium, type maintainability; it requires a coordinated call-site change. No new functional issue was surfaced.
+
+### 2026-09-20 control action claim request review pass
+
+Implementation: grouped the durable claim identity, timing, recovery authority, and receipt expectation into a typed `ControlActionClaimRequest` and converted all ten production/test call sites. Review compared each call site against its previous AST and confirmed keyword names, order, and expressions were unchanged; no unconverted calls remain. The claim function forwards the same request fields to reservation, lease, and receipt. Verification: 23 focused control tests passed; full strict Ty/Basedpyright, routine checks, Ruff, and diff checks passed. The module has zero focused strict Ruff structure findings (down from one); repository cyclomatic count remains 84. Remaining strict structure and health findings remain open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.

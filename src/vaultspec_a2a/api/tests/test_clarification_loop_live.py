@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ...control.accepted_input import freeze_accepted_input
 from ...control.action_lease import (
     CONTROL_ACTION_LEASE_TTL,
+    ControlActionClaimRequest,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
 )
@@ -507,16 +508,20 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
         )
         lost_claim = await prepare_control_action_claim(
             db,
-            thread_id=thread_id,
-            action_type=ControlActionType.RESUME,
-            idempotency_key=idempotency_key,
-            request_id=request_id,
-            payload=freeze_accepted_input(resume, intent=resolution.as_resume_value()),
-            dispatch_id=idempotency_key,
-            write_expectation=thread_write_expectation(thread),
-            worker_generation=thread.repair_generation,
-            now=datetime.now(UTC) - CONTROL_ACTION_LEASE_TTL - timedelta(seconds=1),
-            recovery_timeout_seconds=300,
+            request=ControlActionClaimRequest(
+                thread_id=thread_id,
+                action_type=ControlActionType.RESUME,
+                idempotency_key=idempotency_key,
+                request_id=request_id,
+                payload=freeze_accepted_input(
+                    resume, intent=resolution.as_resume_value()
+                ),
+                dispatch_id=idempotency_key,
+                write_expectation=thread_write_expectation(thread),
+                worker_generation=thread.repair_generation,
+                now=datetime.now(UTC) - CONTROL_ACTION_LEASE_TTL - timedelta(seconds=1),
+                recovery_timeout_seconds=300,
+            ),
         )
         assert lost_claim.acquired is True
         await finalize_control_action_acceptance(db, lost_claim)

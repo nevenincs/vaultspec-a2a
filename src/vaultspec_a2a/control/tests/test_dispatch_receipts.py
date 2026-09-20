@@ -26,6 +26,7 @@ from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ..accepted_input import freeze_accepted_input
 from ..action_lease import (
+    ControlActionClaimRequest,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
 )
@@ -116,28 +117,30 @@ async def test_retry_preserves_original_receipt_after_state_revision(
     async with sessions() as db:
         claim = await prepare_control_action_claim(
             db,
-            thread_id="run",
-            action_type=ControlActionType.RESUME,
-            idempotency_key="resume",
-            payload=freeze_accepted_input(
-                DispatchRequest(
-                    action="resume",
-                    thread_id="run",
-                    option_id="yes",
-                    recursion_limit=25,
-                    team_preset="mock-success-single",
-                    graph_definition=freeze_graph_definition(
-                        load_team_config(
-                            "mock-success-single", workspace_root=tmp_path
+            request=ControlActionClaimRequest(
+                thread_id="run",
+                action_type=ControlActionType.RESUME,
+                idempotency_key="resume",
+                payload=freeze_accepted_input(
+                    DispatchRequest(
+                        action="resume",
+                        thread_id="run",
+                        option_id="yes",
+                        recursion_limit=25,
+                        team_preset="mock-success-single",
+                        graph_definition=freeze_graph_definition(
+                            load_team_config(
+                                "mock-success-single", workspace_root=tmp_path
+                            ),
+                            workspace_root=tmp_path,
                         ),
-                        workspace_root=tmp_path,
                     ),
+                    intent={"option_id": "yes"},
                 ),
-                intent={"option_id": "yes"},
+                dispatch_id="resume",
+                write_expectation=witness,
+                recovery_timeout_seconds=60,
             ),
-            dispatch_id="resume",
-            write_expectation=witness,
-            recovery_timeout_seconds=60,
         )
         assert claim.acquired
         await finalize_control_action_acceptance(db, claim)
@@ -227,28 +230,30 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
     async with sessions() as db:
         claim = await prepare_control_action_claim(
             db,
-            thread_id="run",
-            action_type=ControlActionType.RESUME,
-            idempotency_key="resume",
-            payload=freeze_accepted_input(
-                DispatchRequest(
-                    action="resume",
-                    thread_id="run",
-                    option_id="yes",
-                    recursion_limit=25,
-                    team_preset="mock-success-single",
-                    graph_definition=freeze_graph_definition(
-                        load_team_config(
-                            "mock-success-single", workspace_root=tmp_path
+            request=ControlActionClaimRequest(
+                thread_id="run",
+                action_type=ControlActionType.RESUME,
+                idempotency_key="resume",
+                payload=freeze_accepted_input(
+                    DispatchRequest(
+                        action="resume",
+                        thread_id="run",
+                        option_id="yes",
+                        recursion_limit=25,
+                        team_preset="mock-success-single",
+                        graph_definition=freeze_graph_definition(
+                            load_team_config(
+                                "mock-success-single", workspace_root=tmp_path
+                            ),
+                            workspace_root=tmp_path,
                         ),
-                        workspace_root=tmp_path,
                     ),
+                    intent={"option_id": "yes"},
                 ),
-                intent={"option_id": "yes"},
+                dispatch_id="resume",
+                write_expectation=witness,
+                recovery_timeout_seconds=60,
             ),
-            dispatch_id="resume",
-            write_expectation=witness,
-            recovery_timeout_seconds=60,
         )
         assert not claim.acquired
         assert not claim.authority_matches
@@ -275,28 +280,30 @@ async def test_requested_projection_and_receipt_share_acceptance_commit(
     async with sessions() as db:
         claim = await prepare_control_action_claim(
             db,
-            thread_id="run",
-            action_type=ControlActionType.RESUME,
-            idempotency_key="resume",
-            payload=freeze_accepted_input(
-                DispatchRequest(
-                    action="resume",
-                    thread_id="run",
-                    option_id="yes",
-                    recursion_limit=25,
-                    team_preset="mock-success-single",
-                    graph_definition=freeze_graph_definition(
-                        load_team_config(
-                            "mock-success-single", workspace_root=tmp_path
+            request=ControlActionClaimRequest(
+                thread_id="run",
+                action_type=ControlActionType.RESUME,
+                idempotency_key="resume",
+                payload=freeze_accepted_input(
+                    DispatchRequest(
+                        action="resume",
+                        thread_id="run",
+                        option_id="yes",
+                        recursion_limit=25,
+                        team_preset="mock-success-single",
+                        graph_definition=freeze_graph_definition(
+                            load_team_config(
+                                "mock-success-single", workspace_root=tmp_path
+                            ),
+                            workspace_root=tmp_path,
                         ),
-                        workspace_root=tmp_path,
                     ),
+                    intent={"option_id": "yes"},
                 ),
-                intent={"option_id": "yes"},
+                dispatch_id="resume",
+                write_expectation=witness,
+                recovery_timeout_seconds=60,
             ),
-            dispatch_id="resume",
-            write_expectation=witness,
-            recovery_timeout_seconds=60,
         )
         assert claim.acquired
         row = await get_thread(db, "run")

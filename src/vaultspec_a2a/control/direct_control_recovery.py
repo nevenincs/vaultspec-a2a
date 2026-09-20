@@ -42,6 +42,7 @@ from .accepted_input import (
 from .action_lease import (
     CONTROL_ACTION_LEASE_TTL,
     ControlActionClaim,
+    ControlActionClaimRequest,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
 )
@@ -619,15 +620,17 @@ async def _prepare_recovery_action(
     claim_started = datetime.now(UTC)
     claim = await prepare_control_action_claim(
         db,
-        thread_id=action.thread_id,
-        action_type=action.action_type,
-        request_id=action.request_id,
-        idempotency_key=action.idempotency_key,
-        payload=action.payload,
-        dispatch_id=action.dispatch_id,
-        worker_generation=action.worker_generation,
-        recovery_deadline_at=action.recovery_deadline_at,
-        now=claim_started,
+        request=ControlActionClaimRequest(
+            thread_id=action.thread_id,
+            action_type=action.action_type,
+            request_id=action.request_id,
+            idempotency_key=action.idempotency_key,
+            payload=action.payload,
+            dispatch_id=action.dispatch_id,
+            worker_generation=action.worker_generation,
+            recovery_deadline_at=action.recovery_deadline_at,
+            now=claim_started,
+        ),
     )
     if not claim.authority_matches:
         authority_checked_at = datetime.now(UTC)

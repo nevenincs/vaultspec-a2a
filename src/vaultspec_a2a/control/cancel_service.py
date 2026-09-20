@@ -19,6 +19,7 @@ from sqlalchemy.exc import OperationalError
 from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
     ControlActionClaim,
+    ControlActionClaimRequest,
     DispatchFailureDisposition,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -263,12 +264,14 @@ async def cancel_thread(
     try:
         claim = await prepare_control_action_claim(
             db,
-            thread_id=thread_id,
-            action_type=ControlActionType.CANCEL,
-            idempotency_key=resolved_idempotency_key,
-            payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
-            dispatch_id=dispatch.dispatch_id,
-            recovery_deadline_at=preflight.recovery_deadline_at,
+            request=ControlActionClaimRequest(
+                thread_id=thread_id,
+                action_type=ControlActionType.CANCEL,
+                idempotency_key=resolved_idempotency_key,
+                payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
+                dispatch_id=dispatch.dispatch_id,
+                recovery_deadline_at=preflight.recovery_deadline_at,
+            ),
         )
     except OperationalError as exc:
         if (

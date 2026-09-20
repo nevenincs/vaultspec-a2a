@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CONTROL_ACTION_LEASE_TTL",
     "ControlActionClaim",
+    "ControlActionClaimRequest",
     "DispatchFailureDisposition",
     "finalize_control_action_acceptance",
     "prepare_control_action_claim",
@@ -60,6 +61,24 @@ class ControlActionClaim:
     applied: bool
     result_status: str
     claim_token: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ControlActionClaimRequest:
+    """Accepted dispatch identity, recovery deadline, and receipt expectation."""
+
+    thread_id: str
+    action_type: ControlActionType | str
+    idempotency_key: str
+    payload: dict[str, object] | None
+    dispatch_id: str
+    request_id: str | None = None
+    worker_generation: int = 0
+    now: datetime | None = None
+    lease_ttl: timedelta = CONTROL_ACTION_LEASE_TTL
+    write_expectation: ThreadWriteExpectation | None = None
+    recovery_timeout_seconds: int | None = None
+    recovery_deadline_at: datetime | None = None
 
 
 class DispatchFailureDisposition(StrEnum):
@@ -122,19 +141,7 @@ async def _claim_reserved_action(
 
 async def prepare_control_action_claim(
     db: AsyncSession,
-    *,
-    thread_id: str,
-    action_type: ControlActionType | str,
-    idempotency_key: str,
-    payload: dict[str, object] | None,
-    dispatch_id: str,
-    request_id: str | None = None,
-    worker_generation: int = 0,
-    now: datetime | None = None,
-    lease_ttl: timedelta = CONTROL_ACTION_LEASE_TTL,
-    write_expectation: ThreadWriteExpectation | None = None,
-    recovery_timeout_seconds: int | None = None,
-    recovery_deadline_at: datetime | None = None,
+    request: ControlActionClaimRequest,
 ) -> ControlActionClaim:
     """Prepare one accepted action inside the caller's acceptance transaction.
 
@@ -142,20 +149,23 @@ async def prepare_control_action_claim(
     writer and lease. The caller must finalize acceptance before any network
     delivery. Losing claims roll back their attempted acceptance.
     """
-    instant = now or datetime.now(UTC)
-    resolved_type = ControlActionType(action_type)
+    instant = request.now or datetime.now(UTC)
+    resolved_type = ControlActionType(request.action_type)
     recovery_deadline_at = _resolved_recovery_deadline(
-        resolved_type, instant, recovery_timeout_seconds, recovery_deadline_at
+        resolved_type,
+        instant,
+        request.recovery_timeout_seconds,
+        request.recovery_deadline_at,
     )
     reservation = await reserve_control_action(
         db,
-        thread_id=thread_id,
-        action_type=action_type,
-        idempotency_key=idempotency_key,
-        request_id=request_id,
-        payload=payload,
-        dispatch_id=dispatch_id,
-        worker_generation=worker_generation,
+        thread_id=request.thread_id,
+        action_type=request.action_type,
+        idempotency_key=request.idempotency_key,
+        request_id=request.request_id,
+        payload=request.payload,
+        dispatch_id=request.dispatch_id,
+        worker_generation=request.worker_generation,
         recovery_deadline_at=recovery_deadline_at,
     )
     action = reservation.action
@@ -172,15 +182,15 @@ async def prepare_control_action_claim(
     result_status = action.result_status
 
     claim_token, acquired, authority_matches = await _claim_reserved_action(
-        db, reservation, resolved_type, instant, lease_ttl
+        db, reservation, resolved_type, instant, request.lease_ttl
     )
 
-    if acquired and action_type != ControlActionType.CANCEL:
+    if acquired and request.action_type != ControlActionType.CANCEL:
         receipt = await prepare_graph_action_receipt(
             db,
-            thread_id=thread_id,
+            thread_id=request.thread_id,
             dispatch_id=dispatch_id,
-            install_from=write_expectation if reservation.created else None,
+            install_from=request.write_expectation if reservation.created else None,
         )
         if receipt is None:
             acquired = False

@@ -43,6 +43,7 @@ from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import AcceptedActionInput, freeze_accepted_input
 from .action_lease import (
     ControlActionClaim,
+    ControlActionClaimRequest,
     DispatchFailureDisposition,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -415,15 +416,17 @@ async def _claim_and_dispatch(
     )
     claim = await prepare_control_action_claim(
         db,
-        write_expectation=write_expectation,
-        thread_id=context.thread_id,
-        action_type=ControlActionType.RESUME,
-        idempotency_key=context.idempotency_key,
-        request_id=context.request_id,
-        payload=freeze_accepted_input(dispatch, intent=context.payload),
-        dispatch_id=dispatch.dispatch_id,
-        worker_generation=worker_generation,
-        recovery_timeout_seconds=graph_definition.run_timeout_seconds,
+        request=ControlActionClaimRequest(
+            write_expectation=write_expectation,
+            thread_id=context.thread_id,
+            action_type=ControlActionType.RESUME,
+            idempotency_key=context.idempotency_key,
+            request_id=context.request_id,
+            payload=freeze_accepted_input(dispatch, intent=context.payload),
+            dispatch_id=dispatch.dispatch_id,
+            worker_generation=worker_generation,
+            recovery_timeout_seconds=graph_definition.run_timeout_seconds,
+        ),
     )
     if not claim.authority_matches:
         return ClarificationResult(

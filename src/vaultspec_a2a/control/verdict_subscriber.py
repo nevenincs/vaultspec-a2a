@@ -62,6 +62,7 @@ from ..utils.coercion import coerce_object_list, coerce_object_mapping
 from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import freeze_accepted_input
 from .action_lease import (
+    ControlActionClaimRequest,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
     record_dispatch_failure,
@@ -699,14 +700,16 @@ class VerdictSubscriber:
         async with self._session_factory() as db:
             claim = await prepare_control_action_claim(
                 db,
-                write_expectation=setup.write_expectation,
-                thread_id=thread_id,
-                action_type=ControlActionType.RESUME,
-                idempotency_key=_verdict_resume_idempotency_key(setup.current_gate),
-                request_id=setup.current_gate,
-                payload=freeze_accepted_input(dispatch, intent=setup.resume_value),
-                dispatch_id=dispatch.dispatch_id,
-                recovery_timeout_seconds=setup.graph_definition.run_timeout_seconds,
+                request=ControlActionClaimRequest(
+                    write_expectation=setup.write_expectation,
+                    thread_id=thread_id,
+                    action_type=ControlActionType.RESUME,
+                    idempotency_key=_verdict_resume_idempotency_key(setup.current_gate),
+                    request_id=setup.current_gate,
+                    payload=freeze_accepted_input(dispatch, intent=setup.resume_value),
+                    dispatch_id=dispatch.dispatch_id,
+                    recovery_timeout_seconds=setup.graph_definition.run_timeout_seconds,
+                ),
             )
             if not claim.authority_matches:
                 logger.warning(

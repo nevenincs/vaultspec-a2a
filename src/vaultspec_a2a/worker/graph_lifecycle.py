@@ -191,6 +191,18 @@ def assert_armed_authoring_attachable(
         )
 
 
+def _validated_checkpoint_digest(values: dict[str, object], field: str) -> str:
+    """Return one validated compilation digest from checkpoint channel values."""
+    digest = values.get(field)
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(char not in "0123456789abcdef" for char in digest)
+    ):
+        raise GraphCompilationError("durable compilation authority is incompatible")
+    return digest
+
+
 class GraphLifecycleManager:
     """Manages graph compilation, LRU caching, and input construction.
 
@@ -579,19 +591,10 @@ class GraphLifecycleManager:
         if not isinstance(values, dict):
             raise GraphCompilationError("durable checkpoint state is incompatible")
         values_obj = cast("dict[str, object]", values)
-        digests: list[str] = []
-        for field in ("model_assignment_digest", "graph_definition_digest"):
-            digest = values_obj.get(field)
-            if (
-                not isinstance(digest, str)
-                or len(digest) != 64
-                or any(char not in "0123456789abcdef" for char in digest)
-            ):
-                raise GraphCompilationError(
-                    "durable compilation authority is incompatible"
-                )
-            digests.append(digest)
-        return digests[0], digests[1]
+        return (
+            _validated_checkpoint_digest(values_obj, "model_assignment_digest"),
+            _validated_checkpoint_digest(values_obj, "graph_definition_digest"),
+        )
 
     async def _send_graph_registered(
         self, thread_id: str, graph: RegisteredCompiledGraph

@@ -375,19 +375,7 @@ class EventEmitters:
         now = time.monotonic()
         key = (thread_id, tool_call_id)
 
-        existing = self._tool_call_states.get(key)
-        if existing is not None:
-            if status is not None:
-                existing["status"] = status.value
-            if title is not None:
-                existing["title"] = title
-        elif status is not None or title is not None:
-            self._tool_call_states[key] = {
-                "title": title or "unknown_tool",
-                "kind": ToolKind.OTHER.value,
-                "status": (status or ToolCallStatus.PENDING).value,
-                "agent_id": agent_id,
-            }
+        self._update_tool_call_state(key, agent_id, status, title)
 
         if status in (ToolCallStatus.COMPLETED, ToolCallStatus.FAILED):
             self._prune_completed_tool_calls(thread_id)
@@ -415,6 +403,27 @@ class EventEmitters:
                 self._buffering.schedule_debounce(
                     self._buffering.broadcast_debounced_tool_update(key)
                 )
+
+    def _update_tool_call_state(
+        self,
+        key: tuple[str, str],
+        agent_id: str,
+        status: ToolCallStatus | None,
+        title: str | None,
+    ) -> None:
+        existing = self._tool_call_states.get(key)
+        if existing is not None:
+            if status is not None:
+                existing["status"] = status.value
+            if title is not None:
+                existing["title"] = title
+        elif status is not None or title is not None:
+            self._tool_call_states[key] = {
+                "title": title or "unknown_tool",
+                "kind": ToolKind.OTHER.value,
+                "status": (status or ToolCallStatus.PENDING).value,
+                "agent_id": agent_id,
+            }
 
     async def emit_permission_request(
         self,

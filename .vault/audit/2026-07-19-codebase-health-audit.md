@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:e5953307f64b466f64e45f34d307ac86c4d4b2072e9a15463758ba735714c777'
+body_hash: 'sha256:d4962d235a655ff48ddc94865ff7453908e5eada190bf62c896af7985786a22e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3815,3 +3815,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted rooted path detection into `_is_rooted_command_segment` while retaining validation order and error wording in `ComponentEntrypoint._segments_non_empty`.
 - Verification: 80 desktop contract tests passed; Ruff, format, Ty, and `git diff --check` passed. The cyclomatic gate fell from 15 to 13 offenders in the shared worktree, with concurrent changes contributing to that total.
 - Review finding (medium, code health): the repository cyclomatic gate remains red at 13 offenders; continue the existing complexity burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 streaming and checkpoint complexity review
+
+- Implementation: extracted tool-call state update logic and checkpoint digest validation into focused helpers. The original call ordering, validation, and error text remain intact.
+- Verification: 73 streaming aggregation tests passed. The checkpoint lane passed its focused 52 tests and strict Ty. Targeted Ruff, format, Ty, and diff checks passed. The shared cyclomatic count is 12 at review time.
+- Review finding (medium, code health): 12 cyclomatic offenders remain in the strict gate; continue the existing complexity burn-down queue. No new functional defect was found in these two changes.

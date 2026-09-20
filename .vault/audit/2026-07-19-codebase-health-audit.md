@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:aeeaa59aa582bb499b8914769a39400318692d756979d4503491eb35463eba79'
+body_hash: 'sha256:e5953307f64b466f64e45f34d307ac86c4d4b2072e9a15463758ba735714c777'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3809,3 +3809,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved process-table probes, listener ownership, descendant walking, and tree-kill primitives from `utils/process.py` into `utils/_process_tree.py`. The existing `process` import surface re-exports its public API and exercised private test seams; OS-owned `ProcessContainment` stays in the facade. The files now have 703 and 889 lines, reducing module-length findings from 9 to 8.
 - Review: inspected cross-module imports, native Windows handle loader ownership, probe constants, public and test imports, and absence of a new import cycle. Severity/type: no new defect found. Remaining long modules stay queued.
 - Verification: Ruff check/format, strict Ty, import-load probe for all 275 governed modules, `git diff --check`, and 34 real-process/containment tests. The module-length gate reports eight remaining offenders.
+
+### 2026-09-20 desktop entrypoint complexity review
+
+- Implementation: extracted rooted path detection into `_is_rooted_command_segment` while retaining validation order and error wording in `ComponentEntrypoint._segments_non_empty`.
+- Verification: 80 desktop contract tests passed; Ruff, format, Ty, and `git diff --check` passed. The cyclomatic gate fell from 15 to 13 offenders in the shared worktree, with concurrent changes contributing to that total.
+- Review finding (medium, code health): the repository cyclomatic gate remains red at 13 offenders; continue the existing complexity burn-down queue. No new functional defect was found in this pass.

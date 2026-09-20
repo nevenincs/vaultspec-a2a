@@ -140,6 +140,18 @@ class MigrationRange(BaseModel):
     )
 
 
+def _is_rooted_command_segment(segment: str) -> bool:
+    posix_segment = PurePosixPath(segment)
+    windows_segment = PureWindowsPath(segment)
+    return bool(
+        posix_segment.is_absolute()
+        or posix_segment.root
+        or windows_segment.is_absolute()
+        or windows_segment.drive
+        or windows_segment.root
+    )
+
+
 class ComponentEntrypoint(BaseModel):
     """A single typed launch surface, invoked relative to the runtime root."""
 
@@ -175,15 +187,7 @@ class ComponentEntrypoint(BaseModel):
                     "relative_command must contain only portable runtime-relative "
                     "segments"
                 )
-            posix_segment = PurePosixPath(segment)
-            windows_segment = PureWindowsPath(segment)
-            if (
-                posix_segment.is_absolute()
-                or posix_segment.root
-                or windows_segment.is_absolute()
-                or windows_segment.drive
-                or windows_segment.root
-            ):
+            if _is_rooted_command_segment(segment):
                 raise ValueError("relative_command must not be rooted")
         return value
 

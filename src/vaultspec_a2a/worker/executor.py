@@ -912,6 +912,29 @@ class Executor:
                 ),
             )
 
+    async def _settle_completed_preflight(
+        self, req: DispatchRequest, span: Span
+    ) -> None:
+        logger.info(
+            "Thread %s checkpoint shows completion before crash"
+            " — emitting completed without re-running",
+            req.thread_id,
+            extra=self._dispatch_log_extra(
+                req,
+                action="checkpoint_preflight_terminal",
+                outcome=ThreadStatus.COMPLETED,
+            ),
+        )
+        span.set_attribute("pre_flight", "completed")
+        await self._state_projector.emit_terminal_status(
+            req.thread_id, ThreadStatus.COMPLETED
+        )
+        self._graph_lifecycle.release_thread(req.thread_id)
+        self._aggregator.remove_node_metadata(req.thread_id)
+        reservation = self._dispatch_reservation.get()
+        if reservation is not None:
+            await self.release_dispatch_capacity(reservation)
+
     async def _handle_ingest(self, req: DispatchRequest) -> None:
         """Compile graph on first use and execute a new user turn."""
         async with ws_span("executor.ingest", thread_id=req.thread_id) as span:
@@ -939,25 +962,7 @@ class Executor:
                 ),
             )
             if pre_flight_outcome == ThreadStatus.COMPLETED:
-                logger.info(
-                    "Thread %s checkpoint shows completion before crash"
-                    " — emitting completed without re-running",
-                    req.thread_id,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action="checkpoint_preflight_terminal",
-                        outcome=ThreadStatus.COMPLETED,
-                    ),
-                )
-                span.set_attribute("pre_flight", "completed")
-                await self._state_projector.emit_terminal_status(
-                    req.thread_id, ThreadStatus.COMPLETED
-                )
-                self._graph_lifecycle.release_thread(req.thread_id)
-                self._aggregator.remove_node_metadata(req.thread_id)
-                reservation = self._dispatch_reservation.get()
-                if reservation is not None:
-                    await self.release_dispatch_capacity(reservation)
+                await self._settle_completed_preflight(req, span)
                 return
             if pre_flight_outcome == ThreadStatus.FAILED:
                 logger.warning(

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:72d7505d4dff9b2fd30d7addbaf872d8b242c3741f9039f1fb4c8ca364b7b9f5'
+body_hash: 'sha256:9d434251fa59b14aa52907bf96db8069a741e2122d1072c5ac1a5c797187a980'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3316,3 +3316,7 @@ Three medium-severity strict Ruff statement and cyclomatic findings in worker st
 ### 2026-09-20 worker terminal evidence review pass
 
 Two medium-severity strict Ruff argument-count and cyclomatic findings in terminal event emission were resolved. One typed evidence value now carries either cancellation or graph-failure proof, and a focused validator checks outcome compatibility and the failure's exact thread, detail fingerprint, and provider condition. Review checked that nonterminal outcomes still emit nothing, failed outcomes retain the UNKNOWN floor, completed terminals carry no failure condition, cancelled outcomes require cancellation proof, and the executor keeps the same evidence for each settlement path. A first executor expression selected evidence by truthiness; review replaced it with an explicit None check so even a false-valued evidence object would be retained. Eleven focused state-projection tests, 21 focused executor settlement tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Three new test cases verify mismatched thread, detail, and condition refusal. Strict Ruff structure falls from 173 to 171; cyclomatic health stays at 123. No unresolved new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 completed checkpoint preflight review pass
+
+One medium-severity strict Ruff statement-count finding in executor ingest admission was resolved. Completed-checkpoint settlement now has a focused method. Review checked that the checkpoint result is inspected before graph compilation, the span and log identify preflight completion, the terminal event is emitted before graph and metadata release, and any held dispatch capacity is released before returning without rerunning the graph. Thirteen focused executor checkpoint and terminal tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 171 to 170; cyclomatic health remains at 123. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

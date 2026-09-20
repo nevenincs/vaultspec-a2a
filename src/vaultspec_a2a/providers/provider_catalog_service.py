@@ -248,6 +248,33 @@ class ProviderCatalogService:
         )
 
 
+def _health_reasons(
+    key: ProviderCatalogKey,
+    catalog: ProviderCatalog,
+    authentication: AuthenticationState,
+    configured: HealthState,
+    transport: HealthState,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if configured is not HealthState.AVAILABLE:
+        reasons.append("provider configuration has not been verified")
+    if transport is HealthState.UNAVAILABLE:
+        reasons.append("provider transport is unavailable")
+    elif transport is HealthState.UNKNOWN:
+        reasons.append("provider transport has not been verified")
+    if authentication not in {
+        AuthenticationState.AUTHENTICATED,
+        AuthenticationState.NOT_APPLICABLE,
+    }:
+        reasons.append("provider authentication is not established")
+    if catalog.state.status is not CatalogStatus.AVAILABLE:
+        reasons.append(catalog.state.reason or "provider catalog is not available")
+    admission_reason = catalog_lane_admission_reason(key)
+    if admission_reason is not None:
+        reasons.append(admission_reason)
+    return tuple(dict.fromkeys(reasons))
+
+
 def _health_for(
     key: ProviderCatalogKey,
     catalog: ProviderCatalog,
@@ -271,23 +298,7 @@ def _health_for(
 
     admitted = is_catalog_lane_admissible(key)
     admission = AdmissionState.ADMITTED if admitted else AdmissionState.NOT_ADMITTED
-    reasons: list[str] = []
-    if configured is not HealthState.AVAILABLE:
-        reasons.append("provider configuration has not been verified")
-    if transport is HealthState.UNAVAILABLE:
-        reasons.append("provider transport is unavailable")
-    elif transport is HealthState.UNKNOWN:
-        reasons.append("provider transport has not been verified")
-    if authentication not in {
-        AuthenticationState.AUTHENTICATED,
-        AuthenticationState.NOT_APPLICABLE,
-    }:
-        reasons.append("provider authentication is not established")
-    if catalog.state.status is not CatalogStatus.AVAILABLE:
-        reasons.append(catalog.state.reason or "provider catalog is not available")
-    admission_reason = catalog_lane_admission_reason(key)
-    if admission_reason is not None:
-        reasons.append(admission_reason)
+    reasons = _health_reasons(key, catalog, authentication, configured, transport)
 
     return StructuredProviderHealth.derive(
         axes=ProviderHealthAxes(
@@ -297,7 +308,7 @@ def _health_for(
             catalog=catalog.state.status,
             admission=admission,
         ),
-        reasons=tuple(dict.fromkeys(reasons)),
+        reasons=reasons,
         checked_at=datetime.now(UTC),
     )
 

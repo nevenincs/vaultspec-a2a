@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:4fb59191b6a0e8833b368ed1c447fcb17228fe94a4f7eb177611dc90889293da'
+body_hash: 'sha256:b4fcbfab3b04c853965372db5669aac150bd16ff6289f441a9f702f7bace504e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3628,3 +3628,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding (low, formatting; fixed): the first `just check-all` run found one Ruff formatting change after extraction. Formatted the file and reran the full standard gate successfully.
 - Review finding (moderate, code health; queued): 39 cyclomatic and 131 selected Ruff design findings remain.
 - Verification: eight catalog unit tests and three subprocess error/reap tests passed; `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 39 findings.
+
+### 2026-09-20 provider catalog health review pass
+
+- Implementation: extracted ordered health-reason construction from provider catalog axis normalization. Configured and transport overrides still precede reason generation, and reason de-duplication preserves first occurrence. The original 14-path function and helper measure 7 and 8; cyclomatic findings fell from 39 to 38.
+- Review finding (low, formatting; fixed): the first standard gate found a Ruff formatting change. Formatted the module and reran `just check-all` successfully.
+- Review finding (moderate, code health; queued): 38 cyclomatic and 131 selected Ruff design findings remain.
+- Verification: 41 in-process catalog tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 38 findings.

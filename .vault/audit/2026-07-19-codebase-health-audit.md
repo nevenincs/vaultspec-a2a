@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:cf143b3eef55c0ed17eb587feb812413b36fb8d98a8704dfc3b5e947282365e1'
+body_hash: 'sha256:72d7505d4dff9b2fd30d7addbaf872d8b242c3741f9039f1fb4c8ca364b7b9f5'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3312,3 +3312,7 @@ One medium-severity strict Ruff cyclomatic finding and one cognitive-complexity 
 ### 2026-09-20 worker startup and dispatch review pass
 
 Three medium-severity strict Ruff statement and cyclomatic findings in worker startup and dispatch admission were resolved. Startup gateway probing and dispatch receipt, duplicate-response, and scheduling logic now have focused functions. Review checked non-fatal gateway probe logs, invalid graph-receipt refusal before admission, exact duplicate replay before and after capacity wait, 429 for a different request on a busy thread, capacity release when synchronous admission or scheduling fails, and the no-await boundary between admitting a dispatch ID and scheduling its task. Seventeen focused worker app and dispatch-id tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 176 to 173; the cyclomatic health count remains 123. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 worker terminal evidence review pass
+
+Two medium-severity strict Ruff argument-count and cyclomatic findings in terminal event emission were resolved. One typed evidence value now carries either cancellation or graph-failure proof, and a focused validator checks outcome compatibility and the failure's exact thread, detail fingerprint, and provider condition. Review checked that nonterminal outcomes still emit nothing, failed outcomes retain the UNKNOWN floor, completed terminals carry no failure condition, cancelled outcomes require cancellation proof, and the executor keeps the same evidence for each settlement path. A first executor expression selected evidence by truthiness; review replaced it with an explicit None check so even a false-valued evidence object would be retained. Eleven focused state-projection tests, 21 focused executor settlement tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Three new test cases verify mismatched thread, detail, and condition refusal. Strict Ruff structure falls from 173 to 171; cyclomatic health stays at 123. No unresolved new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

@@ -19,6 +19,7 @@ from ..ipc.schemas import (
     ExecutionTaskProjectionPayload,
 )
 from ..providers import ProviderCondition
+from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..utils.coercion import coerce_object_mapping
@@ -28,7 +29,6 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
     from ..streaming.types import StreamableGraph
-    from ..thread.cancellation_evidence import CancellationEvidence
     from .ipc import WorkerBridge
 
 __all__ = ["StateProjector"]
@@ -193,6 +193,37 @@ def _checkpoint_id(config: Mapping[str, object] | None) -> str | None:
         raise TypeError("Checkpoint configurable metadata must be string-keyed")
     checkpoint_id = configurable_metadata.get("checkpoint_id")
     return str(checkpoint_id) if checkpoint_id is not None else None
+
+
+def _validated_terminal_evidence(
+    thread_id: str,
+    outcome: str,
+    error_detail: str | None,
+    provider_condition: ProviderCondition | None,
+    evidence: CancellationEvidence | GraphFailureEvidence | None,
+) -> tuple[CancellationEvidence | None, GraphFailureEvidence | None, ProviderCondition]:
+    cancellation_evidence = (
+        evidence if isinstance(evidence, CancellationEvidence) else None
+    )
+    failure_evidence = evidence if isinstance(evidence, GraphFailureEvidence) else None
+    if cancellation_evidence is not None and outcome != ThreadStatus.CANCELLED:
+        raise ValueError("cancellation evidence requires a cancelled terminal")
+    if failure_evidence is not None and outcome != ThreadStatus.FAILED:
+        raise ValueError("failure evidence requires a failed terminal")
+    if outcome == ThreadStatus.CANCELLED and cancellation_evidence is None:
+        raise ValueError("cancelled terminal requires cancellation evidence")
+    if outcome == ThreadStatus.FAILED and failure_evidence is None:
+        raise ValueError("failed terminal requires failure evidence")
+    resolved_condition = provider_condition or ProviderCondition.UNKNOWN
+    if failure_evidence is not None and (
+        not error_detail
+        or failure_evidence.action.thread_id != thread_id
+        or failure_evidence.detail_fingerprint
+        != failure_detail_fingerprint(error_detail)
+        or failure_evidence.provider_condition != resolved_condition.value
+    ):
+        raise ValueError("failure evidence does not match terminal payload")
+    return cancellation_evidence, failure_evidence, resolved_condition
 
 
 class StateProjector:
@@ -388,8 +419,7 @@ class StateProjector:
         error_detail: str | None = None,
         *,
         provider_condition: ProviderCondition | None = None,
-        cancellation_evidence: CancellationEvidence | None = None,
-        failure_evidence: GraphFailureEvidence | None = None,
+        evidence: CancellationEvidence | GraphFailureEvidence | None = None,
     ) -> None:
         """Emit a ``thread_terminal`` event to the gateway.
 
@@ -420,23 +450,11 @@ class StateProjector:
         """
         if outcome not in TERMINAL_STATUSES:
             return
-        if cancellation_evidence is not None and outcome != ThreadStatus.CANCELLED:
-            raise ValueError("cancellation evidence requires a cancelled terminal")
-        if failure_evidence is not None and outcome != ThreadStatus.FAILED:
-            raise ValueError("failure evidence requires a failed terminal")
-        if outcome == ThreadStatus.CANCELLED and cancellation_evidence is None:
-            raise ValueError("cancelled terminal requires cancellation evidence")
-        if outcome == ThreadStatus.FAILED and failure_evidence is None:
-            raise ValueError("failed terminal requires failure evidence")
-        resolved_condition = provider_condition or ProviderCondition.UNKNOWN
-        if failure_evidence is not None and (
-            not error_detail
-            or failure_evidence.action.thread_id != thread_id
-            or failure_evidence.detail_fingerprint
-            != failure_detail_fingerprint(error_detail)
-            or failure_evidence.provider_condition != resolved_condition.value
-        ):
-            raise ValueError("failure evidence does not match terminal payload")
+        cancellation_evidence, failure_evidence, resolved_condition = (
+            _validated_terminal_evidence(
+                thread_id, outcome, error_detail, provider_condition, evidence
+            )
+        )
         payload: dict[str, object] = {
             "event_type": "thread_terminal",
             "thread_id": thread_id,

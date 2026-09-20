@@ -543,7 +543,7 @@ class Executor:
                 ThreadStatus.FAILED,
                 error_detail=reason,
                 provider_condition=_EXECUTOR_CONDITION,
-                failure_evidence=failure_evidence,
+                evidence=failure_evidence,
             )
         else:
             logger.warning(
@@ -680,8 +680,9 @@ class Executor:
             # persists. Left as None when ingest resolved nothing, so a completed
             # or cancelled run is never stamped with a condition it never had.
             provider_condition=failure_condition,
-            cancellation_evidence=cancellation_evidence,
-            failure_evidence=(
+            evidence=cancellation_evidence
+            if cancellation_evidence is not None
+            else (
                 self._failure_evidence(
                     req,
                     detail=failure_reason,
@@ -779,7 +780,7 @@ class Executor:
                             await self._state_projector.emit_terminal_status(
                                 req.thread_id,
                                 ThreadStatus.CANCELLED,
-                                cancellation_evidence=self._take_cancellation_evidence(
+                                evidence=self._take_cancellation_evidence(
                                     req.thread_id, outcome="no_active_work"
                                 ),
                             )
@@ -892,7 +893,7 @@ class Executor:
                     ThreadStatus.FAILED,
                     error_detail=reason,
                     provider_condition=condition,
-                    failure_evidence=failure_evidence,
+                    evidence=failure_evidence,
                 )
             if owns_slot:
                 await self._mark_ingest_done(

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:1f86b1ee5d711b4db44a772c21d216ea396a467bab4c6bc990a12ffed76f8f0c'
+body_hash: 'sha256:f6d77f27dad433517d48c51575a9ef469ff49bb40977ba7e5cfa171ad5cd96e9'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3936,3 +3936,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - High / maintainability: `providers/codex_chat_model.py` exceeded the 1000-line strict limit. Extracted pure protocol projections into `_codex_protocol.py` and the subprocess JSON-RPC client into `_codex_app_server_client.py`; the model is now 768 lines. Preserved the existing import surface and logger category. Strict Ty, 59 focused Codex tests, import loadability (284 modules), and unconsumed exports (zero findings) pass. Review found no behavioral issue.
 - Medium / integration: moving private test imports first surfaced strict type and export diagnostics. Explicit exports and reexports resolved these before commit.
 - Remaining queue from full strict run: 4 oversized modules, 79 parameter-count findings, 124 selected Ruff findings, 30 preview nesting findings, and remaining Pylint design findings. Cyclomatic complexity and function length remain green. These findings remain open.
+
+### 2026-09-20 unit catalog and Windows transport review
+
+- Implementation: the shared API unit fixture now filters the real `ProviderFactory` registrations to the production in-process lanes before discovery, so it no longer launches external provider CLIs merely to select the deterministic lane. The explicit service-marked all-provider route remains the live discovery proof. The real production-gateway fixture now drains subprocess stdout and reaps the child together with `communicate()` on the owning event loop, including its kill fallback.
+- Verification: the deterministic catalog and restart path passed three focused warning-as-error tests in 2.68 seconds; the exact production-gateway leak sequence passed five warning-as-error tests; the complete API suite passed 524 tests with one honest skip and one service deselection in 103.29 seconds with `PytestUnraisableExceptionWarning` promoted to error. Ruff and BasedPyright passed.
+- Review finding (medium, test isolation): RESOLVED. The unit fixture's six-hour cache still paid one prompt-free external-provider subprocess discovery per pytest process; it now exposes only real in-process registrations and performs no external I/O.
+- Review finding (low, Windows process cleanup): RESOLVED. Awaiting `Process.wait()` reaped the gateway child but left Proactor pipe EOF/closure asynchronous; `communicate()` now owns drain, reap, and transport closure on the creating loop. No new defect was found.

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v2'
-body_hash: 'sha256:e4634e55abd178776d53c31e5616d20a50e046f2f799efb34ccb648faf33876d'
+body_hash: 'sha256:bdc69db41f8cdca28b3fa93ee416eba12673d2b288374c62a7beded41bf25938'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -90,6 +90,12 @@ related:
 - `S29` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
 - `S29` `verify:` `ruff-S29` -> `pass`
 - `S29` `by:` `codex`
+- `S30` `M` `src/vaultspec_a2a/api/tests/conftest.py`
+- `S30` `M` `src/vaultspec_a2a/api/tests/test_provider_catalog_route.py`
+- `S30` `M` `src/vaultspec_a2a/api/tests/test_active_run_discovery_live.py`
+- `S30` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
+- `S30` `verify:` `ruff-basedpyright-S30` -> `pass`
+- `S30` `by:` `codex`
 
 ## Notes
 

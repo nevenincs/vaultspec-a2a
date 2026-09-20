@@ -122,11 +122,14 @@ async def _production_gateway(
     finally:
         if process.returncode is None:
             process.terminate()
-            try:
-                await asyncio.wait_for(process.wait(), timeout=10.0)
-            except TimeoutError:
-                process.kill()
-                await process.wait()
+        try:
+            # ``wait()`` reaps the child but does not guarantee that Windows'
+            # Proactor pipe transports have consumed EOF and closed.  Draining
+            # through ``communicate()`` owns both operations on this loop.
+            await asyncio.wait_for(process.communicate(), timeout=10.0)
+        except TimeoutError:
+            process.kill()
+            await process.communicate()
 
 
 @pytest.mark.asyncio(loop_scope="function")

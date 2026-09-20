@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:809a25167e7a6e9e77d2e40b84ee8cff63d960e9926628ce538775e126684c94'
+body_hash: 'sha256:2d432443b43b262e4e9796a71c269d39758e4d43774d70afb1871bd2b8dcea16'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4306,3 +4306,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Verification on source commit `e22244ef`: local `just check-strict` passed with zero required findings; `just audit-dead-code-burndown` returned 0; the full local unit gate passed 4,582 tests with two declared prerequisite skips and 197 service tests deselected. Linux canonical CI passed 4,566 tests with 16 declared prerequisite/platform skips and 197 service tests deselected; source and wheel builds succeeded. Separate strict checks, CodeQL, migration, workflow lint, and language analysis passed. Compose server regression, all three desktop service matrix jobs (ARM Linux, x64 Linux, Windows), and provider prerequisite gates passed. The repository CodeQL open-alert count is zero.
 - Review classification: the intermittent lease, POSIX group, and admission-test findings and the service/workflow selector findings have implementation, tests, review, and queue entries above and are closed for their required gates. Bandit advisory observations (49 low, 11 medium, zero high) and one immutable-migration clone retain their explicit classifications; no claim of zero raw advisory observations is made. Live proofs requiring an external dashboard engine, authenticated Claude ACP session, or accelerator retain their declared prerequisites and are not represented as executed.
 - Review result: PASS for the required Python quality gates, local/full Linux non-service unit gate, build, and the CI service jobs executed on this commit. The rolling audit queue retains only the separately classified advisory observations and external-prerequisite proofs.
+
+### 2026-09-20 ready-review action policy follow-up
+
+- Review finding, medium severity, CI policy: marking PR #69 ready triggered its Claude review job, which failed before execution because the repository Actions allowlist blocked the action's nested `oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6`. The review did not run in that failed attempt; this is a workflow-policy failure rather than an application-code finding.
+- Implementation: the repository selected-actions policy now permits that exact nested action SHA, preserving the existing allowlist entries. The failed review job was rerun and reached its `Run Claude Code Review` step. Both Claude workflows now pin the parent action to the observed `cfc3eb22bfed5c26ef66e3223c982af27e4524de` commit so a moving `main` reference cannot silently change the transitive action set.
+- Verification: local `just check-workflow` and `git diff --check` pass. The rerun review outcome and fresh checks after the workflow pin are pending. Review result is REVISION REQUIRED until those results are known; the prior strict/source PASS remains valid for the unchanged code commit.

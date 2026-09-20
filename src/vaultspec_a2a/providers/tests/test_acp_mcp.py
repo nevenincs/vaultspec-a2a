@@ -25,15 +25,14 @@ from pydantic import SecretStr
 
 from ...thread.errors import ConfigError
 from .._acp_mcp import (
-    NATIVE_READ_TOOL_NAMES,
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
-    compose_native_read_tools,
     harness_allowed_tool_names,
-    is_known_harness_server,
     require_declared_surface,
     resolve_harness_mcp_servers,
 )
+from .._harness_mcp_registry import is_known_harness_server
+from .._native_read_tools import NATIVE_READ_TOOL_NAMES, compose_native_read_tools
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
@@ -88,7 +87,7 @@ def test_no_registry_launch_spec_constrains_a_version() -> None:
     server's own ``tools/list``, so a constraint reappearing here is a regression
     caught in the suite rather than in a downstream consumer's blocked upgrade.
     """
-    from .._acp_mcp import _KNOWN_MCP_SERVERS
+    from .._harness_mcp_registry import _KNOWN_MCP_SERVERS
 
     for name, entry in _KNOWN_MCP_SERVERS.items():
         assert isinstance(entry, MappingProxyType)
@@ -367,7 +366,7 @@ def test_declared_surface_refuses_an_unregistered_server() -> None:
 def test_every_registry_entry_is_marked_read_only() -> None:
     # Trust-root invariant: only read-only servers exist in the registry, so a
     # drifted write-capable entry fails at test time before it can ever surface.
-    from .._acp_mcp import _KNOWN_MCP_SERVERS
+    from .._harness_mcp_registry import _KNOWN_MCP_SERVERS
 
     # A loop over an empty registry asserts nothing, and "no entries" is exactly
     # what a broken registry looks like - so the entry this invariant is about is
@@ -425,7 +424,8 @@ class TestHarnessCompositionStages:
     """
 
     def test_resolve_refuses_an_unknown_name_before_projection(self) -> None:
-        from .._acp_mcp import HarnessMcpRuntimeProfile, _resolve_harness_composition
+        from .._acp_mcp import _resolve_harness_composition
+        from .._harness_mcp_registry import HarnessMcpRuntimeProfile
 
         model = ChatOpenAI(model="gpt-4o-mini", api_key=SecretStr("unused-test-key"))
         with pytest.raises(ConfigError):
@@ -436,7 +436,8 @@ class TestHarnessCompositionStages:
             )
 
     def test_resolve_returns_specs_for_a_known_name(self) -> None:
-        from .._acp_mcp import HarnessMcpRuntimeProfile, _resolve_harness_composition
+        from .._acp_mcp import _resolve_harness_composition
+        from .._harness_mcp_registry import HarnessMcpRuntimeProfile
 
         model = AcpChatModel(command=["echo"], env_vars={})
         resolution, unavailable, resolved = _resolve_harness_composition(

@@ -32,10 +32,7 @@ from ..desktop.profile import (
     DesktopProfileError,
     derive_state_paths,
 )
-from ..providers.factory import (
-    capsule_acp_entry,
-    capsule_node_executable,
-)
+from ..providers._factory_commands import capsule_acp_entry, capsule_node_executable
 from ..testing import armed_environment
 
 if TYPE_CHECKING:

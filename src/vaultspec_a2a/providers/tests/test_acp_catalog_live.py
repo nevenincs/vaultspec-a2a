@@ -12,9 +12,9 @@ import pytest
 from ...control.config import settings
 from ...graph.enums import Provider
 from ...workspace.environment import resolve_env_vars
+from .._factory_commands import _CLAUDE_ACP_JS, _classify_acp_command
 from ..acp_catalog import discover_acp_catalog
 from ..cli_resolution import resolve_provider_cli_executable
-from ..factory import _CLAUDE_ACP_JS, _classify_acp_command
 from ..provider_catalog import (
     AuthenticationState,
     CatalogStatus,

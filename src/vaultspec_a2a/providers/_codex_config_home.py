@@ -47,11 +47,11 @@ from typing import TYPE_CHECKING
 
 from ..thread.errors import ConfigError
 from ..utils.enums import CodexWebSearchMode
-from ._acp_mcp import declared_harness_tools, is_known_harness_server
 from ._config_home_roots import (
     sweep_orphan_homes,
     temp_home_root,
 )
+from ._harness_mcp_registry import declared_harness_tools, is_known_harness_server
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

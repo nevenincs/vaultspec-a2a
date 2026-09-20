@@ -94,7 +94,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "_DEGRADED_CHECK_STATUSES",
-    "_active_role",
     "_admission_readiness",
     "_body_with_frozen_selection",
     "_bool_field",
@@ -117,11 +116,8 @@ __all__ = [
     "_release_ineligible_reservation",
     "_replay_identity_or_conflict",
     "_string_field",
-    "_summarize_preset",
     "_validate_and_freeze_selection_or_refuse",
-    "route_signature",
     "router",
-    "snapshot_to_wire",
 ]
 
 # Health-check statuses that represent a genuine dependency failure (as opposed
@@ -235,10 +231,7 @@ def _admission_readiness(
 async def _probe_admission_readiness(
     app_state: Any, worker_client: httpx.AsyncClient
 ) -> AdmissionReadiness:
-    from ...control.worker_management import (
-        probe_worker_health,
-        worker_ready_and_ours,
-    )
+    from ...control._worker_health import probe_worker_health, worker_ready_and_ours
 
     probe = await probe_worker_health(settings.worker_url, client=worker_client)
     reachable = probe.healthy
@@ -756,9 +749,8 @@ def _raise_for_dispatch_failure(
 from ._gateway_run_start import (  # noqa: E402
     _RunLeaseBinding,
 )
-from ._gateway_read_endpoints import _active_role, snapshot_to_wire  # noqa: E402
-from ._gateway_action_endpoints import (  # noqa: E402
-    _summarize_preset,
-    route_signature,
-)
+from . import _gateway_read_endpoints as _read_router_registration  # noqa: E402
+from . import _gateway_action_endpoints as _action_router_registration  # noqa: E402
+
 # isort: on
+del _read_router_registration, _action_router_registration

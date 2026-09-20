@@ -32,15 +32,10 @@ from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
 from ...api.internal import internal_router
+from ...control._worker_health import WorkerLiveness, WorkerState, worker_liveness
 from ...control.config import settings
 from ...control.health import assemble_health_status
-from ...control.worker_management import (
-    LazyWorkerSpawner,
-    WorkerLiveness,
-    WorkerState,
-    WorkerWatchdog,
-    worker_liveness,
-)
+from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ...graph.enums import ServerEventType
 from ...testing.ports import free_port
 from ...worker.ipc import WorkerBridge

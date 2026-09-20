@@ -79,6 +79,11 @@ from ..graph._compiler_research import _make_research_producer
 from ..graph.enums import Provider
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND, create_researcher_node
 from ..providers._acp_mcp import codex_mcp_server_specs
+from ..providers._codex_app_server_client import (
+    _CAPABILITIES,
+    _CLIENT_INFO,
+    _CodexAppServerClient,
+)
 from ..providers._codex_config_home import (
     SERVED_WEB_SEARCH_MODE,
     build_codex_config_home,
@@ -87,12 +92,7 @@ from ..providers._codex_config_home import (
 )
 from ..providers._json_contract import JsonObject, json_object
 from ..providers._subprocess import spawn_acp_process
-from ..providers.codex_chat_model import (
-    _CAPABILITIES,
-    _CLIENT_INFO,
-    CodexChatModel,
-    _CodexAppServerClient,
-)
+from ..providers.codex_chat_model import CodexChatModel
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import is_web_lane_proven
 from ..testing.tests._support.json_contract import json_list, json_text

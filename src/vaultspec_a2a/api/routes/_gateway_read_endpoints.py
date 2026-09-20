@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
+from ...control._worker_health import worker_liveness
 from ...control.cancel_service import (
     CancelRuntime,
     cancel_thread,
@@ -37,7 +38,6 @@ from ...control.thread_state_service import (
     derive_run_semantic_context,
     project_semantic_phase,
 )
-from ...control.worker_management import worker_liveness
 from ...database import (
     get_db,
     get_permission_logs_by_thread,

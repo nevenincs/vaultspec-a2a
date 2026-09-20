@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 from ...graph.enums import Provider
 from ...providers import AcpPromptError, ProviderCondition
-from ...providers.codex_chat_model import _turn_failure
+from ...providers._codex_protocol import _turn_failure
 from ...providers.conditions import condition_from_acp_error, condition_is_retryable
 from ...providers.factory import ProviderFactory, ProviderRuntimeUnavailableError
 from ...team.team_config import (

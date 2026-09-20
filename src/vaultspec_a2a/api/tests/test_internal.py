@@ -21,11 +21,11 @@ from langgraph.checkpoint.base import empty_checkpoint
 from sqlalchemy import select
 from starlette.testclient import TestClient
 
+from ...control._worker_health import WorkerLiveness
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
-from ...control.worker_management import WorkerLiveness
 from ...database import (
     create_control_action,
     create_thread,

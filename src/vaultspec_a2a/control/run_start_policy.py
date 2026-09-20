@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..api.schemas.gateway import ProviderEligibility
+    from ..api.schemas.gateway_readiness import ProviderEligibility
     from ..context.harness import HarnessReadiness
     from ..team.team_config import TeamConfig
     from ..thread.actor_tokens import ActorTokenBundle
@@ -73,7 +73,7 @@ def evaluate_execution_eligibility(
     reason so a not-yet-ready worker and an unresolved provider are reported
     together rather than one at a time.
     """
-    from ..api.schemas.gateway import ProviderEligibility
+    from ..api.schemas.gateway_readiness import ProviderEligibility
 
     reasons: list[str] = []
     if not worker_reachable:

@@ -13,13 +13,9 @@ from ...graph.compiler import resolve_model_for_worker
 from ...graph.enums import Provider
 from ...team.team_config import load_agent_config, load_team_config
 from ...thread.errors import ConfigError
-from ..acp_chat_model import AcpChatModel
-from ..cli_resolution import resolve_provider_cli_executable
-from ..codex_chat_model import CodexChatModel
-from ..factory import (
+from .._factory_commands import (
     _BIN_PATH,
     _CLAUDE_ACP_JS,
-    ProviderFactory,
     _build_kimi_env,
     _build_zai_env,
     _classify_acp_command,
@@ -27,6 +23,10 @@ from ..factory import (
     classify_provider_command,
     kimi_temporary_model_configuration_reason,
 )
+from ..acp_chat_model import AcpChatModel
+from ..cli_resolution import resolve_provider_cli_executable
+from ..codex_chat_model import CodexChatModel
+from ..factory import ProviderFactory
 from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatalogKey
 
 # The exact model values a run freezes into its role assignment for each external
@@ -277,7 +277,7 @@ def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
     """Kimi builds an AcpChatModel on the `kimi acp` command with the kimi family."""
     if resolve_provider_cli_executable(Provider.KIMI) is None:
         with pytest.raises(ValueError, match="Kimi CLI not resolvable"):
-            from ..factory import classify_provider_command
+            from .._factory_commands import classify_provider_command
 
             classify_provider_command(Provider.KIMI)
         return

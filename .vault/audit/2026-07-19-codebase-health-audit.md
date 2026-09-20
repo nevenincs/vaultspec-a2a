@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:a64a1e826303e9237b284561bad86dabbad74f7f4787a1b6fc7e706124a12c2e'
+body_hash: 'sha256:e88f7edb47970d7f38151bfa4e70b0d8646468037c98995aa6cdab4abffc79ea'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4131,3 +4131,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: redirected callers of compiler retry, worker dispatch, permission response, infrastructure configuration, and process-tree names to their declaring modules. Removed those imported names from ordinary-module export lists and removed unused relay imports. The export declaration guard fell from 96 to 70 findings.
 - Review finding, medium severity, import compatibility: ordinary-module relay paths for 26 names are no longer declared as exports. Direct imports were moved across production and tests; package facades still carry their intended public names. Dynamic or external consumers of private relay paths are not represented in this tree, so their compatibility risk remains recorded. No new static import or type issue was found.
 - Verification: 67 compiler, 59 worker executor, 21 permission, 52 lifecycle and provenance, and 34 process tests passed. All 295 governed imports load; whole-tree strict typing and scoped Ruff pass. Six ordinary modules still account for 70 export declaration findings, so this review remains REVISION REQUIRED.
+
+### 2026-09-20 import declaration closure review
+
+- Implementation: moved consumers of factory command, Codex protocol/client, gateway readiness, gateway route, worker health/readiness, and MCP registry/native-tool names to their declaration modules. Removed 70 remaining ordinary-module relay exports. Gateway route modules still register on the shared router through explicit module imports. The export declaration guard now passes at zero.
+- Review finding, medium severity, broad import migration: 74 files changed. Canonical imports preserve symbol identity; 295 governed modules load, strict typing passes, and full `just check-all` passes. Compatibility remains at risk for external consumers of the removed ordinary-module relay paths; package facades and declared public exports were preserved. No in-tree caller remains on the removed paths.
+- Review finding, medium severity, duplicate test helper: the unit gate surfaced two identical authoring stream observers. The Codex case now calls the already imported solo-coder observer, which has the same timeout, engine polling, terminal check, and unconditional cancellation. The structural duplication guard passes after that fix.
+- Verification: the initial full unit run reported 4,579 passed, two skipped, and two failed guards (import declaration and duplicate test helper). Both failed guards pass after fixes; focused schema, provider MCP, watchdog, compiler, profile, cost, and snapshot tests passed. Full unit rerun remains queued after this batch. Other strict lint findings remain open, so the broad quality burndown is REVISION REQUIRED.

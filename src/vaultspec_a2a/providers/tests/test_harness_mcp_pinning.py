@@ -42,10 +42,6 @@ from mcp.client.stdio import stdio_client
 from ...thread.errors import ConfigError
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from .._acp_mcp import (
-    _KNOWN_MCP_SERVERS,
-    _declare_registry,
-    _launch_spec,
-    _require_root_pin,
     _require_trust_root,
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
@@ -55,6 +51,12 @@ from .._acp_mcp import (
 )
 from .._acp_session import session_surface_mcp_servers
 from .._acp_types import AcpModelConfig
+from .._harness_mcp_registry import (
+    _KNOWN_MCP_SERVERS,
+    _declare_registry,
+    _launch_spec,
+    _require_root_pin,
+)
 from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
 

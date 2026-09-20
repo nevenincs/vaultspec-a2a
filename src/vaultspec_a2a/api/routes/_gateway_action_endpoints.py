@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control._permission_response_contract import PermissionInput, PermissionRuntime
+from ...control._worker_health import worker_liveness
 from ...control.clarification_service import (
     ClarificationRuntime,
     respond_to_clarification,
@@ -35,7 +36,6 @@ from ...control.permission_service import respond_to_permission
 from ...control.run_start_policy import (
     required_role_ids,
 )
-from ...control.worker_management import worker_liveness
 from ...control.worker_status import WorkerConnectionStatus
 from ...database import (
     get_db,
@@ -564,7 +564,7 @@ async def service_state_endpoint(
     # Local import matching this module's convention for control-layer symbols.
     # The constant is minted once per gateway process, so this is the very
     # identity the spawner stamps into the workers it starts.
-    from ...control.worker_management import GATEWAY_LIFETIME_ID
+    from ...control._worker_health import GATEWAY_LIFETIME_ID
 
     db, _aggregator, _checkpointer, worker_client = services
     full = await build_full_health(

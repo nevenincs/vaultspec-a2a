@@ -26,13 +26,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.worker_management import (
-    GATEWAY_LIFETIME_ID,
-    LazyWorkerSpawner,
-    WorkerReadySpec,
-    _await_worker_ready,
-    _spawn_worker_owned,
-)
+from ...control._worker_health import GATEWAY_LIFETIME_ID
+from ...control._worker_readiness import WorkerReadySpec, _await_worker_ready
+from ...control.worker_management import LazyWorkerSpawner, _spawn_worker_owned
 from ...testing import armed_desktop_app_home as _armed_desktop
 from ...utils.process import ProcessContainment
 from .test_unready_worker_reap import _await_gone, _force_cleanup, _spawn_tree

@@ -19,7 +19,6 @@ from ..control.config import settings
 from ..graph.acp_options import option_id_of, valid_option_ids
 from ..utils.async_cleanup import complete_cleanup
 from ..workspace.environment import resolve_env_vars
-from ._acp_mcp import NATIVE_READ_TOOL_NAMES
 from ._acp_types import (
     AcpModelConfig,
     AcpRpcId,
@@ -32,6 +31,7 @@ from ._json_contract import (
     lenient_json_object,
     lenient_json_object_list,
 )
+from ._native_read_tools import NATIVE_READ_TOOL_NAMES
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process
 from .acp_exceptions import AcpErrorCode

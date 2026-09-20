@@ -35,11 +35,12 @@ import pytest
 from ...thread.errors import ConfigError
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
-from .._acp_mcp import codex_mcp_server_specs, declared_harness_tools
+from .._acp_mcp import codex_mcp_server_specs
 from .._codex_config_home import (
     registry_tools_divergence,
     render_codex_config_toml,
 )
+from .._harness_mcp_registry import declared_harness_tools
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

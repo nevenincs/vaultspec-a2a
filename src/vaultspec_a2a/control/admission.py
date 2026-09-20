@@ -40,7 +40,7 @@ from ..thread.actor_tokens import MAX_ROLES_PER_RUN
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from ..api.schemas.gateway import (
+    from ..api.schemas.gateway_readiness import (
         ProviderEligibility,
         RunAdmission,
         WorkerLifecycleState,

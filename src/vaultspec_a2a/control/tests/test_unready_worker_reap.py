@@ -32,13 +32,13 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from ...control.worker_management import (
-    LazyWorkerSpawner,
+from ...control._worker_process_stop import _shutdown_worker_process
+from ...control._worker_readiness import (
     WorkerReadySpec,
     _await_worker_ready,
     _reap_unready_worker,
-    _shutdown_worker_process,
 )
+from ...control.worker_management import LazyWorkerSpawner
 from ...lifecycle.discovery import is_pid_alive
 from ...lifecycle.shutdown import ShutdownDeadline
 from ...utils import kill_pid_tree_async

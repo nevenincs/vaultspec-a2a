@@ -28,18 +28,12 @@ from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from ..workspace.environment import resolve_env_vars
 from ._factory_commands import (
-    _BIN_PATH,
-    _CLAUDE_ACP_JS,
     _build_kimi_env,
     _build_zai_env,
     _classify_acp_command,
     _classify_codex_command,
     _classify_kimi_command,
     _kimi_home_env,
-    capsule_acp_entry,
-    capsule_node_executable,
-    classify_provider_command,
-    kimi_temporary_model_configuration_reason,
 )
 from .acp_catalog import discover_acp_catalog
 from .antigravity_catalog import discover_antigravity_catalog
@@ -63,23 +57,11 @@ from .provider_catalog import (
 )
 
 __all__ = [
-    "_BIN_PATH",
-    "_CLAUDE_ACP_JS",
     "ProviderCatalogDiscovery",
     "ProviderCatalogRegistration",
     "ProviderFactory",
     "ProviderRuntimeUnavailableError",
     "UnsupportedExecutionLaneError",
-    "_build_kimi_env",
-    "_build_zai_env",
-    "_classify_acp_command",
-    "_classify_codex_command",
-    "_classify_kimi_command",
-    "_kimi_home_env",
-    "capsule_acp_entry",
-    "capsule_node_executable",
-    "classify_provider_command",
-    "kimi_temporary_model_configuration_reason",
     "validate_current_execution_lane",
     "validate_current_native_controls",
 ]

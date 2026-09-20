@@ -44,7 +44,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from ..thread.errors import HarnessToolContractError
-from ._acp_mcp import (
+from ._harness_mcp_registry import (
     declared_harness_tools,
     harness_server_exact_surface,
     is_known_harness_server,

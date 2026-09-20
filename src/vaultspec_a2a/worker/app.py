@@ -36,12 +36,9 @@ from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 
+from ..control._worker_health import GATEWAY_LIFETIME_ENV, WORKER_GENERATION_ENV
 from ..control.config import settings
 from ..control.infra_config import GATEWAY_URL_ALT_ENV, GATEWAY_URL_ENV
-from ..control.worker_management import (
-    GATEWAY_LIFETIME_ENV,
-    WORKER_GENERATION_ENV,
-)
 from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..lifecycle.pairing import DispatchPairingStatus, resolve_worker_gateway_target

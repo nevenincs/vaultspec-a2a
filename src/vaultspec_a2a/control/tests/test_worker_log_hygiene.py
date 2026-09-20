@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 
-from ...control.worker_management import (
+from ...control._worker_health import (
     _evict_stale_worker,
     _worker_stderr_log_path,
     sweep_orphan_worker_logs,

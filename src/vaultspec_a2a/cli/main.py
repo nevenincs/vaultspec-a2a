@@ -275,7 +275,7 @@ def _expected_route_signature() -> list[str]:
     route table off the code on disk.
     """
     from ..api.app import create_app
-    from ..api.routes.gateway import route_signature
+    from ..api.routes._gateway_action_endpoints import route_signature
 
     return route_signature(create_app())
 

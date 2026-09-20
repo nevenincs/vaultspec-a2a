@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, override
 import httpx
 import pytest
 
-from ...control.worker_management import WorkerHealthProbe, probe_worker_health
+from ...control._worker_health import WorkerHealthProbe, probe_worker_health
 
 if TYPE_CHECKING:
     from collections.abc import Generator

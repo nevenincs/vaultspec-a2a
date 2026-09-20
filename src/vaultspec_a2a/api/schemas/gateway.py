@@ -55,9 +55,6 @@ from .gateway_readiness import (
 )
 from .gateway_readiness import (
     DesktopReadiness,
-    GatewayReadiness,
-    LivenessResponse,
-    LivenessState,
     ProviderEligibility,
     RunAdmission,
     WorkerLifecycleState,
@@ -70,17 +67,11 @@ from .snapshots import ThreadStateSnapshot
 __all__ = [
     "ActiveRunRecord",
     "ActiveRunsResponse",
-    "DesktopReadiness",
-    "GatewayReadiness",
-    "LivenessResponse",
-    "LivenessState",
     "PathSafeRunId",
     "PresetSummary",
     "PresetsListResponse",
     "ProviderCatalogSelection",
-    "ProviderEligibility",
     "RoleState",
-    "RunAdmission",
     "RunCancelResponse",
     "RunClarificationRespondRequest",
     "RunClarificationRespondResponse",
@@ -96,7 +87,6 @@ __all__ = [
     "ServiceStateResponse",
     "TerminalSettlement",
     "TopologyPosition",
-    "WorkerLifecycleState",
 ]
 
 _PATH_SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")

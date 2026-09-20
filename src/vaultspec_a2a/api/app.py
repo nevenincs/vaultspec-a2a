@@ -31,6 +31,7 @@ from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from ..authoring import resolve_engine
+from ..control._worker_health import WorkerLiveness, WorkerState
 from ..control.circuit_breaker import WorkerCircuitBreaker
 from ..control.clarification_service import (
     ClarificationRuntime,
@@ -47,12 +48,7 @@ from ..control.health import (
     probe_desktop_readiness,
 )
 from ..control.verdict_subscriber import VerdictSubscriber, VerdictSubscriberConfig
-from ..control.worker_management import (
-    LazyWorkerSpawner,
-    WorkerLiveness,
-    WorkerState,
-    WorkerWatchdog,
-)
+from ..control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ..database import (
     close_db,
     get_db,
@@ -89,7 +85,7 @@ from .auth import verify_attach_bearer
 from .body_limit import BoundedV1WriteBodyMiddleware
 from .internal import internal_router
 from .routes import register_routes
-from .schemas.gateway import LivenessResponse
+from .schemas.gateway_readiness import LivenessResponse
 
 _RECOVERY_POLL_SECONDS = 2.0
 

@@ -1,6 +1,6 @@
 """Worker readiness uses both live reachability and adoption authority."""
 
-from ...api.schemas.gateway import WorkerLifecycleState
+from ...api.schemas.gateway_readiness import WorkerLifecycleState
 from ..health import _desktop_worker_state
 from ..worker_status import WorkerConnectionStatus
 

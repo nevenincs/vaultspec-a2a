@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ....providers._acp_mcp import NATIVE_READ_TOOL_NAMES
+from ....providers._native_read_tools import NATIVE_READ_TOOL_NAMES
 from ....providers.lane_admission import web_tool_names_for
 from ....team import load_agent_config
 from ...nodes.worker import create_worker_node

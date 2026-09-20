@@ -848,7 +848,7 @@ def create_worker_node(
         effective_model = _compose_worker_harness(
             effective_model, harness_mcp_servers, autonomous, workspace_root
         )
-        from ...providers._acp_mcp import compose_native_read_tools
+        from ...providers._native_read_tools import compose_native_read_tools
         from ...providers.lane_admission import web_tool_names_for
 
         # Web grounding rides the read floor but is gated one axis further: the

@@ -52,7 +52,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ....authoring.contract import DOCUMENT_AUTHORING_ROLES
-from ....providers._acp_mcp import (
+from ....providers._native_read_tools import (
     NATIVE_READ_TOOL_NAMES,
     NATIVE_TOOL_EGRESS,
     NATIVE_WEB_TOOL_BOUNDS,

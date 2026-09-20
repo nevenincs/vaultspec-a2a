@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
+from ...control._worker_health import worker_liveness
 from ...control.admission import AdmissionBroker
 from ...control.config import settings
 from ...control.run_start_policy import (
@@ -31,7 +32,6 @@ from ...control.thread_service import (
     create_and_dispatch_thread,
     process_metadata,
 )
-from ...control.worker_management import worker_liveness
 from ...database import (
     get_thread,
 )
@@ -64,8 +64,8 @@ from ..schemas.gateway import (
     RunStage,
     RunStartRequest,
     RunStartResponse,
-    WorkerLifecycleState,
 )
+from ..schemas.gateway_readiness import WorkerLifecycleState
 from .gateway import (
     _admission_readiness,
     _body_with_frozen_selection,
@@ -606,7 +606,7 @@ async def _prepare_commit_eligibility(
     # only after the runtime and provider are eligible. The worker reachability is
     # probed live so the verdict never lags behind the watchdog's status ladder; a
     # refusal releases the reservation so a failed commit leaks nothing.
-    from ...control.worker_management import probe_worker_health
+    from ...control._worker_health import probe_worker_health
 
     logger.info("commit step: probe_worker")
     probe = await probe_worker_health(settings.worker_url, client=runtime.worker_client)

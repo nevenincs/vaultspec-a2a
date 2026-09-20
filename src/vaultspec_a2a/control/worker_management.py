@@ -32,14 +32,10 @@ from ._worker_health import (
     GATEWAY_LIFETIME_ENV,
     GATEWAY_LIFETIME_ID,
     WORKER_GENERATION_ENV,
-    WorkerHealthProbe,
-    WorkerLiveness,
     WorkerState,
     _build_worker_restart_detail,
     _desktop_worker_port_clear,
-    _evict_stale_worker,
     _internal_auth_headers,
-    _read_log_tail,
     _shared_worker_port_clear,
     _worker_stderr_log_path,
     probe_worker_health,
@@ -54,33 +50,14 @@ from ._worker_process_stop import (
 from ._worker_readiness import (
     WorkerReadySpec,
     _await_worker_ready,
-    _reap_unready_worker,
 )
 from .config import settings
 from .infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV
 from .worker_status import WorkerConnectionStatus
 
 __all__ = [
-    "GATEWAY_LIFETIME_ENV",
-    "GATEWAY_LIFETIME_ID",
-    "WORKER_GENERATION_ENV",
     "LazyWorkerSpawner",
-    "WorkerHealthProbe",
-    "WorkerLiveness",
-    "WorkerReadySpec",
-    "WorkerState",
     "WorkerWatchdog",
-    "_await_worker_ready",
-    "_build_worker_restart_detail",
-    "_evict_stale_worker",
-    "_read_log_tail",
-    "_reap_unready_worker",
-    "_shutdown_worker_process",
-    "_worker_stderr_log_path",
-    "probe_worker_health",
-    "sweep_orphan_worker_logs",
-    "worker_liveness",
-    "worker_ready_and_ours",
 ]
 
 logger = logging.getLogger(__name__)

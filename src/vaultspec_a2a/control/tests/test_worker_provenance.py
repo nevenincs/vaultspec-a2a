@@ -20,13 +20,10 @@ from typing import TYPE_CHECKING, TypedDict, override
 
 import pytest
 
+from ...control._worker_health import WorkerHealthProbe, probe_worker_health
 from ...control.config import settings
 from ...control.infra_config import INTERNAL_TOKEN_ENV
-from ...control.worker_management import (
-    LazyWorkerSpawner,
-    WorkerHealthProbe,
-    probe_worker_health,
-)
+from ...control.worker_management import LazyWorkerSpawner
 
 if TYPE_CHECKING:
     from collections.abc import Generator

@@ -18,15 +18,17 @@ import pytest
 from ...thread.errors import ConfigError, HarnessToolContractError
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from .._acp_mcp import (
-    _KNOWN_MCP_SERVERS,
-    _LAUNCH_IDENTITY_KEYS,
     codex_mcp_server_specs,
-    declared_harness_tools,
     harness_allowed_tool_names,
     pin_harness_mcp_servers,
-    registry_launch_divergence,
     require_declared_surface,
     resolve_harness_mcp_servers,
+)
+from .._harness_mcp_registry import (
+    _KNOWN_MCP_SERVERS,
+    _LAUNCH_IDENTITY_KEYS,
+    declared_harness_tools,
+    registry_launch_divergence,
 )
 from .._mcp_contract import (
     verify_declared_tool_contract,

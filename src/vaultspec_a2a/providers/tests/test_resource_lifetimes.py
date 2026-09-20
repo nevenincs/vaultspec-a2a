@@ -17,10 +17,10 @@ from .._acp_protocol import process_stdout_loop
 from .._acp_rpc_handlers import on_terminal_create, on_terminal_release
 from .._acp_types import AcpSessionContext
 from .._cleanup import cancel_owned_tasks, run_independent_cleanups
+from .._codex_app_server_client import _CodexAppServerClient
 from .._codex_config_home import cleanup_codex_config_home
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..acp_chat_model import AcpChatModel
-from ..codex_chat_model import _CodexAppServerClient
 from .conftest import _AcpChildStreams, _fresh_acp_session_context
 
 if TYPE_CHECKING:

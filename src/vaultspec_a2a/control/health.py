@@ -36,13 +36,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ..database import inspect_sqlite_database, verify_wal_mode
 from ..utils.coercion import coerce_object_mapping
+from ._worker_health import WorkerState, probe_worker_health, worker_liveness
 from .config import settings
-from .worker_management import (
-    LazyWorkerSpawner,
-    WorkerState,
-    probe_worker_health,
-    worker_liveness,
-)
+from .worker_management import LazyWorkerSpawner
 from .worker_status import WorkerConnectionStatus
 
 if TYPE_CHECKING:
@@ -51,7 +47,7 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..api.schemas.gateway import (
+    from ..api.schemas.gateway_readiness import (
         DesktopReadiness,
         GatewayReadiness,
         ProviderEligibility,
@@ -500,7 +496,7 @@ def _desktop_worker_state(
     worker_probe_ready: bool | None,
     worker_adoptable: bool | None,
 ) -> tuple[WorkerLifecycleState, str | None]:
-    from ..api.schemas.gateway import WorkerLifecycleState
+    from ..api.schemas.gateway_readiness import WorkerLifecycleState
 
     worker_spawned = bool(shared["worker_spawned"])
     worker_status = shared["worker_status"]
@@ -546,7 +542,7 @@ def _desktop_run_admission(
     provider_eligibility: ProviderEligibility,
     recovery_owner_error: object,
 ) -> RunAdmission:
-    from ..api.schemas.gateway import (
+    from ..api.schemas.gateway_readiness import (
         GatewayReadiness,
         ProviderEligibility,
         RunAdmission,
@@ -591,7 +587,7 @@ def assemble_desktop_readiness(
     """
     import os
 
-    from ..api.schemas.gateway import (
+    from ..api.schemas.gateway_readiness import (
         DesktopReadiness,
         GatewayReadiness,
         LivenessState,

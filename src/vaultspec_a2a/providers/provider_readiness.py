@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
-from .factory import (
+from ._factory_commands import (
     classify_provider_command,
     kimi_temporary_model_configuration_reason,
 )

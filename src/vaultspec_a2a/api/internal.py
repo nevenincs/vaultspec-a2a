@@ -29,12 +29,12 @@ from fastapi import (
 )
 from fastapi.security import HTTPBearer
 
+from ..control._worker_health import worker_liveness
 from ..control.config import settings
 from ..control.event_handlers import (
     _handle_execution_state_event,
     relay_event,
 )
-from ..control.worker_management import worker_liveness
 from ..graph.enums import ServerEventType
 from ..thread.snapshots import normalize_wire_event_type
 from ..utils import BearerVerdict, verify_internal_bearer

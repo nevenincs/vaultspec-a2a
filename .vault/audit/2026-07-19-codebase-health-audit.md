@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:ce725942bff9bd6475a3792cd618177e6144501da840aa0a2a8af4def188b0b7'
+body_hash: 'sha256:396f5bc0d78de10f0435af41bb3017bd05d27789d3ac69b976b1705f944c6c2e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4008,3 +4008,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 
 - High / maintainability: `create_worker_node` scored 28 cognitive complexity. Extracted queue-tool selection, feedback lookup, per-thread authoring binding, and harness composition into focused helpers. Deferred provider imports remain deferred and model composition retains the same order. Review found no behavior issue. `just check-complexity` is now green with zero offenders; strict Ty, Ruff, and 61 focused worker tests pass, including the import-cost and tool-composition tests.
 - Remaining queue: module length, parameter count, Ruff selected limits, preview nesting, and Pylint design findings remain open.
+
+### 2026-09-20 gateway route split review
+
+- High / maintainability: `api/routes/gateway.py` exceeded the 1000-line strict limit at 2627 lines. Split run start, read/status/history, and action/catalog/service endpoints into three focused modules; facade and each route module are 764, 772, 669, and 644 lines. Route decorators still register on the shared router in start/read/action order. Review checked import-cycle timing, logger category, public/private import compatibility, and full API behavior. Strict Ty, Ruff, formatter, import loadability (292 modules), zero unconsumed exports, and the complete API suite (524 passed, one honest skip, one service deselection) pass.
+- Medium / integration: the first split used deferred helper lookups that static export coverage could not observe. Moved registration after helper definitions and switched to explicit imports; strict Ty and export coverage now pass. No behavior issue remains from this pass.
+- Remaining queue: `graph/compiler.py` is the sole oversized module; parameter count, selected Ruff limits, preview nesting, and Pylint design findings remain open.

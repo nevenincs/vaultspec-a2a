@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c152534ff9d3730b42a063fbb05ad06ec5902bdba18fb4c50216582b5f87b55c'
+body_hash: 'sha256:f969e8f615651abc5d23bb84c124e1db8999e4ce286c4ca6844f78368efb4742'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3374,3 +3374,9 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: extracted accepted action parsing and dispatch/receipt matching from the receipt orchestration. The same validation and exception paths remain in place.
 - Review: inspected the diff; 35 receipt and live gateway tests, routine checks, strict type checking, focused Ruff/Pylint passed. The receipt module has no radon function above 10. Severity: none for this change; type: no contract drift found.
 - Queue: the prior PLR0911 finding for `prepare_graph_action_receipt` and two radon offenders in this module are closed. The repository-wide cyclomatic gate still has 115 offenders, with other strict Ruff/Pylint findings open.
+
+### 2026-09-20 team selection authority review pass
+
+- Implementation: extracted focused helpers for control defaults, replay identity and defaults, persisted control records, and role validation. These preserve the existing error conditions and keep the execution-lane import at its original local boundary.
+- Review: inspected the diff and corrected new helper annotations to the repository `JsonObject`/`JsonValue` contract. Thirty-one provider tests, routine checks, strict type checks, focused Ruff/Pylint passed. This module has no radon function above 10. Severity: none for the final change; type: no contract drift found. The transient type diagnostics from overbroad `object` annotations were fixed before commit.
+- Queue: four prior radon offenders in `team_selection.py` are closed. The repository-wide cyclomatic gate still has 111 offenders; other strict findings remain open.

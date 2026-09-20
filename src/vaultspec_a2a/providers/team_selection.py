@@ -219,11 +219,11 @@ def _require_selectable_record(record: ProviderRecord) -> None:
         )
 
 
-def _freeze_controls(
+def _selected_control_options(
     reference: SelectionReference,
     model: ModelCatalogEntry,
     advertised: dict[str, NativeControl],
-) -> tuple[SelectionReference, tuple[FrozenNativeControl, ...], tuple[str, ...]]:
+) -> tuple[dict[str, str], list[str]]:
     attached = set(model.native_control_ids)
     chosen = {item.control_id: item.option_id for item in reference.controls}
     defaulted: list[str] = []
@@ -238,6 +238,15 @@ def _freeze_controls(
             defaulted.append(control_id)
         elif option_id is not None and option_id not in option_ids:
             raise TeamSelectionError("selection names an unknown native-control option")
+    return chosen, defaulted
+
+
+def _freeze_controls(
+    reference: SelectionReference,
+    model: ModelCatalogEntry,
+    advertised: dict[str, NativeControl],
+) -> tuple[SelectionReference, tuple[FrozenNativeControl, ...], tuple[str, ...]]:
+    chosen, defaulted = _selected_control_options(reference, model, advertised)
     normalized = SelectionReference(
         schema_version=reference.schema_version,
         provider_id=reference.provider_id,
@@ -328,6 +337,37 @@ def _stored_replay_controls(stored_record: JsonObject) -> dict[str, str]:
     return stored_controls
 
 
+def _require_matching_replay_identity(
+    incoming: SelectionReference, stored_record: JsonObject
+) -> None:
+    if (
+        stored_record.get("schema_version") != incoming.schema_version
+        or stored_record.get("provider_id") != incoming.provider_id
+        or stored_record.get("execution_mode") != incoming.execution_mode
+        or stored_record.get("catalog_revision") != incoming.catalog_revision
+        or stored_record.get("entry_id") != incoming.entry_id
+    ):
+        raise TeamSelectionError("replay selection does not match the accepted run")
+
+
+def _reconciled_replay_controls(
+    incoming: SelectionReference, stored_record: JsonObject
+) -> dict[str, str]:
+    stored_controls = _stored_replay_controls(stored_record)
+    raw_defaulted = stored_record.get("defaulted_control_ids", [])
+    if not isinstance(raw_defaulted, list) or not all(
+        isinstance(item, str) for item in raw_defaulted
+    ):
+        raise TeamSelectionError("persisted team selection is invalid")
+    defaulted = [item for item in raw_defaulted if isinstance(item, str)]
+    controls = {item.control_id: item.option_id for item in incoming.controls}
+    for control_id in set(defaulted).intersection(stored_controls).difference(controls):
+        controls[control_id] = stored_controls[control_id]
+    if controls != stored_controls:
+        raise TeamSelectionError("replay selection does not match the accepted run")
+    return controls
+
+
 def _normalize_replay_lane(
     incoming: SelectionReference, stored: object
 ) -> SelectionReference:
@@ -346,27 +386,8 @@ def _normalize_replay_lane(
         },
         optional={"provider_display_name", "model_display_name"},
     )
-    if (
-        stored_record.get("schema_version") != incoming.schema_version
-        or stored_record.get("provider_id") != incoming.provider_id
-        or stored_record.get("execution_mode") != incoming.execution_mode
-        or stored_record.get("catalog_revision") != incoming.catalog_revision
-        or stored_record.get("entry_id") != incoming.entry_id
-    ):
-        raise TeamSelectionError("replay selection does not match the accepted run")
-    stored_controls = _stored_replay_controls(stored_record)
-    raw_defaulted = stored_record.get("defaulted_control_ids", [])
-    if not isinstance(raw_defaulted, list) or not all(
-        isinstance(item, str) for item in raw_defaulted
-    ):
-        raise TeamSelectionError("persisted team selection is invalid")
-    defaulted = [item for item in raw_defaulted if isinstance(item, str)]
-    controls = {item.control_id: item.option_id for item in incoming.controls}
-    for control_id in defaulted:
-        if control_id not in controls and control_id in stored_controls:
-            controls[control_id] = stored_controls[control_id]
-    if controls != stored_controls:
-        raise TeamSelectionError("replay selection does not match the accepted run")
+    _require_matching_replay_identity(incoming, stored_record)
+    controls = _reconciled_replay_controls(incoming, stored_record)
     return SelectionReference(
         schema_version=incoming.schema_version,
         provider_id=incoming.provider_id,
@@ -463,24 +484,9 @@ def _optional_record_text(record: JsonObject, field: str) -> str | None:
     return value
 
 
-def _lane_from_record(value: object) -> FrozenSelectedLane:
-    record = _json_object(value)
-    _require_exact_keys(
-        record,
-        required={
-            "schema_version",
-            "provider_id",
-            "execution_mode",
-            "catalog_revision",
-            "entry_id",
-            "model_name",
-            "controls",
-            "defaulted_control_ids",
-        },
-        optional={"provider_display_name", "model_display_name"},
-    )
-    if record.get("schema_version") != 1:
-        raise TeamSelectionError("persisted team selection is invalid")
+def _record_control_lists(
+    record: JsonObject,
+) -> tuple[list[JsonValue], tuple[str, ...]]:
     raw_controls = record.get("controls")
     raw_defaulted = record.get("defaulted_control_ids")
     if (
@@ -490,6 +496,13 @@ def _lane_from_record(value: object) -> FrozenSelectedLane:
         or not all(isinstance(item, str) for item in raw_defaulted)
     ):
         raise TeamSelectionError("persisted team selection is invalid")
+    return raw_controls, tuple(item for item in raw_defaulted if isinstance(item, str))
+
+
+def _frozen_controls_from_record(
+    record: JsonObject,
+) -> tuple[list[FrozenNativeControl], list[ControlSelection], tuple[str, ...]]:
+    raw_controls, defaulted = _record_control_lists(record)
     controls: list[FrozenNativeControl] = []
     selections: list[ControlSelection] = []
     seen: set[str] = set()
@@ -517,9 +530,30 @@ def _lane_from_record(value: object) -> FrozenSelectedLane:
             )
         )
         selections.append(ControlSelection(control_id, option_id))
-    defaulted = tuple(item for item in raw_defaulted if isinstance(item, str))
     if len(defaulted) != len(set(defaulted)) or not set(defaulted).issubset(seen):
         raise TeamSelectionError("persisted team selection is invalid")
+    return controls, selections, defaulted
+
+
+def _lane_from_record(value: object) -> FrozenSelectedLane:
+    record = _json_object(value)
+    _require_exact_keys(
+        record,
+        required={
+            "schema_version",
+            "provider_id",
+            "execution_mode",
+            "catalog_revision",
+            "entry_id",
+            "model_name",
+            "controls",
+            "defaulted_control_ids",
+        },
+        optional={"provider_display_name", "model_display_name"},
+    )
+    if record.get("schema_version") != 1:
+        raise TeamSelectionError("persisted team selection is invalid")
+    controls, selections, defaulted = _frozen_controls_from_record(record)
     reference = SelectionReference(
         schema_version=1,
         provider_id=_required_record_text(record, "provider_id"),
@@ -573,6 +607,31 @@ def _digest_record(
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def _valid_role_names(raw_roles: list[JsonValue]) -> bool:
+    return (
+        bool(raw_roles)
+        and len(raw_roles) <= MAX_ROLES_PER_RUN
+        and all(isinstance(role, str) and role for role in raw_roles)
+        and len(raw_roles) == len(set(raw_roles))
+    )
+
+
+def _validated_team_roles(
+    stored: JsonObject,
+) -> tuple[tuple[str, ...], JsonObject, list[JsonValue]]:
+    raw_roles = stored.get("roles")
+    raw_overrides = _json_object(stored.get("overrides"))
+    raw_fallbacks = stored.get("fallbacks")
+    if not isinstance(raw_roles, list) or not isinstance(raw_fallbacks, list):
+        raise TeamSelectionError("persisted team selection is invalid")
+    if not _valid_role_names(raw_roles) or len(raw_fallbacks) > 8:
+        raise TeamSelectionError("persisted team selection is invalid")
+    roles = tuple(role for role in raw_roles if isinstance(role, str))
+    if not set(raw_overrides).issubset(roles):
+        raise TeamSelectionError("persisted team selection is invalid")
+    return roles, raw_overrides, raw_fallbacks
+
+
 def frozen_team_selection_from_record(record: object) -> FrozenTeamSelection:
     """Validate and reconstruct the persisted modern execution authority."""
     stored = _json_object(record)
@@ -589,22 +648,7 @@ def frozen_team_selection_from_record(record: object) -> FrozenTeamSelection:
     )
     if stored.get("schema_version") != 1:
         raise TeamSelectionError("persisted team selection is invalid")
-    raw_roles = stored.get("roles")
-    raw_overrides = _json_object(stored.get("overrides"))
-    raw_fallbacks = stored.get("fallbacks")
-    if not isinstance(raw_roles, list) or not isinstance(raw_fallbacks, list):
-        raise TeamSelectionError("persisted team selection is invalid")
-    valid_roles = (
-        bool(raw_roles)
-        and len(raw_roles) <= MAX_ROLES_PER_RUN
-        and all(isinstance(role, str) and role for role in raw_roles)
-        and len(raw_roles) == len(set(raw_roles))
-    )
-    if not valid_roles or len(raw_fallbacks) > 8:
-        raise TeamSelectionError("persisted team selection is invalid")
-    roles = tuple(role for role in raw_roles if isinstance(role, str))
-    if not set(raw_overrides).issubset(roles):
-        raise TeamSelectionError("persisted team selection is invalid")
+    roles, raw_overrides, raw_fallbacks = _validated_team_roles(stored)
     selection = _lane_from_record(stored.get("selection"))
     overrides = {
         role: _lane_from_record(value) for role, value in raw_overrides.items()

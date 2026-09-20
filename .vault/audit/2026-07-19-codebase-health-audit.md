@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:0042afe3d409a7a7e4f9f6f57895fa1771cc05a486c06b89523c8674797d3975'
+body_hash: 'sha256:1c6fde1802b61da8ed171cb233c877555bb76740bfbf3c518bd1a15fafb8c60b'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4106,3 +4106,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved the existing approval callback, initial SSE read, and approval assertions into a helper, closing the stream follow-up test's locals-count finding.
 - Review finding, low severity, test setup: the callback still runs after the same delay inside the stream context; its errors and response are asserted before checking the terminal event. No timeout, request, or state assertion changed.
 - Verification: the real service follow-up test passed, and scoped Ruff, preview locals, and basedpyright passed. Remaining preview locals findings stay open.
+
+### 2026-09-20 ACP error parameter review
+
+- Implementation: grouped the two optional keyword-only ACP error flags in a typed keyword contract, preserving the four positional arguments and defaults, and closing one parameter-count finding.
+- Review finding, low severity, signature introspection: runtime inspection sees `**kwargs` for the optional flags; all current callers pass them by name and static type checking enforces their types. The exception message and stored fields are unchanged.
+- Verification: 24 ACP exception tests passed; scoped Ruff and basedpyright passed. Remaining argument findings stay open.

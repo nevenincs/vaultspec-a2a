@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-09-19'
-body_hash: 'sha256:e73a07b75c2caabc24b48cfbe16114a007bba9740a6f063545ed17fb50e5031d'
+modified: '2026-09-20'
+body_hash: 'sha256:7e7b64cbbb59c2ae8c07e0886ed0c3adffaa854d50e3e96e5bd1a15b335f5799'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3264,3 +3264,7 @@ Five medium-severity strict Ruff complexity, branch, statement, return, and para
 ### 2026-09-20 snapshot projection structure review pass
 
 Three medium-severity strict Ruff complexity, branch, and statement findings and one medium-severity cognitive-complexity finding in snapshot enrichment were resolved. Message projection, checkpoint-owned agent descriptors, checkpoint and live tool-call projection now have focused functions. Review checked that checkpoint descriptors retain priority over aggregator state, invalid descriptors still degrade the snapshot, provider action status and ToolMessage correlation remain distinct, and live tool calls do not duplicate checkpoint calls. Review surfaced one low-severity malformed tool-args risk in the extracted projector; an absent args mapping now safely takes the pending/completed correlation path. Strict basedpyright also exposed an imprecise extracted `ToolCall` type, corrected before final verification. One hundred one focused snapshot and API tests pass, followed by 26 focused snapshot and thread-state tests after the final type correction. `just check-all`, `just check-type-strict`, focused strict Ruff and Ty, module complexipy, and diff check pass. Repository strict Ruff structure falls from 210 to 207; radon findings from 136 to 135; code-health function-length findings from 14 to 13. No unresolved new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 checkpoint evidence classification review pass
+
+Three medium-severity strict Ruff complexity, return, and branch findings and one cognitive-complexity finding in durable checkpoint evidence interpretation were resolved. Checkpoint schema, active action, completion receipt, and pending write classification now have focused functions. Review checked that unavailable and absent reads remain distinct, requested checkpoint ids are exact, malformed durable values and receipts remain incompatible, an older writer generation is reported as prior action only after incorporated evidence is verified, a valid completion still outranks pending writes, and error/interrupt channels retain their precedence and incorporation flag. Twenty-three focused recovery-authority and event-handler tests pass; `just check-all`, `just check-type-strict`, focused Ruff/Ty/basedpyright, module complexipy, and diff check pass. Repository strict Ruff structure falls from 207 to 204; radon findings from 135 to 134; code-health function-length findings from 13 to 12. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

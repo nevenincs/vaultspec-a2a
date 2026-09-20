@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:4b5cc7e89878c9b5cbab3e3050dc5191e2fa504f490dfa9721f7e06308a8ab4f'
+body_hash: 'sha256:4fb59191b6a0e8833b368ed1c447fcb17228fe94a4f7eb177611dc90889293da'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3621,3 +3621,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted DSL bounds and unknown-key guidance assembly from tool input schema normalization. Guidance order and schema closure behavior remain unchanged. The original 14-path function measures 7 and its helper measures 8; cyclomatic findings fell from 41 to 40.
 - Review finding (moderate, code health; queued): 40 cyclomatic and 131 selected Ruff design findings remain. The schema-normalization finding is closed.
 - Verification: 20 schema normalization tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 40 findings.
+
+### 2026-09-20 Codex catalog cleanup review pass
+
+- Implementation: extracted Codex catalog process cleanup, stderr protocol failure selection, and outcome/error resolution. Cleanup order, stderr error precedence, exception notes, and return behavior remain unchanged. The former 14-path function and all helpers are within the cyclomatic limit; findings fell from 40 to 39.
+- Review finding (low, formatting; fixed): the first `just check-all` run found one Ruff formatting change after extraction. Formatted the file and reran the full standard gate successfully.
+- Review finding (moderate, code health; queued): 39 cyclomatic and 131 selected Ruff design findings remain.
+- Verification: eight catalog unit tests and three subprocess error/reap tests passed; `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 39 findings.

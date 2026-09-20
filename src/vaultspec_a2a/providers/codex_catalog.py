@@ -483,6 +483,65 @@ async def _read_model_pages(
     return tuple(pages), request_id
 
 
+async def _cleanup_codex_process(
+    process: asyncio.subprocess.Process,
+    metadata: Mapping[str, object] | None,
+    stderr_task: asyncio.Task[None],
+) -> list[tuple[str, Exception]]:
+    cleanup_steps: list[CleanupStep] = []
+    if process.stdin is not None:
+        cleanup_steps.append(("codex-catalog-stdin", process.stdin.close))
+    cleanup_steps.extend(
+        [
+            ("codex-catalog-process", lambda: kill_process_tree(process, metadata)),
+            ("codex-catalog-stderr", lambda: cancel_task(stderr_task)),
+        ]
+    )
+    return await run_independent_cleanups(*cleanup_steps)
+
+
+def _stderr_protocol_failure(
+    cleanup_failures: list[tuple[str, Exception]],
+) -> CodexCatalogProtocolError | None:
+    return next(
+        (
+            exc
+            for name, exc in cleanup_failures
+            if name == "codex-catalog-stderr"
+            and isinstance(exc, CodexCatalogProtocolError)
+        ),
+        None,
+    )
+
+
+def _finish_codex_discovery(
+    outcome: CodexCatalogDiscovery | None,
+    failure: BaseException | None,
+    cleanup_failures: list[tuple[str, Exception]],
+) -> CodexCatalogDiscovery:
+    if failure is not None:
+        output_failure = _stderr_protocol_failure(cleanup_failures)
+        if output_failure is not None:
+            output_failure.add_note(
+                f"Codex discovery also failed with {type(failure).__name__}"
+            )
+            raise output_failure
+        if cleanup_failures:
+            failure.add_note(
+                "Codex catalog cleanup also failed: "
+                + ", ".join(name for name, _ in cleanup_failures)
+            )
+        raise failure
+    if cleanup_failures:
+        raise RuntimeError(
+            "Codex catalog cleanup failed: "
+            + ", ".join(name for name, _ in cleanup_failures)
+        )
+    if outcome is None:
+        raise RuntimeError("Codex catalog discovery completed without an outcome")
+    return outcome
+
+
 async def discover_codex_catalog(
     command: tuple[str, ...],
     *,
@@ -533,42 +592,5 @@ async def discover_codex_catalog(
     except BaseException as exc:
         failure = exc
 
-    cleanup_steps: list[CleanupStep] = []
-    if process.stdin is not None:
-        cleanup_steps.append(("codex-catalog-stdin", process.stdin.close))
-    cleanup_steps.extend(
-        [
-            ("codex-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("codex-catalog-stderr", lambda: cancel_task(stderr_task)),
-        ]
-    )
-    cleanup_failures = await run_independent_cleanups(*cleanup_steps)
-    if failure is not None:
-        output_failure = next(
-            (
-                exc
-                for name, exc in cleanup_failures
-                if name == "codex-catalog-stderr"
-                and isinstance(exc, CodexCatalogProtocolError)
-            ),
-            None,
-        )
-        if output_failure is not None:
-            output_failure.add_note(
-                f"Codex discovery also failed with {type(failure).__name__}"
-            )
-            raise output_failure
-        if cleanup_failures:
-            failure.add_note(
-                "Codex catalog cleanup also failed: "
-                + ", ".join(name for name, _ in cleanup_failures)
-            )
-        raise failure
-    if cleanup_failures:
-        raise RuntimeError(
-            "Codex catalog cleanup failed: "
-            + ", ".join(name for name, _ in cleanup_failures)
-        )
-    if outcome is None:
-        raise RuntimeError("Codex catalog discovery completed without an outcome")
-    return outcome
+    cleanup_failures = await _cleanup_codex_process(process, metadata, stderr_task)
+    return _finish_codex_discovery(outcome, failure, cleanup_failures)

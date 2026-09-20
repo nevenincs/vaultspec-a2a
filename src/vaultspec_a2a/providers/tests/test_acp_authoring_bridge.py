@@ -18,7 +18,6 @@ Skips with a pointer when the Claude CLI is unavailable (an infra gate).
 
 import asyncio
 import json
-import shutil
 import threading
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -35,12 +34,14 @@ from starlette.types import Receive, Scope, Send
 
 from ...authoring.catalog import CATALOG_SCHEMA_VERSION, parse_catalog
 from ...control.config import settings
+from ...graph.enums import Provider
 from ...protocols.mcp.tools.authoring_bridge import build_authoring_mcp_server
 from ...testing.ports import free_port
 from ...workspace.environment import resolve_env_vars
 from .._acp_authoring import AuthoringToolBinding, build_authoring_mcp_servers
 from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
+from ..cli_resolution import resolve_provider_cli_executable
 from ..factory import _classify_acp_command
 from ._acp_frames import read_acp_frame
 
@@ -136,7 +137,7 @@ async def authoring_http() -> AsyncGenerator[_AuthoringHttpServer]:
 async def test_real_agent_connects_to_authoring_bridge(
     authoring_http: _AuthoringHttpServer,
 ) -> None:
-    if shutil.which("claude") is None:
+    if resolve_provider_cli_executable(Provider.CLAUDE) is None:
         pytest.fail("claude CLI unavailable; start it per the ACP runbook")
 
     command, meta = _classify_acp_command(settings.acp_backend)
@@ -146,7 +147,7 @@ async def test_real_agent_connects_to_authoring_bridge(
     if token:
         env["CLAUDE_CODE_OAUTH_TOKEN"] = token
         env.pop("ANTHROPIC_API_KEY", None)
-    sys_claude = shutil.which("claude")
+    sys_claude = resolve_provider_cli_executable(Provider.CLAUDE)
     if sys_claude:
         env["CLAUDE_CODE_EXECUTABLE"] = sys_claude
     env.pop("CLAUDECODE", None)

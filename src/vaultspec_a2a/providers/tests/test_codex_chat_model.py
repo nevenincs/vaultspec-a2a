@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import shutil
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -32,6 +31,7 @@ from ...service_tests._provider_catalog_live import declared_lane_model_value
 from .._acp_types import NativeCommandOutcome
 from .._codex_permission import CodexPermissionRung
 from .._subprocess import spawn_acp_process
+from ..cli_resolution import resolve_provider_cli_executable
 from ..codex_chat_model import (
     STDERR_TAIL_LINES,
     CodexChatModel,
@@ -67,7 +67,7 @@ def _codex_present() -> bool:
     import while the file's own tests claimed to do no I/O at all. Deferring it
     confines the scan to the three tests that actually depend on it.
     """
-    return shutil.which("codex") is not None
+    return resolve_provider_cli_executable(Provider.CODEX) is not None
 
 
 # A minimal JSON-RPC-over-stdio echo server matching the app-server framing:

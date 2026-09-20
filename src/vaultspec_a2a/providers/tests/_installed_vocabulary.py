@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 from typing import cast
+
+from ...graph.enums import Provider
+from ..cli_resolution import resolve_provider_cli_executable
 
 __all__ = [
     "MissingInstalledVocabularyError",
@@ -134,7 +136,7 @@ def codex_error_info_variants(destination: Path) -> frozenset[str]:
     categorical strings and the keys of the single-key object variants - because
     the mapping treats them as one vocabulary.
     """
-    executable = shutil.which("codex")
+    executable = resolve_provider_cli_executable(Provider.CODEX)
     if executable is None:
         raise MissingInstalledVocabularyError(
             "the codex CLI is not on PATH, so the app-server protocol schema "

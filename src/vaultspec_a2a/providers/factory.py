@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,6 +31,7 @@ from ..workspace.environment import resolve_env_vars
 from .acp_catalog import discover_acp_catalog
 from .antigravity_catalog import discover_antigravity_catalog
 from .antigravity_cli import resolve_antigravity_command
+from .cli_resolution import resolve_provider_cli_executable
 from .codex_catalog import discover_codex_catalog
 from .in_process_catalog import (
     IN_PROCESS_EXECUTION_MODES,
@@ -434,7 +434,7 @@ def _classify_codex_command() -> tuple[list[str], dict[str, str]]:
     executable on PATH; the bare-name ``fallback_cli_name`` origin (no resolved
     path) is what ``classify_provider_command`` treats as unresolvable.
     """
-    system_codex = shutil.which("codex")
+    system_codex = resolve_provider_cli_executable(Provider.CODEX)
     if system_codex:
         return [system_codex, "app-server"], {
             "runtime_authority": "system_cli",
@@ -460,7 +460,7 @@ def _classify_kimi_command() -> tuple[list[str], dict[str, str]]:
     ``fallback_cli_name`` origin is treated as unresolvable by readiness and
     catalog registration.
     """
-    system_kimi = shutil.which("kimi")
+    system_kimi = resolve_provider_cli_executable(Provider.KIMI)
     if system_kimi:
         return [system_kimi, "acp"], {
             "runtime_authority": "system_cli",

@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v1'
-body_hash: 'sha256:4197cc3f1bd6eb11d7a686433deab05c453a7e8e7dad7ccefbf98c28fba5afd8'
+body_hash: 'sha256:1b219e3d4ab0706d46091d155ae67e91f4b3dc6127853854df268737d7395143'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -540,6 +540,24 @@ not for mutable ACP authority. Subprocess setup and teardown execute on the same
 module loop, including `StreamWriter.wait_closed`; per-test asyncio objects are
 created by the function-scoped fixture. All affected tests, Ruff, ty, and
 BasedPyright pass without transport warnings. No new finding remains from S25.
+### executable-availability-checks-bypass-classifiers | low | resolved
+
+Type: portability and duplication. Claude, Codex, and Kimi system-CLI
+resolution now has one production helper used by factory classification, ACP
+environment construction, installed-vocabulary readers, and live test guards.
+It accepts explicit `.cmd` and `.exe` shims on Windows even when `PATHEXT` is
+incomplete, while Unix admits only the unsuffixed executable. All provider-test
+raw availability guards now call that resolver. Three platform-resolution
+regressions, 110 deterministic provider tests, and twelve installed prompt-free
+or keyless service proofs pass. Status: resolved.
+
+### s26-binary-resolution-review-2026-09-20 | low | PASS
+
+Review result: PASS. Command construction and availability now share one path;
+Antigravity retains its separate canonical installer-aware resolver. The helper
+rejects API-only providers and returns no credential or secret material. Ruff,
+ty, BasedPyright, deterministic coverage, and installed Windows service proofs
+pass. No new finding remains from S26.
 ## Recommendations
 
 - Migrate the outlying live suites (CLI live tests, authoring discovery retry

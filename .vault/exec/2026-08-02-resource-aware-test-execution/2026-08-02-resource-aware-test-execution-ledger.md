@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v2'
-body_hash: 'sha256:7dcb5c20ceda530d2f90ce152f070b7ea75dbe7f80d75f315dd7bdf579d64194'
+body_hash: 'sha256:ff5b5552bd5947caafbc207f64d358084a9919c7d80a10421c77d7e3f1b1e6d0'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -63,3 +63,12 @@ related:
 - `S25` `verify:` `170 ACP fixture consumers and isolation proof` -> `pass`
 - `S25` `by:` `root`
 - `S25` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`
+- `S26` `M` `.vault/plan/2026-08-02-resource-aware-test-execution-plan.md`
+- `S26` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S26` `A` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S26` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S26` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests`
+- `S26` `verify:` `110 deterministic + 12 installed provider proofs` -> `pass`
+- `S26` `by:` `root`
+- `S26` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`

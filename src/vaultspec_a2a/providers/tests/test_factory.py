@@ -14,6 +14,7 @@ from ...graph.enums import Provider
 from ...team.team_config import load_agent_config, load_team_config
 from ...thread.errors import ConfigError
 from ..acp_chat_model import AcpChatModel
+from ..cli_resolution import resolve_provider_cli_executable
 from ..codex_chat_model import CodexChatModel
 from ..factory import (
     _BIN_PATH,
@@ -274,9 +275,7 @@ def test_provider_factory_zai_injects_configured_token() -> None:
 
 def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
     """Kimi builds an AcpChatModel on the `kimi acp` command with the kimi family."""
-    import shutil
-
-    if shutil.which("kimi") is None:
+    if resolve_provider_cli_executable(Provider.KIMI) is None:
         with pytest.raises(ValueError, match="Kimi CLI not resolvable"):
             from ..factory import classify_provider_command
 
@@ -371,9 +370,7 @@ def test_every_partial_kimi_temporary_definition_fails_closed(
 
 def test_classify_provider_command_kimi_resolves_or_hints_install() -> None:
     """Kimi classifies to the installed Kimi Code ACP executable."""
-    import shutil
-
-    if shutil.which("kimi") is None:
+    if resolve_provider_cli_executable(Provider.KIMI) is None:
         with pytest.raises(ValueError, match="Kimi Code CLI not resolvable"):
             classify_provider_command(Provider.KIMI)
         return

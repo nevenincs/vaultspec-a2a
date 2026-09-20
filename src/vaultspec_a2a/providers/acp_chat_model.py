@@ -16,7 +16,6 @@ Architecture:
 
 import asyncio
 import logging
-import shutil
 import sys
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
@@ -42,6 +41,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
+from ..graph.enums import Provider
 from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
@@ -103,6 +103,7 @@ from .acp_exceptions import (
     AcpPromptCancelledError,
     AcpPromptError,
 )
+from .cli_resolution import resolve_provider_cli_executable
 
 __all__ = [
     "AcpChatModel",
@@ -360,7 +361,7 @@ class AcpChatModel(BaseChatModel):
         # binary an interactive invocation runs, so the lane's behaviour (and
         # credential resolution) matches the operator's own CLI exactly. Only
         # for the claude-family adapter; Kimi runs its own CLI.
-        _system_claude = shutil.which("claude")
+        _system_claude = resolve_provider_cli_executable(Provider.CLAUDE)
         if _system_claude and self._config.acp_family == "claude" and self.command:
             env.setdefault("CLAUDE_CODE_EXECUTABLE", _system_claude)
         env.pop("CLAUDECODE", None)  # Prevent nested session abort

@@ -33,15 +33,16 @@ Skips with a pointer when the Claude CLI entry point is unavailable (an infra ga
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 import pytest
 
 from ...control.config import settings
+from ...graph.enums import Provider
 from ...workspace.environment import resolve_env_vars
 from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
+from ..cli_resolution import resolve_provider_cli_executable
 from ..factory import _CLAUDE_ACP_JS, _classify_acp_command
 from ._acp_frames import read_acp_frame
 
@@ -60,7 +61,7 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
     # Exactly the production env assembly: ambient environment passthrough, no
     # credential injected or scrubbed (the no-auth contract).
     env = resolve_env_vars(Path(workspace))
-    sys_claude = shutil.which("claude")
+    sys_claude = resolve_provider_cli_executable(Provider.CLAUDE)
     if sys_claude:
         env["CLAUDE_CODE_EXECUTABLE"] = sys_claude
     env.pop("CLAUDECODE", None)

@@ -24,7 +24,7 @@ from langgraph.checkpoint.base import empty_checkpoint
 from ...database import update_thread_status
 from ...thread.enums import ThreadStatus, TranscriptAvailability
 from .conftest import async_catalog_run_fields, make_app
-from .test_gateway_drain import _relay_terminal
+from .test_gateway_drain import _relay_terminal, _RelayContext
 from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:
@@ -72,7 +72,9 @@ async def test_a_completed_run_without_a_checkpoint_reports_the_transcript_lost(
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-lost-01")
-        await _relay_terminal(client, run_id, checkpointer, worker, session_factory)
+        await _relay_terminal(
+            client, run_id, _RelayContext(checkpointer, worker, session_factory)
+        )
         await checkpointer.adelete_thread(run_id)
 
         history = await client.get(f"/v1/runs/{run_id}/history")
@@ -114,7 +116,9 @@ async def test_an_archived_run_without_a_checkpoint_still_answers_the_durable_re
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-archived-01")
-        await _relay_terminal(client, run_id, checkpointer, worker, session_factory)
+        await _relay_terminal(
+            client, run_id, _RelayContext(checkpointer, worker, session_factory)
+        )
         await checkpointer.adelete_thread(run_id)
         archived = await client.post(f"/v1/runs/{run_id}/archive")
         assert archived.status_code == 200, archived.text

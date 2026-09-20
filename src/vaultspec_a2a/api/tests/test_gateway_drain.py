@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -44,6 +45,13 @@ _PRESET = "mock-success-single"
 # host, so a dispatch POST to it is refused by the real transport. The repo's
 # established way to produce a genuine unreachable worker without a mock.
 _UNREACHABLE_WORKER = "http://127.0.0.1:9"
+
+
+@dataclass(frozen=True, slots=True)
+class _RelayContext:
+    checkpointer: AsyncSqliteSaver
+    worker: Any
+    session_factory: SessionFactory
 
 
 _RUN_SEQ = itertools.count(1)
@@ -85,13 +93,14 @@ def _terminal_envelope(run_id: str, status: str = "completed") -> dict[str, Any]
 async def _relay_terminal(
     client: httpx.AsyncClient,
     run_id: str,
-    checkpointer: AsyncSqliteSaver,
-    worker: Any,
-    session_factory: SessionFactory,
+    relay: _RelayContext,
     *,
     status: str = "completed",
 ) -> None:
     """Deliver a run's terminal event over the real worker relay endpoint."""
+    checkpointer = relay.checkpointer
+    worker = relay.worker
+    session_factory = relay.session_factory
     envelope = _terminal_envelope(run_id, status)
     payload = envelope["payload"]
     if status == "completed":
@@ -305,6 +314,7 @@ async def test_normal_completion_releases_admission_and_drain_quiesces(
     run stays active for the life of the process and the gate can never quiesce.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    relay = _RelayContext(checkpointer, worker, session_factory)
     async with (
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
@@ -324,7 +334,7 @@ async def test_normal_completion_releases_admission_and_drain_quiesces(
         assert not busy.quiescent, busy
         assert busy.active_runs == 1, busy
 
-        await _relay_terminal(client, run_id, checkpointer, worker, session_factory)
+        await _relay_terminal(client, run_id, relay)
 
         # The run left the active set on its terminal event.
         assert not gate.is_active(run_id)
@@ -394,6 +404,7 @@ async def test_followup_dispatch_failure_keeps_the_live_run_admitted(
     would let a drain declare quiescence over a run that is still working.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    relay = _RelayContext(checkpointer, worker, session_factory)
     run_id = "run-drain-followup-failure"
     async with (
         _live_server(app) as base,
@@ -433,7 +444,7 @@ async def test_followup_dispatch_failure_keeps_the_live_run_admitted(
         # The worker's terminal event is still the release, and the accounting
         # the failed follow-up left behind is intact enough to take it.
         app.state.worker_client = worker.client
-        await _relay_terminal(client, run_id, checkpointer, worker, session_factory)
+        await _relay_terminal(client, run_id, relay)
         assert not gate.is_active(run_id)
         result = await gate.drain(timeout=1.0)
         assert result.quiescent and result.active_runs == 0, result
@@ -462,6 +473,7 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
     absorbs it with no coordination.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    relay = _RelayContext(checkpointer, worker, session_factory)
     cancelled_run = "run-drain-cancelled"
     repeated_run = "run-drain-repeated"
     survivor = "run-drain-survivor"
@@ -492,9 +504,7 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
         await _relay_terminal(
             client,
             cancelled_run,
-            checkpointer,
-            worker,
-            session_factory,
+            relay,
             status="cancelled",
         )
         assert not gate.is_active(cancelled_run)
@@ -502,13 +512,9 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
 
         # A repeated terminal event releases the same run twice; the second
         # delivery takes the already-terminal branch.
-        await _relay_terminal(
-            client, repeated_run, checkpointer, worker, session_factory
-        )
+        await _relay_terminal(client, repeated_run, relay)
         assert not gate.is_active(repeated_run)
-        await _relay_terminal(
-            client, repeated_run, checkpointer, worker, session_factory
-        )
+        await _relay_terminal(client, repeated_run, relay)
         assert not gate.is_active(repeated_run)
 
         # Exactly the two settled runs left; the survivor's accounting is intact.
@@ -521,6 +527,6 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
         assert not not_yet.quiescent, not_yet
         assert not_yet.active_runs == 1, not_yet
 
-        await _relay_terminal(client, survivor, checkpointer, worker, session_factory)
+        await _relay_terminal(client, survivor, relay)
         result = await gate.drain(timeout=1.0)
         assert result.quiescent and result.active_runs == 0, result

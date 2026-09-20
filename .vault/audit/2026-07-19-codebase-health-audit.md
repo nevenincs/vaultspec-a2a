@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:38c707936b7e1f7e12bb73f584dc8fba9db849805327b0a723b5cfe10f361ffb'
+body_hash: 'sha256:b46b9050f5d8c7d3b0f611e6def7abea2801454e3bfb4cf6bdab3b6b0f4c9932'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3923,3 +3923,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved infrastructure settings fields, endpoint constants, and path/URL helpers into `control/infra_config.py`. `Settings` still composes that class with domain settings in `control/config.py`, and the consumed config constants remain explicitly re-exported.
 - Verification: 47 focused configuration and desktop profile tests passed. Target Ruff, Ty, basedpyright, formatting, diff, import-load, and unconsumed-export checks passed. The module-length gate fell from 6 to 5 offenders.
 - Review finding (medium, code health): five oversized modules and other strict findings remain; continue the existing burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 test helper parameter review
+
+- Medium / maintainability: `api/tests/test_gateway_drain.py` relay helper exceeded the strict Ruff parameter limit. Grouped its three fixture dependencies into a frozen `_RelayContext`; focused drain tests (8), Ruff, formatter, and targeted Ty pass. Review found no behavioral issue.
+- Medium / maintainability: `control/tests/test_event_handlers.py` action-seeding and answered-rejection helpers exceeded the strict Ruff parameter limit. Grouped fixture input into frozen `_SeedActionSpec` and `_RejectionSpec`; focused handler tests (17), Ruff, formatter, and targeted Ty pass. Review found no behavioral issue.
+- Remaining queue: repository strict findings in production modules and functions remain open and must be reduced to zero before this audit closes.
+- Medium / type integration: commit-hook Ty exposed two transcript-availability tests calling the old relay helper signature. Updated both to pass `_RelayContext`; repository Ty and all five transcript tests now pass. This finding is resolved in the same pass.

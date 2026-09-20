@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:847932324252d5ca30a46fd96af4faa58c47ac887a1e624c4535c51b82ad4ad4'
+body_hash: 'sha256:f20d13ba32da65d1bb11b3fd89c7561491e5c91bb180d715797fba22af4252c4'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3678,3 +3678,11 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Full `just check-strict` completed after the provider stream nesting pass. Standard checks, strict Ty, reachability, unused-symbol and export coverage, imports, dependencies, workflow, and shell gates passed. Function length and shape nesting are at zero.
 - Review finding (moderate, code health; queued): cyclomatic complexity has 34 findings (the preceding review entry quoted the pre-refactor value 35), module length 13, parameter count 81, Ruff function limits 130, Ruff preview nesting 30, and Pylint size/design 53 (C0302 13; R0902 37; R0904 3). The Pylint count is from the full run, not an earlier partial estimate. The current health report also ranks 9 modules below the maintainability threshold; this report is advisory but remains part of the audit backlog.
 - Remaining work: reduce each measured strict dimension to zero, rerun the full strict recipe, and only then treat the draft PR as ready.
+
+### 2026-09-20 gateway schema module review pass
+
+- Implementation: moved liveness/readiness enums and models into `api/schemas/gateway_readiness.py`, with `gateway.py` retaining its existing imports and exports. The API version constant now has one home in the new module. `gateway.py` fell to 953 lines, reducing module-length findings from 13 to 12.
+- Review finding (moderate, strict type; fixed): the first split imported a private version constant across modules and basedpyright reported `reportPrivateUsage`. Made the shared constant public in its home and kept the gateway-local alias.
+- Review finding (low, lint/format; fixed): Ruff required a separate aliased import and formatting after the split. Both standard checks pass after correction.
+- Review finding (moderate, code health; queued): 12 long modules and the other full strict findings remain.
+- Verification: 49 schema/vocabulary tests, import loadability of 271 governed modules, unused-symbol and unconsumed-export coverage, `just check-all`, `just check-type-strict`, focused Ty/Ruff, and `git diff --check` passed.

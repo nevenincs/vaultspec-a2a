@@ -15,12 +15,12 @@ jobs:
       (github.event.pull_request.author_association == 'OWNER' ||
        github.event.pull_request.author_association == 'MEMBER' ||
        github.event.pull_request.author_association == 'COLLABORATOR')
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     permissions:
       contents: read
       id-token: write
-      pull-requests: read
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,6 +33,12 @@ jobs:
         uses: anthropics/claude-code-action@main
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The review only needs the action's GitHub MCP servers. Project MCP
+          # entries include local desktop services and Windows-only launchers.
+          claude_args: >-
+            --strict-mcp-config
+            --allowedTools
+            "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),mcp__github_inline_comment__create_inline_comment"
           prompt: |
             Review pull request ${{ github.repository }}/pull/${{ github.event.pull_request.number }}.
             Focus on correctness, security, regression risk, and maintainability.

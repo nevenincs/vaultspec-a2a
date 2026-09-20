@@ -57,10 +57,9 @@ async def _iter_sse_frames(response: httpx.Response) -> AsyncIterator[SseFrame]:
     async for raw in response.aiter_lines():
         line = raw.rstrip("\r")
         if line == "":
-            if data_lines:
-                frame = parse_sse_frame(event_type, "\n".join(data_lines))
-                if frame is not None:
-                    yield frame
+            frame = _buffered_sse_frame(event_type, data_lines)
+            if frame is not None:
+                yield frame
             event_type = "message"
             data_lines = []
             continue
@@ -73,10 +72,15 @@ async def _iter_sse_frames(response: httpx.Response) -> AsyncIterator[SseFrame]:
             event_type = value
         elif field == "data":
             data_lines.append(value)
-    if data_lines:
-        frame = parse_sse_frame(event_type, "\n".join(data_lines))
-        if frame is not None:
-            yield frame
+    frame = _buffered_sse_frame(event_type, data_lines)
+    if frame is not None:
+        yield frame
+
+
+def _buffered_sse_frame(event_type: str, data_lines: list[str]) -> SseFrame | None:
+    if not data_lines:
+        return None
+    return parse_sse_frame(event_type, "\n".join(data_lines))
 
 
 class AuthoringClient:

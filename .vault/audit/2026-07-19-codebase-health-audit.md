@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:5dce8ef732e13fa5e1be66fb09accab3c3f5aeda1bbba133283f20e6f396cc94'
+body_hash: 'sha256:941308978f45a3b0110892fa2cdd369ee687c38101bd78799ff127c4437a30de'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3288,3 +3288,7 @@ Two medium-severity cognitive-complexity findings in star and pipeline graph com
 ### 2026-09-20 durable snapshot projection complexity review pass
 
 Two medium-severity strict Ruff cyclomatic-complexity findings in durable snapshot enrichment were resolved. Permission projection and execution-projection failure marking now have focused helpers. Review checked terminal permission clearing still takes precedence, valid siblings survive malformed permission rows, unreadable plan approval still clears its request id and demands repair, absent execution rows only degrade when a checkpoint exists, and unreadable execution rows still require operator intervention. Seventeen focused projection tests, focused strict Ruff and Ty, and module complexipy pass. The cyclomatic health gate falls from 130 to 129 findings. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 authoring SSE and IPC event serialization review pass
+
+Three medium-severity strict Ruff complexity findings in authoring SSE line reassembly and IPC event-type selection were resolved. Buffered SSE dispatch now has one helper shared by blank-line and end-of-stream flushing; the closed IPC domain-event mapping is a typed ordered registry. Review checked that empty/comment lines do not emit, undecodable frames still drop, each supported event maps to its prior wire type, unknown events still have no type, and the existing IPC coverage test continues to detect unlisted event subclasses. A new test proves blank-line and EOF flushing. Thirty-four focused authoring and IPC tests, focused strict Ruff and Ty, and module complexipy pass. Repository strict Ruff structure falls from 187 to 184 and cyclomatic findings from 129 to 127. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

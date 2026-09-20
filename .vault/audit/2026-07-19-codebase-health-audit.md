@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:f20d13ba32da65d1bb11b3fd89c7561491e5c91bb180d715797fba22af4252c4'
+body_hash: 'sha256:3630e64aad4d86f578b8ae840d48fd499f6e372a5b129862e23d69930fca2f59'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3686,3 +3686,11 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding (low, lint/format; fixed): Ruff required a separate aliased import and formatting after the split. Both standard checks pass after correction.
 - Review finding (moderate, code health; queued): 12 long modules and the other full strict findings remain.
 - Verification: 49 schema/vocabulary tests, import loadability of 271 governed modules, unused-symbol and unconsumed-export coverage, `just check-all`, `just check-type-strict`, focused Ty/Ruff, and `git diff --check` passed.
+
+### 2026-09-20 ACP prompt outcome module review pass
+
+- Implementation: moved prompt/session outcome validation and native-command name validation from `acp_chat_model.py` into `_acp_prompt_outcomes.py`. Existing model behavior and the private local call names remain the same; the model module fell to 999 lines, reducing module-length findings from 12 to 11.
+- Review finding (moderate, strict type; fixed): a test still imported the moved private helper from the model module, producing basedpyright `reportPrivateLocalImportUsage`. Updated the test to import the public function from its new owner.
+- Review finding (low, lint; fixed): sorted the test import after the owner change.
+- Review finding (moderate, code health; queued): 11 long modules and the other strict findings remain.
+- Verification: 28 ACP command/condition/stop tests before the test import update and 21 focused tests after it, import loadability of 272 governed modules, unused-symbol and export coverage, `just check-all`, `just check-type-strict`, focused Ty/Ruff, and `git diff --check` passed.

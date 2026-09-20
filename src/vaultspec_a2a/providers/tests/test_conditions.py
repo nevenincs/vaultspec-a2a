@@ -31,8 +31,8 @@ from typing import TYPE_CHECKING
 import pytest
 from langchain_core.messages import AIMessage
 
+from .._acp_prompt_outcomes import raise_prompt_error
 from .._subprocess import spawn_acp_process
-from ..acp_chat_model import _raise_prompt_error
 from ..acp_exceptions import AcpErrorCode, AcpPromptError
 from ..codex_chat_model import (
     CodexChatModel,
@@ -172,7 +172,7 @@ def test_the_acp_raise_site_carries_the_condition_it_resolved() -> None:
         }
     }
     with pytest.raises(AcpPromptError) as raised:
-        _raise_prompt_error(observed)
+        raise_prompt_error(observed)
     assert raised.value.condition is ProviderCondition.UNAUTHENTICATED
 
 
@@ -182,11 +182,11 @@ def test_the_acp_raise_site_falls_back_to_the_code_and_then_the_floor() -> None:
         "error": {"code": -32000, "message": "Authentication required"}
     }
     with pytest.raises(AcpPromptError) as from_code:
-        _raise_prompt_error(from_code_frame)
+        raise_prompt_error(from_code_frame)
     assert from_code.value.condition is ProviderCondition.UNAUTHENTICATED
 
     with pytest.raises(AcpPromptError) as from_nothing:
-        _raise_prompt_error({})
+        raise_prompt_error({})
     assert from_nothing.value.condition is ProviderCondition.UNKNOWN
 
 

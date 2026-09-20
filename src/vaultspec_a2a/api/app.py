@@ -58,7 +58,7 @@ from ..database import (
     get_session_factory,
     init_db,
 )
-from ..database.checkpoints import open_checkpointer
+from ..database.checkpoints import Checkpointer, open_checkpointer
 from ..database.migrations import backfill_teamstate_sdd_fields
 from ..database.reconciliation import reconcile_threads_on_startup
 from ..domain_config import domain_config
@@ -421,6 +421,285 @@ async def _shutdown_observability(deadline: ShutdownDeadline) -> None:
         )
 
 
+_WorkerShutdownResources = tuple[httpx.AsyncClient, LazyWorkerSpawner, EventAggregator]
+_GatewayShutdownTasks = tuple[
+    asyncio.Task[None], asyncio.Task[None], asyncio.Task[None] | None
+]
+_DiscoveryRuntime = tuple[Path, int, ProcRecord | None, asyncio.Task[None]]
+
+
+async def _shutdown_gateway(
+    app: FastAPI,
+    workers: _WorkerShutdownResources,
+    tasks: _GatewayShutdownTasks,
+    discovery: _DiscoveryRuntime,
+) -> None:
+    worker_client, worker_spawner, aggregator = workers
+    watchdog_task, reconcile_task, verdict_subscriber_task = tasks
+    discovery_path, discovery_pid, serve_record, discovery_task = discovery
+    # Close run admission first so the gateway admits no new run while it
+    # drains and reaps its owned worker and run descendants below, then wait
+    # a bounded interval for the runs already in flight to reach a terminal
+    # outcome and release themselves. The wait returns immediately when
+    # nothing is active - the common case - and a non-quiescent result names
+    # how many runs the teardown below must cancel and reap, which is the
+    # designed escape for a worker that died emitting nothing.
+    from .routes.gateway import admission_gate
+
+    deadline = getattr(app.state, "shutdown_deadline", None)
+    if deadline is None:
+        deadline = ShutdownDeadline.start(settings.shutdown_total_timeout_seconds)
+        app.state.shutdown_deadline = deadline
+    gate = admission_gate(app)
+    await gate.close_admission()
+    drain_budget = min(
+        _DRAIN_QUIESCENCE_TIMEOUT_SECONDS,
+        deadline.remaining(reserve=5.0),
+    )
+    drained, drain_result = await finish_before(
+        gate.wait_quiescent(drain_budget),
+        deadline,
+        phase="active-run drain",
+        reserve=5.0,
+    )
+    if drained and drain_result is not None and not drain_result.quiescent:
+        logger.warning(
+            "Gateway drain did not quiesce in %.1fs; %d run(s) still active "
+            "and left to shutdown cancellation and reaping",
+            drain_result.waited_seconds,
+            drain_result.active_runs,
+        )
+
+    if verdict_subscriber_task is not None:
+        verdict_subscriber_task.cancel()
+        await finish_before(
+            asyncio.gather(verdict_subscriber_task, return_exceptions=True),
+            deadline,
+            phase="verdict subscriber",
+            reserve=4.0,
+        )
+
+    reconcile_task.cancel()
+    await finish_before(
+        asyncio.gather(reconcile_task, return_exceptions=True),
+        deadline,
+        phase="reconciliation task",
+        reserve=4.0,
+    )
+
+    # Stop heartbeating and drop our own discovery record so the next
+    # start sees Absent, not a stale record it must treat as Crashed.
+    discovery_task.cancel()
+    await finish_before(
+        asyncio.gather(discovery_task, return_exceptions=True),
+        deadline,
+        phase="discovery heartbeat",
+        reserve=4.0,
+    )
+    try:
+        remove_service_json_if_owned(discovery_path, discovery_pid)
+    except OSError:
+        logger.warning(
+            "Failed to remove discovery file %s on shutdown",
+            discovery_path,
+            exc_info=True,
+        )
+    # Drop our own record so `procs list` shows the
+    # gateway gone, not a stale orphan the next reap must collect.
+    deregister_serve(serve_record)
+
+    logger.info("Shutting down gateway")
+
+    watchdog_task.cancel()
+    await finish_before(
+        asyncio.gather(watchdog_task, return_exceptions=True),
+        deadline,
+        phase="worker watchdog",
+        reserve=4.0,
+    )
+
+    await finish_before(
+        worker_spawner.shutdown(deadline=deadline),
+        deadline,
+        phase="owned worker tree",
+    )
+    await finish_before(worker_client.aclose(), deadline, phase="worker HTTP client")
+    await finish_before(aggregator.shutdown(), deadline, phase="event aggregator")
+    await finish_before(close_db(), deadline, phase="database")
+
+    await _shutdown_observability(deadline)
+
+    logger.info("Gateway shutdown complete")
+
+
+def _start_worker_runtime(
+    app: FastAPI, *, armed: bool
+) -> tuple[
+    httpx.AsyncClient,
+    LazyWorkerSpawner,
+    WorkerCircuitBreaker,
+    WorkerLiveness,
+    asyncio.Task[None],
+]:
+    worker_client = httpx.AsyncClient(
+        base_url=settings.worker_url,
+        timeout=httpx.Timeout(30.0, connect=5.0),
+        headers=(
+            {"Authorization": f"Bearer {settings.internal_token}"}
+            if settings.internal_token is not None
+            else None
+        ),
+    )
+    app.state.worker_client = worker_client
+    logger.info("Worker client configured: %s", settings.worker_url)
+
+    worker_spawner = LazyWorkerSpawner(
+        worker_url=settings.worker_url,
+        worker_port=settings.worker_port,
+        auto_spawn=settings.auto_spawn_worker,
+    )
+    app.state.worker_spawner = worker_spawner
+
+    circuit_breaker = WorkerCircuitBreaker(
+        failure_threshold=settings.cb_failure_threshold,
+        recovery_timeout=settings.cb_recovery_timeout_seconds,
+    )
+    app.state.circuit_breaker = circuit_breaker
+
+    worker_state = WorkerState()
+    app.state.worker_state = worker_state
+
+    liveness = WorkerLiveness()
+    app.state.worker_liveness = liveness
+
+    watchdog = WorkerWatchdog(worker_spawner, circuit_breaker, worker_state, app.state)
+    watchdog_task = asyncio.create_task(watchdog.run())
+
+    # Accepted durable actions create immediate recovery demand while idle
+    # gateways retain lazy worker startup.
+    worker_demand_ready = asyncio.Event()
+    app.state.worker_demand_ready = worker_demand_ready
+    if armed:
+        worker_spawner.demand_ready_event = worker_demand_ready
+    return worker_client, worker_spawner, circuit_breaker, liveness, watchdog_task
+
+
+async def _reconcile_gateway_startup(app: FastAPI, checkpointer: Checkpointer) -> None:
+    session_factory = get_session_factory()
+    async with session_factory() as db:
+        app.state.repair_summary = await reconcile_threads_on_startup(db, checkpointer)
+        await db.commit()
+
+
+def _start_verdict_subscriber(
+    checkpointer: Checkpointer,
+    worker_client: httpx.AsyncClient,
+    circuit_breaker: WorkerCircuitBreaker,
+    worker_spawner: LazyWorkerSpawner,
+) -> asyncio.Task[None] | None:
+    if not settings.authoring_subscriber_enabled:
+        return None
+    verdict_subscriber = VerdictSubscriber(
+        VerdictSubscriberConfig(
+            session_factory=get_session_factory(),
+            checkpointer=checkpointer,
+            worker_client=worker_client,
+            circuit_breaker=circuit_breaker,
+            worker_spawner=worker_spawner,
+            endpoint_provider=resolve_engine,
+            recursion_limit=domain_config.graph_recursion_limit,
+            trace_headers_fn=trace_headers,
+            poll_interval_seconds=settings.authoring_subscriber_poll_interval_seconds,
+            reconnect_base_seconds=settings.authoring_subscriber_reconnect_base_seconds,
+            reconnect_max_seconds=settings.authoring_subscriber_reconnect_max_seconds,
+        )
+    )
+    task = asyncio.create_task(verdict_subscriber.run())
+    logger.info("Authoring verdict subscriber enabled")
+    return task
+
+
+_GatewayRecoveryRuntime = tuple[
+    httpx.AsyncClient, WorkerCircuitBreaker, LazyWorkerSpawner, WorkerLiveness
+]
+
+
+async def _direct_recovery_pass(
+    app: FastAPI,
+    worker_client: httpx.AsyncClient,
+    circuit_breaker: WorkerCircuitBreaker,
+    worker_spawner: LazyWorkerSpawner,
+) -> None:
+    try:
+        app.state.direct_control_recovery_summary = (
+            await redrive_direct_control_actions(
+                get_session_factory(),
+                worker_client=worker_client,
+                circuit_breaker=circuit_breaker,
+                worker_spawner=worker_spawner,
+                trace_headers=trace_headers(),
+            )
+        )
+        app.state.direct_control_recovery_error = None
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        app.state.direct_control_recovery_error = "recovery_pass_failed"
+        logger.exception("Direct recovery pass failed; the owner will retry")
+
+
+def _start_gateway_recovery(
+    app: FastAPI,
+    checkpointer: Checkpointer,
+    runtime: _GatewayRecoveryRuntime,
+) -> asyncio.Task[None]:
+    worker_client, circuit_breaker, worker_spawner, liveness = runtime
+
+    def record_worker_contact(timestamp: float) -> None:
+        liveness.record_contact(when=timestamp)
+
+    async def _redispatch_recovery() -> None:
+        await _direct_recovery_pass(app, worker_client, circuit_breaker, worker_spawner)
+        try:
+            await redispatch_reconciling_threads(
+                worker_client,
+                circuit_breaker,
+                worker_spawner,
+                record_worker_contact=record_worker_contact,
+                trace_headers_fn=trace_headers,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Startup reconciliation dispatch failed")
+        try:
+            app.state.clarification_recovery_summary = (
+                await redrive_clarification_actions(
+                    get_session_factory(),
+                    runtime=ClarificationRuntime(
+                        checkpointer,
+                        worker_client,
+                        circuit_breaker,
+                        worker_spawner,
+                        domain_config.graph_recursion_limit,
+                        trace_headers(),
+                    ),
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Clarification recovery pass failed")
+        while True:
+            await asyncio.sleep(_RECOVERY_POLL_SECONDS)
+            await _direct_recovery_pass(
+                app, worker_client, circuit_breaker, worker_spawner
+            )
+
+    reconcile_task = asyncio.create_task(_redispatch_recovery())
+    return reconcile_task
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: startup and shutdown hooks.
@@ -447,12 +726,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             settings.resolved_checkpoint_backend,
         )
 
-        session_factory = get_session_factory()
-        async with session_factory() as db:
-            app.state.repair_summary = await reconcile_threads_on_startup(
-                db, checkpointer
-            )
-            await db.commit()
+        await _reconcile_gateway_startup(app, checkpointer)
 
         aggregator = EventAggregator(telemetry=OTelAggregatorHook())
         app.state.aggregator = aggregator
@@ -462,240 +736,37 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         configure_telemetry()
         logger.info("Telemetry configured")
 
-        worker_client = httpx.AsyncClient(
-            base_url=settings.worker_url,
-            timeout=httpx.Timeout(30.0, connect=5.0),
-            headers=(
-                {"Authorization": f"Bearer {settings.internal_token}"}
-                if settings.internal_token is not None
-                else None
-            ),
+        (
+            worker_client,
+            worker_spawner,
+            circuit_breaker,
+            liveness,
+            watchdog_task,
+        ) = _start_worker_runtime(app, armed=armed)
+
+        reconcile_task = _start_gateway_recovery(
+            app,
+            checkpointer,
+            (worker_client, circuit_breaker, worker_spawner, liveness),
         )
-        app.state.worker_client = worker_client
-        logger.info("Worker client configured: %s", settings.worker_url)
-
-        worker_spawner = LazyWorkerSpawner(
-            worker_url=settings.worker_url,
-            worker_port=settings.worker_port,
-            auto_spawn=settings.auto_spawn_worker,
-        )
-        app.state.worker_spawner = worker_spawner
-
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=settings.cb_failure_threshold,
-            recovery_timeout=settings.cb_recovery_timeout_seconds,
-        )
-        app.state.circuit_breaker = circuit_breaker
-
-        worker_state = WorkerState()
-        app.state.worker_state = worker_state
-
-        liveness = WorkerLiveness()
-        app.state.worker_liveness = liveness
-
-        def record_worker_contact(timestamp: float) -> None:
-            liveness.record_contact(when=timestamp)
-
-        watchdog = WorkerWatchdog(
-            worker_spawner, circuit_breaker, worker_state, app.state
-        )
-        watchdog_task = asyncio.create_task(watchdog.run())
-
-        # Worker readiness remains observable to the demand path. Recovery itself
-        # starts immediately: an accepted durable action is already execution
-        # demand, and waiting for a new client read or write would strand it.
-        # With no due obligation the recovery pass sends nothing and lazy worker
-        # startup remains intact.
-        worker_demand_ready = asyncio.Event()
-        app.state.worker_demand_ready = worker_demand_ready
-
-        async def _direct_recovery_pass() -> None:
-            try:
-                app.state.direct_control_recovery_summary = (
-                    await redrive_direct_control_actions(
-                        get_session_factory(),
-                        worker_client=worker_client,
-                        circuit_breaker=circuit_breaker,
-                        worker_spawner=worker_spawner,
-                        trace_headers=trace_headers(),
-                    )
-                )
-                app.state.direct_control_recovery_error = None
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                app.state.direct_control_recovery_error = "recovery_pass_failed"
-                logger.exception("Direct recovery pass failed; the owner will retry")
-
-        async def _redispatch_recovery() -> None:
-            await _direct_recovery_pass()
-            try:
-                await redispatch_reconciling_threads(
-                    worker_client,
-                    circuit_breaker,
-                    worker_spawner,
-                    record_worker_contact=record_worker_contact,
-                    trace_headers_fn=trace_headers,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Startup reconciliation dispatch failed")
-            try:
-                app.state.clarification_recovery_summary = (
-                    await redrive_clarification_actions(
-                        get_session_factory(),
-                        runtime=ClarificationRuntime(
-                            checkpointer,
-                            worker_client,
-                            circuit_breaker,
-                            worker_spawner,
-                            domain_config.graph_recursion_limit,
-                            trace_headers(),
-                        ),
-                    )
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Clarification recovery pass failed")
-            while True:
-                await asyncio.sleep(_RECOVERY_POLL_SECONDS)
-                await _direct_recovery_pass()
-
-        if armed:
-            worker_spawner.demand_ready_event = worker_demand_ready
-        reconcile_task = asyncio.create_task(_redispatch_recovery())
-
         discovery_path, discovery_pid, serve_record, discovery_task = (
             _start_gateway_discovery(app)
         )
 
-        verdict_subscriber_task: asyncio.Task[None] | None = None
-        if settings.authoring_subscriber_enabled:
-            verdict_subscriber = VerdictSubscriber(
-                VerdictSubscriberConfig(
-                    session_factory=get_session_factory(),
-                    checkpointer=checkpointer,
-                    worker_client=worker_client,
-                    circuit_breaker=circuit_breaker,
-                    worker_spawner=worker_spawner,
-                    endpoint_provider=resolve_engine,
-                    recursion_limit=domain_config.graph_recursion_limit,
-                    trace_headers_fn=trace_headers,
-                    poll_interval_seconds=(
-                        settings.authoring_subscriber_poll_interval_seconds
-                    ),
-                    reconnect_base_seconds=(
-                        settings.authoring_subscriber_reconnect_base_seconds
-                    ),
-                    reconnect_max_seconds=(
-                        settings.authoring_subscriber_reconnect_max_seconds
-                    ),
-                )
-            )
-            verdict_subscriber_task = asyncio.create_task(verdict_subscriber.run())
-            logger.info("Authoring verdict subscriber enabled")
+        verdict_subscriber_task = _start_verdict_subscriber(
+            checkpointer, worker_client, circuit_breaker, worker_spawner
+        )
 
         logger.info("Gateway startup complete")
 
         yield
 
-        # Close run admission first so the gateway admits no new run while it
-        # drains and reaps its owned worker and run descendants below, then wait
-        # a bounded interval for the runs already in flight to reach a terminal
-        # outcome and release themselves. The wait returns immediately when
-        # nothing is active - the common case - and a non-quiescent result names
-        # how many runs the teardown below must cancel and reap, which is the
-        # designed escape for a worker that died emitting nothing.
-        from .routes.gateway import admission_gate
-
-        deadline = getattr(app.state, "shutdown_deadline", None)
-        if deadline is None:
-            deadline = ShutdownDeadline.start(settings.shutdown_total_timeout_seconds)
-            app.state.shutdown_deadline = deadline
-        gate = admission_gate(app)
-        await gate.close_admission()
-        drain_budget = min(
-            _DRAIN_QUIESCENCE_TIMEOUT_SECONDS,
-            deadline.remaining(reserve=5.0),
+        await _shutdown_gateway(
+            app,
+            (worker_client, worker_spawner, aggregator),
+            (watchdog_task, reconcile_task, verdict_subscriber_task),
+            (discovery_path, discovery_pid, serve_record, discovery_task),
         )
-        drained, drain_result = await finish_before(
-            gate.wait_quiescent(drain_budget),
-            deadline,
-            phase="active-run drain",
-            reserve=5.0,
-        )
-        if drained and drain_result is not None and not drain_result.quiescent:
-            logger.warning(
-                "Gateway drain did not quiesce in %.1fs; %d run(s) still active "
-                "and left to shutdown cancellation and reaping",
-                drain_result.waited_seconds,
-                drain_result.active_runs,
-            )
-
-        if verdict_subscriber_task is not None:
-            verdict_subscriber_task.cancel()
-            await finish_before(
-                asyncio.gather(verdict_subscriber_task, return_exceptions=True),
-                deadline,
-                phase="verdict subscriber",
-                reserve=4.0,
-            )
-
-        reconcile_task.cancel()
-        await finish_before(
-            asyncio.gather(reconcile_task, return_exceptions=True),
-            deadline,
-            phase="reconciliation task",
-            reserve=4.0,
-        )
-
-        # Stop heartbeating and drop our own discovery record so the next
-        # start sees Absent, not a stale record it must treat as Crashed.
-        discovery_task.cancel()
-        await finish_before(
-            asyncio.gather(discovery_task, return_exceptions=True),
-            deadline,
-            phase="discovery heartbeat",
-            reserve=4.0,
-        )
-        try:
-            remove_service_json_if_owned(discovery_path, discovery_pid)
-        except OSError:
-            logger.warning(
-                "Failed to remove discovery file %s on shutdown",
-                discovery_path,
-                exc_info=True,
-            )
-        # Drop our own record so `procs list` shows the
-        # gateway gone, not a stale orphan the next reap must collect.
-        deregister_serve(serve_record)
-
-        logger.info("Shutting down gateway")
-
-        watchdog_task.cancel()
-        await finish_before(
-            asyncio.gather(watchdog_task, return_exceptions=True),
-            deadline,
-            phase="worker watchdog",
-            reserve=4.0,
-        )
-
-        await finish_before(
-            worker_spawner.shutdown(deadline=deadline),
-            deadline,
-            phase="owned worker tree",
-        )
-        await finish_before(
-            worker_client.aclose(), deadline, phase="worker HTTP client"
-        )
-        await finish_before(aggregator.shutdown(), deadline, phase="event aggregator")
-        await finish_before(close_db(), deadline, phase="database")
-
-        await _shutdown_observability(deadline)
-
-        logger.info("Gateway shutdown complete")
 
 
 def _bind_server_shutdown_owner(app: FastAPI, server: uvicorn.Server) -> None:

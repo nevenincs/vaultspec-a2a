@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:8a909fed0101203b7e901252fa6a801d78986fb5e8320a938bf2b40029018752'
+body_hash: 'sha256:9cb548aa7045319e7edbbb58755402ad7e761a1f2a8939e99795ae1bed128ff4'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3565,3 +3565,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: isolated database startup, discovery publication/pairing/heartbeat registration, and observability shutdown from gateway lifespan. Startup publication and pairing checks, the discovery registration boundary, and shutdown order are retained.
 - Review: inspected the actual diff and startup/teardown order. No new correctness findings surfaced (severity: none; type: implementation review). App/shutdown tests: 18 passed; live gateway and desktop readiness/credential tests: 32 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 50 to 49 over limit, Ruff function-limit findings from 139 to 138, and code-health nesting depth from 3 to 2. `_lifespan` still has Ruff C901 and PLR0915 findings, and the file still contributes function-length debt (severity: moderate; type: code health). Remaining strict findings stay open until zero.
+
+### 2026-09-20 gateway worker and recovery lifecycle review pass
+
+- Implementation: moved worker resource initialization, startup reconciliation, authoring subscriber creation, recovery tasks, and ordered gateway shutdown into focused helpers. Shutdown retains admission drain, task cancellation, discovery cleanup, worker/resource closing, and telemetry shutdown in the same order.
+- Review: inspected startup/teardown dependencies and the changed call boundaries. No new correctness findings surfaced (severity: none; type: implementation review). Live gateway, restart, app, and desktop tests: 45 passed. `just check-all`, `just check-type-strict`, and focused Pylint passed.
+- Queue: Ruff function-limit findings fell from 138 to 136, removing the lifespan C901 and PLR0915 findings. Code-health function-length findings fell from 4 to 3. Cyclomatic findings remain 49 and all other strict findings remain open (severity: moderate; type: code health).

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:eb2a2833d844a24472281be06d4eb2eaa4082898d2fb71d34865395fb017b4fe'
+body_hash: 'sha256:f6c2770bec9e429bbff7e56f334a56129f4a65d0a13b52f055d1e080629ca9c8'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3338,3 +3338,9 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: extracted the persisted graph receipt's writer identity and authority comparisons into a focused predicate. The comparisons and rejection behavior are unchanged.
 - Review: inspected the actual diff and checked the receipt tests (5 passed), routine gate, strict type gate, focused Pylint, and focused strict Ruff. No new correctness issue surfaced. Severity: none for this change; type: no contract drift.
 - Queue: the pre-existing `prepare_graph_action_receipt` return-count finding remains open in the strict Ruff queue. The repository still has other strict Ruff, Pylint, and code-health findings; this pass does not close them.
+
+### 2026-09-20 native command name validation review pass
+
+- Implementation: extracted the exact native command name predicate and preserved validation order and the existing error path.
+- Review: inspected the diff; 8 focused native command tests, routine quality gate, strict type gate, and focused strict Ruff passed. Pylint's boolean-expression finding in this function is cleared. Severity: none for the change; type: no contract drift found.
+- Queue: pre-existing Pylint `too-many-lines` and `too-many-instance-attributes` findings in `acp_chat_model.py` remain open. The remaining repository-wide strict gate findings remain open.

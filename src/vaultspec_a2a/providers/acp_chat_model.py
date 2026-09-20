@@ -202,6 +202,16 @@ def _raise_for_prompt_stop_reason(
     )
 
 
+def _is_executable_native_command_name(name: str) -> bool:
+    if not name or name != name.strip() or not name.isprintable():
+        return False
+    return (
+        not any(character.isspace() for character in name)
+        and not name.startswith("/")
+        and len(name) <= MAX_NATIVE_COMMAND_NAME_LENGTH
+    )
+
+
 class AcpChatModel(BaseChatModel):
     """A custom LangChain ChatModel that wraps ACP-compatible CLI agents."""
 
@@ -668,14 +678,7 @@ class AcpChatModel(BaseChatModel):
         self, name: str, arguments: str | None = None
     ) -> NativeCommandResult:
         """Execute one exactly advertised command through ACP prompt syntax."""
-        if (
-            not name
-            or name != name.strip()
-            or not name.isprintable()
-            or any(character.isspace() for character in name)
-            or name.startswith("/")
-            or len(name) > MAX_NATIVE_COMMAND_NAME_LENGTH
-        ):
+        if not _is_executable_native_command_name(name):
             raise ValueError("native command name is not an executable exact identity")
         if arguments is not None and (
             len(arguments) > _MAX_NATIVE_COMMAND_ARGUMENT_LENGTH

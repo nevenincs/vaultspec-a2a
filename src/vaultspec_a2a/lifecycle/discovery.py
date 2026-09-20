@@ -32,7 +32,7 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import BinaryIO, cast, override
+from typing import BinaryIO, TypedDict, Unpack, cast, override
 
 import httpx
 
@@ -391,15 +391,18 @@ def _harden_record_parent(parent: Path) -> None:
     _harden_credential_path(resolve_directory_authority(parent).path)
 
 
-def write_service_json(
-    path: Path,
-    *,
-    port: int,
-    pid: int,
-    service_token: str | None = None,
-    now_ms: int | None = None,
-    allow_tokenless: bool = False,
-) -> None:
+class _ServiceWriteOptional(TypedDict, total=False):
+    service_token: str | None
+    now_ms: int | None
+    allow_tokenless: bool
+
+
+class _ServiceWriteArgs(_ServiceWriteOptional):
+    port: int
+    pid: int
+
+
+def write_service_json(path: Path, **kwargs: Unpack[_ServiceWriteArgs]) -> None:
     """Atomically publish the discovery record with a fresh heartbeat.
 
     Writes to a sibling temp file then ``os.replace`` so a concurrent reader
@@ -417,6 +420,11 @@ def write_service_json(
     Raises:
         ValueError: If *service_token* is absent and *allow_tokenless* is not set.
     """
+    port = kwargs["port"]
+    pid = kwargs["pid"]
+    service_token = kwargs.get("service_token")
+    now_ms = kwargs.get("now_ms")
+    allow_tokenless = kwargs.get("allow_tokenless", False)
     if not service_token and not allow_tokenless:
         raise ValueError(
             "refusing to publish a discovery record without a service token: "
@@ -730,19 +738,24 @@ def desktop_record_process_is_live(record: DesktopDiscoveryRecord) -> bool:
     return current == record.start_fingerprint
 
 
+class _DesktopWriteOptional(TypedDict, total=False):
+    credential_reference: str | None
+    host: str
+    protocol_min: int
+    protocol_max: int
+    pid: int | None
+    start_fingerprint: str | None
+    now_ms: int | None
+
+
+class _DesktopWriteArgs(_DesktopWriteOptional):
+    generation: str
+    port: int
+    owner: str
+
+
 def write_desktop_discovery(
-    path: Path,
-    *,
-    generation: str,
-    port: int,
-    owner: str,
-    credential_reference: str | None = None,
-    host: str = "127.0.0.1",
-    protocol_min: int = DESKTOP_PROTOCOL_MIN,
-    protocol_max: int = DESKTOP_PROTOCOL_MAX,
-    pid: int | None = None,
-    start_fingerprint: str | None = None,
-    now_ms: int | None = None,
+    path: Path, **kwargs: Unpack[_DesktopWriteArgs]
 ) -> DesktopDiscoveryRecord:
     """Atomically publish the versioned desktop discovery record and return it.
 
@@ -754,6 +767,16 @@ def write_desktop_discovery(
     """
     from .singleton import current_process_fingerprint
 
+    generation = kwargs["generation"]
+    port = kwargs["port"]
+    owner = kwargs["owner"]
+    credential_reference = kwargs.get("credential_reference")
+    host = kwargs.get("host", "127.0.0.1")
+    protocol_min = kwargs.get("protocol_min", DESKTOP_PROTOCOL_MIN)
+    protocol_max = kwargs.get("protocol_max", DESKTOP_PROTOCOL_MAX)
+    pid = kwargs.get("pid")
+    start_fingerprint = kwargs.get("start_fingerprint")
+    now_ms = kwargs.get("now_ms")
     resolved_pid = pid if pid is not None else os.getpid()
     fingerprint = (
         start_fingerprint

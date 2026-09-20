@@ -513,14 +513,16 @@ def _compile_worker_node(
     return worker_node, metadata
 
 
+class _DivergeStageArgs(TypedDict):
+    dispatch_name: str
+    synthesis_name: str
+    specs: list[dict[str, Any]]
+    make_researcher: Callable[[dict[str, Any]], WorkerNode]
+    researcher_metadata: dict[str, str]
+
+
 def _wire_diverge_stage(
-    builder: StateGraph[Any, None, Any, Any],
-    *,
-    dispatch_name: str,
-    synthesis_name: str,
-    specs: list[dict[str, Any]],
-    make_researcher: Callable[[dict[str, Any]], WorkerNode],
-    researcher_metadata: dict[str, str],
+    builder: StateGraph[Any, None, Any, Any], **kwargs: Unpack[_DivergeStageArgs]
 ) -> str:
     """Wire a Send-based diverge stage into ``builder``.
 
@@ -549,6 +551,11 @@ def _wire_diverge_stage(
     class is kept off the production path at the producer instead, where the
     citation channel's locators are normalised into the contract.
     """
+    dispatch_name = kwargs["dispatch_name"]
+    synthesis_name = kwargs["synthesis_name"]
+    specs = kwargs["specs"]
+    make_researcher = kwargs["make_researcher"]
+    researcher_metadata = kwargs["researcher_metadata"]
     if not specs:
         raise ConfigError(
             f"diverge stage {dispatch_name!r} requires at least one research "

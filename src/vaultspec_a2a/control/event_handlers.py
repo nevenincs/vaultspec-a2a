@@ -91,6 +91,9 @@ _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 
 
 class _TerminalEventOptions(TypedDict, total=False):
+    aggregator: EventAggregator | None
+    session_factory: async_sessionmaker[AsyncSession] | None
+    checkpointer: Checkpointer | None
     drain_gate: DrainGate | None
 
 
@@ -602,20 +605,22 @@ async def _accept_terminal_event(
 async def _handle_terminal_event(
     thread_id: str,
     payload: dict[str, object],
-    *,
-    aggregator: EventAggregator | None = None,
-    session_factory: async_sessionmaker[AsyncSession] | None = None,
-    checkpointer: Checkpointer | None = None,
     **options: Unpack[_TerminalEventOptions],
 ) -> None:
     """Settle a proven terminal event, then release drain and aggregator state."""
-    drain_gate = options.pop("drain_gate", None)
-    if options:
-        unexpected = next(iter(options))
+    unknown = set(options).difference(
+        {"aggregator", "session_factory", "checkpointer", "drain_gate"}
+    )
+    if unknown:
+        unexpected = next(iter(unknown))
         raise TypeError(
             "_handle_terminal_event() got an unexpected keyword argument "
             f"{unexpected!r}"
         )
+    aggregator = options.get("aggregator")
+    session_factory = options.get("session_factory")
+    checkpointer = options.get("checkpointer")
+    drain_gate = options.get("drain_gate")
     if not is_terminal_event(payload):
         return
     # Capture before the durable write and before aggregator state is pruned.
@@ -909,10 +914,6 @@ async def _handle_execution_state_event(
 async def relay_event(
     thread_id: str,
     payload: dict[str, object],
-    *,
-    aggregator: EventAggregator | None = None,
-    session_factory: async_sessionmaker[AsyncSession] | None = None,
-    checkpointer: Checkpointer | None = None,
     **options: Unpack[_TerminalEventOptions],
 ) -> None:
     """Consolidated relay: run all 4 event handlers in sequence.
@@ -929,12 +930,18 @@ async def relay_event(
     permission journal, progress inference, execution state persistence,
     and terminal status updates with aggregator GC.
     """
-    drain_gate = options.pop("drain_gate", None)
-    if options:
-        unexpected = next(iter(options))
+    unknown = set(options).difference(
+        {"aggregator", "session_factory", "checkpointer", "drain_gate"}
+    )
+    if unknown:
+        unexpected = next(iter(unknown))
         raise TypeError(
             f"relay_event() got an unexpected keyword argument {unexpected!r}"
         )
+    aggregator = options.get("aggregator")
+    session_factory = options.get("session_factory")
+    checkpointer = options.get("checkpointer")
+    drain_gate = options.get("drain_gate")
     await _handle_permission_event(
         thread_id,
         payload,

@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, Protocol
+from typing import TYPE_CHECKING, Final, Protocol, TypedDict, Unpack
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -55,6 +55,17 @@ class ProtocolErrorFactory(Protocol):
     def __call__(self, message: str) -> Exception:
         """Return the error this lane raises for a protocol fault."""
         ...
+
+
+class _ReadResponseOptions(TypedDict):
+    """Required controls for reading one bounded JSON-RPC response."""
+
+    request_id: int
+    timeout: float
+    output_budget: OutputBudgetLike
+    max_frames: int
+    max_frame_bytes: int
+    protocol_error: ProtocolErrorFactory
 
 
 @dataclass(slots=True)
@@ -124,13 +135,7 @@ async def drain_stderr(
 
 async def read_response(
     stdout: asyncio.StreamReader,
-    *,
-    request_id: int,
-    timeout: float,
-    output_budget: OutputBudgetLike,
-    max_frames: int,
-    max_frame_bytes: int,
-    protocol_error: ProtocolErrorFactory,
+    **options: Unpack[_ReadResponseOptions],
 ) -> JsonObject:
     """Read frames until one carries *request_id*, or refuse.
 
@@ -140,17 +145,19 @@ async def read_response(
     because a frame that large is evidence the stream is not what this reader
     thinks it is, and charging it to the budget would be too late.
     """
-    for _ in range(max_frames):
-        raw = await asyncio.wait_for(stdout.readline(), timeout=timeout)
+    for _ in range(options["max_frames"]):
+        raw = await asyncio.wait_for(stdout.readline(), timeout=options["timeout"])
         if not raw:
             break
-        if len(raw) > max_frame_bytes:
-            raise protocol_error("discovery frame exceeds one MiB")
-        output_budget.charge(len(raw))
+        if len(raw) > options["max_frame_bytes"]:
+            raise options["protocol_error"]("discovery frame exceeds one MiB")
+        options["output_budget"].charge(len(raw))
         try:
             value = _JSON_OBJECT.validate_json(raw)
         except (ValidationError, UnicodeDecodeError):
             continue
-        if value.get("id") == request_id:
+        if value.get("id") == options["request_id"]:
             return value
-    raise protocol_error(f"discovery received no response for request {request_id}")
+    raise options["protocol_error"](
+        f"discovery received no response for request {options['request_id']}"
+    )

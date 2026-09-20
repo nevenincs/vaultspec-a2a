@@ -38,7 +38,7 @@ import asyncio
 import io
 import tempfile
 import unicodedata
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, TextIO, TypedDict, Unpack
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -197,15 +197,23 @@ def _tool_contract_differences(
     return missing, undeclared
 
 
+class _VerifyDeclaredToolContractRequired(TypedDict):
+    name: str
+    command: str
+    args: Sequence[str]
+    declared: Sequence[str]
+
+
+class _VerifyDeclaredToolContractOptions(
+    _VerifyDeclaredToolContractRequired, total=False
+):
+    exact_surface: bool
+    env: Mapping[str, str] | None
+    timeout: float
+
+
 async def verify_declared_tool_contract(
-    *,
-    name: str,
-    command: str,
-    args: Sequence[str],
-    declared: Sequence[str],
-    exact_surface: bool = False,
-    env: Mapping[str, str] | None = None,
-    timeout: float = CONTRACT_PROBE_TIMEOUT_SECONDS,
+    **options: Unpack[_VerifyDeclaredToolContractOptions],
 ) -> None:
     """Fail loud unless the launched server serves every tool in *declared*.
 
@@ -228,6 +236,13 @@ async def verify_declared_tool_contract(
         HarnessToolContractError: If a declared tool is not served, or the probe
             could not be completed.
     """
+    name = options["name"]
+    command = options["command"]
+    args = options["args"]
+    declared = options["declared"]
+    exact_surface = options.get("exact_surface", False)
+    env = options.get("env")
+    timeout = options.get("timeout", CONTRACT_PROBE_TIMEOUT_SECONDS)
     key = (command, tuple(args), tuple(declared))
     if key in _verified:
         return

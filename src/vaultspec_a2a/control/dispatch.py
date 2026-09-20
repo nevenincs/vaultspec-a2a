@@ -254,8 +254,7 @@ def _signal_worker_demand_ready(spawner: LazyWorkerSpawner) -> None:
 def _log_redispatch_failure_ladder(
     counts: dict[str, int],
     thread_ids: dict[str, list[str]],
-    category: str,
-    thread_id: str,
+    identity: tuple[str, str],
     message: str,
     *args: object,
 ) -> None:
@@ -272,6 +271,7 @@ def _log_redispatch_failure_ladder(
     batch-end summary can name every stuck thread, keeping per-entity
     diagnosability even while the per-occurrence line is suppressed.
     """
+    category, thread_id = identity
     counts[category] = counts.get(category, 0) + 1
     thread_ids.setdefault(category, []).append(thread_id)
     n = counts[category]
@@ -325,8 +325,7 @@ async def _refuse_incompatible_authority(
     _log_redispatch_failure_ladder(
         failure_counts,
         failure_thread_ids,
-        "incompatible_execution_authority",
-        thread.id,
+        ("incompatible_execution_authority", thread.id),
         "Refusing incompatible execution authority (%s) for thread %s",
         exc.reason.value,
         thread.id,
@@ -367,8 +366,7 @@ async def _refuse_missing_project(
     _log_redispatch_failure_ladder(
         failure_counts,
         failure_thread_ids,
-        "no_active_project",
-        thread.id,
+        ("no_active_project", thread.id),
         "Refusing to re-dispatch thread %s with no active project",
         thread.id,
     )
@@ -499,8 +497,7 @@ async def redispatch_reconciling_threads(
                     _log_redispatch_failure_ladder(
                         failure_counts,
                         failure_thread_ids,
-                        "circuit_open",
-                        thread.id,
+                        ("circuit_open", thread.id),
                         "Circuit breaker open, skipping re-dispatch for %s",
                         thread.id,
                     )
@@ -514,8 +511,7 @@ async def redispatch_reconciling_threads(
                     _log_redispatch_failure_ladder(
                         failure_counts,
                         failure_thread_ids,
-                        "redispatch_error",
-                        thread.id,
+                        ("redispatch_error", thread.id),
                         "Re-dispatch error for thread %s: %s",
                         thread.id,
                         exc,

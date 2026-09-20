@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from ..thread.errors import ConfigError
 from ._harness_mcp_registry import (
@@ -715,14 +715,17 @@ def _resolve_harness_composition(
     return resolution, unavailable_names, resolved
 
 
+class _HarnessCompositionOptions(TypedDict, total=False):
+    allowed_tools: Sequence[str] | None
+    profile: HarnessMcpRuntimeProfile
+    project_root: str | None
+    lane: str | None
+
+
 def compose_harness_mcp_servers(
     model: BaseChatModel,
     names: Sequence[str],
-    *,
-    allowed_tools: Sequence[str] | None = None,
-    profile: HarnessMcpRuntimeProfile = HarnessMcpRuntimeProfile.NON_DESKTOP,
-    project_root: str | None = None,
-    lane: str | None = None,
+    **kwargs: Unpack[_HarnessCompositionOptions],
 ) -> BaseChatModel:
     """Return a model advertising the declared harness MCP servers, or *model*.
 
@@ -767,6 +770,10 @@ def compose_harness_mcp_servers(
     (:func:`codex_mcp_server_specs`) and a ``project_root`` given here does not
     reach it.
     """
+    allowed_tools = kwargs.get("allowed_tools")
+    profile = kwargs.get("profile", HarnessMcpRuntimeProfile.NON_DESKTOP)
+    project_root = kwargs.get("project_root")
+    lane = kwargs.get("lane")
     if not names and profile is HarnessMcpRuntimeProfile.NON_DESKTOP:
         return model
     resolution, unavailable_names, resolved = _resolve_harness_composition(

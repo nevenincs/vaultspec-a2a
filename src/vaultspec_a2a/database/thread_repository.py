@@ -7,7 +7,7 @@ import json
 import os
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from sqlalchemy import and_, exists, func, or_, select, update
@@ -362,16 +362,26 @@ async def list_non_terminal_threads(session: AsyncSession) -> Sequence[ThreadMod
     return result.scalars().all()
 
 
+class _ActivePageOptional(TypedDict, total=False):
+    workspace_root: str | None
+    feature_tag: str | None
+    after_created_at: datetime | None
+    after_id: str | None
+
+
+class _ActivePageArgs(_ActivePageOptional):
+    limit: int
+
+
 async def list_active_thread_page(
-    session: AsyncSession,
-    *,
-    limit: int,
-    workspace_root: str | None = None,
-    feature_tag: str | None = None,
-    after_created_at: datetime | None = None,
-    after_id: str | None = None,
+    session: AsyncSession, **kwargs: Unpack[_ActivePageArgs]
 ) -> Sequence[ActiveThreadProjection]:
     """Return one narrow, keyset-paginated page of durable active threads."""
+    limit = kwargs["limit"]
+    workspace_root = kwargs.get("workspace_root")
+    feature_tag = kwargs.get("feature_tag")
+    after_created_at = kwargs.get("after_created_at")
+    after_id = kwargs.get("after_id")
     if not 1 <= limit <= 101:
         msg = "active-thread page limit must be between 1 and 101"
         raise ValueError(msg)

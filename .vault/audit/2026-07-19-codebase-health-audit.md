@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:e58579cfd4f1c0f5ff0ea2c34cac52e31797d6993fcb3810bac4298116e06c1d'
+body_hash: 'sha256:e44ad4f31ebd4b5bcd2a6cffc46e26e06c9afcc90d513d77e0a6fb04edcc6719'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4145,3 +4145,11 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, low severity, semantics: the inlined expressions and tuple conversion retain the same values and order; the research harness helper still calls `effective_harness` once; the desktop record helper preserves all validated fields. The ingest helper performs the same checks before binding. No changed assertion or timeout was found in diff review.
 - Review finding, medium severity, service prerequisite: the cancel health/trace test reached the real stack but Jaeger `/api/services` returned an empty list before the new helper ran. Its observed failure cannot validate the extracted Jaeger assertion path. Keep this test result in the audit queue for a service run with populated Jaeger. A sibling service cancel test passed; provider condition service tests had four passes and one unarmed skip.
 - Verification: 73 aggregator, 15 message dispatch, seven Kimi catalog, 46 Codex model, 21 research ADR, and 21 discovery tests passed. Preview Ruff locals and Radon pass for the touched production functions. Remaining strict argument, locals, maintainability, and design findings stay open; review result is REVISION REQUIRED.
+
+### 2026-09-20 typed keyword signature review
+
+- Implementation: reduced parameter-count findings in control dispatch/event relay, active thread paging, diverge wiring, service and desktop discovery, harness MCP composition, MCP contract probing, stdio response reading, and ACP authentication. Required keyword names and defaults remain typed through `Unpack[TypedDict]`; dispatch groups log identity into one tuple.
+- Review finding, low severity, compatibility: callers using `inspect.signature` on the changed functions will see the typed variadic keyword parameter instead of each named keyword. Existing repository callers and focused tests passed. Keep this contract sensitivity in the audit queue while remaining parameter-count findings are burned down.
+- Review finding, medium severity, prerequisite: one service test could not reach its assertion because the external Jaeger service list was empty. Repeat that test with its service prerequisite available; the failure does not establish a code regression.
+- Review finding, medium severity, quality: the strict census still reports 37 production parameter-count findings and four maintainability-index findings. Preview Ruff also reports test-local and argument findings. Continue the queue until every gate is zero.
+- Verification: `just check-all` and `just check-type-strict` passed; focused dispatch, event, database, graph, discovery, ACP MCP, MCP contract, and stdio tests passed in the implementation pass. Diff review found no introduced high-severity issue.

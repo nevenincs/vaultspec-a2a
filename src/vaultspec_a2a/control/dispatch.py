@@ -141,7 +141,6 @@ async def dispatch_to_worker(
     circuit_breaker: WorkerCircuitBreaker,
     spawner: LazyWorkerSpawner,
     *,
-    bypass_circuit_breaker: bool = False,
     trace_headers: dict[str, str] | None = None,
 ) -> DispatchResponse:
     """Dispatch a request to the worker process.
@@ -149,8 +148,7 @@ async def dispatch_to_worker(
     Handles the common dispatch sequence:
 
     1. Ensure the worker is spawned via ``spawner.ensure_worker()``.
-    2. Unless ``bypass_circuit_breaker`` is set, check that the circuit
-       breaker allows the dispatch.
+    2. Check that the circuit breaker allows non-cancel dispatches.
     3. HTTP POST to ``/dispatch`` with the serialised payload and optional
        trace propagation headers.
     4. Record success or failure on the circuit breaker.
@@ -176,7 +174,7 @@ async def dispatch_to_worker(
     # reconciliation is eager.
     _signal_worker_demand_ready(spawner)
 
-    if not bypass_circuit_breaker and not circuit_breaker.pre_dispatch():
+    if dispatch.action != "cancel" and not circuit_breaker.pre_dispatch():
         raise WorkerCircuitOpenError(circuit_breaker.rejection_detail)
 
     headers = dict(trace_headers) if trace_headers else {}
@@ -533,7 +531,6 @@ async def safe_dispatch(
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: LazyWorkerSpawner,
     *,
-    bypass_circuit_breaker: bool = False,
     trace_headers: dict[str, str] | None = None,
 ) -> DispatchOutcome:
     """Non-raising wrapper around :func:`dispatch_to_worker`.
@@ -548,7 +545,6 @@ async def safe_dispatch(
             dispatch_request,
             circuit_breaker,
             worker_spawner,
-            bypass_circuit_breaker=bypass_circuit_breaker,
             trace_headers=trace_headers,
         )
         return DispatchOutcome(success=True)

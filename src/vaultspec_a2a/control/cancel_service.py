@@ -487,7 +487,6 @@ async def _dispatch_cancellation(
         dispatch,
         runtime.circuit_breaker,
         runtime.worker_spawner,
-        bypass_circuit_breaker=True,
         trace_headers=runtime.trace_headers,
     )
 

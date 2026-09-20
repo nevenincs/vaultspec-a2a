@@ -572,7 +572,6 @@ async def _dispatch_prepared_claim(
         dispatch,
         runtime.circuit_breaker,
         runtime.worker_spawner,
-        bypass_circuit_breaker=(action.action_type == ControlActionType.CANCEL.value),
         trace_headers=runtime.trace_headers,
     )
     if not outcome.success:

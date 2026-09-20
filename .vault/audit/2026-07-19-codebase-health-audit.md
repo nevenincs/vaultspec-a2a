@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:97c0e5b63e7f165d85922061d942a26e2029eef242467754176f6430c53ad5e4'
+body_hash: 'sha256:b072bfec616fc84ae286be11a5341ac5a7af7c21080f66be933f12b67c93fb01'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3755,3 +3755,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved mock permission tool-call payload normalization from `_collect_mock_permission_result` to `_parse_mock_permission_call` in `graph/nodes/worker.py`.
 - Review: inspected the malformed input fallback, dict option filtering, and callback arguments. Severity/type: no new defect found; remaining worker-node complexity findings stay open in this audit queue.
 - Verification: strict Ty, full Ruff and target format, 22 focused worker tests, `git diff --check`, and cyclomatic gate. The target function no longer exceeds the cyclomatic threshold.
+
+### 2026-09-20 cancel dispatch signature review
+
+- Implementation: removed the redundant `bypass_circuit_breaker` argument from `dispatch_to_worker` and `safe_dispatch`; cancel action now carries its circuit-bypass rule directly. Updated both cancel call sites and added an open-circuit cancel transport test.
+- Review: traced all production call sites and verified that only cancel paths had passed the bypass flag. Checked non-cancel receipt validation and circuit admission order. Severity/type: no new defect found. Other parameter-count findings remain queued.
+- Verification: strict Ty, Ruff check/format, 28 cancel/recovery/dispatch tests plus the new open-circuit transport test, and the parameter-count gate. Parameter-count findings decreased from 81 to 79.

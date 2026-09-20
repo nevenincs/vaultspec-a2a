@@ -16,7 +16,7 @@ execute``. Turning a snapshot into MCP tool registrations lives in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from ._envelope import AuthoringResponse
@@ -172,16 +172,21 @@ def snapshot_to_catalog_payload(snapshot: CatalogSnapshot) -> dict[str, Any]:
     }
 
 
+class _AgentToolOptional(TypedDict, total=False):
+    actor_token: str | None
+
+
+class _AgentToolArgs(_AgentToolOptional):
+    run_id: str
+    command: str
+    tool_call_id: str
+    name: str
+    tool_input: dict[str, Any]
+    idempotency_key: str
+
+
 async def execute_agent_tool(
-    client: AuthoringClient,
-    *,
-    run_id: str,
-    command: str,
-    tool_call_id: str,
-    name: str,
-    tool_input: dict[str, Any],
-    idempotency_key: str,
-    actor_token: str | None = None,
+    client: AuthoringClient, **kwargs: Unpack[_AgentToolArgs]
 ) -> AuthoringResponse | Denial:
     """Execute a bridged tool through the engine's run-scoped execute endpoint.
 
@@ -194,15 +199,15 @@ async def execute_agent_tool(
     :class:`Denial` value rather than raising.
     """
     return await client.post_command(
-        f"/v1/runs/{run_id}/agent-tools/execute",
-        command=command,
+        f"/v1/runs/{kwargs['run_id']}/agent-tools/execute",
+        command=kwargs["command"],
         payload={
-            "tool_call_id": tool_call_id,
-            "name": name,
-            "input": tool_input,
+            "tool_call_id": kwargs["tool_call_id"],
+            "name": kwargs["name"],
+            "input": kwargs["tool_input"],
         },
-        idempotency_key=idempotency_key,
-        actor_token=actor_token,
+        idempotency_key=kwargs["idempotency_key"],
+        actor_token=kwargs.get("actor_token"),
     )
 
 

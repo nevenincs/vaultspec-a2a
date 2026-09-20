@@ -65,6 +65,8 @@ if TYPE_CHECKING:
     from sqlalchemy import CursorResult, Result
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ...database.thread_repository import ThreadWriteExpectation
+
 
 __all__ = [
     "CleanupItem",
@@ -408,6 +410,29 @@ def _record_for(
     )
 
 
+async def _resume_existing_saga(
+    session: AsyncSession,
+    thread_id: str,
+    existing: ThreadDeletionSagaModel,
+    expectation: ThreadWriteExpectation,
+) -> DeletionSaga | None:
+    if expectation.status is ThreadStatus.DELETING:
+        return _hydrate(existing, created=False)
+    try:
+        election = await elect_thread_deleting(
+            session,
+            thread_id,
+            expectation=expectation,
+        )
+    except ValueError:
+        await session.rollback()
+        raise
+    if election.outcome is ThreadStatusElectionOutcome.WON:
+        return _hydrate(existing, created=False)
+    await session.rollback()
+    return None
+
+
 async def create_deletion_saga(
     session: AsyncSession,
     *,
@@ -431,21 +456,7 @@ async def create_deletion_saga(
         return None
     expectation = thread_write_expectation(thread)
     if existing is not None:
-        if expectation.status is ThreadStatus.DELETING:
-            return _hydrate(existing, created=False)
-        try:
-            election = await elect_thread_deleting(
-                session,
-                thread_id,
-                expectation=expectation,
-            )
-        except ValueError:
-            await session.rollback()
-            raise
-        if election.outcome is ThreadStatusElectionOutcome.WON:
-            return _hydrate(existing, created=False)
-        await session.rollback()
-        return None
+        return await _resume_existing_saga(session, thread_id, existing, expectation)
 
     row = ThreadDeletionSagaModel(
         thread_id=thread_id,

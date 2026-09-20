@@ -141,13 +141,13 @@ class LivenessPollFilter(logging.Filter):
             return True
         if path.split("?", 1)[0] not in _LIVENESS_POLL_PATHS:
             return True
-        if not isinstance(status, int | str):
-            # An unrecognised status is not a proven-boring poll; keep it.
-            return True
-        try:
-            return not 200 <= int(status) < 300
-        except ValueError:
-            return True
+        if isinstance(status, int | str):
+            try:
+                return not 200 <= int(status) < 300
+            except ValueError:
+                pass
+        # An unrecognised status is not a proven-boring poll; keep it.
+        return True
 
 
 class OTelCorrelationFilter(logging.Filter):

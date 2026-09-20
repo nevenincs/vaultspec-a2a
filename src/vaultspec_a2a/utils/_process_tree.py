@@ -115,29 +115,7 @@ def pid_is_live(pid: int) -> bool:
     if pid <= 0:
         return False
     if sys.platform == "win32":
-        import ctypes
-        from ctypes import wintypes
-
-        process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
-        still_active = 259  # STILL_ACTIVE
-        kernel32 = _win_kernel32()
-        kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-        kernel32.GetExitCodeProcess.argtypes = (
-            wintypes.HANDLE,
-            ctypes.POINTER(wintypes.DWORD),
-        )
-        handle = kernel32.OpenProcess(process_query, False, pid)
-        if not handle:
-            return False
-        try:
-            code = wintypes.DWORD()
-            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                return False
-            return code.value == still_active
-        finally:
-            kernel32.CloseHandle(handle)
+        return _windows_pid_is_live(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -146,6 +124,32 @@ def pid_is_live(pid: int) -> bool:
         # Another user owns it, so it cannot be an unreaped child of ours: it exists.
         return True
     return not _posix_pid_is_zombie(pid)
+
+
+def _windows_pid_is_live(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
+    still_active = 259  # STILL_ACTIVE
+    kernel32 = _win_kernel32()
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.GetExitCodeProcess.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    handle = kernel32.OpenProcess(process_query, False, pid)
+    if not handle:
+        return False
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _posix_pid_is_zombie(pid: int) -> bool:

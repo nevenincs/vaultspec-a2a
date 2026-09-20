@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:2472e5e233102da2147decfc8e90411d44dc8031dd7e5cfd757dc3b36bfc5064'
+body_hash: 'sha256:7e0079fcba570ed3aa653967605ffbf0d329d54be8f5824394e894bf4bc2eddd'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4027,3 +4027,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, compatibility: topology route annotations are inspected at runtime by LangGraph. The extracted modules require `TeamState` available at runtime. Fixed after the first focused test run exposed a `NameError`; 107 graph tests then passed.
 - Review finding, low severity, maintainability: the compatibility wrappers for three private research helpers add indirect calls. They preserve current import and call signatures. Keep them in the audit queue for removal only if callers migrate deliberately.
 - Verification: strict Ty passed, import load passed for 295 modules, export coverage had zero findings, 107 focused graph tests and 17 event-handler tests passed, and Radon cyclomatic passed. `just check-strict` still fails on 74 parameter-count offenders, 111 selected Ruff findings, 30 preview nesting findings, and 40 Pylint design findings. Module length and cognitive complexity are green. These remaining findings stay open in the audit queue.
+
+### 2026-09-20 return and catalog parameter review
+
+- Implementation: extracted deletion-saga resume and Windows PID liveness helpers, consolidated the liveness log-filter fallback, and grouped agent-tool execution keyword fields in a TypedDict. Three PLR0911 return findings and one PLR0913 parameter finding are closed.
+- Review finding, low severity, compatibility: `execute_agent_tool` now accepts the same required keyword names through `Unpack[_AgentToolArgs]`; direct callers and dispatch tests pass. Runtime signature introspection now sees `**kwargs`, so any future signature consumer should use the explicit TypedDict contract.
+- Verification: 25 deletion tests, 53 process/logging tests, and 13 catalog/dispatch tests passed; strict Ty and scoped Ruff passed. Remaining strict findings stay open in this audit queue.

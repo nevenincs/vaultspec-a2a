@@ -907,6 +907,10 @@ def _posix_group_is_live(pgid: int) -> bool | None:
         entries = os.listdir("/proc")
     except OSError:
         return _ps_group_is_live(pgid)
+    return _proc_group_has_live_member(entries, pgid)
+
+
+def _proc_group_has_live_member(entries: list[str], pgid: int) -> bool | None:
     uncertain = False
     for entry in entries:
         if not entry.isdigit():

@@ -44,7 +44,9 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ..control.action_lease import ControlActionClaim
     from ..control.circuit_breaker import WorkerCircuitBreaker
+    from ..control.dispatch import DispatchOutcome
     from ..control.worker_management import LazyWorkerSpawner
 
 __all__ = ["MessageResult", "send_followup_message"]
@@ -63,6 +65,69 @@ class MessageResult:
     error_detail: str | None = None
     circuit_open: bool = False
     failure_type: FailureType | None = None
+
+
+def _claim_message_failure(
+    claim: ControlActionClaim, thread_id: str, thread_status: str
+) -> MessageResult | None:
+    if not claim.authority_matches:
+        return MessageResult(
+            action_id=claim.action_id,
+            thread_id=thread_id,
+            thread_status=thread_status,
+            dispatched=False,
+            failure_type=FailureType.INCOMPATIBLE_STATE,
+            error_detail="Accepted action no longer owns the current run",
+        )
+    if not claim.payload_matches:
+        return MessageResult(
+            action_id=claim.action_id,
+            thread_id=thread_id,
+            thread_status=thread_status,
+            dispatched=False,
+            error_detail="Idempotency key is already bound to a different message",
+            failure_type=FailureType.CONFLICT,
+        )
+    if not claim.acquired:
+        return MessageResult(
+            action_id=claim.action_id,
+            thread_id=thread_id,
+            thread_status=thread_status,
+            dispatched=False,
+        )
+    return None
+
+
+async def _settle_failed_message_dispatch(
+    db: AsyncSession,
+    claim: ControlActionClaim,
+    outcome: DispatchOutcome,
+    thread_id: str,
+    thread_status: str,
+) -> MessageResult:
+    policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
+    detail = outcome.detail or "Worker dispatch failed"
+    if typed_failure is None:
+        raise RuntimeError("failed dispatch carries no failure type")
+    settlement = await record_dispatch_failure(db, claim, typed_failure, detail=detail)
+    if settlement is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
+        # Only definite non-delivery may be recorded; ambiguous delivery keeps
+        # its lease for redrive and leaves the run's status untouched.
+        await record_undelivered_dispatch(
+            db,
+            thread_id,
+            reason=f"Follow-up message not delivered: {detail}",
+        )
+    await db.commit()
+    return MessageResult(
+        action_id=claim.action_id,
+        thread_id=thread_id,
+        thread_status=thread_status,
+        dispatched=False,
+        circuit_open=policy.is_circuit_open,
+        error_detail=detail,
+        failure_type=typed_failure,
+    )
 
 
 async def send_followup_message(
@@ -191,31 +256,9 @@ async def send_followup_message(
             recovery_timeout_seconds=graph_definition.run_timeout_seconds,
         ),
     )
-    if not claim.authority_matches:
-        return MessageResult(
-            action_id=claim.action_id,
-            thread_id=thread_id,
-            thread_status=thread_status,
-            dispatched=False,
-            failure_type=FailureType.INCOMPATIBLE_STATE,
-            error_detail="Accepted action no longer owns the current run",
-        )
-    if not claim.payload_matches:
-        return MessageResult(
-            action_id=claim.action_id,
-            thread_id=thread_id,
-            thread_status=thread_status,
-            dispatched=False,
-            error_detail="Idempotency key is already bound to a different message",
-            failure_type=FailureType.CONFLICT,
-        )
-    if not claim.acquired:
-        return MessageResult(
-            action_id=claim.action_id,
-            thread_id=thread_id,
-            thread_status=thread_status,
-            dispatched=False,
-        )
+    claim_failure = _claim_message_failure(claim, thread_id, thread_status)
+    if claim_failure is not None:
+        return claim_failure
 
     dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
     await mark_message_followup_requested(db, thread_id)
@@ -243,42 +286,16 @@ async def send_followup_message(
     )
 
     if not outcome.success:
-        policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-        detail = outcome.detail or "Worker dispatch failed"
-        if typed_failure is None:
-            raise RuntimeError("failed dispatch carries no failure type")
-        settlement = await record_dispatch_failure(
-            db, claim, typed_failure, detail=detail
+        result = await _settle_failed_message_dispatch(
+            db, claim, outcome, thread_id, thread_status
         )
-        if settlement is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
-            # The lease is released only where the worker certainly scheduled no
-            # task, so this is the one arm that KNOWS the message never arrived,
-            # and the only one entitled to say so durably. An ambiguous failure
-            # keeps its lease for redrive precisely because delivery is
-            # undecided; recording a non-delivery there would assert something
-            # the gateway cannot observe. Neither arm touches the run's status:
-            # the run is alive, and the message is what failed.
-            await record_undelivered_dispatch(
-                db,
-                thread_id,
-                reason=f"Follow-up message not delivered: {detail}",
-            )
-        await db.commit()
-        return MessageResult(
+    else:
+        # Worker acknowledgement proves scheduling only. The exact internal
+        # ``dispatch_applied`` receipt settles the journal action and repair state.
+        result = MessageResult(
             action_id=claim.action_id,
             thread_id=thread_id,
             thread_status=thread_status,
-            dispatched=False,
-            circuit_open=policy.is_circuit_open,
-            error_detail=detail,
-            failure_type=typed_failure,
+            dispatched=True,
         )
-
-    # Worker acknowledgement proves scheduling only. The exact internal
-    # ``dispatch_applied`` receipt settles the journal action and repair state.
-    return MessageResult(
-        action_id=claim.action_id,
-        thread_id=thread_id,
-        thread_status=thread_status,
-        dispatched=True,
-    )
+    return result

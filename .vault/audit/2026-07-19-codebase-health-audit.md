@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:43a70ba22b7bb32481f932556e369cf022ad35c79c0d8ec99beda3251ed06fb5'
+body_hash: 'sha256:9ad51fd80a5a0ed3a2f362c2605c8eb791fde1b6f4e8156c27dcb1c6b9120b4f'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3541,3 +3541,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: separated the protocol-bound check in desktop discovery numeric validation and extracted one `/proc/net/tcp` line parser. The latter removes one preview nesting finding without changing the first matching inode or malformed-line behavior.
 - Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Process and discovery tests: 28 passed. `just check-all` and `just check-type-strict` passed; focused Pylint no longer reports the boolean-expression issue in discovery. Preview nesting fell from 31 to 30.
 - Queue: after this pass, 54 cyclomatic, 141 Ruff function-limit, 30 preview nesting, 50 Pylint size/design, and the listed shape and cognitive findings remain (severity: moderate; type: code health). Full strict gate stays open until all reach zero.
+
+### 2026-09-20 follow-up dispatch and process group review pass
+
+- Implementation: isolated follow-up claim rejection and failed-dispatch settlement while preserving durable non-delivery and lease rules; separated Linux process-group membership scan from probe selection.
+- Review: inspected both diffs and dispatch ordering. No new correctness findings surfaced (severity: none; type: implementation review). Follow-up/control and process tests passed (36, then 15 after final dispatch edit). `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 54 to 52 over limit and Ruff function-limit findings from 141 to 139. The follow-up service still has a parameter-count finding, and all remaining strict findings remain queued (severity: moderate; type: code health).

@@ -2,10 +2,30 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ..thread.enums import ApprovalStatus
 from ..thread.snapshots import LOCALLY_RESPONDABLE_PAUSE_CAUSES
 
-__all__ = ["permission_resume_value"]
+if TYPE_CHECKING:
+    from .dispatch import DispatchOutcome
+
+__all__ = ["permission_dispatch_error", "permission_resume_value"]
+
+
+def permission_dispatch_error(
+    outcome: DispatchOutcome, *, is_circuit_open: bool, should_mark_failed: bool
+) -> tuple[str, int | None]:
+    """Translate a failed worker dispatch into the permission response error."""
+    detail = outcome.detail or "Worker dispatch failed"
+    if is_circuit_open:
+        return outcome.detail or "Circuit breaker open", 503
+    if should_mark_failed:
+        http_code = getattr(outcome.exception, "status_code", 0)
+        if http_code:
+            detail = f"Worker dispatch failed (HTTP {http_code})"
+        return detail, 502
+    return detail, None
 
 
 def permission_resume_value(

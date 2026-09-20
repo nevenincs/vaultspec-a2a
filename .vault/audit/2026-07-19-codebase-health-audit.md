@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:1ede18eb98173b091bb3d21a24edaf3824584f05b94293422458474fd10ac36e'
+body_hash: 'sha256:f45de8c5ef9871da044c1b17a04ead75fbfe91d7d2457748839f801eadb3d1c3'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3779,3 +3779,27 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted declared-versus-served tool differences from `verify_declared_tool_contract` in `providers/_mcp_contract.py`.
 - Review: inspected missing and undeclared selection under exact-surface mode, plus unchanged refusal messages. Severity/type: no new defect found. The pre-existing seven-parameter `PLR0913` finding is medium/type shape and remains queued.
 - Verification: 25 focused MCP/registry tests, strict Ty, file Ruff and format, `git diff --check`, and Radon. Target function complexity decreased from 12 to 7.
+
+### 2026-09-20 permission dispatch error ownership review
+
+- Implementation: moved protocol-facing failed-dispatch error translation from `permission_service.py` to the existing `permission_dispatch.py` helper module and followed its import back into the service. The service is now 998 lines; module-length findings decreased from 10 to 9 after permission replay changes.
+- Review: compared error details, HTTP status mapping, and call sites with the original function. Severity/type: no new defect found. Other module-length and parameter findings stay open in this audit queue.
+- Verification: Ruff and format checks for both files, eight permission lease/dispatch transition tests, and the module-length gate. Strict Ty is running for the combined tree.
+
+### 2026-09-20 checkpoint interrupt projection review
+
+- Implementation: extracted checkpoint interrupt merging from `apply_checkpoint_projection` into `_merge_checkpoint_interrupts` in `control/projection.py`.
+- Review: inspected duplicate permission suppression, first parked clarification selection, and unchanged projection order. Severity/type: no new defect found; other projection findings remain queued.
+- Verification: Ruff/format, 17 API projection tests, and function-level Radon. The target function complexity decreased from 11 to 4, with the helper at 8.
+
+### 2026-09-20 cancellation election and public catalog review
+
+- Implementation: extracted cancel writer-ownership and lost-election classification from `_elect_cancel_authority`; extracted public identifier collection from `validate_public_catalog_bounds`.
+- Review: checked cancellation election outcomes, refreshed thread eligibility, public identifier ordering, revision inclusion, and unchanged validation errors. Severity/type: no new defect found; other complexity and parameter findings remain open.
+- Verification: nine direct-control lease tests, 22 catalog tests, targeted Ruff/format and Ty. Radon complexity decreased from 11 to 7 for cancellation election and 12 to 8 for catalog bounds.
+
+### 2026-09-20 Kimi catalog model-reference review
+
+- Implementation: extracted provider/model reference validation from `catalog_from_provider_list` into `_validated_model_reference`.
+- Review: checked validation order, exact error messages, returned provider reference, revision row construction, and model metadata. Severity/type: no new defect found. The pre-existing six-parameter `discover_kimi_catalog` shape finding remains queued.
+- Verification: 59 focused Kimi catalog tests, Ruff and format, targeted Ty, and Radon. Target function complexity decreased from 12 to 9.

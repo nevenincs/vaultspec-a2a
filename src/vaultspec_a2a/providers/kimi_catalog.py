@@ -171,6 +171,32 @@ def _revision(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _validated_model_reference(
+    alias_value: str,
+    raw_model: JsonValue,
+    providers: JsonObject,
+) -> tuple[str, str, str, JsonObject]:
+    alias = _FIELDS.required_text(alias_value, field="model alias")
+    if not isinstance(raw_model, dict):
+        raise KimiCatalogProtocolError(
+            f"Kimi catalog model {alias!r} must be an object"
+        )
+    provider_ref = _FIELDS.required_text(
+        raw_model.get("provider"), field=f"{alias}.provider"
+    )
+    if provider_ref not in providers:
+        raise KimiCatalogProtocolError(
+            f"Kimi catalog model {alias!r} names an unknown provider"
+        )
+    provider = providers[provider_ref]
+    if not isinstance(provider, dict):
+        raise KimiCatalogProtocolError(
+            f"Kimi catalog provider {provider_ref!r} must be an object"
+        )
+    wire_model = _FIELDS.required_text(raw_model.get("model"), field=f"{alias}.model")
+    return alias, provider_ref, wire_model, raw_model
+
+
 def catalog_from_provider_list(
     result: JsonObject,
     *,
@@ -188,24 +214,8 @@ def catalog_from_provider_list(
     controls: list[NativeControl] = []
     revision_rows: list[JsonObject] = []
     for alias_value, raw_model in model_table.items():
-        alias = _FIELDS.required_text(alias_value, field="model alias")
-        if not isinstance(raw_model, dict):
-            raise KimiCatalogProtocolError(
-                f"Kimi catalog model {alias!r} must be an object"
-            )
-        provider_ref = _FIELDS.required_text(
-            raw_model.get("provider"), field=f"{alias}.provider"
-        )
-        if provider_ref not in providers:
-            raise KimiCatalogProtocolError(
-                f"Kimi catalog model {alias!r} names an unknown provider"
-            )
-        if not isinstance(providers[provider_ref], dict):
-            raise KimiCatalogProtocolError(
-                f"Kimi catalog provider {provider_ref!r} must be an object"
-            )
-        wire_model = _FIELDS.required_text(
-            raw_model.get("model"), field=f"{alias}.model"
+        alias, provider_ref, wire_model, raw_model = _validated_model_reference(
+            alias_value, raw_model, providers
         )
         capabilities = _string_list(
             raw_model.get("capabilities"),

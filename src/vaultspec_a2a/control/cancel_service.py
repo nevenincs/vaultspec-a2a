@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from ..control.circuit_breaker import WorkerCircuitBreaker
     from ..control.worker_management import LazyWorkerSpawner
     from ..database import ThreadWriteExpectation
+    from ..thread.cancel_policy import CancelEligibility
 
 __all__ = ["CancelResult", "CancelRuntime", "cancel_thread"]
 
@@ -377,6 +378,31 @@ async def _existing_cancel_claim(
     return None
 
 
+def _cancel_authority_already_owned(
+    expectation: ThreadWriteExpectation, dispatch_id: str
+) -> bool:
+    """Return whether the expected writer already owns this cancel receipt."""
+    return (
+        expectation.status is ThreadStatus.CANCELLING
+        and expectation.authority.action_type is ControlActionType.CANCEL
+        and expectation.authority.action_receipt_id == dispatch_id
+    )
+
+
+def _cancel_election_conflict(
+    eligibility: CancelEligibility,
+) -> tuple[FailureType | None, str | None]:
+    """Classify a lost cancellation election against the refreshed thread."""
+    if eligibility.already_cancelled:
+        return None, None
+    if eligibility.allowed:
+        return (
+            FailureType.CONFLICT,
+            "Thread authority changed during cancellation election",
+        )
+    return FailureType.TERMINAL, eligibility.reason
+
+
 async def _elect_cancel_authority(
     db: AsyncSession,
     thread: ThreadModel,
@@ -387,11 +413,7 @@ async def _elect_cancel_authority(
     thread_id = context.thread_id
     thread_status = context.thread_status
     response_idempotency_key = context.response_idempotency_key
-    already_owned = (
-        expectation.status is ThreadStatus.CANCELLING
-        and expectation.authority.action_type is ControlActionType.CANCEL
-        and expectation.authority.action_receipt_id == claim.dispatch_id
-    )
+    already_owned = _cancel_authority_already_owned(expectation, claim.dispatch_id)
     election = (
         None
         if already_owned
@@ -433,15 +455,7 @@ async def _elect_cancel_authority(
             )
         await db.refresh(thread)
         eligibility = can_cancel(thread.status)
-        if eligibility.already_cancelled:
-            failure_type = None
-            error_detail = None
-        elif eligibility.allowed:
-            failure_type = FailureType.CONFLICT
-            error_detail = "Thread authority changed during cancellation election"
-        else:
-            failure_type = FailureType.TERMINAL
-            error_detail = eligibility.reason
+        failure_type, error_detail = _cancel_election_conflict(eligibility)
         return CancelResult(
             action_id=claim.action_id,
             thread_id=thread_id,

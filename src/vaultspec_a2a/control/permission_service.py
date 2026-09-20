@@ -92,6 +92,9 @@ from .dispatch import DispatchOutcome, safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .graph_definition import read_accepted_graph_definition
+from .permission_dispatch import (
+    permission_dispatch_error as _permission_dispatch_error,
+)
 from .permission_dispatch import permission_resume_value
 from .repair_transitions import (
     apply_dispatch_failure,
@@ -876,20 +879,6 @@ async def _record_permission_transition(
         dispatch=dispatch.model_copy(update={"dispatch_id": claim.dispatch_id}),
         approval_status=submitted_approval_status,
     )
-
-
-def _permission_dispatch_error(
-    outcome: DispatchOutcome, *, is_circuit_open: bool, should_mark_failed: bool
-) -> tuple[str, int | None]:
-    detail = outcome.detail or "Worker dispatch failed"
-    if is_circuit_open:
-        return outcome.detail or "Circuit breaker open", 503
-    if should_mark_failed:
-        http_code = getattr(outcome.exception, "status_code", 0)
-        if http_code:
-            detail = f"Worker dispatch failed (HTTP {http_code})"
-        return detail, 502
-    return detail, None
 
 
 async def _failed_permission_dispatch(

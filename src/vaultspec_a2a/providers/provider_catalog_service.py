@@ -319,8 +319,7 @@ def _valid_public_id(value: str, *, max_length: int) -> bool:
     )
 
 
-def validate_public_catalog_bounds(catalog: ProviderCatalog) -> None:
-    """Reject one unsafe lane before it can poison the whole public response."""
+def _catalog_public_ids(catalog: ProviderCatalog) -> tuple[str, ...]:
     public_ids = (
         catalog.key.provider_id,
         catalog.key.execution_mode,
@@ -333,6 +332,12 @@ def validate_public_catalog_bounds(catalog: ProviderCatalog) -> None:
     )
     if catalog.state.revision is not None:
         public_ids = (*public_ids, catalog.state.revision)
+    return public_ids
+
+
+def validate_public_catalog_bounds(catalog: ProviderCatalog) -> None:
+    """Reject one unsafe lane before it can poison the whole public response."""
+    public_ids = _catalog_public_ids(catalog)
     if not all(_valid_public_id(value, max_length=512) for value in public_ids):
         raise ValueError("catalog contains an invalid public identifier")
     control_ids = (

@@ -336,6 +336,28 @@ def _permission_data_from_interrupt(
     return None
 
 
+def _merge_checkpoint_interrupts(
+    snapshot: ThreadStateData, projection: CheckpointProjection
+) -> None:
+    """Add checkpoint permissions and the first parked clarification."""
+    existing = {permission.request_id for permission in snapshot.pending_permissions}
+    for interrupt in projection.pending_interrupts:
+        permission = _permission_data_from_interrupt(interrupt)
+        if permission is None or permission.request_id in existing:
+            continue
+        snapshot.pending_permissions.append(permission)
+        existing.add(permission.request_id)
+
+    # Mid-run clarification: checkpoint-truth disclosure only. A parked
+    # clarification is read from this projection on every reload.
+    if snapshot.pending_clarification is None:
+        for interrupt in projection.pending_interrupts:
+            clarification = clarification_data_from_interrupt(interrupt)
+            if clarification is not None:
+                snapshot.pending_clarification = clarification
+                break
+
+
 def apply_checkpoint_projection(
     snapshot: ThreadStateData,
     projection: CheckpointProjection,
@@ -353,24 +375,7 @@ def apply_checkpoint_projection(
     if snapshot.pause_cause is None:
         snapshot.pause_cause = projection.pause_cause
 
-    existing = {permission.request_id for permission in snapshot.pending_permissions}
-    for interrupt in projection.pending_interrupts:
-        permission = _permission_data_from_interrupt(interrupt)
-        if permission is None or permission.request_id in existing:
-            continue
-        snapshot.pending_permissions.append(permission)
-        existing.add(permission.request_id)
-
-    # Mid-run clarification: checkpoint-truth
-    # disclosure only — no durable-row cross-check, unlike pending_permissions
-    # above. A parked clarification survives a reload because it is read from
-    # this same checkpoint projection every time, never cached in memory.
-    if snapshot.pending_clarification is None:
-        for interrupt in projection.pending_interrupts:
-            clarification = clarification_data_from_interrupt(interrupt)
-            if clarification is not None:
-                snapshot.pending_clarification = clarification
-                break
+    _merge_checkpoint_interrupts(snapshot, projection)
 
     for reason in projection.degraded_reasons:
         if reason not in snapshot.degraded_reasons:

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:48df01ac2a72ee805db4804cac907f8805fc51956b4e9be703336a64fe6b5d72'
+body_hash: 'sha256:7994e8a91ac3a039d3e4898978267d381af132bb4e6c12702708add033e1e208'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4246,3 +4246,12 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, advisory security triage: Bandit reports 11 medium observations, zero high. Two B104 sites describe explicit bind-all defaults or a bind-all comparison in service configuration; the transport host is a configured deployment choice. B310 is a fixed `http://127.0.0.1` health probe with a typed service port. Eight B608 sites interpolate fixed schema identifiers or SQL placeholder strings, including immutable migrations; values from variable records are bound separately. These are reviewed, non-exploitable under the current contracts and remain visible in the advisory scan, rather than being represented as a zero-count security scan.
 - Review finding, low severity, advisory security triage: Bandit reports 49 low observations, predominantly deliberate subprocess imports/calls in process management and tests, plus token-key names, a deterministic fixture value, and non-security random test leases. No shell interpolation or embedded credential was identified in the reviewed categories. The advisory scan remains outside the required strict gate.
 - Review finding, low severity, advisory duplication: the clone scanner reports one 41-line clone (0.04%) between migration revisions 0008 and 0009. Those migration histories are immutable; modifying a historical revision would change upgrade behavior for existing installations. Keep this classified advisory observation in the audit queue.
+
+### 2026-09-20 Linux canonical CI review
+
+- Review finding, medium severity, platform correctness: Linux canonical CI completed the quality sentinels but its full unit phase reported 17 failures. Several fixtures embedded Windows drive roots (`C:` or `Y:`), which fail the Linux absolute-project validator or alter expected error precedence. API, database, and IPC fixtures now derive their absolute paths from the host anchor, current directory, or `tmp_path`; boundary-length assertions remain exact.
+- Review finding, medium severity, test configuration: the SQLite health probe constructed a temporary engine but left global settings pointing at the host database, so the reported footprint was `None` on Linux. The test now overrides the database settings for its temporary SQLite authority. Three Kimi eligibility tests assumed an optional CLI existed; they now declare the canonical `kimi-cli` prerequisite. One provider factory test expected stale CLI wording, and a prerequisite-rule meta-test assumed `codex` was installed; the latter now seats a temporary PATH-visible executable to reach its intended gate assertion.
+- Review finding, medium severity, worker startup: the restart test surfaced an eager worker spawn before the reconciling sweep checked stored execution authority. The sweep now starts the worker only through `dispatch_to_worker` after a valid dispatch exists. The live restart test and 13 redispatch-focused tests pass locally.
+- Review finding, low severity, filesystem identity: deleting a file and creating its replacement at the same name can reuse an inode on Linux, making the swapped-secret test report a false admission. The test now creates a second inode before atomically replacing the named file.
+- Review finding, low severity, timing measurement: bridge close completed in 0.33 seconds on the Linux runner, while the warmup test asserted it must exceed one second. The test still checks every measured teardown window and its loop-gap boundary; the host-specific duration floor was removed.
+- Verification: agent-owned focused suites passed 46 path tests, eight health/selection tests, and 58 provider/prerequisite tests. Root focused suites passed eight desktop/warmup tests and 13 redispatch tests. Ruff check and formatting pass on touched files. A fresh strict scan, full local unit suite, and Linux CI rerun are required; review result is REVISION REQUIRED pending these results.

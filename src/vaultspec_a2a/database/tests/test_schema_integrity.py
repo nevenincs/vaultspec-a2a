@@ -29,7 +29,6 @@ Pydantic models.
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -420,7 +419,7 @@ class TestWorkspaceRootBoundIsTheColumn:
     @staticmethod
     def _root_of_length(length: int) -> str:
         """Build an absolute workspace root of exactly ``length`` characters."""
-        prefix = f"C:{os.sep}"
+        prefix = Path.cwd().anchor
         root = prefix + "w" * (length - len(prefix))
         assert len(root) == length
         return root
@@ -537,7 +536,7 @@ class TestFeatureTagBoundIsTheColumn:
             session,
             write_authority=make_test_write_authority(),
             metadata=json.dumps(
-                {"workspace_root": f"C:{os.sep}workspace", "feature_tag": tag}
+                {"workspace_root": str(Path.cwd() / "workspace"), "feature_tag": tag}
             ),
         )
         await session.commit()
@@ -564,7 +563,7 @@ class TestFeatureTagBoundIsTheColumn:
             write_authority=make_test_write_authority(),
             metadata=json.dumps(
                 {
-                    "workspace_root": f"C:{os.sep}workspace",
+                    "workspace_root": str(Path.cwd() / "workspace"),
                     "feature_tag": "f" * (width + 1),
                 }
             ),

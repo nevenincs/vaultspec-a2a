@@ -444,7 +444,8 @@ async def redispatch_reconciling_threads(
             )
             if not threads:
                 return
-            await spawner.ensure_worker()
+            # Start a worker only for a dispatch that survives stored-authority
+            # validation; dispatch_to_worker owns that demand.
             logger.info("Re-dispatching %d reconciling threads", len(threads))
             failure_counts: dict[str, int] = {}
             failure_thread_ids: dict[str, list[str]] = {}

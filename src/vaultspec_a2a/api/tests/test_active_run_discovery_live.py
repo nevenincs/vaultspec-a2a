@@ -456,7 +456,7 @@ async def test_active_run_discovery_rejects_unbounded_selectors(
         assert isinstance(workspace_root_type, String)
         column_width = workspace_root_type.length
         assert isinstance(column_width, int)
-        prefix = f"C:{os.sep}"
+        prefix = tmp_path.anchor
         widest = prefix + "w" * (column_width - len(prefix))
 
         admitted = await client.get("/v1/runs", params={"workspace_root": widest})

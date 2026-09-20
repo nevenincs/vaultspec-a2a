@@ -276,7 +276,7 @@ def test_provider_factory_zai_injects_configured_token() -> None:
 def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
     """Kimi builds an AcpChatModel on the `kimi acp` command with the kimi family."""
     if resolve_provider_cli_executable(Provider.KIMI) is None:
-        with pytest.raises(ValueError, match="Kimi CLI not resolvable"):
+        with pytest.raises(ValueError, match="Kimi Code CLI not resolvable"):
             from .._factory_commands import classify_provider_command
 
             classify_provider_command(Provider.KIMI)

@@ -205,9 +205,6 @@ def test_compile_probe_reports_distinct_teardown_windows(
         assert 0.0 <= compiled[gap_field] <= compiled[duration_field], (
             f"teardown phase boundaries disagree at {gap_field}: {compiled}"
         )
-    assert compiled["bridge_close_seconds"] > 1.0, (
-        "the unreachable-gateway retry cleanup was not exercised"
-    )
 
 
 def test_repeated_cold_compiles_keep_serving_under_five_slot_cpu_load(

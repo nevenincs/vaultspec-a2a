@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -31,7 +33,7 @@ def _request(**changes: object) -> RunStartRequest:
         "team_preset": "mock-coder",
         "run_id": "run-selection-schema",
         "message": "go",
-        "metadata": ThreadMetadata(workspace_root="Y:/code"),
+        "metadata": ThreadMetadata(workspace_root=str(Path.cwd())),
         "selection": _selection(),
     }
     payload.update(changes)

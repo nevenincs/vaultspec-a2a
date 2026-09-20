@@ -256,6 +256,16 @@ def test_a_gate_that_skips_despite_its_declaration_fails_the_session(
         '    pytest.skip("codex CLI not on PATH")\n',
         encoding="utf-8",
     )
+    fake_codex = tmp_path / ("codex.cmd" if os.name == "nt" else "codex")
+    if os.name == "nt":
+        fake_codex.write_text("@echo off\r\nexit /b 0\r\n", encoding="utf-8")
+    else:
+        fake_codex.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_codex.chmod(0o755)
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join(
+        part for part in (str(tmp_path), env.get("PATH", "")) if part
+    )
     result = subprocess.run(
         [
             sys.executable,
@@ -268,6 +278,7 @@ def test_a_gate_that_skips_despite_its_declaration_fails_the_session(
             str(target),
         ],
         cwd=tmp_path,
+        env=env,
         capture_output=True,
         text=True,
         timeout=300,

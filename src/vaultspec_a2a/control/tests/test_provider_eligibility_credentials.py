@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Any, cast
@@ -13,6 +12,8 @@ import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from ...conftest import ExternalPrerequisiteRule
 
 _DRIVER = """
 import json
@@ -48,10 +49,13 @@ _KIMI_NAMES = (
 )
 
 
-def _run_probe(tmp_path: Path, definition: dict[str, str]) -> dict[str, Any]:
+def _run_probe(
+    tmp_path: Path,
+    definition: dict[str, str],
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> dict[str, Any]:
     """Run the production readiness path with the installed Kimi executable."""
-    if shutil.which("kimi") is None:
-        pytest.fail("Kimi Code CLI is not installed")
+    external_prerequisite("kimi-cli")
     env = dict(os.environ)
     for name in _KIMI_NAMES:
         env.pop(name, None)
@@ -75,8 +79,9 @@ def _run_probe(tmp_path: Path, definition: dict[str, str]) -> dict[str, Any]:
 @pytest.mark.middleware
 def test_persisted_config_mode_reaches_command_eligibility(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
-    result = _run_probe(tmp_path, {})
+    result = _run_probe(tmp_path, {}, external_prerequisite)
 
     assert result["temporary_key_configured"] is False
     assert result["command_origin"] == "system_path_executable"
@@ -88,6 +93,7 @@ def test_persisted_config_mode_reaches_command_eligibility(
 @pytest.mark.middleware
 def test_complete_temporary_definition_reaches_command_eligibility(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     result = _run_probe(
         tmp_path,
@@ -96,6 +102,7 @@ def test_complete_temporary_definition_reaches_command_eligibility(
             "KIMI_MODEL_API_KEY": "temporary-secret",
             "KIMI_MODEL_BASE_URL": "https://kimi.example.invalid/v1",
         },
+        external_prerequisite,
     )
 
     assert result["temporary_key_configured"] is True
@@ -107,8 +114,11 @@ def test_complete_temporary_definition_reaches_command_eligibility(
 
 
 @pytest.mark.middleware
-def test_partial_temporary_definition_fails_readiness(tmp_path: Path) -> None:
-    result = _run_probe(tmp_path, {"KIMI_MODEL_API_KEY": "key"})
+def test_partial_temporary_definition_fails_readiness(
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    result = _run_probe(tmp_path, {"KIMI_MODEL_API_KEY": "key"}, external_prerequisite)
 
     assert result["command_origin"] == "system_path_executable"
     assert result["probe_ready"] is False

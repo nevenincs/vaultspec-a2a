@@ -47,7 +47,6 @@ from ._process_tree import (
     THREAD_SUSPEND_RESUME as _THREAD_SUSPEND_RESUME,
 )
 from ._process_tree import (
-    DetachedSpawnFlags,
     ListenerOwnership,
     classify_listener_ownership,
     detached_spawn_kwargs,
@@ -75,7 +74,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
-    "DetachedSpawnFlags",
     "ListenerOwnership",
     "ProcessContainment",
     "ProcessContainmentError",

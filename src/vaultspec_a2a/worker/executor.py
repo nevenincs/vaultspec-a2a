@@ -24,10 +24,6 @@ from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
 from ..thread.errors import describe_exception_chain
-from ..thread.failure_evidence import (
-    GraphFailureEvidence,
-    failure_detail_fingerprint,
-)
 from ._authoring_close import close_authoring_session_best_effort
 from ._dispatch_contract import (
     _CAPACITY_ACCEPTED,
@@ -39,6 +35,7 @@ from ._dispatch_contract import (
     _SLOT_OWNING_ACTIONS,
     DispatchCapacityReservation,
     _GuardWording,
+    failure_evidence,
 )
 from ._dispatch_receipts import emit_dispatch_application_receipt
 from .catalog_store import RunCatalogStore
@@ -56,13 +53,17 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
-    from ..providers import ProviderCondition
     from ..streaming.types import SequencedEvent, StreamableGraph
     from .ipc import WorkerBridge
 
 # ``GraphCompilationError`` is imported to be CAUGHT here, not re-published:
 # ``graph_lifecycle`` raises it and is where every handler imports it from.
-__all__ = ["Executor"]
+__all__ = [
+    "_INGEST_GUARDS",
+    "_RESUME_GUARDS",
+    "DispatchCapacityReservation",
+    "Executor",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -210,25 +211,6 @@ class Executor:
             outcome=outcome,
         )
 
-    @staticmethod
-    def _failure_evidence(
-        req: DispatchRequest,
-        *,
-        detail: str | None,
-        condition: ProviderCondition,
-    ) -> GraphFailureEvidence | None:
-        """Bind one classified worker failure to its accepted graph action."""
-        receipt = req.graph_action_receipt
-        if receipt is None or not detail:
-            return None
-        return GraphFailureEvidence(
-            schema_version="graph-failure-v1",
-            action=receipt,
-            outcome="failed",
-            detail_fingerprint=failure_detail_fingerprint(detail),
-            provider_condition=condition.value,
-        )
-
     async def _emit_dispatch_application_receipt(self, req: DispatchRequest) -> None:
         await emit_dispatch_application_receipt(
             req,
@@ -364,16 +346,14 @@ class Executor:
             reason,
             recoverable=False,
         )
-        failure_evidence = self._failure_evidence(
-            req, detail=reason, condition=_EXECUTOR_CONDITION
-        )
-        if failure_evidence is not None:
+        evidence = failure_evidence(req, detail=reason, condition=_EXECUTOR_CONDITION)
+        if evidence is not None:
             await self._state_projector.emit_terminal_status(
                 req.thread_id,
                 ThreadStatus.FAILED,
                 error_detail=reason,
                 provider_condition=_EXECUTOR_CONDITION,
-                evidence=failure_evidence,
+                evidence=evidence,
             )
         else:
             logger.warning(
@@ -513,7 +493,7 @@ class Executor:
             evidence=cancellation_evidence
             if cancellation_evidence is not None
             else (
-                self._failure_evidence(
+                failure_evidence(
                     req,
                     detail=failure_reason,
                     condition=failure_condition or _EXECUTOR_CONDITION,
@@ -714,16 +694,14 @@ class Executor:
                 reason,
                 recoverable=False,
             )
-            failure_evidence = self._failure_evidence(
-                req, detail=reason, condition=condition
-            )
-            if failure_evidence is not None:
+            evidence = failure_evidence(req, detail=reason, condition=condition)
+            if evidence is not None:
                 await self._state_projector.emit_terminal_status(
                     req.thread_id,
                     ThreadStatus.FAILED,
                     error_detail=reason,
                     provider_condition=condition,
-                    evidence=failure_evidence,
+                    evidence=evidence,
                 )
             if owns_slot:
                 await self._mark_ingest_done(

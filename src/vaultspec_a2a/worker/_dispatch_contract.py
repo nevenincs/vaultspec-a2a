@@ -1,9 +1,32 @@
 """Dispatch guard wording and capacity tokens shared by the executor."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ..providers import ProviderCondition
 from ..thread.enums import ControlActionType
+from ..thread.failure_evidence import (
+    GraphFailureEvidence,
+    failure_detail_fingerprint,
+)
+
+if TYPE_CHECKING:
+    from ..ipc.schemas import DispatchRequest
+
+__all__ = [
+    "_CAPACITY_ACCEPTED",
+    "_CAPACITY_FULL",
+    "_CAPACITY_THREAD_ACTIVE",
+    "_EXECUTOR_CONDITION",
+    "_INGEST_GUARDS",
+    "_RESUME_GUARDS",
+    "_SLOT_OWNING_ACTIONS",
+    "DispatchCapacityReservation",
+    "_GuardWording",
+    "failure_evidence",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,3 +102,22 @@ class DispatchCapacityReservation:
 
     thread_id: str
     generation: int
+
+
+def failure_evidence(
+    req: DispatchRequest,
+    *,
+    detail: str | None,
+    condition: ProviderCondition,
+) -> GraphFailureEvidence | None:
+    """Bind one classified worker failure to its accepted graph action."""
+    receipt = req.graph_action_receipt
+    if receipt is None or not detail:
+        return None
+    return GraphFailureEvidence(
+        schema_version="graph-failure-v1",
+        action=receipt,
+        outcome="failed",
+        detail_fingerprint=failure_detail_fingerprint(detail),
+        provider_condition=condition.value,
+    )

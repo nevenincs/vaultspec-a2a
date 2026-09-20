@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:2bf987acc94b4a392d3f7b147a2ca36e544528dfc958ddffe876586c96ef21db'
+body_hash: 'sha256:7fc1b9b80683422e2dd2de9068c3ec8517bb470904d067c525e3da7fb0fe8bb3'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3899,3 +3899,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: declared the desktop real-process tier as a shared `desktop-processes` resource at collection time. This removes the undeclared-live serial catch-all while preserving machine-global admission, per-test timeout backstops, isolated application homes, and dynamic port allocation.
 - Verification: the resource/plugin contract suite passed 71 tests; Ruff and BasedPyright passed. A two-worker proof placed two real desktop tests on distinct workers and completed in 10.12 seconds. A representative 12-test admission/provenance subset completed in 57.61 seconds on four workers versus about 186 seconds of cumulative test time.
 - Review finding (low, performance/environment): a saturated Windows host can erase the wall-clock benefit for the complete desktop directory (288.10 seconds on four workers versus 286.24 seconds serial) despite confirmed distribution and focused parallel speedup. This is host/process contention, not residual scheduler serialization; session admission remains the capacity backstop. No new correctness defect was found.
+
+### 2026-09-20 executor split follow-up review
+
+- Review finding (high, type regression): the executor split initially left moved private dispatch symbols unavailable to existing typed importers. Explicit exports and a moved failure-evidence helper fixed all 12 strict type diagnostics while keeping `executor.py` below 1000 lines. The affected executor failure/settle tests passed.
+- Review finding (medium, export hygiene): `DetachedSpawnFlags` was published from `utils.process` without a consumer. Removed that redundant facade export; the unconsumed-export guard and governed import-load probe now report zero findings.
+- Remaining work: the module-length gate has 7 oversized modules, and strict shape, Ruff, preview nesting, and Pylint findings remain in the queue.

@@ -584,6 +584,30 @@ def _mark_execution_projection_unavailable(
         snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
 
 
+def _execution_state_projection_is_stale(
+    row: ThreadExecutionStateModel,
+    thread: ThreadModel,
+    *,
+    checkpoint_present: bool,
+    checkpoint_id: str | None,
+) -> bool:
+    """Return whether durable execution state can be joined to the snapshot."""
+    if not checkpoint_present or row.recovery_epoch != thread.recovery_epoch:
+        return True
+    return checkpoint_id is not None and row.checkpoint_id != checkpoint_id
+
+
+def _mark_stale_execution_state(
+    snapshot: ThreadStateData,
+    projection: ExecutionStateProjection,
+) -> None:
+    """Carry projection diagnostics forward before marking its lineage stale."""
+    for reason in projection.degraded_reasons:
+        if reason not in snapshot.degraded_reasons:
+            snapshot.degraded_reasons.append(reason)
+    _mark_execution_state_stale(snapshot)
+
+
 async def enrich_snapshot_from_execution_state(
     session: AsyncSession,
     *,
@@ -615,23 +639,13 @@ async def enrich_snapshot_from_execution_state(
     if is_terminal:
         return snapshot
 
-    is_stale = row.recovery_epoch != thread.recovery_epoch or (
-        checkpoint_present
-        and checkpoint_id is not None
-        and row.checkpoint_id != checkpoint_id
-    )
-    # When checkpoint is unavailable, the execution state row
-    # is unverifiable — fail closed instead of merging stale metadata.
-    if not checkpoint_present:
-        is_stale = True
-    if is_stale:
-        # Carry forward the projection's own degraded_reasons (e.g.
-        # "execution_state_projection_unavailable") before adding the
-        # staleness marker — both conditions are independently true.
-        for reason in projection.degraded_reasons:
-            if reason not in snapshot.degraded_reasons:
-                snapshot.degraded_reasons.append(reason)
-        _mark_execution_state_stale(snapshot)
+    if _execution_state_projection_is_stale(
+        row,
+        thread,
+        checkpoint_present=checkpoint_present,
+        checkpoint_id=checkpoint_id,
+    ):
+        _mark_stale_execution_state(snapshot, projection)
         return snapshot
 
     return apply_execution_state_projection(snapshot, projection)

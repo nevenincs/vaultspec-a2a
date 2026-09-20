@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:a689c525f31c7ebecb22d119be9da118a27434b82c3a70bcb957a9d4e6b64fe4'
+body_hash: 'sha256:f825d4c439d8df6ee1b23847e57d602e4126c139d8c13746a39fdd18e31faa64'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3712,3 +3712,16 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: separated transport validation from token and catalog checks in `AuthoringToolBinding.__post_init__` without changing their order or failure messages.
 - Review: inspected the complete validation path and test coverage for HTTP and stdio transport, tokens, and write-tool refusal. Severity/type: no new defect found. Remaining strict complexity findings are retained in this audit queue.
 - Verification: Ruff selected complexity, full Ruff check and format, strict Ty, 51 focused authoring tests, and the cyclomatic gate. Cyclomatic findings decreased from 33 to 32.
+
+### 2026-09-20 event application and clarification review
+
+- Implementation: moved permission resolution and dispatch application receipt settlement from `control/event_handlers.py` to `control/_event_application.py`, following their direct imports and callers. `event_handlers.py` is now 938 lines; the module-length gate decreased from 10 to 9 offenders. Extracted clarification answer validation from `respond_to_clarification`, reducing cyclomatic findings further.
+- Review finding, medium/type regression, fixed: the prior Windows ACL helper lacked its own platform guard, so cross-platform Ty found eight Windows-only `ctypes` member errors on Linux and Darwin. The helper now checks `os.name` before using Windows APIs. Cross-platform Ty checks pass.
+- Review of event and clarification changes: inspected call sites, direct imports, durable receipt path, and validation order. No additional defect found; remaining strict shape and complexity findings remain open in this audit queue.
+- Verification: strict Ty, `just check-all`, 20 event handler/terminal tests, 10 clarification/live tests, file-specific Ruff checks and format, module-length and cyclomatic gates. The final cyclomatic count is assessed after concurrent scoped changes finish.
+
+### 2026-09-20 execution-state projection review
+
+- Implementation: extracted projection freshness classification and stale diagnostic merging from `enrich_snapshot_from_execution_state` in `control/projection.py`.
+- Review: inspected the combined recovery-epoch, checkpoint-availability, and checkpoint-id predicate against the original ordering. Severity/type: no defect found. Remaining complexity findings stay open.
+- Verification: Ruff selected and full checks, format, strict Ty and basedpyright, 17 API projection tests, and `git diff --check`.

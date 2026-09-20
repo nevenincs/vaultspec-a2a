@@ -148,6 +148,8 @@ def restrict_windows_file(path: Path) -> None:
 
 def _restricted_dacl_principals(dacl: ctypes.c_void_p) -> set[str] | None:
     """Read allowed principals, rejecting inherited or non-allow ACEs."""
+    if os.name != "nt":
+        return None
     advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     information = _AclSizeInformation()

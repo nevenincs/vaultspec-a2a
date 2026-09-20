@@ -27,6 +27,7 @@ from ..database import (
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.clarification import (
     ClarificationAnswers,
+    ClarificationRequest,
     ClarificationResolution,
     clarification_resolution_fingerprint,
     parse_clarification_resolution,
@@ -271,6 +272,32 @@ async def _replay_existing_action(
     return None
 
 
+def _invalid_parked_answers(
+    parked: ClarificationRequest | None,
+    resolution: ClarificationResolution,
+    thread_id: str,
+    request_id: str,
+) -> ClarificationResult | None:
+    if (
+        parked is None
+        or parked.request_id != request_id
+        or not isinstance(resolution, ClarificationAnswers)
+    ):
+        return None
+    violations = validate_clarification_answers(parked, resolution.answers)
+    if not violations:
+        return None
+    return ClarificationResult(
+        request_id=request_id,
+        thread_id=thread_id,
+        accepted=False,
+        applied=False,
+        action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+        error_detail="; ".join(violations),
+        error_status_code=422,
+    )
+
+
 async def respond_to_clarification(
     db: AsyncSession,
     *,
@@ -321,22 +348,9 @@ async def respond_to_clarification(
             error_status_code=404,
         )
 
-    if (
-        parked is not None
-        and parked.request_id == request_id
-        and isinstance(resolution, ClarificationAnswers)
-    ):
-        violations = validate_clarification_answers(parked, resolution.answers)
-        if violations:
-            return ClarificationResult(
-                request_id=request_id,
-                thread_id=thread_id,
-                accepted=False,
-                applied=False,
-                action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-                error_detail="; ".join(violations),
-                error_status_code=422,
-            )
+    invalid_answers = _invalid_parked_answers(parked, resolution, thread_id, request_id)
+    if invalid_answers is not None:
+        return invalid_answers
 
     if existing is not None:
         replay = await _replay_existing_action(

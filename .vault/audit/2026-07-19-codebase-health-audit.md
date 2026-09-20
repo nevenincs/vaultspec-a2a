@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:e08a91b64d1914aea3b85f11947e654f7507864aeaa192d7cb76d954b5ad4c8b'
+body_hash: 'sha256:eaa4bbc49d03f6404f4415c739fd8d6e6f86d71846bbd4ce8b20e96fbf6bafba'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3430,3 +3430,7 @@ Implementation: extracted terminal command allowlist and token checks, cwd conta
 ### 2026-09-20 pytest process owner review pass
 
 Implementation: separated child creation, containment assignment, root and session timeout decisions, and progress reporting in the bounded pytest owner. Added a process probe test for a run that never produces a session result. Actual diff review found no new functional defect: the same timeout precedence, exit codes, diagnostic messages, containment cleanup, and assignment failure cleanup are preserved. Verification: five runner tests passed, including teardown, descendant, progress, and run timeouts; routine checks, strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 87 to 86 offenders; this module has zero focused strict Ruff structure findings (down from three) and zero radon offenders (down from one). Remaining repository findings are open, severity medium, type maintainability, in the existing codebase-health queue.
+
+### 2026-09-20 control action lease review pass
+
+Implementation: separated recovery deadline validation, reservation lease acquisition, and failed-dispatch authority checks into typed helpers. Review of the actual diff found no new behavioral defect: deadline refusal order, rollback-before-projection behavior, token matching, and failure disposition precedence remain intact. Verification: 21 focused control tests passed; routine checks, strict Ty and Basedpyright, Ruff, and diff checks passed. The cyclomatic gate fell from 86 to 84 offenders; this module has zero radon offenders, down from two, and its return-count Ruff finding is cleared. The public `prepare_control_action_claim` parameter-count finding remains open alongside the repository strict structure queue, severity medium, type maintainability; it requires a coordinated call-site change. No new functional issue was surfaced.

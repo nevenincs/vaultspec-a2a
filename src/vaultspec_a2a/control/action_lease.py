@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from ..database import (
     ControlActionModel,
+    ControlActionReservation,
     ThreadModel,
     acquire_control_action_lease,
     commit_control_action_lease,
@@ -25,6 +26,7 @@ from .recovery import record_recovery_failure
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ..database.models import RunWriteAuthority
     from ..database.thread_repository import ThreadWriteExpectation
 
 __all__ = [
@@ -70,6 +72,54 @@ class DispatchFailureDisposition(StrEnum):
     APPLICATION_WON = "application_won"
 
 
+def _resolved_recovery_deadline(
+    action_type: ControlActionType,
+    instant: datetime,
+    timeout_seconds: int | None,
+    deadline_at: datetime | None,
+) -> datetime | None:
+    if action_type not in RECOVERY_ACTION_TYPES:
+        if timeout_seconds is not None or deadline_at is not None:
+            raise ValueError("non-recoverable action cannot carry a recovery deadline")
+        return None
+    if (timeout_seconds is None) == (deadline_at is None):
+        raise ValueError(
+            "recoverable action requires exactly one run timeout or deadline"
+        )
+    if timeout_seconds is not None:
+        if timeout_seconds < 1:
+            raise ValueError("recovery_timeout_seconds must be positive")
+        deadline_at = instant + timedelta(seconds=timeout_seconds)
+    if deadline_at is None or deadline_at <= instant:
+        raise ValueError("recovery deadline must be later than acceptance")
+    return deadline_at
+
+
+async def _claim_reserved_action(
+    db: AsyncSession,
+    reservation: ControlActionReservation,
+    action_type: ControlActionType,
+    instant: datetime,
+    lease_ttl: timedelta,
+) -> tuple[str | None, bool, bool]:
+    action = reservation.action
+    authority_matches = action_type not in RECOVERY_ACTION_TYPES or (
+        action.recovery_deadline_at is not None
+        and action.recovery_deadline_at > instant
+    )
+    if not authority_matches or not reservation.payload_matches or action.applied_at:
+        return None, False, authority_matches
+    claim_token = uuid4().hex
+    acquired = await acquire_control_action_lease(
+        db,
+        action.id,
+        claim_token=claim_token,
+        claim_expires_at=instant + lease_ttl,
+        now=instant,
+    )
+    return claim_token, acquired, authority_matches
+
+
 async def prepare_control_action_claim(
     db: AsyncSession,
     *,
@@ -94,19 +144,9 @@ async def prepare_control_action_claim(
     """
     instant = now or datetime.now(UTC)
     resolved_type = ControlActionType(action_type)
-    if resolved_type in RECOVERY_ACTION_TYPES:
-        if (recovery_timeout_seconds is None) == (recovery_deadline_at is None):
-            raise ValueError(
-                "recoverable action requires exactly one run timeout or deadline"
-            )
-        if recovery_timeout_seconds is not None:
-            if recovery_timeout_seconds < 1:
-                raise ValueError("recovery_timeout_seconds must be positive")
-            recovery_deadline_at = instant + timedelta(seconds=recovery_timeout_seconds)
-        if recovery_deadline_at is None or recovery_deadline_at <= instant:
-            raise ValueError("recovery deadline must be later than acceptance")
-    elif recovery_timeout_seconds is not None or recovery_deadline_at is not None:
-        raise ValueError("non-recoverable action cannot carry a recovery deadline")
+    recovery_deadline_at = _resolved_recovery_deadline(
+        resolved_type, instant, recovery_timeout_seconds, recovery_deadline_at
+    )
     reservation = await reserve_control_action(
         db,
         thread_id=thread_id,
@@ -131,21 +171,9 @@ async def prepare_control_action_claim(
     applied = action.applied_at is not None
     result_status = action.result_status
 
-    claim_token: str | None = None
-    acquired = False
-    authority_matches = resolved_type not in RECOVERY_ACTION_TYPES or (
-        action.recovery_deadline_at is not None
-        and action.recovery_deadline_at > instant
+    claim_token, acquired, authority_matches = await _claim_reserved_action(
+        db, reservation, resolved_type, instant, lease_ttl
     )
-    if authority_matches and reservation.payload_matches and action.applied_at is None:
-        claim_token = uuid4().hex
-        acquired = await acquire_control_action_lease(
-            db,
-            action_id,
-            claim_token=claim_token,
-            claim_expires_at=instant + lease_ttl,
-            now=instant,
-        )
 
     if acquired and action_type != ControlActionType.CANCEL:
         receipt = await prepare_graph_action_receipt(
@@ -188,6 +216,38 @@ async def finalize_control_action_acceptance(
     )
 
 
+async def _failure_action(
+    db: AsyncSession, claim: ControlActionClaim, instant: datetime
+) -> tuple[ControlActionModel, str, datetime] | DispatchFailureDisposition:
+    action = await db.get(ControlActionModel, claim.action_id, with_for_update=True)
+    if action is None or action.dispatch_id != claim.dispatch_id:
+        return DispatchFailureDisposition.AUTHORITY_LOST
+    if action.applied_at is not None:
+        return DispatchFailureDisposition.APPLICATION_WON
+    deadline = action.recovery_deadline_at
+    if deadline is None or deadline <= instant:
+        return DispatchFailureDisposition.DEADLINE_EXPIRED
+    token = claim.claim_token
+    if token is None or action.claim_token != token:
+        return DispatchFailureDisposition.AUTHORITY_LOST
+    return action, token, deadline
+
+
+async def _failure_thread_authority(
+    db: AsyncSession, action: ControlActionModel
+) -> RunWriteAuthority | DispatchFailureDisposition:
+    thread = await db.get(ThreadModel, action.thread_id, with_for_update=True)
+    if thread is None:
+        return DispatchFailureDisposition.AUTHORITY_LOST
+    authority = thread_write_expectation(thread).authority
+    if (
+        authority.action_type.value != action.action_type
+        or authority.action_receipt_id != action.dispatch_id
+    ):
+        return DispatchFailureDisposition.AUTHORITY_LOST
+    return authority
+
+
 async def record_dispatch_failure(
     db: AsyncSession,
     claim: ControlActionClaim,
@@ -198,31 +258,20 @@ async def record_dispatch_failure(
 ) -> DispatchFailureDisposition:
     """Persist the typed outcome and release only proven non-delivery leases."""
     instant = observed_at or datetime.now(UTC)
-    action = await db.get(ControlActionModel, claim.action_id, with_for_update=True)
-    if action is None or action.dispatch_id != claim.dispatch_id:
-        return DispatchFailureDisposition.AUTHORITY_LOST
-    if action.applied_at is not None:
-        return DispatchFailureDisposition.APPLICATION_WON
-    if action.recovery_deadline_at is None or action.recovery_deadline_at <= instant:
-        return DispatchFailureDisposition.DEADLINE_EXPIRED
-    if claim.claim_token is None or action.claim_token != claim.claim_token:
-        return DispatchFailureDisposition.AUTHORITY_LOST
-    thread = await db.get(ThreadModel, action.thread_id, with_for_update=True)
-    if thread is None:
-        return DispatchFailureDisposition.AUTHORITY_LOST
-    authority = thread_write_expectation(thread).authority
-    if (
-        authority.action_type.value != action.action_type
-        or authority.action_receipt_id != action.dispatch_id
-    ):
-        return DispatchFailureDisposition.AUTHORITY_LOST
+    resolved = await _failure_action(db, claim, instant)
+    if isinstance(resolved, DispatchFailureDisposition):
+        return resolved
+    action, claim_token, deadline = resolved
+    authority = await _failure_thread_authority(db, action)
+    if isinstance(authority, DispatchFailureDisposition):
+        return authority
 
     disposition = DispatchFailureDisposition.AMBIGUOUS_DELIVERY
     if failure_type in _DEFINITE_NON_DELIVERY:
         if not await release_control_action_lease(
             db,
             claim.action_id,
-            claim_token=claim.claim_token,
+            claim_token=claim_token,
         ):
             return DispatchFailureDisposition.AUTHORITY_LOST
         disposition = DispatchFailureDisposition.DEFINITE_NON_DELIVERY
@@ -234,9 +283,9 @@ async def record_dispatch_failure(
         observed_at=instant,
         next_eligible_at=min(
             instant + timedelta(seconds=2),
-            action.recovery_deadline_at,
+            deadline,
         ),
-        deadline_at=action.recovery_deadline_at,
+        deadline_at=deadline,
         detail=detail,
     )
     return disposition

@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import logging
 import pathlib
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast, override
 
 import httpx
@@ -64,6 +65,18 @@ _CODER_TOKEN = "secret-coder-acceptance"
 _REVIEWER_TOKEN = "secret-reviewer-acceptance"
 _BEARER = "secret-bearer-acceptance"
 _PRESET = "mock-success-multi"
+
+
+@dataclass(frozen=True, slots=True)
+class _MultiroleFixture:
+    """Durable inputs and before-snapshot for the multi-role recovery proof."""
+
+    vault_root: Path
+    before: list[str]
+    thread_id: str
+    checkpoint_path: str
+    definition: FrozenGraphDefinition
+    model_assignment: dict[str, dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
@@ -165,15 +178,11 @@ async def _read_run_status(client: httpx.AsyncClient, thread_id: str) -> dict[st
     return response.json()
 
 
-# ---------------------------------------------------------------------------
-# Acceptance tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio(loop_scope="function")
-async def test_multirole_run_status_recovery_and_zero_vault_writes(
-    session_factory: SessionFactory, tmp_path: Path
-) -> None:
+async def _prepare_multirole_fixture(
+    session_factory: SessionFactory,
+    tmp_path: Path,
+) -> _MultiroleFixture:
+    """Create the durable run inputs shared by both recovery reads."""
     vault_root = tmp_path / ".vault"
     vault_root.mkdir()
     (vault_root / "seed.md").write_text("do not touch", encoding="utf-8")
@@ -191,12 +200,7 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
         )
         await session.commit()
 
-    # A single durable sqlite checkpoint file, shared by the run and both reads.
-    ckpt_path = str(tmp_path / "checkpoints.db")
-    bundle = ActorTokenBundle(
-        tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
-        engine_bearer=_BEARER,
-    )
+    checkpoint_path = str(tmp_path / "checkpoints.db")
     workspace = pathlib.Path(_WORKSPACE)
     definition = freeze_graph_definition(
         load_team_config(_PRESET, workspace_root=workspace),
@@ -208,22 +212,45 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
             required_roles=("mock-planner", "mock-coder-success", "mock-reviewer"),
         )
     ).model_assignment
+    return _MultiroleFixture(
+        vault_root=vault_root,
+        before=before,
+        thread_id=thread_id,
+        checkpoint_path=checkpoint_path,
+        definition=definition,
+        model_assignment=model_assignment,
+    )
 
-    async with AsyncSqliteSaver.from_conn_string(ckpt_path) as cp:
+
+async def _dispatch_multirole_run(
+    session_factory: SessionFactory,
+    fixture: _MultiroleFixture,
+) -> dict[str, Any]:
+    """Dispatch the real graph and read its first durable status snapshot."""
+    bundle = ActorTokenBundle(
+        tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
+        engine_bearer=_BEARER,
+    )
+    async with AsyncSqliteSaver.from_conn_string(fixture.checkpoint_path) as cp:
         await cp.setup()
         bridge = _bridge()
         executor: Executor | None = None
         try:
             executor = Executor(checkpointer=cp, bridge=bridge)
-            _install_multirole_graph(executor, thread_id, definition, model_assignment)
+            _install_multirole_graph(
+                executor,
+                fixture.thread_id,
+                fixture.definition,
+                fixture.model_assignment,
+            )
             req = DispatchRequest(
                 action="ingest",
                 workspace_root=_WORKSPACE,
-                thread_id=thread_id,
+                thread_id=fixture.thread_id,
                 content="build and review",
                 team_preset=_PRESET,
-                graph_definition=definition,
-                model_assignment=model_assignment,
+                graph_definition=fixture.definition,
+                model_assignment=fixture.model_assignment,
                 recursion_limit=10,
                 actor_tokens=bundle,
             )
@@ -232,8 +259,8 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
             )
             receipt = GraphActionReceipt(
                 schema_version="graph-action-v1",
-                thread_id=thread_id,
-                action_id=f"{thread_id}-action",
+                thread_id=fixture.thread_id,
+                action_id=f"{fixture.thread_id}-action",
                 action_type=ControlActionType.INGEST,
                 payload_fingerprint=control_action_payload_fingerprint(accepted),
                 dispatch_id=req.dispatch_id,
@@ -248,40 +275,54 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
             if executor is not None:
                 await executor.shutdown()
 
-        # No actor token appears in any log record captured during the run.
         _assert_no_token(records)
-
-        # run-status over the control surface reads the durable recovery snapshot.
         app, _agg, _worker, _cp = make_app(session_factory, cp)
         async with (
             _live_server(app) as base,
             httpx.AsyncClient(base_url=base) as client,
         ):
-            body = await _read_run_status(client, thread_id)
-            assert body["api_version"] == "v1"
-            assert body["run_id"] == thread_id
-            assert body["topology"]["team_preset"] == _PRESET
-            assert isinstance(body["roles"], list)
-            assert isinstance(body["proposal_ids"], list)
-            assert body["checkpoint_id"] is not None
+            return await _read_run_status(client, fixture.thread_id)
 
-    # Restart recovery: a fresh gateway on a fresh checkpointer opened against the
-    # SAME durable sqlite file returns the same snapshot — proof the recovery read
-    # is from durable state, not in-memory.
-    async with AsyncSqliteSaver.from_conn_string(ckpt_path) as restart_cp:
+
+async def _read_restart_status(
+    session_factory: SessionFactory,
+    fixture: _MultiroleFixture,
+) -> dict[str, Any]:
+    """Read the same snapshot through a fresh gateway/checkpointer pair."""
+    async with AsyncSqliteSaver.from_conn_string(fixture.checkpoint_path) as restart_cp:
         app2, _a2, _w2, _c2 = make_app(session_factory, restart_cp)
         async with (
             _live_server(app2) as base2,
             httpx.AsyncClient(base_url=base2) as client2,
         ):
-            body2 = await _read_run_status(client2, thread_id)
-            assert body2["run_id"] == thread_id
-            assert body2["topology"]["team_preset"] == _PRESET
-            assert body2["checkpoint_id"] == body["checkpoint_id"]
+            return await _read_run_status(client2, fixture.thread_id)
 
-    # Zero .vault/ writes across the whole run.
-    after = _vault_write_events(vault_root)
-    assert before == after, "the run must not write to .vault/"
+
+# ---------------------------------------------------------------------------
+# Acceptance tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_multirole_run_status_recovery_and_zero_vault_writes(
+    session_factory: SessionFactory, tmp_path: Path
+) -> None:
+    fixture = await _prepare_multirole_fixture(session_factory, tmp_path)
+    body = await _dispatch_multirole_run(session_factory, fixture)
+    assert body["api_version"] == "v1"
+    assert body["run_id"] == fixture.thread_id
+    assert body["topology"]["team_preset"] == _PRESET
+    assert isinstance(body["roles"], list)
+    assert isinstance(body["proposal_ids"], list)
+    assert body["checkpoint_id"] is not None
+
+    body2 = await _read_restart_status(session_factory, fixture)
+    assert body2["run_id"] == fixture.thread_id
+    assert body2["topology"]["team_preset"] == _PRESET
+    assert body2["checkpoint_id"] == body["checkpoint_id"]
+
+    after = _vault_write_events(fixture.vault_root)
+    assert fixture.before == after, "the run must not write to .vault/"
 
 
 def _assert_no_token(records: list[logging.LogRecord]) -> None:

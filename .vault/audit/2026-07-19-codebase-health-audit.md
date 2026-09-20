@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:5b9f0751f1254f72a21339bd8ed57f2bb99901a4201eb34cafa6d02a28640be0'
+body_hash: 'sha256:69e22f1c3c7ef035e137f89f30616f70778fc7ce9749b312946d4a8c44029f55'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4184,3 +4184,11 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, transient regression: the concurrent graph lifecycle positional binder raised cyclomatic complexity above the health threshold. Assigned to its owning implementation lane and require a zero cyclomatic census before this pass is closed.
 - Review finding, medium severity, quality: the current working tree has eight parameter-count findings, two maintainability findings, and 25 preview Ruff argument/local findings. Continue the audit queue to zero.
 - Verification: 72 compiler/topology, 76 database creation/election, and 17 projection tests passed; strict typing and scoped Ruff passed for stable compiler/repository changes. No new high-severity finding surfaced in diff review.
+
+### 2026-09-20 zero production health review
+
+- Implementation: split provider refresh caching and persisted team-selection reconstruction into focused private modules while retaining the declared public class/function homes; typed Click callbacks, worker creation, message dispatch, and lifecycle boot options. Reduced the production health census to zero argument, maintainability, and cyclomatic findings.
+- Review finding, low severity, compatibility: the Click callbacks now accept typed keyword mappings and the worker factory binds legacy positional options; help output and focused CLI/worker tests passed. Direct runtime signature inspection differs. Keep this compatibility sensitivity in the audit queue for broad suite verification.
+- Review finding, low severity, module boundaries: cache methods lazily reference the public catalog status/exception classes and team selection uses a private record implementation behind public wrappers. Import loadability, export declaration tests, strict types, and focused behavior tests passed; keep broad integration verification queued.
+- Review finding, medium severity, quality: preview Ruff still has three live-test argument findings in concurrent edits. Pylint reports 30 instance-attribute, two module-length, and three public-method findings. These remain open and must be burned down before strict completion.
+- Verification: 34 cache tests, 23 team-selection/export tests, 47 lifecycle/service tests, 14 CLI tests, 34 worker tests, and 15 message-dispatch tests passed; `just check-type-strict` and production health passed. Diff review found no high-severity regression.

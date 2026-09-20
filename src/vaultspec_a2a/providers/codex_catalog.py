@@ -558,18 +558,19 @@ async def discover_codex_catalog(
     **options: Unpack[_DiscoverCodexCatalogOptions],
 ) -> CodexCatalogDiscovery:
     """Discover Codex models and controls without starting a completion."""
-    env = options["env"]
-    cwd = options["cwd"]
     key = options["key"]
-    timeout = options.get("timeout", 30.0)
     metadata = options.get("metadata")
     if not command:
         raise ValueError("command must not be empty")
     process = await spawn_acp_process(
-        list(command), dict(env), cwd, use_exec=False, metadata=metadata
+        list(command),
+        dict(options["env"]),
+        options["cwd"],
+        use_exec=False,
+        metadata=metadata,
     )
     output_budget = OutputBudget(_protocol_error)
-    rpc = _CatalogRpc(process, timeout, output_budget)
+    rpc = _CatalogRpc(process, options.get("timeout", 30.0), output_budget)
     stderr_task = asyncio.create_task(
         drain_stderr(process.stderr, process, metadata, output_budget)
     )

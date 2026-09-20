@@ -774,19 +774,67 @@ def _compose_worker_harness(
     )
 
 
+class _WorkerNodeOptions(TypedDict, total=False):
+    autonomous: bool
+    workspace_root: Path | None
+    feature_tag: str | None
+    task_queue_port: TaskQueuePort | None
+    authoring_binding_provider: AuthoringBindingProvider | None
+    role: str | None
+    harness_mcp_servers: list[str] | None
+    feedback_reader: FeedbackContextReader | None
+    cost_port: CostPort | None
+
+
+class _WorkerNodeSettings(TypedDict):
+    autonomous: bool
+    workspace_root: Path | None
+    feature_tag: str | None
+    task_queue_port: TaskQueuePort | None
+    authoring_binding_provider: AuthoringBindingProvider | None
+    role: str | None
+    harness_mcp_servers: list[str] | None
+    feedback_reader: FeedbackContextReader | None
+    cost_port: CostPort | None
+
+
+def _bind_worker_node_settings(
+    args: tuple[object, ...], options: _WorkerNodeOptions
+) -> _WorkerNodeSettings:
+    names = tuple(_WorkerNodeSettings.__annotations__)
+    if len(args) > len(names):
+        raise TypeError("create_worker_node() received too many positional arguments")
+    bound: dict[str, object] = {
+        "autonomous": False,
+        "workspace_root": None,
+        "feature_tag": None,
+        "task_queue_port": None,
+        "authoring_binding_provider": None,
+        "role": None,
+        "harness_mcp_servers": None,
+        "feedback_reader": None,
+        "cost_port": None,
+    }
+    for index, value in enumerate(args):
+        name = names[index]
+        if name in options:
+            raise TypeError(f"create_worker_node() got multiple values for {name!r}")
+        bound[name] = value
+    unknown = set(options).difference(names)
+    if unknown:
+        raise TypeError(
+            f"create_worker_node() got an unexpected keyword {min(unknown)!r}"
+        )
+    bound.update(options)
+    return cast("_WorkerNodeSettings", bound)
+
+
 def create_worker_node(
     model: BaseChatModel,
     system_prompt: str,
     name: str,
-    autonomous: bool = False,
-    workspace_root: Path | None = None,
-    feature_tag: str | None = None,
-    task_queue_port: TaskQueuePort | None = None,
-    authoring_binding_provider: AuthoringBindingProvider | None = None,
-    role: str | None = None,
-    harness_mcp_servers: list[str] | None = None,
-    feedback_reader: FeedbackContextReader | None = None,
-    cost_port: CostPort | None = None,
+    *args: object,
+    **options: Unpack[_WorkerNodeOptions],
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
@@ -820,6 +868,8 @@ def create_worker_node(
         An async function that conforms to the LangGraph node signature.
     """
 
+    settings = _bind_worker_node_settings(args, options)
+
     async def worker_node(
         state: TeamState, config: RunnableConfig | None = None
     ) -> dict[str, Any]:
@@ -829,33 +879,40 @@ def create_worker_node(
         # compiled graph is shared across threads and cannot close over it. The
         # tool returns a Command (revised contract); its update is propagated
         # through this node's return, not a side-channel drain.
-        queue_tool = _queue_tool_for_state(state, task_queue_port, feature_tag)
-        feedback_grounding = await _feedback_for_state(state, feedback_reader)
+        queue_tool = _queue_tool_for_state(
+            state, settings["task_queue_port"], settings["feature_tag"]
+        )
+        feedback_grounding = await _feedback_for_state(
+            state, settings["feedback_reader"]
+        )
 
         messages = _build_worker_messages(
             state=state,
             system_prompt=system_prompt,
-            workspace_root=workspace_root,
-            role=role,
+            workspace_root=settings["workspace_root"],
+            role=settings["role"],
             feedback_grounding=feedback_grounding,
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
         effective_model = _resolve_effective_worker_model(
             model=model,
-            autonomous=autonomous,
+            autonomous=settings["autonomous"],
         )
         # Build this role's authoring binding per invoke from the run's thread_id
         # and this worker's agent_id (``name``) - never closed over, so the shared
         # compiled graph holds no run-scoped tokens (R7). Absent provider or
         # coverage yields no binding, leaving the session's MCP surface unchanged.
         authoring_binding = await _authoring_binding_for_state(
-            state, name, authoring_binding_provider
+            state, name, settings["authoring_binding_provider"]
         )
         effective_model = _attach_authoring_tools(
-            effective_model, authoring_binding, autonomous=autonomous
+            effective_model, authoring_binding, autonomous=settings["autonomous"]
         )
         effective_model = _compose_worker_harness(
-            effective_model, harness_mcp_servers, autonomous, workspace_root
+            effective_model,
+            settings["harness_mcp_servers"],
+            settings["autonomous"],
+            settings["workspace_root"],
         )
         from ...providers._native_read_tools import compose_native_read_tools
         from ...providers.lane_admission import web_tool_names_for
@@ -869,8 +926,8 @@ def create_worker_node(
         # a branch that has never run.
         effective_model = compose_native_read_tools(
             effective_model,
-            autonomous=autonomous,
-            role=role,
+            autonomous=settings["autonomous"],
+            role=settings["role"],
             extra_tool_names=web_tool_names_for(
                 getattr(effective_model, "provider", None)
             ),
@@ -883,7 +940,7 @@ def create_worker_node(
             model_label,
             len(messages),
             compacted,
-            autonomous,
+            settings["autonomous"],
         )
         # Scoped to this attempt: a retry constructs a new one, so the flag can
         # never carry a previous attempt's output into the next decision.
@@ -896,7 +953,7 @@ def create_worker_node(
                 response=response,
                 queue_tool=queue_tool,
                 model=effective_model,
-                autonomous=autonomous,
+                autonomous=settings["autonomous"],
                 config=attempt_config,
             )
         except GraphBubbleUp:
@@ -918,7 +975,7 @@ def create_worker_node(
         usage = _turn_token_usage(response)
         if usage is not None:
             await _record_turn_usage(
-                cost_port=cost_port,
+                cost_port=settings["cost_port"],
                 thread_id=state.get("thread_id"),
                 worker_name=name,
                 model=effective_model,

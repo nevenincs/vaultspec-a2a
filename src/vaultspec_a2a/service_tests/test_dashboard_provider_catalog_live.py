@@ -21,6 +21,8 @@ import os
 import subprocess
 import time
 import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -45,6 +47,7 @@ from .test_engine_broker_lost_ack_live import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
 
     from ..api.schemas.gateway import ProviderCatalogSelection
@@ -53,6 +56,18 @@ _TERMINAL_DEADLINE_SECONDS = 900.0
 _POLL_SECONDS = 2.0
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_ARRAY = TypeAdapter(list[object])
+
+
+@dataclass(frozen=True, slots=True)
+class _DashboardScenario:
+    """Inputs shared by the provider-catalog engine lifecycle."""
+
+    workspace: Path
+    engine_port: int
+    engine_base: str
+    engine_log: Path
+    run_id: str
+    nonce: str
 
 
 def _object(value: object, *, source: str) -> dict[str, object]:
@@ -198,6 +213,144 @@ def _wait_for_completed_run(
     return final
 
 
+def _dashboard_scenario(tmp_path: Path) -> _DashboardScenario:
+    workspace = tmp_path / "dashboard-workspace"
+    _provision_workspace(workspace)
+    engine_port = free_port()
+    return _DashboardScenario(
+        workspace=workspace,
+        engine_port=engine_port,
+        engine_base=f"http://127.0.0.1:{engine_port}",
+        engine_log=tmp_path / "engine.log",
+        run_id=f"{_RUN_ID_PREFIX}-{uuid.uuid4().hex}",
+        nonce=f"provider-output-{uuid.uuid4().hex}",
+    )
+
+
+@contextmanager
+def _dashboard_engine(
+    tmp_path: Path,
+    scenario: _DashboardScenario,
+    gateway_base: str,
+) -> Generator[str]:
+    discovery_home = tmp_path / "a2a-discovery"
+    write_service_json(
+        discovery_home / "service.json",
+        port=int(gateway_base.rsplit(":", 1)[1]),
+        pid=os.getpid(),
+        service_token=ATTACH_CREDENTIAL,
+    )
+    environment = {
+        **{
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"VAULTSPEC_APP_HOME", "VAULTSPEC_DESKTOP_APP_HOME"}
+        },
+        "VAULTSPEC_A2A_HOME": str(discovery_home),
+        "VAULTSPEC_APP_HOME": str(tmp_path / "dashboard-product-home"),
+    }
+    with scenario.engine_log.open("wb") as output:
+        containment = ProcessContainment.create()
+        new_session = bool(containment.spawn_kwargs().get("start_new_session"))
+        process: subprocess.Popen[bytes] | None = None
+        token: str | None = None
+        try:
+            process = subprocess.Popen(
+                _engine_command(scenario.engine_port, scenario.workspace),
+                cwd=scenario.workspace,
+                env=environment,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                start_new_session=new_session,
+            )
+            containment.assign(process.pid)
+            token = _wait_for_engine(scenario.workspace, scenario.engine_base, process)
+            yield token
+        finally:
+            if process is None:
+                containment.close()
+            elif token is not None:
+                _shutdown_engine(process, containment, scenario.engine_base, token)
+            else:
+                _force_engine_tree_exit(process, containment)
+
+
+def _run_dashboard_turn(
+    scenario: _DashboardScenario,
+    gateway_base: str,
+    auth: str,
+    token: str,
+) -> None:
+    session = httpx.get(
+        f"{scenario.engine_base}/session",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    session.raise_for_status()
+    session_data = _object(session.json(), source="engine session")
+    scope = _object(session_data.get("data"), source="engine session data").get(
+        "active_scope"
+    )
+    assert isinstance(scope, str) and scope, session_data
+
+    stale_scope = httpx.post(
+        f"{scenario.engine_base}/ops/a2a/provider-catalog",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"expected_scope": f"{scope}-stale"},
+        timeout=30,
+    )
+    assert stale_scope.status_code == HTTPStatus.CONFLICT, stale_scope.text
+
+    catalog = httpx.post(
+        f"{scenario.engine_base}/ops/a2a/provider-catalog",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"expected_scope": scope},
+        timeout=30,
+    )
+    selection = selection_from_served_catalog(
+        _engine_envelope(catalog, source="provider-catalog")
+    )
+    start_body = {
+        "run_id": scenario.run_id,
+        "team_preset": "vaultspec-solo-coder",
+        "message": f"Return exactly this nonce and no other text: {scenario.nonce}",
+        "expected_scope": scope,
+        "feature_tag": "live-provider-catalog",
+        "selection": selection.model_dump(mode="json"),
+    }
+    started = _engine_envelope(
+        httpx.post(
+            f"{scenario.engine_base}/ops/a2a/run-start",
+            headers={"Authorization": f"Bearer {token}"},
+            json=start_body,
+            timeout=90,
+        ),
+        source="run-start",
+    )
+    assert started.get("run_id") == scenario.run_id, started
+    frozen = _frozen_assignment(started, selection)
+
+    completed = _wait_for_completed_run(
+        scenario.engine_base, token, selection, scenario.run_id
+    )
+    assert _frozen_assignment(completed, selection) == frozen
+    _assert_completed_provider_output(
+        gateway_base, auth, scenario.run_id, frozen, scenario.nonce
+    )
+
+    replayed = _engine_envelope(
+        httpx.post(
+            f"{scenario.engine_base}/ops/a2a/run-start",
+            headers={"Authorization": f"Bearer {token}"},
+            json=start_body,
+            timeout=90,
+        ),
+        source="run-start replay",
+    )
+    assert replayed.get("run_id") == scenario.run_id, replayed
+    assert _frozen_assignment(replayed, selection) == frozen
+
+
 @pytest.mark.service
 @pytest.mark.timeout(_TERMINAL_DEADLINE_SECONDS + 300.0)
 @pytest.mark.requires_prerequisites(*LIVE_PROVIDER_PREREQUISITES)
@@ -205,127 +358,15 @@ def test_dashboard_catalog_selection_completes_and_replays_with_frozen_assignmen
     tmp_path: Path,
 ) -> None:
     """One explicitly authorized provider turn stays frozen across Dashboard replay."""
-    workspace = tmp_path / "dashboard-workspace"
-    _provision_workspace(workspace)
-    engine_port = free_port()
-    engine_base = f"http://127.0.0.1:{engine_port}"
-    engine_log = tmp_path / "engine.log"
+    scenario = _dashboard_scenario(tmp_path)
 
-    run_id = f"{_RUN_ID_PREFIX}-{uuid.uuid4().hex}"
-    nonce = f"provider-output-{uuid.uuid4().hex}"
-
-    with armed_gateway(
-        tmp_path,
-        VAULTSPEC_ENGINE_SERVICE_JSON=str(
-            workspace / ".vault" / "data" / "engine-data" / "service.json"
-        ),
-    ) as (gateway_base, auth):
-        discovery_home = tmp_path / "a2a-discovery"
-        write_service_json(
-            discovery_home / "service.json",
-            port=int(gateway_base.rsplit(":", 1)[1]),
-            pid=os.getpid(),
-            service_token=ATTACH_CREDENTIAL,
-        )
-        environment = {
-            **{
-                key: value
-                for key, value in os.environ.items()
-                if key not in {"VAULTSPEC_APP_HOME", "VAULTSPEC_DESKTOP_APP_HOME"}
-            },
-            "VAULTSPEC_A2A_HOME": str(discovery_home),
-            "VAULTSPEC_APP_HOME": str(tmp_path / "dashboard-product-home"),
-        }
-        with engine_log.open("wb") as output:
-            containment = ProcessContainment.create()
-            new_session = bool(containment.spawn_kwargs().get("start_new_session"))
-            process: subprocess.Popen[bytes] | None = None
-            token: str | None = None
-            try:
-                process = subprocess.Popen(
-                    _engine_command(engine_port, workspace),
-                    cwd=workspace,
-                    env=environment,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=new_session,
-                )
-                containment.assign(process.pid)
-                token = _wait_for_engine(workspace, engine_base, process)
-                session = httpx.get(
-                    f"{engine_base}/session",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=10,
-                )
-                session.raise_for_status()
-                session_data = _object(session.json(), source="engine session")
-                scope = _object(
-                    session_data.get("data"), source="engine session data"
-                ).get("active_scope")
-                assert isinstance(scope, str) and scope, session_data
-
-                stale_scope = httpx.post(
-                    f"{engine_base}/ops/a2a/provider-catalog",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={"expected_scope": f"{scope}-stale"},
-                    timeout=30,
-                )
-                assert stale_scope.status_code == HTTPStatus.CONFLICT, stale_scope.text
-
-                catalog = httpx.post(
-                    f"{engine_base}/ops/a2a/provider-catalog",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={"expected_scope": scope},
-                    timeout=30,
-                )
-                selection = selection_from_served_catalog(
-                    _engine_envelope(catalog, source="provider-catalog")
-                )
-                start_body = {
-                    "run_id": run_id,
-                    "team_preset": "vaultspec-solo-coder",
-                    "message": (
-                        f"Return exactly this nonce and no other text: {nonce}"
-                    ),
-                    "expected_scope": scope,
-                    "feature_tag": "live-provider-catalog",
-                    "selection": selection.model_dump(mode="json"),
-                }
-                started = _engine_envelope(
-                    httpx.post(
-                        f"{engine_base}/ops/a2a/run-start",
-                        headers={"Authorization": f"Bearer {token}"},
-                        json=start_body,
-                        timeout=90,
-                    ),
-                    source="run-start",
-                )
-                assert started.get("run_id") == run_id, started
-                frozen = _frozen_assignment(started, selection)
-
-                completed = _wait_for_completed_run(
-                    engine_base, token, selection, run_id
-                )
-                assert _frozen_assignment(completed, selection) == frozen
-                _assert_completed_provider_output(
-                    gateway_base, auth, run_id, frozen, nonce
-                )
-
-                replayed = _engine_envelope(
-                    httpx.post(
-                        f"{engine_base}/ops/a2a/run-start",
-                        headers={"Authorization": f"Bearer {token}"},
-                        json=start_body,
-                        timeout=90,
-                    ),
-                    source="run-start replay",
-                )
-                assert replayed.get("run_id") == run_id, replayed
-                assert _frozen_assignment(replayed, selection) == frozen
-            finally:
-                if process is None:
-                    containment.close()
-                elif token is not None:
-                    _shutdown_engine(process, containment, engine_base, token)
-                else:
-                    _force_engine_tree_exit(process, containment)
+    with (
+        armed_gateway(
+            tmp_path,
+            VAULTSPEC_ENGINE_SERVICE_JSON=str(
+                scenario.workspace / ".vault" / "data" / "engine-data" / "service.json"
+            ),
+        ) as (gateway_base, auth),
+        _dashboard_engine(tmp_path, scenario, gateway_base) as token,
+    ):
+        _run_dashboard_turn(scenario, gateway_base, auth, token)

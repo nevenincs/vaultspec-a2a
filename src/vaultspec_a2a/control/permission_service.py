@@ -8,6 +8,7 @@ protocol-agnostic service function.  Does NOT commit the session, raise
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -109,6 +110,7 @@ if TYPE_CHECKING:
     from ..database import (
         PermissionRequestModel,
         ThreadModel,
+        ThreadWriteExpectation,
     )
 
 __all__ = [
@@ -116,6 +118,63 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _PermissionTransitionContext:
+    """Immutable values shared by transition validation and persistence."""
+
+    request_id: str
+    option_id: str
+    notes: str | None
+    permission: PermissionRequestModel
+    thread_record: ThreadModel
+    write_expectation: ThreadWriteExpectation
+    thread_id: str
+    resolved_idempotency_key: str
+    is_locally_respondable: bool
+    permission_description: str
+    replay_approval_status: str | None
+    decision_verdict: str
+    submitted_approval_status: str | None
+
+
+def _permission_transition_context(
+    authorized: _AuthorizedPermission, response: PermissionInput
+) -> _PermissionTransitionContext:
+    """Capture transition inputs before any durable writes occur."""
+    request_id = response.request_id
+    option_id = response.option_id
+    notes = response.notes
+    permission = authorized.permission
+    thread_record = authorized.thread_record
+    write_expectation = thread_write_expectation(thread_record)
+    thread_id = authorized.thread_id
+    resolved_idempotency_key = authorized.resolved_idempotency_key
+    is_locally_respondable = (
+        permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
+    )
+    permission_description = permission.description
+    replay_approval_status = thread_record.approval_status
+    decision_verdict = _response_verdict(permission, option_id)
+    submitted_approval_status = (
+        decision_verdict if is_locally_respondable else replay_approval_status
+    )
+    return _PermissionTransitionContext(
+        request_id=request_id,
+        option_id=option_id,
+        notes=notes,
+        permission=permission,
+        thread_record=thread_record,
+        write_expectation=write_expectation,
+        thread_id=thread_id,
+        resolved_idempotency_key=resolved_idempotency_key,
+        is_locally_respondable=is_locally_respondable,
+        permission_description=permission_description,
+        replay_approval_status=replay_approval_status,
+        decision_verdict=decision_verdict,
+        submitted_approval_status=submitted_approval_status,
+    )
 
 
 async def _journal_rejection(
@@ -704,25 +763,9 @@ async def _record_permission_transition(
     operator really made is a fact about the run even when its delivery failed,
     and a re-answer appends a second row rather than rewriting the first.
     """
-    request_id = response.request_id
-    option_id = response.option_id
-    notes = response.notes
-    permission = authorized.permission
-    thread_record = authorized.thread_record
-    write_expectation = thread_write_expectation(thread_record)
-    thread_id = authorized.thread_id
-    resolved_idempotency_key = authorized.resolved_idempotency_key
-    is_locally_respondable = (
-        permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
-    )
-    permission_description = permission.description
-    replay_approval_status = thread_record.approval_status
-    decision_verdict = _response_verdict(permission, option_id)
-    submitted_approval_status = (
-        decision_verdict if is_locally_respondable else replay_approval_status
-    )
+    context = _permission_transition_context(authorized, response)
 
-    team_preset: str | None = thread_record.team_preset
+    team_preset: str | None = context.thread_record.team_preset
     # The stored value is validated, not merely fetched. This is the workspace a
     # resumed run executes in, and the sibling that reads it for dispatch records
     # what a bad one costs: degrading it used to dispatch the turn anyway and let
@@ -731,48 +774,50 @@ async def _record_permission_transition(
     # ``str | None`` while the read admitted any JSON value, so a stored number or
     # object flowed through untouched and only failed further downstream, if at
     # all.
-    workspace_root = dispatchable_workspace_root(thread_record.thread_metadata)
+    workspace_root = dispatchable_workspace_root(context.thread_record.thread_metadata)
     if workspace_root is None:
         return PermissionResult(
-            request_id=request_id,
-            thread_id=thread_id,
+            request_id=context.request_id,
+            thread_id=context.thread_id,
             accepted=False,
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            idempotency_key=resolved_idempotency_key,
-            approval_status=replay_approval_status,
+            idempotency_key=context.resolved_idempotency_key,
+            approval_status=context.replay_approval_status,
             error_detail="The accepted run's project is unavailable",
             error_status_code=409,
             failure_type=FailureType.NO_ACTIVE_PROJECT,
         )
 
     try:
-        graph_definition = await read_accepted_graph_definition(db, thread_id)
+        graph_definition = await read_accepted_graph_definition(db, context.thread_id)
         team_preset = graph_definition.team_id
-        execution_authority = resolve_execution_authority(thread_record.thread_metadata)
+        execution_authority = resolve_execution_authority(
+            context.thread_record.thread_metadata
+        )
     except (ExecutionAuthorityError, ValueError) as exc:
         return PermissionResult(
-            request_id=request_id,
-            thread_id=thread_id,
+            request_id=context.request_id,
+            thread_id=context.thread_id,
             accepted=False,
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            idempotency_key=resolved_idempotency_key,
-            approval_status=replay_approval_status,
+            idempotency_key=context.resolved_idempotency_key,
+            approval_status=context.replay_approval_status,
             error_detail=str(exc),
             error_status_code=409,
             failure_type=FailureType.INCOMPATIBLE_STATE,
         )
 
     resume_value = permission_resume_value(
-        permission.pause_reason_type,
-        option_id,
-        notes,
+        context.permission.pause_reason_type,
+        context.option_id,
+        context.notes,
     )
 
     dispatch = DispatchRequest(
         action=to_dispatch_action(ControlActionType.RESUME),
-        thread_id=thread_id,
+        thread_id=context.thread_id,
         option_id=resume_value,
         team_preset=team_preset,
         graph_definition=graph_definition,
@@ -784,13 +829,13 @@ async def _record_permission_transition(
     claim = await prepare_control_action_claim(
         db,
         request=ControlActionClaimRequest(
-            write_expectation=write_expectation,
-            thread_id=thread_id,
+            write_expectation=context.write_expectation,
+            thread_id=context.thread_id,
             action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-            request_id=request_id,
-            idempotency_key=permission_response_action_key(request_id),
+            request_id=context.request_id,
+            idempotency_key=permission_response_action_key(context.request_id),
             payload=freeze_accepted_input(
-                dispatch, intent=_response_payload(option_id, notes)
+                dispatch, intent=_response_payload(context.option_id, context.notes)
             ),
             dispatch_id=dispatch.dispatch_id,
             recovery_timeout_seconds=graph_definition.run_timeout_seconds,
@@ -798,47 +843,47 @@ async def _record_permission_transition(
     )
     if not claim.authority_matches:
         return PermissionResult(
-            request_id=request_id,
-            thread_id=thread_id,
+            request_id=context.request_id,
+            thread_id=context.thread_id,
             accepted=False,
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            idempotency_key=resolved_idempotency_key,
-            approval_status=replay_approval_status,
+            idempotency_key=context.resolved_idempotency_key,
+            approval_status=context.replay_approval_status,
             error_status_code=409,
             failure_type=FailureType.INCOMPATIBLE_STATE,
             error_detail="Accepted action no longer owns the current run",
         )
     if not claim.payload_matches:
         return PermissionResult(
-            request_id=request_id,
-            thread_id=thread_id,
+            request_id=context.request_id,
+            thread_id=context.thread_id,
             accepted=False,
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            idempotency_key=resolved_idempotency_key,
-            approval_status=replay_approval_status,
+            idempotency_key=context.resolved_idempotency_key,
+            approval_status=context.replay_approval_status,
             error_detail="Permission request already has a different response",
             error_status_code=409,
             failure_type=FailureType.CONFLICT,
         )
     if not claim.acquired:
         return PermissionResult(
-            request_id=request_id,
-            thread_id=thread_id,
+            request_id=context.request_id,
+            thread_id=context.thread_id,
             accepted=True,
             applied=claim.applied,
             action_status=claim.result_status,
             action_id=claim.action_id,
-            idempotency_key=resolved_idempotency_key,
-            approval_status=replay_approval_status,
+            idempotency_key=context.resolved_idempotency_key,
+            approval_status=context.replay_approval_status,
         )
 
     await record_permission_response_submission(
         db,
-        request_id=request_id,
-        option_id=option_id,
-        idempotency_key=resolved_idempotency_key,
+        request_id=context.request_id,
+        option_id=context.option_id,
+        idempotency_key=context.resolved_idempotency_key,
     )
     # The audit entry is written here and nowhere else: this is the one point the
     # response is applied to the pending request, and it sits behind the claim
@@ -849,32 +894,32 @@ async def _record_permission_transition(
     # unreachable. No commit here - the durability boundary below owns it.
     await append_permission_log(
         db,
-        thread_id=thread_id,
+        thread_id=context.thread_id,
         # Unattributed, deliberately. Neither sense of "who" is knowable at this
         # seam: the agent whose tool call was gated is never captured upstream,
         # and the responder carries no authenticated identity. Recording the
         # decision without the actor beats fabricating one.
         agent_id=None,
-        tool_name=_audited_tool_name(permission),
-        action=decision_verdict,
-        option_id=option_id,
+        tool_name=_audited_tool_name(context.permission),
+        action=context.decision_verdict,
+        option_id=context.option_id,
     )
-    if is_locally_respondable:
+    if context.is_locally_respondable:
         await set_thread_approval_state(
             db,
-            thread_id,
-            approval_status=submitted_approval_status,
-            approval_request_id=request_id,
-            approval_reason=permission_description,
+            context.thread_id,
+            approval_status=context.submitted_approval_status,
+            approval_request_id=context.request_id,
+            approval_reason=context.permission_description,
             approval_response_action_id=claim.action_id,
         )
-    await mark_permission_response_requested(db, thread_id)
+    await mark_permission_response_requested(db, context.thread_id)
     await finalize_control_action_acceptance(db, claim)
 
     return _PermissionTransition(
         claim=claim,
         dispatch=dispatch.model_copy(update={"dispatch_id": claim.dispatch_id}),
-        approval_status=submitted_approval_status,
+        approval_status=context.submitted_approval_status,
     )
 
 

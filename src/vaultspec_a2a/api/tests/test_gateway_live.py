@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
@@ -73,6 +74,22 @@ class _SqlTraceConnection(Protocol):
     async def set_trace_callback(
         self, trace_callback: Callable[[str], object] | None
     ) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _LiveRaceContext:
+    client: httpx.AsyncClient
+    engine: AsyncEngine
+    gate: DrainGate
+    checked_out: Callable[[], int]
+
+
+@dataclass(frozen=True, slots=True)
+class _DifferentBodyRaceAssertions:
+    session_factory: SessionFactory
+    worker: _InProcessWorker
+    gate: DrainGate
+    caplog: pytest.LogCaptureFixture
 
 
 async def _set_sql_trace_callback(
@@ -622,25 +639,22 @@ async def _wait_until(
 
 
 async def _run_same_id_insert_race(
-    client: httpx.AsyncClient,
-    engine: AsyncEngine,
-    gate: DrainGate,
-    checked_out: Callable[[], int],
+    race_context: _LiveRaceContext,
     run_id: str,
     payload: Mapping[str, object],
 ) -> tuple[httpx.Response, httpx.Response, httpx.Response]:
-    barrier = await engine.connect()
-    baseline = checked_out()
+    barrier = await race_context.engine.connect()
+    baseline = race_context.checked_out()
     await barrier.exec_driver_sql("BEGIN IMMEDIATE")
     try:
-        first = asyncio.create_task(client.post("/v1/runs", json=payload))
+        first = asyncio.create_task(race_context.client.post("/v1/runs", json=payload))
         await _wait_until(
-            lambda: gate.is_active(run_id),
+            lambda: race_context.gate.is_active(run_id),
             what="the first modern request to pass its read",
         )
-        second = asyncio.create_task(client.post("/v1/runs", json=payload))
+        second = asyncio.create_task(race_context.client.post("/v1/runs", json=payload))
         await _wait_until(
-            lambda: checked_out() >= baseline + 2,
+            lambda: race_context.checked_out() >= baseline + 2,
             what="the second modern request to reach the store",
         )
         await asyncio.sleep(0.25)
@@ -648,7 +662,7 @@ async def _run_same_id_insert_race(
         await barrier.exec_driver_sql("ROLLBACK")
         await barrier.close()
     first_response, second_response = await asyncio.gather(first, second)
-    replay = await client.post("/v1/runs", json=payload)
+    replay = await race_context.client.post("/v1/runs", json=payload)
     return first_response, second_response, replay
 
 
@@ -719,10 +733,7 @@ async def _exercise_five_verbs(
 
 
 async def _run_nickname_insert_race(
-    client: httpx.AsyncClient,
-    engine: AsyncEngine,
-    gate: DrainGate,
-    checked_out: Callable[[], int],
+    race_context: _LiveRaceContext,
     selection: Mapping[str, object],
     workspace_root: str,
 ) -> tuple[httpx.Response, httpx.Response]:
@@ -740,33 +751,33 @@ async def _run_nickname_insert_race(
         },
     }
     await _wait_until(
-        lambda: checked_out() == 0,
+        lambda: race_context.checked_out() == 0,
         what="the same-id race connections to return to the pool",
     )
-    barrier = await engine.connect()
-    baseline = checked_out()
+    barrier = await race_context.engine.connect()
+    baseline = race_context.checked_out()
     await barrier.exec_driver_sql("BEGIN IMMEDIATE")
     try:
         # `nickname_base` already carries the selection AND the metadata naming
         # the shared nickname; adding `_run_fields` would dissolve the collision.
         left = asyncio.create_task(
-            client.post(
+            race_context.client.post(
                 "/v1/runs",
                 json={**nickname_base, "run_id": left_id},
             )
         )
         await _wait_until(
-            lambda: gate.is_active(left_id),
+            lambda: race_context.gate.is_active(left_id),
             what="the first nickname request to pass its read",
         )
         right = asyncio.create_task(
-            client.post(
+            race_context.client.post(
                 "/v1/runs",
                 json={**nickname_base, "run_id": right_id},
             )
         )
         await _wait_until(
-            lambda: checked_out() >= baseline + 2,
+            lambda: race_context.checked_out() >= baseline + 2,
             what="the second nickname request to reach the store",
         )
         await asyncio.sleep(0.25)
@@ -815,10 +826,7 @@ def _assert_modern_race_results(
 
 
 async def _run_modern_selection_races(
-    client: httpx.AsyncClient,
-    engine: AsyncEngine,
-    gate: DrainGate,
-    checked_out: Callable[[], int],
+    race_context: _LiveRaceContext,
     run_id: str,
     selection: Mapping[str, object],
     workspace_root: str,
@@ -835,18 +843,12 @@ async def _run_modern_selection_races(
         "metadata": {"workspace_root": workspace_root},
     }
     first_response, second_response, replay = await _run_same_id_insert_race(
-        client,
-        engine,
-        gate,
-        checked_out,
+        race_context,
         run_id,
         payload,
     )
     nickname_responses = await _run_nickname_insert_race(
-        client,
-        engine,
-        gate,
-        checked_out,
+        race_context,
         selection,
         workspace_root,
     )
@@ -854,22 +856,19 @@ async def _run_modern_selection_races(
 
 
 async def _run_different_body_race(
-    client: httpx.AsyncClient,
-    engine: AsyncEngine,
-    gate: DrainGate,
-    checked_out: Callable[[], int],
+    race_context: _LiveRaceContext,
     run_id: str,
     first_body: Mapping[str, object],
     second_body: Mapping[str, object],
 ) -> tuple[httpx.Response, httpx.Response, httpx.Response, Mapping[str, object]]:
     """Race two bodies for one id, then replay the winner's body."""
-    barrier = await engine.connect()
-    race_fields = await _run_fields(client)
-    baseline = checked_out()
+    barrier = await race_context.engine.connect()
+    race_fields = await _run_fields(race_context.client)
+    baseline = race_context.checked_out()
     await barrier.exec_driver_sql("BEGIN IMMEDIATE")
     try:
         first = asyncio.create_task(
-            client.post(
+            race_context.client.post(
                 "/v1/runs",
                 json={
                     **first_body,
@@ -880,11 +879,11 @@ async def _run_different_body_race(
         # Admission happens after the check-then-act read and before the insert,
         # so an active run id proves the first request read an absent run.
         await _wait_until(
-            lambda: gate.is_active(run_id),
+            lambda: race_context.gate.is_active(run_id),
             what="the first request to pass its read",
         )
         second = asyncio.create_task(
-            client.post(
+            race_context.client.post(
                 "/v1/runs",
                 json={
                     **second_body,
@@ -895,7 +894,7 @@ async def _run_different_body_race(
         # A second leased connection proves the second request is issuing DB
         # work of its own while the barrier bars every insert.
         await _wait_until(
-            lambda: checked_out() >= baseline + 2,
+            lambda: race_context.checked_out() >= baseline + 2,
             what="the second request to reach the store",
         )
         await asyncio.sleep(0.25)
@@ -910,7 +909,9 @@ async def _run_different_body_race(
         winner, loser = second_response, first_response
         winning_body = second_body
     # The winner's own request still replays after the colliding body is refused.
-    replay = await client.post("/v1/runs", json={**winning_body, **race_fields})
+    replay = await race_context.client.post(
+        "/v1/runs", json={**winning_body, **race_fields}
+    )
     return winner, loser, replay, winning_body
 
 
@@ -922,10 +923,7 @@ async def _assert_different_body_race(
         Mapping[str, object],
     ],
     *,
-    session_factory: SessionFactory,
-    worker: _InProcessWorker,
-    gate: DrainGate,
-    caplog: pytest.LogCaptureFixture,
+    assertions: _DifferentBodyRaceAssertions,
     run_id: str,
 ) -> None:
     """Assert the loser is refused and only the winner is durable and dispatched."""
@@ -936,7 +934,7 @@ async def _assert_different_body_race(
     ]
     assert [
         record
-        for record in caplog.records
+        for record in assertions.caplog.records
         if "lost a concurrent insert race" in record.getMessage()
         and run_id in record.getMessage()
     ], "the integrity-error branch did not execute"
@@ -945,13 +943,13 @@ async def _assert_different_body_race(
     assert replay.status_code == 201, replay.text
     assert replay.json()["run_id"] == run_id
 
-    async with session_factory() as verify:
+    async with assertions.session_factory() as verify:
         _rows, total = await list_threads(verify)
     assert total == 1
-    raced = [d for d in worker.dispatches if d.get("thread_id") == run_id]
+    raced = [d for d in assertions.worker.dispatches if d.get("thread_id") == run_id]
     assert len(raced) == 1
     assert raced[0]["content"] == winning_body["message"]
-    assert gate.is_active(run_id)
+    assert assertions.gate.is_active(run_id)
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -2013,10 +2011,12 @@ async def test_modern_selection_insert_race_and_direct_replay_disclose_same_free
         ):
             selection, workspace_root = await _in_process_catalog_selection(client)
             responses, nickname_responses = await _run_modern_selection_races(
-                client,
-                engine,
-                gate,
-                checked_out,
+                _LiveRaceContext(
+                    client=client,
+                    engine=engine,
+                    gate=gate,
+                    checked_out=checked_out,
+                ),
                 run_id,
                 selection,
                 workspace_root,
@@ -2077,10 +2077,12 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
             httpx.AsyncClient(base_url=base, timeout=30.0) as client,
         ):
             race = await _run_different_body_race(
-                client,
-                engine,
-                gate,
-                checked_out,
+                _LiveRaceContext(
+                    client=client,
+                    engine=engine,
+                    gate=gate,
+                    checked_out=checked_out,
+                ),
                 run_id,
                 first_body,
                 second_body,
@@ -2088,10 +2090,12 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
 
     await _assert_different_body_race(
         race,
-        session_factory=session_factory,
-        worker=worker,
-        gate=gate,
-        caplog=caplog,
+        assertions=_DifferentBodyRaceAssertions(
+            session_factory=session_factory,
+            worker=worker,
+            gate=gate,
+            caplog=caplog,
+        ),
         run_id=run_id,
     )
 

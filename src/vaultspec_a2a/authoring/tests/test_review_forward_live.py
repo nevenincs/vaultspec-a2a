@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import pathlib
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -52,6 +53,24 @@ if TYPE_CHECKING:
 # test_submitter_live.py's own workspace binding) rather than a scratch
 # directory the engine would not recognise as one.
 _PROJECT = pathlib.Path(__file__).resolve().parents[4]
+
+
+@dataclass(frozen=True, slots=True)
+class _ReviewProposal:
+    """Tokens and identifiers for one submitted review proposal."""
+
+    feature: str
+    reviewer_token: str
+    changeset_id: str
+    proposal_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ReviewApproval:
+    """Approval identifiers returned by the review queue."""
+
+    approval_id: str
+    reviewed_revision: str
 
 
 def _whole_document_op(feature: str) -> dict[str, Any]:
@@ -171,6 +190,123 @@ async def _propose_and_submit(
     return changeset_id, proposal_id
 
 
+async def _create_review_proposal(
+    client: AuthoringClient,
+    run_id: str,
+    feature: str,
+    scope: str,
+) -> _ReviewProposal:
+    """Mint actors, create a session, and submit one review proposal."""
+    author_token = await _mint(client, f"agent:{run_id}", "agent")
+    reviewer_token = await _mint(client, f"reviewer:{run_id}", "human")
+    client._actor_token = author_token
+
+    session = AuthoringSession(client, run_id, project_scope=scope)
+    created_session = await session.create_session(
+        title=f"f30 {run_id}",
+        idempotency_key=derive_idempotency_key(run_id, "create_session"),
+    )
+    assert isinstance(created_session, AuthoringResponse)
+
+    changeset_id, proposal_id = await _propose_and_submit(
+        client, session, run_id=run_id, feature=feature, label="proof"
+    )
+    return _ReviewProposal(
+        feature=feature,
+        reviewer_token=reviewer_token,
+        changeset_id=changeset_id,
+        proposal_id=proposal_id,
+    )
+
+
+async def _review_approval(
+    client: AuthoringClient,
+    changeset_id: str,
+) -> _ReviewApproval:
+    """Read the queue entry for a submitted changeset."""
+    queue = await client.get("/v1/review-queue")
+    item = _find_review_item(queue.data, changeset_id)
+    approval = item["approval"]
+    return _ReviewApproval(
+        approval_id=approval["approval_id"],
+        reviewed_revision=approval["reviewed_proposal_revision"],
+    )
+
+
+async def _approve_review(
+    client: AuthoringClient,
+    run_id: str,
+    proposal: _ReviewProposal,
+    approval: _ReviewApproval,
+) -> None:
+    """Approve the submitted proposal with the distinct reviewer actor."""
+    decided = await decide_review(
+        client,
+        approval_id=approval.approval_id,
+        proposal_id=proposal.proposal_id,
+        decision=REVIEW_DECISION_APPROVE,
+        reviewed_revision=approval.reviewed_revision,
+        idempotency_key=derive_idempotency_key(run_id, approval.approval_id, "approve"),
+        actor_token=proposal.reviewer_token,
+    )
+    assert isinstance(decided, AuthoringResponse), f"approve denied: {decided}"
+
+
+async def _apply_and_assert_replay(
+    client: AuthoringClient,
+    run_id: str,
+    proposal: _ReviewProposal,
+    approval: _ReviewApproval,
+) -> None:
+    """Apply once, retry under one key, and clean up the materialized document."""
+    apply_key = derive_idempotency_key(run_id, approval.approval_id, "request_apply")
+    first = await request_apply(
+        client,
+        changeset_id=proposal.changeset_id,
+        approval_id=approval.approval_id,
+        idempotency_key=apply_key,
+        actor_token=proposal.reviewer_token,
+    )
+    assert isinstance(first, AuthoringResponse), f"apply denied: {first}"
+    assert first.data.get("child_outcome") == "applied", first.data
+    receipt = first.data["receipt"]
+    document_path = receipt["child"]["document_path"]
+    assert isinstance(document_path, str) and document_path
+
+    resolved_path = _resolve_document_path(_PROJECT, document_path)
+    try:
+        assert resolved_path.is_file(), (
+            f"apply reported document_path={document_path!r} but no file "
+            f"exists at {resolved_path}"
+        )
+        body_on_disk = resolved_path.read_text(encoding="utf-8")
+        assert proposal.feature in body_on_disk
+        mtime_after_first = resolved_path.stat().st_mtime_ns
+
+        # Retry the identical forward under the SAME key. If a fresh key were
+        # generated per call this would apply the document a second time -
+        # the worst outcome available at this seam.
+        second = await request_apply(
+            client,
+            changeset_id=proposal.changeset_id,
+            approval_id=approval.approval_id,
+            idempotency_key=apply_key,
+            actor_token=proposal.reviewer_token,
+        )
+        assert isinstance(second, AuthoringResponse), f"replay denied: {second}"
+        assert second.data.get("status") in {"recorded", "replayed"}, second.data
+        assert second.data.get("child_outcome") == "applied", second.data
+        second_receipt = second.data["receipt"]
+        assert second_receipt["child"]["document_path"] == document_path
+
+        # Single application, proven on the FILESYSTEM: unchanged mtime and
+        # byte-identical content after the retry, not merely a matching receipt.
+        assert resolved_path.stat().st_mtime_ns == mtime_after_first
+        assert resolved_path.read_text(encoding="utf-8") == body_on_disk
+    finally:
+        resolved_path.unlink(missing_ok=True)
+
+
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_decide_and_apply_materializes_a_file_with_single_application(
@@ -192,85 +328,10 @@ async def test_decide_and_apply_materializes_a_file_with_single_application(
 
     endpoint = live_engine.base_url, live_engine.bearer_token
     async with AuthoringClient(*endpoint) as client:
-        author_token = await _mint(client, f"agent:{run_id}", "agent")
-        reviewer_token = await _mint(client, f"reviewer:{run_id}", "human")
-        client._actor_token = author_token
-
-        session = AuthoringSession(client, run_id, project_scope=scope)
-        created_session = await session.create_session(
-            title=f"f30 {run_id}",
-            idempotency_key=derive_idempotency_key(run_id, "create_session"),
-        )
-        assert isinstance(created_session, AuthoringResponse)
-
-        changeset_id, proposal_id = await _propose_and_submit(
-            client, session, run_id=run_id, feature=feature, label="proof"
-        )
-
-        queue = await client.get("/v1/review-queue")
-        item = _find_review_item(queue.data, changeset_id)
-        approval = item["approval"]
-        approval_id = approval["approval_id"]
-        reviewed_revision = approval["reviewed_proposal_revision"]
-
-        decided = await decide_review(
-            client,
-            approval_id=approval_id,
-            proposal_id=proposal_id,
-            decision=REVIEW_DECISION_APPROVE,
-            reviewed_revision=reviewed_revision,
-            idempotency_key=derive_idempotency_key(run_id, approval_id, "approve"),
-            actor_token=reviewer_token,
-        )
-        assert isinstance(decided, AuthoringResponse), f"approve denied: {decided}"
-
-        apply_key = derive_idempotency_key(run_id, approval_id, "request_apply")
-        first = await request_apply(
-            client,
-            changeset_id=changeset_id,
-            approval_id=approval_id,
-            idempotency_key=apply_key,
-            actor_token=reviewer_token,
-        )
-        assert isinstance(first, AuthoringResponse), f"apply denied: {first}"
-        assert first.data.get("child_outcome") == "applied", first.data
-        receipt = first.data["receipt"]
-        document_path = receipt["child"]["document_path"]
-        assert isinstance(document_path, str) and document_path
-
-        resolved_path = _resolve_document_path(_PROJECT, document_path)
-        try:
-            assert resolved_path.is_file(), (
-                f"apply reported document_path={document_path!r} but no file "
-                f"exists at {resolved_path}"
-            )
-            body_on_disk = resolved_path.read_text(encoding="utf-8")
-            assert feature in body_on_disk
-            mtime_after_first = resolved_path.stat().st_mtime_ns
-
-            # Retry the identical forward under the SAME key. If a fresh key were
-            # generated per call this would apply the document a second time —
-            # the worst outcome available at this seam.
-            second = await request_apply(
-                client,
-                changeset_id=changeset_id,
-                approval_id=approval_id,
-                idempotency_key=apply_key,
-                actor_token=reviewer_token,
-            )
-            assert isinstance(second, AuthoringResponse), f"replay denied: {second}"
-            assert second.data.get("status") in {"recorded", "replayed"}, second.data
-            assert second.data.get("child_outcome") == "applied", second.data
-            second_receipt = second.data["receipt"]
-            assert second_receipt["child"]["document_path"] == document_path
-
-            # Single application, proven on the FILESYSTEM: unchanged mtime and
-            # byte-identical content after the retry, not merely a matching
-            # receipt.
-            assert resolved_path.stat().st_mtime_ns == mtime_after_first
-            assert resolved_path.read_text(encoding="utf-8") == body_on_disk
-        finally:
-            resolved_path.unlink(missing_ok=True)
+        proposal = await _create_review_proposal(client, run_id, feature, scope)
+        approval = await _review_approval(client, proposal.changeset_id)
+        await _approve_review(client, run_id, proposal, approval)
+        await _apply_and_assert_replay(client, run_id, proposal, approval)
 
 
 @pytest.mark.service

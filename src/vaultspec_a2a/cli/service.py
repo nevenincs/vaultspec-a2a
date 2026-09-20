@@ -145,6 +145,10 @@ def _desktop_arm_env(app_home: Path, capsule_root: Path) -> dict[str, str]:
 
 
 class _StartServiceOptions(TypedDict, total=False):
+    capsule_root: Path | None
+    host: str | None
+    port: int | None
+    log_path: str | None
     ready_timeout: float
 
 
@@ -165,11 +169,6 @@ def _reject_unexpected_service_options(
 
 def start_service(
     app_home: Path | None = None,
-    *,
-    capsule_root: Path | None = None,
-    host: str | None = None,
-    port: int | None = None,
-    log_path: str | None = None,
     **options: Unpack[_StartServiceOptions],
 ) -> ServiceStatus:
     """Start the gateway detached and wait until it is discoverably healthy.
@@ -187,6 +186,10 @@ def start_service(
     pid: on Windows a venv launcher stub means the recorded gateway pid can
     legitimately differ from the spawned child's pid.
     """
+    capsule_root = options.pop("capsule_root", None)
+    host = options.pop("host", None)
+    port = options.pop("port", None)
+    log_path = options.pop("log_path", None)
     ready_timeout = options.pop("ready_timeout", _READY_TIMEOUT_SECONDS)
     _reject_unexpected_service_options("start_service", options)
     home = _resolved_app_home(app_home)
@@ -324,11 +327,6 @@ def stop_service(
 
 def restart_service(
     app_home: Path | None = None,
-    *,
-    capsule_root: Path | None = None,
-    host: str | None = None,
-    port: int | None = None,
-    log_path: str | None = None,
     **options: Unpack[_RestartServiceOptions],
 ) -> ServiceStatus:
     """Stop the resident (confirmed dead), then start ready-gated.
@@ -338,6 +336,10 @@ def restart_service(
     a surviving generation on the same port; :func:`start_service` then
     publishes exactly one ready generation or fails loudly.
     """
+    capsule_root = options.pop("capsule_root", None)
+    host = options.pop("host", None)
+    port = options.pop("port", None)
+    log_path = options.pop("log_path", None)
     ready_timeout = options.pop("ready_timeout", _READY_TIMEOUT_SECONDS)
     stop_timeout = options.pop("stop_timeout", _STOP_TIMEOUT_SECONDS)
     _reject_unexpected_service_options("restart_service", options)

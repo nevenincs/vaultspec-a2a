@@ -342,6 +342,17 @@ class _Evidence:
         return bool(self.locator_urls) and bool(self.body)
 
 
+@dataclass(frozen=True, slots=True)
+class _GroundingObservation:
+    """Inputs captured before the web-grounding proof assertions."""
+
+    before: dict[str, tuple[float, int]]
+    shas_before: set[str]
+    evidence: _Evidence
+    failure_reason: str
+    failure_condition: str
+
+
 async def _read_evidence(run_id: str) -> _Evidence:
     """Project the run's checkpointed state onto the two citation channels."""
     state = await _read_checkpointed_state(run_id)
@@ -442,50 +453,10 @@ async def _observe_web_grounding_run(
     return evidence, failure_reason, failure_condition
 
 
-@pytest.mark.service
-@pytest.mark.resource("loopback-stack")
-@pytest.mark.resource("claude-cli-lane")
-@pytest.mark.asyncio
-@pytest.mark.timeout(_OBSERVE_DEADLINE_SECONDS + 600.0)
-async def test_claude_lane_completes_a_real_web_retrieval(
-    external_prerequisite: ExternalPrerequisiteRule,
+def _assert_web_grounding_evidence(
+    harness: AcceptanceHarness,
+    observation: _GroundingObservation,
 ) -> None:
-    """Live: an autonomous Claude run retrieves from the web and cites it both ways.
-
-    The Claude lane's completed-retrieval proof. Zero vault writes: the run is
-    observed only until the evidence lands in checkpointed state, then cancelled with
-    nothing ever applied, and a before / after snapshot of the engine workspace
-    asserts no document changed.
-    """
-    stack = _reachable_stack()
-    if stack is None:
-        external_prerequisite.absent("loopback-stack")
-    gateway_url, engine_base_url, engine_bearer, vault_root = stack
-
-    shas_before = _fetch_live_commit_shas()
-    if not shas_before:
-        pytest.skip(
-            f"could not resolve live commit SHAs from {_LIVE_SHA_URL} (network "
-            "unreachable or rate-limited); the completed-retrieval proof cannot be "
-            "posed without a live token the prompt never carried. This is a truthful "
-            "skip, not a masked failure"
-        )
-
-    feature = f"tool-cores-web-{int(time.time())}"
-    case = _web_grounding_case(feature)
-    harness = AcceptanceHarness(
-        case=case,
-        engine_base_url=engine_base_url,
-        engine_bearer=engine_bearer,
-        vault_root=vault_root,
-        gateway_url=gateway_url,
-    )
-
-    before = _snapshot_vault(vault_root)
-    evidence, failure_reason, failure_condition = await _observe_web_grounding_run(
-        harness, case, feature
-    )
-
     # A run that died before the evidence landed proves nothing either way, so the
     # two causes are separated rather than reported as one failure. A provider that
     # refused the run for rate is an ABSENT EXTERNAL RESOURCE - the lane cannot be
@@ -497,12 +468,16 @@ async def test_claude_lane_completes_a_real_web_retrieval(
     # nothing: a classification derived from prose breaks whenever a vendor rewords
     # a message, and re-derives what the lane already resolved from the provider's
     # own discriminator.
-    if not evidence.complete and (failure_reason or failure_condition):
-        if _is_provider_rate_refusal(failure_condition):
+    if not observation.evidence.complete and (
+        observation.failure_reason or observation.failure_condition
+    ):
+        if _is_provider_rate_refusal(observation.failure_condition):
             pytest.skip(
                 f"the {_PRESET_LIVE!r} lane's provider refused the run for rate "
-                f"before the evidence landed (condition {failure_condition!r}): "
-                f"{failure_reason}. This lane cannot say whether a short-term rate "
+                "before the evidence landed (condition "
+                f"{observation.failure_condition!r}): "
+                f"{observation.failure_reason}. This lane cannot say whether a "
+                "short-term rate "
                 "limit or an exhausted subscription window caused it - its adapter "
                 "reports both identically - so this names only what the wire "
                 "carried. A truthful skip for an absent external resource, not a "
@@ -510,21 +485,21 @@ async def test_claude_lane_completes_a_real_web_retrieval(
             )
         pytest.fail(
             f"run {harness.run_id} went terminal before the retrieval evidence "
-            f"landed (condition {failure_condition or 'none recorded'!r}): "
-            f"{failure_reason}"
+            f"landed (condition {observation.failure_condition or 'none recorded'!r}): "
+            f"{observation.failure_reason}"
         )
 
     shas_after = _fetch_live_commit_shas()
-    live_shas = shas_before | shas_after
+    live_shas = observation.shas_before | shas_after
 
-    after = _snapshot_vault(vault_root)
-    delta = _vault_write_delta(before, after)
+    after = _snapshot_vault(harness.vault_root)
+    delta = _vault_write_delta(observation.before, after)
 
-    locator_urls = evidence.locator_urls
-    body = evidence.body
+    locator_urls = observation.evidence.locator_urls
+    body = observation.evidence.body
     sources = _sources_section(body)
     reproduced = sorted(
-        sha for sha in _SHA_RE.findall(evidence.claims) if sha in live_shas
+        sha for sha in _SHA_RE.findall(observation.evidence.claims) if sha in live_shas
     )
 
     # 1. The retrieval actually happened. A live commit SHA the prompt never carried
@@ -580,6 +555,61 @@ async def test_claude_lane_completes_a_real_web_retrieval(
         )
     assert delta == {"created": [], "modified": [], "deleted": []}, (
         f"the retrieval proof must not write to .vault, but the run changed it: {delta}"
+    )
+
+
+@pytest.mark.service
+@pytest.mark.resource("loopback-stack")
+@pytest.mark.resource("claude-cli-lane")
+@pytest.mark.asyncio
+@pytest.mark.timeout(_OBSERVE_DEADLINE_SECONDS + 600.0)
+async def test_claude_lane_completes_a_real_web_retrieval(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """Live: an autonomous Claude run retrieves from the web and cites it both ways.
+
+    The Claude lane's completed-retrieval proof. Zero vault writes: the run is
+    observed only until the evidence lands in checkpointed state, then cancelled with
+    nothing ever applied, and a before / after snapshot of the engine workspace
+    asserts no document changed.
+    """
+    stack = _reachable_stack()
+    if stack is None:
+        external_prerequisite.absent("loopback-stack")
+    gateway_url, engine_base_url, engine_bearer, vault_root = stack
+
+    shas_before = _fetch_live_commit_shas()
+    if not shas_before:
+        pytest.skip(
+            f"could not resolve live commit SHAs from {_LIVE_SHA_URL} (network "
+            "unreachable or rate-limited); the completed-retrieval proof cannot be "
+            "posed without a live token the prompt never carried. This is a truthful "
+            "skip, not a masked failure"
+        )
+
+    feature = f"tool-cores-web-{int(time.time())}"
+    case = _web_grounding_case(feature)
+    harness = AcceptanceHarness(
+        case=case,
+        engine_base_url=engine_base_url,
+        engine_bearer=engine_bearer,
+        vault_root=vault_root,
+        gateway_url=gateway_url,
+    )
+
+    before = _snapshot_vault(vault_root)
+    evidence, failure_reason, failure_condition = await _observe_web_grounding_run(
+        harness, case, feature
+    )
+    _assert_web_grounding_evidence(
+        harness,
+        _GroundingObservation(
+            before=before,
+            shas_before=shas_before,
+            evidence=evidence,
+            failure_reason=failure_reason,
+            failure_condition=failure_condition,
+        ),
     )
 
 

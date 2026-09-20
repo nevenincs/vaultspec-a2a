@@ -227,43 +227,12 @@ async def _observe_solo_coder_run(
     return run_changesets
 
 
-@pytest.mark.service
-@pytest.mark.resource("loopback-stack")
-@pytest.mark.asyncio
-async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
-    external_prerequisite: ExternalPrerequisiteRule,
-) -> None:
-    """Live: a solo-coder natively invokes a bridged authoring tool mid-turn.
-
-    Proven by an engine-side changeset scoped to this run
-    (``cs:<run_id>:*`` in ``GET /authoring/v1/proposals``) - only a real
-    ``propose_changeset`` the bridge forwards creates one. The run is observed over
-    its SSE stream WITHOUT an early cancel; the engine is polled for the changeset
-    until it appears, the run terminates, or the deadline elapses. A before/after
-    document-dir snapshot asserts zero ``.vault`` writes: the proposal lands in the
-    engine review lane, never materialized to disk here.
-    """
-    stack = _reachable_stack()
-    if stack is None:
-        external_prerequisite.absent("loopback-stack")
-    gateway_url, engine_base_url, engine_bearer, vault_root = stack
-
-    feature = f"s20-solo-coder-{int(time.time())}"
-    case = _solo_coder_case(feature)
-    selection, overrides = await _resolve_selection(
-        case, gateway_url, str(vault_root.parent)
-    )
-    harness = AcceptanceHarness(
-        case=case,
-        engine_base_url=engine_base_url,
-        engine_bearer=engine_bearer,
-        vault_root=vault_root,
-        gateway_url=gateway_url,
-        selection=selection,
-        overrides=overrides,
-    )
-
-    before = _snapshot_vault(vault_root)
+async def _run_solo_coder_proof(
+    case: AcceptanceCase,
+    harness: AcceptanceHarness,
+    feature: str,
+) -> tuple[set[str], dict[str, list[str]], set[str]]:
+    before = _snapshot_vault(harness.vault_root)
     output_parts: list[str] = []
     # Diagnostic only (NEVER asserted): the bridge tool names that appear in the
     # agent's narration. Retained to surface prompt-echo vs. real invocation when
@@ -272,7 +241,9 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
 
     from .test_pw7_acceptance import _ResilientAuthoringClient
 
-    async with _ResilientAuthoringClient(engine_base_url, engine_bearer) as ec:
+    async with _ResilientAuthoringClient(
+        harness.engine_base_url, harness.engine_bearer
+    ) as ec:
         # Per-agent_id token minted here and supplied at the gateway seam (pw7
         # pattern): keyed by the coder's agent_id so the run_start coverage gate
         # passes without the engine's role-key minting.
@@ -310,8 +281,50 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
                 narrated_bridge_names,
             )
 
-    after = _snapshot_vault(vault_root)
+    after = _snapshot_vault(harness.vault_root)
     delta = _vault_write_delta(before, after)
+    return run_changesets, delta, narrated_bridge_names
+
+
+@pytest.mark.service
+@pytest.mark.resource("loopback-stack")
+@pytest.mark.asyncio
+async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """Live: a solo-coder natively invokes a bridged authoring tool mid-turn.
+
+    Proven by an engine-side changeset scoped to this run
+    (``cs:<run_id>:*`` in ``GET /authoring/v1/proposals``) - only a real
+    ``propose_changeset`` the bridge forwards creates one. The run is observed over
+    its SSE stream WITHOUT an early cancel; the engine is polled for the changeset
+    until it appears, the run terminates, or the deadline elapses. A before/after
+    document-dir snapshot asserts zero ``.vault`` writes: the proposal lands in the
+    engine review lane, never materialized to disk here.
+    """
+    stack = _reachable_stack()
+    if stack is None:
+        external_prerequisite.absent("loopback-stack")
+    gateway_url, engine_base_url, engine_bearer, vault_root = stack
+
+    feature = f"s20-solo-coder-{int(time.time())}"
+    case = _solo_coder_case(feature)
+    selection, overrides = await _resolve_selection(
+        case, gateway_url, str(vault_root.parent)
+    )
+    harness = AcceptanceHarness(
+        case=case,
+        engine_base_url=engine_base_url,
+        engine_bearer=engine_bearer,
+        vault_root=vault_root,
+        gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
+    )
+
+    run_changesets, delta, narrated_bridge_names = await _run_solo_coder_proof(
+        case, harness, feature
+    )
 
     assert run_changesets, (
         "the solo-coder did not create any engine changeset scoped to run "

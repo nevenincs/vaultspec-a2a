@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from ..control.action_lease import (
     ControlActionClaimRequest,
@@ -130,18 +130,20 @@ async def _settle_failed_message_dispatch(
     )
 
 
+class _FollowupMessageArgs(TypedDict):
+    thread_id: str
+    content: str
+    agent_id: str
+    idempotency_key: str | None
+    circuit_breaker: WorkerCircuitBreaker
+    worker_spawner: LazyWorkerSpawner
+    worker_client: httpx.AsyncClient
+    recursion_limit: int
+    trace_headers: dict[str, str] | None
+
+
 async def send_followup_message(
-    db: AsyncSession,
-    *,
-    thread_id: str,
-    content: str,
-    agent_id: str,
-    idempotency_key: str | None,
-    circuit_breaker: WorkerCircuitBreaker,
-    worker_spawner: LazyWorkerSpawner,
-    worker_client: httpx.AsyncClient,
-    recursion_limit: int,
-    trace_headers: dict[str, str] | None,
+    db: AsyncSession, **options: Unpack[_FollowupMessageArgs]
 ) -> MessageResult:
     """Execute the send-followup-message workflow.
 
@@ -150,11 +152,11 @@ async def send_followup_message(
     into an appropriate HTTP response.  Commits the session before returning.
     """
     # -- Thread lookup & guard -------------------------------------------
-    thread = await get_thread(db, thread_id)
+    thread = await get_thread(db, options["thread_id"])
     if thread is None:
         return MessageResult(
             action_id="",
-            thread_id=thread_id,
+            thread_id=options["thread_id"],
             thread_status="",
             dispatched=False,
             error_detail="Thread not found",
@@ -166,7 +168,7 @@ async def send_followup_message(
         # Distinguish INPUT_REQUIRED from generic terminal-state rejection
         return MessageResult(
             action_id="",
-            thread_id=thread_id,
+            thread_id=options["thread_id"],
             thread_status=thread.status,
             dispatched=False,
             error_detail=eligibility.reason,
@@ -179,8 +181,8 @@ async def send_followup_message(
 
     logger.info(
         "Message received for thread %s: %d chars",
-        thread_id,
-        len(content),
+        options["thread_id"],
+        len(options["content"]),
     )
 
     # The losing claim path rolls its transaction back, which expires ORM state.
@@ -191,13 +193,15 @@ async def send_followup_message(
     team_preset = thread.team_preset
     thread_metadata = thread.thread_metadata
     try:
-        graph_definition = await read_accepted_graph_definition(db, thread_id)
+        graph_definition = await read_accepted_graph_definition(
+            db, options["thread_id"]
+        )
         team_preset = graph_definition.team_id
         execution_authority = resolve_execution_authority(thread_metadata)
     except (ExecutionAuthorityError, ValueError) as exc:
         return MessageResult(
             action_id="",
-            thread_id=thread_id,
+            thread_id=options["thread_id"],
             thread_status=thread_status,
             dispatched=False,
             error_detail=str(exc),
@@ -214,7 +218,7 @@ async def send_followup_message(
     if workspace_root is None:
         return MessageResult(
             action_id="",
-            thread_id=thread_id,
+            thread_id=options["thread_id"],
             thread_status=thread_status,
             dispatched=False,
             error_detail=(
@@ -227,73 +231,74 @@ async def send_followup_message(
     # -- Dispatch construction & send ------------------------------------
     dispatch = DispatchRequest(
         action=to_dispatch_action(ControlActionType.INGEST),
-        thread_id=thread_id,
-        agent_id=agent_id,
-        content=content,
+        thread_id=options["thread_id"],
+        agent_id=options["agent_id"],
+        content=options["content"],
         team_preset=team_preset,
         graph_definition=graph_definition,
         workspace_root=workspace_root,
-        recursion_limit=recursion_limit,
+        recursion_limit=options["recursion_limit"],
         model_assignment=execution_authority.model_assignment,
     )
 
     # -- Durable reservation and dispatch election -----------------------
-    resolved_idempotency_key = idempotency_key or default_message_key(
-        thread_id, agent_id, content
+    resolved_idempotency_key = options["idempotency_key"] or default_message_key(
+        options["thread_id"], options["agent_id"], options["content"]
     )
     claim = await prepare_control_action_claim(
         db,
         request=ControlActionClaimRequest(
-            thread_id=thread_id,
+            thread_id=options["thread_id"],
             action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
             idempotency_key=resolved_idempotency_key,
             payload=freeze_accepted_input(
-                dispatch, intent={"content": content, "agent_id": agent_id}
+                dispatch,
+                intent={"content": options["content"], "agent_id": options["agent_id"]},
             ),
             dispatch_id=dispatch.dispatch_id,
             write_expectation=write_expectation,
             recovery_timeout_seconds=graph_definition.run_timeout_seconds,
         ),
     )
-    claim_failure = _claim_message_failure(claim, thread_id, thread_status)
+    claim_failure = _claim_message_failure(claim, options["thread_id"], thread_status)
     if claim_failure is not None:
         return claim_failure
 
     dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
-    await mark_message_followup_requested(db, thread_id)
+    await mark_message_followup_requested(db, options["thread_id"])
     await finalize_control_action_acceptance(db, claim)
 
     logger.info(
         "Dispatching message dispatch_id=%s for thread %s",
         dispatch.dispatch_id,
-        thread_id,
+        options["thread_id"],
         extra={
-            "thread_id": thread_id,
+            "thread_id": options["thread_id"],
             "dispatch_id": dispatch.dispatch_id,
             "action": dispatch.action,
-            "agent_id": agent_id,
+            "agent_id": options["agent_id"],
         },
     )
 
     dispatch = await bind_graph_action_receipt(db, dispatch)
     outcome = await safe_dispatch(
-        worker_client,
+        options["worker_client"],
         dispatch,
-        circuit_breaker,
-        worker_spawner,
-        trace_headers=trace_headers,
+        options["circuit_breaker"],
+        options["worker_spawner"],
+        trace_headers=options["trace_headers"],
     )
 
     if not outcome.success:
         result = await _settle_failed_message_dispatch(
-            db, claim, outcome, thread_id, thread_status
+            db, claim, outcome, options["thread_id"], thread_status
         )
     else:
         # Worker acknowledgement proves scheduling only. The exact internal
         # ``dispatch_applied`` receipt settles the journal action and repair state.
         result = MessageResult(
             action_id=claim.action_id,
-            thread_id=thread_id,
+            thread_id=options["thread_id"],
             thread_status=thread_status,
             dispatched=True,
         )

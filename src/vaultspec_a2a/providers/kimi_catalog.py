@@ -370,16 +370,17 @@ async def discover_kimi_catalog(
     **options: Unpack[_DiscoverKimiCatalogOptions],
 ) -> KimiCatalogDiscovery:
     """Run the fixed prompt-free provider-list command and reap its process tree."""
-    env = options["env"]
-    cwd = options["cwd"]
     key = options["key"]
-    timeout = options.get("timeout", 30.0)
     metadata = options.get("metadata")
     if not command_prefix:
         raise ValueError("command_prefix must not be empty")
     command = [*command_prefix, "provider", "list", "--json"]
     process = await spawn_acp_process(
-        command, dict(env), cwd, use_exec=False, metadata=metadata
+        command,
+        dict(options["env"]),
+        options["cwd"],
+        use_exec=False,
+        metadata=metadata,
     )
     output_budget = OutputBudget(_protocol_error)
     stdout_task = asyncio.create_task(
@@ -393,7 +394,7 @@ async def discover_kimi_catalog(
     try:
         returncode, stdout, _ = await asyncio.wait_for(
             asyncio.gather(process.wait(), stdout_task, stderr_task),
-            timeout=timeout,
+            timeout=options.get("timeout", 30.0),
         )
         if returncode != 0:
             raise KimiCatalogProtocolError("Kimi provider-list discovery failed")

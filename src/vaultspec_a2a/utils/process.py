@@ -139,10 +139,15 @@ def _ps_group_is_live(pgid: int) -> bool | None:
 async def _await_posix_group_gone(pgid: int, *, timeout: float) -> bool:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
+    empty_observations = 0
     while True:
         # ps is bounded, but may still block for seconds on a busy host.
         if await asyncio.to_thread(_posix_group_is_live, pgid) is False:
-            return True
+            empty_observations += 1
+            if empty_observations == 2:
+                return True
+        else:
+            empty_observations = 0
         remaining = deadline - loop.time()
         if remaining <= 0:
             return False
@@ -643,7 +648,12 @@ class ProcessContainment:
         pgid = self._pgid
         if pgid is None or pgid != self._pid or pgid <= 1 or pgid == os.getpgrp():
             raise ProcessContainmentError("Refusing to signal an unowned process group")
-        if await asyncio.to_thread(_posix_group_is_live, pgid) is False:
+        # Confirm an empty snapshot before returning: the /proc walk can
+        # transiently miss a member while the root exits and is reparented.
+        if (
+            await asyncio.to_thread(_posix_group_is_live, pgid) is False
+            and await asyncio.to_thread(_posix_group_is_live, pgid) is False
+        ):
             return True
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGTERM)

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:0127c0d55ae3ec852d4728c1309e93ecce1e5f31bd6f46d96e2ef3d45701c8ab'
+body_hash: 'sha256:26c9ef157076304a258c41a932a640946466a62f94db189eec27e30e3c4ac059'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4274,3 +4274,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, concurrency correctness: the final-head Linux unit rerun found one failure (4,564 passed, 16 skipped, 197 deselected). A reclaimed live-pid marker and its successor can carry identical JSON when the same process acquires both in one millisecond. The displaced holder then mistakes the successor marker for its own and deletes it during release. This is a real lease ownership bug exposed by the full CI run.
 - Implementation: each marker now carries a random 128-bit release token in its payload. The existing token comparison on release therefore distinguishes successive claims even if pid, owner, and acquisition millisecond match. The regression test fixes the wall clock across both claims and asserts that releasing the displaced holder preserves the successor marker.
 - Verification: all nine lease tests pass locally; the strict gate and Linux CI rerun are in progress. Review result is REVISION REQUIRED pending those gates. The prior PASS records the preceding source commit only and does not cover this newly discovered issue.
+
+### 2026-09-20 POSIX process-group observation follow-up
+
+- Review finding, medium severity, process cleanup: Linux canonical CI on `e1aaa4a0` passed the lease regression but failed `test_release_after_root_exit_reaps_descendant_and_preserves_foreign_process`: `terminal/release` returned while the former root's child PID was still live. The run had 4,564 passed, 16 skips, and 197 service tests deselected. Fifty repeated native Linux runs of the original focused test passed, so the precise CI scheduling event was not reproduced locally.
+- Implementation: the POSIX containment path now requires two consecutive empty process-group observations before it reports quiescence, both before signaling and while awaiting exit. The process table walk can transiently miss a member during root exit/reparenting; one empty snapshot is insufficient proof. A new real-process regression test forces the first liveness observation to be empty and verifies that containment still reaps the live child. The pre-signal confirmation preserves the guard against signaling a numerically reused group.
+- Verification: 26 focused process tests pass on Windows and 27 pass on native Linux after the fix. The full local unit gate on the preceding lease-fix commit passed 4,582 with two prerequisite skips and 197 service tests deselected. Strict scanning and a fresh Linux canonical CI run remain required. Review result is REVISION REQUIRED pending those gates.

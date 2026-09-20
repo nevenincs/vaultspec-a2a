@@ -579,6 +579,26 @@ def _validated_terminal_status(
     return status
 
 
+async def _accept_terminal_event(
+    thread_id: str,
+    payload: dict[str, object],
+    terminal_status: ThreadStatus,
+    context: tuple[
+        async_sessionmaker[AsyncSession] | None, int | None, Checkpointer | None
+    ],
+) -> bool:
+    factory, last_sequence, checkpointer = context
+    if terminal_status is ThreadStatus.COMPLETED:
+        return await _confirm_completed_terminal(
+            thread_id, factory, checkpointer, last_sequence
+        )
+    if terminal_status is ThreadStatus.CANCELLED:
+        return await _confirm_cancelled_terminal(
+            thread_id, payload.get("cancellation_evidence"), factory, last_sequence
+        )
+    return await _confirm_failed_terminal(thread_id, payload, factory, last_sequence)
+
+
 async def _handle_terminal_event(
     thread_id: str,
     payload: dict[str, object],
@@ -606,18 +626,9 @@ async def _handle_terminal_event(
     if terminal_status is None:
         return
     factory = _session_factory(session_factory)
-    if terminal_status is ThreadStatus.COMPLETED:
-        accepted = await _confirm_completed_terminal(
-            thread_id, factory, checkpointer, last_sequence
-        )
-    elif terminal_status is ThreadStatus.CANCELLED:
-        accepted = await _confirm_cancelled_terminal(
-            thread_id, payload.get("cancellation_evidence"), factory, last_sequence
-        )
-    else:
-        accepted = await _confirm_failed_terminal(
-            thread_id, payload, factory, last_sequence
-        )
+    accepted = await _accept_terminal_event(
+        thread_id, payload, terminal_status, (factory, last_sequence, checkpointer)
+    )
     if not accepted or factory is None:
         return
     _schedule_terminal_settlement(thread_id, terminal_status, factory)

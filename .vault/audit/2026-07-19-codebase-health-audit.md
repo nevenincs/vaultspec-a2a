@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:fceb0acc3384ae02685af90e0a068aeab7d9720d46c0218b58679b9d701cad9b'
+body_hash: 'sha256:2472e5e233102da2147decfc8e90411d44dc8031dd7e5cfd757dc3b36bfc5064'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4020,3 +4020,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Medium / maintainability: `authoring/session.py` decision keywords and draft mutation helper exceeded the strict five-parameter limit. Typed keyword options preserve public decision calls; a frozen `_DraftMutation` groups the internal request. Review found a runtime TypedDict defect: postponed `NotRequired` annotations marked optional keys as required. Split optional and required keys into total-false and required TypedDict bases; runtime key metadata now matches the call contract. Strict Ty, Ruff, formatter, and focused authoring tests pass.
 - Medium / maintainability: `control/event_handlers.py` failure persistence, terminal handling, and `relay_event` exceeded the strict parameter limit. Persisted condition now uses validated failure evidence; the parser had already verified it equals the wire condition. Typed terminal options retain keyword compatibility. Review found no behavior issue. The file now has zero PLR0913 findings; strict Ty, Ruff, and focused handler/gateway tests pass.
 - Remaining queue: other strict parameter-count findings remain open.
+
+### 2026-09-20 compiler and terminal event review
+
+- Implementation: moved star, pipeline, loop, research/ADR, and retry logic from `graph/compiler.py` into focused modules. Preserved private compiler helper imports used by tests. The compiler is now 989 physical lines, below the 1000-line limit. Moved terminal acceptance routing into a helper, returning cyclomatic complexity to zero offenders.
+- Review finding, medium severity, compatibility: topology route annotations are inspected at runtime by LangGraph. The extracted modules require `TeamState` available at runtime. Fixed after the first focused test run exposed a `NameError`; 107 graph tests then passed.
+- Review finding, low severity, maintainability: the compatibility wrappers for three private research helpers add indirect calls. They preserve current import and call signatures. Keep them in the audit queue for removal only if callers migrate deliberately.
+- Verification: strict Ty passed, import load passed for 295 modules, export coverage had zero findings, 107 focused graph tests and 17 event-handler tests passed, and Radon cyclomatic passed. `just check-strict` still fails on 74 parameter-count offenders, 111 selected Ruff findings, 30 preview nesting findings, and 40 Pylint design findings. Module length and cognitive complexity are green. These remaining findings stay open in the audit queue.

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:248b699e5c346cfb873a508d8177c6402399909a2acfc95c2c5186d8867175dd'
+body_hash: 'sha256:c912c72f0295011a958215f515fccd67f06a1fbe81ded34167e10a687ec5626e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3362,3 +3362,9 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: extracted the permission-clear decision into a focused predicate, retaining the existing checkpoint and snapshot conditions.
 - Review: inspected the diff; 14 snapshot tests and 21 capture/authoring tests passed, as did routine checks and strict type checking. Focused Pylint is clear. Severity: none for this change; type: no contract drift found.
 - Queue: `capture_thread_state` still has strict Ruff C901 (13 > 10) and PLR0915 (69 > 50). Its checkpoint projection block requires a larger extraction. Other repository strict findings remain open.
+
+### 2026-09-20 checkpoint projection extraction review pass
+
+- Implementation: moved the existing checkpoint tuple read, history projection, and failure handling into `_read_projected_checkpoint`. A typed result carries the snapshot, checkpoint flags, and captured tuple back to the orchestration function. The statements and exception behavior are unchanged.
+- Review: inspected the moved block and return wiring; 35 focused snapshot/capture tests, routine checks, strict type checking, focused Ruff/Pylint, and complexipy passed. The module has no radon functions above 10. Severity: none for this change; type: no contract drift found.
+- Queue: the prior C901 and PLR0915 findings for `capture_thread_state` are closed. Repository-wide cyclomatic complexity still has 117 offenders, and other strict Ruff/Pylint findings remain open.

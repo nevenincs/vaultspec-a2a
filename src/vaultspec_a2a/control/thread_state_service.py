@@ -266,6 +266,107 @@ def derive_run_semantic_context(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _CheckpointSnapshotRead:
+    snapshot: ThreadStateData
+    loaded: bool
+    present: bool
+    error: bool
+    captured_tuple: CheckpointTuple | None
+
+
+async def _read_projected_checkpoint(
+    checkpointer: Checkpointer,
+    snapshot: ThreadStateData,
+    aggregator: EventAggregator,
+    expected_assignment_digest: str | None,
+    durable_permission_ids: set[str],
+) -> _CheckpointSnapshotRead:
+    thread_id = snapshot.thread_id
+    checkpoint_loaded = False
+    checkpoint_present = False
+    checkpoint_error = False
+    captured_tuple: CheckpointTuple | None = None
+
+    try:
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        checkpoint_tuple = await asyncio.wait_for(
+            checkpointer.aget_tuple(config),
+            timeout=10.0,
+        )
+        if checkpoint_tuple is not None:
+            checkpoint_present = True
+            history_depth: int | None = None
+            try:
+                history_depth = await asyncio.wait_for(
+                    load_checkpoint_history_depth(checkpointer, config),
+                    timeout=10.0,
+                )
+            except TimeoutError:
+                if "checkpoint_history_timeout" not in snapshot.degraded_reasons:
+                    snapshot.degraded_reasons.append("checkpoint_history_timeout")
+            except Exception:
+                if "checkpoint_history_unavailable" not in snapshot.degraded_reasons:
+                    snapshot.degraded_reasons.append("checkpoint_history_unavailable")
+            projection = project_checkpoint_tuple(
+                checkpoint_tuple,
+                thread_id=thread_id,
+                history_depth=history_depth,
+            )
+
+            minimal_state = MinimalState(
+                values=projection.channel_values,
+                cfg=projection.config,
+            )
+            snapshot = enrich_snapshot_from_state(
+                snapshot,
+                minimal_state,
+                aggregator=aggregator,
+                expected_assignment_digest=expected_assignment_digest,
+            )
+            snapshot = apply_checkpoint_projection(snapshot, projection)
+            snapshot = reconcile_checkpoint_permissions_with_durable_state(
+                snapshot,
+                durable_request_ids=durable_permission_ids,
+            )
+            checkpoint_loaded = True
+            captured_tuple = checkpoint_tuple
+    except TimeoutError:
+        logger.warning(
+            "Timed out loading checkpoint for thread %s after 10s; "
+            "returning partial snapshot",
+            thread_id,
+        )
+        checkpoint_error = True
+        snapshot.snapshot_complete = False
+        snapshot.degraded_reasons.append("checkpoint_timeout")
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
+        snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot = clear_permissions_without_checkpoint_truth(snapshot)
+    except Exception:
+        logger.warning(
+            "Could not load checkpoint for thread %s; returning partial snapshot",
+            thread_id,
+            exc_info=True,
+        )
+        checkpoint_error = True
+        snapshot.snapshot_complete = False
+        snapshot.degraded_reasons.append("checkpoint_unavailable")
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
+        snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot = clear_permissions_without_checkpoint_truth(snapshot)
+
+    return _CheckpointSnapshotRead(
+        snapshot=snapshot,
+        loaded=checkpoint_loaded,
+        present=checkpoint_present,
+        error=checkpoint_error,
+        captured_tuple=captured_tuple,
+    )
+
+
 def _should_clear_permissions_without_checkpoint(
     thread: ThreadModel,
     snapshot: ThreadStateData,
@@ -360,80 +461,18 @@ async def capture_thread_state(
     durable_permission_ids = {
         permission.request_id for permission in snapshot.pending_permissions
     }
-    checkpoint_loaded = False
-    checkpoint_present = False
-    checkpoint_error = False
-    captured_tuple: CheckpointTuple | None = None
-
-    try:
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-        checkpoint_tuple = await asyncio.wait_for(
-            checkpointer.aget_tuple(config),
-            timeout=10.0,
-        )
-        if checkpoint_tuple is not None:
-            checkpoint_present = True
-            history_depth: int | None = None
-            try:
-                history_depth = await asyncio.wait_for(
-                    load_checkpoint_history_depth(checkpointer, config),
-                    timeout=10.0,
-                )
-            except TimeoutError:
-                if "checkpoint_history_timeout" not in snapshot.degraded_reasons:
-                    snapshot.degraded_reasons.append("checkpoint_history_timeout")
-            except Exception:
-                if "checkpoint_history_unavailable" not in snapshot.degraded_reasons:
-                    snapshot.degraded_reasons.append("checkpoint_history_unavailable")
-            projection = project_checkpoint_tuple(
-                checkpoint_tuple,
-                thread_id=thread_id,
-                history_depth=history_depth,
-            )
-
-            minimal_state = MinimalState(
-                values=projection.channel_values,
-                cfg=projection.config,
-            )
-            snapshot = enrich_snapshot_from_state(
-                snapshot,
-                minimal_state,
-                aggregator=aggregator,
-                expected_assignment_digest=expected_assignment_digest,
-            )
-            snapshot = apply_checkpoint_projection(snapshot, projection)
-            snapshot = reconcile_checkpoint_permissions_with_durable_state(
-                snapshot,
-                durable_request_ids=durable_permission_ids,
-            )
-            checkpoint_loaded = True
-            captured_tuple = checkpoint_tuple
-    except TimeoutError:
-        logger.warning(
-            "Timed out loading checkpoint for thread %s after 10s; "
-            "returning partial snapshot",
-            thread_id,
-        )
-        checkpoint_error = True
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append("checkpoint_timeout")
-        snapshot.replay_status = ReplayStatus.UNKNOWN.value
-        snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        snapshot = clear_permissions_without_checkpoint_truth(snapshot)
-    except Exception:
-        logger.warning(
-            "Could not load checkpoint for thread %s; returning partial snapshot",
-            thread_id,
-            exc_info=True,
-        )
-        checkpoint_error = True
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append("checkpoint_unavailable")
-        snapshot.replay_status = ReplayStatus.UNKNOWN.value
-        snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        snapshot = clear_permissions_without_checkpoint_truth(snapshot)
+    checkpoint_read = await _read_projected_checkpoint(
+        checkpointer,
+        snapshot,
+        aggregator,
+        expected_assignment_digest,
+        durable_permission_ids,
+    )
+    snapshot = checkpoint_read.snapshot
+    checkpoint_loaded = checkpoint_read.loaded
+    checkpoint_present = checkpoint_read.present
+    checkpoint_error = checkpoint_read.error
+    captured_tuple = checkpoint_read.captured_tuple
 
     if _should_clear_permissions_without_checkpoint(
         thread,

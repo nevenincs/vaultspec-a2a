@@ -278,6 +278,14 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
             )
         statuses = sorted(status for _, status, _ in outcomes)
         assert statuses == [201, 201, 503, 503], statuses
+        # Measure the first-demand race before later requests exercise a
+        # separate worker lifecycle. Each prepare reached worker readiness.
+        gateway_log = log_path.read_text(encoding="utf-8", errors="replace")
+        spawn_count = gateway_log.count(_SPAWN_LINE)
+        assert spawn_count == 1, (
+            f"expected one worker spawn during prepares, saw {spawn_count}\n"
+            f"{gateway_log}"
+        )
 
         admitted = [(index, body) for index, status, body in outcomes if status == 201]
         reservations = [
@@ -325,12 +333,6 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
             run_id="run-bogus-reservation",
         )
         assert bogus_status == 409, bogus_status
-
-    # Single-flight: the worker spawn line appears exactly once for the burst.
-    spawn_count = log_path.read_text(encoding="utf-8", errors="replace").count(
-        _SPAWN_LINE
-    )
-    assert spawn_count == 1, f"expected one worker spawn, saw {spawn_count}"
 
 
 def test_reservation_times_out_and_expired_commit_creates_no_run(

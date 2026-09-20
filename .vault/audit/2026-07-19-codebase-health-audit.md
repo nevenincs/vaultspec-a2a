@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:86466231d3f37992d2e2404ea76651229dfb1fb179d463299292e471b8707f43'
+body_hash: 'sha256:02b864b0f74d2eb7f4be91e5071075c526f75b56f8096c2b3ffb03a00de58595'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4293,3 +4293,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, stale test selection: the provider prerequisite job named a deleted Claude MCP test file and an obsolete Codex test home, causing pytest usage exit 4 before testing. The gate now selects the current Codex CLI readiness and emitted-config tests, and the workflow installs only that CLI. Claude's strict MCP proof remains in its authenticated service lane; an installable CLI alone cannot discharge that proof. The CI-contract allow entry now matches the renamed install step.
 - Review finding, low severity, cross-platform invocation: `-m ""` arrived as a literal marker expression on Windows in the provider recipe. The explicit-node provider, cross-repository, and collect-all recipes now clear default pytest addopts with `-o addopts=` and restore strict marker/config validation, allowing service and unit nodes in one selection. The provider gate passes locally with all three current nodes. The cross-repository proof retains its declared dashboard-engine prerequisite.
 - Verification: `just check-workflow` and CI contract pass; a fresh hosted Compose and provider CI run is required. Review result is REVISION REQUIRED pending those checks.
+
+### 2026-09-20 concurrent prepare measurement follow-up
+
+- Review finding, medium severity, test-contract timing: the next Linux canonical CI run failed only `test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound` (4,565 passed, 16 prerequisite/platform skips, 197 service deselected). All four concurrent prepares returned the expected capacity statuses, and the later assertion counted two worker spawn log lines. The assertion ran after commit, replay, bogus commit, and gateway teardown, so the log count did not isolate the concurrent prepare burst. The CI log did not include the gateway log, so it cannot prove when the second spawn occurred.
+- Implementation: the test now counts worker spawn lines immediately after the four prepares return and before any later request, preserving the single-flight assertion for the intended race. A failure includes the gateway log to distinguish duplicate first-demand spawn from a later worker lifecycle. No production behavior was changed based on the ambiguous prior count.
+- Verification: the focused test passes on Windows. A native WSL checkout produced four 503 prepare responses due its earlier documented service-readiness limitation; that does not reproduce the CI spawn-count failure and is not treated as proof of the new assertion. Ruff passes on the touched test. Strict scanning and a fresh canonical CI run are required. Review result is REVISION REQUIRED pending those gates.

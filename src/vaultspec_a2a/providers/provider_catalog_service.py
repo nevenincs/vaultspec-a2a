@@ -29,6 +29,7 @@ from .provider_catalog import (
     HealthState,
     ProviderCatalog,
     ProviderCatalogKey,
+    ProviderHealthAxes,
     ProviderRecord,
     StructuredProviderHealth,
 )
@@ -289,11 +290,13 @@ def _health_for(
         reasons.append(admission_reason)
 
     return StructuredProviderHealth.derive(
-        configured=configured,
-        transport=transport,
-        authentication=authentication,
-        catalog=catalog.state.status,
-        admission=admission,
+        axes=ProviderHealthAxes(
+            configured=configured,
+            transport=transport,
+            authentication=authentication,
+            catalog=catalog.state.status,
+            admission=admission,
+        ),
         reasons=tuple(dict.fromkeys(reasons)),
         checked_at=datetime.now(UTC),
     )

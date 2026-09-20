@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:9c4498275ead3d9274ae3a772d5b0d3989299044961b2153077840b2d37011bb'
+body_hash: 'sha256:4f8de83b976b2ed4a30fbf5a9b8dc5be39f36d03d74e6b29a1ab82dc93e2b634'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3450,3 +3450,7 @@ Implementation: shared band lookup between gateway dispatch and worker heartbeat
 ### 2026-09-20 provider catalog cache and model validation review pass
 
 Implementation: separated advertised-control validation, cache freshness and suppression checks, loader failure fencing, and catalog storage from the provider catalog cache read path. Actual diff review found no new behavior defect: the cache still checks freshness before suppression on ordinary reads, bypasses suppression on forced refreshes, rechecks under the lane lock, records only fence-clean loader failures, and fences storage after invalidation. Verification: 24 focused catalog/selection tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 81 to 79 offenders; this module has zero radon offenders (down from two) and two fewer focused strict Ruff structure findings. The remaining `StructuredProviderHealth.derive` parameter-count finding and other repository findings remain open, severity medium, type maintainability, in the existing codebase-health queue.
+
+### 2026-09-20 provider health axes review pass
+
+Implementation: grouped the five independent provider health observations in `ProviderHealthAxes` and updated all ten derivation call sites. Actual diff review used AST comparison to confirm every previous axis expression, reason, and timestamp is preserved; derived selectability still reads the same five axes and `StructuredProviderHealth` still validates the result. Verification: 57 provider, route, and redispatch tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The focused strict Ruff structure count for `provider_catalog.py` is zero (down from one); repository cyclomatic count remains 79. Remaining strict structure and health findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.

@@ -30,6 +30,7 @@ from ...providers.provider_catalog import (
     NativeControlOption,
     ProviderCatalog,
     ProviderCatalogKey,
+    ProviderHealthAxes,
     ProviderRecord,
     StructuredProviderHealth,
 )
@@ -308,11 +309,13 @@ def test_wire_projection_omits_provider_execution_values() -> None:
         ),
     )
     health = StructuredProviderHealth.derive(
-        configured=HealthState.AVAILABLE,
-        transport=HealthState.AVAILABLE,
-        authentication=AuthenticationState.AUTHENTICATED,
-        catalog=CatalogStatus.AVAILABLE,
-        admission=AdmissionState.ADMITTED,
+        axes=ProviderHealthAxes(
+            configured=HealthState.AVAILABLE,
+            transport=HealthState.AVAILABLE,
+            authentication=AuthenticationState.AUTHENTICATED,
+            catalog=CatalogStatus.AVAILABLE,
+            admission=AdmissionState.ADMITTED,
+        ),
         checked_at=now,
     )
     response = ProviderCatalogResponse.from_records(

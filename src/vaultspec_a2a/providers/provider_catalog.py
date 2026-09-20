@@ -34,6 +34,7 @@ __all__ = [
     "NativeControlOption",
     "ProviderCatalog",
     "ProviderCatalogKey",
+    "ProviderHealthAxes",
     "ProviderRecord",
     "SelectionReference",
     "StructuredProviderHealth",
@@ -263,6 +264,17 @@ class CatalogState:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderHealthAxes:
+    """Independent provider health observations before selectability is derived."""
+
+    configured: HealthState
+    transport: HealthState
+    authentication: AuthenticationState
+    catalog: CatalogStatus
+    admission: AdmissionState
+
+
+@dataclass(frozen=True, slots=True)
 class StructuredProviderHealth:
     """Independent provider health facts and their derived selectability."""
 
@@ -299,30 +311,26 @@ class StructuredProviderHealth:
     @classmethod
     def derive(
         cls,
+        axes: ProviderHealthAxes,
         *,
-        configured: HealthState,
-        transport: HealthState,
-        authentication: AuthenticationState,
-        catalog: CatalogStatus,
-        admission: AdmissionState,
         reasons: tuple[str, ...] = (),
         checked_at: datetime,
     ) -> StructuredProviderHealth:
         """Build health with selectability derived from every required axis."""
         selectable = (
-            configured is HealthState.AVAILABLE
-            and transport is HealthState.AVAILABLE
-            and authentication
+            axes.configured is HealthState.AVAILABLE
+            and axes.transport is HealthState.AVAILABLE
+            and axes.authentication
             in {AuthenticationState.AUTHENTICATED, AuthenticationState.NOT_APPLICABLE}
-            and catalog is CatalogStatus.AVAILABLE
-            and admission is AdmissionState.ADMITTED
+            and axes.catalog is CatalogStatus.AVAILABLE
+            and axes.admission is AdmissionState.ADMITTED
         )
         return cls(
-            configured=configured,
-            transport=transport,
-            authentication=authentication,
-            catalog=catalog,
-            admission=admission,
+            configured=axes.configured,
+            transport=axes.transport,
+            authentication=axes.authentication,
+            catalog=axes.catalog,
+            admission=axes.admission,
             selectable=selectable,
             reasons=reasons,
             checked_at=checked_at,

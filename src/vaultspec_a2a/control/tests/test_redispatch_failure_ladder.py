@@ -51,6 +51,7 @@ from ...providers.provider_catalog import (
     ModelCatalogEntry,
     ProviderCatalog,
     ProviderCatalogKey,
+    ProviderHealthAxes,
     ProviderRecord,
     SelectionReference,
     StructuredProviderHealth,
@@ -140,11 +141,13 @@ def _current_metadata(workspace_root: str | None) -> dict[str, object]:
         ),
     )
     health = StructuredProviderHealth.derive(
-        configured=HealthState.AVAILABLE,
-        transport=HealthState.AVAILABLE,
-        authentication=AuthenticationState.NOT_APPLICABLE,
-        catalog=CatalogStatus.AVAILABLE,
-        admission=AdmissionState.ADMITTED,
+        axes=ProviderHealthAxes(
+            configured=HealthState.AVAILABLE,
+            transport=HealthState.AVAILABLE,
+            authentication=AuthenticationState.NOT_APPLICABLE,
+            catalog=CatalogStatus.AVAILABLE,
+            admission=AdmissionState.ADMITTED,
+        ),
         checked_at=now,
     )
     record = ProviderRecord(

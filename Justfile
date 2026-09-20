@@ -520,6 +520,11 @@ test-parallel:
 test-service:
     {{creds}} live-tests -- {{dev}} test service
 
+# Run one service suite under the same credentials and pytest owner.
+[group('test')]
+test-service-path path:
+    {{creds}} live-tests -- uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m service {{path}}
+
 # Run the unit gate with terminal coverage.
 [group('test')]
 test-coverage:

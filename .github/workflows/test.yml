@@ -220,7 +220,7 @@ jobs:
       - name: Run desktop service gates
         shell: bash
         run: |
-          just test-service src/vaultspec_a2a/desktop_tests/
+          just test-service-path src/vaultspec_a2a/desktop_tests/
 
   provider-prerequisites:
     name: Provider prerequisite gates
@@ -311,5 +311,5 @@ jobs:
 
       - name: Run Compose server profile regression
         run: |
-          just test-service \
+          just test-service-path \
             src/vaultspec_a2a/service_tests/test_compose_profile_regression.py

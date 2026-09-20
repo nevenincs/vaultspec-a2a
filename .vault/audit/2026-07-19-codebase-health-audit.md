@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:26c9ef157076304a258c41a932a640946466a62f94db189eec27e30e3c4ac059'
+body_hash: 'sha256:35dda928a43a1b6da79d43ccc726fe5fcce78bc43cf5d0493ec989cdb50bda28'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4280,3 +4280,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, process cleanup: Linux canonical CI on `e1aaa4a0` passed the lease regression but failed `test_release_after_root_exit_reaps_descendant_and_preserves_foreign_process`: `terminal/release` returned while the former root's child PID was still live. The run had 4,564 passed, 16 skips, and 197 service tests deselected. Fifty repeated native Linux runs of the original focused test passed, so the precise CI scheduling event was not reproduced locally.
 - Implementation: the POSIX containment path now requires two consecutive empty process-group observations before it reports quiescence, both before signaling and while awaiting exit. The process table walk can transiently miss a member during root exit/reparenting; one empty snapshot is insufficient proof. A new real-process regression test forces the first liveness observation to be empty and verifies that containment still reaps the live child. The pre-signal confirmation preserves the guard against signaling a numerically reused group.
 - Verification: 26 focused process tests pass on Windows and 27 pass on native Linux after the fix. The full local unit gate on the preceding lease-fix commit passed 4,582 with two prerequisite skips and 197 service tests deselected. Strict scanning and a fresh Linux canonical CI run remain required. Review result is REVISION REQUIRED pending those gates.
+
+### 2026-09-20 service workflow invocation follow-up
+
+- Review finding, medium severity, CI configuration: canonical Linux CI on `eb12c224` passed, including the full unit gate and build. The newly unblocked ARM desktop service job then failed before collecting tests: the workflow called `just test-service src/vaultspec_a2a/desktop_tests/`, but `test-service` declares no positional parameter, so just interpreted the path as another recipe name. The same invalid call appears in the other desktop matrix jobs and the Compose regression job.
+- Implementation: added a focused `test-service-path` recipe that keeps the live credential scope and canonical pytest process owner while accepting one selected path. Both workflow call sites now use it; the desktop matrix shares the corrected call.
+- Verification: `just --dry-run test-service-path src/vaultspec_a2a/desktop_tests/` expands to the intended credential-wrapped, service-marked test runner. `just check-workflow` and the CI contract guard pass. The current source commit passed `just check-strict`, dead-code burndown 0, the local full unit gate (4,582 passed, two prerequisite skips, 197 service cases deselected), and Linux canonical CI. A fresh workflow run must execute the service jobs after push. Review result is REVISION REQUIRED pending that run.

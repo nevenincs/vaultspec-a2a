@@ -116,6 +116,31 @@ async def _verify_dispatch_token(
         )
 
 
+async def _probe_gateway(bridge: WorkerBridge) -> None:
+    """Log startup gateway reachability without blocking worker admission."""
+    try:
+        probe = await bridge.probe_health()
+        if probe.status_code == 200:
+            logger.info("Gateway reachable at %s", settings.gateway_url)
+        else:
+            logger.error(
+                "Gateway probe returned HTTP %d"
+                " (gateway_url=%s) — IPC events may"
+                " not be delivered",
+                probe.status_code,
+                settings.gateway_url,
+            )
+    except httpx.HTTPError:
+        logger.error(
+            "Gateway UNREACHABLE at startup"
+            " (gateway_url=%s) — permission requests"
+            " and status events will NOT be delivered"
+            " until the gateway is available",
+            settings.gateway_url,
+            exc_info=True,
+        )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Worker lifespan: initialise checkpointer, bridge, executor, heartbeat.
@@ -177,30 +202,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # Non-fatal startup probe — verify the gateway is
         # reachable *before* we accept dispatches. Logs ERROR if the
         # gateway cannot be contacted so operators notice immediately.
-        try:
-            probe = await bridge.probe_health()
-            if probe.status_code == 200:
-                logger.info(
-                    "Gateway reachable at %s",
-                    settings.gateway_url,
-                )
-            else:
-                logger.error(
-                    "Gateway probe returned HTTP %d"
-                    " (gateway_url=%s) — IPC events may"
-                    " not be delivered",
-                    probe.status_code,
-                    settings.gateway_url,
-                )
-        except httpx.HTTPError:
-            logger.error(
-                "Gateway UNREACHABLE at startup"
-                " (gateway_url=%s) — permission requests"
-                " and status events will NOT be delivered"
-                " until the gateway is available",
-                settings.gateway_url,
-                exc_info=True,
-            )
+        await _probe_gateway(bridge)
 
         executor = Executor(checkpointer, bridge)
 
@@ -277,6 +279,84 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             )
 
 
+def _require_dispatch_receipt(req: DispatchRequest) -> None:
+    if req.action == "cancel":
+        return
+    try:
+        req.require_graph_action_receipt()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409, detail={"condition": "incompatible_state"}
+        ) from exc
+
+
+def _duplicate_dispatch_response(req: DispatchRequest) -> DispatchResponse:
+    logger.info(
+        "Worker duplicate dispatch suppressed",
+        extra={
+            "action": "dispatch_duplicate_suppressed",
+            "dispatch_id": req.dispatch_id,
+            "dispatch_action": req.action,
+            "thread_id": req.thread_id,
+        },
+    )
+    return DispatchResponse(status="dispatched", thread_id=req.thread_id)
+
+
+async def _dispatch_request(app: FastAPI, req: DispatchRequest) -> DispatchResponse:
+    """Admit one gateway dispatch and schedule it in the worker task group."""
+    _require_dispatch_receipt(req)
+    executor: Executor = app.state.executor
+    tg = app.state.task_group
+    dispatch_ids: DispatchIdAdmission = app.state.dispatch_ids
+    if req.dispatch_id in dispatch_ids:
+        return _duplicate_dispatch_response(req)
+
+    owns_capacity = req.action in {"ingest", "resume"}
+    reservation = (
+        await executor.reserve_dispatch_capacity(req.thread_id)
+        if owns_capacity
+        else None
+    )
+    if owns_capacity and reservation is None:
+        # A duplicate can be admitted while this request waits for capacity.
+        if req.dispatch_id in dispatch_ids:
+            return _duplicate_dispatch_response(req)
+        raise HTTPException(
+            status_code=429,
+            detail="Worker at capacity — too many concurrent threads",
+        )
+
+    # No await may be inserted between admission and scheduling.
+    if not dispatch_ids.admit(req.dispatch_id):
+        if owns_capacity:
+            assert reservation is not None
+            await executor.release_dispatch_capacity(reservation)
+        return DispatchResponse(status="dispatched", thread_id=req.thread_id)
+
+    try:
+        if owns_capacity:
+            assert reservation is not None
+            tg.start_soon(executor.handle_reserved_dispatch, req, reservation)
+        else:
+            tg.start_soon(executor.handle_dispatch, req)
+    except BaseException:
+        if owns_capacity:
+            assert reservation is not None
+            await executor.release_dispatch_capacity(reservation)
+        raise
+    logger.info(
+        "Worker dispatch accepted",
+        extra={
+            "action": "dispatch_accepted",
+            "dispatch_id": req.dispatch_id,
+            "dispatch_action": req.action,
+            "thread_id": req.thread_id,
+        },
+    )
+    return DispatchResponse(status="dispatched", thread_id=req.thread_id)
+
+
 def create_worker_app(lifespan: Any | None = None) -> FastAPI:
     """Create and return the worker FastAPI application.
 
@@ -311,87 +391,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         The actual graph execution is scheduled as a background task inside
         the lifespan task group so that this endpoint returns immediately.
         """
-        if req.action != "cancel":
-            try:
-                req.require_graph_action_receipt()
-            except ValueError as exc:
-                raise HTTPException(
-                    status_code=409,
-                    detail={"condition": "incompatible_state"},
-                ) from exc
-        executor: Executor = app.state.executor
-        tg = app.state.task_group
-
-        dispatch_ids: DispatchIdAdmission = app.state.dispatch_ids
-
-        def duplicate_response() -> DispatchResponse:
-            logger.info(
-                "Worker duplicate dispatch suppressed",
-                extra={
-                    "action": "dispatch_duplicate_suppressed",
-                    "dispatch_id": req.dispatch_id,
-                    "dispatch_action": req.action,
-                    "thread_id": req.thread_id,
-                },
-            )
-            return DispatchResponse(status="dispatched", thread_id=req.thread_id)
-
-        if req.dispatch_id in dispatch_ids:
-            return duplicate_response()
-
-        owns_capacity = req.action in {"ingest", "resume"}
-        reservation = (
-            await executor.reserve_dispatch_capacity(req.thread_id)
-            if owns_capacity
-            else None
-        )
-        if owns_capacity and reservation is None:
-            # Capacity reservation awaits the executor's admission lock. An
-            # identical request can be admitted while this request is queued.
-            # Recheck that exact ID before reporting capacity; a different ID
-            # for the same busy thread remains a real refusal.
-            if req.dispatch_id in dispatch_ids:
-                return duplicate_response()
-            raise HTTPException(
-                status_code=429,
-                detail="Worker at capacity — too many concurrent threads",
-            )
-
-        # No await may be inserted between this admission and scheduling: this is
-        # the worker's synchronous duplicate-dispatch boundary.
-        if not dispatch_ids.admit(req.dispatch_id):
-            if owns_capacity:
-                assert reservation is not None
-                await executor.release_dispatch_capacity(reservation)
-            return DispatchResponse(status="dispatched", thread_id=req.thread_id)
-
-        # Fire-and-forget: the task group keeps the task alive even after
-        # this endpoint handler returns.
-        try:
-            if owns_capacity:
-                assert reservation is not None
-                tg.start_soon(executor.handle_reserved_dispatch, req, reservation)
-            else:
-                tg.start_soon(executor.handle_dispatch, req)
-        except BaseException:
-            if owns_capacity:
-                assert reservation is not None
-                await executor.release_dispatch_capacity(reservation)
-            raise
-        logger.info(
-            "Worker dispatch accepted",
-            extra={
-                "action": "dispatch_accepted",
-                "dispatch_id": req.dispatch_id,
-                "dispatch_action": req.action,
-                "thread_id": req.thread_id,
-            },
-        )
-
-        return DispatchResponse(
-            status="dispatched",
-            thread_id=req.thread_id,
-        )
+        return await _dispatch_request(app, req)
 
     @app.get("/health", dependencies=[Depends(_verify_dispatch_token)])
     async def health_endpoint() -> dict[str, object]:

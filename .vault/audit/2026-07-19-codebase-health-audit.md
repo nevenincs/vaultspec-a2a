@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:052193c1b7705c3ffabde848fd6831265b9525b4ae2ba00d2b93f5f4c78b8d64'
+body_hash: 'sha256:cf143b3eef55c0ed17eb587feb812413b36fb8d98a8704dfc3b5e947282365e1'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3308,3 +3308,7 @@ One medium-severity strict Ruff complexity finding in dispatch model-assignment 
 ### 2026-09-20 worker IPC flush review pass
 
 One medium-severity strict Ruff cyclomatic finding and one cognitive-complexity finding in buffered worker event relay were resolved. One batch POST, cancellation requeue, bounded retry wait, and exhausted-batch requeue now have focused methods. Review checked successful HTTP 200 acknowledgement, non-200 and network-error warning details, deadline-limited request timeout and backoff, cancellation requeue before a POST or during backoff, exhausted error logging, and buffer-cap preservation. Twenty-four focused worker IPC tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 177 to 176 and cyclomatic findings from 124 to 123. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 worker startup and dispatch review pass
+
+Three medium-severity strict Ruff statement and cyclomatic findings in worker startup and dispatch admission were resolved. Startup gateway probing and dispatch receipt, duplicate-response, and scheduling logic now have focused functions. Review checked non-fatal gateway probe logs, invalid graph-receipt refusal before admission, exact duplicate replay before and after capacity wait, 429 for a different request on a busy thread, capacity release when synchronous admission or scheduling fails, and the no-await boundary between admitting a dispatch ID and scheduling its task. Seventeen focused worker app and dispatch-id tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 176 to 173; the cyclomatic health count remains 123. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

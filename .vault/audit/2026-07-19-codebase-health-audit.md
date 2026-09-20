@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:eae25038919b0fed9485730660fae9ec858d3abad50f9cfd68032aef90c3f667'
+body_hash: 'sha256:b2c97383e021f0330c058a9be9869155cf0500bdaeecad319df3a7cd6db6cb14'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3328,3 +3328,7 @@ Two medium-severity strict Ruff complexity and branch findings in desktop readin
 ### 2026-09-20 shared and full health projection review pass
 
 One medium-severity strict Ruff parameter-count finding, two cognitive-complexity findings, and two cyclomatic findings in shared and full health assembly were resolved. Worker status/restart projection and database, checkpointer, and worker probes now have focused helpers. A typed FullHealthRuntime carries the three live probe dependencies into both authenticated service-state and unarmed health callers. Review checked worker observation order, default restart fields, live database and informational journal verdicts, checkpoint timeout/failure details, exact worker HTTP 200 authority, pairing identity only when explicitly requested by the authenticated caller, and the existing overall readiness predicate. Thirty live gateway tests and five focused health/readiness tests pass; routine gates, strict Ty/basedpyright, module complexipy, focused Ruff, and diff check pass. Focused Pylint reports only two existing gateway-module findings. Strict Ruff structure falls from 168 to 167 and cyclomatic findings from 122 to 120. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue. A mistyped audit body-file command briefly displaced the earlier corpus; the committed body was restored through the vault CLI and the final diff checked before commit.
+
+### 2026-09-20 persisted run lease binding shape review pass
+
+One medium-severity Pylint boolean-expression finding in durable staged-commit lease binding validation was resolved. The binding now reuses the existing typed string-field reader for lease id, reservation id, and commit digest, then rejects any blank or absent value before constructing a binding. Review checked that non-string, blank, and missing fields still refuse replay; no durable metadata or digest authority changed. Thirty live gateway tests, routine gates, strict Ty/basedpyright, focused Ruff/Pylint, and diff check pass. Pylint now reports 58 findings, including the gateway module-length finding and six remaining boolean-expression findings. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

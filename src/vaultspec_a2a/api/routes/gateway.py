@@ -1395,17 +1395,10 @@ def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | No
     lease = coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
     if lease is None:
         return None
-    lease_id = lease.get("lease_id")
-    reservation_id = lease.get("reservation_id")
-    commit_digest = lease.get("commit_digest")
-    if (
-        not isinstance(lease_id, str)
-        or not lease_id
-        or not isinstance(reservation_id, str)
-        or not reservation_id
-        or not isinstance(commit_digest, str)
-        or not commit_digest
-    ):
+    lease_id = _string_field(lease, "lease_id")
+    reservation_id = _string_field(lease, "reservation_id")
+    commit_digest = _string_field(lease, "commit_digest")
+    if not lease_id or not reservation_id or not commit_digest:
         return None
     return _RunLeaseBinding(
         lease_id=lease_id,

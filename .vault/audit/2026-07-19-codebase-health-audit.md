@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:cbacd11cf62ca981bdef3a0eb2ae97240ebfc50e7e265898ce0c4f8ec9af3e1b'
+body_hash: 'sha256:2bf987acc94b4a392d3f7b147a2ca36e544528dfc958ddffe876586c96ef21db'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3893,3 +3893,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved dispatch guard and reservation definitions, checkpoint-backed dispatch receipt emission, and best-effort authoring close into focused worker modules. Executor call ordering and the original logger category are preserved.
 - Verification: 80 executor, dispatch-id, token lifecycle, and authoring binding tests passed. Target Ruff, Ty, formatting, and diff checks passed. The module-length gate fell from 8 to 7 offenders; `executor.py` is below 1000 lines.
 - Review finding (medium, code health): the review caught a logging-category change in the moved functions and restored the original executor logger name before commit. Seven oversized modules and other strict findings remain in the audit queue.
+
+### 2026-09-20 desktop execution-resource review
+
+- Implementation: declared the desktop real-process tier as a shared `desktop-processes` resource at collection time. This removes the undeclared-live serial catch-all while preserving machine-global admission, per-test timeout backstops, isolated application homes, and dynamic port allocation.
+- Verification: the resource/plugin contract suite passed 71 tests; Ruff and BasedPyright passed. A two-worker proof placed two real desktop tests on distinct workers and completed in 10.12 seconds. A representative 12-test admission/provenance subset completed in 57.61 seconds on four workers versus about 186 seconds of cumulative test time.
+- Review finding (low, performance/environment): a saturated Windows host can erase the wall-clock benefit for the complete desktop directory (288.10 seconds on four workers versus 286.24 seconds serial) despite confirmed distribution and focused parallel speedup. This is host/process contention, not residual scheduler serialization; session admission remains the capacity backstop. No new correctness defect was found.

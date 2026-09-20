@@ -107,6 +107,14 @@ _CATALOG: tuple[ResourceSpec, ...] = (
         backstop_s=1800,
     ),
     ResourceSpec(
+        key="desktop-processes",
+        description=(
+            "isolated local desktop gateway and worker process capacity; tests "
+            "own separate application homes and dynamically reserved ports"
+        ),
+        backstop_s=1800,
+    ),
+    ResourceSpec(
         key="claude-cli-lane",
         description="the Claude Code ACP CLI's live usage window",
         prerequisite_id="claude-cli",

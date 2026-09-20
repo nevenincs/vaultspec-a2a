@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v2'
-body_hash: 'sha256:6e1752e5c1b4c7028e030c64e90e523d442c69492dc2c339576810cc59554898'
+body_hash: 'sha256:52ef6d3c289f6c6e529b54635617c25ffe2c54b6a5e8dcaf22c9205b0dcde984'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -79,3 +79,13 @@ related:
 - `S27` `by:` `root`
 - `S27` `verify:` `75 endpoint tests with unraisable warnings as errors` -> `pass`
 - `S27` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`
+- `S28` `M` `src/vaultspec_a2a/testing/resources.py`
+- `S28` `A` `src/vaultspec_a2a/desktop_tests/conftest.py`
+- `S28` `A` `src/vaultspec_a2a/desktop_tests/test_execution_resource.py`
+- `S28` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
+- `S28` `verify:` `parallel-desktop-subset-12-tests` -> `pass`
+- `S28` `by:` `codex`
+
+## Notes
+
+- `S28` Full desktop directory remained host-contention-bound at 288.10s parallel versus 286.24s serial; focused distribution proof achieved 3.2x against cumulative duration.

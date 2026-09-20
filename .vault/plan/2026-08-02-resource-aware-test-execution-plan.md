@@ -13,7 +13,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
 modified: '2026-09-20'
-body_hash: 'sha256:9b1689b8133494f8bbf688c42aaab11f822bfa2b2d18765006319eef9ef23083'
+body_hash: 'sha256:ef0f6f667d02915e047ef8c4a5a89f151b49d6c1205f1a530724c651224be042'
 ---
 
 # `resource-aware-test-execution` plan
@@ -67,7 +67,7 @@ resolution, closing the audited harness-registry gap.
 - [x] `S25` - Prove ACP session isolation and safely amortize child-process setup where loop and mutable state allow; `src/vaultspec_a2a/providers/tests/conftest.py, src/vaultspec_a2a/providers/tests`.
 - [x] `S26` - Replace raw test binary guards with canonical platform-aware provider resolvers; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/providers`.
 - [x] `S27` - Close Windows injected-client transport ownership warnings on their owning TestClient loop; `src/vaultspec_a2a/api/tests/test_endpoints.py`.
-- [ ] `S28` - Reduce the serialized desktop test tail without weakening real-process coverage; `src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/testing`.
+- [x] `S28` - Reduce the serialized desktop test tail without weakening real-process coverage; `src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/testing`.
 
 ## Parallelization
 

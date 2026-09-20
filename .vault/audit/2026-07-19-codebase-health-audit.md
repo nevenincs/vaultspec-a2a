@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c912c72f0295011a958215f515fccd67f06a1fbe81ded34167e10a687ec5626e'
+body_hash: 'sha256:c152534ff9d3730b42a063fbb05ad06ec5902bdba18fb4c50216582b5f87b55c'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3368,3 +3368,9 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: moved the existing checkpoint tuple read, history projection, and failure handling into `_read_projected_checkpoint`. A typed result carries the snapshot, checkpoint flags, and captured tuple back to the orchestration function. The statements and exception behavior are unchanged.
 - Review: inspected the moved block and return wiring; 35 focused snapshot/capture tests, routine checks, strict type checking, focused Ruff/Pylint, and complexipy passed. The module has no radon functions above 10. Severity: none for this change; type: no contract drift found.
 - Queue: the prior C901 and PLR0915 findings for `capture_thread_state` are closed. Repository-wide cyclomatic complexity still has 117 offenders, and other strict Ruff/Pylint findings remain open.
+
+### 2026-09-20 graph receipt preparation review pass
+
+- Implementation: extracted accepted action parsing and dispatch/receipt matching from the receipt orchestration. The same validation and exception paths remain in place.
+- Review: inspected the diff; 35 receipt and live gateway tests, routine checks, strict type checking, focused Ruff/Pylint passed. The receipt module has no radon function above 10. Severity: none for this change; type: no contract drift found.
+- Queue: the prior PLR0911 finding for `prepare_graph_action_receipt` and two radon offenders in this module are closed. The repository-wide cyclomatic gate still has 115 offenders, with other strict Ruff/Pylint findings open.

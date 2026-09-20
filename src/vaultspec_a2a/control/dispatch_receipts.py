@@ -94,6 +94,26 @@ def _receipt_matches_current_writer(
     )
 
 
+def _accepted_graph_action(
+    action: ControlActionModel, thread_id: str
+) -> tuple[ControlActionType, dict[str, object]] | None:
+    if action.payload_json is None:
+        return None
+    try:
+        action_type = ControlActionType(action.action_type)
+        payload = _PAYLOAD.validate_json(action.payload_json)
+        accepted = AcceptedActionInput.model_validate(payload)
+        if accepted.dispatch["thread_id"] != thread_id or accepted.dispatch[
+            "action"
+        ] != _GRAPH_ACTIONS.get(action_type):
+            return None
+    except (ValueError, ValidationError):
+        return None
+    if action_type not in _GRAPH_ACTIONS:
+        return None
+    return action_type, payload
+
+
 async def prepare_graph_action_receipt(
     db: AsyncSession,
     *,
@@ -116,25 +136,12 @@ async def prepare_graph_action_receipt(
     action = await get_control_action_by_dispatch_id(
         db, thread_id=thread_id, dispatch_id=dispatch_id
     )
-    if (
-        thread is None
-        or action is None
-        or thread.status in NON_ACTIVE_STATUSES
-        or action.payload_json is None
-    ):
+    if thread is None or action is None or thread.status in NON_ACTIVE_STATUSES:
         return None
-    try:
-        action_type = ControlActionType(action.action_type)
-        payload = _PAYLOAD.validate_json(action.payload_json)
-        accepted = AcceptedActionInput.model_validate(payload)
-        if accepted.dispatch["thread_id"] != thread_id or accepted.dispatch[
-            "action"
-        ] != _GRAPH_ACTIONS.get(action_type):
-            return None
-    except (ValueError, ValidationError):
+    accepted_graph_action = _accepted_graph_action(action, thread_id)
+    if accepted_graph_action is None:
         return None
-    if action_type not in _GRAPH_ACTIONS:
-        return None
+    action_type, payload = accepted_graph_action
     expectation = thread_write_expectation(thread)
     matches = (
         expectation.authority.action_type == action_type
@@ -180,6 +187,17 @@ async def prepare_graph_action_receipt(
     )
 
 
+def _matching_dispatch_receipt(
+    dispatch: DispatchRequest,
+    receipt: GraphActionReceipt | None,
+    action: ControlActionModel | None,
+) -> GraphActionReceipt | None:
+    if receipt is None or action is None or action.payload_json is None:
+        return receipt
+    accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+    return receipt if dispatch_matches_accepted_input(dispatch, accepted) else None
+
+
 async def bind_graph_action_receipt(
     db: AsyncSession,
     dispatch: DispatchRequest,
@@ -204,14 +222,7 @@ async def bind_graph_action_receipt(
             if thread is not None and thread.status not in NON_ACTIVE_STATUSES
             else None
         )
-        if (
-            receipt is not None
-            and action is not None
-            and action.payload_json is not None
-        ):
-            accepted = AcceptedActionInput.model_validate_json(action.payload_json)
-            if not dispatch_matches_accepted_input(dispatch, accepted):
-                receipt = None
+        receipt = _matching_dispatch_receipt(dispatch, receipt, action)
     if receipt is not None and _GRAPH_ACTIONS[receipt.action_type] != dispatch.action:
         receipt = None
     return dispatch.model_copy(update={"graph_action_receipt": receipt})

@@ -238,6 +238,23 @@ def _decided_verdicts(data: object) -> dict[str, str]:
     return verdict_by_id
 
 
+def _checkpoint_authoring_ids(checkpoint: object) -> set[str]:
+    checkpoint_mapping = coerce_object_mapping(checkpoint)
+    values = (
+        coerce_object_mapping(checkpoint_mapping.get("channel_values"))
+        if checkpoint_mapping is not None
+        else None
+    )
+    if values is None:
+        return set()
+    out: set[str] = set()
+    for field in _STATE_ID_FIELDS:
+        items = coerce_object_list(values.get(field))
+        if items is not None:
+            out.update(item for item in items if isinstance(item, str) and item)
+    return out
+
+
 class VerdictSubscriber:
     """Consume engine authoring verdicts and resume the runs they belong to."""
 
@@ -581,22 +598,7 @@ class VerdictSubscriber:
             return set()
         if checkpoint_tuple is None:
             return set()
-        checkpoint: object = getattr(checkpoint_tuple, "checkpoint", None)
-        checkpoint_mapping = coerce_object_mapping(checkpoint)
-        values = (
-            coerce_object_mapping(checkpoint_mapping.get("channel_values"))
-            if checkpoint_mapping is not None
-            else None
-        )
-        if values is None:
-            return set()
-        out: set[str] = set()
-        for field in _STATE_ID_FIELDS:
-            value = values.get(field)
-            items = coerce_object_list(value)
-            if items is not None:
-                out.update(item for item in items if isinstance(item, str) and item)
-        return out
+        return _checkpoint_authoring_ids(getattr(checkpoint_tuple, "checkpoint", None))
 
     # ------------------------------------------------------------------
     # Resume dispatch

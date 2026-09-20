@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:83aa7384fa9879e4d881fa060feaf0c81959489e8d57542f6128aeac9368f117'
+body_hash: 'sha256:024acdf45b03c45d8491d09dfca1d6018ceedb5b80ac15f3cbaa9d147c33a7ad'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3833,3 +3833,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted clarification answer normalization and per-question answer validation into helpers. The validation ordering, error wording, and payload shape are preserved.
 - Verification: 44 clarification tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 11 to 9 offenders.
 - Review finding (medium, code health): 9 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 verdict checkpoint correlation complexity review
+
+- Implementation: extracted checkpoint authoring-id collection from the verdict subscriber method. Timeout and read-failure handling remain in the caller; checkpoint value traversal preserves its prior order and filtering.
+- Verification: 22 verdict subscriber tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 9 to 8 offenders.
+- Review finding (medium, code health): 8 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.

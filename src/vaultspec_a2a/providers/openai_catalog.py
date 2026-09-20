@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
@@ -24,7 +24,7 @@ from ._catalog_fields import (
     local_id,
     model_list_revision,
 )
-from ._json_contract import JsonObject
+from ._json_contract import JsonObject, JsonValue
 from .provider_catalog import (
     MAX_MODELS,
     AuthenticationState,
@@ -34,6 +34,9 @@ from .provider_catalog import (
     ProviderCatalog,
     ProviderCatalogKey,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = [
     "OpenAICompatibleCatalogError",
@@ -134,6 +137,37 @@ def _has_next_page(link_header: str | None) -> bool:
     )
 
 
+def _validated_model_values(raw_models: Sequence[JsonValue]) -> set[str]:
+    model_values: set[str] = set()
+    for index, raw_model in enumerate(raw_models):
+        if not isinstance(raw_model, dict):
+            raise OpenAICompatibleCatalogError(
+                f"OpenAI-compatible model-list data[{index}] must be an object"
+            )
+        if raw_model.get("object") != "model":
+            raise OpenAICompatibleCatalogError(
+                f"OpenAI-compatible model-list data[{index}] has an invalid object type"
+            )
+        created = raw_model.get("created")
+        if not isinstance(created, int) or isinstance(created, bool) or created < 0:
+            raise OpenAICompatibleCatalogError(
+                f"OpenAI-compatible model-list data[{index}].created must be "
+                "a non-negative integer"
+            )
+        _FIELDS.required_text(
+            raw_model.get("owned_by"), field=f"data[{index}].owned_by"
+        )
+        model_value = _FIELDS.required_text(
+            raw_model.get("id"), field=f"data[{index}].id"
+        )
+        if model_value in model_values:
+            raise OpenAICompatibleCatalogError(
+                "OpenAI-compatible model-list contains duplicate identifiers"
+            )
+        model_values.add(model_value)
+    return model_values
+
+
 def catalog_from_model_list(
     result: JsonObject,
     *,
@@ -167,33 +201,7 @@ def catalog_from_model_list(
         raise OpenAICompatibleCatalogError(
             f"OpenAI-compatible model-list exceeds {MAX_MODELS} models"
         )
-    model_values: set[str] = set()
-    for index, raw_model in enumerate(raw_models):
-        if not isinstance(raw_model, dict):
-            raise OpenAICompatibleCatalogError(
-                f"OpenAI-compatible model-list data[{index}] must be an object"
-            )
-        if raw_model.get("object") != "model":
-            raise OpenAICompatibleCatalogError(
-                f"OpenAI-compatible model-list data[{index}] has an invalid object type"
-            )
-        created = raw_model.get("created")
-        if not isinstance(created, int) or isinstance(created, bool) or created < 0:
-            raise OpenAICompatibleCatalogError(
-                f"OpenAI-compatible model-list data[{index}].created must be "
-                "a non-negative integer"
-            )
-        _FIELDS.required_text(
-            raw_model.get("owned_by"), field=f"data[{index}].owned_by"
-        )
-        model_value = _FIELDS.required_text(
-            raw_model.get("id"), field=f"data[{index}].id"
-        )
-        if model_value in model_values:
-            raise OpenAICompatibleCatalogError(
-                "OpenAI-compatible model-list contains duplicate identifiers"
-            )
-        model_values.add(model_value)
+    model_values = _validated_model_values(raw_models)
     now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     if not model_values:
         return _unavailable_catalog(
@@ -219,6 +227,41 @@ def catalog_from_model_list(
         ),
         models=models,
     )
+
+
+async def _read_model_list_response(
+    response: httpx.Response, key: ProviderCatalogKey
+) -> bytes | OpenAICompatibleCatalogDiscovery:
+    if response.status_code == 401:
+        return OpenAICompatibleCatalogDiscovery(
+            catalog=_unavailable_catalog(
+                key, reason="provider model-list authentication failed"
+            ),
+            authentication=AuthenticationState.UNAUTHENTICATED,
+        )
+    if response.status_code == 403:
+        return OpenAICompatibleCatalogDiscovery(
+            catalog=_unavailable_catalog(
+                key, reason="provider model-list request was forbidden"
+            ),
+            authentication=AuthenticationState.UNKNOWN,
+        )
+    if response.status_code != 200:
+        raise OpenAICompatibleCatalogError(
+            "OpenAI-compatible model-list request failed"
+        )
+    if _has_next_page(response.headers.get("Link")):
+        raise OpenAICompatibleCatalogError(
+            "OpenAI-compatible model-list pagination cannot be exhausted"
+        )
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        if len(body) + len(chunk) > _MAX_RESPONSE_BYTES:
+            raise OpenAICompatibleCatalogError(
+                "OpenAI-compatible model-list response exceeds one MiB"
+            )
+        body.extend(chunk)
+    return bytes(body)
 
 
 async def discover_openai_compatible_catalog(
@@ -258,37 +301,7 @@ async def discover_openai_compatible_catalog(
                 },
             ) as response,
         ):
-            if response.status_code == 401:
-                return OpenAICompatibleCatalogDiscovery(
-                    catalog=_unavailable_catalog(
-                        key,
-                        reason="provider model-list authentication failed",
-                    ),
-                    authentication=AuthenticationState.UNAUTHENTICATED,
-                )
-            if response.status_code == 403:
-                return OpenAICompatibleCatalogDiscovery(
-                    catalog=_unavailable_catalog(
-                        key,
-                        reason="provider model-list request was forbidden",
-                    ),
-                    authentication=AuthenticationState.UNKNOWN,
-                )
-            if response.status_code != 200:
-                raise OpenAICompatibleCatalogError(
-                    "OpenAI-compatible model-list request failed"
-                )
-            if _has_next_page(response.headers.get("Link")):
-                raise OpenAICompatibleCatalogError(
-                    "OpenAI-compatible model-list pagination cannot be exhausted"
-                )
-            body = bytearray()
-            async for chunk in response.aiter_bytes():
-                if len(body) + len(chunk) > _MAX_RESPONSE_BYTES:
-                    raise OpenAICompatibleCatalogError(
-                        "OpenAI-compatible model-list response exceeds one MiB"
-                    )
-                body.extend(chunk)
+            body_or_discovery = await _read_model_list_response(response, key)
     except (TimeoutError, httpx.TimeoutException):
         raise OpenAICompatibleCatalogError(
             "OpenAI-compatible model-list request timed out"
@@ -297,8 +310,10 @@ async def discover_openai_compatible_catalog(
         raise OpenAICompatibleCatalogError(
             "OpenAI-compatible model-list request failed"
         ) from None
+    if isinstance(body_or_discovery, OpenAICompatibleCatalogDiscovery):
+        return body_or_discovery
     try:
-        result = _JSON_OBJECT.validate_json(bytes(body))
+        result = _JSON_OBJECT.validate_json(body_or_discovery)
     except (ValidationError, UnicodeDecodeError):
         raise OpenAICompatibleCatalogError(
             "OpenAI-compatible model-list returned malformed JSON"

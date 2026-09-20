@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:9d434251fa59b14aa52907bf96db8069a741e2122d1072c5ac1a5c797187a980'
+body_hash: 'sha256:e324777984c515cb68f65b89b2a974f9dc75cbb3c69824b2b565e731f6e98670'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3320,3 +3320,7 @@ Two medium-severity strict Ruff argument-count and cyclomatic findings in termin
 ### 2026-09-20 completed checkpoint preflight review pass
 
 One medium-severity strict Ruff statement-count finding in executor ingest admission was resolved. Completed-checkpoint settlement now has a focused method. Review checked that the checkpoint result is inspected before graph compilation, the span and log identify preflight completion, the terminal event is emitted before graph and metadata release, and any held dispatch capacity is released before returning without rerunning the graph. Thirteen focused executor checkpoint and terminal tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 171 to 170; cyclomatic health remains at 123. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 desktop readiness ladder review pass
+
+Two medium-severity strict Ruff complexity and branch findings in desktop readiness assembly were resolved. Worker lifecycle selection, pending-worker evidence, and run-admission classification now have focused helpers. Review checked that an unspawned worker needs both a successful live probe and adoption provenance before promotion, a pending worker accepts a heartbeat only when the live probe has no verdict, an explicit failed probe takes precedence, down/restarting workers stay unavailable, and database or recovery-owner failure blocks admission. The first extraction introduced a second radon offender; focused pending-worker and admission helpers resolved it before commit. Eleven desktop readiness/admission and health tests passed during implementation; five focused worker-state and database-health tests pass after the final extraction. Routine gates, strict Ty/basedpyright, focused Ruff, and diff check pass. Strict Ruff structure falls from 170 to 168 and cyclomatic findings from 123 to 122. The existing cognitive-complexity findings in assemble_health_status and build_full_health remain open, alongside the remaining strict backlog. No unresolved new review findings were surfaced.

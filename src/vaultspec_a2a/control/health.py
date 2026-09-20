@@ -50,7 +50,13 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..api.schemas.gateway import DesktopReadiness
+    from ..api.schemas.gateway import (
+        DesktopReadiness,
+        GatewayReadiness,
+        ProviderEligibility,
+        RunAdmission,
+        WorkerLifecycleState,
+    )
     from .circuit_breaker import WorkerCircuitBreaker
 
 __all__ = [
@@ -469,6 +475,85 @@ def _eligible_provider_names() -> list[str]:
     ]
 
 
+def _pending_worker_ready(
+    shared: Mapping[str, object], worker_probe_ready: bool | None
+) -> bool:
+    return worker_probe_ready is True or (
+        worker_probe_ready is None and bool(shared["worker_connected"])
+    )
+
+
+def _desktop_worker_state(
+    shared: Mapping[str, object],
+    worker_probe_ready: bool | None,
+    worker_adoptable: bool | None,
+) -> tuple[WorkerLifecycleState, str | None]:
+    from ..api.schemas.gateway import WorkerLifecycleState
+
+    worker_spawned = bool(shared["worker_spawned"])
+    worker_status = shared["worker_status"]
+    if not worker_spawned and worker_probe_ready is True and worker_adoptable is True:
+        # A worker can answer before the watchdog sets its flag. Reachability
+        # alone could be a foreign process on the port; adoption proves identity.
+        return WorkerLifecycleState.READY, None
+    if not worker_spawned:
+        return (
+            WorkerLifecycleState.COLD,
+            "worker is cold; starts on first execution demand",
+        )
+    if worker_status == WorkerConnectionStatus.PENDING:
+        # A live probe outranks the cached pending label. None means the probe
+        # did not finish, so the worker's heartbeat is still positive evidence;
+        # an explicit failed probe takes precedence over that cached heartbeat.
+        ready = _pending_worker_ready(shared, worker_probe_ready)
+        return (
+            WorkerLifecycleState.READY if ready else WorkerLifecycleState.STARTING,
+            None,
+        )
+    if worker_status in {
+        WorkerConnectionStatus.DOWN,
+        WorkerConnectionStatus.RESTARTING,
+    }:
+        return WorkerLifecycleState.UNAVAILABLE, f"worker is {worker_status}"
+    worker_reachable = (
+        worker_probe_ready
+        if worker_probe_ready is not None
+        else bool(shared["worker_connected"])
+    )
+    return (
+        WorkerLifecycleState.READY
+        if worker_reachable
+        else WorkerLifecycleState.STARTING,
+        None,
+    )
+
+
+def _desktop_run_admission(
+    gateway_readiness: GatewayReadiness,
+    worker_state: WorkerLifecycleState,
+    provider_eligibility: ProviderEligibility,
+    recovery_owner_error: object,
+) -> RunAdmission:
+    from ..api.schemas.gateway import (
+        GatewayReadiness,
+        ProviderEligibility,
+        RunAdmission,
+        WorkerLifecycleState,
+    )
+
+    if (
+        gateway_readiness is not GatewayReadiness.READY
+        or recovery_owner_error is not None
+    ):
+        return RunAdmission.BLOCKED
+    if (
+        worker_state is WorkerLifecycleState.READY
+        and provider_eligibility is ProviderEligibility.ELIGIBLE
+    ):
+        return RunAdmission.READY
+    return RunAdmission.DEFERRED
+
+
 def assemble_desktop_readiness(
     *,
     app_state: object,
@@ -499,8 +584,6 @@ def assemble_desktop_readiness(
         GatewayReadiness,
         LivenessState,
         ProviderEligibility,
-        RunAdmission,
-        WorkerLifecycleState,
     )
     from ..utils import package_version
 
@@ -530,70 +613,11 @@ def assemble_desktop_readiness(
         reasons.append("database is not valid")
 
     # --- Worker lifecycle: the cold-to-execution ladder. ---
-    worker_spawned = bool(shared["worker_spawned"])
-    worker_status = shared["worker_status"]
-    if not worker_spawned and worker_probe_ready is True and worker_adoptable is True:
-        # The spawn flag has not been set yet, but the worker just answered its
-        # real authenticated probe. This is the SAME window the ``pending``
-        # branch below documents - a demand-side caller completing the live
-        # probe before the watchdog advances its cached label - one rung
-        # earlier, and it was unhandled here. `ensure_worker` awaits the
-        # single-flight start and returns, admission probes immediately, and the
-        # flag has not caught up: prepare then refused a worker that was already
-        # answering, so first demand failed on a cold-start race rather than on
-        # anything about the run.
-        #
-        # ``worker_adoptable`` is required here and NOT in the ``pending`` branch
-        # below, and the asymmetry is the whole point. There, ``worker_spawned``
-        # is set: we started that worker, and only its cached label lags. Here
-        # nothing has been spawned, so a bare ``/health`` 200 proves only that
-        # SOME process holds the port - which a foreign orphan squatting a shared
-        # band port satisfies exactly as well as our own worker does. Promoting
-        # on reachability alone let an armed gateway mint a reservation against a
-        # squatter it must refuse, so the promotion additionally demands the
-        # provenance verdict every other adoption decision already turns on.
-        worker_state = WorkerLifecycleState.READY
-    elif not worker_spawned:
-        # No worker exists yet; one starts on first execution demand.
-        worker_state = WorkerLifecycleState.COLD
-        reasons.append("worker is cold; starts on first execution demand")
-    elif worker_status == WorkerConnectionStatus.PENDING:
-        # A demand-side caller can complete the worker's real HTTP probe before
-        # the watchdog has advanced its cached lifecycle label.  In that narrow
-        # window the live probe is the stronger fact: refusing admission as
-        # ``starting`` after an exact authenticated 200 would make first demand
-        # fail even though ``ensure_worker`` has already completed successfully.
-        #
-        # ``None`` is the third case and is NOT a negative: the caller probed and
-        # the observation did not finish (a worker busy compiling a graph for an
-        # already-admitted run stops answering for seconds). With no live verdict
-        # the worker's OWN heartbeat is the remaining live evidence, and it is a
-        # positive liveness assertion by the worker rather than a label this
-        # gateway has not got round to advancing. Reading ``starting`` there made
-        # every second run-start fail while the first one was still booting.
-        if worker_probe_ready is True or (
-            worker_probe_ready is None and bool(shared["worker_connected"])
-        ):
-            worker_state = WorkerLifecycleState.READY
-        else:
-            worker_state = WorkerLifecycleState.STARTING
-    elif worker_status in {
-        WorkerConnectionStatus.DOWN,
-        WorkerConnectionStatus.RESTARTING,
-    }:
-        worker_state = WorkerLifecycleState.UNAVAILABLE
-        reasons.append(f"worker is {worker_status}")
-    else:
-        worker_reachable = (
-            worker_probe_ready
-            if worker_probe_ready is not None
-            else bool(shared["worker_connected"])
-        )
-        worker_state = (
-            WorkerLifecycleState.READY
-            if worker_reachable
-            else WorkerLifecycleState.STARTING
-        )
+    worker_state, worker_reason = _desktop_worker_state(
+        shared, worker_probe_ready, worker_adoptable
+    )
+    if worker_reason is not None:
+        reasons.append(worker_reason)
 
     # --- Provider eligibility via the credential-aware readiness probe. ---
     eligible_providers = _eligible_provider_names()
@@ -604,18 +628,9 @@ def assemble_desktop_readiness(
         reasons.append("no subprocess provider is installed and credentialed here")
 
     # --- Run admission: execution readiness, distinct from gateway readiness. ---
-    if (
-        gateway_readiness is not GatewayReadiness.READY
-        or recovery_owner_error is not None
-    ):
-        run_admission = RunAdmission.BLOCKED
-    elif (
-        worker_state is WorkerLifecycleState.READY
-        and provider_eligibility is ProviderEligibility.ELIGIBLE
-    ):
-        run_admission = RunAdmission.READY
-    else:
-        run_admission = RunAdmission.DEFERRED
+    run_admission = _desktop_run_admission(
+        gateway_readiness, worker_state, provider_eligibility, recovery_owner_error
+    )
 
     return DesktopReadiness(
         gateway_pid=os.getpid(),

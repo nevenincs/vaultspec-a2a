@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:09479ea25e48409684abaf5c3e4de5e9a6eb3ed5c9c87052550072ea47ebb359'
+body_hash: 'sha256:847932324252d5ca30a46fd96af4faa58c47ac887a1e624c4535c51b82ad4ad4'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3672,3 +3672,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted ACP message-chunk enqueueing and flattened the mutually exclusive ACP and Codex notification branches with explicit exits. Message handling order, queue-full warnings, streamed chunks, usage updates, and terminal completion remain unchanged. Nesting-depth findings fell from two to zero.
 - Review finding (moderate, code health; queued): other strict dimensions remain red, including 35 cyclomatic and 130 selected Ruff design findings. The nesting-depth shape gate is now green.
 - Verification: 22 ACP command/stop tests and 61 Codex model/idle/condition tests passed (one deselected); `just check-all`, `just check-type-strict`, focused Ty and Ruff, `git diff --check`, and the nesting-depth gate passed.
+
+### 2026-09-20 full strict gate reconciliation
+
+- Full `just check-strict` completed after the provider stream nesting pass. Standard checks, strict Ty, reachability, unused-symbol and export coverage, imports, dependencies, workflow, and shell gates passed. Function length and shape nesting are at zero.
+- Review finding (moderate, code health; queued): cyclomatic complexity has 34 findings (the preceding review entry quoted the pre-refactor value 35), module length 13, parameter count 81, Ruff function limits 130, Ruff preview nesting 30, and Pylint size/design 53 (C0302 13; R0902 37; R0904 3). The Pylint count is from the full run, not an earlier partial estimate. The current health report also ranks 9 modules below the maintainability threshold; this report is advisory but remains part of the audit backlog.
+- Remaining work: reduce each measured strict dimension to zero, rerun the full strict recipe, and only then treat the draft PR as ready.

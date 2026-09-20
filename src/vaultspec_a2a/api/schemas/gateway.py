@@ -283,18 +283,24 @@ class RunStartRequest(BaseModel):
         if self.stage in (RunStage.START, RunStage.COMMIT) and not self.message.strip():
             raise ValueError("message must not be empty")
         if self.stage == RunStage.PREPARE:
-            if self.actor_tokens is not None:
-                raise ValueError("prepare must not carry actor tokens")
-            if self.reservation_id is not None:
-                raise ValueError("prepare must not carry a reservation id")
+            self._validate_prepare()
         if self.stage == RunStage.COMMIT and self.reservation_id is None:
             raise ValueError("commit requires a reservation id")
         if self.stage == RunStage.RELEASE:
-            if self.reservation_id is None:
-                raise ValueError("release requires a reservation id")
-            if self.actor_tokens is not None:
-                raise ValueError("release must not carry actor tokens")
+            self._validate_release()
         return self
+
+    def _validate_prepare(self) -> None:
+        if self.actor_tokens is not None:
+            raise ValueError("prepare must not carry actor tokens")
+        if self.reservation_id is not None:
+            raise ValueError("prepare must not carry a reservation id")
+
+    def _validate_release(self) -> None:
+        if self.reservation_id is None:
+            raise ValueError("release requires a reservation id")
+        if self.actor_tokens is not None:
+            raise ValueError("release must not carry actor tokens")
 
 
 class FrozenNativeControlSummary(BaseModel):

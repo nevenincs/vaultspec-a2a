@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c0ad077b8d5085b5226d4d7069ffc70a183f8684813d1627e238d582427a5eb0'
+body_hash: 'sha256:a7730ef5c354e71c5cf8cf73d26abf9ea85f944c3b73c5cc4e9e7f7ffc3fc1a8'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3510,3 +3510,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: isolated fresh resident-token lookup and collected optional ACP telemetry fields before the existing None filter. Explicit gateway token precedence and loopback constraints remain unchanged.
 - Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Gateway and ACP auth/session tests: 51 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 65 to 63 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.
+
+### 2026-09-20 executable graph and run-stage validation review pass
+
+- Implementation: separated complete executable graph checks by team, agent roster, and supervisor authority; separated prepare and release run-stage checks. Validation order and exact errors are preserved.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Focused graph/accepted-input and run-selection/digest tests: 90 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 63 to 60 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.

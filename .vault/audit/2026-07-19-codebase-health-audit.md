@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:bb52dd48eb56035ba68fea3f8c55d96e4b9560ac6f1b822e01145a6b8109c52a'
+body_hash: 'sha256:507d25ae8ae109f01b5a799bde862f7a5a053ff45e42beded78800cf8fb09834'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3498,3 +3498,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted runtime integer identity checks for run write authority and the balanced predicate reader for named SQLite CHECK constraints. Existing validation order and errors are retained.
 - Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Database authority/schema tests: 31 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 70 to 67 over limit. Ruff structural findings remain 146 (severity: moderate; type: code health). These existing findings remain open until zero, as does the full strict gate.
+
+### 2026-09-20 runtime singleton review pass
+
+- Implementation: separated owner-record parsing, contended-lock classification, and foreign-record rejection from singleton acquisition. The same conflict states, error messages, and lock release sequence remain.
+- Review: inspected the actual diff and lock ownership paths. No new correctness findings surfaced (severity: none; type: implementation review). Lifecycle, desktop, and CLI singleton tests: 11 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 67 to 65 over limit; Ruff structural findings fell from 146 to 145. Both are remaining moderate code-health debt; the full strict gate remains open until all findings reach zero.

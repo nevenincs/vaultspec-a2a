@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:7dafa24d594e5eae874b090a4e3fdca387b18eaddc2fa81db79270822feedd1f'
+body_hash: 'sha256:25665d4a337e8fed3719ec9291c849c41bbcf31f531b92393ef018a0f94d2408'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3863,3 +3863,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved the existing ACP chunk callback delivery helper into `_acp_chunks.py`, keeping the call sites and callback timing unchanged.
 - Verification: 7 ACP stop-outcome tests passed; target Ruff, Ty, formatting, and diff checks passed. The module-length gate fell from 9 to 8 offenders.
 - Review finding (medium, code health): 8 modules remain over the 1000-line limit; continue the existing module-length burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 ACP native-command complexity review
+
+- Implementation: moved exception-to-result classification into `_native_command_error_result`, retaining the original exception order, logging, outcome, and effects flag.
+- Verification: 8 native-command tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate no longer reports `execute_native_command`.
+- Review finding (medium, code health): other cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.

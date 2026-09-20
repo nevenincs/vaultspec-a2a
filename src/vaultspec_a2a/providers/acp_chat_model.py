@@ -619,43 +619,47 @@ class AcpChatModel(BaseChatModel):
                 content = chunk.message.content
                 if isinstance(content, str):
                     output.append(content)
-        except _AcpSessionBusyError as exc:
+        except Exception as exc:
+            return self._native_command_error_result(name, exc)
+        return NativeCommandResult(
+            name=name,
+            outcome=NativeCommandOutcome.COMPLETED,
+            output="".join(output),
+            effects_may_have_occurred=True,
+        )
+
+    @staticmethod
+    def _native_command_error_result(name: str, exc: Exception) -> NativeCommandResult:
+        if isinstance(exc, _AcpSessionBusyError):
             return NativeCommandResult(
                 name=name, outcome=NativeCommandOutcome.BUSY, reason=str(exc)
             )
-        except _NativeCommandUnavailableError as exc:
+        if isinstance(exc, _NativeCommandUnavailableError):
             outcome = (
                 NativeCommandOutcome.UNSUPPORTED
                 if exc.disposition is NativeCommandDisposition.UNSUPPORTED
                 else NativeCommandOutcome.BLOCKED
             )
             return NativeCommandResult(name=name, outcome=outcome, reason=str(exc))
-        except AcpPromptCancelledError as exc:
+        if isinstance(exc, AcpPromptCancelledError):
             return NativeCommandResult(
                 name=name,
                 outcome=NativeCommandOutcome.CANCELLED,
                 reason=str(exc),
                 effects_may_have_occurred=exc.effects_may_have_occurred,
             )
-        except AcpError as exc:
+        if isinstance(exc, AcpError):
             return NativeCommandResult(
                 name=name,
                 outcome=NativeCommandOutcome.FAILED,
                 reason=str(exc),
                 effects_may_have_occurred=exc.effects_may_have_occurred,
             )
-        except Exception as exc:
-            logger.error("ACP native command failed", exc_info=exc)
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.FAILED,
-                reason=f"provider command failed ({type(exc).__name__})",
-                effects_may_have_occurred=True,
-            )
+        logger.error("ACP native command failed", exc_info=exc)
         return NativeCommandResult(
             name=name,
-            outcome=NativeCommandOutcome.COMPLETED,
-            output="".join(output),
+            outcome=NativeCommandOutcome.FAILED,
+            reason=f"provider command failed ({type(exc).__name__})",
             effects_may_have_occurred=True,
         )
 

@@ -9,13 +9,43 @@ but a remote URL never receives a machine-local credential.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import SplitResult, urlsplit
 
 from .control.config import settings
 
+if TYPE_CHECKING:
+    from .desktop.credentials import DesktopCredentialPaths
+    from .lifecycle.discovery import DesktopDiscoveryRecord
+
 __all__ = ["gateway_auth_headers"]
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _matches_desktop_discovery_origin(
+    parsed: SplitResult, record: DesktopDiscoveryRecord
+) -> bool:
+    try:
+        requested_port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "http"
+        and parsed.hostname == record.host
+        and requested_port == record.port
+    )
+
+
+def _matches_desktop_credential_reference(
+    reference: str | None, paths: DesktopCredentialPaths
+) -> bool:
+    if reference is None:
+        return False
+    try:
+        return Path(reference).resolve() == paths.attach_path.resolve()
+    except (OSError, RuntimeError):
+        return False
 
 
 def _validated_desktop_attach_credential(parsed: SplitResult) -> str | None:
@@ -34,28 +64,13 @@ def _validated_desktop_attach_credential(parsed: SplitResult) -> str | None:
     state, record = classify_desktop_discovery(service_json_path(settings.a2a_home))
     if state is not DesktopDiscoveryState.FRESH or record is None:
         return None
-    if not record.supports_protocol(DESKTOP_PROTOCOL_MAX):
+    if not record.supports_protocol(
+        DESKTOP_PROTOCOL_MAX
+    ) or not desktop_record_process_is_live(record):
         return None
-    if not desktop_record_process_is_live(record):
-        return None
-    try:
-        requested_port = parsed.port
-    except ValueError:
-        return None
-    if (
-        parsed.scheme != "http"
-        or parsed.hostname != record.host
-        or requested_port != record.port
+    if not _matches_desktop_discovery_origin(parsed, record) or not (
+        _matches_desktop_credential_reference(record.credential_reference, references)
     ):
-        return None
-    if record.credential_reference is None:
-        return None
-    try:
-        referenced_credential = Path(record.credential_reference).resolve()
-        expected_credential = references.attach_path.resolve()
-    except (OSError, RuntimeError):
-        return None
-    if referenced_credential != expected_credential:
         return None
     from .desktop.credentials import CredentialError, load_attach_credential
 

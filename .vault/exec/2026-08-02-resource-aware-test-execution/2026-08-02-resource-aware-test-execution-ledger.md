@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v2'
-body_hash: 'sha256:026740a3ab2d15d80459e509cf00f7a10606e6de195979b670d8e5d7989d65fb'
+body_hash: 'sha256:7dcb5c20ceda530d2f90ce152f070b7ea75dbe7f80d75f315dd7bdf579d64194'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -56,3 +56,10 @@ related:
 - `S24` `verify:` `unit/service collection split and focused execution` -> `pass`
 - `S24` `by:` `root`
 - `S24` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`
+- `S25` `M` `.vault/plan/2026-08-02-resource-aware-test-execution-plan.md`
+- `S25` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S25` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S25` `M` `src/vaultspec_a2a/providers/tests/test_resource_lifetimes.py`
+- `S25` `verify:` `170 ACP fixture consumers and isolation proof` -> `pass`
+- `S25` `by:` `root`
+- `S25` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`

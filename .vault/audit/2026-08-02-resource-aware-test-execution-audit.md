@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v1'
-body_hash: 'sha256:590dbd5dcec7744ed017f2e6033df636c053dc69c9d2b274628562268f2511e9'
+body_hash: 'sha256:4197cc3f1bd6eb11d7a686433deab05c453a7e8e7dad7ccefbf98c28fba5afd8'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -520,6 +520,26 @@ presence prerequisite because provider absence is part of the catalog contract,
 but it serializes installed-host discovery across sessions. Ruff, ty,
 BasedPyright, resource-vocabulary tests, collection proofs, and both execution
 selections pass. No new finding remains from S24.
+### function-scoped-acp-child-fixture | low | resolved
+
+Type: fixture lifecycle and process handling. The ACP handler fixture formerly
+spawned and reaped one idle Python child for every consumer. The child streams
+are now owned by a module-scoped async fixture on a module-scoped event loop,
+while each test still receives a newly constructed `AcpSessionContext` with its
+own futures, queue, event, lock, lists, terminal map, task set, tool calls,
+command catalogs, and config options. Consumers do not perform I/O through the
+shared streams; they exist only to retain the production context shape. An
+explicit isolation regression mutates one context and proves a sibling remains
+empty. The 170-test consumer bundle improved from 11.09s to 8.54s. Status:
+resolved.
+
+### s25-acp-fixture-review-2026-09-20 | low | PASS
+
+Review result: PASS. Scope widened only for the immutable process/stream holder,
+not for mutable ACP authority. Subprocess setup and teardown execute on the same
+module loop, including `StreamWriter.wait_closed`; per-test asyncio objects are
+created by the function-scoped fixture. All affected tests, Ruff, ty, and
+BasedPyright pass without transport warnings. No new finding remains from S25.
 ## Recommendations
 
 - Migrate the outlying live suites (CLI live tests, authoring discovery retry

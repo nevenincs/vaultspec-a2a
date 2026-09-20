@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:183c84bb36f94b901859ce04e0e35e8927c9be0dfef998f77502d6750a0eb3d6'
+body_hash: 'sha256:64f1f92a6a67b2298298cfc0a51f434d888058eb6925f26c6839429682976bb9'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3522,3 +3522,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: isolated numeric and identity validation for desktop discovery records and the per-candidate atomic reservation attempt. Record rejection and exclusive marker arbitration retain their prior order.
 - Review: inspected both diffs and concurrency path. No new correctness findings surfaced (severity: none; type: implementation review). Discovery tests: 25 passed; registry/concurrency tests: 20 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 60 to 58 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.
+
+### 2026-09-20 terminal stream replay and authoring discovery review pass
+
+- Implementation: isolated durable terminal replay frames from live SSE subscription and split versioned versus legacy authoring discovery parsing. Failure code/message fallback and record-shape precedence are preserved.
+- Review: inspected both diffs and replay/record branches. No new correctness findings surfaced (severity: none; type: implementation review). Stream tests: 11 passed; authoring discovery tests: 15 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 58 to 56 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.

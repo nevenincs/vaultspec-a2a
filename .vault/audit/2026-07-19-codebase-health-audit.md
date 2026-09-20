@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:555ae31fcf9974520c840f37f9ae7d8e55e1e246ee3b67015eb0201d5872d514'
+body_hash: 'sha256:180aeca2755f438aecbf4d9799308b2222992be60fe901755e768f62e89ef380'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3553,3 +3553,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: isolated current write-authority column validation and receipt-index reflection from the read-only compatibility check, preserving their order and exact rejection messages.
 - Review: inspected the diff and database-open failure paths. No new correctness findings surfaced (severity: none; type: implementation review). Compatibility and authority-schema tests: 36 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 52 to 51 over limit. Ruff function-limit findings remain 139; other strict findings remain open (severity: moderate; type: code health).
+
+### 2026-09-20 Alembic current-only guard review pass
+
+- Implementation: separated revision ancestry, schema/index/check validation, and populated-row/receipt validation while keeping the migration transaction and rollback boundary. The guard still refuses incomplete current authority before migrations run.
+- Review: inspected the actual refactor. A low-severity validation-order issue (type: revision read timing) surfaced: a short-circuit initially skipped the Alembic revision read for populated stores. This was fixed before commit. No unresolved new correctness findings remain. Migration, authority, and compatibility tests: 51 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 51 to 50 over limit. Ruff function-limit findings remain 139; all other strict findings remain open (severity: moderate; type: code health).

@@ -248,14 +248,12 @@ def _await_pytest_exit(
                 status, root_exit_seen = _root_exit_status(
                     process, containment, root_exit_seen, now, limits.exit_timeout_s
                 )
-                if status is not None:
-                    return status
-            if returncode is None:
+            else:
                 status = _teardown_timeout_status(
                     process, containment, completion_seen, now, limits.exit_timeout_s
                 )
-                if status is not None:
-                    return status
+            if status is not None:
+                return status
             status = _run_timeout_status(
                 process, containment, started, now, limits.run_timeout_s
             )

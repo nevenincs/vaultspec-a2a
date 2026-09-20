@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:0362e562f1c3d109989a813a69cec3f6e23a49941307ccc437fb2944dc6e51eb'
+body_hash: 'sha256:a551523627d8dc27862f7e2ea36aa8ee184eac3692f732056ad93912e199f83e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3987,3 +3987,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 
 - Medium / maintainability: `CodexChatModel._consume_turn` scored 18 cognitive complexity. Extracted foreign-thread filtering and control-notification dispatch into small methods; item streaming, deferred error handling, usage, and turn completion remain in their original order. Review found no changed frame handling. Strict Ty, Ruff, and 48 focused Codex model/idle-timeout tests pass; the function now passes complexity.
 - Remaining queue: four cognitive-complexity offenders remain (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`, `_await_pytest_exit`).
+
+### 2026-09-20 service options and pytest owner review
+
+- Medium / maintainability: `cli/service.py` start/restart helpers exceeded the five-parameter strict limit. Typed keyword options preserve the existing timeout keyword calls and reject unknown options; strict Ty, Ruff, formatter, and eight service tests pass. Review replaced the first broad object-typed options draft with `TypedDict`/`Unpack` so static call-site types remain checked. Runtime signature introspection now sees typed `**options`; no repository caller introspects these signatures.
+- Medium / maintainability: `testing/runner.py` `_await_pytest_exit` scored 16 cognitive complexity. Unified the mutually exclusive root-exited and teardown-timeout branches before their shared return check; timeout precedence and cleanup are unchanged. Review found no new issue. Complexity now scores 11; five focused runner tests, strict Ty, Ruff, and formatter pass.
+- Remaining queue: cognitive complexity still has three offenders (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`); other strict parameter findings remain open.

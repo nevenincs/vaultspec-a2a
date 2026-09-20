@@ -33,7 +33,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import click
 import httpx
@@ -144,6 +144,25 @@ def _desktop_arm_env(app_home: Path, capsule_root: Path) -> dict[str, str]:
     }
 
 
+class _StartServiceOptions(TypedDict, total=False):
+    ready_timeout: float
+
+
+class _RestartServiceOptions(_StartServiceOptions, total=False):
+    stop_timeout: float
+
+
+def _reject_unexpected_service_options(
+    function_name: str, options: _StartServiceOptions | _RestartServiceOptions
+) -> None:
+    """Keep compatibility wrappers strict about unsupported keyword options."""
+    if options:
+        unexpected = next(iter(options))
+        raise TypeError(
+            f"{function_name}() got an unexpected keyword argument {unexpected!r}"
+        )
+
+
 def start_service(
     app_home: Path | None = None,
     *,
@@ -151,7 +170,7 @@ def start_service(
     host: str | None = None,
     port: int | None = None,
     log_path: str | None = None,
-    ready_timeout: float = _READY_TIMEOUT_SECONDS,
+    **options: Unpack[_StartServiceOptions],
 ) -> ServiceStatus:
     """Start the gateway detached and wait until it is discoverably healthy.
 
@@ -168,6 +187,8 @@ def start_service(
     pid: on Windows a venv launcher stub means the recorded gateway pid can
     legitimately differ from the spawned child's pid.
     """
+    ready_timeout = options.pop("ready_timeout", _READY_TIMEOUT_SECONDS)
+    _reject_unexpected_service_options("start_service", options)
     home = _resolved_app_home(app_home)
     if another_resident_is_live(home):
         return service_status(home)
@@ -308,8 +329,7 @@ def restart_service(
     host: str | None = None,
     port: int | None = None,
     log_path: str | None = None,
-    ready_timeout: float = _READY_TIMEOUT_SECONDS,
-    stop_timeout: float = _STOP_TIMEOUT_SECONDS,
+    **options: Unpack[_RestartServiceOptions],
 ) -> ServiceStatus:
     """Stop the resident (confirmed dead), then start ready-gated.
 
@@ -318,6 +338,9 @@ def restart_service(
     a surviving generation on the same port; :func:`start_service` then
     publishes exactly one ready generation or fails loudly.
     """
+    ready_timeout = options.pop("ready_timeout", _READY_TIMEOUT_SECONDS)
+    stop_timeout = options.pop("stop_timeout", _STOP_TIMEOUT_SECONDS)
+    _reject_unexpected_service_options("restart_service", options)
     home = _resolved_app_home(app_home)
     stop_service(home, timeout=stop_timeout)
     return start_service(

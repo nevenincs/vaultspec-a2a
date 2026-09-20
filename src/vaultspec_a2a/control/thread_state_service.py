@@ -266,6 +266,24 @@ def derive_run_semantic_context(
     )
 
 
+def _should_clear_permissions_without_checkpoint(
+    thread: ThreadModel,
+    snapshot: ThreadStateData,
+    *,
+    checkpoint_loaded: bool,
+    checkpoint_present: bool,
+) -> bool:
+    if checkpoint_loaded or checkpoint_present:
+        return False
+    return bool(
+        thread.status != "submitted"
+        or snapshot.pending_permissions
+        or snapshot.approval_status is not None
+        or snapshot.approval_request_id is not None
+        or snapshot.pause_cause is not None
+    )
+
+
 async def capture_thread_state(
     db: AsyncSession,
     *,
@@ -417,16 +435,11 @@ async def capture_thread_state(
         snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
 
-    if (
-        not checkpoint_loaded
-        and not checkpoint_present
-        and (
-            thread.status != "submitted"
-            or snapshot.pending_permissions
-            or snapshot.approval_status is not None
-            or snapshot.approval_request_id is not None
-            or snapshot.pause_cause is not None
-        )
+    if _should_clear_permissions_without_checkpoint(
+        thread,
+        snapshot,
+        checkpoint_loaded=checkpoint_loaded,
+        checkpoint_present=checkpoint_present,
     ):
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
 

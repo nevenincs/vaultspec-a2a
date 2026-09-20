@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:66a49a7110d210b9eaaf8c27dc74d8d80bfdf5acc4edf56b0f84d9ad578fce45'
+body_hash: 'sha256:248b699e5c346cfb873a508d8177c6402399909a2acfc95c2c5186d8867175dd'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3356,3 +3356,9 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: split missing-record rejection from the exact cancellation authority comparison; both paths still roll back and return false.
 - Review: inspected the diff; 31 event/cancellation tests, routine quality gate, strict type gate, focused Pylint, and focused strict Ruff passed. Severity: none for this change; type: no contract drift found.
 - Queue: pre-existing `event_handlers.py` module-length and three strict Ruff parameter-count findings remain open. Other repository strict findings remain open.
+
+### 2026-09-20 checkpoint permission-clear predicate review pass
+
+- Implementation: extracted the permission-clear decision into a focused predicate, retaining the existing checkpoint and snapshot conditions.
+- Review: inspected the diff; 14 snapshot tests and 21 capture/authoring tests passed, as did routine checks and strict type checking. Focused Pylint is clear. Severity: none for this change; type: no contract drift found.
+- Queue: `capture_thread_state` still has strict Ruff C901 (13 > 10) and PLR0915 (69 > 50). Its checkpoint projection block requires a larger extraction. Other repository strict findings remain open.

@@ -815,12 +815,18 @@ class TestTheWritersAreActuallyInjected:
         )
 
     def test_the_worker_node_accepts_the_port(self) -> None:
-        """The node factory must expose the parameter the compiler passes."""
-        assert "cost_port" in inspect.signature(create_worker_node).parameters
+        """The node factory's typed keyword contract must accept the port."""
+        options = inspect.signature(create_worker_node).parameters["options"]
+        assert options.annotation == "Unpack[_WorkerNodeOptions]"
+        contract = create_worker_node.__globals__["_WorkerNodeOptions"]
+        assert "cost_port" in contract.__annotations__
 
     def test_the_compile_entrypoint_accepts_the_port(self) -> None:
-        """The graph entrypoint the lifecycle calls must accept the port."""
-        assert "cost_port" in inspect.signature(compile_team_graph).parameters
+        """The graph entrypoint's typed keyword contract accepts the port."""
+        options = inspect.signature(compile_team_graph).parameters["options"]
+        assert options.annotation == "Unpack[_CompileTeamOptions]"
+        contract = compile_team_graph.__globals__["_CompileTeamOptions"]
+        assert "cost_port" in contract.__annotations__
 
     def test_the_process_root_constructs_and_passes_a_real_port(self) -> None:
         """The lifecycle must build a concrete port and hand it to the compiler.

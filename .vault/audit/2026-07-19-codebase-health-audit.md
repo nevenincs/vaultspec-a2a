@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:f0c5a7da966ad5fab0e1e910ed4528976852fa2b02f27ef353a8c1511f1653c7'
+body_hash: 'sha256:4fa31ece4679374c56cdd5f246f4865ce81d67e317bc71963b6831e2d675222d'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4217,3 +4217,8 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, high severity, security triage: CodeQL currently reports four alerts on this PR, all also open on `main`: three path-expression findings for authenticated, intentionally selected workspace/config paths and one plaintext-credential-storage finding for the owner-restricted atomic secret writer. Workspace TOML symlink containment has been strengthened. Review the next scan and resolve or explicitly triage every alert before marking the PR ready.
 - Review finding, medium severity, verification: the 4,583-case unit gate was started and remains in progress. Live service proofs still require their documented engine/provider prerequisites.
 - Verification: production module length, function length, parameter count, nesting, Radon cyclomatic and maintainability, Pylint design, normal/preview Ruff, relative imports, import loadability, reachability, unused symbols, and exports have current zero-finding scans. Focused agent suites reported 73 streaming, 27 discovery, 74 Codex client, 116 ACP/provider, 55 worker lifecycle, and 22 verdict tests passing; 34 process and 103 team-config tests passed in the root pass. Review result is REVISION REQUIRED pending unit completion and CodeQL/CI recheck.
+
+### 2026-09-20 cost-port contract test review
+
+- Review finding, medium severity, test-contract drift: the first full unit run found two cost-tracking tests asserting `cost_port` is a named `inspect.signature` parameter. The worker and compiler now accept that keyword through typed `Unpack[TypedDict]`; the tests were outdated and did not measure whether the port was accepted. They now assert the runtime function annotation names its typed keyword contract and that the contract includes `cost_port`.
+- Verification: all 40 cost-tracking tests pass after the correction; the full 4,584-case unit gate has restarted. Strict typing, scoped Ruff, and the two direct contract tests pass. Keep the broad unit result and fresh CI result open in this audit queue until complete. Review result is REVISION REQUIRED pending those runs.

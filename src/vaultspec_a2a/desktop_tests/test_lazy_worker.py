@@ -80,8 +80,10 @@ def _worker_state(base: str, headers: dict[str, str]) -> str:
 _RUN_SEQ = itertools.count(1)
 
 
-def _start_run(base: str, headers: dict[str, str]) -> int:
-    """Fire one authenticated mock run-start and return its status code.
+def _start_run(
+    base: str, headers: dict[str, str], selection: dict[str, object]
+) -> tuple[int, str]:
+    """Fire one authenticated mock run-start and return its status and body.
 
     Each call blocks inside the gateway until the single-flight worker start
     reaches readiness, so parallel calls model concurrent first demand.
@@ -107,12 +109,10 @@ def _start_run(base: str, headers: dict[str, str]) -> int:
                 # The workspace anchors the selection, which run start
                 # revalidates against the catalog served for it.
                 "metadata": {"workspace_root": workspace},
-                "selection": catalog_selection(
-                    base, headers["Authorization"], workspace
-                ),
+                "selection": selection,
             },
         )
-    return resp.status_code
+    return resp.status_code, resp.text
 
 
 def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
@@ -158,14 +158,26 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
         assert _SPAWN_LINE not in log_path.read_text(encoding="utf-8", errors="replace")
 
         # --- Concurrent first demand: exactly one real worker. ---
+        # Resolve the catalog once before the race. Parallel catalog refreshes
+        # would add an unrelated cold-start load to this worker-spawn proof.
+        selection: dict[str, object] = catalog_selection(
+            base, auth["Authorization"], str(Path.cwd())
+        )
+        assert _worker_state(base, auth) == "cold"
+        assert _SPAWN_LINE not in log_path.read_text(encoding="utf-8", errors="replace")
+
         # Four real, parallel, authenticated run-starts race into the single-flight
         # worker start. Each blocks until the worker is ready, so all resolve 201.
-        def _start_run_once(_index: int) -> int:
-            return _start_run(base, auth)
+        def _start_run_once(_index: int) -> tuple[int, str]:
+            return _start_run(base, auth, selection)
 
         with ThreadPoolExecutor(max_workers=4) as pool:
-            statuses = list(pool.map(_start_run_once, range(4)))
-        assert statuses == [201, 201, 201, 201], statuses
+            responses = list(pool.map(_start_run_once, range(4)))
+        statuses = [status for status, _body in responses]
+        assert statuses == [201, 201, 201, 201], (
+            responses,
+            log_path.read_text(encoding="utf-8", errors="replace"),
+        )
 
         # A real worker now listens on its private port.
         assert _port_listening(worker_port), "first demand must start the worker"

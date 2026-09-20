@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:cc7e308b3fe0155303dc2779feee209dc76d84fdbed04ee4115f835e6691ab28'
+body_hash: 'sha256:8719158c71ee78320546260601c8f0175202dc7cf4635147c366c22e6a622a06'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3585,3 +3585,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding (low, dead code; fixed): `setup_session` computed and updated an environment mapping which no request, process spawn, or return value read. The call performed only redundant local filesystem probing and environment preparation.
 - Review finding (moderate, code health; queued): 46 cyclomatic and 132 selected Ruff design findings remain. ACP initialization still measures 15 paths; supervisor response and graph compilation measure 17 each.
 - Verification: 27 ACP model selection, Kimi conditioning, and strict MCP tests passed (two live tests deselected); `just check-all` and `just check-type-strict` passed before the final unused-import removal; focused Ruff and Linux Ty passed after it, as did `git diff --check`. The cyclomatic gate remains red at 46 findings.
+
+### 2026-09-20 ACP initialization review pass
+
+- Implementation: extracted initialization result and authentication-method validation from `initialize_session`. Validation order, error codes, messages, and resume capability requirement remain the same. Cyclomatic findings fell from 46 to 45; selected Ruff design findings remain 132.
+- Review finding (moderate, code health; queued): 45 cyclomatic findings remain, led by supervisor response evaluation and worker graph compilation (17 each). The ACP initialization finding is closed.
+- Verification: 27 ACP model selection, Kimi conditioning, and strict MCP tests passed (two live tests deselected); `just check-all`, `just check-type-strict`, and `git diff --check` passed. Radon gate remains red at 45 findings.

@@ -410,6 +410,24 @@ async def initialize_session(
         raise _session_wire_error(
             f"ACP initialize failed: {resp['error']}", resp["error"]
         )
+    return _validated_initialize_result(resp, config)
+
+
+def _validated_auth_methods(result: JsonObject) -> list[JsonObject]:
+    auth_methods = result.get("authMethods", [])
+    if not isinstance(auth_methods, list) or not all(
+        isinstance(method, dict) for method in auth_methods
+    ):
+        raise AcpSessionError(
+            "ACP initialize returned malformed authMethods",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    return cast("list[JsonObject]", auth_methods)
+
+
+def _validated_initialize_result(
+    resp: JsonObject, config: AcpModelConfig
+) -> InitializeResult:
     result = resp.get("result")
     if not isinstance(result, dict):
         raise AcpSessionError(
@@ -440,17 +458,9 @@ async def initialize_session(
             "loadSession support",
             code=AcpErrorCode.INVALID_PARAMS,
         )
-    auth_methods = result.get("authMethods", [])
-    if not isinstance(auth_methods, list) or not all(
-        isinstance(method, dict) for method in auth_methods
-    ):
-        raise AcpSessionError(
-            "ACP initialize returned malformed authMethods",
-            code=AcpErrorCode.INTERNAL_ERROR,
-        )
     return InitializeResult(
         agent_capabilities=capabilities,
-        auth_methods=cast("list[JsonObject]", auth_methods),
+        auth_methods=_validated_auth_methods(result),
     )
 
 

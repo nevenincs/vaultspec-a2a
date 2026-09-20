@@ -174,9 +174,7 @@ async def dispatch_to_worker(
     # reconciliation. Fire the demand-readiness signal once, only after the worker
     # is genuinely up. The signal is unset on Compose and development, whose boot
     # reconciliation is eager.
-    demand_ready = spawner.demand_ready_event
-    if demand_ready is not None and spawner.spawned and not demand_ready.is_set():
-        demand_ready.set()
+    _signal_worker_demand_ready(spawner)
 
     if not bypass_circuit_breaker and not circuit_breaker.pre_dispatch():
         raise WorkerCircuitOpenError(circuit_breaker.rejection_detail)
@@ -204,6 +202,15 @@ async def dispatch_to_worker(
             cause=exc,
         ) from exc
 
+    return _dispatch_response_or_raise(resp, dispatch, circuit_breaker)
+
+
+def _dispatch_response_or_raise(
+    resp: httpx.Response,
+    dispatch: DispatchRequest,
+    circuit_breaker: WorkerCircuitBreaker,
+) -> DispatchResponse:
+    """Classify the worker's HTTP response and update circuit health."""
     if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
         circuit_breaker.record_failure()
         logger.warning(
@@ -237,6 +244,13 @@ async def dispatch_to_worker(
         status="dispatched",
         thread_id=dispatch.thread_id,
     )
+
+
+def _signal_worker_demand_ready(spawner: LazyWorkerSpawner) -> None:
+    """Release deferred boot reconciliation after a real worker start."""
+    demand_ready = spawner.demand_ready_event
+    if demand_ready is not None and spawner.spawned and not demand_ready.is_set():
+        demand_ready.set()
 
 
 def _log_redispatch_failure_ladder(

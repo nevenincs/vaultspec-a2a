@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c2c036516822a58a90e42c5029999c6095bb0dc40adb417b5dffc8068d425633'
+body_hash: 'sha256:97c0e5b63e7f165d85922061d942a26e2029eef242467754176f6430c53ad5e4'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3731,3 +3731,27 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted selector validation, workspace normalization, candidate reconciliation, and public projection from `discover_active_runs` in `control/run_discovery_service.py`.
 - Review: inspected validation order, deadline, commit/requery, filtering, and truncation in the resulting flow. Severity/type: no new defect found. Remaining strict findings stay open in this audit queue.
 - Verification: selected and full Ruff checks, Ruff format, source Ty, 10 focused tests and one performance test. The discovered function's radon complexity decreased from 12 to 1.
+
+### 2026-09-20 worker dispatch response review
+
+- Implementation: extracted HTTP response classification and deferred-demand readiness signaling from `dispatch_to_worker` in `control/dispatch.py`.
+- Review: inspected call order, failure accounting, exact raised exception types, and successful response shape. Severity/type: no new defect found. The function-specific radon over-limit finding is removed; its separate parameter-count finding remains queued.
+- Verification: file-specific Ruff, format, radon API, strict Ty for the dispatch file, and 19 dispatch/readiness/reconciliation tests. A concurrent full strict Ty run found diagnostics in an independently edited worker file; that owner is correcting them.
+
+### 2026-09-20 registration and ACP authentication review
+
+- Implementation: extracted role/port config eligibility from `register_serve` and authentication response classification from `authenticate_rpc`.
+- Review: inspected validation order and resolved config reuse for registration, and the complete error-result mapping for ACP authenticate. Severity/type: no new defect found. Registration's pre-existing parameter-count finding remains medium/type shape and stays queued.
+- Verification: eight focused registration tests, 24 ACP exception tests, file-specific Ruff/format, targeted Ty, and function-level Radon. Both functions now meet the cyclomatic threshold.
+
+### 2026-09-20 orphan config-home sweep review
+
+- Implementation: extracted old-directory eligibility from `sweep_orphan_homes` in `providers/_config_home_roots.py`.
+- Review: checked keep-path exclusion, freshness cutoff, concurrent removal handling, and post-delete existence check against prior behavior. Severity/type: no new defect found; other complexity findings remain queued.
+- Verification: file Ruff and format, function-level Radon, and two focused orphan-sweep tests. The sweep function now meets the cyclomatic threshold.
+
+### 2026-09-20 mock permission normalization review
+
+- Implementation: moved mock permission tool-call payload normalization from `_collect_mock_permission_result` to `_parse_mock_permission_call` in `graph/nodes/worker.py`.
+- Review: inspected the malformed input fallback, dict option filtering, and callback arguments. Severity/type: no new defect found; remaining worker-node complexity findings stay open in this audit queue.
+- Verification: strict Ty, full Ruff and target format, 22 focused worker tests, `git diff --check`, and cyclomatic gate. The target function no longer exceeds the cyclomatic threshold.

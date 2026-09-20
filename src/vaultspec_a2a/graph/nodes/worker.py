@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     # import (it eagerly probes for transformers); the node receives already
     # constructed models and never instantiates one.
     from langchain_core.language_models import BaseChatModel
+    from langchain_core.messages import ToolCall
     from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import BaseTool
 
@@ -387,22 +388,7 @@ async def _collect_mock_permission_result(
     for tool_call in response.tool_calls:
         if tool_call.get("name") != "session_request_permission":
             continue
-        raw_tool_input = cast("object", tool_call.get("args", {}))
-        tool_input = (
-            cast("dict[str, Any]", raw_tool_input)
-            if isinstance(raw_tool_input, dict)
-            else {}
-        )
-        raw_options = cast("object", tool_input.get("options", []))
-        options: list[dict[str, Any]] = (
-            [
-                cast("dict[str, Any]", o)
-                for o in cast("list[object]", raw_options)
-                if isinstance(o, dict)
-            ]
-            if isinstance(raw_options, list)
-            else []
-        )
+        tool_input, options = _parse_mock_permission_call(tool_call)
         selected_option = await _interrupt_permission_callback(
             "session_request_permission",
             tool_input,
@@ -421,6 +407,29 @@ async def _collect_mock_permission_result(
         ]
 
     return []
+
+
+def _parse_mock_permission_call(
+    tool_call: ToolCall,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Extract the permissive input and option shape used by mock tool calls."""
+    raw_tool_input = cast("object", tool_call.get("args", {}))
+    tool_input = (
+        cast("dict[str, Any]", raw_tool_input)
+        if isinstance(raw_tool_input, dict)
+        else {}
+    )
+    raw_options = cast("object", tool_input.get("options", []))
+    options: list[dict[str, Any]] = (
+        [
+            cast("dict[str, Any]", option)
+            for option in cast("list[object]", raw_options)
+            if isinstance(option, dict)
+        ]
+        if isinstance(raw_options, list)
+        else []
+    )
+    return tool_input, options
 
 
 async def _resolve_worker_tool_calls(

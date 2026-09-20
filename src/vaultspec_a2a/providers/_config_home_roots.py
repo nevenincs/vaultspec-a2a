@@ -68,6 +68,18 @@ def temp_home_root() -> Path | None:
     return declared
 
 
+def _orphan_home_is_collectable(
+    candidate: Path, *, keep: Path | None, cutoff: float
+) -> bool:
+    """Select an old directory while tolerating concurrent removal."""
+    if not candidate.is_dir() or (keep is not None and candidate == keep):
+        return False
+    try:
+        return candidate.stat().st_mtime <= cutoff
+    except OSError:
+        return False
+
+
 def sweep_orphan_homes(
     *, prefix: str, keep: Path | None = None, root: Path | None = None
 ) -> list[Path]:
@@ -106,12 +118,7 @@ def sweep_orphan_homes(
     except OSError:
         return removed
     for candidate in candidates:
-        if not candidate.is_dir() or (keep is not None and candidate == keep):
-            continue
-        try:
-            if candidate.stat().st_mtime > cutoff:
-                continue
-        except OSError:
+        if not _orphan_home_is_collectable(candidate, keep=keep, cutoff=cutoff):
             continue
         shutil.rmtree(candidate, ignore_errors=True)
         if not candidate.exists():

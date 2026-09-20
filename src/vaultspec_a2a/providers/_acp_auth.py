@@ -277,6 +277,15 @@ async def authenticate_rpc(
             auth_url=auth_url,
             last_auth_url=last_auth_url,
         )
+    return _authenticate_result_or_raise(resp, auth_url, last_auth_url)
+
+
+def _authenticate_result_or_raise(
+    resp: JsonObject,
+    auth_url: str | None,
+    last_auth_url: str | None,
+) -> JsonObject:
+    """Map an ACP authentication response to its exact outcome."""
     if "error" in resp:
         raw_err = resp["error"]
         err: JsonObject = lenient_json_object(raw_err)

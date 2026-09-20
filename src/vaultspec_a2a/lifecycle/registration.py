@@ -55,6 +55,19 @@ def _load_config() -> ProcsConfig | None:
         return None
 
 
+def _eligible_config(
+    role: str, port: int, config: ProcsConfig | None
+) -> ProcsConfig | None:
+    """Return the config when *role* accepts *port*, otherwise ``None``."""
+    resolved_config = config if config is not None else _load_config()
+    if resolved_config is None:
+        return None
+    role_cfg = resolved_config.roles.get(role)
+    if role_cfg is None or port not in role_cfg.band:
+        return None
+    return resolved_config
+
+
 def register_serve(
     role: str,
     port: int,
@@ -75,11 +88,8 @@ def register_serve(
     ``VAULTSPEC_PROCS_NAME``) and returns it, so the caller can refresh and
     deregister it.
     """
-    resolved_config = config if config is not None else _load_config()
+    resolved_config = _eligible_config(role, port, config)
     if resolved_config is None:
-        return None
-    role_cfg = resolved_config.roles.get(role)
-    if role_cfg is None or port not in role_cfg.band:
         return None
     from .manager import default_procs_owner
 

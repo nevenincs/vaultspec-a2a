@@ -596,29 +596,37 @@ class _CodexAppServerClient:
         # settles completed, so the refusal has to be visible in a log to ever be
         # noticed again.
         if msg_id is not None and method:
-            if method == ELICITATION_METHOD and self._permission_rung is not None:
-                self._schedule_elicitation_decision(msg_id, message)
-                return
-            logger.warning(
-                "codex app-server sent an unsupported server-initiated request "
-                "%r; answering method-not-found, which the provider will treat "
-                "as a refusal",
-                method,
-            )
-            self._send({"id": msg_id, "error": {"code": -32601, "message": method}})
+            self._dispatch_server_request(msg_id, method, message)
             return
         if msg_id is not None:
             self._dispatch_reply(msg_id, message)
             return
         if method:
-            # Observed before the turn consumer sees it: the approval request for
-            # a tool call arrives immediately after the item frame that names the
-            # tool, and the elicitation payload itself carries no tool name.
-            if self._permission_rung is not None:
-                self._permission_rung.observe(
-                    method, lenient_json_object(message.get("params"))
-                )
-            self.notifications.put_nowait(message)
+            self._dispatch_notification(method, message)
+
+    def _dispatch_notification(self, method: str, message: JsonObject) -> None:
+        # Observed before the turn consumer sees it: the approval request for
+        # a tool call arrives immediately after the item frame that names the
+        # tool, and the elicitation payload itself carries no tool name.
+        if self._permission_rung is not None:
+            self._permission_rung.observe(
+                method, lenient_json_object(message.get("params"))
+            )
+        self.notifications.put_nowait(message)
+
+    def _dispatch_server_request(
+        self, msg_id: int, method: str, message: JsonObject
+    ) -> None:
+        if method == ELICITATION_METHOD and self._permission_rung is not None:
+            self._schedule_elicitation_decision(msg_id, message)
+            return
+        logger.warning(
+            "codex app-server sent an unsupported server-initiated request "
+            "%r; answering method-not-found, which the provider will treat "
+            "as a refusal",
+            method,
+        )
+        self._send({"id": msg_id, "error": {"code": -32601, "message": method}})
 
     def _dispatch_reply(self, msg_id: int, message: JsonObject) -> None:
         future = self._pending.pop(msg_id, None)

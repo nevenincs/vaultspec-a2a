@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:037b0e3adb3ae29c10a8af250e91f6a45b2b88489945949797363b5f6adab2e9'
+body_hash: 'sha256:51b813d95acb52c7fb9cf120bec88e38261b2ff86c2007263d45c0c10d896c47'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3875,3 +3875,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted held port-reservation release into `_release_held_reservations`. The `finally` path still releases every held reservation in the same order.
 - Verification: 39 lifecycle manager tests passed; target Ruff, Ty, formatting, and diff checks passed. The shared worktree cyclomatic gate currently reports zero findings after concurrent bounded fixes.
 - Review finding (medium, code health): the strict suite still has non-cyclomatic findings; continue the existing burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 Codex dispatch complexity review
+
+- Implementation: extracted Codex server-request and notification routing from `_dispatch`. Request classification, observation ordering, and refusal payload remain unchanged.
+- Verification: the delegated lane reports 46 focused tests passed, with Ruff, Ty, formatting, and diff checks passing. `_dispatch` Radon complexity fell from 13 to 10.
+- Review finding (medium, code health): strict non-cyclomatic findings remain; continue the existing queue. No new functional defect was found in this pass.

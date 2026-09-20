@@ -1375,6 +1375,37 @@ class LazyWorkerSpawner:
         except psutil.NoSuchProcess:
             return []
 
+    async def _reap_shutdown_process(
+        self,
+        process: subprocess.Popen[bytes],
+        shutdown_containment: ProcessContainment | None,
+        transient_containment: ProcessContainment | None,
+        retained_descendants: list[psutil.Process],
+        deadline: ShutdownDeadline | None,
+    ) -> None:
+        try:
+            if process.poll() is None or shutdown_containment is not None:
+                await complete_cleanup(
+                    _shutdown_worker_process(
+                        process, shutdown_containment, deadline=deadline
+                    )
+                )
+        finally:
+            try:
+                if retained_descendants:
+                    await complete_cleanup(
+                        _reap_retained_processes(
+                            retained_descendants, deadline=deadline
+                        )
+                    )
+            finally:
+                self._process = None
+                if self._containment is not None:
+                    self._containment.close()
+                if transient_containment is not None:
+                    transient_containment.close()
+                self._containment = None
+
     async def shutdown(self, *, deadline: ShutdownDeadline | None = None) -> None:
         """Cooperatively stop the owned worker, then reap its tree by deadline."""
         if self._process is None:
@@ -1407,28 +1438,13 @@ class LazyWorkerSpawner:
             ):
                 await self._cooperative_shutdown(process, deadline)
         finally:
-            try:
-                if process.poll() is None or shutdown_containment is not None:
-                    await complete_cleanup(
-                        _shutdown_worker_process(
-                            process, shutdown_containment, deadline=deadline
-                        )
-                    )
-            finally:
-                try:
-                    if retained_descendants:
-                        await complete_cleanup(
-                            _reap_retained_processes(
-                                retained_descendants, deadline=deadline
-                            )
-                        )
-                finally:
-                    self._process = None
-                    if self._containment is not None:
-                        self._containment.close()
-                    if transient_containment is not None:
-                        transient_containment.close()
-                    self._containment = None
+            await self._reap_shutdown_process(
+                process,
+                shutdown_containment,
+                transient_containment,
+                retained_descendants,
+                deadline,
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:d94e9bd3683121d61c6d545bd3edeb1686d6bedade2f8c7bbec87ee7218a0516'
+body_hash: 'sha256:85bc9610cede3f2fda43754bca7b2e05604e44c4b5a92b0c3e071d5dfa16a431'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3641,3 +3641,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted capacity reservation/replay and synchronous task-group scheduling from the worker dispatcher. Reservation still precedes dispatch-ID admission, and scheduling still occurs without a suspension after admission. The dispatcher measures 9 paths; cyclomatic findings fell from 38 to 37.
 - Review finding (moderate, code health; queued): 37 cyclomatic and 131 selected Ruff design findings remain. Worker-management shutdown is now the sole 14-path function.
 - Verification: six dispatch-ID tests including duplicate and capacity races, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 37 findings.
+
+### 2026-09-20 worker shutdown cleanup review pass
+
+- Implementation: extracted the nested process-tree and retained-descendant cleanup from worker shutdown into one method. The same nested `finally` order still clears process state and closes retained/transient containment after cleanup attempts. Shutdown now measures 9 paths and its helper 6; cyclomatic findings fell from 37 to 36, worst value 13.
+- Review finding (low, formatting; fixed): the first standard gate found a Ruff formatting change. Formatted the module and reran `just check-all` successfully.
+- Review finding (moderate, code health; queued): 36 cyclomatic and 131 selected Ruff design findings remain.
+- Verification: 11 worker reaping tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 36 findings.

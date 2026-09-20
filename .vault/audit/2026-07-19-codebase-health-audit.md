@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:447162f34a53185e7fcd0883004ca0e2df46060df6e97521cf73c4e4527180c4'
+body_hash: 'sha256:c98fb459c396c74550bc5c285fa47e3a1e783362e39e6483e1d44b5cb07c9a93'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3998,3 +3998,8 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 
 - Medium / maintainability: `create_mount_node` scored 24 cognitive complexity. Extracted document selection, reading, and token-budget truncation into `_mount_document_blocks`, preserving order, cache use, truncation, and queue-budget accounting. Review found no behavior difference. Complexity now passes; strict Ty, Ruff, and nine focused vault reader tests pass.
 - Remaining queue: cognitive complexity has two offenders (`make_tool_dispatch`, `create_worker_node`).
+
+### 2026-09-20 authoring dispatcher complexity review
+
+- Medium / maintainability: `make_tool_dispatch` scored 28 cognitive complexity because its nested lifecycle helpers counted against the factory. Moved session creation, proposal-field injection, and response tracking to module helpers with explicit run/session/lifecycle inputs. The returned dispatch closure retains run-local state and command order. Review found no behavior change. Strict Ty, Ruff, and 13 focused catalog/dispatch tests pass; the function now passes complexity.
+- Remaining queue: `create_worker_node` is the last cognitive-complexity offender.

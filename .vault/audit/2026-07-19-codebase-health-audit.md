@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:f6d77f27dad433517d48c51575a9ef469ff49bb40977ba7e5cfa171ad5cd96e9'
+body_hash: 'sha256:57e20c5f556473d7b76cf501d85dd2fc82e90ec253984d39b9b3d1c1e8c78213'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3943,3 +3943,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Verification: the deterministic catalog and restart path passed three focused warning-as-error tests in 2.68 seconds; the exact production-gateway leak sequence passed five warning-as-error tests; the complete API suite passed 524 tests with one honest skip and one service deselection in 103.29 seconds with `PytestUnraisableExceptionWarning` promoted to error. Ruff and BasedPyright passed.
 - Review finding (medium, test isolation): RESOLVED. The unit fixture's six-hour cache still paid one prompt-free external-provider subprocess discovery per pytest process; it now exposes only real in-process registrations and performs no external I/O.
 - Review finding (low, Windows process cleanup): RESOLVED. Awaiting `Process.wait()` reaped the gateway child but left Proactor pipe EOF/closure asynchronous; `communicate()` now owns drain, reap, and transport closure on the creating loop. No new defect was found.
+
+### 2026-09-20 MCP composition split review
+
+- High / maintainability: `providers/_acp_mcp.py` exceeded the 1000-line strict limit. Extracted immutable harness registry declarations to `_harness_mcp_registry.py` and native read-tool bounds to `_native_read_tools.py`; facade is now 925 lines. Review verified the reexport surface and the registry's immutable construction remained intact. Strict Ty, 125 focused MCP tests, import loadability (286 modules), Ruff, formatter, and zero unconsumed exports pass. No behavioral finding remains from this split.
+- Medium / integration: first extraction surfaced missing registry constants and helper reexports in downstream tests and capability resolution. Explicit imports and exports resolved the type errors. Five unused helper exports found by the export guard were removed.
+- Remaining queue: 3 oversized modules plus strict parameter, Ruff, preview nesting, and Pylint findings remain open.

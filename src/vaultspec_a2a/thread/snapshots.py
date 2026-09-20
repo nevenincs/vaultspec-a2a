@@ -286,7 +286,8 @@ class ProjectedInterrupt:
 
 
 @dataclass(slots=True)
-class CheckpointProjection:
+# Flat projection matches the durable checkpoint read model.
+class CheckpointProjection:  # pylint: disable=too-many-instance-attributes
     """Gateway-side normalized checkpoint projection."""
 
     channel_values: dict[str, Any]
@@ -306,7 +307,8 @@ class CheckpointProjection:
 
 
 @dataclass(slots=True)
-class ExecutionStateProjection:
+# Flat projection matches the execution-state response model.
+class ExecutionStateProjection:  # pylint: disable=too-many-instance-attributes
     """Normalized durable execution-state read model."""
 
     checkpoint_id: str | None
@@ -408,7 +410,8 @@ class ClarificationRequestData:
 
 
 @dataclass(slots=True)
-class AgentData:
+# Flat data mirrors the public agent snapshot schema.
+class AgentData:  # pylint: disable=too-many-instance-attributes
     """Canonical agent descriptor.
 
     Single declaration behind every agent-shaped surface: the REST team-status
@@ -433,7 +436,8 @@ class AgentData:
 
 
 @dataclass(slots=True)
-class ExecutionTaskData:
+# Flat data mirrors the public task snapshot schema.
+class ExecutionTaskData:  # pylint: disable=too-many-instance-attributes
     """Layer 1 equivalent of ``ExecutionTaskSnapshot``."""
 
     task_id: str
@@ -448,7 +452,8 @@ class ExecutionTaskData:
 
 
 @dataclass(slots=True)
-class ThreadStateData:
+# Flat data mirrors the public thread snapshot schema.
+class ThreadStateData:  # pylint: disable=too-many-instance-attributes
     """Layer 1 equivalent of ``ThreadStateSnapshot``."""
 
     thread_id: str

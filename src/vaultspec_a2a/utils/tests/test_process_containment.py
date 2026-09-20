@@ -12,9 +12,8 @@ from typing import TYPE_CHECKING
 import psutil
 import pytest
 
-from ...utils._process_tree import kill_pid_tree_async, pid_is_live
+from ...utils._process_tree import _win_parent_map, kill_pid_tree_async, pid_is_live
 from ...utils._process_tree import win_kernel32 as _win_kernel32
-from ...utils._process_tree import win_parent_map as _win_parent_map
 from ...utils.process import (
     ProcessContainment,
     ProcessContainmentError,

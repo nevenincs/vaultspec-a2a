@@ -128,10 +128,11 @@ def _bind_emitter_arguments(
     return bound
 
 
-class EventEmitters:
+class EventEmitters:  # pylint: disable=too-many-public-methods
     """Event emission + state tracking.
 
-    Manages sequences, permissions, agent states, and tool calls.
+    Manages sequences, permissions, agent states, and tool calls. Each public
+    emitter is a distinct domain event or query used by the event-bus facade.
     """
 
     def __init__(

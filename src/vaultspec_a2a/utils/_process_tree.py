@@ -888,6 +888,3 @@ CREATE_SUSPENDED = _CREATE_SUSPENDED
 TH32CS_SNAPTHREAD = _TH32CS_SNAPTHREAD
 THREAD_SUSPEND_RESUME = _THREAD_SUSPEND_RESUME
 win_kernel32 = _win_kernel32
-win_parent_map = _win_parent_map
-win_tree_kill = _win_tree_kill
-tcp_table_listener_pid = _tcp_table_listener_pid

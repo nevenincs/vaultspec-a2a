@@ -6,6 +6,7 @@ import logging
 from collections import deque
 from collections.abc import Mapping
 from contextlib import suppress
+from dataclasses import dataclass
 
 from langgraph.errors import GraphBubbleUp
 from pydantic import TypeAdapter, ValidationError
@@ -101,6 +102,39 @@ _CAPABILITIES: JsonObject = {
 _STREAM_CLOSED: JsonObject = {"__codex_stream_closed__": True}
 
 
+@dataclass(slots=True)
+class _CodexTransportState:
+    """Subprocess streams and launch metadata owned by one client."""
+
+    process: asyncio.subprocess.Process
+    stdin: asyncio.StreamWriter
+    stdout: asyncio.StreamReader
+    metadata: Mapping[str, object] | None
+
+
+@dataclass(slots=True)
+class _CodexSessionState:
+    """RPC requests, notifications, and permission decisions for one session."""
+
+    permission_rung: CodexPermissionRung | None
+    decision_tasks: set[asyncio.Task[None]]
+    pending_interrupt: BaseException | None
+    next_id: int
+    pending: dict[int, asyncio.Future[JsonObject]]
+    notifications: asyncio.Queue[JsonObject]
+
+
+@dataclass(slots=True)
+class _CodexLifecycleState:
+    """Close and diagnostic tasks retained for the client lifetime."""
+
+    closed: bool
+    close_task: asyncio.Task[None] | None
+    stderr_tail: deque[str]
+    reader_task: asyncio.Task[None] | None
+    stderr_task: asyncio.Task[None] | None
+
+
 class _CodexAppServerClient:
     """Minimal JSON-RPC-over-stdio client for a spawned ``codex app-server``.
 
@@ -119,45 +153,85 @@ class _CodexAppServerClient:
     ) -> None:
         if process.stdin is None or process.stdout is None:
             raise RuntimeError("codex app-server failed to open stdio pipes")
-        self._process = process
-        self._stdin = process.stdin
-        self._stdout = process.stdout
-        self._metadata = metadata
-        self._permission_rung = permission_rung
+        self._transport = _CodexTransportState(
+            process=process,
+            stdin=process.stdin,
+            stdout=process.stdout,
+            metadata=metadata,
+        )
         # Decisions run as tasks because the reader loop is synchronous and a
         # supervised rung is not: holding references keeps them from being
         # garbage-collected mid-flight, which would strand codex waiting on a
         # request nobody is answering any more.
-        self._decision_tasks: set[asyncio.Task[None]] = set()
-        # A graph suspension raised by a supervised rung, held for the turn
-        # consumer to re-raise. The RPC it interrupted is answered immediately so
-        # the provider is never left blocked on a request the graph parked.
-        self.pending_interrupt: BaseException | None = None
-        self._next_id = 1
-        self._pending: dict[int, asyncio.Future[JsonObject]] = {}
-        self.notifications: asyncio.Queue[JsonObject] = asyncio.Queue()
-        self._closed = False
-        self._close_task: asyncio.Task[None] | None = None
+        self._session = _CodexSessionState(
+            permission_rung=permission_rung,
+            decision_tasks=set(),
+            # A graph suspension raised by a supervised rung, held for the turn
+            # consumer to re-raise. The RPC it interrupted is answered immediately so
+            # the provider is never left blocked on a request the graph parked.
+            pending_interrupt=None,
+            next_id=1,
+            pending={},
+            notifications=asyncio.Queue(),
+        )
         # An undrained pipe is a hang, not just lost diagnostics: the operating
         # system buffer fills and the child BLOCKS on its next stderr write. The
         # subprocess helper opens stderr as a pipe, so something must read it for
         # the whole session, and the tail is retained bounded so a crash can be
         # explained without letting a chatty process grow memory without limit.
-        self._stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
-        self._reader_task = asyncio.create_task(self._read_loop())
-        self._stderr_task: asyncio.Task[None] | None = (
-            asyncio.create_task(self._drain_stderr())
-            if process.stderr is not None
-            else None
+        self._lifecycle = _CodexLifecycleState(
+            closed=False,
+            close_task=None,
+            stderr_tail=deque(maxlen=STDERR_TAIL_LINES),
+            reader_task=None,
+            stderr_task=None,
         )
+        self._lifecycle.reader_task = asyncio.create_task(self._read_loop())
+        if process.stderr is not None:
+            self._lifecycle.stderr_task = asyncio.create_task(self._drain_stderr())
+
+    @property
+    def _process(self) -> asyncio.subprocess.Process:
+        """Keep the subprocess inspection seam used by lifecycle tests."""
+        return self._transport.process
+
+    @property
+    def _reader_task(self) -> asyncio.Task[None]:
+        """Keep the reader-task inspection seam used by lifecycle tests."""
+        task = self._lifecycle.reader_task
+        assert task is not None
+        return task
+
+    @property
+    def _stderr_task(self) -> asyncio.Task[None] | None:
+        """Keep the stderr-task inspection seam used by lifecycle tests."""
+        return self._lifecycle.stderr_task
+
+    @property
+    def pending_interrupt(self) -> BaseException | None:
+        return self._session.pending_interrupt
+
+    @pending_interrupt.setter
+    def pending_interrupt(self, value: BaseException | None) -> None:
+        self._session.pending_interrupt = value
+
+    @property
+    def notifications(self) -> asyncio.Queue[JsonObject]:
+        return self._session.notifications
+
+    @notifications.setter
+    def notifications(self, value: asyncio.Queue[JsonObject]) -> None:
+        self._session.notifications = value
 
     async def _drain_stderr(self) -> None:
         """Read this session's standard error for the process lifetime."""
-        await drain_stderr_into(self._process.stderr, self._stderr_tail)
+        await drain_stderr_into(
+            self._transport.process.stderr, self._lifecycle.stderr_tail
+        )
 
     def stderr_tail(self) -> str:
         """Return the retained, redacted tail of the child's standard error."""
-        return chr(10).join(self._stderr_tail)
+        return chr(10).join(self._lifecycle.stderr_tail)
 
     async def unexpected_eof_error(self) -> _CodexProtocolError:
         """Public accessor for :meth:`_unexpected_eof_error` (cross-class use)."""
@@ -172,17 +246,19 @@ class _CodexAppServerClient:
         tail is redacted at capture time and line-bounded by
         :data:`STDERR_TAIL_LINES`.
         """
-        exit_code = self._process.returncode
+        process = self._transport.process
+        exit_code = process.returncode
         if exit_code is None:
             with suppress(TimeoutError):
                 exit_code = await asyncio.wait_for(
-                    self._process.wait(), timeout=CLEANUP_TIMEOUT_SECONDS
+                    process.wait(), timeout=CLEANUP_TIMEOUT_SECONDS
                 )
 
-        if self._stderr_task is not None:
+        stderr_task = self._lifecycle.stderr_task
+        if stderr_task is not None:
             with suppress(asyncio.CancelledError, TimeoutError, Exception):
                 await asyncio.wait_for(
-                    asyncio.shield(self._stderr_task), timeout=CLEANUP_TIMEOUT_SECONDS
+                    asyncio.shield(stderr_task), timeout=CLEANUP_TIMEOUT_SECONDS
                 )
 
         exit_detail = (
@@ -205,7 +281,7 @@ class _CodexAppServerClient:
         """Parse newline-delimited JSON frames, routing responses vs. notifications."""
         try:
             while True:
-                line = await self._stdout.readline()
+                line = await self._transport.stdout.readline()
                 if not line:
                     break
                 text = line.decode("utf-8", errors="replace").strip()
@@ -228,7 +304,7 @@ class _CodexAppServerClient:
             # A reader EOF during a request is an early provider exit. Retain
             # its actual status and already-redacted stderr rather than hiding
             # the only startup diagnostic behind a generic connection error.
-            if self._pending:
+            if self._session.pending:
                 self._fail_pending(await self._unexpected_eof_error())
             # Requests are not the only thing that can be waiting. A turn
             # consumer blocks on the NOTIFICATION queue, which an EOF used to
@@ -239,7 +315,7 @@ class _CodexAppServerClient:
             self.notifications.put_nowait(_STREAM_CLOSED)
 
     def _dispatch(self, message: JsonObject) -> None:
-        if self._closed:
+        if self._lifecycle.closed:
             return
         raw_id = message.get("id")
         msg_id = (
@@ -267,8 +343,8 @@ class _CodexAppServerClient:
         # Observed before the turn consumer sees it: the approval request for
         # a tool call arrives immediately after the item frame that names the
         # tool, and the elicitation payload itself carries no tool name.
-        if self._permission_rung is not None:
-            self._permission_rung.observe(
+        if self._session.permission_rung is not None:
+            self._session.permission_rung.observe(
                 method, lenient_json_object(message.get("params"))
             )
         self.notifications.put_nowait(message)
@@ -276,7 +352,7 @@ class _CodexAppServerClient:
     def _dispatch_server_request(
         self, msg_id: int, method: str, message: JsonObject
     ) -> None:
-        if method == ELICITATION_METHOD and self._permission_rung is not None:
+        if method == ELICITATION_METHOD and self._session.permission_rung is not None:
             self._schedule_elicitation_decision(msg_id, message)
             return
         logger.warning(
@@ -288,7 +364,7 @@ class _CodexAppServerClient:
         self._send({"id": msg_id, "error": {"code": -32601, "message": method}})
 
     def _dispatch_reply(self, msg_id: int, message: JsonObject) -> None:
-        future = self._pending.pop(msg_id, None)
+        future = self._session.pending.pop(msg_id, None)
         if future is None or future.done():
             return
         if "error" in message:
@@ -314,7 +390,7 @@ class _CodexAppServerClient:
         request - a raised decision is a decline, never an unanswered frame that
         would hang the turn until the idle backstop fired.
         """
-        rung = self._permission_rung
+        rung = self._session.permission_rung
         if rung is None:
             return
         params = lenient_json_object(message.get("params"))
@@ -331,53 +407,53 @@ class _CodexAppServerClient:
                 logger.exception(
                     "Codex permission decision failed; declining (fail-closed)"
                 )
-            if self._closed:
+            if self._lifecycle.closed:
                 return
             self._send(elicitation_response(msg_id, action))
             with suppress(Exception):
-                await self._stdin.drain()
+                await self._transport.stdin.drain()
 
         task = asyncio.create_task(_decide())
-        self._decision_tasks.add(task)
-        task.add_done_callback(self._decision_tasks.discard)
+        self._session.decision_tasks.add(task)
+        task.add_done_callback(self._session.decision_tasks.discard)
 
     def _fail_pending(self, exc: BaseException) -> None:
-        for future in self._pending.values():
+        for future in self._session.pending.values():
             if not future.done():
                 future.set_exception(exc)
-        self._pending.clear()
+        self._session.pending.clear()
 
     def _send(self, message: JsonObject) -> None:
-        self._stdin.write((json.dumps(message) + "\n").encode("utf-8"))
+        self._transport.stdin.write((json.dumps(message) + "\n").encode("utf-8"))
 
     async def request(self, method: str, params: JsonObject) -> JsonObject:
         """Send a request and await its matching response frame."""
-        if self._closed:
+        if self._lifecycle.closed:
             raise _CodexProtocolError("codex app-server client is closed")
-        request_id = self._next_id
-        self._next_id += 1
+        request_id = self._session.next_id
+        self._session.next_id += 1
         future: asyncio.Future[JsonObject] = asyncio.get_running_loop().create_future()
-        self._pending[request_id] = future
+        self._session.pending[request_id] = future
         self._send({"id": request_id, "method": method, "params": params})
-        await self._stdin.drain()
+        await self._transport.stdin.drain()
         return await future
 
     def notify(self, method: str, params: JsonObject) -> None:
         """Send a fire-and-forget notification frame."""
-        if self._closed:
+        if self._lifecycle.closed:
             return
         self._send({"method": method, "params": params})
 
     async def aclose(self) -> None:
         """Close stdin, reap the process tree, and cancel the reader."""
-        if self._close_task is None:
-            self._closed = True
-            self._close_task = asyncio.create_task(self._close())
-        await complete_cleanup(self._close_task)
+        if self._lifecycle.close_task is None:
+            self._lifecycle.closed = True
+            self._lifecycle.close_task = asyncio.create_task(self._close())
+        await complete_cleanup(self._lifecycle.close_task)
 
     async def _close(self) -> None:
         try:
-            self._stdin.close()
+            self._transport.stdin.close()
         except Exception:
             logger.debug("codex app-server: stdin close failed", exc_info=True)
 
@@ -392,9 +468,9 @@ class _CodexAppServerClient:
                 (
                     task
                     for task in (
-                        self._reader_task,
-                        self._stderr_task,
-                        *tuple(self._decision_tasks),
+                        self._lifecycle.reader_task,
+                        self._lifecycle.stderr_task,
+                        *tuple(self._session.decision_tasks),
                     )
                     if task is not None
                 ),
@@ -404,7 +480,9 @@ class _CodexAppServerClient:
         await run_independent_cleanups(
             (
                 "codex-process-tree",
-                lambda: kill_process_tree(self._process, self._metadata),
+                lambda: kill_process_tree(
+                    self._transport.process, self._transport.metadata
+                ),
             ),
             ("codex-reader-tasks", _cancel_reader_tasks),
         )

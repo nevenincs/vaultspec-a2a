@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:667021fcf85fc40ed4fbd83c0dccbe98c51f808cfdfcb7f1604f74a5a2f092cf'
+body_hash: 'sha256:f0c5a7da966ad5fab0e1e910ed4528976852fa2b02f27ef353a8c1511f1653c7'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4208,3 +4208,12 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, low severity, compatibility: internal graph lifecycle attribute names changed to owned port/state records. No repository tests or callers access the old private fields; 59 executor tests and import-load verification passed.
 - Review finding, medium severity, quality: the post-pass strict Pylint census is 18 instance-attribute and three public-method findings. Keep all 21 open for further implementation and review; this pass remains REVISION REQUIRED.
 - Verification: 95 lifecycle, 25 desktop/seating, and 59 executor tests passed. `just check-type-strict`, standard and preview Ruff, scoped Pylint, and `just check-all` passed before the final lifecycle extraction; scoped Ruff/Pylint/Ty and executor tests passed after it. No high-severity issue surfaced in diff review.
+
+### 2026-09-20 strict zero and CI follow-up review
+
+- Implementation: composed worker spawner, verdict subscriber, ACP model/client, desktop discovery, and streaming buffer state; moved oversized helper blocks into private modules. Corrected three process-tree test imports to their declaration home and reduced installed-vocabulary parser complexity. Fixed the CI guard's Linux case-sensitive `Justfile` path. Added canonical-path containment before loading a workspace TOML override.
+- Review finding, low severity, design contract: the checkpointer and event-bus facade expose stable public method sets; the flat registry, ACP, thread, permission, and snapshot records expose persisted or public schema fields. Narrow class-level Pylint design exceptions are documented at their declaration sites; no global threshold or disabled rule was added. Keep their schema/facade contracts under direct tests.
+- Review finding, medium severity, CI: the pushed commit's canonical CI failed two exit-code guard tests because the guard looked for lowercase `justfile` on Linux; 23 focused guard tests pass after changing to the tracked `Justfile`. A test helper exceeded C901 by two points; extraction now passes Ruff and 13 provider-condition tests. A fresh CI run is required after push.
+- Review finding, high severity, security triage: CodeQL currently reports four alerts on this PR, all also open on `main`: three path-expression findings for authenticated, intentionally selected workspace/config paths and one plaintext-credential-storage finding for the owner-restricted atomic secret writer. Workspace TOML symlink containment has been strengthened. Review the next scan and resolve or explicitly triage every alert before marking the PR ready.
+- Review finding, medium severity, verification: the 4,583-case unit gate was started and remains in progress. Live service proofs still require their documented engine/provider prerequisites.
+- Verification: production module length, function length, parameter count, nesting, Radon cyclomatic and maintainability, Pylint design, normal/preview Ruff, relative imports, import loadability, reachability, unused symbols, and exports have current zero-finding scans. Focused agent suites reported 73 streaming, 27 discovery, 74 Codex client, 116 ACP/provider, 55 worker lifecycle, and 22 verdict tests passing; 34 process and 103 team-config tests passed in the root pass. Review result is REVISION REQUIRED pending unit completion and CodeQL/CI recheck.

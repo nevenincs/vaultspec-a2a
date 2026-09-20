@@ -247,11 +247,11 @@ def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
             f"""
             import asyncio
 
-            from vaultspec_a2a.control.worker_management import (
-                LazyWorkerSpawner,
+            from vaultspec_a2a.control._worker_health import (
                 WorkerHealthProbe,
                 probe_worker_health,
             )
+            from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
 
 
             async def main() -> None:

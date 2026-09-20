@@ -14,6 +14,7 @@ import os
 import subprocess
 import threading
 import time
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -222,6 +223,34 @@ async def _spawn_worker_owned(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(slots=True)
+class _WorkerSpawnConfig:
+    """Connection and policy values shared by a worker spawner."""
+
+    url: str
+    port: int
+    auto_spawn: bool
+    stderr_log_path: Path | None
+
+
+@dataclass(slots=True)
+class _WorkerProcessState:
+    """Owned process handles and the readiness state for one worker."""
+
+    process: subprocess.Popen[bytes] | None = None
+    containment: ProcessContainment | None = None
+    spawned: bool = False
+
+
+@dataclass(slots=True)
+class _WorkerSynchronization:
+    """Locks and generation counter shared by async and thread callers."""
+
+    generation: int = 0
+    generation_lock: threading.Lock = field(default_factory=threading.Lock)
+    spawn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
 class LazyWorkerSpawner:
     """Defer worker spawn to first dispatch instead of gateway startup.
 
@@ -240,28 +269,26 @@ class LazyWorkerSpawner:
         auto_spawn: bool,
     ) -> None:
         """Initialise with worker connection details and spawn policy."""
-        self._worker_url = worker_url
-        self._worker_port = worker_port
-        self._auto_spawn = auto_spawn
-        self._process: subprocess.Popen[bytes] | None = None
+        self._config = _WorkerSpawnConfig(
+            url=worker_url,
+            port=worker_port,
+            auto_spawn=auto_spawn,
+            stderr_log_path=(
+                _worker_stderr_log_path(worker_port) if auto_spawn else None
+            ),
+        )
         # Every worker spawned by this gateway carries OS containment. ``None``
         # means no owned process or an explicitly restored fallback handle that
         # shutdown must seat before offering a cooperative interval.
-        self._containment: ProcessContainment | None = None
-        self._stderr_log_path = (
-            _worker_stderr_log_path(worker_port) if auto_spawn else None
-        )
-        self._spawned = False
+        self._process_state = _WorkerProcessState()
         # Incremented before each spawn, so the value a worker carries names the
         # attempt that produced it. A restart yields a distinct generation even
         # when the port, the host and the gateway are unchanged.
-        self._generation = 0
         # A plain increment is not atomic - it loads, adds and stores - so two
         # callers can read the same value and issue one generation twice. The
         # asyncio lock below does not help: the watchdog reaches this from a
         # worker thread, not the event loop.
-        self._generation_lock = threading.Lock()
-        self._lock = asyncio.Lock()
+        self._synchronization = _WorkerSynchronization()
         # Optional demand-readiness signal wired by the armed desktop gateway. It
         # is fired once, on the authenticated demand path, after the single-flight
         # worker start reaches readiness, so deferred boot reconciliation runs only
@@ -279,17 +306,17 @@ class LazyWorkerSpawner:
     @property
     def spawned(self) -> bool:
         """Whether the worker has been spawned (or was already running)."""
-        return self._spawned
+        return self._process_state.spawned
 
     @property
     def process(self) -> subprocess.Popen[bytes] | None:
         """The worker subprocess handle, if we spawned it."""
-        return self._process
+        return self._process_state.process
 
     @property
     def stderr_log_path(self) -> Path | None:
         """The worker stderr log path used for gateway-managed spawns."""
-        return self._stderr_log_path
+        return self._config.stderr_log_path
 
     async def ensure_worker(self) -> None:
         """Spawn the worker if not already running.  No-op after first call.
@@ -304,53 +331,57 @@ class LazyWorkerSpawner:
         can only ever mean "a worker this gateway can use exists", and an
         exception is one of the ways it does not.
         """
-        if self._spawned:
+        if self._process_state.spawned:
             return
-        async with self._lock:
+        async with self._synchronization.spawn_lock:
             # Double-check after acquiring lock.
-            if self._spawned:
+            if self._process_state.spawned:
                 return
-            if not self._auto_spawn:
+            if not self._config.auto_spawn:
                 # Not configured to auto-spawn; attach only to a worker that
                 # declares THIS gateway as its target, never a foreign orphan that
                 # merely answers /health on the port. Under the armed profile
                 # this attach requires the OWNED pairing verdict, which an
                 # externally-managed worker can never present - armed without
                 # auto-spawn is a misconfiguration and fails closed.
-                self._spawned = await worker_ready_and_ours(
-                    self._worker_url, current_generation=self._generation
+                self._process_state.spawned = await worker_ready_and_ours(
+                    self._config.url,
+                    current_generation=self._synchronization.generation,
                 )
-                if not self._spawned:
+                if not self._process_state.spawned:
                     logger.warning(
                         "No worker targeting this gateway at %s and"
                         " auto_spawn_worker=False",
-                        self._worker_url,
+                        self._config.url,
                     )
                 return
             logger.info(
                 "First dispatch received — starting worker at %s...",
-                self._worker_url,
+                self._config.url,
             )
             # Every gateway-spawned worker is seated inside OS containment and its
             # whole tree is reaped on shutdown. The spawn seam hands containment
             # back only alongside the live tree it contains.
             generation = self.next_generation()
-            self._process, self._containment = await _spawn_worker_owned(
-                self._worker_url,
-                self._worker_port,
+            process, containment = await _spawn_worker_owned(
+                self._config.url,
+                self._config.port,
                 generation=generation,
             )
+            self._process_state.process = process
+            self._process_state.containment = containment
             # Mark as spawned even if _spawn_worker found it already running
             # (returns None when a same-gateway worker was already healthy). The
             # fallback probe must confirm the running worker is OURS: a bare health
             # check here would let a refused-eviction foreign orphan (spawn returned
             # None) be adopted as this gateway's worker.
-            self._spawned = self._process is not None or (
+            self._process_state.spawned = process is not None or (
                 await worker_ready_and_ours(
-                    self._worker_url, current_generation=self._generation
+                    self._config.url,
+                    current_generation=self._synchronization.generation,
                 )
             )
-            if self._spawned:
+            if self._process_state.spawned:
                 logger.info("Worker available — processing dispatch")
             else:
                 logger.error(
@@ -366,17 +397,17 @@ class LazyWorkerSpawner:
         running worker but must never spawn or restart it (that belongs to whoever
         owns it, e.g. the dev-process registry).
         """
-        return self._auto_spawn
+        return self._config.auto_spawn
 
     @property
     def worker_url(self) -> str:
         """The worker's base URL."""
-        return self._worker_url
+        return self._config.url
 
     @property
     def worker_port(self) -> int:
         """The worker's port number."""
-        return self._worker_port
+        return self._config.port
 
     def next_generation(self) -> int:
         """Advance and return the spawn generation for a replacement worker.
@@ -386,14 +417,14 @@ class LazyWorkerSpawner:
         counters would let a restarted worker claim a generation the gateway
         never issued.
         """
-        with self._generation_lock:
-            self._generation += 1
-            return self._generation
+        with self._synchronization.generation_lock:
+            self._synchronization.generation += 1
+            return self._synchronization.generation
 
     @property
     def generation(self) -> int:
         """Return the spawn generation of the worker this spawner last started."""
-        return self._generation
+        return self._synchronization.generation
 
     def replace_process(
         self,
@@ -414,17 +445,17 @@ class LazyWorkerSpawner:
         else would ever close. ``close`` is idempotent, so releasing on both paths
         costs nothing and removes the distinction as a thing to get right.
         """
-        outgoing = self._containment
+        outgoing = self._process_state.containment
         if outgoing is not None and outgoing is not containment:
             outgoing.close()
-        self._process = process
-        self._containment = containment
-        self._spawned = True
+        self._process_state.process = process
+        self._process_state.containment = containment
+        self._process_state.spawned = True
 
     @property
     def containment(self) -> ProcessContainment | None:
         """The OS containment owning the worker tree, if this gateway spawned it."""
-        return self._containment
+        return self._process_state.containment
 
     async def _cooperative_shutdown(
         self, process: subprocess.Popen[bytes], deadline: ShutdownDeadline
@@ -439,7 +470,7 @@ class LazyWorkerSpawner:
                     headers=_internal_auth_headers(),
                     timeout=cooperative_budget,
                 ) as client:
-                    response = await client.post(f"{self._worker_url}/admin/shutdown")
+                    response = await client.post(f"{self._config.url}/admin/shutdown")
                     if response.status_code != 202:
                         logger.warning(
                             "Worker cooperative shutdown refused with HTTP %d",
@@ -492,19 +523,19 @@ class LazyWorkerSpawner:
                         )
                     )
             finally:
-                self._process = None
-                if self._containment is not None:
-                    self._containment.close()
+                self._process_state.process = None
+                if self._process_state.containment is not None:
+                    self._process_state.containment.close()
                 if transient_containment is not None:
                     transient_containment.close()
-                self._containment = None
+                self._process_state.containment = None
 
     async def shutdown(self, *, deadline: ShutdownDeadline | None = None) -> None:
         """Cooperatively stop the owned worker, then reap its tree by deadline."""
-        if self._process is None:
+        if self._process_state.process is None:
             return
-        process = self._process
-        shutdown_containment = self._containment
+        process = self._process_state.process
+        shutdown_containment = self._process_state.containment
         transient_containment: ProcessContainment | None = None
         retained_descendants: list[psutil.Process] = []
         try:

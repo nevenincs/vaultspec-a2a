@@ -91,7 +91,8 @@ class StalenessState(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class ProcRecord:
+# Flat fields are persisted with asdict and loaded from the registry JSON schema.
+class ProcRecord:  # pylint: disable=too-many-instance-attributes
     """A single managed process. Never carries a credential, token, or env value."""
 
     name: str

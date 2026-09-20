@@ -93,11 +93,12 @@ def _validate_ingest_arguments(
         )
 
 
-class EventAggregator:
+class EventAggregator:  # pylint: disable=too-many-public-methods
     """Central event bus — composition root delegating to sub-components.
 
     Preserves the exact same public API as the pre-decomposition monolith.
-    All callers continue to work unchanged.
+    All callers continue to work unchanged. The public method count reflects
+    that stable facade; implementation state lives in composed managers.
     """
 
     def __init__(self, telemetry: TelemetryHook | None = None) -> None:

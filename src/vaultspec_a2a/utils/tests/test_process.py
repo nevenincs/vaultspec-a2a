@@ -22,6 +22,7 @@ from ...lifecycle.manager import _await_listener
 from ...testing.ports import free_port
 from ...utils._process_tree import (
     ListenerOwnership,
+    _win_tree_kill,
     classify_listener_ownership,
     kill_pid_tree_async,
     parse_netstat_listener_pid,
@@ -29,7 +30,6 @@ from ...utils._process_tree import (
     port_listener_pid,
     posix_descendant_pids,
 )
-from ...utils._process_tree import win_tree_kill as _win_tree_kill
 
 # A parent that spawns a long-lived grandchild, prints its pid, then sleeps.
 _SPAWN_GRANDCHILD = (
@@ -403,7 +403,7 @@ def test_windows_tcp_table_resolves_a_real_listener_without_parsing_text() -> No
     silently report an empty table, which is what keeps the caller from treating
     "cannot answer" as "nothing is listening".
     """
-    from ...utils._process_tree import tcp_table_listener_pid as _tcp_table_listener_pid
+    from ...utils._process_tree import _tcp_table_listener_pid
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", 0))
@@ -427,7 +427,7 @@ def test_windows_tcp_table_reports_no_listener_on_an_unbound_port() -> None:
     table" is what earns the ``netstat`` fallback. Collapsing them would spawn a
     subprocess on every iteration of the readiness loop.
     """
-    from ...utils._process_tree import tcp_table_listener_pid as _tcp_table_listener_pid
+    from ...utils._process_tree import _tcp_table_listener_pid
 
     if sys.platform == "win32":
         assert _tcp_table_listener_pid(free_port()) is None

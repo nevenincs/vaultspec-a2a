@@ -124,6 +124,23 @@ def acp_adapter_error_kinds() -> frozenset[str]:
     return frozenset(_ACP_ADAPTER_OWN_KIND.findall(source))
 
 
+def _codex_error_branch_names(raw_branch: object) -> set[str]:
+    """Read string or single-key object variants from one schema branch."""
+    if not isinstance(raw_branch, dict):
+        return set()
+    branch = cast("dict[str, object]", raw_branch)
+    branch_type = branch.get("type")
+    key = "enum" if branch_type == "string" else "required"
+    if branch_type not in {"string", "object"}:
+        return set()
+    members = branch.get(key)
+    if not isinstance(members, list):
+        return set()
+    return {
+        member for member in cast("list[object]", members) if isinstance(member, str)
+    }
+
+
 def _parse_codex_error_info_variants(schema_path: Path) -> frozenset[str]:
     try:
         raw_schema: object = json.loads(schema_path.read_text(encoding="utf-8"))
@@ -150,23 +167,7 @@ def _parse_codex_error_info_variants(schema_path: Path) -> frozenset[str]:
 
     variants: set[str] = set()
     for raw_branch in cast("list[object]", branches):
-        if not isinstance(raw_branch, dict):
-            continue
-        branch = cast("dict[str, object]", raw_branch)
-        if branch.get("type") == "string":
-            members = branch.get("enum")
-            if isinstance(members, list):
-                variants.update(
-                    m for m in cast("list[object]", members) if isinstance(m, str)
-                )
-        elif branch.get("type") == "object":
-            required = branch.get("required")
-            if isinstance(required, list):
-                variants.update(
-                    name
-                    for name in cast("list[object]", required)
-                    if isinstance(name, str)
-                )
+        variants.update(_codex_error_branch_names(raw_branch))
     if not variants:
         raise MissingInstalledVocabularyError(
             f"the generated CodexErrorInfo union lists no variants in {schema_path}"

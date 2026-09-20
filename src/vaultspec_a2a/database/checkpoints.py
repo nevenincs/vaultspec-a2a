@@ -33,13 +33,14 @@ __all__ = ["Checkpointer", "open_checkpointer"]
 Checkpointer = BaseCheckpointSaver[Any]
 
 
-class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):
+class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: disable=too-many-public-methods
     """Run AsyncPostgresSaver on a dedicated selector loop on Windows.
 
     Psycopg's async connection layer rejects the default Proactor event loop on
     Windows, while the ACP/provider subprocess path requires Proactor support.
     Keeping the saver on its own selector loop avoids forcing the entire
     gateway/worker runtime onto the wrong loop policy.
+    The methods implement the required synchronous and asynchronous saver API.
     """
 
     def __init__(self, conn_string: str) -> None:

@@ -60,6 +60,7 @@ from ..thread.enums import (
 )
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
 from ._thread_metadata import dispatchable_workspace_root
+from ._verdict_subscriber_config import VerdictSubscriberConfig
 from .accepted_input import freeze_accepted_input
 from .action_lease import (
     ControlActionClaimRequest,
@@ -73,18 +74,14 @@ from .execution_authority import ExecutionAuthorityError, resolve_execution_auth
 from .graph_definition import read_accepted_graph_definition
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
-    import httpx
     from langchain_core.runnables import RunnableConfig
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..authoring import EngineEndpoint
     from ..database import ControlActionModel, ThreadWriteExpectation
-    from ..database.checkpoints import Checkpointer
     from ..thread.executable_graph import FrozenGraphDefinition
-    from .circuit_breaker import WorkerCircuitBreaker
-    from .worker_management import LazyWorkerSpawner
 
 __all__ = [
     "VerdictSubscriber",
@@ -122,23 +119,6 @@ class _VerdictSetup:
     current_gate: str
     resume_value: dict[str, object]
     graph_definition: FrozenGraphDefinition
-
-
-@dataclass(frozen=True, slots=True)
-class VerdictSubscriberConfig:
-    session_factory: async_sessionmaker[AsyncSession]
-    checkpointer: Checkpointer
-    worker_client: httpx.AsyncClient
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-    endpoint_provider: Callable[[], EngineEndpoint | None]
-    recursion_limit: int
-    trace_headers_fn: Callable[[], dict[str, str]] | None = None
-    poll_interval_seconds: float = 3.0
-    reconnect_base_seconds: float = 2.0
-    reconnect_max_seconds: float = 30.0
-    checkpoint_timeout_seconds: float = 10.0
-    parked_thread_limit: int = 200
 
 
 def _verdict_resume_idempotency_key(proposal_id: str) -> str:
@@ -259,19 +239,9 @@ class VerdictSubscriber:
     """Consume engine authoring verdicts and resume the runs they belong to."""
 
     def __init__(self, config: VerdictSubscriberConfig) -> None:
-        self._session_factory = config.session_factory
-        self._checkpointer = config.checkpointer
-        self._worker_client = config.worker_client
-        self._circuit_breaker = config.circuit_breaker
-        self._worker_spawner = config.worker_spawner
-        self._endpoint_provider = config.endpoint_provider
-        self._recursion_limit = config.recursion_limit
-        self._trace_headers_fn = config.trace_headers_fn
-        self._poll_interval = config.poll_interval_seconds
-        self._reconnect_base = config.reconnect_base_seconds
-        self._reconnect_max = config.reconnect_max_seconds
-        self._checkpoint_timeout = config.checkpoint_timeout_seconds
-        self._parked_thread_limit = config.parked_thread_limit
+        self._dependencies = config.dependencies
+        self._execution = config.execution
+        self._timing = config.timing
         self._last_parked_reconcile = 0.0
 
     # ------------------------------------------------------------------
@@ -285,17 +255,17 @@ class VerdictSubscriber:
         exponentially and retries rather than terminating the task, so the
         subscriber self-heals across engine restarts and transient outages.
         """
-        backoff = self._reconnect_base
+        backoff = self._timing.reconnect_base_seconds
         logger.info("Authoring verdict subscriber started")
         try:
             while True:
                 # ``endpoint_provider`` (``resolve_engine``) does blocking file
                 # reads and a blocking ``/health`` probe; keep it off the shared
                 # event loop so a slow probe never stalls the gateway.
-                endpoint = await asyncio.to_thread(self._endpoint_provider)
+                endpoint = await asyncio.to_thread(self._dependencies.endpoint_provider)
                 if endpoint is None:
                     await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, self._reconnect_max)
+                    backoff = min(backoff * 2, self._timing.reconnect_max_seconds)
                     continue
                 try:
                     processed = await self._consume_page(endpoint)
@@ -307,16 +277,16 @@ class VerdictSubscriber:
                         exc_info=True,
                     )
                     await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, self._reconnect_max)
+                    backoff = min(backoff * 2, self._timing.reconnect_max_seconds)
                     continue
-                backoff = self._reconnect_base
+                backoff = self._timing.reconnect_base_seconds
                 if processed == 0:
                     # Steady state: nothing new on this page. Reconcile any run
                     # left parked at a gate whose verdict was already consumed
                     # before it finished parking (the AUTO submit-time race), then
                     # poll gently.
                     await self._reconcile_parked_runs(endpoint)
-                    await asyncio.sleep(self._poll_interval)
+                    await asyncio.sleep(self._timing.poll_interval_seconds)
         except asyncio.CancelledError:
             logger.info("Authoring verdict subscriber cancelled")
             raise
@@ -396,11 +366,11 @@ class VerdictSubscriber:
                 await self._resume_with_verdict(thread_id, verdict, None, {pending})
 
     async def _parked_candidate_ids(self) -> list[str]:
-        async with self._session_factory() as db:
+        async with self._dependencies.session_factory() as db:
             parked, _ = await list_threads(
                 db,
                 status=ThreadStatus.INPUT_REQUIRED,
-                limit=self._parked_thread_limit,
+                limit=self._timing.parked_thread_limit,
             )
             # A checkpoint parked at a gate can be mis-statused RUNNING when a
             # prior receipt races the gate event. The gate-precise claim below
@@ -408,7 +378,7 @@ class VerdictSubscriber:
             running, _ = await list_threads(
                 db,
                 status=ThreadStatus.RUNNING,
-                limit=self._parked_thread_limit,
+                limit=self._timing.parked_thread_limit,
             )
         candidates = [thread.id for thread in parked]
         seen = set(candidates)
@@ -429,8 +399,8 @@ class VerdictSubscriber:
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
         try:
             checkpoint_tuple = await asyncio.wait_for(
-                self._checkpointer.aget_tuple(config),
-                timeout=self._checkpoint_timeout,
+                self._dependencies.checkpointer.aget_tuple(config),
+                timeout=self._timing.checkpoint_timeout_seconds,
             )
         except TimeoutError:
             logger.warning("Checkpoint read timed out for thread %s", thread_id)
@@ -570,9 +540,11 @@ class VerdictSubscriber:
         """
         if not ids:
             return None
-        async with self._session_factory() as db:
+        async with self._dependencies.session_factory() as db:
             threads, _ = await list_threads(
-                db, status=ThreadStatus.INPUT_REQUIRED, limit=self._parked_thread_limit
+                db,
+                status=ThreadStatus.INPUT_REQUIRED,
+                limit=self._timing.parked_thread_limit,
             )
         for thread in threads:
             state_ids = await self._thread_authoring_ids(thread.id)
@@ -585,8 +557,8 @@ class VerdictSubscriber:
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
         try:
             checkpoint_tuple = await asyncio.wait_for(
-                self._checkpointer.aget_tuple(config),
-                timeout=self._checkpoint_timeout,
+                self._dependencies.checkpointer.aget_tuple(config),
+                timeout=self._timing.checkpoint_timeout_seconds,
             )
         except TimeoutError:
             logger.warning("Checkpoint read timed out for thread %s", thread_id)
@@ -611,7 +583,7 @@ class VerdictSubscriber:
         notes: str | None,
         correlated_ids: set[str],
     ) -> _VerdictSetup | None:
-        async with self._session_factory() as db:
+        async with self._dependencies.session_factory() as db:
             thread = await get_thread(db, thread_id)
             if thread is None:
                 return
@@ -656,7 +628,7 @@ class VerdictSubscriber:
             team_preset=team_preset,
             graph_definition=graph_definition,
             workspace_root=workspace_root,
-            recursion_limit=self._recursion_limit,
+            recursion_limit=self._execution.recursion_limit,
             model_assignment=execution_authority.model_assignment,
         )
         return _VerdictSetup(
@@ -699,7 +671,7 @@ class VerdictSubscriber:
         if setup is None:
             return
         dispatch = setup.dispatch
-        async with self._session_factory() as db:
+        async with self._dependencies.session_factory() as db:
             claim = await prepare_control_action_claim(
                 db,
                 request=ControlActionClaimRequest(
@@ -738,25 +710,26 @@ class VerdictSubscriber:
             raise RuntimeError("acquired verdict lease has no claim token")
 
         dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
-        trace_headers = self._trace_headers_fn() if self._trace_headers_fn else None
+        trace_headers_fn = self._execution.trace_headers_fn
+        trace_headers = trace_headers_fn() if trace_headers_fn else None
         logger.info(
             "Resuming thread %s with verdict=%s (dispatch_id=%s)",
             thread_id,
             verdict,
             dispatch.dispatch_id,
         )
-        async with self._session_factory() as db:
+        async with self._dependencies.session_factory() as db:
             dispatch = await bind_graph_action_receipt(db, dispatch)
         outcome = await safe_dispatch(
-            self._worker_client,
+            self._dependencies.worker_client,
             dispatch,
-            self._circuit_breaker,
-            self._worker_spawner,
+            self._dependencies.circuit_breaker,
+            self._dependencies.worker_spawner,
             trace_headers=trace_headers,
         )
         if not outcome.success:
             _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
-            async with self._session_factory() as db:
+            async with self._dependencies.session_factory() as db:
                 if failure_type is None:
                     raise RuntimeError("failed dispatch carries no failure type")
                 await record_dispatch_failure(
@@ -779,11 +752,11 @@ class VerdictSubscriber:
     # ------------------------------------------------------------------
 
     async def _read_cursor(self) -> int:
-        async with self._session_factory() as db:
+        async with self._dependencies.session_factory() as db:
             return await get_authoring_cursor(db)
 
     async def _advance_cursor(self, last_seq: int) -> None:
-        async with self._session_factory() as db:
+        async with self._dependencies.session_factory() as db:
             await set_authoring_cursor(db, last_seq=last_seq)
             await db.commit()
 

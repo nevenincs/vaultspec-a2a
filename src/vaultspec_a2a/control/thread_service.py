@@ -143,7 +143,8 @@ def _parse_thread_summary_metadata(
 
 
 @dataclass(frozen=True, slots=True)
-class ThreadSummaryData:
+# Flat read-model fields match the thread-list response contract.
+class ThreadSummaryData:  # pylint: disable=too-many-instance-attributes
     """Lightweight thread descriptor produced by :func:`list_threads_service`."""
 
     thread_id: str
@@ -373,7 +374,8 @@ async def list_threads_service(
 
 
 @dataclass(frozen=True, slots=True)
-class ThreadCreationRequest:
+# Flat request fields are passed through the established admission contract.
+class ThreadCreationRequest:  # pylint: disable=too-many-instance-attributes
     """Bundled request fields for :func:`create_and_dispatch_thread`."""
 
     thread_id: str

@@ -63,6 +63,16 @@ from ..desktop._platform_acl import (
 )
 from ..utils.atomic_write import atomic_write_text
 from ..utils.coercion import coerce_int
+from ._desktop_discovery_record_parts import (
+    DesktopDiscoveryRecordOptions,
+    DesktopRecordEndpoint,
+    DesktopRecordIdentity,
+    DesktopRecordProcess,
+    DesktopRecordProtocol,
+    DesktopRecordState,
+    bind_desktop_record_fields,
+    required_desktop_record_field,
+)
 
 __all__ = [
     "DESKTOP_DISCOVERY_VERSION",
@@ -561,7 +571,7 @@ class DesktopDiscoveryState(StrEnum):
     ABSENT = "absent"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class DesktopDiscoveryRecord:
     """A parsed versioned desktop discovery record. Carries no credential value.
 
@@ -570,18 +580,129 @@ class DesktopDiscoveryRecord:
     ``None`` on platforms without a cheap process start-time source.
     """
 
-    version: int
-    profile: str
-    generation: str
-    protocol_min: int
-    protocol_max: int
-    pid: int
-    start_fingerprint: str | None
-    host: str
-    port: int
-    last_heartbeat: int
-    owner: str
-    credential_reference: str | None
+    _identity: DesktopRecordIdentity
+    _protocol: DesktopRecordProtocol
+    _process: DesktopRecordProcess
+    _endpoint: DesktopRecordEndpoint
+    _state: DesktopRecordState
+
+    def __init__(
+        self,
+        *args: object,
+        **options: Unpack[DesktopDiscoveryRecordOptions],
+    ) -> None:
+        values = bind_desktop_record_fields(args, options)
+        object.__setattr__(
+            self,
+            "_identity",
+            DesktopRecordIdentity(
+                version=cast(
+                    "int", required_desktop_record_field("version", values[0])
+                ),
+                profile=cast(
+                    "str", required_desktop_record_field("profile", values[1])
+                ),
+                generation=cast(
+                    "str", required_desktop_record_field("generation", values[2])
+                ),
+                owner=cast("str", required_desktop_record_field("owner", values[10])),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_protocol",
+            DesktopRecordProtocol(
+                protocol_min=cast(
+                    "int",
+                    required_desktop_record_field("protocol_min", values[3]),
+                ),
+                protocol_max=cast(
+                    "int",
+                    required_desktop_record_field("protocol_max", values[4]),
+                ),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_process",
+            DesktopRecordProcess(
+                pid=cast("int", required_desktop_record_field("pid", values[5])),
+                start_fingerprint=cast(
+                    "str | None",
+                    required_desktop_record_field("start_fingerprint", values[6]),
+                ),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_endpoint",
+            DesktopRecordEndpoint(
+                host=cast("str", required_desktop_record_field("host", values[7])),
+                port=cast("int", required_desktop_record_field("port", values[8])),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_state",
+            DesktopRecordState(
+                last_heartbeat=cast(
+                    "int",
+                    required_desktop_record_field("last_heartbeat", values[9]),
+                ),
+                credential_reference=cast(
+                    "str | None",
+                    required_desktop_record_field("credential_reference", values[11]),
+                ),
+            ),
+        )
+
+    @property
+    def version(self) -> int:
+        return self._identity.version
+
+    @property
+    def profile(self) -> str:
+        return self._identity.profile
+
+    @property
+    def generation(self) -> str:
+        return self._identity.generation
+
+    @property
+    def protocol_min(self) -> int:
+        return self._protocol.protocol_min
+
+    @property
+    def protocol_max(self) -> int:
+        return self._protocol.protocol_max
+
+    @property
+    def pid(self) -> int:
+        return self._process.pid
+
+    @property
+    def start_fingerprint(self) -> str | None:
+        return self._process.start_fingerprint
+
+    @property
+    def host(self) -> str:
+        return self._endpoint.host
+
+    @property
+    def port(self) -> int:
+        return self._endpoint.port
+
+    @property
+    def last_heartbeat(self) -> int:
+        return self._state.last_heartbeat
+
+    @property
+    def owner(self) -> str:
+        return self._identity.owner
+
+    @property
+    def credential_reference(self) -> str | None:
+        return self._state.credential_reference
 
     @property
     def base_url(self) -> str:

@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-08-02'
-body_hash: 'sha256:22b62723da613e4f864bad3efd09ffe445d5a6d187144e9fa5b5f0aeffe6efc2'
+modified: '2026-09-20'
+body_hash: 'sha256:c2aa6100e98f2143949b84e5cc183dbc6349878068e38bfebb8b8cb0225abdbb'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -14,7 +14,6 @@ related:
   - "[[2026-07-17-kimi-provider-dedup-audit]]"
   - '[[2026-07-19-codebase-health-research]]'
 ---
-
 # `codebase-health` audit: `repository-wide health and dashboard contract`
 
 ## Scope
@@ -2862,3 +2861,9 @@ Whole-tree lint and type gates clean. The full package passes 2,784 tests with n
 over twenty minutes of real processes and stores, taken while no other writer was touching
 the tree - which is what makes the real-process suites trustworthy here rather than
 contended. The consuming product passes 376 native and 281 interface tests.
+
+### 2026-09-20 independent Claude review workflow and migration bootstrap
+
+- Review finding, medium severity, CI permissions and scheduling: PR #69's ready-review action initialized but timed out once, then an isolated rerun returned `is_error:true` after two turns and 28 tool permission denials without a review result. The review and canonical tests also competed for the only self-hosted Linux x64 runner. The proposed workflow uses a hosted Ubuntu runner, `--strict-mcp-config` to keep only the action's explicit GitHub MCP servers, and the scoped PR view/diff/comment tools from the [action's review example](https://github.com/anthropics/claude-code-action/blob/main/examples/pr-review-comprehensive.yml). The job has PR write scope for posting findings and retains read-only repository contents. Static actionlint and `just check-workflow` pass. Runtime review proof requires this changed workflow to land on the default branch because the action otherwise reports a validation skip, even with a successful check status.
+- Review finding, medium severity, CI bootstrap: the workflow repair PR's migration job failed in `just init` before invoking Alembic. On the default-branch source, `just init` requires Node and npm, but `.github/workflows/migrations.yml` installed only uv and just; Docker was an advisory host message. This is an environment prerequisite failure, not a migration-logic failure. The migration workflow now installs the same pinned Node action and `.node-version` used by the canonical test workflow before `just init`. A fresh migration CI run must show the round trip. The later PR #69 source changes make Node optional for this init selection, but the standalone repair branch must pass against its current default-branch contract.
+- Integrated review: the workflow permissions permit PR comments and read-only PR inspection while keeping repository contents read-only; strict MCP selection avoids local desktop and Windows-only project servers on Linux. The Node bootstrap matches the existing test workflow. No new high or medium implementation finding surfaced in the static diff review. Result is REVISION REQUIRED pending the fresh migration job and an actual Claude review after the workflow lands on the default branch.

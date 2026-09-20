@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:25a3137344f75b343b6bca4dae04e9299899ac59ed1807305312802ac9f0b084'
+body_hash: 'sha256:4896b2721d2f1871a2a16e8f1799d956c339b1af1f9d56bedb4060e66c2b3129'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4161,3 +4161,18 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, low severity, module move: parser and interrupt code now have new private homes. Import loadability, export-home guard, structural duplication guard, and focused schema/streaming tests pass; repeat the broad unit suite after the full burn down.
 - Review finding, medium severity, quality: strict health has two maintainability-index offenders and 31 production parameter-count offenders; preview Ruff still reports test locals and argument findings. Keep them open in this audit queue.
 - Verification: 72 schema tests, 80 streaming tests, 11 atomic-write tests, and 25 worker web-tool tests passed. `just check-all`, `just check-type-strict`, and import loadability passed. No new high-severity finding surfaced in diff review.
+
+### 2026-09-20 catalog, endpoint, and service-test review
+
+- Implementation: typed catalog discovery controls, graph lifecycle timeout, token-usage persistence, thread election/repair/approval state, and gateway read/cancel dependencies. Extracted test helpers for event-loop responsiveness, RAG service pinning, broker lost-ack, and tool-core evidence.
+- Review finding, low severity, compatibility: typed keyword contracts preserve existing names/defaults but change runtime signature introspection. The gateway route refactor preserved its checked OpenAPI parameter surface and focused endpoint tests passed. Continue full integration coverage after the remaining signature findings are cleared.
+- Review finding, medium severity, external prerequisite: four RAG pinning service checks could not run to assertions because this host lacks CUDA/MPS; the engine lost-ack live proof also lacks dashboard/provider prerequisites. Keep these checks queued for a suitable service host.
+- Review finding, medium severity, quality: 27 production parameter-count findings and two maintainability-index findings remain in the health census. Preview Ruff has 47 argument/local findings. Continue the strict burn down.
+- Verification: 144 thread/control/API tests, 40 cost-tracking tests, 10 election tests, focused catalog/worker/endpoint tests, and 31 stack-free RAG pinning tests passed. Standard Ruff/format, strict typing, import guard, and diff check passed on the stable implementation. Diff review found no new high-severity finding.
+
+### 2026-09-20 positional compatibility review
+
+- Implementation: supervisor and provider factory now bind optional legacy positional arguments before applying typed keyword options. Gateway read and cancel endpoint dependency grouping passed focused route checks. The current health census is 22 parameter-count and two maintainability findings; preview Ruff reports 47 argument/local findings.
+- Review finding, low severity, compatibility: positional binders preserve accepted argument order and duplicate-key errors; runtime `inspect.signature` still changes. Follow through with broad integration coverage when the remaining signatures are refactored.
+- Review finding, medium severity, quality: the remaining 22 parameter-count and two maintainability findings remain open in this audit queue; strict gate is not complete.
+- Verification: 29 supervisor and 46 factory tests passed, along with gateway listing/cancel/history checks. `just check-all` and `just check-type-strict` passed across the integrated tree. No high-severity regression surfaced in the diff review.

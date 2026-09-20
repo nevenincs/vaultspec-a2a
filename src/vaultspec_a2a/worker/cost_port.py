@@ -17,13 +17,15 @@ provider-reported facts and are persisted.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Unpack
 from uuid import uuid4
 
 from ..database import CostTrackingModel, append_cost_record
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from ..graph.protocols import UsageRecordArgs
 
 __all__ = ["SqlCostPort"]
 
@@ -38,22 +40,19 @@ class SqlCostPort:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
-    async def record_usage(
-        self,
-        *,
-        thread_id: str,
-        agent_id: str,
-        provider: str | None,
-        model: str | None,
-        input_tokens: int,
-        output_tokens: int,
-    ) -> None:
+    async def record_usage(self, **kwargs: Unpack[UsageRecordArgs]) -> None:
         """Persist one invocation's token accounting and commit.
 
         A ``None`` lane or model is stored as SQL ``NULL`` — the honest encoding
         of "the invoked instance never declared this" for a free-text column,
         and the counterpart of the ``UNKNOWN`` member a closed enum would use.
         """
+        thread_id = kwargs["thread_id"]
+        agent_id = kwargs["agent_id"]
+        provider = kwargs["provider"]
+        model = kwargs["model"]
+        input_tokens = kwargs["input_tokens"]
+        output_tokens = kwargs["output_tokens"]
         async with self._session_factory() as session:
             await append_cost_record(
                 session,

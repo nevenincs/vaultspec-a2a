@@ -212,6 +212,10 @@ def _validated_checkpoint_digest(values: dict[str, object], field: str) -> str:
     return digest
 
 
+class _GraphLifecycleOptions(TypedDict, total=False):
+    checkpoint_read_timeout_seconds: float | None
+
+
 class GraphLifecycleManager:
     """Manages graph compilation, LRU caching, and input construction.
 
@@ -232,13 +236,14 @@ class GraphLifecycleManager:
         aggregator: EventAggregator,
         token_store: RunTokenStore,
         catalog_store: RunCatalogStore,
-        checkpoint_read_timeout_seconds: float | None = None,
+        **options: Unpack[_GraphLifecycleOptions],
     ) -> None:
         from ..database import get_session_factory
         from ..providers.factory import ProviderFactory
         from .cost_port import SqlCostPort
         from .task_queue_port import SqlTaskQueuePort
 
+        checkpoint_read_timeout_seconds = options.get("checkpoint_read_timeout_seconds")
         self._checkpointer = checkpointer
         self._checkpoint_read_timeout_seconds = (
             checkpoint_read_timeout_seconds

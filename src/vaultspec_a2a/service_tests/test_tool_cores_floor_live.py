@@ -52,7 +52,8 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import httpx
 import pytest
@@ -84,6 +85,34 @@ _MESSAGE_FRAMES = frozenset(
 # A live research turn takes minutes; bound the observation so a stalled run fails loud
 # rather than hanging. The document agents read early, mid-Diverge/Synthesize.
 _OBSERVE_DEADLINE_SECONDS = 900.0
+
+
+@dataclass(frozen=True, slots=True)
+class _NamedAdrFloorContext:
+    """Prepared live harness and evidence inputs for the named-ADR proof."""
+
+    harness: AcceptanceHarness
+    adr_name: str
+    adr_stem: str
+    tokens: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _RagFloorContext:
+    """Prepared live harness and workspace for the semantic proof."""
+
+    harness: AcceptanceHarness
+    workspace_root: Path
+
+
+class _NamedAdrObservationOptions(TypedDict):
+    """Evidence inputs for one named-ADR SSE observation."""
+
+    adr_name: str
+    adr_stem: str
+    tokens: list[str]
+    output_parts: list[str]
+
 
 # Every real-provider service lane runs on the operator-configured served
 # selection. It used to name the committed all-low "fast" model profile; a
@@ -214,11 +243,7 @@ def _parse_sse_payload(
 async def _observe_named_adr_run(
     harness: AcceptanceHarness,
     gateway_client: httpx.AsyncClient,
-    *,
-    adr_name: str,
-    adr_stem: str,
-    tokens: list[str],
-    output_parts: list[str],
+    **options: Unpack[_NamedAdrObservationOptions],
 ) -> tuple[bool, list[str]]:
     """Observe the named-ADR evidence stream and cancel the run on exit."""
     deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
@@ -241,11 +266,15 @@ async def _observe_named_adr_run(
                     continue
                 content = _message_content(payload)
                 if content:
-                    output_parts.append(content)
-                    joined = "".join(output_parts)
-                    if _cites_named_adr(joined, adr_name, adr_stem):
+                    options["output_parts"].append(content)
+                    joined = "".join(options["output_parts"])
+                    if _cites_named_adr(
+                        joined, options["adr_name"], options["adr_stem"]
+                    ):
                         cited = True
-                    matched_tokens = [token for token in tokens if token in joined]
+                    matched_tokens = [
+                        token for token in options["tokens"] if token in joined
+                    ]
                 if payload.get("type") == "thread_terminal":
                     break
                 if (cited and matched_tokens) or time.monotonic() > deadline:
@@ -331,22 +360,13 @@ def _floor_case(feature: str, adr_name: str) -> AcceptanceCase:
     )
 
 
-@pytest.mark.service
-@pytest.mark.resource("loopback-stack")
-@pytest.mark.asyncio
-async def test_document_agent_reads_named_adr_midturn_and_cites(
-    external_prerequisite: ExternalPrerequisiteRule,
-) -> None:
-    """Live: a document agent reads a named .vault ADR mid-turn and cites it.
-
-    Zero .vault writes: the run is observed over its SSE stream and cancelled before
-    any review gate applies; a before/after vault snapshot asserts no file changed.
-    """
-    stack = _reachable_stack()
-    if stack is None:
-        external_prerequisite.absent("loopback-stack")
-    gateway_url, engine_base_url, engine_bearer, vault_root = stack
-
+async def _prepare_named_adr_floor(
+    vault_root: Path,
+    gateway_url: str,
+    engine_base_url: str,
+    engine_bearer: str,
+) -> _NamedAdrFloorContext:
+    """Select the live ADR and prepare its read-evidence harness."""
     target_adr = _pick_named_adr(vault_root)
     if target_adr is None:
         pytest.skip(
@@ -356,7 +376,6 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
     adr_name = target_adr.name
     adr_stem = target_adr.stem
     adr_text = target_adr.read_text(encoding="utf-8", errors="replace")
-
     feature = f"tool-cores-floor-{int(time.time())}"
     case = _floor_case(feature, adr_name)
     tokens = _distinctive_tokens(adr_text, case.prompt)
@@ -377,47 +396,85 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
         selection=selection,
         overrides=overrides,
     )
+    return _NamedAdrFloorContext(
+        harness=harness,
+        adr_name=adr_name,
+        adr_stem=adr_stem,
+        tokens=tokens,
+    )
 
-    before = _snapshot_vault(vault_root)
+
+async def _run_named_adr_floor(
+    context: _NamedAdrFloorContext,
+) -> tuple[bool, list[str], dict[str, list[str]]]:
+    """Observe one named-ADR run and return evidence plus its vault delta."""
+    before = _snapshot_vault(context.harness.vault_root)
     output_parts: list[str] = []
 
     from .test_pw7_acceptance import _ResilientAuthoringClient
 
-    async with _ResilientAuthoringClient(engine_base_url, engine_bearer) as ec:
+    async with _ResilientAuthoringClient(
+        context.harness.engine_base_url, context.harness.engine_bearer
+    ) as ec:
         run_tokens = {
-            role: await harness._mint(ec, f"agent:{harness.run_id}:{role}", "agent")
-            for role in case.roles
+            role: await context.harness._mint(
+                ec, f"agent:{context.harness.run_id}:{role}", "agent"
+            )
+            for role in context.harness.case.roles
         }
         async with httpx.AsyncClient() as hc:
-            await harness._run_start(
+            await context.harness._run_start(
                 hc,
-                run_id=harness.run_id,
+                run_id=context.harness.run_id,
                 tokens=run_tokens,
-                feature=feature,
+                feature=context.harness.case.feature,
                 expect=201,
             )
             cited, matched_tokens = await _observe_named_adr_run(
-                harness,
+                context.harness,
                 hc,
-                adr_name=adr_name,
-                adr_stem=adr_stem,
-                tokens=tokens,
+                adr_name=context.adr_name,
+                adr_stem=context.adr_stem,
+                tokens=context.tokens,
                 output_parts=output_parts,
             )
 
-    after = _snapshot_vault(vault_root)
-    delta = _vault_write_delta(before, after)
+    after = _snapshot_vault(context.harness.vault_root)
+    return cited, matched_tokens, _vault_write_delta(before, after)
+
+
+@pytest.mark.service
+@pytest.mark.resource("loopback-stack")
+@pytest.mark.asyncio
+async def test_document_agent_reads_named_adr_midturn_and_cites(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """Live: a document agent reads a named .vault ADR mid-turn and cites it.
+
+    Zero .vault writes: the run is observed over its SSE stream and cancelled before
+    any review gate applies; a before/after vault snapshot asserts no file changed.
+    """
+    stack = _reachable_stack()
+    if stack is None:
+        external_prerequisite.absent("loopback-stack")
+    gateway_url, engine_base_url, engine_bearer, vault_root = stack
+    context = await _prepare_named_adr_floor(
+        vault_root, gateway_url, engine_base_url, engine_bearer
+    )
+    cited, matched_tokens, delta = await _run_named_adr_floor(context)
 
     assert cited, (
-        f"no document agent cited {adr_name!r} (or its stem {adr_stem!r}) in its "
+        f"no document agent cited {context.adr_name!r} (or its stem "
+        f"{context.adr_stem!r}) in its "
         f"message stream within {_OBSERVE_DEADLINE_SECONDS:.0f}s (run "
-        f"{harness.run_id}); the floor was not exercised live"
+        f"{context.harness.run_id}); the floor was not exercised live"
     )
     assert matched_tokens, (
-        f"the agent cited {adr_name!r} but reproduced none of its distinctive "
-        f"interior tokens {tokens[:8]!r}...; a citation without interior content does "
+        f"the agent cited {context.adr_name!r} but reproduced none of its "
+        f"distinctive interior tokens {context.tokens[:8]!r}...; a citation without "
+        "interior content does "
         "not prove the file was actually read (run "
-        f"{harness.run_id})"
+        f"{context.harness.run_id})"
     )
     assert delta == {"created": [], "modified": [], "deleted": []}, (
         f"the floor proof must not write to .vault, but the run changed it: {delta}"
@@ -472,6 +529,68 @@ def _resolving_citations(output: str, workspace_root: Path) -> list[str]:
     return resolving
 
 
+async def _prepare_rag_floor(
+    gateway_url: str,
+    engine_base_url: str,
+    engine_bearer: str,
+    vault_root: Path,
+) -> _RagFloorContext:
+    """Prepare the live harness and workspace for the semantic proof."""
+    workspace_root = vault_root.parent
+    feature = f"tool-cores-semantic-{int(time.time())}"
+    case = _rag_case(feature)
+    selection, overrides = await _resolve_selection(
+        case, gateway_url, str(workspace_root)
+    )
+    harness = AcceptanceHarness(
+        case=case,
+        engine_base_url=engine_base_url,
+        engine_bearer=engine_bearer,
+        vault_root=vault_root,
+        gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
+    )
+    return _RagFloorContext(harness=harness, workspace_root=workspace_root)
+
+
+async def _run_rag_floor(
+    context: _RagFloorContext,
+) -> tuple[bool, bool, list[str], dict[str, list[str]]]:
+    """Observe one semantic run and return evidence plus its vault delta."""
+    before = _snapshot_vault(context.harness.vault_root)
+    output_parts: list[str] = []
+
+    from .test_pw7_acceptance import _ResilientAuthoringClient
+
+    async with _ResilientAuthoringClient(
+        context.harness.engine_base_url, context.harness.engine_bearer
+    ) as ec:
+        run_tokens = {
+            role: await context.harness._mint(
+                ec, f"agent:{context.harness.run_id}:{role}", "agent"
+            )
+            for role in context.harness.case.roles
+        }
+        async with httpx.AsyncClient() as hc:
+            await context.harness._run_start(
+                hc,
+                run_id=context.harness.run_id,
+                tokens=run_tokens,
+                feature=context.harness.case.feature,
+                expect=201,
+            )
+            rag_invoked, service_down, resolving = await _observe_rag_run(
+                context.harness,
+                hc,
+                workspace_root=context.workspace_root,
+                output_parts=output_parts,
+            )
+
+    after = _snapshot_vault(context.harness.vault_root)
+    return rag_invoked, service_down, resolving, _vault_write_delta(before, after)
+
+
 @pytest.mark.service
 @pytest.mark.resource("loopback-stack")
 @pytest.mark.asyncio
@@ -499,64 +618,26 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
     if stack is None:
         external_prerequisite.absent("loopback-stack")
     gateway_url, engine_base_url, engine_bearer, vault_root = stack
-    workspace_root = vault_root.parent
-
-    feature = f"tool-cores-semantic-{int(time.time())}"
-    case = _rag_case(feature)
-    selection, overrides = await _resolve_selection(
-        case, gateway_url, str(vault_root.parent)
+    context = await _prepare_rag_floor(
+        gateway_url, engine_base_url, engine_bearer, vault_root
     )
-    harness = AcceptanceHarness(
-        case=case,
-        engine_base_url=engine_base_url,
-        engine_bearer=engine_bearer,
-        vault_root=vault_root,
-        gateway_url=gateway_url,
-        selection=selection,
-        overrides=overrides,
-    )
-
-    before = _snapshot_vault(vault_root)
-    output_parts: list[str] = []
-
-    from .test_pw7_acceptance import _ResilientAuthoringClient
-
-    async with _ResilientAuthoringClient(engine_base_url, engine_bearer) as ec:
-        run_tokens = {
-            role: await harness._mint(ec, f"agent:{harness.run_id}:{role}", "agent")
-            for role in case.roles
-        }
-        async with httpx.AsyncClient() as hc:
-            await harness._run_start(
-                hc,
-                run_id=harness.run_id,
-                tokens=run_tokens,
-                feature=feature,
-                expect=201,
-            )
-            rag_invoked, service_down, resolving = await _observe_rag_run(
-                harness,
-                hc,
-                workspace_root=workspace_root,
-                output_parts=output_parts,
-            )
-
-    after = _snapshot_vault(vault_root)
-    delta = _vault_write_delta(before, after)
+    rag_invoked, service_down, resolving, delta = await _run_rag_floor(context)
 
     assert not service_down, (
         "the rag search returned the service-not-running error (run "
-        f"{harness.run_id}); the :8766 service was undiscoverable/unreachable from the "
+        f"{context.harness.run_id}); the :8766 service was "
+        "undiscoverable/unreachable from the "
         "spawned agent env"
     )
     assert rag_invoked, (
         f"no document agent invoked a vaultspec-rag search tool {_RAG_TOOLS} in its "
-        f"message stream within {_OBSERVE_DEADLINE_SECONDS:.0f}s (run {harness.run_id})"
+        f"message stream within {_OBSERVE_DEADLINE_SECONDS:.0f}s (run "
+        f"{context.harness.run_id})"
     )
     assert resolving, (
         "the agent invoked rag search but cited no file:line that resolves under the "
-        f"indexed workspace {workspace_root}; citations did not resolve to real "
-        f"locations (run {harness.run_id})"
+        f"indexed workspace {context.workspace_root}; citations did not resolve to "
+        f"real locations (run {context.harness.run_id})"
     )
     assert delta == {"created": [], "modified": [], "deleted": []}, (
         f"the semantic proof must not write to .vault, but the run changed it: {delta}"

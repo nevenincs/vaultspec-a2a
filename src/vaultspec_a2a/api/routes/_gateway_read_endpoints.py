@@ -1,9 +1,9 @@
 """Run discovery, state, history, and lifecycle read endpoints."""
 
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import (
@@ -15,7 +15,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
@@ -102,6 +102,49 @@ from .gateway import (
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
 
+
+class _ActiveRunsOptions(BaseModel):
+    """Query options for the active-run and history listing endpoint."""
+
+    state: Literal["active", "all"] = Query(default="active")
+    workspace_root: str | None = Query(
+        default=None, min_length=1, max_length=MAX_WORKSPACE_ROOT_LENGTH
+    )
+    feature_tag: str | None = Query(
+        default=None, min_length=1, max_length=MAX_FEATURE_TAG_LENGTH
+    )
+    status: ThreadStatus | None = Query(default=None)
+    limit: int = Query(default=50, ge=1, le=100)
+    offset: int = Query(default=0, ge=0)
+
+
+@dataclass(frozen=True, slots=True)
+class _CancelEndpointDependencies:
+    """Injected resources needed by the cancel service."""
+
+    db: AsyncSession
+    runtime: CancelRuntime
+
+
+def _get_cancel_endpoint_dependencies(
+    db: AsyncSession = Depends(get_db),
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
+) -> _CancelEndpointDependencies:
+    """Group cancel's service dependencies without changing their providers."""
+    return _CancelEndpointDependencies(
+        db=db,
+        runtime=CancelRuntime(
+            circuit_breaker,
+            worker_spawner,
+            worker_client,
+            domain_config.graph_recursion_limit,
+            trace_headers(),
+        ),
+    )
+
+
 __all__ = ["_active_role", "snapshot_to_wire"]
 
 # ---------------------------------------------------------------------------
@@ -129,16 +172,7 @@ __all__ = ["_active_role", "snapshot_to_wire"]
 )
 async def active_runs_endpoint(
     request: Request,
-    state: Literal["active", "all"] = Query(default="active"),
-    workspace_root: str | None = Query(
-        default=None, min_length=1, max_length=MAX_WORKSPACE_ROOT_LENGTH
-    ),
-    feature_tag: str | None = Query(
-        default=None, min_length=1, max_length=MAX_FEATURE_TAG_LENGTH
-    ),
-    status: ThreadStatus | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    options: Annotated[_ActiveRunsOptions, Query()],
     db: AsyncSession = Depends(get_db),
 ) -> ActiveRunsResponse | RunSummariesResponse:
     """List runs: non-terminal by default, or every run including terminal ones.
@@ -160,16 +194,18 @@ async def active_runs_endpoint(
     The two shapes are returned as two models rather than one union, so widening
     history cannot perturb a single byte of the certified discovery response.
     """
-    workspace = Path(workspace_root) if workspace_root is not None else None
+    workspace = (
+        Path(options.workspace_root) if options.workspace_root is not None else None
+    )
     if workspace is not None and not workspace.is_absolute():
         raise HTTPException(status_code=422, detail="workspace_root must be absolute")
 
-    if state == "all":
+    if options.state == "all":
         listing = await list_threads_service(
             db,
-            status_filter=status,
-            limit=limit,
-            offset=offset,
+            status_filter=options.status,
+            limit=options.limit,
+            offset=options.offset,
             checkpointer=request.app.state.checkpointer,
         )
         return RunSummariesResponse(
@@ -196,7 +232,7 @@ async def active_runs_endpoint(
                 )
                 for thread in listing.threads
             ],
-            truncated=(offset + len(listing.threads)) < listing.total,
+            truncated=(options.offset + len(listing.threads)) < listing.total,
             total=listing.total,
         )
 
@@ -204,11 +240,11 @@ async def active_runs_endpoint(
         db,
         checkpointer=request.app.state.checkpointer,
         workspace_root=workspace,
-        feature_tag=feature_tag,
-        limit=limit,
+        feature_tag=options.feature_tag,
+        limit=options.limit,
     )
     return ActiveRunsResponse(
-        state=state,
+        state=options.state,
         runs=[
             ActiveRunRecord(
                 run_id=run.run_id,
@@ -367,24 +403,17 @@ async def run_stream_endpoint(
 async def run_cancel_endpoint(
     run_id: PathSafeRunId,
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    worker_client: httpx.AsyncClient = Depends(get_worker_client),
-    circuit_breaker: Any = Depends(get_circuit_breaker),
-    worker_spawner: Any = Depends(get_worker_spawner),
+    dependencies: _CancelEndpointDependencies = Depends(
+        _get_cancel_endpoint_dependencies
+    ),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RunCancelResponse:
     """Cancel a run idempotently."""
     result = await cancel_thread(
-        db=db,
+        db=dependencies.db,
         thread_id=run_id,
         idempotency_key=idempotency_key,
-        runtime=CancelRuntime(
-            circuit_breaker,
-            worker_spawner,
-            worker_client,
-            domain_config.graph_recursion_limit,
-            trace_headers(),
-        ),
+        runtime=dependencies.runtime,
     )
 
     raise_for_cancel_failure(result, resource_noun="Run")

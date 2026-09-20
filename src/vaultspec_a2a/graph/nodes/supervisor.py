@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
@@ -32,6 +32,46 @@ _logger = logging.getLogger(__name__)
 
 
 __all__ = ["create_plan_approval_node", "create_supervisor_node"]
+
+
+class _SupervisorOptions(TypedDict, total=False):
+    worker_phase_map: dict[str, str] | None
+    autonomous: bool
+    workspace_root: Path | None
+
+
+def _bind_supervisor_options(
+    args: tuple[object, ...], options: _SupervisorOptions
+) -> tuple[dict[str, str] | None, bool, Path | None]:
+    names = ("worker_phase_map", "autonomous", "workspace_root")
+    if len(args) > len(names):
+        raise TypeError(
+            f"create_supervisor_node() takes at most {len(names) + 3} "
+            f"positional arguments ({len(args) + 3} given)"
+        )
+    unknown = set(options).difference(names)
+    if unknown:
+        name = sorted(unknown)[0]
+        raise TypeError(
+            f"create_supervisor_node() got an unexpected keyword argument {name!r}"
+        )
+    bound: list[object] = []
+    defaults: tuple[object, ...] = (None, False, None)
+    for index, name in enumerate(names):
+        if index < len(args):
+            if name in options:
+                raise TypeError(
+                    f"create_supervisor_node() got multiple values for argument "
+                    f"{name!r}"
+                )
+            bound.append(args[index])
+        else:
+            bound.append(options.get(name, defaults[index]))
+    return (
+        cast("dict[str, str] | None", bound[0]),
+        cast("bool", bound[1]),
+        cast("Path | None", bound[2]),
+    )
 
 
 def _active_agent_for_route(route: str) -> str:
@@ -450,9 +490,8 @@ def create_supervisor_node(
     model: BaseChatModel,
     system_prompt: str,
     workers: list[str],
-    worker_phase_map: dict[str, str] | None = None,
-    autonomous: bool = False,
-    workspace_root: Path | None = None,
+    *args: object,
+    **options: Unpack[_SupervisorOptions],
 ) -> SupervisorNode:
     """Create a LangGraph supervisor node for routing.
 
@@ -470,13 +509,16 @@ def create_supervisor_node(
     Returns:
         An async function that conforms to the LangGraph node signature.
     """
-    options = [*workers, "FINISH"]
+    worker_phase_map, autonomous, workspace_root = _bind_supervisor_options(
+        args, options
+    )
+    route_options = [*workers, "FINISH"]
 
     # Append routing instructions to ensure structured text output
     routing_instructions = (
         f"\n\nBased on the conversation, who should act next? "
         f"If the request is complete, select FINISH. "
-        f"Respond EXACTLY with one of the following words: {', '.join(options)}."
+        f"Respond EXACTLY with one of the following words: {', '.join(route_options)}."
     )
     full_prompt = system_prompt + routing_instructions
 
@@ -492,7 +534,7 @@ def create_supervisor_node(
             "supervisor invoking model=%s messages=%d options=%s",
             model_type,
             len(messages),
-            options,
+            route_options,
         )
         routing_model = model.with_config({"tags": [TAG_NOSTREAM]})
         try:

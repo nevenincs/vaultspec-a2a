@@ -12,7 +12,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, TypedDict, Unpack
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -542,16 +542,27 @@ def _finish_codex_discovery(
     return outcome
 
 
+class _DiscoverCodexCatalogRequired(TypedDict):
+    env: Mapping[str, str]
+    cwd: str
+    key: ProviderCatalogKey
+
+
+class _DiscoverCodexCatalogOptions(_DiscoverCodexCatalogRequired, total=False):
+    timeout: float
+    metadata: Mapping[str, object] | None
+
+
 async def discover_codex_catalog(
     command: tuple[str, ...],
-    *,
-    env: Mapping[str, str],
-    cwd: str,
-    key: ProviderCatalogKey,
-    timeout: float = 30.0,
-    metadata: Mapping[str, object] | None = None,
+    **options: Unpack[_DiscoverCodexCatalogOptions],
 ) -> CodexCatalogDiscovery:
     """Discover Codex models and controls without starting a completion."""
+    env = options["env"]
+    cwd = options["cwd"]
+    key = options["key"]
+    timeout = options.get("timeout", 30.0)
+    metadata = options.get("metadata")
     if not command:
         raise ValueError("command must not be empty")
     process = await spawn_acp_process(

@@ -13,7 +13,7 @@ import hashlib
 import json
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, TypedDict, Unpack
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -392,15 +392,23 @@ async def _read_response(
     )
 
 
+class _RequestOptions(TypedDict):
+    request_id: int
+    method: str
+    params: JsonObject
+    timeout: float
+    output_budget: OutputBudget
+
+
 async def _request(
     process: asyncio.subprocess.Process,
-    *,
-    request_id: int,
-    method: str,
-    params: JsonObject,
-    timeout: float,
-    output_budget: OutputBudget,
+    **options: Unpack[_RequestOptions],
 ) -> JsonObject:
+    request_id = options["request_id"]
+    method = options["method"]
+    params = options["params"]
+    timeout = options["timeout"]
+    output_budget = options["output_budget"]
     if process.stdin is None or process.stdout is None:
         raise AcpCatalogProtocolError("ACP discovery stdio is unavailable")
     request: JsonObject = {
@@ -426,17 +434,29 @@ async def _request(
     return result
 
 
+class _DiscoverAcpCatalogRequired(TypedDict):
+    env: Mapping[str, str]
+    cwd: str
+    key: ProviderCatalogKey
+
+
+class _DiscoverAcpCatalogOptions(_DiscoverAcpCatalogRequired, total=False):
+    use_exec: bool
+    timeout: float
+    metadata: Mapping[str, object] | None
+
+
 async def discover_acp_catalog(
     command: tuple[str, ...],
-    *,
-    env: Mapping[str, str],
-    cwd: str,
-    key: ProviderCatalogKey,
-    use_exec: bool = False,
-    timeout: float = 30.0,
-    metadata: Mapping[str, object] | None = None,
+    **options: Unpack[_DiscoverAcpCatalogOptions],
 ) -> AcpCatalogDiscovery:
     """Discover a provider catalog without sending a completion-bearing prompt."""
+    env = options["env"]
+    cwd = options["cwd"]
+    key = options["key"]
+    use_exec = options.get("use_exec", False)
+    timeout = options.get("timeout", 30.0)
+    metadata = options.get("metadata")
     if not command:
         raise ValueError("command must not be empty")
     process = await spawn_acp_process(

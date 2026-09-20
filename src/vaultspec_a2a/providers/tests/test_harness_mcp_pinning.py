@@ -127,6 +127,71 @@ class _RagServiceOptions:
     stop_control_prefix: tuple[str, ...] = ()
 
 
+@dataclass(slots=True)
+class _IsolatedRagServiceState:
+    """Configuration and mutable lifecycle state for one private service."""
+
+    requirement: str
+    locked_version: str
+    port: int
+    status_dir: Path
+    env: dict[str, str]
+    receipt: _CleanupReceipt
+    operation_deadline: float
+    cleanup_start_deadline: float
+    control_deadline: float
+    start_control_prefix: tuple[str, ...]
+    stop_control_prefix: tuple[str, ...]
+    started: bool = False
+    start_attempted: bool = False
+
+    @property
+    def service_record_path(self) -> Path:
+        return self.status_dir / "service.json"
+
+
+def _isolated_rag_service_state(
+    project_root: Path,
+    sandbox: Path,
+    options: _RagServiceOptions | None,
+) -> _IsolatedRagServiceState:
+    """Prepare isolated service configuration without owning a process yet."""
+    service_options = options or _RagServiceOptions()
+    requirement = _locked_rag_requirement(project_root)
+    port = _reserve_loopback_port()
+    status_dir = sandbox / "service-status"
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PYTEST_") and key != RAG_PIN_VARIABLE
+    }
+    env.update(
+        {
+            "VAULTSPEC_RAG_STATUS_DIR": str(status_dir),
+            "VAULTSPEC_RAG_DATA_DIR": str(sandbox / "service-data"),
+            "VAULTSPEC_RAG_QDRANT_STORAGE_DIR": str(sandbox / "qdrant-storage"),
+            "VAULTSPEC_RAG_PORT": str(port),
+        }
+    )
+    operation_deadline = (
+        asyncio.get_running_loop().time() + service_options.start_timeout_seconds
+    )
+    cleanup_start_deadline = operation_deadline - _SERVICE_CLEANUP_RESERVE_SECONDS
+    return _IsolatedRagServiceState(
+        requirement=requirement,
+        locked_version=requirement.rsplit("==", maxsplit=1)[1],
+        port=port,
+        status_dir=status_dir,
+        env=env,
+        receipt=service_options.cleanup_receipt or _CleanupReceipt(),
+        operation_deadline=operation_deadline,
+        cleanup_start_deadline=cleanup_start_deadline,
+        control_deadline=cleanup_start_deadline - _SERVICE_LATE_RECORD_RESERVE_SECONDS,
+        start_control_prefix=service_options.start_control_prefix,
+        stop_control_prefix=service_options.stop_control_prefix,
+    )
+
+
 async def _reap_timed_out_rag_process(
     process: asyncio.subprocess.Process,
     control_owner: psutil.Process,
@@ -440,105 +505,79 @@ async def _isolated_rag_service(
     options: _RagServiceOptions | None = None,
 ) -> AsyncGenerator[tuple[str, dict[str, str], _CleanupReceipt]]:
     """Run the lockfile-selected RAG service behind owned state and cleanup."""
-    service_options = options or _RagServiceOptions()
-    start_timeout_seconds = service_options.start_timeout_seconds
-    cleanup_receipt = service_options.cleanup_receipt
-    start_control_prefix = service_options.start_control_prefix
-    stop_control_prefix = service_options.stop_control_prefix
-    requirement = _locked_rag_requirement(project_root)
-    locked_version = requirement.rsplit("==", maxsplit=1)[1]
-    port = _reserve_loopback_port()
-    status_dir = sandbox / "service-status"
-    data_dir = sandbox / "service-data"
-    qdrant_storage_dir = sandbox / "qdrant-storage"
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("PYTEST_") and key != RAG_PIN_VARIABLE
-    }
-    env.update(
-        {
-            "VAULTSPEC_RAG_STATUS_DIR": str(status_dir),
-            "VAULTSPEC_RAG_DATA_DIR": str(data_dir),
-            "VAULTSPEC_RAG_QDRANT_STORAGE_DIR": str(qdrant_storage_dir),
-            "VAULTSPEC_RAG_PORT": str(port),
-        }
-    )
-    started = False
-    start_attempted = False
-    service_record_path = status_dir / "service.json"
+    state = _isolated_rag_service_state(project_root, sandbox, options)
     owner: _OwnedRagService | None = None
-    receipt = cleanup_receipt or _CleanupReceipt()
-    operation_deadline = asyncio.get_running_loop().time() + start_timeout_seconds
-    cleanup_start_deadline = operation_deadline - _SERVICE_CLEANUP_RESERVE_SECONDS
-    control_deadline = cleanup_start_deadline - _SERVICE_LATE_RECORD_RESERVE_SECONDS
     try:
-        start_attempted = True
+        state.start_attempted = True
         start = await _run_rag_cli(
-            requirement,
+            state.requirement,
             "--target",
             str(project_root),
             "server",
             "start",
             "--port",
-            str(port),
+            str(state.port),
             "--local-only",
             "--no-updates",
             "--json",
-            env=env,
-            command_prefix=start_control_prefix,
-            absolute_deadline=control_deadline,
+            env=state.env,
+            command_prefix=state.start_control_prefix,
+            absolute_deadline=state.control_deadline,
         )
         assert start.get("ok") is True, start
         raw_start_data = start.get("data")
         assert isinstance(raw_start_data, dict), start
         start_data = cast("dict[str, object]", raw_start_data)
-        assert start_data.get("port") == port, start
-        started = True
+        assert start_data.get("port") == state.port, start
+        state.started = True
 
         owner = _read_private_service_owner(
-            service_record_path,
-            expected_port=port,
-            expected_version=locked_version,
+            state.service_record_path,
+            expected_port=state.port,
+            expected_version=state.locked_version,
         )
         assert owner is not None, "the private RAG service exited before use"
         assert await _private_endpoint_matches(owner), (
             "the private RAG health identity does not match its service record"
         )
-        yield requirement, env, receipt
+        yield state.requirement, state.env, state.receipt
     finally:
         # A bounded start may time out after the daemon has published its owned
         # identity. The private status record is the authority to clean that
         # process up; without it, never issue a stop against a merely reserved
         # port that another process could have acquired.
-        if owner is None and start_attempted and not service_record_path.exists():
+        if (
+            owner is None
+            and state.start_attempted
+            and not state.service_record_path.exists()
+        ):
             # The CLI control process can time out just before its detached
             # daemon atomically publishes identity. Fund a bounded discovery
             # window so that late-owned service is still reaped.
             while (
-                not service_record_path.exists()
-                and asyncio.get_running_loop().time() < cleanup_start_deadline
+                not state.service_record_path.exists()
+                and asyncio.get_running_loop().time() < state.cleanup_start_deadline
             ):
                 await asyncio.sleep(0.05)
-        if owner is None and (started or service_record_path.exists()):
-            receipt.late_service_record_observed = True
+        if owner is None and (state.started or state.service_record_path.exists()):
+            state.receipt.late_service_record_observed = True
             owner = _read_private_service_owner(
-                service_record_path,
-                expected_port=port,
-                expected_version=locked_version,
+                state.service_record_path,
+                expected_port=state.port,
+                expected_version=state.locked_version,
             )
             if owner is None:
-                receipt.process_absent = True
-                receipt.port_absent = _loopback_port_is_closed(port)
-                service_record_path.unlink(missing_ok=True)
+                state.receipt.process_absent = True
+                state.receipt.port_absent = _loopback_port_is_closed(state.port)
+                state.service_record_path.unlink(missing_ok=True)
         if owner is not None:
             cleanup = asyncio.create_task(
                 _cleanup_private_rag_service(
-                    _CleanupContext(owner=owner, receipt=receipt),
-                    requirement=requirement,
-                    env=env,
-                    absolute_deadline=operation_deadline,
-                    stop_control_prefix=stop_control_prefix,
+                    _CleanupContext(owner=owner, receipt=state.receipt),
+                    requirement=state.requirement,
+                    env=state.env,
+                    absolute_deadline=state.operation_deadline,
+                    stop_control_prefix=state.stop_control_prefix,
                 )
             )
             await _shield_private_cleanup(cleanup)

@@ -13,7 +13,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, TypedDict, Unpack
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -354,16 +354,27 @@ def _finish_kimi_discovery(
     return outcome
 
 
+class _DiscoverKimiCatalogRequired(TypedDict):
+    env: Mapping[str, str]
+    cwd: str
+    key: ProviderCatalogKey
+
+
+class _DiscoverKimiCatalogOptions(_DiscoverKimiCatalogRequired, total=False):
+    timeout: float
+    metadata: Mapping[str, object] | None
+
+
 async def discover_kimi_catalog(
     command_prefix: tuple[str, ...],
-    *,
-    env: Mapping[str, str],
-    cwd: str,
-    key: ProviderCatalogKey,
-    timeout: float = 30.0,
-    metadata: Mapping[str, object] | None = None,
+    **options: Unpack[_DiscoverKimiCatalogOptions],
 ) -> KimiCatalogDiscovery:
     """Run the fixed prompt-free provider-list command and reap its process tree."""
+    env = options["env"]
+    cwd = options["cwd"]
+    key = options["key"]
+    timeout = options.get("timeout", 30.0)
+    metadata = options.get("metadata")
     if not command_prefix:
         raise ValueError("command_prefix must not be empty")
     command = [*command_prefix, "provider", "list", "--json"]

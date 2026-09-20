@@ -553,15 +553,19 @@ def _validate_election_inputs(
         raise TypeError("successor must be a RunWriteAuthority")
 
 
+class _ElectionOptional(TypedDict, total=False):
+    failure_reason: str | None
+    provider_condition: str | None
+
+
+class _ElectionArgs(_ElectionOptional):
+    expectation: ThreadWriteExpectation
+    status: ThreadStatus
+    successor: RunWriteAuthority
+
+
 async def elect_thread_status(
-    session: AsyncSession,
-    thread_id: str,
-    *,
-    expectation: ThreadWriteExpectation,
-    status: ThreadStatus,
-    successor: RunWriteAuthority,
-    failure_reason: str | None = None,
-    provider_condition: str | None = None,
+    session: AsyncSession, thread_id: str, **kwargs: Unpack[_ElectionArgs]
 ) -> ThreadStatusElectionResult:
     """Atomically elect one lifecycle writer from an exact durable witness.
 
@@ -571,6 +575,11 @@ async def elect_thread_status(
     a same-thread, same-action journal row; absence is a typed refusal and never
     causes authority to be invented.
     """
+    expectation = kwargs["expectation"]
+    status = kwargs["status"]
+    successor = kwargs["successor"]
+    failure_reason = kwargs.get("failure_reason")
+    provider_condition = kwargs.get("provider_condition")
     _validate_election_inputs(expectation, status, successor)
     validate_transition(expectation.status, status, thread_id=thread_id)
     _validate_successor_authority(expectation, successor)
@@ -780,19 +789,30 @@ async def update_thread_status(
     return thread
 
 
+class _RepairOptional(TypedDict, total=False):
+    repair_reason: str | None
+    execution_readiness: RepairStatus | str | None
+    last_requested_action: ControlActionType | str | None
+    last_applied_action: ControlActionType | str | None
+    increment_generation: bool
+    increment_recovery_epoch: bool
+
+
+class _RepairArgs(_RepairOptional):
+    repair_status: RepairStatus | str
+
+
 async def set_thread_repair_state(
-    session: AsyncSession,
-    thread_id: str,
-    *,
-    repair_status: RepairStatus | str,
-    repair_reason: str | None = None,
-    execution_readiness: RepairStatus | str | None = None,
-    last_requested_action: ControlActionType | str | None = None,
-    last_applied_action: ControlActionType | str | None = None,
-    increment_generation: bool = False,
-    increment_recovery_epoch: bool = False,
+    session: AsyncSession, thread_id: str, **kwargs: Unpack[_RepairArgs]
 ) -> ThreadModel | None:
     """Persist thread repair metadata used by restart reconciliation."""
+    repair_status = kwargs["repair_status"]
+    repair_reason = kwargs.get("repair_reason")
+    execution_readiness = kwargs.get("execution_readiness")
+    last_requested_action = kwargs.get("last_requested_action")
+    last_applied_action = kwargs.get("last_applied_action")
+    increment_generation = kwargs.get("increment_generation", False)
+    increment_recovery_epoch = kwargs.get("increment_recovery_epoch", False)
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
@@ -818,17 +838,23 @@ async def set_thread_repair_state(
     return thread
 
 
+class _ApprovalStateOptions(TypedDict, total=False):
+    approval_status: ApprovalStatus | str | _UnsetType | None
+    approval_request_id: str | _UnsetType | None
+    approval_reason: str | _UnsetType | None
+    approval_response_action_id: str | _UnsetType | None
+    approval_updated_at: datetime | None
+
+
 async def set_thread_approval_state(
-    session: AsyncSession,
-    thread_id: str,
-    *,
-    approval_status: ApprovalStatus | str | _UnsetType | None = _UNSET,
-    approval_request_id: str | _UnsetType | None = _UNSET,
-    approval_reason: str | _UnsetType | None = _UNSET,
-    approval_response_action_id: str | _UnsetType | None = _UNSET,
-    approval_updated_at: datetime | None = None,
+    session: AsyncSession, thread_id: str, **kwargs: Unpack[_ApprovalStateOptions]
 ) -> ThreadModel | None:
     """Persist durable plan-approval state on the thread row."""
+    approval_status = kwargs.get("approval_status", _UNSET)
+    approval_request_id = kwargs.get("approval_request_id", _UNSET)
+    approval_reason = kwargs.get("approval_reason", _UNSET)
+    approval_response_action_id = kwargs.get("approval_response_action_id", _UNSET)
+    approval_updated_at = kwargs.get("approval_updated_at")
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None

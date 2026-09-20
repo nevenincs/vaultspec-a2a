@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -88,6 +88,10 @@ _RUN_LEASE_METADATA_KEY = "run_lease"
 _settlement_tasks: set[asyncio.Task[None]] = set()
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
+
+
+class _TerminalEventOptions(TypedDict, total=False):
+    drain_gate: DrainGate | None
 
 
 def _session_factory(
@@ -206,7 +210,6 @@ async def _persist_proven_failure(
     thread_id: str,
     evidence: GraphFailureEvidence,
     failure_reason: str,
-    provider_condition: ProviderCondition,
     last_sequence: int | None,
 ) -> bool:
     """Elect and settle one failure for the exact current graph action."""
@@ -250,7 +253,7 @@ async def _persist_proven_failure(
                 action_receipt_id=evidence.action.dispatch_id,
             ),
             failure_reason=failure_reason,
-            provider_condition=provider_condition.value,
+            provider_condition=evidence.provider_condition,
         )
         if election.outcome is not ThreadStatusElectionOutcome.WON:
             await db.rollback()
@@ -475,7 +478,7 @@ async def _confirm_cancelled_terminal(
 
 def _parse_failure_terminal(
     thread_id: str, payload: dict[str, object]
-) -> tuple[GraphFailureEvidence, str, ProviderCondition] | None:
+) -> tuple[GraphFailureEvidence, str] | None:
     raw_evidence = payload.get("failure_evidence")
     if raw_evidence is None:
         logger.warning(
@@ -511,7 +514,7 @@ def _parse_failure_terminal(
             extra={"thread_id": thread_id, "action": "mismatched_failure_evidence"},
         )
         return None
-    return evidence, error_detail, condition
+    return evidence, error_detail
 
 
 async def _confirm_failed_terminal(
@@ -523,7 +526,7 @@ async def _confirm_failed_terminal(
     parsed = _parse_failure_terminal(thread_id, payload)
     if parsed is None:
         return False
-    evidence, error_detail, provider_condition = parsed
+    evidence, error_detail = parsed
     if factory is None:
         _skip_without_database("the failure terminal election", thread_id)
         return False
@@ -532,7 +535,6 @@ async def _confirm_failed_terminal(
         thread_id=thread_id,
         evidence=evidence,
         failure_reason=error_detail,
-        provider_condition=provider_condition,
         last_sequence=last_sequence,
     )
     if not accepted:
@@ -584,9 +586,16 @@ async def _handle_terminal_event(
     aggregator: EventAggregator | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     checkpointer: Checkpointer | None = None,
-    drain_gate: DrainGate | None = None,
+    **options: Unpack[_TerminalEventOptions],
 ) -> None:
     """Settle a proven terminal event, then release drain and aggregator state."""
+    drain_gate = options.pop("drain_gate", None)
+    if options:
+        unexpected = next(iter(options))
+        raise TypeError(
+            "_handle_terminal_event() got an unexpected keyword argument "
+            f"{unexpected!r}"
+        )
     if not is_terminal_event(payload):
         return
     # Capture before the durable write and before aggregator state is pruned.
@@ -893,7 +902,7 @@ async def relay_event(
     aggregator: EventAggregator | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     checkpointer: Checkpointer | None = None,
-    drain_gate: DrainGate | None = None,
+    **options: Unpack[_TerminalEventOptions],
 ) -> None:
     """Consolidated relay: run all 4 event handlers in sequence.
 
@@ -909,6 +918,12 @@ async def relay_event(
     permission journal, progress inference, execution state persistence,
     and terminal status updates with aggregator GC.
     """
+    drain_gate = options.pop("drain_gate", None)
+    if options:
+        unexpected = next(iter(options))
+        raise TypeError(
+            f"relay_event() got an unexpected keyword argument {unexpected!r}"
+        )
     await _handle_permission_event(
         thread_id,
         payload,

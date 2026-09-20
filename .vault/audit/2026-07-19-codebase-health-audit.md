@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:3cbbff7c4b032a40ae5fd539af4394a9b3402dae762824f2fd32c7811b79e3f9'
+body_hash: 'sha256:4b5cc7e89878c9b5cbab3e3050dc5191e2fa504f490dfa9721f7e06308a8ab4f'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3615,3 +3615,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted process cleanup sequencing and outcome/error precedence from Kimi catalog discovery. Cleanup order, output-budget error precedence, exception notes, and return behavior remain unchanged. The original 15-path discovery function measures 5, with helpers at 2 and 10. Cyclomatic findings fell from 42 to 41 and selected Ruff design findings from 132 to 131.
 - Review finding (moderate, code health; queued): 41 cyclomatic and 131 selected Ruff design findings remain. Worst cyclomatic value is now 14.
 - Verification: seven Kimi catalog unit tests and three real subprocess output/timeout/cleanup tests passed; `just check-all`, `just check-type-strict`, focused Linux Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 41 findings.
+
+### 2026-09-20 MCP tool schema normalization review pass
+
+- Implementation: extracted DSL bounds and unknown-key guidance assembly from tool input schema normalization. Guidance order and schema closure behavior remain unchanged. The original 14-path function measures 7 and its helper measures 8; cyclomatic findings fell from 41 to 40.
+- Review finding (moderate, code health; queued): 40 cyclomatic and 131 selected Ruff design findings remain. The schema-normalization finding is closed.
+- Verification: 20 schema normalization tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 40 findings.

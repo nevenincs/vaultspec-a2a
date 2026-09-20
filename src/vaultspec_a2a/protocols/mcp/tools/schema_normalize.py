@@ -273,6 +273,22 @@ def _translate_flat_schema(
     return properties, required, open_schema
 
 
+def _append_dsl_guidance(raw_map: dict[str, Any], guidance_parts: list[str]) -> None:
+    bounds_raw: object = raw_map.get("bounds")
+    if isinstance(bounds_raw, dict) and bounds_raw:
+        bounds = cast("dict[str, Any]", bounds_raw)
+        guidance_parts.append(
+            "Bounds: " + ", ".join(f"{k}={v}" for k, v in bounds.items()) + "."
+        )
+    unknown: dict[str, Any] = {
+        k: v for k, v in raw_map.items() if k not in _CONSUMED_KEYS
+    }
+    if unknown:
+        guidance_parts.append(
+            "Engine: " + "; ".join(f"{k}={v}" for k, v in unknown.items()) + "."
+        )
+
+
 def normalize_tool_input_schema(
     raw: object, injected: frozenset[str] = frozenset()
 ) -> tuple[dict[str, Any], str]:
@@ -310,20 +326,7 @@ def normalize_tool_input_schema(
         properties, required, open_schema = _translate_flat_schema(raw_map, injected)
         guidance_parts = []
 
-    bounds_raw: object = raw_map.get("bounds")
-    if isinstance(bounds_raw, dict) and bounds_raw:
-        bounds = cast("dict[str, Any]", bounds_raw)
-        guidance_parts.append(
-            "Bounds: " + ", ".join(f"{k}={v}" for k, v in bounds.items()) + "."
-        )
-
-    unknown: dict[str, Any] = {
-        k: v for k, v in raw_map.items() if k not in _CONSUMED_KEYS
-    }
-    if unknown:
-        guidance_parts.append(
-            "Engine: " + "; ".join(f"{k}={v}" for k, v in unknown.items()) + "."
-        )
+    _append_dsl_guidance(raw_map, guidance_parts)
 
     schema: dict[str, Any] = {"type": "object", "properties": properties}
     # A tool carrying an opaque payload must stay OPEN so the model can send the

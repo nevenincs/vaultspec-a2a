@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c236cde18d70ada1d713a2124d22d6aff3d3040fe1515b2d56173463399d6c83'
+body_hash: 'sha256:950c7f57154fa26a0085e866f1e75e2b31bdc5183f82e8def786d1fd9b389c98'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3393,3 +3393,10 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Review: inspected the moved branches; 81 ACP MCP composition tests, 31 pinning tests without real-service startup, 12 contract/surface tests, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for the code change; type: no contract drift found.
 - Verification finding (environment dependency, severity medium): four real-service pinning tests failed because the installed service interpreter reports `service_env_no_gpu` (CUDA and MPS unavailable). They remain queued for execution on a supported accelerator host or a supported service configuration; 112 other tests in that run passed. This is not evidence that the four tests are green.
 - Queue: four prior radon offenders and one private PLR0913 finding in `_acp_mcp.py` are closed. Its public composition parameter-count finding and Pylint module-length finding remain open. Repository-wide cyclomatic gate still has 103 offenders, with other strict findings open.
+
+### 2026-09-20 authoring submitter review pass
+
+- Implementation: extracted locator URL, body-link, web-disclosure, and recovery-snapshot parsing helpers. Grouped the run's document proposal fields in an immutable context while keeping bearer and actor token as separate transient arguments. The operation's deterministic IDs and body are unchanged.
+- Review: inspected the diff; 56 submitter tests, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for the final change; type: no contract drift found. An initial pass found two unused locals introduced by the grouping; both were removed and the gates rerun green.
+- Verification limitation (environment dependency, severity medium): four service-marked live submitter tests were deselected because this run has no live engine endpoint; engine-backed proposal replay remains unverified here.
+- Queue: three prior radon offenders and three strict Ruff findings in `authoring/submitter.py` are closed. The repository-wide cyclomatic gate still has 100 offenders; other strict findings remain open.

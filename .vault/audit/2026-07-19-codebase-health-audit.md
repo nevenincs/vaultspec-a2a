@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:3630e64aad4d86f578b8ae840d48fd499f6e372a5b129862e23d69930fca2f59'
+body_hash: 'sha256:ea379cb2ae7af0667a8de0577b248d66bae981fdcec221b6cdd35318118430b3'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3694,3 +3694,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding (low, lint; fixed): sorted the test import after the owner change.
 - Review finding (moderate, code health; queued): 11 long modules and the other strict findings remain.
 - Verification: 28 ACP command/condition/stop tests before the test import update and 21 focused tests after it, import loadability of 272 governed modules, unused-symbol and export coverage, `just check-all`, `just check-type-strict`, focused Ty/Ruff, and `git diff --check` passed.
+
+### 2026-09-20 permission response contract extraction review
+
+- Implementation: moved response identity, verdict, rejection payload validation, and immutable transition records from `control/permission_service.py` into `control/_permission_response_contract.py`. The service now has 971 lines; the module-length gate decreased from 11 to 10 offenders.
+- Review: inspected imports and callers after extraction. The response helper and state definitions retain their original behavior; the service re-exports its existing public API. Severity/type: no new defect found in this pass. Existing high-volume strict shape, complexity, and Ruff findings remain open in this audit queue.
+- Verification: Ruff check and format, strict Ty, focused permission lease tests, and module-length gate. `just check-all` run for repository-wide validation.

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c49e727d6a8be2f4c4b0aad29da7f844f40c42269782dc204e7e73c98dda5279'
+body_hash: 'sha256:488465392eab01a8f5d589b7a8a076dfcc15d0f4d7474050717d8409febbd9e8'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4094,3 +4094,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: expressed the fixed ACP request frame inputs as a required typed keyword contract, closing one parameter-count finding while keeping every caller's named fields.
 - Review finding, low severity, signature introspection: runtime inspection now shows `**kwargs`; no caller inspects this private helper's signature. The future is still registered before the locked write and the frame fields are unchanged.
 - Verification: 20 ACP session ownership and model-selection tests passed; scoped Ruff and basedpyright passed. Remaining parameter findings stay open.
+
+### 2026-09-20 compiler import-home review
+
+- Implementation: removed three thin compiler wrappers whose only consumers were tests. The graph, streaming, and service tests now import the research implementations directly from `_compiler_research`, and the unused-symbol gate no longer reports those compiler symbols.
+- Review finding, low severity, private import path: the test imports change path but exercise the same implementation. A repository-wide search found no remaining imports through compiler; public `compile_team_graph` remains there. No production caller consumed the wrappers.
+- Verification: 28 research ADR and clarification relay tests passed; scoped Ruff passed after import sorting. Other strict findings remain open.

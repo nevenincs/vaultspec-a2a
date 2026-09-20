@@ -40,11 +40,11 @@ from ...team.team_config import (
 )
 from ...thread.errors import ConfigError, WorkerExecutionError
 from ...thread.state import TeamState
+from .._compiler_research import _make_research_producer
 from ..compiler import (
     _NODE_RETRY_POLICY,
     _build_supervisor_prompt,
     _loop_route,
-    _make_research_producer,
     _parse_catalog_preferences,
     _route_from_supervisor,
     _worker_retry_on,

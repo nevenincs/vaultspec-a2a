@@ -33,7 +33,6 @@ if TYPE_CHECKING:
 
     from ..authoring import FeedbackContextReader
     from ..worker.authoring_binding import AuthoringBindingProvider
-    from .nodes.diverge import ResearchFindingProducer
     from .nodes.phase_gate import DocumentProposalSubmitter
     from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
 
@@ -72,13 +71,10 @@ __all__ = [
     "_add_node",
     "_agent_node_metadata",
     "_build_supervisor_prompt",
-    "_clarification_request_id",
     "_compile_worker_node",
     "_compose_persona_prompt",
-    "_doc_review_router",
     "_lane_web_demonstrated",
     "_loop_route",
-    "_make_research_producer",
     "_resolve_supervisor_model",
     "_route_from_supervisor",
     "_wire_diverge_stage",
@@ -961,37 +957,3 @@ def compile_team_graph(
     graph.step_timeout = step_timeout
 
     return graph
-
-
-def _clarification_request_id(thread_id: str) -> str:
-    """Mint the stable clarification handle for a thread."""
-    from ._compiler_research import _clarification_request_id as implementation
-
-    return implementation(thread_id)
-
-
-def _doc_review_router(*, writer_target: str, gate_target: str) -> Any:
-    """Build the research document review router."""
-    from ._compiler_research import _doc_review_router as implementation
-
-    return implementation(writer_target=writer_target, gate_target=gate_target)
-
-
-def _make_research_producer(
-    model: BaseChatModel,
-    system_prompt: str,
-    workspace_root: Path | None = None,
-    harness_mcp_servers: list[str] | None = None,
-    *,
-    autonomous: bool = False,
-) -> ResearchFindingProducer:
-    """Create the researcher finding producer."""
-    from ._compiler_research import _make_research_producer as implementation
-
-    return implementation(
-        model,
-        system_prompt,
-        workspace_root,
-        harness_mcp_servers,
-        autonomous=autonomous,
-    )

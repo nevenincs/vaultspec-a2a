@@ -31,7 +31,8 @@ from ...team.team_config import (
 )
 from ...thread.clarification import CLARIFICATION_TOPOLOGIES
 from ...thread.errors import ConfigError
-from ..compiler import _clarification_request_id, compile_team_graph
+from .._compiler_research import _clarification_request_id
+from ..compiler import compile_team_graph
 from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:

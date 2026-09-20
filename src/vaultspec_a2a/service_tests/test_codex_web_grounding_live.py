@@ -75,7 +75,7 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ..graph.compiler import _make_research_producer
+from ..graph._compiler_research import _make_research_producer
 from ..graph.enums import Provider
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND, create_researcher_node
 from ..providers._acp_mcp import codex_mcp_server_specs

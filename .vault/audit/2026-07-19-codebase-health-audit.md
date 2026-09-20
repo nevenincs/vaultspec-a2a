@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:9702b2e11fddb98f4c9fe50bbd838705f3a90871fd48c42bdf495d0005234959'
+body_hash: 'sha256:5b65182d8431506fa2e04a1a2ba4dda54c8fe6d2ff63449f691c6b7cf6a14416'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4324,3 +4324,8 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, false-green CI review: the pinned parent Claude action ran but reported SUCCESS after skipping the review. Its OIDC token exchange rejected the PR workflow because Anthropic requires its content to be identical to the repository default branch; no code review or comments were produced. The preceding action-policy entry documents the pin as an attempted implementation, not a completed review.
 - Implementation: restored both Claude workflow files to their exact default-branch content. The repository selected-actions policy still permits only the exact nested Bun action SHA observed in the parent action manifest. A parent-action pin on this PR cannot coexist with Anthropic's default-branch workflow validation; future pinning would need to land on the default branch first. The moving parent reference remains a classified low-severity workflow supply-chain follow-up, with the exact nested allowlist acting as a visible failure boundary if it changes.
 - Verification: both workflow files now match `origin/main` byte-for-byte; local workflow lint and CI contract must pass after this correction. A fresh ready-review run must execute an actual review before this pass can close. Review result is REVISION REQUIRED pending that evidence.
+
+### 2026-09-20 ready-review timeout and current local gate
+
+- Review finding, medium severity, CI automation: on `15285b4f`, the Claude review action passed workflow validation and initialized Claude Sonnet 5, but the SDK emitted no review result after initialization and the 30-minute job timeout cancelled it. No inline findings were posted. This is an incomplete automated review, not a clean review result; its cause is unproven from the hidden SDK output. A successful actual review or an independently completed review is still required before claiming that review gate passed.
+- Verification: the current source passes `just check-strict` with zero required findings and both focused real-gateway admission tests. The full local unit gate passed 4,583 tests, with two declared prerequisite skips and 197 service tests deselected. Current CodeQL, migration, and language analysis checks pass; CodeQL has zero open alerts. Workflow lint and Linux canonical CI were still queued behind the same Linux x64 runner at this audit entry. Review result is REVISION REQUIRED pending remote gates and review completion.

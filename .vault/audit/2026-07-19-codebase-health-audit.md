@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:7cb8bc17e1714feacbcc1202c84f620d39b0be210de4016fdce0830870d30e72'
+body_hash: 'sha256:d6e2aec7126fbe85fa41b1b0a0e4ecef12692f0c4604025c342b152f720db995'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3480,3 +3480,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted terminal status and evidence compatibility validation from `_handle_terminal_event`, preserving the sequence capture, durable election, drain release, and aggregator cleanup order.
 - Review: inspected the actual diff and terminal tests. No new correctness findings surfaced (severity: none; type: implementation review). Focused terminal and event handler tests: 20 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 74 to 73 over limit; `_persist_permission_request` remains at 15 in this file. The repository-wide Ruff structural scan reports 146 findings across C901/PLR0911/PLR0912/PLR0913/PLR0915. Both are existing quality debt (severity: moderate; type: code health), still queued for reduction to zero. Full strict gate remains open.
+
+### 2026-09-20 permission request journal review pass
+
+- Implementation: normalized request metadata in a focused helper and isolated the current receipt identity check. The original ordering of option validation after thread lookup is preserved.
+- Review: inspected the diff. A low-severity behavioral ordering issue (type: validation timing) surfaced during review and was fixed before commit: option validation had moved before the absent-thread guard. No unresolved new findings remain. Permission/event tests: 33 passed; `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 73 to 72 over limit; this module now has no functions above 10. Repository-wide Ruff structural findings remain 146 (severity: moderate; type: code health). Full strict gate remains open, and these existing findings remain queued for zero.

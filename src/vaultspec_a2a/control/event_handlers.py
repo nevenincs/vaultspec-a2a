@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..database.checkpoints import Checkpointer
+    from ..database.thread_repository import ThreadWriteExpectation
     from ..streaming.aggregator import EventAggregator
     from ..thread.action_receipts import GraphActionReceipt
     from .drain import DrainGate
@@ -613,6 +614,50 @@ _PERMISSION_REQUEST_EVENT_TYPES = frozenset(
 )
 
 
+def _permission_request_fields(
+    payload: dict[str, object], event_type: str
+) -> tuple[str, str | None, str, str] | None:
+    """Validate and normalize the fields stored with a permission request."""
+    request_value = payload.get("request_id")
+    if not isinstance(request_value, str) or not request_value:
+        return None
+    tool_value = payload.get("tool_call")
+    tool_call = tool_value if isinstance(tool_value, str) else None
+    pause_reason_type = (
+        event_type
+        if event_type in {"plan_approval_request", "document_approval_request"}
+        else classify_permission_pause_reason(tool_call)
+    )
+    description_value = payload.get("description")
+    # Keep the durable row at least as descriptive as the streamed frame.
+    description = (
+        description_value[:MAX_PERMISSION_DESCRIPTION_CHARS]
+        if isinstance(description_value, str)
+        else ""
+    )
+    return (
+        request_value,
+        tool_call,
+        pause_reason_type,
+        description,
+    )
+
+
+def _permission_receipt_is_current(
+    expectation: ThreadWriteExpectation,
+    status: ThreadStatus,
+    dispatch_id: str,
+) -> bool:
+    from ..thread.enums import ControlActionType
+
+    return (
+        expectation.status is status
+        and expectation.authority.action_type
+        is ControlActionType.PERMISSION_REQUEST_CREATED
+        and expectation.authority.action_receipt_id == dispatch_id
+    )
+
+
 async def _persist_permission_request(
     db: AsyncSession,
     thread_id: str,
@@ -645,30 +690,15 @@ async def _persist_permission_request(
         ControlActionType,
     )
 
-    request_value = payload.get("request_id")
-    request_id = request_value if isinstance(request_value, str) else ""
-    if not request_id:
+    fields = _permission_request_fields(payload, event_type)
+    if fields is None:
         return
-    tool_value = payload.get("tool_call")
-    tool_call = tool_value if isinstance(tool_value, str) else None
-    pause_reason_type = (
-        event_type
-        if event_type in {"plan_approval_request", "document_approval_request"}
-        else classify_permission_pause_reason(tool_call)
-    )
+    request_id, tool_call, pause_reason_type, description = fields
     fx = compute_permission_request_effects(pause_reason_type)
     thread = await get_thread(db, thread_id)
     if thread is None:
         return
     expectation = thread_write_expectation(thread)
-    description_value = payload.get("description")
-    # The same declaration the streamed permission frame truncates at, so the
-    # row a reload replays from cannot hold less than the operator was shown.
-    description = (
-        description_value[:MAX_PERMISSION_DESCRIPTION_CHARS]
-        if isinstance(description_value, str)
-        else ""
-    )
     allowed_options = _option_mappings(payload.get("options"))
     reservation = await reserve_control_action(
         db,
@@ -686,11 +716,8 @@ async def _persist_permission_request(
     if action.dispatch_id is None:
         await db.rollback()
         raise RuntimeError("permission-request action has no durable receipt")
-    if (
-        expectation.status is fx.thread_status
-        and expectation.authority.action_type
-        is ControlActionType.PERMISSION_REQUEST_CREATED
-        and expectation.authority.action_receipt_id == action.dispatch_id
+    if _permission_receipt_is_current(
+        expectation, fx.thread_status, action.dispatch_id
     ):
         await db.rollback()
         return

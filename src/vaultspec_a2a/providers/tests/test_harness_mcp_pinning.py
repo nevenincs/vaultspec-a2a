@@ -848,6 +848,8 @@ def test_codex_specs_refuse_an_unusable_pin(project_root: str) -> None:
         codex_mcp_server_specs([RAG], project_root=project_root)
 
 
+@pytest.mark.service
+@pytest.mark.resource("rag-service-control")
 @pytest.mark.asyncio
 async def test_the_declared_channel_is_the_servers_own_root_authority(
     tmp_path: Path,
@@ -950,6 +952,8 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
     assert str(launch_root) not in diagnosis, diagnosis
 
 
+@pytest.mark.service
+@pytest.mark.resource("rag-service-control")
 @pytest.mark.asyncio
 async def test_cancelled_probe_reaps_private_service_when_stop_command_fails(
     tmp_path: Path,
@@ -987,6 +991,8 @@ async def test_cancelled_probe_reaps_private_service_when_stop_command_fails(
     assert _shared_service_digest() == shared_before
 
 
+@pytest.mark.service
+@pytest.mark.resource("rag-service-control")
 @pytest.mark.asyncio
 async def test_hung_real_stop_preserves_fallback_and_absence_budget(
     tmp_path: Path,
@@ -1049,6 +1055,8 @@ while True:
     assert _shared_service_digest() == shared_before
 
 
+@pytest.mark.service
+@pytest.mark.resource("rag-service-control")
 @pytest.mark.asyncio
 async def test_timed_out_start_reaps_a_late_published_private_service(
     tmp_path: Path,

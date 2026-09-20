@@ -13,7 +13,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
 modified: '2026-09-20'
-body_hash: 'sha256:ef0f6f667d02915e047ef8c4a5a89f151b49d6c1205f1a530724c651224be042'
+body_hash: 'sha256:6d2b0d36d3a95e16e8bdb9ee12b7f58ee06247a3db9e9e3225ca6faf97d347c3'
 ---
 
 # `resource-aware-test-execution` plan
@@ -68,6 +68,8 @@ resolution, closing the audited harness-registry gap.
 - [x] `S26` - Replace raw test binary guards with canonical platform-aware provider resolvers; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/providers`.
 - [x] `S27` - Close Windows injected-client transport ownership warnings on their owning TestClient loop; `src/vaultspec_a2a/api/tests/test_endpoints.py`.
 - [x] `S28` - Reduce the serialized desktop test tail without weakening real-process coverage; `src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/testing`.
+- [x] `S29` - Exclude private RAG service-control proofs from the unit lane and declare their live resource; `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py, src/vaultspec_a2a/testing/resources.py`.
+- [ ] `S30` - Close the residual Windows Proactor transports exposed by the full lane; `src/vaultspec_a2a/api/tests, src/vaultspec_a2a/desktop/tests`.
 
 ## Parallelization
 

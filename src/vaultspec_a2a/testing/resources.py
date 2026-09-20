@@ -107,6 +107,14 @@ _CATALOG: tuple[ResourceSpec, ...] = (
         backstop_s=1800,
     ),
     ResourceSpec(
+        key="rag-service-control",
+        description=(
+            "private vaultspec-rag data-plane service startup and teardown; "
+            "live proofs are excluded from the deterministic unit lane"
+        ),
+        backstop_s=1800,
+    ),
+    ResourceSpec(
         key="desktop-processes",
         description=(
             "isolated local desktop gateway and worker process capacity; tests "

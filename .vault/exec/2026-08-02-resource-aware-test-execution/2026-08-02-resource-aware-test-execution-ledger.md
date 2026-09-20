@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v2'
-body_hash: 'sha256:52ef6d3c289f6c6e529b54635617c25ffe2c54b6a5e8dcaf22c9205b0dcde984'
+body_hash: 'sha256:e4634e55abd178776d53c31e5616d20a50e046f2f799efb34ccb648faf33876d'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -85,7 +85,13 @@ related:
 - `S28` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
 - `S28` `verify:` `parallel-desktop-subset-12-tests` -> `pass`
 - `S28` `by:` `codex`
+- `S29` `M` `src/vaultspec_a2a/testing/resources.py`
+- `S29` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S29` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
+- `S29` `verify:` `ruff-S29` -> `pass`
+- `S29` `by:` `codex`
 
 ## Notes
 
 - `S28` Full desktop directory remained host-contention-bound at 288.10s parallel versus 286.24s serial; focused distribution proof achieved 3.2x against cumulative duration.
+- `S29` Resource suite: 69 passed, then unrelated concurrent InfraConfig NameError broke plugin load.

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:4c460d49b5f486d82f7d244b5eed2e58b8776b343ba392e9b92edc875a0093fc'
+body_hash: 'sha256:800d4382fd86baa19db8c1c7acc98807a97a52f4685d4391d436477043ac4b70'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3911,3 +3911,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved provider command resolution, capsule asset paths, and explicit subprocess environment builders into `_factory_commands.py`; the factory re-exports its established import surface. Both modules remain below 1000 lines, and command resolution still reads the shared settings instance.
 - Verification: 56 focused factory, capsule resolution, and catalog registration tests passed. Target Ruff, Ty, basedpyright, formatting, and diff checks passed. Import loadability and unconsumed-export coverage report zero findings. The module-length gate fell from 7 to 6 offenders.
 - Review finding (medium, code health): six oversized modules and the other strict findings remain; continue the existing burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 private RAG service-control lane review
+
+- Implementation: the four tests that boot and control a private `vaultspec-rag` data-plane service now carry the `service` marker and an exclusive `rag-service-control` resource declaration. The deterministic unit lane retains the module's 31 pure contract tests and deselects the four live proofs.
+- Verification: focused collection selected 31 of 35 tests under `-m "not service"`; Ruff passed. The resource suite reached 69 passes before an unrelated concurrent `InfraConfig` `NameError` prevented an isolated subprocess from loading the repository plugin.
+- Review finding (medium, test isolation): RESOLVED. Private service startup had been reachable from the unit lane, consumed up to 120 seconds per proof, and attempted accelerator-backed RAG startup on machines that cannot provide it. No RAG process is now required or started by the unit lane.

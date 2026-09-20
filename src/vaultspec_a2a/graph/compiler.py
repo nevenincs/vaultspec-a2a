@@ -306,6 +306,21 @@ def _retry_verdict(exc: BaseException) -> bool:
     return isinstance(exc, _TRANSIENT_EXCEPTIONS)
 
 
+def _retry_wrapped_worker_error(exc: WorkerExecutionError) -> bool:
+    # Retrying after relayed output would duplicate text already sent to the client.
+    if exc.relayed_output:
+        return False
+    cause = exc.__cause__
+    if cause is None:
+        return False
+    # A tool may have changed external state even when no text was relayed.
+    if getattr(cause, "effects_may_have_occurred", False) is True:
+        return False
+    if isinstance(cause, _NO_RETRY_EXCEPTIONS):
+        return False
+    return _retry_verdict(cause)
+
+
 def _worker_retry_on(exc: Exception) -> bool:
     """Predicate passed to ``RetryPolicy`` for every worker node.
 
@@ -324,32 +339,7 @@ def _worker_retry_on(exc: Exception) -> bool:
 
     # WorkerExecutionError wraps the original cause -- inspect it.
     if isinstance(exc, WorkerExecutionError):
-        # A turn that already streamed cannot be retried, whatever refused it.
-        # The node re-invokes the model on retry, and every token the lane
-        # already produced is relayed a second time - the client watches the
-        # same text arrive twice, with nothing to explain it.
-        #
-        # This outranks the lane's stated hint deliberately. The hint is the
-        # provider's verdict on ITS OWN failure; the duplication is harm WE
-        # would cause, and a vendor cannot consent to that on the user's behalf.
-        #
-        # It is placed on the wrapper rather than in the verdict because only
-        # the wrapper knows what the attempt relayed. Duplication is a property
-        # of whether the lane streamed, NOT of which condition refused it: an
-        # ordinary overload that happens to arrive after the first token
-        # duplicates exactly as a mid-stream disconnect does.
-        if exc.relayed_output:
-            return False
-        cause = exc.__cause__
-        if cause is None:
-            return False
-        # Tool/action activity can mutate the world even when no text reached
-        # the client. A fresh model turn cannot prove that replay is harmless.
-        if getattr(cause, "effects_may_have_occurred", False) is True:
-            return False
-        if isinstance(cause, _NO_RETRY_EXCEPTIONS):
-            return False
-        return _retry_verdict(cause)
+        return _retry_wrapped_worker_error(exc)
 
     return _retry_verdict(exc)
 
@@ -889,6 +879,26 @@ def _composed_worker_prompt(agent_config: Any, model: BaseChatModel) -> str:
     )
 
 
+def _validate_compiled_topology(team_config: Any) -> None:
+    from ..team.team_config import TopologyType
+
+    topology = team_config.topology
+    if not isinstance(topology.type, TopologyType):
+        raise ValueError(
+            f"Unknown topology type: {topology.type!r}. "
+            f"Expected one of: {[t.value for t in TopologyType]}"
+        )
+    if getattr(team_config, "clarification", None) is not None and (
+        not topology_honours_clarification(topology.type)
+    ):
+        raise ConfigError(
+            f"Team {getattr(team_config, 'id', '?')!r} declares a clarification "
+            f"questionnaire on topology {topology.type.value!r}, which compiles no "
+            f"clarification stage; the questions would never be asked. Topologies "
+            f"that ask: {sorted(CLARIFICATION_TOPOLOGIES)}."
+        )
+
+
 def compile_team_graph(
     team_config: Any,
     agent_configs: dict[str, Any],
@@ -963,29 +973,7 @@ def compile_team_graph(
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     topology = team_config.topology
 
-    # M3: validate topology_type is a known TopologyType enum value before dispatch.
-    if not isinstance(topology.type, TopologyType):
-        raise ValueError(
-            f"Unknown topology type: {topology.type!r}. "
-            f"Expected one of: {[t.value for t in TopologyType]}"
-        )
-
-    # Only the topologies below mount the clarification stage, so compiling a
-    # config that declares questions onto any other topology would produce a graph
-    # that silently never asks them. Preset load refuses this too, but a config can
-    # reach the compiler without re-running its validators (``model_copy`` is the
-    # obvious route), so the refusal is repeated where the graph is actually built
-    # - the last point at which the declaration and the wiring can still be
-    # compared.
-    if getattr(team_config, "clarification", None) is not None and (
-        not topology_honours_clarification(topology.type)
-    ):
-        raise ConfigError(
-            f"Team {getattr(team_config, 'id', '?')!r} declares a clarification "
-            f"questionnaire on topology {topology.type.value!r}, which compiles no "
-            f"clarification stage; the questions would never be asked. Topologies "
-            f"that ask: {sorted(CLARIFICATION_TOPOLOGIES)}."
-        )
+    _validate_compiled_topology(team_config)
 
     # interrupt_before disabled: approval flows via interrupt() inside the node only.
     interrupt_nodes: list[str] = []
@@ -1117,6 +1105,29 @@ def _star_supervisor_presentation(
     return supervisor_prompt, sv_meta
 
 
+def _route_from_plan_approval(state: TeamState) -> str:
+    next_route = state.get("next")
+    if next_route is None:
+        raise ConfigError(
+            "plan_approval routing invariant broken: 'next' was not set "
+            "before the plan_approval->route edge ran"
+        )
+    return next_route
+
+
+def _star_worker_context(
+    team_config: Any, agent_configs: dict[str, Any]
+) -> tuple[list[str], list[Any], dict[str, str]]:
+    worker_ids = [worker.agent_id for worker in team_config.workers]
+    resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
+    worker_phase_map = {
+        cfg.id: _ROLE_TO_PHASE[cfg.role]
+        for cfg in resolved_agents
+        if cfg.role in _ROLE_TO_PHASE
+    }
+    return worker_ids, resolved_agents, worker_phase_map
+
+
 def _compile_star(
     builder: StateGraph[Any, None, Any, Any],
     team_config: Any,
@@ -1133,8 +1144,9 @@ def _compile_star(
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END."""
-    worker_ids: list[str] = [w.agent_id for w in team_config.workers]
-    resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
+    worker_ids, resolved_agents, worker_phase_map = _star_worker_context(
+        team_config, agent_configs
+    )
 
     supervisor_model, sv_provider, sv_model_name = _resolve_supervisor_model(
         workspace_root,
@@ -1151,13 +1163,6 @@ def _compile_star(
         team_config,
         sv_assignment,
     )
-
-    # Derive worker_phase_map from agent roles for phase prerequisite gates.
-    worker_phase_map: dict[str, str] = {
-        cfg.id: _ROLE_TO_PHASE[cfg.role]
-        for cfg in resolved_agents
-        if cfg.role in _ROLE_TO_PHASE
-    }
 
     supervisor_node = create_supervisor_node(
         model=supervisor_model,
@@ -1249,15 +1254,6 @@ def _compile_star(
     )
 
     # Approved -> exec worker's mount; rejected -> revision worker's mount.
-    def _route_from_plan_approval(state: TeamState) -> str:
-        next_route = state.get("next")
-        if next_route is None:
-            raise ConfigError(
-                "plan_approval routing invariant broken: 'next' was not set "
-                "before the plan_approval->route edge ran"
-            )
-        return next_route
-
     builder.add_conditional_edges(
         "plan_approval",
         _route_from_plan_approval,
@@ -1366,6 +1362,17 @@ def _compile_pipeline(
     builder.add_edge(node_names[-1], GRAPH_COMPLETION_NODE)
 
 
+def _duplicate_order_entries(order: list[str]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for agent_id in order:
+        if agent_id in seen:
+            duplicates.append(agent_id)
+        else:
+            seen.add(agent_id)
+    return duplicates
+
+
 def _validate_pipeline_loop_config(
     team_config: Any,
     agent_configs: dict[str, Any],
@@ -1383,13 +1390,7 @@ def _validate_pipeline_loop_config(
         raise ConfigError("pipeline_loop topology requires loop_node to be set")
 
     if len(order) != len(set(order)):
-        seen: set[str] = set()
-        dupes: list[str] = []
-        for a in order:
-            if a in seen:
-                dupes.append(a)
-            else:
-                seen.add(a)
+        dupes = _duplicate_order_entries(order)
         raise ConfigError(
             f"pipeline_loop order for team {team_config.id!r} has duplicate "
             f"entries: {dupes}. Each agent may appear at most once."

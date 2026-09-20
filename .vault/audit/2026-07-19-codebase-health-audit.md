@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:8d1ae6188b58c5e45ef6e75e3d57ed37119ff7c2569115652269c35436b7c756'
+body_hash: 'sha256:60e39837829ab48bb16683917e019e6107f34175e971dddc7981ffdef4792fbc'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3418,3 +3418,7 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: extracted document-approval refusal, active permission request selection, and failed dispatch error mapping into focused helpers. Journal, commit, and response behavior remains in the same order.
 - Review: inspected the diff; 18 permission rejection/options/lease tests, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for the final change; type: no contract drift found. An initial import-order finding from the new type-only `Sequence` import was fixed and checks rerun.
 - Queue: three prior radon offenders in `control/permission_service.py` are closed. Its Pylint module-length and instance-attribute findings remain open. Repository-wide cyclomatic gate still has 91 offenders.
+
+### 2026-09-20 graph compiler complexity and retry review pass
+
+Implementation: extracted the wrapped worker retry decision, topology validation, star worker context, plan approval route, and pipeline-loop duplicate scan from graph compilation. Review of the actual diff found no new behavior defect. The retry ordering, clarification rejection, and duplicate diagnostics remain intact. Verification: 67 graph compiler tests passed; strict Ty, routine checks, and `git diff --check` passed. The cyclomatic gate still reports 88 offenders (down from 91), and focused strict Ruff reports eight remaining compiler parameter-count findings (down from nine). These are open quality findings, severity medium, type maintainability; continue the existing codebase-health queue until all strict gates pass. No new functional issue was surfaced by this review.

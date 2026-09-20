@@ -430,10 +430,7 @@ def _catalog_fallbacks(frozen: dict[str, Any]) -> list[dict[str, Any]]:
     return [cast("dict[str, Any]", item) for item in raw]
 
 
-def _parse_catalog_preferences(
-    frozen: dict[str, Any],
-) -> tuple[Provider, str, str, dict[str, str]]:
-    """Parse one exact schema-v1 lane without consulting current catalogs."""
+def _validate_catalog_assignment_shape(frozen: dict[str, Any]) -> None:
     primary_keys = {
         "provider",
         "execution_mode",
@@ -467,6 +464,52 @@ def _parse_catalog_preferences(
         raise ValueError("Frozen catalog assignment has invalid fields")
     if frozen.get("schema_version") != 1:
         raise ValueError("Frozen catalog assignment has an invalid schema_version")
+
+
+def _native_control_entry(raw_control: object) -> tuple[str, str]:
+    if not isinstance(raw_control, dict):
+        raise ValueError("Frozen catalog assignment has invalid native controls")
+    control = cast("dict[str, object]", raw_control)
+    if set(control) - {
+        "control_id",
+        "option_id",
+        "provider_value",
+        "display_name",
+        "option_display_name",
+    } or not {"control_id", "option_id", "provider_value"}.issubset(control):
+        raise ValueError("Frozen catalog assignment has invalid native controls")
+    control_id = control.get("control_id")
+    provider_value = control.get("provider_value")
+    if (
+        not isinstance(control_id, str)
+        or not control_id
+        or not isinstance(provider_value, str)
+        or not provider_value
+    ):
+        raise ValueError("Frozen catalog assignment has invalid native controls")
+    return control_id, provider_value
+
+
+def _parse_native_controls(raw_controls_value: object) -> dict[str, str]:
+    if not isinstance(raw_controls_value, list):
+        raise ValueError("Frozen catalog assignment has invalid native controls")
+    raw_controls = cast("list[object]", raw_controls_value)
+    if len(raw_controls) > 32:
+        raise ValueError("Frozen catalog assignment has invalid native controls")
+    controls: dict[str, str] = {}
+    for raw_control in raw_controls:
+        control_id, provider_value = _native_control_entry(raw_control)
+        if control_id in controls:
+            raise ValueError("Frozen catalog assignment has invalid native controls")
+        controls[control_id] = provider_value
+    return controls
+
+
+def _parse_catalog_preferences(
+    frozen: dict[str, Any],
+) -> tuple[Provider, str, str, dict[str, str]]:
+    """Parse one exact schema-v1 lane without consulting current catalogs."""
+    _validate_catalog_assignment_shape(frozen)
     raw_provider = (
         frozen.get("provider") if "provider" in frozen else frozen.get("provider_id")
     )
@@ -482,36 +525,7 @@ def _parse_catalog_preferences(
         raise ValueError("Frozen catalog assignment is missing its concrete model_name")
     if not isinstance(execution_mode, str) or not execution_mode.strip():
         raise ValueError("Frozen catalog assignment is missing its execution_mode")
-    raw_controls_value: object = frozen.get("controls")
-    if not isinstance(raw_controls_value, list):
-        raise ValueError("Frozen catalog assignment has invalid native controls")
-    raw_controls = cast("list[object]", raw_controls_value)
-    if len(raw_controls) > 32:
-        raise ValueError("Frozen catalog assignment has invalid native controls")
-    controls: dict[str, str] = {}
-    for raw_control in raw_controls:
-        if not isinstance(raw_control, dict):
-            raise ValueError("Frozen catalog assignment has invalid native controls")
-        control = cast("dict[str, object]", raw_control)
-        if set(control) - {
-            "control_id",
-            "option_id",
-            "provider_value",
-            "display_name",
-            "option_display_name",
-        } or not {"control_id", "option_id", "provider_value"}.issubset(control):
-            raise ValueError("Frozen catalog assignment has invalid native controls")
-        control_id = control.get("control_id")
-        provider_value = control.get("provider_value")
-        if (
-            not isinstance(control_id, str)
-            or not control_id
-            or not isinstance(provider_value, str)
-            or not provider_value
-            or control_id in controls
-        ):
-            raise ValueError("Frozen catalog assignment has invalid native controls")
-        controls[control_id] = provider_value
+    controls = _parse_native_controls(frozen.get("controls"))
     if "provenance" in frozen:
         provenance = frozen["provenance"]
         if not isinstance(provenance, dict):

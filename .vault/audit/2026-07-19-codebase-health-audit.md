@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c5c206a104429ec40ed861da46a44977878d11e21b7d462cba46f4ae1a1036f6'
+body_hash: 'sha256:c7d5bc3d1ccbcdad4abc84242b1168e10afc0e5e55504b65cff31b80ecafda1f'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3276,3 +3276,7 @@ Three medium-severity strict Ruff complexity, branch, and statement findings and
 ### 2026-09-20 gateway run admission and commit review pass
 
 Ten medium-severity strict Ruff argument-count, complexity, branch, and statement findings in the gateway run-start and commit path were resolved. Private dispatch dependencies now travel as one typed runtime; replay-safe metadata admission, SQLite creation retries, nickname/integrity-race resolution, exact commit replay, execution eligibility, and failed-commit durability classification have focused functions. Review checked that the request replay digest is stamped before drain admission, a durable insert winner keeps its gate admission even when the losing body conflicts, nickname and winnerless errors release unused admission, a terminal dispatch failure releases it, a commit replay verifies the persisted reservation and digest before repairing the broker, and a failed commit aborts only when an authoritative read proves the run absent. Seventy-seven focused gateway, digest, catalog, drain, and desktop admission tests pass; `just check-all`, `just check-type-strict`, focused Ruff/Ty/basedpyright, module complexipy, and diff check pass. Repository strict Ruff structure falls from 201 to 191; radon findings from 133 to 132; code-health function-length findings from 11 to nine and parameter-count findings from 93 to 89. No new review findings were surfaced. The gateway module-length finding remains open and its measured length rose from 2,578 to 2,619 lines during extraction; the remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 frozen catalog preference parser review pass
+
+Two medium-severity strict Ruff complexity and branch findings in frozen catalog preference parsing were resolved. Assignment shape, one native-control entry, and the bounded native-control list now have focused validators. Review checked that primary and fallback field sets remain exact, schema version and provider errors retain their order, model and execution-mode strings remain required, native-control records still refuse unknown keys, blank ids/values, duplicates, and lists over 32, and provenance remains checked after controls. Eighty-nine focused compiler and persisted-selection tests pass; `just check-all`, `just check-type-strict`, focused strict Ruff/Ty, and diff check pass. Repository strict Ruff structure falls from 191 to 189 and radon findings from 132 to 131. No new review findings were surfaced. The compiler still has two cognitive-complexity and nine strict Ruff findings, plus its module-length finding; these and the remaining repository strict backlog stay open in the audit queue.

@@ -159,6 +159,13 @@ def _read_named_check(sql: str, cursor: int) -> tuple[str | None, str, int, bool
         return None, "", cursor, False
     if check_word is None or check_word.lower() != "check":
         return None, "", cursor, True
+    return _read_named_check_body(sql, cursor, name)
+
+
+def _read_named_check_body(
+    sql: str, cursor: int, name: str
+) -> tuple[str | None, str, int, bool]:
+    """Read the balanced predicate after a named CHECK keyword."""
     cursor, valid = _skip_space_and_comments(sql, cursor)
     if not valid or cursor >= len(sql):
         return None, "", cursor, False

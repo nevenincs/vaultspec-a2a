@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:73a7a7d36cb68b325b99640b2efb0c8a893a93de2b8ad7d4e51cc698f4981633'
+body_hash: 'sha256:bb52dd48eb56035ba68fea3f8c55d96e4b9560ac6f1b822e01145a6b8109c52a'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3492,3 +3492,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: isolated immutable graph receipt matching and recovery window validation while preserving the original check order and error messages.
 - Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Recovery authority and attempt repository tests: 13 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 72 to 70 over limit. Ruff structural findings remain 146 (severity: moderate; type: code health). These existing findings remain open until zero, as does the full strict gate.
+
+### 2026-09-20 database authority validation review pass
+
+- Implementation: extracted runtime integer identity checks for run write authority and the balanced predicate reader for named SQLite CHECK constraints. Existing validation order and errors are retained.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Database authority/schema tests: 31 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 70 to 67 over limit. Ruff structural findings remain 146 (severity: moderate; type: code health). These existing findings remain open until zero, as does the full strict gate.

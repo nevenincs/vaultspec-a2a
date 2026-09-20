@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:35dda928a43a1b6da79d43ccc726fe5fcce78bc43cf5d0493ec989cdb50bda28'
+body_hash: 'sha256:86466231d3f37992d2e2404ea76651229dfb1fb179d463299292e471b8707f43'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4286,3 +4286,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, CI configuration: canonical Linux CI on `eb12c224` passed, including the full unit gate and build. The newly unblocked ARM desktop service job then failed before collecting tests: the workflow called `just test-service src/vaultspec_a2a/desktop_tests/`, but `test-service` declares no positional parameter, so just interpreted the path as another recipe name. The same invalid call appears in the other desktop matrix jobs and the Compose regression job.
 - Implementation: added a focused `test-service-path` recipe that keeps the live credential scope and canonical pytest process owner while accepting one selected path. Both workflow call sites now use it; the desktop matrix shares the corrected call.
 - Verification: `just --dry-run test-service-path src/vaultspec_a2a/desktop_tests/` expands to the intended credential-wrapped, service-marked test runner. `just check-workflow` and the CI contract guard pass. The current source commit passed `just check-strict`, dead-code burndown 0, the local full unit gate (4,582 passed, two prerequisite skips, 197 service cases deselected), and Linux canonical CI. A fresh workflow run must execute the service jobs after push. Review result is REVISION REQUIRED pending that run.
+
+### 2026-09-20 service runner and provider selector follow-up
+
+- Review finding, medium severity, CI environment: the corrected desktop service selection passed on ARM Linux, x64 Linux, and Windows. The Compose job collected 17 tests and passed 12 structural checks, but five live fixture setups failed because its self-hosted Linux runner has no Docker CLI. The job now uses GitHub-hosted Ubuntu 24.04, whose published runner image includes Docker Server and Compose. Its old self-hosted-cache comment was removed. The same live Compose selection passed locally with Docker (17 passed).
+- Review finding, medium severity, stale test selection: the provider prerequisite job named a deleted Claude MCP test file and an obsolete Codex test home, causing pytest usage exit 4 before testing. The gate now selects the current Codex CLI readiness and emitted-config tests, and the workflow installs only that CLI. Claude's strict MCP proof remains in its authenticated service lane; an installable CLI alone cannot discharge that proof. The CI-contract allow entry now matches the renamed install step.
+- Review finding, low severity, cross-platform invocation: `-m ""` arrived as a literal marker expression on Windows in the provider recipe. The explicit-node provider, cross-repository, and collect-all recipes now clear default pytest addopts with `-o addopts=` and restore strict marker/config validation, allowing service and unit nodes in one selection. The provider gate passes locally with all three current nodes. The cross-repository proof retains its declared dashboard-engine prerequisite.
+- Verification: `just check-workflow` and CI contract pass; a fresh hosted Compose and provider CI run is required. Review result is REVISION REQUIRED pending those checks.

@@ -558,18 +558,17 @@ test-lanes *ARGS:
 # Prove durable replay and lost-ack recovery across repositories (never skips).
 [group('test')]
 test-cross-repo *ARGS:
-    {{creds}} live-tests -- uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "" --require-prerequisite=dashboard-engine src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py {{ ARGS }}
+    {{creds}} live-tests -- uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -o addopts= --strict-markers --strict-config --require-prerequisite=dashboard-engine src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py {{ ARGS }}
 
-# These need the Codex and Claude CLIs on PATH and no credential whatsoever, so
-# a certification job can provision them. Selected by explicit node id and run
-# strict on purpose: a renamed or deleted gate is a usage error, and a gate that
-# skips while its CLI is installed fails the run. Credential-gated provider
-# lanes are deliberately NOT here - they need owner-supplied secrets.
+# These need the Codex CLI on PATH and no credential, so CI can provision it.
+# Explicit node ids make a renamed or deleted proof a usage error. Claude's
+# strict MCP surface proof requires an authenticated ACP session and remains
+# in its separately declared service lane.
 #
 # Run the provider gates whose prerequisite is an installable CLI (never skips).
 [group('test')]
 test-provider-gates *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "" --require-prerequisite=codex-cli --require-prerequisite=claude-cli --require-prerequisite=mcp-streamable-http src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_classify_provider_command_resolves_codex src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_codex_readiness_ready_when_installed src/vaultspec_a2a/providers/tests/test_codex_config_home.py::TestCodexEntrypointAcceptsEmittedMcpConfig::test_codex_mcp_list_accepts_the_built_config_home src/vaultspec_a2a/providers/tests/test_acp_project_mcp.py::TestAcpEntrypointAcceptsProjectedMcpConfig::test_claude_mcp_list_accepts_the_projected_config {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -o addopts= --strict-markers --strict-config --require-prerequisite=codex-cli --require-prerequisite=mcp-streamable-http src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_classify_provider_command_resolves_codex src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_codex_readiness_ready_when_installed src/vaultspec_a2a/providers/tests/test_codex_config_home_service.py::test_codex_mcp_list_accepts_the_built_config_home {{ ARGS }}
 
 # Prove gateway and worker telemetry start in a base-only installation.
 #
@@ -596,7 +595,7 @@ test-collect-service *ARGS:
 # Collect every test without the project default marker exclusion.
 [group('test')]
 test-collect-all *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "" --collect-only {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -o addopts= --strict-markers --strict-config --collect-only {{ ARGS }}
 
 # ===========================================================================
 #  build

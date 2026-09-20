@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:f825d4c439d8df6ee1b23847e57d602e4126c139d8c13746a39fdd18e31faa64'
+body_hash: 'sha256:c2c036516822a58a90e42c5029999c6095bb0dc40adb417b5dffc8068d425633'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3725,3 +3725,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted projection freshness classification and stale diagnostic merging from `enrich_snapshot_from_execution_state` in `control/projection.py`.
 - Review: inspected the combined recovery-epoch, checkpoint-availability, and checkpoint-id predicate against the original ordering. Severity/type: no defect found. Remaining complexity findings stay open.
 - Verification: Ruff selected and full checks, format, strict Ty and basedpyright, 17 API projection tests, and `git diff --check`.
+
+### 2026-09-20 active-run discovery review
+
+- Implementation: extracted selector validation, workspace normalization, candidate reconciliation, and public projection from `discover_active_runs` in `control/run_discovery_service.py`.
+- Review: inspected validation order, deadline, commit/requery, filtering, and truncation in the resulting flow. Severity/type: no new defect found. Remaining strict findings stay open in this audit queue.
+- Verification: selected and full Ruff checks, Ruff format, source Ty, 10 focused tests and one performance test. The discovered function's radon complexity decreased from 12 to 1.

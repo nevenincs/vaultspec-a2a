@@ -19,10 +19,12 @@ from .recovery_authority import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ..database import ActiveThreadProjection
     from ..database.checkpoints import Checkpointer
 
 __all__ = ["ActiveRunDiscoveryResult", "discover_active_runs"]
@@ -48,15 +50,13 @@ class ActiveRunDiscoveryResult:
     truncated: bool
 
 
-async def discover_active_runs(
-    db: AsyncSession,
+def _validate_discovery_inputs(
     *,
-    checkpointer: Checkpointer,
-    workspace_root: Path | None = None,
-    feature_tag: str | None = None,
-    limit: int = 50,
-) -> ActiveRunDiscoveryResult:
-    """Request recovery, then project a fresh bounded page of durable runs."""
+    feature_tag: str | None,
+    limit: int,
+    workspace_root: Path | None,
+) -> str | None:
+    """Validate selectors and return the workspace source for normalization."""
     if not 1 <= limit <= _MAX_DISCOVERY_RESULTS:
         raise ValueError(f"limit must be between 1 and {_MAX_DISCOVERY_RESULTS}")
     if feature_tag is not None and not 1 <= len(feature_tag) <= MAX_FEATURE_TAG_LENGTH:
@@ -75,17 +75,24 @@ async def discover_active_runs(
             "workspace_root must be between 1 and "
             f"{MAX_WORKSPACE_ROOT_LENGTH} characters"
         )
-    expected_workspace = (
-        await asyncio.to_thread(normalize_workspace_identity, expected_workspace_source)
-        if expected_workspace_source is not None
-        else None
-    )
-    page = await list_active_thread_page(
-        db,
-        limit=limit + 1,
-        workspace_root=expected_workspace,
-        feature_tag=feature_tag,
-    )
+    return expected_workspace_source
+
+
+async def _normalize_workspace_source(workspace_source: str | None) -> str | None:
+    """Normalize a supplied workspace selector outside the event loop."""
+    if workspace_source is None:
+        return None
+    return await asyncio.to_thread(normalize_workspace_identity, workspace_source)
+
+
+async def _reconcile_candidate_page(
+    db: AsyncSession,
+    checkpointer: Checkpointer,
+    page: Sequence[ActiveThreadProjection],
+    *,
+    limit: int,
+) -> None:
+    """Reconcile the bounded candidate page until its deadline expires."""
     deadline = (
         asyncio.get_running_loop().time()
         + domain_config.thread_list_checkpoint_deadline_seconds
@@ -103,13 +110,13 @@ async def discover_active_runs(
                 trigger=RecoveryTrigger.READ,
             ),
         )
-    # Re-query every projected field after reconciliation, including deletion
-    # and a different winner. The first page was only a candidate list.
-    await db.commit()
-    page = await list_active_thread_page(
-        db, limit=limit + 1, workspace_root=expected_workspace, feature_tag=feature_tag
-    )
-    runs = [
+
+
+def _project_active_runs(
+    page: Sequence[ActiveThreadProjection], *, limit: int
+) -> list[ActiveRunSummary]:
+    """Project valid durable rows into the bounded public run summary."""
+    return [
         ActiveRunSummary(
             run_id=thread.id,
             status=ThreadStatus(thread.status),
@@ -118,4 +125,36 @@ async def discover_active_runs(
         for thread in page[:limit]
         if 1 <= len(thread.id) <= _MAX_RUN_ID_LENGTH
     ]
-    return ActiveRunDiscoveryResult(runs=runs, truncated=len(page) > limit)
+
+
+async def discover_active_runs(
+    db: AsyncSession,
+    *,
+    checkpointer: Checkpointer,
+    workspace_root: Path | None = None,
+    feature_tag: str | None = None,
+    limit: int = 50,
+) -> ActiveRunDiscoveryResult:
+    """Request recovery, then project a fresh bounded page of durable runs."""
+    expected_workspace_source = _validate_discovery_inputs(
+        feature_tag=feature_tag,
+        limit=limit,
+        workspace_root=workspace_root,
+    )
+    expected_workspace = await _normalize_workspace_source(expected_workspace_source)
+    page = await list_active_thread_page(
+        db,
+        limit=limit + 1,
+        workspace_root=expected_workspace,
+        feature_tag=feature_tag,
+    )
+    await _reconcile_candidate_page(db, checkpointer, page, limit=limit)
+    # Re-query every projected field after reconciliation, including deletion
+    # and a different winner. The first page was only a candidate list.
+    await db.commit()
+    page = await list_active_thread_page(
+        db, limit=limit + 1, workspace_root=expected_workspace, feature_tag=feature_tag
+    )
+    return ActiveRunDiscoveryResult(
+        runs=_project_active_runs(page, limit=limit), truncated=len(page) > limit
+    )

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:6b10555c665e306806883e1cc3b3fe8469376e25e3a7457e04a9379669c646b3'
+body_hash: 'sha256:2b1f3f7dd2c18647a710958a8c59a34590355f39b48fbfb5033f9814a7653fb8'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3960,3 +3960,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 
 - Medium / maintainability: `api/app.py` desktop discovery heartbeat exceeded the strict five-parameter limit. Grouped its immutable inputs in a frozen slotted `_DesktopDiscoveryHeartbeatConfig`; the write call and log path still read the same values. Review found no behavior change. Ruff, formatter, Ty, and 11 focused API tests pass; the app file has zero PLR0913 findings.
 - Remaining queue: other strict parameter-count findings remain open.
+
+### 2026-09-20 worker management split review
+
+- High / maintainability: `control/worker_management.py` exceeded the 1000-line strict limit. Extracted worker health and liveness, process shutdown, and readiness admission into three modules; the spawner/watchdog facade is now 874 lines. Review checked logger category, lifetime identity, retained-process cleanup, and import compatibility. Strict Ty, 73 focused worker lifecycle tests, import loadability (289 modules), Ruff, formatter, and zero unconsumed exports pass. No behavior finding remains from this pass.
+- Medium / integration: moved private helpers initially broke strict imports and export diagnostics. Explicit reexports restored the existing test and gateway surface. Removed two orphaned module constants left by extraction.
+- Remaining queue: 2 oversized modules and strict parameter, Ruff, preview nesting, and Pylint findings remain open.

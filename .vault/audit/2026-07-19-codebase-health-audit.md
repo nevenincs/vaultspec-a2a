@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:d0da6d096c8a0f019beff0981cf19c973e70b2f7684bb24b4ce2863af0617d33'
+body_hash: 'sha256:9c4498275ead3d9274ae3a772d5b0d3989299044961b2153077840b2d37011bb'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3446,3 +3446,7 @@ Implementation: separated command text, file-change locations, MCP tool text, an
 ### 2026-09-20 gateway and worker pairing review pass
 
 Implementation: shared band lookup between gateway dispatch and worker heartbeat pairing, isolated the explicit/learned gateway decision, and parsed reported generations in a focused helper. Actual diff review found no new behavior defect: missing configuration and roles still pass through, live band records still govern refusal and learning, diagnostic messages remain unchanged, and malformed worker generations still fail closed. Verification: 17 pairing tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 83 to 81 offenders; this module has zero radon offenders (down from two) and zero focused strict Ruff structure findings (down from two). Remaining repository findings stay open, severity medium, type maintainability, in the existing codebase-health queue.
+
+### 2026-09-20 provider catalog cache and model validation review pass
+
+Implementation: separated advertised-control validation, cache freshness and suppression checks, loader failure fencing, and catalog storage from the provider catalog cache read path. Actual diff review found no new behavior defect: the cache still checks freshness before suppression on ordinary reads, bypasses suppression on forced refreshes, rechecks under the lane lock, records only fence-clean loader failures, and fences storage after invalidation. Verification: 24 focused catalog/selection tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 81 to 79 offenders; this module has zero radon offenders (down from two) and two fewer focused strict Ruff structure findings. The remaining `StructuredProviderHealth.derive` parameter-count finding and other repository findings remain open, severity medium, type maintainability, in the existing codebase-health queue.

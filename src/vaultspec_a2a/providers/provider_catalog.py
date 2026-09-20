@@ -365,13 +365,7 @@ class ProviderCatalog:
             tuple(control.control_id for control in self.native_controls),
             "native control ids",
         )
-        known_control_ids = {control.control_id for control in self.native_controls}
-        for model in self.models:
-            unknown = set(model.native_control_ids) - known_control_ids
-            if unknown:
-                raise ValueError(
-                    "model native_control_ids must name advertised controls"
-                )
+        _validate_model_controls(self.models, self.native_controls)
         if self.state.status in {CatalogStatus.UNAVAILABLE, CatalogStatus.UNKNOWN} and (
             self.models
         ):
@@ -382,6 +376,16 @@ class ProviderCatalog:
         return next(
             (model for model in self.models if model.entry_id == entry_id), None
         )
+
+
+def _validate_model_controls(
+    models: tuple[ModelCatalogEntry, ...], controls: tuple[NativeControl, ...]
+) -> None:
+    known_control_ids = {control.control_id for control in controls}
+    for model in models:
+        unknown = set(model.native_control_ids) - known_control_ids
+        if unknown:
+            raise ValueError("model native_control_ids must name advertised controls")
 
 
 @dataclass(frozen=True, slots=True)
@@ -616,6 +620,57 @@ class CatalogRefreshCache:
         entry = self._entries.get(key)
         return None if entry is None else self._snapshot(entry, monotonic())
 
+    async def _load_catalog(
+        self, key: ProviderCatalogKey, loader: CatalogLoader, generation: int
+    ) -> ProviderCatalog:
+        try:
+            catalog = await loader(key)
+        except Exception as exc:
+            # Invalidation supersedes a failing in-flight refresh.
+            if self._generations.get(key, 0) == generation:
+                self._record_failure(key, type(exc).__name__)
+            raise
+        if catalog.key != key:
+            raise ValueError("catalog loader returned a different provider lane")
+        return catalog
+
+    async def _store_catalog(
+        self, key: ProviderCatalogKey, catalog: ProviderCatalog, generation: int
+    ) -> CatalogCacheSnapshot:
+        refreshed_at = datetime.now(UTC)
+        expires_at = refreshed_at + self._ttl
+        if catalog.state.expires_at is not None:
+            expires_at = min(expires_at, catalog.state.expires_at)
+        if catalog.state.status is CatalogStatus.STALE:
+            expires_at = refreshed_at
+        lifetime = max(0.0, (expires_at - refreshed_at).total_seconds())
+        stored = _StoredCatalog(
+            catalog=catalog,
+            refreshed_at=refreshed_at,
+            expires_at=expires_at,
+            deadline=monotonic() + lifetime,
+        )
+        async with self._index_lock:
+            if self._generations.get(key, 0) != generation:
+                raise CatalogRefreshInvalidatedError(
+                    "catalog lane was invalidated during refresh"
+                )
+            self._make_capacity(key, monotonic())
+            self._entries[key] = stored
+            self._failures.pop(key, None)
+        return self._snapshot(stored, monotonic())
+
+    def _available_snapshot(
+        self, key: ProviderCatalogKey, now: float
+    ) -> CatalogCacheSnapshot | None:
+        current = self._entries.get(key)
+        if current is not None and now < current.deadline:
+            return self._snapshot(current, now)
+        suppressed = self._suppression(key, now)
+        if suppressed is not None:
+            raise suppressed
+        return None
+
     async def get(
         self,
         key: ProviderCatalogKey,
@@ -627,69 +682,31 @@ class CatalogRefreshCache:
         now = monotonic()
         current = self._entries.get(key)
         observed = current
-        if not force_refresh and current is not None and now < current.deadline:
-            return self._snapshot(current, now)
         # An explicit refresh is a caller asking to retry now, so it is never
         # suppressed; an ordinary read of a recently-failed lane is.
         if not force_refresh:
-            suppressed = self._suppression(key, now)
-            if suppressed is not None:
-                raise suppressed
+            available = self._available_snapshot(key, now)
+            if available is not None:
+                return available
 
         lane = await self._lock_for(key)
         try:
             async with lane.lock:
                 now = monotonic()
                 current = self._entries.get(key)
-                if not force_refresh and current is not None and now < current.deadline:
-                    return self._snapshot(current, now)
                 if force_refresh and current is not None and current is not observed:
                     return self._snapshot(current, now)
                 # Re-checked under the lane lock: the whole point of negative
                 # caching is that the loser of a single-flight race must not run
                 # the discovery the winner just proved is failing.
                 if not force_refresh:
-                    suppressed = self._suppression(key, now)
-                    if suppressed is not None:
-                        raise suppressed
+                    available = self._available_snapshot(key, now)
+                    if available is not None:
+                        return available
 
                 generation = self._generations.get(key, 0)
-                try:
-                    catalog = await loader(key)
-                except Exception as exc:
-                    # Only fence-clean failures are remembered. A lane invalidated
-                    # mid-flight was explicitly asked to refresh, so suppressing
-                    # its next read would answer that request with the very
-                    # attempt it superseded.
-                    if self._generations.get(key, 0) == generation:
-                        self._record_failure(key, type(exc).__name__)
-                    raise
-                if catalog.key != key:
-                    raise ValueError(
-                        "catalog loader returned a different provider lane"
-                    )
-                refreshed_at = datetime.now(UTC)
-                expires_at = refreshed_at + self._ttl
-                if catalog.state.expires_at is not None:
-                    expires_at = min(expires_at, catalog.state.expires_at)
-                if catalog.state.status is CatalogStatus.STALE:
-                    expires_at = refreshed_at
-                lifetime = max(0.0, (expires_at - refreshed_at).total_seconds())
-                stored = _StoredCatalog(
-                    catalog=catalog,
-                    refreshed_at=refreshed_at,
-                    expires_at=expires_at,
-                    deadline=monotonic() + lifetime,
-                )
-                async with self._index_lock:
-                    if self._generations.get(key, 0) != generation:
-                        raise CatalogRefreshInvalidatedError(
-                            "catalog lane was invalidated during refresh"
-                        )
-                    self._make_capacity(key, monotonic())
-                    self._entries[key] = stored
-                    self._failures.pop(key, None)
-                return self._snapshot(stored, monotonic())
+                catalog = await self._load_catalog(key, loader, generation)
+                return await self._store_catalog(key, catalog, generation)
         finally:
             await self._release_lock(key, lane)
 

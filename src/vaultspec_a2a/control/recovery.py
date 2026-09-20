@@ -59,6 +59,22 @@ def _bounded_detail(detail: str | None) -> str | None:
     return detail.replace("\r", " ").replace("\n", " ")[:_MAX_DETAIL_CHARS]
 
 
+def _validate_recovery_window(
+    observed_at: datetime,
+    next_eligible_at: datetime,
+    deadline_at: datetime,
+    action_type: ControlActionType,
+) -> None:
+    if next_eligible_at < observed_at:
+        raise ValueError("next_eligible_at cannot precede observed_at")
+    if deadline_at <= observed_at:
+        raise ValueError("deadline_at must be later than observed_at")
+    if next_eligible_at > deadline_at:
+        raise ValueError("next_eligible_at cannot exceed deadline_at")
+    if action_type not in RECOVERY_ACTION_TYPES:
+        raise ValueError("action type is not recoverable")
+
+
 async def record_recovery_failure(
     session: AsyncSession,
     *,
@@ -71,14 +87,9 @@ async def record_recovery_failure(
     detail: str | None,
 ) -> RecoveryAttemptModel:
     """Create or advance the sole retry record for an exact run writer."""
-    if next_eligible_at < observed_at:
-        raise ValueError("next_eligible_at cannot precede observed_at")
-    if deadline_at <= observed_at:
-        raise ValueError("deadline_at must be later than observed_at")
-    if next_eligible_at > deadline_at:
-        raise ValueError("next_eligible_at cannot exceed deadline_at")
-    if authority.action_type not in RECOVERY_ACTION_TYPES:
-        raise ValueError("action type is not recoverable")
+    _validate_recovery_window(
+        observed_at, next_eligible_at, deadline_at, authority.action_type
+    )
 
     owns_thread = await session.scalar(
         select(ThreadModel.id)

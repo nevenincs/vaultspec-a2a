@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:d6e2aec7126fbe85fa41b1b0a0e4ecef12692f0c4604025c342b152f720db995'
+body_hash: 'sha256:73a7a7d36cb68b325b99640b2efb0c8a893a93de2b8ad7d4e51cc698f4981633'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3486,3 +3486,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: normalized request metadata in a focused helper and isolated the current receipt identity check. The original ordering of option validation after thread lookup is preserved.
 - Review: inspected the diff. A low-severity behavioral ordering issue (type: validation timing) surfaced during review and was fixed before commit: option validation had moved before the absent-thread guard. No unresolved new findings remain. Permission/event tests: 33 passed; `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 73 to 72 over limit; this module now has no functions above 10. Repository-wide Ruff structural findings remain 146 (severity: moderate; type: code health). Full strict gate remains open, and these existing findings remain queued for zero.
+
+### 2026-09-20 accepted graph and recovery window review pass
+
+- Implementation: isolated immutable graph receipt matching and recovery window validation while preserving the original check order and error messages.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Recovery authority and attempt repository tests: 13 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 72 to 70 over limit. Ruff structural findings remain 146 (severity: moderate; type: code health). These existing findings remain open until zero, as does the full strict gate.

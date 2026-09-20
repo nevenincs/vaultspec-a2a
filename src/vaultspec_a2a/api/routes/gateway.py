@@ -59,7 +59,7 @@ from ...control.health import (
     build_full_health,
     probe_engine_discovery_freshness,
 )
-from ...control.message_service import send_followup_message
+from ...control.message_service import MessageResult, send_followup_message
 from ...control.permission_service import (
     PermissionInput,
     PermissionRuntime,
@@ -444,29 +444,28 @@ class _RunWinner:
     metadata_json: str | None
 
 
+def _run_metadata_with_request_fields(body: RunStartRequest) -> ThreadMetadata | None:
+    # Keep process_metadata's enrichment off the request used for replay digest.
+    metadata = (
+        body.metadata.model_copy(deep=True) if body.metadata is not None else None
+    )
+    if body.feature_tag and metadata is not None:
+        metadata = metadata.model_copy(update={"feature_tag": body.feature_tag})
+    # The worker resolves this opaque batch id through the engine read route.
+    if body.feedback_batch_id and metadata is not None:
+        metadata = metadata.model_copy(
+            update={"feedback_batch_id": body.feedback_batch_id}
+        )
+    return metadata
+
+
 async def _prepare_run_admission(
     request: Request, body: RunStartRequest, commit_binding: _RunLeaseBinding | None
 ) -> _RunAdmission:
     run_id = body.run_id
     # Thread the target feature onto the metadata so it reaches dispatch and the
     # vault index; the top-level field is authoritative when both are present.
-    # ``process_metadata`` enriches its input with the generated nickname and
-    # discovered context. Keep that durable enrichment off the request object:
-    # the replay digest describes what the caller sent, and the same request on
-    # a later retry has not yet been enriched.
-    metadata = (
-        body.metadata.model_copy(deep=True) if body.metadata is not None else None
-    )
-    if body.feature_tag and metadata is not None:
-        metadata = metadata.model_copy(update={"feature_tag": body.feature_tag})
-    # Thread the opaque feedback-batch id onto the metadata the same way, so it
-    # reaches dispatch (and persists for restart). a2a never parses it - the
-    # worker retrieves the authoritative batch from the engine read route.
-    if body.feedback_batch_id and metadata is not None:
-        metadata = metadata.model_copy(
-            update={"feedback_batch_id": body.feedback_batch_id}
-        )
-
+    metadata = _run_metadata_with_request_fields(body)
     try:
         ws_root, nickname, metadata_json = process_metadata(
             metadata, run_id, body.team_preset
@@ -1363,6 +1362,21 @@ def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:
     return json.dumps(data)
 
 
+def _legacy_lease_id(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    if (
+        1 <= len(value) <= 128
+        and value[0].isalnum()
+        and all(
+            character.isascii() and (character.isalnum() or character in {"_", "-"})
+            for character in value
+        )
+    ):
+        return value
+    return None
+
+
 def _persisted_lease_id(metadata_json: str | None) -> str | None:
     """Read current or legacy non-secret lease metadata from a durable run."""
     binding = _persisted_lease_binding(metadata_json)
@@ -1373,18 +1387,7 @@ def _persisted_lease_id(metadata_json: str | None) -> str | None:
     lease_object = coerce_object_mapping(lease)
     if lease_object is None:
         return None
-    lease_id = lease_object.get("lease_id")
-    if (
-        not isinstance(lease_id, str)
-        or not 1 <= len(lease_id) <= 128
-        or not lease_id[0].isalnum()
-        or not all(
-            character.isascii() and (character.isalnum() or character in {"_", "-"})
-            for character in lease_id
-        )
-    ):
-        return None
-    return lease_id
+    return _legacy_lease_id(lease_object.get("lease_id"))
 
 
 def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | None:
@@ -2085,6 +2088,21 @@ async def run_delete_endpoint(
 # ---------------------------------------------------------------------------
 
 
+async def _raise_for_message_dispatch_failure(
+    request: Request, result: MessageResult
+) -> None:
+    if result.failure_type is None:
+        return
+    # A failed follow-up can settle without a terminal worker event.
+    if result.thread_status == ThreadStatus.FAILED.value:
+        drain_gate = getattr(request.app.state, "drain_gate", None)
+        if drain_gate is not None:
+            await drain_gate.release(result.thread_id)
+    if result.failure_type in (FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY):
+        raise HTTPException(status_code=503, detail=result.error_detail)
+    raise HTTPException(status_code=502, detail=result.error_detail)
+
+
 @router.post(
     "/runs/{run_id}/messages",
     status_code=202,
@@ -2141,18 +2159,7 @@ async def run_message_endpoint(
     if result.dispatched:
         worker_liveness(request.app.state).record_contact()
 
-    if result.failure_type is not None:
-        # A follow-up the service resolved to FAILED settles the run terminally
-        # without a worker ever running it, so no terminal event will arrive to
-        # release its admission. Read the gate rather than seating one: a gate
-        # never created has admitted nothing.
-        if result.thread_status == ThreadStatus.FAILED.value:
-            drain_gate = getattr(request.app.state, "drain_gate", None)
-            if drain_gate is not None:
-                await drain_gate.release(result.thread_id)
-        if result.failure_type in (FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY):
-            raise HTTPException(status_code=503, detail=result.error_detail)
-        raise HTTPException(status_code=502, detail=result.error_detail)
+    await _raise_for_message_dispatch_failure(request, result)
 
     return RunMessageResponse(
         run_id=result.thread_id,
@@ -2496,6 +2503,19 @@ def route_signature(app: FastAPI) -> list[str]:
     )
 
 
+def _service_degraded_reasons(checks: dict[str, object]) -> list[str]:
+    reasons: list[str] = []
+    for name, check_value in checks.items():
+        check = coerce_object_mapping(check_value)
+        if check is None:
+            continue
+        status_value = _string_field(check, "status")
+        if status_value in _DEGRADED_CHECK_STATUSES:
+            detail = _string_field(check, "detail") or status_value
+            reasons.append(f"{name}: {detail}")
+    return reasons
+
+
 @router.get("/service", response_model=ServiceStateResponse)
 async def service_state_endpoint(
     request: Request,
@@ -2560,15 +2580,7 @@ async def service_state_endpoint(
     # Only genuine failure statuses degrade readiness; informational checks such
     # as worker_spawned ("yes"/"no") or worker_stderr_log ("configured") are not
     # degradation signals.
-    degraded_reasons: list[str] = []
-    for name, check_value in checks.items():
-        check = coerce_object_mapping(check_value)
-        if check is None:
-            continue
-        status_value = _string_field(check, "status")
-        if status_value in _DEGRADED_CHECK_STATUSES:
-            detail = _string_field(check, "detail") or status_value
-            degraded_reasons.append(f"{name}: {detail}")
+    degraded_reasons = _service_degraded_reasons(checks)
 
     return ServiceStateResponse(
         service_version=_service_version(),

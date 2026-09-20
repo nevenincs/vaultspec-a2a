@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:f969e8f615651abc5d23bb84c124e1db8999e4ce286c4ca6844f78368efb4742'
+body_hash: 'sha256:229f908c819b7d570a4cb71a45e0a30fcadefda8a3c6134e11a93c8b2c2976de'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3380,3 +3380,9 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: extracted focused helpers for control defaults, replay identity and defaults, persisted control records, and role validation. These preserve the existing error conditions and keep the execution-lane import at its original local boundary.
 - Review: inspected the diff and corrected new helper annotations to the repository `JsonObject`/`JsonValue` contract. Thirty-one provider tests, routine checks, strict type checks, focused Ruff/Pylint passed. This module has no radon function above 10. Severity: none for the final change; type: no contract drift found. The transient type diagnostics from overbroad `object` annotations were fixed before commit.
 - Queue: four prior radon offenders in `team_selection.py` are closed. The repository-wide cyclomatic gate still has 111 offenders; other strict findings remain open.
+
+### 2026-09-20 gateway projection and failure review pass
+
+- Implementation: extracted request-metadata copying, legacy lease-id validation, follow-up dispatch failure mapping, and service degradation reasons into focused helpers. Existing admission, lease, error-status, and health behavior remains in the same order.
+- Review: inspected the diff; 65 gateway/digest/drain tests, routine checks, strict type checking, focused Ruff/Pylint passed. The gateway module has no radon function above 10. Severity: none for this change; type: no contract drift found.
+- Queue: four prior radon offenders in `api/routes/gateway.py` are closed. Existing Pylint module-length and five strict Ruff endpoint parameter-count findings remain open. Repository-wide cyclomatic gate still has 107 offenders.

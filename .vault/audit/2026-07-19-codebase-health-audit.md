@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:f6c2770bec9e429bbff7e56f334a56129f4a65d0a13b52f055d1e080629ca9c8'
+body_hash: 'sha256:eb6cd8b75ec91909b685a04b9dfac8d231c251e769b16f5c86f3deb79ac1a47d'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3344,3 +3344,9 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: extracted the exact native command name predicate and preserved validation order and the existing error path.
 - Review: inspected the diff; 8 focused native command tests, routine quality gate, strict type gate, and focused strict Ruff passed. Pylint's boolean-expression finding in this function is cleared. Severity: none for the change; type: no contract drift found.
 - Queue: pre-existing Pylint `too-many-lines` and `too-many-instance-attributes` findings in `acp_chat_model.py` remain open. The remaining repository-wide strict gate findings remain open.
+
+### 2026-09-20 thread summary checkpoint review pass
+
+- Implementation: removed redundant checkpointer and tuple conditions from the stale execution-state comparison. `checkpoint_id` is assigned only when both conditions hold, so the comparison's behavior is unchanged.
+- Review: inspected the diff; 9 focused thread listing/checkpoint tests, routine quality gate, strict type gate, focused Pylint, and focused strict Ruff passed. Severity: none for this change; type: no contract drift found.
+- Queue: pre-existing Pylint instance-attribute findings in `thread_service.py` remain open. A trial split of the discovery record guard exposed a new strict Ruff return-count finding, so that trial was reverted; the existing discovery boolean-expression finding remains open.

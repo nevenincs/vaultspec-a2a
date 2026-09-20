@@ -260,10 +260,7 @@ def _summary_checkpoint_state(
     if execution_state is not None and (
         execution_state.recovery_epoch != thread.recovery_epoch
         or (
-            checkpointer_active
-            and probe.tuple is not None
-            and checkpoint_id is not None
-            and execution_state.checkpoint_id != checkpoint_id
+            checkpoint_id is not None and execution_state.checkpoint_id != checkpoint_id
         )
     ):
         repair_status, execution_readiness = _degrade_stale_execution_state_summary(

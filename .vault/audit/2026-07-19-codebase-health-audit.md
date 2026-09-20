@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:eefc5dd076b2bee09909c157c2d043450e36d71caf560689dd10230730afa58c'
+body_hash: 'sha256:885e3453ecb167c95b1a9c5abc9c2cf3203d87e926c4f71906344b323e2310a0'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3300,3 +3300,7 @@ Two medium-severity strict Ruff complexity and return-count findings in desktop 
 ### 2026-09-20 provider readiness and OpenAI catalog review pass
 
 Four medium-severity strict Ruff complexity and return-count findings were resolved. Provider readiness now delegates API-key, Z.ai, and Kimi checks; OpenAI-compatible model-list validation and bounded HTTP response handling have focused helpers. Review checked Claude/Codex command-only readiness, exact OpenAI/Zhipu/Z.ai missing-credential reasons, Kimi's partial temporary-definition refusal, 401/403 authentication mapping, pagination refusal, one-MiB response bound, model-field and duplicate validation, and stream cleanup under cancellation. Strict basedpyright exposed an imprecise extracted JSON value type; the helper now takes the exact recursive JsonValue shape. Sixty-seven focused OpenAI catalog tests, three installed Kimi middleware readiness tests, and one Codex readiness test pass. Routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 182 to 178 and cyclomatic findings from 126 to 125. No unresolved new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 IPC assignment schema review pass
+
+One medium-severity strict Ruff complexity finding in dispatch model-assignment validation was resolved. Fallback and selected-control field validation now use focused helpers with the same closed required/optional field sets. Review checked that primary lanes and provenance remain exact, malformed fallback lists and records retain their refusal messages, fallback display fields remain optional, and selected controls still reject missing or unknown fields. Nine focused IPC schema tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 178 to 177 and cyclomatic findings from 125 to 124. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:4fa31ece4679374c56cdd5f246f4865ce81d67e317bc71963b6831e2d675222d'
+body_hash: 'sha256:50e5d48e098570bd04c646ab7aed1ba2566b25037a161a020f3d1a01679705b1'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4222,3 +4222,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 
 - Review finding, medium severity, test-contract drift: the first full unit run found two cost-tracking tests asserting `cost_port` is a named `inspect.signature` parameter. The worker and compiler now accept that keyword through typed `Unpack[TypedDict]`; the tests were outdated and did not measure whether the port was accepted. They now assert the runtime function annotation names its typed keyword contract and that the contract includes `cost_port`.
 - Verification: all 40 cost-tracking tests pass after the correction; the full 4,584-case unit gate has restarted. Strict typing, scoped Ruff, and the two direct contract tests pass. Keep the broad unit result and fresh CI result open in this audit queue until complete. Review result is REVISION REQUIRED pending those runs.
+
+### 2026-09-20 CodeQL inherited-alert triage
+
+- Review finding, high severity, security: the fresh CodeQL scan on this PR still surfaced four alerts already present on `main` (alerts 1–4). Alert 1 traces the intentionally persisted worker IPC secret through the atomic writer; the caller supplies mode 0600 and owner-ACL hardening before publish, and failed hardening removes the temporary file. Alerts 2 and 3 trace authenticated caller-selected workspace directories to existence checks; those endpoints are designed to accept that directory and do not read arbitrary file content at the flagged operation. Alert 4 traces a team-config path to its file opener; safe filename grammar and canonical containment now prevent workspace override escape. These are false positives under the documented local ownership and workspace-selection contracts.
+- Action: dismissed alerts 1–4 as false positives with individual evidence comments through GitHub code scanning; the open-alert census is zero. The CodeQL check run that reported them remains failed because GitHub would not rerun that completed workflow, so a new push/scan must verify the resulting PR check state.
+- Verification: `just check-strict` passed at the second-pass code commit; the full unit gate is still running on the cost-port test correction. Review result remains REVISION REQUIRED until fresh CI and unit outcomes are known.

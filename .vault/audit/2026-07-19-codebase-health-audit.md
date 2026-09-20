@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:950c7f57154fa26a0085e866f1e75e2b31bdc5183f82e8def786d1fd9b389c98'
+body_hash: 'sha256:e482f6e5aa585871a7a07b4a1c12d40a99616368adb12a7ced4cc16428c7fff1'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3400,3 +3400,9 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Review: inspected the diff; 56 submitter tests, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for the final change; type: no contract drift found. An initial pass found two unused locals introduced by the grouping; both were removed and the gates rerun green.
 - Verification limitation (environment dependency, severity medium): four service-marked live submitter tests were deselected because this run has no live engine endpoint; engine-backed proposal replay remains unverified here.
 - Queue: three prior radon offenders and three strict Ruff findings in `authoring/submitter.py` are closed. The repository-wide cyclomatic gate still has 100 offenders; other strict findings remain open.
+
+### 2026-09-20 OpenAI-compatible catalog review pass
+
+- Implementation: extracted URL-origin validation, complete model-list shape checks, and timeout validation into focused helpers. The same fail-closed checks run in their previous order before model normalization or the HTTP request.
+- Review: inspected the diff; 26 catalog tests including real HTTP contract cases, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for this change; type: no contract drift found.
+- Queue: three prior radon offenders in `providers/openai_catalog.py` are closed. Repository-wide cyclomatic gate still has 97 offenders and other strict findings remain open.

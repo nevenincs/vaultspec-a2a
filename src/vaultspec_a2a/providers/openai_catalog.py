@@ -75,13 +75,7 @@ def _protocol_error(message: str) -> OpenAICompatibleCatalogError:
 _FIELDS: Final = CatalogFieldReader(_protocol_error)
 
 
-def _models_url(base_url: str) -> str:
-    if not base_url or base_url != base_url.strip():
-        raise ValueError("base_url must be a normalized non-blank string")
-    try:
-        parsed = httpx.URL(base_url)
-    except httpx.InvalidURL:
-        raise ValueError("base_url must be an absolute HTTP(S) URL") from None
+def _validate_models_origin(parsed: httpx.URL) -> None:
     if (
         parsed.scheme not in {"http", "https"}
         or not parsed.host
@@ -95,6 +89,16 @@ def _models_url(base_url: str) -> str:
         )
     if parsed.scheme == "http" and parsed.host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("base_url must use HTTPS unless it is loopback")
+
+
+def _models_url(base_url: str) -> str:
+    if not base_url or base_url != base_url.strip():
+        raise ValueError("base_url must be a normalized non-blank string")
+    try:
+        parsed = httpx.URL(base_url)
+    except httpx.InvalidURL:
+        raise ValueError("base_url must be an absolute HTTP(S) URL") from None
+    _validate_models_origin(parsed)
     path = parsed.path.rstrip("/")
     return str(parsed.copy_with(path=f"{path}/models" if path else "/models"))
 
@@ -168,13 +172,7 @@ def _validated_model_values(raw_models: Sequence[JsonValue]) -> set[str]:
     return model_values
 
 
-def catalog_from_model_list(
-    result: JsonObject,
-    *,
-    key: ProviderCatalogKey,
-    checked_at: datetime | None = None,
-) -> ProviderCatalog:
-    """Normalize only opaque model IDs from one complete model-list response."""
+def _validated_model_list_items(result: JsonObject) -> list[JsonValue]:
     has_more = result.get("has_more")
     if has_more is not None and not isinstance(has_more, bool):
         raise OpenAICompatibleCatalogError(
@@ -201,6 +199,17 @@ def catalog_from_model_list(
         raise OpenAICompatibleCatalogError(
             f"OpenAI-compatible model-list exceeds {MAX_MODELS} models"
         )
+    return raw_models
+
+
+def catalog_from_model_list(
+    result: JsonObject,
+    *,
+    key: ProviderCatalogKey,
+    checked_at: datetime | None = None,
+) -> ProviderCatalog:
+    """Normalize only opaque model IDs from one complete model-list response."""
+    raw_models = _validated_model_list_items(result)
     model_values = _validated_model_values(raw_models)
     now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     if not model_values:
@@ -264,6 +273,11 @@ async def _read_model_list_response(
     return bytes(body)
 
 
+def _validate_discovery_timeout(timeout: float) -> None:
+    if isinstance(timeout, bool) or not isfinite(float(timeout)) or timeout <= 0:
+        raise ValueError("timeout must be positive")
+
+
 async def discover_openai_compatible_catalog(
     *,
     base_url: str,
@@ -282,8 +296,7 @@ async def discover_openai_compatible_catalog(
             authentication=AuthenticationState.UNAUTHENTICATED,
         )
     bearer = _api_key(api_key)
-    if isinstance(timeout, bool) or not isfinite(float(timeout)) or timeout <= 0:
-        raise ValueError("timeout must be positive")
+    _validate_discovery_timeout(timeout)
     try:
         async with (
             asyncio.timeout(float(timeout)),

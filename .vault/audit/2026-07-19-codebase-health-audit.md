@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:2e3c066a127eed93722da83fd6ebe9bd97248a3c67a109d019c8ce5c23ba7ce9'
+body_hash: 'sha256:9702b2e11fddb98f4c9fe50bbd838705f3a90871fd48c42bdf495d0005234959'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4318,3 +4318,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, test isolation: the Linux canonical run on `80fe5f41` passed 4,565 tests but failed the combined exact-replay/release-race test when the race phase's first prepare returned 503 `run admission is not execution-ready`. The replay phase had already committed a run under the same gateway and worker. The 503 is a readiness response before the race exists, so it does not test the intended release/commit linearization. The CI log did not include gateway health details; the exact readiness cause remains unproven.
 - Implementation: the independent replay and release/commit race assertions now run as separate tests, each with its own freshly armed real gateway, worker, migrated database, and catalog warmup. This preserves both contracts while removing cross-phase worker state from the race setup. No production behavior or 503 response rule was changed.
 - Verification: both focused real-process tests pass locally; scoped Ruff and formatting pass. Strict and Linux CI reruns remain required. Review result is REVISION REQUIRED pending those gates.
+
+### 2026-09-20 ready-review validation correction
+
+- Review finding, medium severity, false-green CI review: the pinned parent Claude action ran but reported SUCCESS after skipping the review. Its OIDC token exchange rejected the PR workflow because Anthropic requires its content to be identical to the repository default branch; no code review or comments were produced. The preceding action-policy entry documents the pin as an attempted implementation, not a completed review.
+- Implementation: restored both Claude workflow files to their exact default-branch content. The repository selected-actions policy still permits only the exact nested Bun action SHA observed in the parent action manifest. A parent-action pin on this PR cannot coexist with Anthropic's default-branch workflow validation; future pinning would need to land on the default branch first. The moving parent reference remains a classified low-severity workflow supply-chain follow-up, with the exact nested allowlist acting as a visible failure boundary if it changes.
+- Verification: both workflow files now match `origin/main` byte-for-byte; local workflow lint and CI contract must pass after this correction. A fresh ready-review run must execute an actual review before this pass can close. Review result is REVISION REQUIRED pending that evidence.

@@ -54,6 +54,7 @@ from ...control.clarification_service import (
 from ...control.config import settings
 from ...control.drain import DrainGate
 from ...control.health import (
+    FullHealthRuntime,
     assemble_desktop_readiness,
     build_full_health,
     probe_engine_discovery_freshness,
@@ -2526,9 +2527,11 @@ async def service_state_endpoint(
     db, _aggregator, _checkpointer, worker_client = services
     full = await build_full_health(
         db=db,
-        worker_client=worker_client,
-        circuit_breaker=circuit_breaker,
-        worker_spawner=worker_spawner,
+        runtime=FullHealthRuntime(
+            worker_client=worker_client,
+            circuit_breaker=circuit_breaker,
+            worker_spawner=worker_spawner,
+        ),
         app_state=request.app.state,
         # This surface is attach-authenticated, which is the only place the
         # pairing identity may be disclosed; the unauthenticated health endpoint

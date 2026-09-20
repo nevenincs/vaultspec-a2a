@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:e324777984c515cb68f65b89b2a974f9dc75cbb3c69824b2b565e731f6e98670'
+body_hash: 'sha256:eae25038919b0fed9485730660fae9ec858d3abad50f9cfd68032aef90c3f667'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3324,3 +3324,7 @@ One medium-severity strict Ruff statement-count finding in executor ingest admis
 ### 2026-09-20 desktop readiness ladder review pass
 
 Two medium-severity strict Ruff complexity and branch findings in desktop readiness assembly were resolved. Worker lifecycle selection, pending-worker evidence, and run-admission classification now have focused helpers. Review checked that an unspawned worker needs both a successful live probe and adoption provenance before promotion, a pending worker accepts a heartbeat only when the live probe has no verdict, an explicit failed probe takes precedence, down/restarting workers stay unavailable, and database or recovery-owner failure blocks admission. The first extraction introduced a second radon offender; focused pending-worker and admission helpers resolved it before commit. Eleven desktop readiness/admission and health tests passed during implementation; five focused worker-state and database-health tests pass after the final extraction. Routine gates, strict Ty/basedpyright, focused Ruff, and diff check pass. Strict Ruff structure falls from 170 to 168 and cyclomatic findings from 123 to 122. The existing cognitive-complexity findings in assemble_health_status and build_full_health remain open, alongside the remaining strict backlog. No unresolved new review findings were surfaced.
+
+### 2026-09-20 shared and full health projection review pass
+
+One medium-severity strict Ruff parameter-count finding, two cognitive-complexity findings, and two cyclomatic findings in shared and full health assembly were resolved. Worker status/restart projection and database, checkpointer, and worker probes now have focused helpers. A typed FullHealthRuntime carries the three live probe dependencies into both authenticated service-state and unarmed health callers. Review checked worker observation order, default restart fields, live database and informational journal verdicts, checkpoint timeout/failure details, exact worker HTTP 200 authority, pairing identity only when explicitly requested by the authenticated caller, and the existing overall readiness predicate. Thirty live gateway tests and five focused health/readiness tests pass; routine gates, strict Ty/basedpyright, module complexipy, focused Ruff, and diff check pass. Focused Pylint reports only two existing gateway-module findings. Strict Ruff structure falls from 168 to 167 and cyclomatic findings from 122 to 120. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue. A mistyped audit body-file command briefly displaced the earlier corpus; the committed body was restored through the vault CLI and the final diff checked before commit.

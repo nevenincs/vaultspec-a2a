@@ -38,6 +38,7 @@ from ..control.config import settings
 from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
 from ..control.health import (
+    FullHealthRuntime,
     assemble_health_status,
     build_full_health,
     build_sqlite_fallback_diagnostics,
@@ -155,9 +156,11 @@ async def _unarmed_health_aggregate(app: FastAPI, db: AsyncSession) -> dict[str,
         }
     return await build_full_health(
         db=db,
-        worker_client=app.state.worker_client,
-        circuit_breaker=app.state.circuit_breaker,
-        worker_spawner=app.state.worker_spawner,
+        runtime=FullHealthRuntime(
+            worker_client=app.state.worker_client,
+            circuit_breaker=app.state.circuit_breaker,
+            worker_spawner=app.state.worker_spawner,
+        ),
         app_state=app.state,
     )
 

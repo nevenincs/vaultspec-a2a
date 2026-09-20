@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -60,6 +61,7 @@ if TYPE_CHECKING:
     from .circuit_breaker import WorkerCircuitBreaker
 
 __all__ = [
+    "FullHealthRuntime",
     "assemble_desktop_readiness",
     "assemble_health_status",
     "build_full_health",
@@ -316,6 +318,52 @@ def _reported_str(body: Mapping[str, object] | None, key: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _worker_restart_fields(ws: WorkerState | None) -> dict[str, object]:
+    return {
+        "worker_restart_count": ws.worker_restart_count if ws is not None else 0,
+        "worker_last_restart_reason": ws.worker_last_restart_reason
+        if ws is not None
+        else None,
+        "worker_last_restart_detail": ws.worker_last_restart_detail
+        if ws is not None
+        else None,
+        "worker_last_restart_started_at": ws.worker_last_restart_started_at
+        if ws is not None
+        else None,
+        "worker_last_restart_completed_at": ws.worker_last_restart_completed_at
+        if ws is not None
+        else None,
+        "worker_last_restart_succeeded": ws.worker_last_restart_succeeded
+        if ws is not None
+        else None,
+        "worker_last_restart_attempts": ws.worker_last_restart_attempts
+        if ws is not None
+        else 0,
+        "worker_stderr_log_path": ws.worker_stderr_log_path if ws is not None else None,
+    }
+
+
+def _worker_health_fields(app_state: object) -> dict[str, object]:
+    spawner_value: object = getattr(app_state, "worker_spawner", None)
+    spawner = spawner_value if isinstance(spawner_value, LazyWorkerSpawner) else None
+    worker_spawned = spawner.spawned if spawner is not None else False
+    worker_pid = (
+        spawner.process.pid if spawner is not None and spawner.process else None
+    )
+    worker_connected = worker_liveness(app_state).is_fresh()
+    worker_state_value: object = getattr(app_state, "worker_state", None)
+    ws = worker_state_value if isinstance(worker_state_value, WorkerState) else None
+    return {
+        "worker_connected": worker_connected,
+        "worker_spawned": worker_spawned,
+        "worker_pid": worker_pid,
+        "worker_status": ws.worker_status
+        if ws is not None
+        else WorkerConnectionStatus.UNKNOWN.value,
+        **_worker_restart_fields(ws),
+    }
+
+
 def assemble_health_status(
     *,
     app_state: object,
@@ -344,43 +392,7 @@ def assemble_health_status(
     cb = cb_value if isinstance(cb_value, WorkerCircuitBreaker) else None
     cb_state = cb.state if cb is not None else "unknown"
 
-    # --- Spawner ---
-    spawner_value: object = getattr(app_state, "worker_spawner", None)
-    spawner = spawner_value if isinstance(spawner_value, LazyWorkerSpawner) else None
-    worker_spawned = spawner.spawned if spawner is not None else False
-    worker_pid = (
-        spawner.process.pid if spawner is not None and spawner.process else None
-    )
-
-    # --- Worker heartbeat ---
-    worker_connected = worker_liveness(app_state).is_fresh()
-
-    # --- Worker state ---
-    worker_state_value: object = getattr(app_state, "worker_state", None)
-    ws = worker_state_value if isinstance(worker_state_value, WorkerState) else None
-    worker_status = (
-        ws.worker_status if ws is not None else WorkerConnectionStatus.UNKNOWN.value
-    )
-    worker_restart_count = ws.worker_restart_count if ws is not None else 0
-    worker_last_restart_reason = (
-        ws.worker_last_restart_reason if ws is not None else None
-    )
-    worker_last_restart_detail = (
-        ws.worker_last_restart_detail if ws is not None else None
-    )
-    worker_last_restart_started_at = (
-        ws.worker_last_restart_started_at if ws is not None else None
-    )
-    worker_last_restart_completed_at = (
-        ws.worker_last_restart_completed_at if ws is not None else None
-    )
-    worker_last_restart_succeeded = (
-        ws.worker_last_restart_succeeded if ws is not None else None
-    )
-    worker_last_restart_attempts = (
-        ws.worker_last_restart_attempts if ws is not None else 0
-    )
-    worker_stderr_log_path = ws.worker_stderr_log_path if ws is not None else None
+    worker_fields = _worker_health_fields(app_state)
 
     # --- Repair summary ---
     repair_summary_value: object = getattr(app_state, "repair_summary", None)
@@ -420,18 +432,7 @@ def assemble_health_status(
 
     return {
         "circuit_breaker": cb_state,
-        "worker_connected": worker_connected,
-        "worker_spawned": worker_spawned,
-        "worker_pid": worker_pid,
-        "worker_status": worker_status,
-        "worker_restart_count": worker_restart_count,
-        "worker_last_restart_reason": worker_last_restart_reason,
-        "worker_last_restart_detail": worker_last_restart_detail,
-        "worker_last_restart_started_at": worker_last_restart_started_at,
-        "worker_last_restart_completed_at": worker_last_restart_completed_at,
-        "worker_last_restart_succeeded": worker_last_restart_succeeded,
-        "worker_last_restart_attempts": worker_last_restart_attempts,
-        "worker_stderr_log_path": worker_stderr_log_path,
+        **worker_fields,
         "database_backend": settings.resolved_database_backend,
         "checkpoint_backend": settings.resolved_checkpoint_backend,
         "postgres_required": settings.postgres_required,
@@ -671,35 +672,7 @@ async def probe_desktop_readiness(
     )
 
 
-async def build_full_health(
-    *,
-    db: AsyncSession,
-    worker_client: httpx.AsyncClient,
-    circuit_breaker: WorkerCircuitBreaker,
-    worker_spawner: LazyWorkerSpawner,
-    app_state: object,
-    include_pairing: bool = False,
-) -> dict[str, object]:
-    """Run all health probes and return the complete readiness payload.
-
-    This is the service-layer orchestration ``/health`` serves unarmed.
-    It runs the DB probe, worker HTTP check, checkpoint presence test,
-    circuit breaker and spawner inspection, then computes overall readiness.
-
-    *include_pairing* adds what the worker reported about which gateway
-    incarnation spawned it. It is opt-in and defaults off because this payload
-    is served verbatim on the UNAUTHENTICATED health endpoint under the Compose
-    and development profiles, and the gateway's lifetime identity is exactly the
-    value a port squatter must not be able to learn: the armed adoption check
-    trusts it precisely because it is unguessable. Only the attach-authenticated
-    readiness surface asks for it.
-    """
-    shared = assemble_health_status(app_state=app_state)
-
-    checks: dict[str, dict[str, str]] = {}
-    checks["gateway"] = {"status": "ok"}
-
-    # --- Database probe ---
+async def _database_health_check(db: AsyncSession, app_state: object) -> dict[str, str]:
     database_check: dict[str, str] = {
         "status": "ok" if await probe_database_ready(db) else "error",
         "backend": settings.resolved_database_backend,
@@ -707,13 +680,7 @@ async def build_full_health(
     }
     if database_check["status"] == "error":
         database_check["detail"] = "database probe failed"
-
-    # --- Journal-mode verification ---
-    # WAL is requested per connection and can be silently refused by the file
-    # system, and nothing else in the process ever re-checks. Reporting the mode
-    # actually in force is informational, not a failure: an in-memory store has no
-    # journal to keep, and a rollback-journal database still serves correctly - it
-    # just serialises the concurrent readers this design assumes.
+    # Journal mode is informational: rollback journals still serve requests.
     journal_mode = await probe_journal_mode(app_state)
     if journal_mode is not None:
         database_check["journal_mode"] = journal_mode
@@ -724,9 +691,10 @@ async def build_full_health(
                 "network or read-only filesystem.",
                 journal_mode,
             )
-    checks["database"] = database_check
+    return database_check
 
-    # --- Checkpointer probe ---
+
+async def _checkpoint_health_check(app_state: object) -> dict[str, str]:
     checkpointer = getattr(app_state, "checkpointer", None)
     checkpoint_check: dict[str, str] = {
         "backend": settings.resolved_checkpoint_backend,
@@ -757,26 +725,21 @@ async def build_full_health(
             logger.exception("Health check: checkpoint probe failed")
             checkpoint_check["status"] = "error"
             checkpoint_check["detail"] = "checkpoint probe failed"
-    checks["checkpoint"] = checkpoint_check
+    return checkpoint_check
 
-    # --- Worker HTTP probe ---
-    # The single worker-health primitive, reusing the pooled client; "healthy" is an
-    # exact 200 for both this endpoint and the watchdog, so they cannot disagree.
-    # The same round trip hands back what the worker REPORTED about its pairing, so
-    # the readiness surface echoes that evidence without a second probe.
+
+async def _worker_health_check(
+    worker_client: httpx.AsyncClient, *, include_pairing: bool
+) -> tuple[dict[str, str], dict[str, object]]:
+    # The pooled-client probe is the same exact-200 authority used by the watchdog.
     worker_probe = await probe_worker_health(
         settings.worker_url, timeout=5.0, client=worker_client
     )
     if worker_probe.healthy:
-        checks["worker"] = {"status": "ok"}
+        worker_check = {"status": "ok"}
     else:
         logger.warning("Health check: worker probe failed")
-        checks["worker"] = {"status": "error", "detail": "worker probe failed"}
-
-    # Echoed, never asserted: which gateway incarnation the worker says spawned it
-    # and which spawn attempt it was. Absent when the worker did not answer or did
-    # not report them - a worker no gateway spawned reports them blank, which is
-    # the honest answer and must not be dressed up as this gateway's own identity.
+        worker_check = {"status": "error", "detail": "worker probe failed"}
     pairing: dict[str, object] = {}
     if include_pairing:
         pairing = {
@@ -787,10 +750,58 @@ async def build_full_health(
                 worker_probe.body, "worker_generation"
             ),
         }
+    return worker_check, pairing
+
+
+@dataclass(frozen=True, slots=True)
+class FullHealthRuntime:
+    worker_client: httpx.AsyncClient
+    circuit_breaker: WorkerCircuitBreaker
+    worker_spawner: LazyWorkerSpawner
+
+
+async def build_full_health(
+    *,
+    db: AsyncSession,
+    runtime: FullHealthRuntime,
+    app_state: object,
+    include_pairing: bool = False,
+) -> dict[str, object]:
+    """Run all health probes and return the complete readiness payload.
+
+    This is the service-layer orchestration ``/health`` serves unarmed.
+    It runs the DB probe, worker HTTP check, checkpoint presence test,
+    circuit breaker and spawner inspection, then computes overall readiness.
+
+    *include_pairing* adds what the worker reported about which gateway
+    incarnation spawned it. It is opt-in and defaults off because this payload
+    is served verbatim on the UNAUTHENTICATED health endpoint under the Compose
+    and development profiles, and the gateway's lifetime identity is exactly the
+    value a port squatter must not be able to learn: the armed adoption check
+    trusts it precisely because it is unguessable. Only the attach-authenticated
+    readiness surface asks for it.
+    """
+    shared = assemble_health_status(app_state=app_state)
+
+    checks: dict[str, dict[str, str]] = {}
+    checks["gateway"] = {"status": "ok"}
+
+    # --- Database probe ---
+    checks["database"] = await _database_health_check(db, app_state)
+
+    # --- Checkpointer probe ---
+    checks["checkpoint"] = await _checkpoint_health_check(app_state)
+
+    # --- Worker HTTP probe ---
+    checks["worker"], pairing = await _worker_health_check(
+        runtime.worker_client, include_pairing=include_pairing
+    )
 
     # --- Circuit breaker & spawner ---
-    checks["circuit_breaker"] = {"status": circuit_breaker.state}
-    checks["worker_spawned"] = {"status": "yes" if worker_spawner.spawned else "no"}
+    checks["circuit_breaker"] = {"status": runtime.circuit_breaker.state}
+    checks["worker_spawned"] = {
+        "status": "yes" if runtime.worker_spawner.spawned else "no"
+    }
     recovery_owner_error = shared["recovery_owner_error"]
     checks["recovery_owner"] = (
         {

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:6d1eb3394b421f9ec25ef849f82e28f90cb6913f3a57aa5c8a910bbee40794dc'
+body_hash: 'sha256:0a06eda7437129182baf68a4f6ad9864863bcd0e00f0189930483b2d758f432c'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4082,3 +4082,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: grouped required permission-request fields and optional tool/generation fields in a typed keyword contract. The repository function still receives the same named keywords and applies the same defaults, closing one parameter-count finding.
 - Review finding, low severity, signature introspection: the runtime signature now presents `**kwargs`; current callers pass named fields and the TypedDict retains required/optional checks. No caller in the repository inspects this function signature.
 - Verification: six permission-related repository tests and five permission-audit tests passed; scoped Ruff and basedpyright passed. Remaining parameter findings stay open.
+
+### 2026-09-20 control action repository parameter review
+
+- Implementation: grouped required control-action identifiers and optional journal fields into typed keyword contracts for create, get-or-create, and reserve. The same named caller arguments and defaults are accepted, closing three parameter-count findings.
+- Review finding, low severity, signature introspection: runtime signatures now present `**kwargs`; current callers use named arguments and static checks retain the required-key contract. The change carries a compatibility risk for any external runtime signature inspection, and that risk remains in the audit queue.
+- Verification: 16 focused control-action, reconciliation, and direct-control lease tests passed; scoped Ruff, Ruff format, basedpyright, and Ty passed. Remaining parameter and design findings stay open.

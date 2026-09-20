@@ -280,23 +280,59 @@ async def expire_pending_permission_requests(
     return len(permissions)
 
 
+class _ControlActionOptional(TypedDict, total=False):
+    request_id: str | None
+    payload: dict[str, object] | None
+    worker_generation: int
+    result_status: ControlActionResultStatus | str
+    dispatch_id: str | None
+    recovery_deadline_at: datetime | None
+
+
+class _ControlActionArgs(_ControlActionOptional):
+    thread_id: str
+    action_type: ControlActionType | str
+    idempotency_key: str
+
+
+class _GetOrCreateActionOptional(_ControlActionOptional, total=False):
+    absence_already_resolved: bool
+
+
+class _GetOrCreateActionArgs(_GetOrCreateActionOptional):
+    thread_id: str
+    action_type: ControlActionType | str
+    idempotency_key: str
+
+
+class _ReserveActionOptional(TypedDict, total=False):
+    request_id: str | None
+    payload: dict[str, object] | None
+    worker_generation: int
+    dispatch_id: str | None
+    recovery_deadline_at: datetime | None
+
+
+class _ReserveActionArgs(_ReserveActionOptional):
+    thread_id: str
+    action_type: ControlActionType | str
+    idempotency_key: str
+
+
 async def create_control_action(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    action_type: ControlActionType | str,
-    idempotency_key: str,
-    request_id: str | None = None,
-    payload: dict[str, object] | None = None,
-    worker_generation: int = 0,
-    result_status: ControlActionResultStatus | str = (
-        ControlActionResultStatus.ACCEPTED_NOT_APPLIED
-    ),
-    dispatch_id: str | None = None,
-    recovery_deadline_at: datetime | None = None,
+    session: AsyncSession, **kwargs: Unpack[_ControlActionArgs]
 ) -> ControlActionModel:
     """Append a durable control journal record."""
-    resolved_type = _coerce_control_action_type(action_type)
+    thread_id = kwargs["thread_id"]
+    resolved_type = _coerce_control_action_type(kwargs["action_type"])
+    request_id = kwargs.get("request_id")
+    payload = kwargs.get("payload")
+    worker_generation = kwargs.get("worker_generation", 0)
+    result_status = kwargs.get(
+        "result_status", ControlActionResultStatus.ACCEPTED_NOT_APPLIED
+    )
+    dispatch_id = kwargs.get("dispatch_id")
+    recovery_deadline_at = kwargs.get("recovery_deadline_at")
     requires_deadline = resolved_type in RECOVERY_ACTION_TYPES
     if requires_deadline != (recovery_deadline_at is not None):
         requirement = "requires" if requires_deadline else "cannot carry"
@@ -306,7 +342,7 @@ async def create_control_action(
         thread_id=thread_id,
         action_type=resolved_type.value,
         request_id=request_id,
-        idempotency_key=idempotency_key,
+        idempotency_key=kwargs["idempotency_key"],
         payload_json=_encode_payload(payload),
         worker_generation=worker_generation,
         result_status=_coerce_control_result(result_status).value,
@@ -317,20 +353,7 @@ async def create_control_action(
 
 
 async def get_or_create_control_action(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    action_type: ControlActionType | str,
-    idempotency_key: str,
-    request_id: str | None = None,
-    payload: dict[str, object] | None = None,
-    worker_generation: int = 0,
-    result_status: ControlActionResultStatus | str = (
-        ControlActionResultStatus.ACCEPTED_NOT_APPLIED
-    ),
-    dispatch_id: str | None = None,
-    recovery_deadline_at: datetime | None = None,
-    absence_already_resolved: bool = False,
+    session: AsyncSession, **kwargs: Unpack[_GetOrCreateActionArgs]
 ) -> tuple[ControlActionModel, bool]:
     """Return the journal record for ``(thread_id, idempotency_key)``, inserting it
     only when absent.
@@ -348,7 +371,9 @@ async def get_or_create_control_action(
     and its ``IntegrityError`` re-read are, precisely because a concurrent writer
     can land between any pre-read and the insert.
     """
-    if not absence_already_resolved:
+    thread_id = kwargs["thread_id"]
+    idempotency_key = kwargs["idempotency_key"]
+    if not kwargs.get("absence_already_resolved", False):
         existing = await get_control_action_by_idempotency_key(
             session,
             thread_id=thread_id,
@@ -366,14 +391,16 @@ async def get_or_create_control_action(
             created = await create_control_action(
                 session,
                 thread_id=thread_id,
-                action_type=action_type,
+                action_type=kwargs["action_type"],
                 idempotency_key=idempotency_key,
-                request_id=request_id,
-                payload=payload,
-                worker_generation=worker_generation,
-                result_status=result_status,
-                dispatch_id=dispatch_id,
-                recovery_deadline_at=recovery_deadline_at,
+                request_id=kwargs.get("request_id"),
+                payload=kwargs.get("payload"),
+                worker_generation=kwargs.get("worker_generation", 0),
+                result_status=kwargs.get(
+                    "result_status", ControlActionResultStatus.ACCEPTED_NOT_APPLIED
+                ),
+                dispatch_id=kwargs.get("dispatch_id"),
+                recovery_deadline_at=kwargs.get("recovery_deadline_at"),
             )
     except IntegrityError:
         conflicting = await get_control_action_by_idempotency_key(
@@ -388,34 +415,25 @@ async def get_or_create_control_action(
 
 
 async def reserve_control_action(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    action_type: ControlActionType | str,
-    idempotency_key: str,
-    request_id: str | None = None,
-    payload: dict[str, object] | None = None,
-    worker_generation: int = 0,
-    dispatch_id: str | None = None,
-    recovery_deadline_at: datetime | None = None,
+    session: AsyncSession, **kwargs: Unpack[_ReserveActionArgs]
 ) -> ControlActionReservation:
     """Reserve one durable intention and compare any replay with its winner."""
-    resolved_type = _coerce_control_action_type(action_type).value
+    resolved_type = _coerce_control_action_type(kwargs["action_type"]).value
     action, created = await get_or_create_control_action(
         session,
-        thread_id=thread_id,
+        thread_id=kwargs["thread_id"],
         action_type=resolved_type,
-        idempotency_key=idempotency_key,
-        request_id=request_id,
-        payload=payload,
-        worker_generation=worker_generation,
-        dispatch_id=dispatch_id,
-        recovery_deadline_at=recovery_deadline_at,
+        idempotency_key=kwargs["idempotency_key"],
+        request_id=kwargs.get("request_id"),
+        payload=kwargs.get("payload"),
+        worker_generation=kwargs.get("worker_generation", 0),
+        dispatch_id=kwargs.get("dispatch_id"),
+        recovery_deadline_at=kwargs.get("recovery_deadline_at"),
     )
     matches = (
         action.action_type == resolved_type
-        and action.request_id == request_id
-        and _payload_matches(action.payload_json, payload)
+        and action.request_id == kwargs.get("request_id")
+        and _payload_matches(action.payload_json, kwargs.get("payload"))
     )
     return ControlActionReservation(
         action=action, created=created, payload_matches=matches

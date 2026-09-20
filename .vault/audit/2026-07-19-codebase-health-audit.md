@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:0a06eda7437129182baf68a4f6ad9864863bcd0e00f0189930483b2d758f432c'
+body_hash: 'sha256:c49e727d6a8be2f4c4b0aad29da7f844f40c42269782dc204e7e73c98dda5279'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4088,3 +4088,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: grouped required control-action identifiers and optional journal fields into typed keyword contracts for create, get-or-create, and reserve. The same named caller arguments and defaults are accepted, closing three parameter-count findings.
 - Review finding, low severity, signature introspection: runtime signatures now present `**kwargs`; current callers use named arguments and static checks retain the required-key contract. The change carries a compatibility risk for any external runtime signature inspection, and that risk remains in the audit queue.
 - Verification: 16 focused control-action, reconciliation, and direct-control lease tests passed; scoped Ruff, Ruff format, basedpyright, and Ty passed. Remaining parameter and design findings stay open.
+
+### 2026-09-20 ACP request parameter review
+
+- Implementation: expressed the fixed ACP request frame inputs as a required typed keyword contract, closing one parameter-count finding while keeping every caller's named fields.
+- Review finding, low severity, signature introspection: runtime inspection now shows `**kwargs`; no caller inspects this private helper's signature. The future is still registered before the locked write and the frame fields are unchanged.
+- Verification: 20 ACP session ownership and model-selection tests passed; scoped Ruff and basedpyright passed. Remaining parameter findings stay open.

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:b072bfec616fc84ae286be11a5341ac5a7af7c21080f66be933f12b67c93fb01'
+body_hash: 'sha256:1ede18eb98173b091bb3d21a24edaf3824584f05b94293422458474fd10ac36e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3761,3 +3761,21 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: removed the redundant `bypass_circuit_breaker` argument from `dispatch_to_worker` and `safe_dispatch`; cancel action now carries its circuit-bypass rule directly. Updated both cancel call sites and added an open-circuit cancel transport test.
 - Review: traced all production call sites and verified that only cancel paths had passed the bypass flag. Checked non-cancel receipt validation and circuit admission order. Severity/type: no new defect found. Other parameter-count findings remain queued.
 - Verification: strict Ty, Ruff check/format, 28 cancel/recovery/dispatch tests plus the new open-circuit transport test, and the parameter-count gate. Parameter-count findings decreased from 81 to 79.
+
+### 2026-09-20 worker message and ACP catalog review
+
+- Implementation: extracted role-scoped workspace rule compilation from `_build_worker_messages` and option normalization from ACP `_control_from_option`.
+- Review: compared role selection, bundled rule gating, message order, ACP option ordering, defaults, identifiers, and error paths with the prior code. Severity/type: no new defect found; other worker and catalog strict findings stay open.
+- Verification: 16 worker-node tests, 62 ACP catalog/bounds tests, Ruff check/format, file-scoped Ty and strict basedpyright. Both target functions now meet the cyclomatic threshold. Full strict Ty is pending a concurrent MCP contract edit.
+
+### 2026-09-20 queue-tool Command merge review
+
+- Implementation: extracted queue-tool Command validation and state-patch merge from `_collect_queue_tool_results` into `_merge_queue_command` in `graph/nodes/worker.py`.
+- Review: checked invalid result failure, ToolMessage filtering, patch key precedence, and sequential merge order. Severity/type: no new defect found; other worker-node strict findings remain queued.
+- Verification: file Ruff and format, function Radon, 16 worker-node tests and six worker integration tests including graph queue dispatch. Target function complexity decreased from 13 to 7.
+
+### 2026-09-20 MCP tool contract review
+
+- Implementation: extracted declared-versus-served tool differences from `verify_declared_tool_contract` in `providers/_mcp_contract.py`.
+- Review: inspected missing and undeclared selection under exact-surface mode, plus unchanged refusal messages. Severity/type: no new defect found. The pre-existing seven-parameter `PLR0913` finding is medium/type shape and remains queued.
+- Verification: 25 focused MCP/registry tests, strict Ty, file Ruff and format, `git diff --check`, and Radon. Target function complexity decreased from 12 to 7.

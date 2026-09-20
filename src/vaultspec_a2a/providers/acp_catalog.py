@@ -196,17 +196,13 @@ def _models_from_options(
     return tuple(models)
 
 
-def _control_from_option(
-    option: JsonObject, *, category: str, namespace: str
-) -> NativeControl | None:
-    if option.get("type") != "select":
-        return None
-    config_id = optional_text(option.get("configId")) or optional_text(option.get("id"))
-    if config_id is None:
-        raise AcpCatalogProtocolError(
-            f"ACP {category} option has no config identifier",
-            code=AcpErrorCode.INTERNAL_ERROR,
-        )
+def _control_options(
+    option: JsonObject,
+    *,
+    category: str,
+    namespace: str,
+    config_id: str,
+) -> tuple[NativeControlOption, ...]:
     choices: list[NativeControlOption] = []
     for choice in _flatten_options(
         option.get("options"), field=f"{config_id}.options", limit=MAX_OPTIONS
@@ -227,6 +223,26 @@ def _control_from_option(
                 description=optional_description(choice.get("description")),
             )
         )
+    return tuple(choices)
+
+
+def _control_from_option(
+    option: JsonObject, *, category: str, namespace: str
+) -> NativeControl | None:
+    if option.get("type") != "select":
+        return None
+    config_id = optional_text(option.get("configId")) or optional_text(option.get("id"))
+    if config_id is None:
+        raise AcpCatalogProtocolError(
+            f"ACP {category} option has no config identifier",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    choices = _control_options(
+        option,
+        category=category,
+        namespace=namespace,
+        config_id=config_id,
+    )
     current = option.get("currentValue")
     current_value = current if isinstance(current, str) else None
     default_option_id = (

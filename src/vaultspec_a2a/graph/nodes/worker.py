@@ -96,6 +96,25 @@ class RoutingNode(Protocol):
         ...
 
 
+def _worker_rule_message(
+    state: TeamState, workspace_root: Path | None, role: str | None
+) -> SystemMessage | None:
+    """Compile the workspace rules visible to this worker role."""
+    effective_workspace_root = workspace_root or state.get("workspace_root")
+    if not effective_workspace_root:
+        return None
+    is_document_role = is_document_authoring_role(role)
+    compile_role = role if is_document_role else None
+    bundled_dir = DEFAULT_BUNDLED_RULES_DIR if is_document_role else None
+    rules = RuleManager(
+        Path(effective_workspace_root),
+        bundled_rules_dir=bundled_dir,
+    ).compile(compile_role)
+    if not rules:
+        return None
+    return SystemMessage(content=f"## Project Coding Rules & Guidelines\n\n{rules}")
+
+
 def _build_worker_messages(
     *,
     state: TeamState,
@@ -120,21 +139,9 @@ def _build_worker_messages(
     )
     anchoring = build_anchoring_context(state)
     messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
-    effective_workspace_root = workspace_root or state.get("workspace_root")
-    if effective_workspace_root:
-        is_document_role = is_document_authoring_role(role)
-        compile_role = role if is_document_role else None
-        bundled_dir = DEFAULT_BUNDLED_RULES_DIR if is_document_role else None
-        rules = RuleManager(
-            Path(effective_workspace_root),
-            bundled_rules_dir=bundled_dir,
-        ).compile(compile_role)
-        if rules:
-            messages.append(
-                SystemMessage(
-                    content=f"## Project Coding Rules & Guidelines\n\n{rules}"
-                )
-            )
+    rule_message = _worker_rule_message(state, workspace_root, role)
+    if rule_message is not None:
+        messages.append(rule_message)
     if anchoring:
         messages.append(SystemMessage(content=anchoring))
     mounted = state.get("mounted_context")
@@ -345,20 +352,29 @@ async def _collect_queue_tool_results(
     tool_messages: list[ToolMessage] = []
     for tool_call in queue_calls:
         command = await queue_tool.ainvoke(tool_call)
-        if not isinstance(command, Command):
-            raise RuntimeError(
-                "mark_task_complete must return a Command(update=...); got "
-                f"{type(command).__name__}"
-            )
-        update = cast("dict[str, Any]", command.update or {})
-        for message in update.get("messages", []):
-            if isinstance(message, ToolMessage):
-                tool_messages.append(message)
-        for key, value in update.items():
-            if key != "messages":
-                state_patch[key] = value
+        _merge_queue_command(command, tool_messages, state_patch)
 
     return tool_messages, state_patch
+
+
+def _merge_queue_command(
+    command: object,
+    tool_messages: list[ToolMessage],
+    state_patch: dict[str, Any],
+) -> None:
+    """Validate and merge one queue tool Command into worker results."""
+    if not isinstance(command, Command):
+        raise RuntimeError(
+            "mark_task_complete must return a Command(update=...); got "
+            f"{type(command).__name__}"
+        )
+    update = cast("dict[str, Any]", command.update or {})
+    for message in update.get("messages", []):
+        if isinstance(message, ToolMessage):
+            tool_messages.append(message)
+    for key, value in update.items():
+        if key != "messages":
+            state_patch[key] = value
 
 
 async def _collect_mock_permission_result(

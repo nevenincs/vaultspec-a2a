@@ -183,6 +183,20 @@ async def _served_tool_names(
             return frozenset(tool.name for tool in listed.tools)
 
 
+def _tool_contract_differences(
+    *,
+    declared: Sequence[str],
+    served: frozenset[str],
+    exact_surface: bool,
+) -> tuple[list[str], list[str]]:
+    """Return missing and, when requested, undeclared served tool names."""
+    missing = [tool for tool in declared if tool not in served]
+    undeclared = (
+        [tool for tool in served if tool not in declared] if exact_surface else []
+    )
+    return missing, undeclared
+
+
 async def verify_declared_tool_contract(
     *,
     name: str,
@@ -254,7 +268,11 @@ async def verify_declared_tool_contract(
                     f"{_stderr_tail(captured_stderr)}"
                 ) from exc
 
-            missing = [tool for tool in declared if tool not in served]
+            missing, undeclared = _tool_contract_differences(
+                declared=declared,
+                served=served,
+                exact_surface=exact_surface,
+            )
             if missing:
                 offered = ", ".join(sorted(served)) if served else "no tools at all"
                 raise HarnessToolContractError(
@@ -277,11 +295,6 @@ async def verify_declared_tool_contract(
             # strict session surface mounts exactly what a server offers, so what
             # the run may CALL is bounded by the permission layer while what it is
             # HANDED is bounded only here.
-            undeclared = (
-                [tool for tool in served if tool not in declared]
-                if exact_surface
-                else []
-            )
             if undeclared:
                 raise HarnessToolContractError(
                     f"harness MCP server {name!r} serves tool(s) it does not "

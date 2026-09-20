@@ -213,6 +213,17 @@ def _volume_capacity(path: Path) -> dict[str, object]:
     return {"path": str(directory), "detail": "volume capacity unavailable"}
 
 
+def _add_sqlite_usage(
+    diagnostics: dict[str, object],
+    store: str,
+    path: Path | None,
+    default_path: Path,
+) -> Path | None:
+    resolved = path or default_path
+    diagnostics[store] = _sqlite_file_usage(resolved)
+    return resolved if resolved != _MEMORY_PATH else None
+
+
 def build_storage_diagnostics(
     *,
     database_backend: str | None = None,
@@ -246,15 +257,15 @@ def build_storage_diagnostics(
     diagnostics: dict[str, object] = {}
     volume_anchor: Path | None = None
     if database_is_sqlite:
-        resolved = database_path or settings.database_path
-        diagnostics["database"] = _sqlite_file_usage(resolved)
-        if resolved != _MEMORY_PATH:
-            volume_anchor = resolved
+        volume_anchor = _add_sqlite_usage(
+            diagnostics, "database", database_path, settings.database_path
+        )
     if checkpoint_is_sqlite:
-        resolved = checkpoint_path or settings.checkpoint_path
-        diagnostics["checkpoint"] = _sqlite_file_usage(resolved)
-        if volume_anchor is None and resolved != _MEMORY_PATH:
-            volume_anchor = resolved
+        checkpoint_anchor = _add_sqlite_usage(
+            diagnostics, "checkpoint", checkpoint_path, settings.checkpoint_path
+        )
+        if volume_anchor is None:
+            volume_anchor = checkpoint_anchor
     if volume_anchor is not None:
         diagnostics["volume"] = _volume_capacity(volume_anchor)
     return diagnostics

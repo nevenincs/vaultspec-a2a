@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:85bc9610cede3f2fda43754bca7b2e05604e44c4b5a92b0c3e071d5dfa16a431'
+body_hash: 'sha256:52c5ee69c62296c5b51d46afc06443d4fc5145d593b817a58f9050fa0cf53287'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3648,3 +3648,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding (low, formatting; fixed): the first standard gate found a Ruff formatting change. Formatted the module and reran `just check-all` successfully.
 - Review finding (moderate, code health; queued): 36 cyclomatic and 131 selected Ruff design findings remain.
 - Verification: 11 worker reaping tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 36 findings.
+
+### 2026-09-20 storage diagnostics review pass
+
+- Implementation: extracted SQLite store usage and path fallback from live storage diagnostics. Database remains the preferred volume anchor, with checkpoint used only when no measurable database path exists. The function now measures 9 paths and its helper 3; cyclomatic findings fell from 36 to 35.
+- Review finding (moderate, code health; queued): 35 cyclomatic and 131 selected Ruff design findings remain. The storage-diagnostics finding is closed.
+- Verification: four storage diagnostics tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 35 findings.

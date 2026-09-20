@@ -66,18 +66,14 @@ def runtime_log_extra(
     if process is not None:
         extra["process_pid"] = process.pid
         extra["returncode"] = process.returncode
-    if handshake_step is not None:
-        extra["handshake_step"] = handshake_step
-    if timeout_seconds is not None:
-        extra["timeout_seconds"] = timeout_seconds
-    if session_id is not None:
-        extra["session_id"] = session_id
-    if stderr_event_count is not None:
-        extra["stderr_event_count"] = stderr_event_count
-    if exit_code is not None:
-        extra["exit_code"] = exit_code
-    if kill_strategy is not None:
-        extra["kill_strategy"] = kill_strategy
+    extra.update(
+        handshake_step=handshake_step,
+        timeout_seconds=timeout_seconds,
+        session_id=session_id,
+        stderr_event_count=stderr_event_count,
+        exit_code=exit_code,
+        kill_strategy=kill_strategy,
+    )
     return {key: value for key, value in extra.items() if value is not None}
 
 

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:507d25ae8ae109f01b5a799bde862f7a5a053ff45e42beded78800cf8fb09834'
+body_hash: 'sha256:c0ad077b8d5085b5226d4d7069ffc70a183f8684813d1627e238d582427a5eb0'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3504,3 +3504,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: separated owner-record parsing, contended-lock classification, and foreign-record rejection from singleton acquisition. The same conflict states, error messages, and lock release sequence remain.
 - Review: inspected the actual diff and lock ownership paths. No new correctness findings surfaced (severity: none; type: implementation review). Lifecycle, desktop, and CLI singleton tests: 11 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 67 to 65 over limit; Ruff structural findings fell from 146 to 145. Both are remaining moderate code-health debt; the full strict gate remains open until all findings reach zero.
+
+### 2026-09-20 gateway and ACP authentication review pass
+
+- Implementation: isolated fresh resident-token lookup and collected optional ACP telemetry fields before the existing None filter. Explicit gateway token precedence and loopback constraints remain unchanged.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Gateway and ACP auth/session tests: 51 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 65 to 63 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.

@@ -80,6 +80,15 @@ def _validated_desktop_attach_credential(parsed: SplitResult) -> str | None:
         return None
 
 
+def _resident_service_token(parsed: SplitResult) -> str | None:
+    from .lifecycle.discovery import DiscoveryState, read_resident_service
+
+    state, info = read_resident_service(settings.a2a_home)
+    if state is DiscoveryState.FRESH and info is not None and info.port == parsed.port:
+        return info.service_token
+    return None
+
+
 def gateway_auth_headers(url: str) -> dict[str, str]:
     """Return an Authorization header for *url* when a safe bearer resolves."""
     token = settings.gateway_service_token
@@ -89,15 +98,7 @@ def gateway_auth_headers(url: str) -> dict[str, str]:
     if token is None and is_loopback and settings.desktop_profile_armed:
         token = _validated_desktop_attach_credential(parsed)
     if token is None and is_loopback and not settings.desktop_profile_armed:
-        from .lifecycle.discovery import DiscoveryState, read_resident_service
-
-        state, info = read_resident_service(settings.a2a_home)
-        if (
-            state is DiscoveryState.FRESH
-            and info is not None
-            and info.port == parsed.port
-        ):
-            token = info.service_token
+        token = _resident_service_token(parsed)
 
     if token is None:
         return {}

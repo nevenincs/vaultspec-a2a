@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c1b6552ca7418a530af01e05272626cd1fa96f3a947de8359aa21fd46b8d97d4'
+body_hash: 'sha256:a689c525f31c7ebecb22d119be9da118a27434b82c3a70bcb957a9d4e6b64fe4'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3706,3 +3706,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted native ACE inspection into `_restricted_dacl_principals` in `desktop/_platform_acl.py`. The public check retains descriptor ownership and exact principal-set comparison.
 - Review: inspected allocation and release paths, invalid ACE handling, and return semantics. Severity/type: no new defect found. Windows-specific ACL behavior remains dependent on native Windows integration tests; this host ran the desktop profile tests successfully. Existing strict complexity findings remain open in this audit queue.
 - Verification: selected Ruff complexity and full Ruff checks for the file, Ruff format, strict Ty, 12 desktop profile tests, and the cyclomatic gate. Cyclomatic findings decreased from 34 to 33.
+
+### 2026-09-20 authoring binding validation review
+
+- Implementation: separated transport validation from token and catalog checks in `AuthoringToolBinding.__post_init__` without changing their order or failure messages.
+- Review: inspected the complete validation path and test coverage for HTTP and stdio transport, tokens, and write-tool refusal. Severity/type: no new defect found. Remaining strict complexity findings are retained in this audit queue.
+- Verification: Ruff selected complexity, full Ruff check and format, strict Ty, 51 focused authoring tests, and the cyclomatic gate. Cyclomatic findings decreased from 33 to 32.

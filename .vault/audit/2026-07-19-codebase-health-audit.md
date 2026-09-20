@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:51b813d95acb52c7fb9cf120bec88e38261b2ff86c2007263d45c0c10d896c47'
+body_hash: 'sha256:8e32303630006744ec2e7815e7247a78efffa75d5703a53e3cccdefb3dc11d7e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3881,3 +3881,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted Codex server-request and notification routing from `_dispatch`. Request classification, observation ordering, and refusal payload remain unchanged.
 - Verification: the delegated lane reports 46 focused tests passed, with Ruff, Ty, formatting, and diff checks passing. `_dispatch` Radon complexity fell from 13 to 10.
 - Review finding (medium, code health): strict non-cyclomatic findings remain; continue the existing queue. No new functional defect was found in this pass.
+
+### 2026-09-20 thread election and execution-state complexity review
+
+- Implementation: extracted election input validation and degraded-only projection classification. Review caught that the first predicate helper introduced a new 9-parameter finding; its inputs were grouped before commit. The parameter-count gate remains at 79 offenders, and the cyclomatic gate is green with zero offenders.
+- Verification: 16 focused thread-status and execution-state projection tests passed. Target Ruff, Ty, formatting, and diff checks passed.
+- Review finding (medium, code health): the existing parameter-count and other strict findings remain; continue the queue. No new functional defect was found in this pass.

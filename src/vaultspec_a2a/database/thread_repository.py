@@ -530,6 +530,19 @@ def _validate_successor_authority(
         raise ValueError(f"successor writer_generation must {relation}")
 
 
+def _validate_election_inputs(
+    expectation: ThreadWriteExpectation,
+    status: ThreadStatus,
+    successor: RunWriteAuthority,
+) -> None:
+    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
+        raise TypeError("expectation must be a ThreadWriteExpectation")
+    if not isinstance(cast("object", status), ThreadStatus):
+        raise TypeError("status must be a ThreadStatus")
+    if not isinstance(cast("object", successor), RunWriteAuthority):
+        raise TypeError("successor must be a RunWriteAuthority")
+
+
 async def elect_thread_status(
     session: AsyncSession,
     thread_id: str,
@@ -548,13 +561,7 @@ async def elect_thread_status(
     a same-thread, same-action journal row; absence is a typed refusal and never
     causes authority to be invented.
     """
-    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
-        raise TypeError("expectation must be a ThreadWriteExpectation")
-    if not isinstance(cast("object", status), ThreadStatus):
-        raise TypeError("status must be a ThreadStatus")
-    if not isinstance(cast("object", successor), RunWriteAuthority):
-        raise TypeError("successor must be a RunWriteAuthority")
-
+    _validate_election_inputs(expectation, status, successor)
     validate_transition(expectation.status, status, thread_id=thread_id)
     _validate_successor_authority(expectation, successor)
     current = expectation.authority
@@ -832,6 +839,26 @@ async def set_thread_approval_state(
     return thread
 
 
+def _is_degraded_only_execution_state(
+    checkpoint_fields: tuple[str | None, str | None, datetime | None],
+    activity_fields: tuple[int, int, list[str], list[str], list[dict[str, object]]],
+    degraded_reasons: list[str],
+) -> bool:
+    checkpoint_id, parent_checkpoint_id, snapshot_created_at = checkpoint_fields
+    task_count, interrupt_count, next_nodes, interrupt_types, tasks = activity_fields
+    return (
+        checkpoint_id is None
+        and parent_checkpoint_id is None
+        and snapshot_created_at is None
+        and task_count == 0
+        and interrupt_count == 0
+        and not next_nodes
+        and not interrupt_types
+        and not tasks
+        and bool(degraded_reasons)
+    )
+
+
 async def record_thread_execution_state(
     session: AsyncSession,
     *,
@@ -852,16 +879,10 @@ async def record_thread_execution_state(
         return None
 
     existing = await session.get(ThreadExecutionStateModel, thread_id)
-    degraded_only = (
-        checkpoint_id is None
-        and parent_checkpoint_id is None
-        and snapshot_created_at is None
-        and task_count == 0
-        and interrupt_count == 0
-        and not next_nodes
-        and not interrupt_types
-        and not tasks
-        and bool(degraded_reasons)
+    degraded_only = _is_degraded_only_execution_state(
+        (checkpoint_id, parent_checkpoint_id, snapshot_created_at),
+        (task_count, interrupt_count, next_nodes, interrupt_types, tasks),
+        degraded_reasons,
     )
     next_nodes_json = json.dumps(next_nodes)
     interrupt_types_json = json.dumps(interrupt_types)

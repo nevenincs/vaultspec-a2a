@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:f45de8c5ef9871da044c1b17a04ead75fbfe91d7d2457748839f801eadb3d1c3'
+body_hash: 'sha256:aeeaa59aa582bb499b8914769a39400318692d756979d4503491eb35463eba79'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3803,3 +3803,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted provider/model reference validation from `catalog_from_provider_list` into `_validated_model_reference`.
 - Review: checked validation order, exact error messages, returned provider reference, revision row construction, and model metadata. Severity/type: no new defect found. The pre-existing six-parameter `discover_kimi_catalog` shape finding remains queued.
 - Verification: 59 focused Kimi catalog tests, Ruff and format, targeted Ty, and Radon. Target function complexity decreased from 12 to 9.
+
+### 2026-09-20 process tree and containment split review
+
+- Implementation: moved process-table probes, listener ownership, descendant walking, and tree-kill primitives from `utils/process.py` into `utils/_process_tree.py`. The existing `process` import surface re-exports its public API and exercised private test seams; OS-owned `ProcessContainment` stays in the facade. The files now have 703 and 889 lines, reducing module-length findings from 9 to 8.
+- Review: inspected cross-module imports, native Windows handle loader ownership, probe constants, public and test imports, and absence of a new import cycle. Severity/type: no new defect found. Remaining long modules stay queued.
+- Verification: Ruff check/format, strict Ty, import-load probe for all 275 governed modules, `git diff --check`, and 34 real-process/containment tests. The module-length gate reports eight remaining offenders.

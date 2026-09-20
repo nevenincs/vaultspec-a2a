@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:55c24dfa4ae6395ed0f0dbca1acf7bd1bcb7629996ed467231238d9d10485998'
+body_hash: 'sha256:1c551154003f669247aac54ac7dd30cf2a907d8fe4c1fde7540002cd5c052e8c'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3462,3 +3462,7 @@ Implementation: separated incomplete and completed checkpoint elections, grouped
 ### 2026-09-20 team status projection review pass
 
 Implementation: separated durable pending-thread eligibility sets and active agent descriptors from `build_team_status`. Actual diff review found no new behavior defect: path-safe known-thread filtering, terminal and checkpoint-unavailable exclusion, pending permission truth, active thread ordering, and descriptor fallback state remain unchanged. Verification: nine focused team status tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 78 to 77 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 authoring feedback rendering review pass
+
+Implementation: separated individual feedback item rendering from the batch read-shape validation and instruction assembly. Actual diff review found no new behavior defect: malformed items and empty bodies still drop out, heading paths retain their ordering and string conversion, and empty batches still return no grounding block. Verification: five feedback reader tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 77 to 76 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.

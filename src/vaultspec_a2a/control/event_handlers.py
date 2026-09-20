@@ -534,6 +534,39 @@ async def _confirm_failed_terminal(
     return accepted
 
 
+def _validated_terminal_status(
+    thread_id: str, payload: dict[str, object]
+) -> ThreadStatus | None:
+    """Reject evidence attached to a different terminal outcome."""
+    payload_status = payload.get("status")
+    status_str = (
+        _TERMINAL_STATUS_MAP.get(payload_status)
+        if isinstance(payload_status, str)
+        else None
+    )
+    if not status_str:
+        return None
+    status = ThreadStatus(status_str)
+    if (
+        payload.get("cancellation_evidence") is not None
+        and status is not ThreadStatus.CANCELLED
+    ):
+        logger.warning(
+            "Refusing cancellation evidence on non-cancelled terminal for %s",
+            thread_id,
+        )
+        return None
+    if (
+        payload.get("failure_evidence") is not None
+        and status is not ThreadStatus.FAILED
+    ):
+        logger.warning(
+            "Refusing failure evidence on non-failed terminal for %s", thread_id
+        )
+        return None
+    return status
+
+
 async def _handle_terminal_event(
     thread_id: str,
     payload: dict[str, object],
@@ -550,27 +583,8 @@ async def _handle_terminal_event(
     last_sequence = (
         aggregator.get_sequence(thread_id) if aggregator is not None else None
     )
-    payload_status = payload.get("status")
-    status_str = (
-        _TERMINAL_STATUS_MAP.get(payload_status)
-        if isinstance(payload_status, str)
-        else None
-    )
-    if not status_str:
-        return
-    terminal_status = ThreadStatus(status_str)
-    raw_cancellation = payload.get("cancellation_evidence")
-    raw_failure = payload.get("failure_evidence")
-    if raw_cancellation is not None and terminal_status is not ThreadStatus.CANCELLED:
-        logger.warning(
-            "Refusing cancellation evidence on non-cancelled terminal for %s",
-            thread_id,
-        )
-        return
-    if raw_failure is not None and terminal_status is not ThreadStatus.FAILED:
-        logger.warning(
-            "Refusing failure evidence on non-failed terminal for %s", thread_id
-        )
+    terminal_status = _validated_terminal_status(thread_id, payload)
+    if terminal_status is None:
         return
     factory = _session_factory(session_factory)
     if terminal_status is ThreadStatus.COMPLETED:
@@ -579,7 +593,7 @@ async def _handle_terminal_event(
         )
     elif terminal_status is ThreadStatus.CANCELLED:
         accepted = await _confirm_cancelled_terminal(
-            thread_id, raw_cancellation, factory, last_sequence
+            thread_id, payload.get("cancellation_evidence"), factory, last_sequence
         )
     else:
         accepted = await _confirm_failed_terminal(

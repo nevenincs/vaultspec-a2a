@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:ab3ea0de7e12cfd5e411161253411768a51739fb7b01c8a491b1d27b350e4446'
+body_hash: 'sha256:7cb8bc17e1714feacbcc1202c84f620d39b0be210de4016fdce0830870d30e72'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3474,3 +3474,9 @@ Implementation: separated terminal outcome/evidence-kind validation from failure
 ### 2026-09-20 Kimi capability normalization review pass
 
 Implementation: extracted one capability token's ASCII, length, leading-character, and remaining-character checks from the settings validator. Actual diff review found no new behavior defect: blank token refusal still occurs before token validation, deduplication order is unchanged, and the new `all` condition is the complement of the previous invalid-character `any` check. Verification: 16 provider settings tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 75 to 74 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 terminal event review pass
+
+- Implementation: extracted terminal status and evidence compatibility validation from `_handle_terminal_event`, preserving the sequence capture, durable election, drain release, and aggregator cleanup order.
+- Review: inspected the actual diff and terminal tests. No new correctness findings surfaced (severity: none; type: implementation review). Focused terminal and event handler tests: 20 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 74 to 73 over limit; `_persist_permission_request` remains at 15 in this file. The repository-wide Ruff structural scan reports 146 findings across C901/PLR0911/PLR0912/PLR0913/PLR0915. Both are existing quality debt (severity: moderate; type: code health), still queued for reduction to zero. Full strict gate remains open.

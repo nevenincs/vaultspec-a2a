@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:e3728f58643d3cef5213d75e7d6f4656266d507aec03102f228e051389a09590'
+body_hash: 'sha256:43a70ba22b7bb32481f932556e369cf022ad35c79c0d8ec99beda3251ed06fb5'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3534,3 +3534,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: isolated pinned-message partitioning and recent-message budgeting, plus exact catalog-entry selection from the served lane. The original objective and latest-message preservation rules and explicit catalog choice remain unchanged.
 - Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Context and live CLI tests: 45 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 56 to 54 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.
+
+### 2026-09-20 full strict gate inventory and parser review pass
+
+- Strict inventory: `just check-strict` ran through every target. Remaining red dimensions included 54 cyclomatic offenders; shape: 13 module-length, 4 function-length, 81 parameter-count, 3 nesting-depth; Ruff function limits: 141; preview nesting: 31; Pylint size/design: 51 (13 module-length, 37 instance-attribute, 1 boolean-expression). Cognitive complexity also remained red. Strict Ty, reachability, unused symbols, exports, import loadability, and the ordinary `check-all` targets were green.
+- Implementation: separated the protocol-bound check in desktop discovery numeric validation and extracted one `/proc/net/tcp` line parser. The latter removes one preview nesting finding without changing the first matching inode or malformed-line behavior.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Process and discovery tests: 28 passed. `just check-all` and `just check-type-strict` passed; focused Pylint no longer reports the boolean-expression issue in discovery. Preview nesting fell from 31 to 30.
+- Queue: after this pass, 54 cyclomatic, 141 Ruff function-limit, 30 preview nesting, 50 Pylint size/design, and the listed shape and cognitive findings remain (severity: moderate; type: code health). Full strict gate stays open until all reach zero.

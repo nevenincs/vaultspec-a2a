@@ -602,8 +602,9 @@ def _desktop_record_numbers(
         or pid is None
         or port is None
         or last_heartbeat is None
-        or protocol_min > protocol_max
     ):
+        return None
+    if protocol_min > protocol_max:
         return None
     return protocol_min, protocol_max, pid, port, last_heartbeat
 

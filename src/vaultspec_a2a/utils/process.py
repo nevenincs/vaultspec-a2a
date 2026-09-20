@@ -704,21 +704,27 @@ def _proc_listen_inode(port: int) -> str | None:
             with open(path, encoding="ascii", errors="replace") as handle:
                 next(handle, None)  # header row
                 for line in handle:
-                    fields = line.split()
-                    if len(fields) < 10 or fields[3] != _TCP_LISTEN_STATE:
-                        continue
-                    _, sep, hexport = fields[1].partition(":")
-                    if not sep:
-                        continue
-                    try:
-                        if int(hexport, 16) != port:
-                            continue
-                    except ValueError:
-                        continue
-                    return fields[9]
+                    inode = _listen_inode_from_line(line, port)
+                    if inode is not None:
+                        return inode
         except OSError:
             continue
     return None
+
+
+def _listen_inode_from_line(line: str, port: int) -> str | None:
+    fields = line.split()
+    if len(fields) < 10 or fields[3] != _TCP_LISTEN_STATE:
+        return None
+    _, sep, hexport = fields[1].partition(":")
+    if not sep:
+        return None
+    try:
+        if int(hexport, 16) != port:
+            return None
+    except ValueError:
+        return None
+    return fields[9]
 
 
 def _proc_pid_for_socket_inode(inode: str) -> int | None:

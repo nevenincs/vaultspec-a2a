@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c6991ff785f41034042cdc1d4e00cef74b320047cf071c4193e401d0e1d87e52'
+body_hash: 'sha256:ab3ea0de7e12cfd5e411161253411768a51739fb7b01c8a491b1d27b350e4446'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3470,3 +3470,7 @@ Implementation: separated individual feedback item rendering from the batch read
 ### 2026-09-20 worker terminal evidence review pass
 
 Implementation: separated terminal outcome/evidence-kind validation from failure fingerprint and provider-condition matching. Actual diff review found no new behavior defect: cancellation and failure evidence are still required for their matching outcomes, mismatched kinds retain the same exceptions, and missing or mismatched failure payloads still fail closed. Verification: 12 worker projection tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 76 to 75 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 Kimi capability normalization review pass
+
+Implementation: extracted one capability token's ASCII, length, leading-character, and remaining-character checks from the settings validator. Actual diff review found no new behavior defect: blank token refusal still occurs before token validation, deduplication order is unchanged, and the new `all` condition is the complement of the previous invalid-character `any` check. Verification: 16 provider settings tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 75 to 74 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.

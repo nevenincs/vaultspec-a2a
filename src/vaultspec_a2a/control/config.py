@@ -178,6 +178,18 @@ def _require_absolute_sqlite_path(url: str, *, setting: str) -> None:
     raise ValueError(msg)
 
 
+def _valid_kimi_capability(token: str) -> bool:
+    return (
+        len(token) <= 64
+        and token[0].isascii()
+        and token[0].isalnum()
+        and all(
+            character.isascii() and (character.isalnum() or character in "_.:-")
+            for character in token
+        )
+    )
+
+
 class InfraConfig(BaseSettings):
     """Infrastructure fields — ports, hosts, URLs, keys, filesystem paths."""
 
@@ -864,16 +876,7 @@ class InfraConfig(BaseSettings):
             raise ValueError("Kimi model capabilities must contain at most 16 tokens")
         ordered_unique = tuple(dict.fromkeys(tokens))
         for token in ordered_unique:
-            if (
-                len(token) > 64
-                or not token[0].isascii()
-                or not token[0].isalnum()
-                or any(
-                    not character.isascii()
-                    or not (character.isalnum() or character in "_.:-")
-                    for character in token
-                )
-            ):
+            if not _valid_kimi_capability(token):
                 raise ValueError("Kimi model capability contains an invalid token")
         return ",".join(ordered_unique)
 

@@ -498,6 +498,14 @@ async def discover_acp_catalog(
         ]
     )
     cleanup_failures = await run_independent_cleanups(*cleanup_steps)
+    return _catalog_outcome_or_raise(outcome, failure, cleanup_failures)
+
+
+def _catalog_outcome_or_raise(
+    outcome: AcpCatalogDiscovery | None,
+    failure: BaseException | None,
+    cleanup_failures: list[tuple[str, Exception]],
+) -> AcpCatalogDiscovery:
     if failure is not None:
         if cleanup_failures:
             failure.add_note(

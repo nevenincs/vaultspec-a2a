@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:0f0ad08eecb74e5728edbcf263f560b5849fb5c1e156136f405249c680077bb9'
+body_hash: 'sha256:9d79cc5c64cb6b65ef460613f20d93e37686c3fa0185c6da1cd11a067820a5f6'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3845,3 +3845,15 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted repeated chunk callback invocation from active and drained ACP queue paths into `_notify_chunk`; callback timing and exception propagation remain within their original loops.
 - Verification: 11 focused ACP stop and deadline tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 8 to 7 offenders.
 - Review finding (medium, code health): 7 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 event filter complexity review
+
+- Implementation: moved filtered-event telemetry and debug logging into `_record_filtered_event`. Its call remains after recognized event translation, preserving which events are counted and logged.
+- Verification: 13 focused LangGraph event tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 7 to 6 offenders.
+- Review finding (medium, code health): 6 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 ACP catalog outcome complexity review
+
+- Implementation: extracted catalog outcome and cleanup failure arbitration into `_catalog_outcome_or_raise`. The cleanup sequence and failure precedence remain unchanged.
+- Verification: 10 focused ACP catalog tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate reports 5 remaining offenders with this and the event projection change present.
+- Review finding (medium, code health): 5 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.

@@ -589,7 +589,15 @@ async def process_langgraph_event(
             event_data, thread_id, effective_agent_id, node, emitters
         )
 
-    # --- Everything else is filtered out (research §1.2) ---
+    _record_filtered_event(event_kind, run_id, telemetry)
+
+
+def _record_filtered_event(
+    event_kind: str,
+    run_id: str,
+    telemetry: TelemetryHook | NullTelemetryHook,
+) -> None:
+    # Everything else is filtered out (research §1.2).
     if event_kind not in PASSTHROUGH_EVENTS | NODE_BOUNDARY_EVENTS:
         telemetry.increment_counter(
             "aggregator.events_filtered", 1, **{"event.kind": event_kind}

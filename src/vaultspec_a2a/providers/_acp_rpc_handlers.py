@@ -346,6 +346,44 @@ _PROJECT_ARGUMENT_KEYS: frozenset[str] = frozenset(
 _MAX_ARGUMENT_SCAN_DEPTH = 6
 
 
+def _foreign_project_field(key: str, value: JsonValue, config: AcpModelConfig) -> bool:
+    return (
+        key in _PROJECT_ARGUMENT_KEYS
+        and isinstance(value, str)
+        and bool(value.strip())
+        and not config.binds_project_path(value.strip())
+    )
+
+
+def _scan_foreign_project_mapping(
+    value: JsonObject, config: AcpModelConfig, depth: int
+) -> str | None:
+    for key, item in value.items():
+        if _foreign_project_field(key, item, config):
+            return str(item)
+        if (
+            found := _scan_foreign_project_argument(item, config, depth + 1)
+        ) is not None:
+            return found
+    return None
+
+
+def _scan_foreign_project_argument(
+    value: JsonValue, config: AcpModelConfig, depth: int
+) -> str | None:
+    if depth > _MAX_ARGUMENT_SCAN_DEPTH:
+        return None
+    if isinstance(value, dict):
+        return _scan_foreign_project_mapping(value, config, depth)
+    if isinstance(value, list):
+        for item in value:
+            if (
+                found := _scan_foreign_project_argument(item, config, depth + 1)
+            ) is not None:
+                return found
+    return None
+
+
 def _foreign_project_argument(args: JsonObject, config: AcpModelConfig) -> str | None:
     """Return the first argument naming a project outside the run's, or ``None``.
 
@@ -360,28 +398,7 @@ def _foreign_project_argument(args: JsonObject, config: AcpModelConfig) -> str |
     agent asked and hide that it asked it.
     """
 
-    def scan(value: JsonValue, depth: int) -> str | None:
-        if depth > _MAX_ARGUMENT_SCAN_DEPTH:
-            return None
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if (
-                    key in _PROJECT_ARGUMENT_KEYS
-                    and isinstance(item, str)
-                    and item.strip()
-                    and not config.binds_project_path(item.strip())
-                ):
-                    return item
-                if (found := scan(item, depth + 1)) is not None:
-                    return found
-            return None
-        if isinstance(value, list):
-            for item in value:
-                if (found := scan(item, depth + 1)) is not None:
-                    return found
-        return None
-
-    return scan(args, 0)
+    return _scan_foreign_project_argument(args, config, 0)
 
 
 async def on_request_permission(

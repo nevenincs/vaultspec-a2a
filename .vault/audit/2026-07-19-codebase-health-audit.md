@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:0b1a3f1940b5de17d1ba3bfaec9e1169e3c18e53a468ebfb590e90c782f3f8fc'
+body_hash: 'sha256:e6ad16527902cdf0e6a8795249414b042d52dd49d6aedbebd8fc9aef98ab133e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3971,3 +3971,8 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 
 - Medium / maintainability: `_record_from_dict` scored 16 against the cognitive-complexity limit of 15. Moved required identity validation into `_record_identity`, preserving all invalid-record rejections. Review found no changed output path. The function now passes complexity; all 19 focused registry tests, Ruff, and formatter pass.
 - Remaining queue: cognitive complexity has six offenders (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`, `_foreign_project_argument`, `CodexChatModel._consume_turn`, `_await_pytest_exit`).
+
+### 2026-09-20 ACP project argument complexity review
+
+- High / security maintainability: `_foreign_project_argument` scored 25 cognitive complexity within the permission boundary. Split its depth-bound recursive scan into field, mapping, and value helpers while preserving first-match order, project binding, and depth cutoff. Review found no scope change. Strict Ty, Ruff, 27 focused project-confinement tests pass; the function now passes complexity.
+- Remaining queue: five cognitive-complexity offenders remain (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`, `CodexChatModel._consume_turn`, `_await_pytest_exit`).

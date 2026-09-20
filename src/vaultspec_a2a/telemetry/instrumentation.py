@@ -351,6 +351,40 @@ def _build_sdk_meter_provider(
     metrics.set_meter_provider(meter_provider)
 
 
+def _configure_sdk(
+    *,
+    sdk_enabled: bool,
+    otlp_available: bool,
+    effective_service: str,
+    langsmith_enabled: bool,
+) -> None:
+    """Configure SDK providers and report the selected SDK mode."""
+    if sdk_enabled:
+        provider = _build_sdk_provider(
+            otlp_available=otlp_available, service_name=effective_service
+        )
+        trace.set_tracer_provider(provider)
+        _build_sdk_meter_provider(
+            otlp_available=otlp_available, service_name=effective_service
+        )
+        logger.info(
+            "OTel SDK TracerProvider configured service=%s otlp=%s traces=%s "
+            "metrics=%s langsmith=%s",
+            effective_service,
+            otlp_available,
+            not _TRACES_EXPORT_DISABLED,
+            not _METRICS_EXPORT_DISABLED,
+            langsmith_enabled,
+        )
+    elif SDK_DISABLED:
+        logger.info("OTel SDK explicitly disabled via OTEL_SDK_DISABLED")
+    else:
+        logger.info(
+            "opentelemetry-sdk not installed — using no-op tracer. "
+            "Install 'opentelemetry-sdk' to enable real tracing."
+        )
+
+
 def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
     """Set up the global OTel TracerProvider and MeterProvider.
 
@@ -388,30 +422,12 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
 
     effective_service = service_name or _SERVICE_NAME
 
-    if sdk_enabled:
-        provider = _build_sdk_provider(
-            otlp_available=otlp_available, service_name=effective_service
-        )
-        trace.set_tracer_provider(provider)
-        _build_sdk_meter_provider(
-            otlp_available=otlp_available, service_name=effective_service
-        )
-        logger.info(
-            "OTel SDK TracerProvider configured service=%s otlp=%s traces=%s "
-            "metrics=%s langsmith=%s",
-            effective_service,
-            otlp_available,
-            not _TRACES_EXPORT_DISABLED,
-            not _METRICS_EXPORT_DISABLED,
-            langsmith_enabled,
-        )
-    elif SDK_DISABLED:
-        logger.info("OTel SDK explicitly disabled via OTEL_SDK_DISABLED")
-    else:
-        logger.info(
-            "opentelemetry-sdk not installed — using no-op tracer. "
-            "Install 'opentelemetry-sdk' to enable real tracing."
-        )
+    _configure_sdk(
+        sdk_enabled=sdk_enabled,
+        otlp_available=otlp_available,
+        effective_service=effective_service,
+        langsmith_enabled=langsmith_enabled,
+    )
 
     if langsmith_enabled:
         logger.info(

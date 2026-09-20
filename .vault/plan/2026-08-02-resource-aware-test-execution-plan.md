@@ -13,7 +13,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
 modified: '2026-09-20'
-body_hash: 'sha256:9750c7ab6add710d69a1b289bf4fcf7f7978da820c5661ca23a417c57df6301c'
+body_hash: 'sha256:2f8edb7edf81868226127468260da408b0aa63c3dfaab78b4d6bbfe8662068e4'
 ---
 
 # `resource-aware-test-execution` plan
@@ -70,6 +70,7 @@ resolution, closing the audited harness-registry gap.
 - [x] `S28` - Reduce the serialized desktop test tail without weakening real-process coverage; `src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/testing`.
 - [x] `S29` - Exclude private RAG service-control proofs from the unit lane and declare their live resource; `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py, src/vaultspec_a2a/testing/resources.py`.
 - [x] `S30` - Close the residual Windows Proactor transports exposed by the full lane; `src/vaultspec_a2a/api/tests, src/vaultspec_a2a/desktop/tests`.
+- [x] `S31` - Exclude the remaining external RAG CLI acquisition proof from the unit lane; `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`.
 
 ## Parallelization
 

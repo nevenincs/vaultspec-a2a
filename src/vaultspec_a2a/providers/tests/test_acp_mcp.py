@@ -101,6 +101,8 @@ def test_no_registry_launch_spec_constrains_a_version() -> None:
             ), f"{name} launch spec constrains a version: {arg!r}"
 
 
+@pytest.mark.service
+@pytest.mark.resource("rag-service-control")
 def test_rag_runtime_acquisition_executes_the_published_cli() -> None:
     """The resolved production launch command acquires a runnable MCP CLI."""
     spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]

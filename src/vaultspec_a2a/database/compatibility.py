@@ -132,38 +132,47 @@ def _read_alembic_version(db_path: Path) -> str | None:
     return str(rows[0][0])
 
 
+def _validate_authority_columns(conn: sqlite3.Connection, db_path: Path) -> None:
+    columns = {
+        str(row[1]): (str(row[2]).upper(), bool(row[3]), row[4])
+        for row in conn.execute("PRAGMA table_info(threads)")
+    }
+    for name, expected_type in WRITE_AUTHORITY_COLUMNS.items():
+        actual = columns.get(name)
+        if actual != (expected_type, True, None):
+            raise SchemaCompatibilityError(
+                f"desktop primary database at {db_path} has invalid current "
+                f"write-authority column {name!r}; expected required "
+                f"{expected_type} with no default. {_REMEDY}"
+            )
+
+
+def _authority_indexes(conn: sqlite3.Connection) -> list[dict[str, object]]:
+    indexes: list[dict[str, object]] = []
+    for row in conn.execute("PRAGMA index_list(threads)"):
+        name = str(row[1])
+        indexes.append(
+            {
+                "name": name,
+                "unique": bool(row[2]),
+                "column_names": tuple(
+                    str(info[0])
+                    for info in conn.execute(
+                        "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
+                        (name,),
+                    )
+                ),
+            }
+        )
+    return indexes
+
+
 def _validate_write_authority(db_path: Path) -> None:
     """Reject stamped, malformed, or receipt-incoherent current thread stores."""
     conn = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
     try:
-        columns = {
-            str(row[1]): (str(row[2]).upper(), bool(row[3]), row[4])
-            for row in conn.execute("PRAGMA table_info(threads)")
-        }
-        for name, expected_type in WRITE_AUTHORITY_COLUMNS.items():
-            actual = columns.get(name)
-            if actual != (expected_type, True, None):
-                raise SchemaCompatibilityError(
-                    f"desktop primary database at {db_path} has invalid current "
-                    f"write-authority column {name!r}; expected required "
-                    f"{expected_type} with no default. {_REMEDY}"
-                )
-        indexes: list[dict[str, object]] = []
-        for row in conn.execute("PRAGMA index_list(threads)"):
-            name = str(row[1])
-            indexes.append(
-                {
-                    "name": name,
-                    "unique": bool(row[2]),
-                    "column_names": tuple(
-                        str(info[0])
-                        for info in conn.execute(
-                            "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
-                            (name,),
-                        )
-                    ),
-                }
-            )
+        _validate_authority_columns(conn, db_path)
+        indexes = _authority_indexes(conn)
         if not write_authority_receipt_index_matches(indexes):
             raise SchemaCompatibilityError(
                 f"desktop primary database at {db_path} lacks the unique current "

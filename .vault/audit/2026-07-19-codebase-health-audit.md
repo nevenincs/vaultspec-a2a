@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:9ad51fd80a5a0ed3a2f362c2605c8eb791fde1b6f4e8156c27dcb1c6b9120b4f'
+body_hash: 'sha256:555ae31fcf9974520c840f37f9ae7d8e55e1e246ee3b67015eb0201d5872d514'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3547,3 +3547,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: isolated follow-up claim rejection and failed-dispatch settlement while preserving durable non-delivery and lease rules; separated Linux process-group membership scan from probe selection.
 - Review: inspected both diffs and dispatch ordering. No new correctness findings surfaced (severity: none; type: implementation review). Follow-up/control and process tests passed (36, then 15 after final dispatch edit). `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 54 to 52 over limit and Ruff function-limit findings from 141 to 139. The follow-up service still has a parameter-count finding, and all remaining strict findings remain queued (severity: moderate; type: code health).
+
+### 2026-09-20 database compatibility validator review pass
+
+- Implementation: isolated current write-authority column validation and receipt-index reflection from the read-only compatibility check, preserving their order and exact rejection messages.
+- Review: inspected the diff and database-open failure paths. No new correctness findings surfaced (severity: none; type: implementation review). Compatibility and authority-schema tests: 36 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 52 to 51 over limit. Ruff function-limit findings remain 139; other strict findings remain open (severity: moderate; type: code health).

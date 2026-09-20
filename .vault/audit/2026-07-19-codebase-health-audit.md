@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:2321ce617c07966ea5c01b1ce2e541903e59ec97d7ba81fa361abd2a198f8afc'
+body_hash: 'sha256:c8dc3fad8598cf671977930025698349b767844ef5fee1143476f897de4c50fa'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3438,3 +3438,7 @@ Implementation: separated recovery deadline validation, reservation lease acquis
 ### 2026-09-20 control action claim request review pass
 
 Implementation: grouped the durable claim identity, timing, recovery authority, and receipt expectation into a typed `ControlActionClaimRequest` and converted all ten production/test call sites. Review compared each call site against its previous AST and confirmed keyword names, order, and expressions were unchanged; no unconverted calls remain. The claim function forwards the same request fields to reservation, lease, and receipt. Verification: 23 focused control tests passed; full strict Ty/Basedpyright, routine checks, Ruff, and diff checks passed. The module has zero focused strict Ruff structure findings (down from one); repository cyclomatic count remains 84. Remaining strict structure and health findings remain open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 completed action detail projection review pass
+
+Implementation: separated command text, file-change locations, MCP tool text, and shared content wrapping from `action_detail_projection`. Actual diff review found no new behavior defect; each variant retains the same required-field checks, empty output behavior, text shape, and file path locations. Verification: 119 streaming/provider tests passed (one service test deselected), full strict Ty/Basedpyright and routine checks passed, and `git diff --check` passed. The repository cyclomatic gate fell from 84 to 83 offenders; this module now has zero radon offenders. Remaining code-health and strict structure findings remain open, severity medium, type maintainability, in the existing audit queue. No new functional issue was surfaced.

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:dc14aeda80f08c3f217496682d9709dbc72680ac3c4f1fd27c9ecd820e02347f'
+body_hash: 'sha256:92985808f0f3908a9df7443a29d1275699faadb44234b834cc5dbd16e75ddff4'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3597,3 +3597,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted explicit-home normalization from the Antigravity executable resolver. Override, PATH, and installer-location precedence remains unchanged. Cyclomatic findings fell from 45 to 44.
 - Review finding (moderate, code health; queued): 44 cyclomatic findings remain; the resolver finding is closed. Selected Ruff design findings remain 132.
 - Verification: four Antigravity catalog cleanup tests, focused Ruff and Linux Ty, and `git diff --check` passed. The cyclomatic gate remains red at 44 findings.
+
+### 2026-09-20 supervisor routing review pass
+
+- Implementation: separated phase-prerequisite and plan-approval decisions from supervisor response routing. Decision ordering, warnings, routing errors, and approval payload remain the same. The original routing function fell from 17 to 7 paths; both helpers measure 7. Cyclomatic findings fell from 44 to 43.
+- Review finding (moderate, code health; queued): 43 cyclomatic findings and 132 selected Ruff design findings remain. The highest remaining cyclomatic function is worker graph compilation at 17 paths. The strict aggregate gate remains red.
+- Verification: 29 supervisor tests, `just check-all`, `just check-type-strict`, focused Ty, Ruff, and `git diff --check` passed. Full `just check-strict` before this edit returned nonzero from remaining strict dimensions.

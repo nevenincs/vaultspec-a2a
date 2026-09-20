@@ -197,6 +197,70 @@ def _check_phase_prerequisites(
     return _GateResult(blocked=False, warning=True, message=msg)
 
 
+def _phase_gate_decision(
+    state: TeamState,
+    vault_index: dict[str, list[str]],
+    next_route: str,
+    inferred_phase: str,
+    worker_phase_map: dict[str, str] | None,
+) -> _SupervisorDecision | None:
+    if not worker_phase_map or not state.get("active_feature"):
+        return None
+    target_phase = worker_phase_map.get(next_route)
+    if not target_phase:
+        return None
+    gate_result = _check_phase_prerequisites(target_phase, vault_index)
+    if not (gate_result.blocked or gate_result.warning):
+        return None
+    _logger.warning(
+        "supervisor phase gate %s: %s",
+        "blocked" if gate_result.blocked else "warning",
+        gate_result.message,
+    )
+    return _SupervisorDecision(
+        next_route=next_route,
+        inferred_phase=_phase_for_route(
+            next_route,
+            fallback_phase=inferred_phase,
+            worker_phase_map=worker_phase_map,
+        ),
+        routing_error=gate_result.message,
+    )
+
+
+def _plan_approval_decision(
+    state: TeamState,
+    vault_index: dict[str, list[str]],
+    next_route: str,
+    worker_phase_map: dict[str, str] | None,
+    *,
+    autonomous: bool,
+) -> _SupervisorDecision | None:
+    approval_granted = state.get("approval_status") == ApprovalStatus.APPROVED
+    exec_route = bool(worker_phase_map) and (
+        worker_phase_map.get(next_route) == PipelinePhase.EXEC
+    )
+    plan_ready = bool(state.get("active_feature") and vault_index.get("plan"))
+    if autonomous or not exec_route or not plan_ready or approval_granted:
+        return None
+    payload = {
+        "type": "plan_approval_request",
+        "feature": state.get("active_feature"),
+        "plan_paths": vault_index.get("plan", []),
+        "exec_worker": next_route,
+    }
+    _logger.info(
+        "supervisor plan approval interrupt: feature=%r exec_worker=%r",
+        state.get("active_feature"),
+        next_route,
+    )
+    return _SupervisorDecision(
+        next_route=next_route,
+        inferred_phase=infer_phase_from_vault_index(vault_index),
+        plan_approval_request=payload,
+    )
+
+
 def _evaluate_supervisor_response(
     *,
     state: TeamState,
@@ -242,48 +306,20 @@ def _evaluate_supervisor_response(
                 routing_error=cast("str", blocked["routing_error"]),
             )
 
-    if worker_phase_map and state.get("active_feature"):
-        target_phase = worker_phase_map.get(next_route)
-        if target_phase:
-            gate_result = _check_phase_prerequisites(target_phase, vault_index)
-            if gate_result.blocked or gate_result.warning:
-                _logger.warning(
-                    "supervisor phase gate %s: %s",
-                    "blocked" if gate_result.blocked else "warning",
-                    gate_result.message,
-                )
-                return _SupervisorDecision(
-                    next_route=next_route,
-                    inferred_phase=_phase_for_route(
-                        next_route,
-                        fallback_phase=inferred_phase,
-                        worker_phase_map=worker_phase_map,
-                    ),
-                    routing_error=gate_result.message,
-                )
-
-    approval_granted = state.get("approval_status") == ApprovalStatus.APPROVED
-    exec_route = bool(worker_phase_map) and (
-        worker_phase_map.get(next_route) == PipelinePhase.EXEC
+    gate_decision = _phase_gate_decision(
+        state, vault_index, next_route, inferred_phase, worker_phase_map
     )
-    plan_ready = bool(state.get("active_feature") and vault_index.get("plan"))
-    if not autonomous and exec_route and plan_ready and not approval_granted:
-        payload = {
-            "type": "plan_approval_request",
-            "feature": state.get("active_feature"),
-            "plan_paths": vault_index.get("plan", []),
-            "exec_worker": next_route,
-        }
-        _logger.info(
-            "supervisor plan approval interrupt: feature=%r exec_worker=%r",
-            state.get("active_feature"),
-            next_route,
-        )
-        return _SupervisorDecision(
-            next_route=next_route,
-            inferred_phase=inferred_phase,
-            plan_approval_request=payload,
-        )
+    if gate_decision is not None:
+        return gate_decision
+    approval_decision = _plan_approval_decision(
+        state,
+        vault_index,
+        next_route,
+        worker_phase_map,
+        autonomous=autonomous,
+    )
+    if approval_decision is not None:
+        return approval_decision
 
     _logger.debug("supervisor routed to %r (raw=%r)", next_route, response_text[:80])
     return _SupervisorDecision(

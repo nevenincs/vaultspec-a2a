@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:2d432443b43b262e4e9796a71c269d39758e4d43774d70afb1871bd2b8dcea16'
+body_hash: 'sha256:2e3c066a127eed93722da83fd6ebe9bd97248a3c67a109d019c8ce5c23ba7ce9'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4312,3 +4312,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, CI policy: marking PR #69 ready triggered its Claude review job, which failed before execution because the repository Actions allowlist blocked the action's nested `oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6`. The review did not run in that failed attempt; this is a workflow-policy failure rather than an application-code finding.
 - Implementation: the repository selected-actions policy now permits that exact nested action SHA, preserving the existing allowlist entries. The failed review job was rerun and reached its `Run Claude Code Review` step. Both Claude workflows now pin the parent action to the observed `cfc3eb22bfed5c26ef66e3223c982af27e4524de` commit so a moving `main` reference cannot silently change the transitive action set.
 - Verification: local `just check-workflow` and `git diff --check` pass. The rerun review outcome and fresh checks after the workflow pin are pending. Review result is REVISION REQUIRED until those results are known; the prior strict/source PASS remains valid for the unchanged code commit.
+
+### 2026-09-20 independent admission proof follow-up
+
+- Review finding, medium severity, test isolation: the Linux canonical run on `80fe5f41` passed 4,565 tests but failed the combined exact-replay/release-race test when the race phase's first prepare returned 503 `run admission is not execution-ready`. The replay phase had already committed a run under the same gateway and worker. The 503 is a readiness response before the race exists, so it does not test the intended release/commit linearization. The CI log did not include gateway health details; the exact readiness cause remains unproven.
+- Implementation: the independent replay and release/commit race assertions now run as separate tests, each with its own freshly armed real gateway, worker, migrated database, and catalog warmup. This preserves both contracts while removing cross-phase worker state from the race setup. No production behavior or 503 response rule was changed.
+- Verification: both focused real-process tests pass locally; scoped Ruff and formatting pass. Strict and Linux CI reruns remain required. Review result is REVISION REQUIRED pending those gates.

@@ -467,16 +467,24 @@ def _assert_release_commit_race(base: str, auth: str) -> None:
         assert not _run_exists(base, auth, race_run_id)
 
 
-def test_exact_commit_replay_role_binding_release_and_race_are_linearized(
+def test_exact_commit_replay_role_binding_and_release_are_linearized(
     tmp_path: Path,
 ) -> None:
-    """Exact replays converge while mismatches and release races stay atomic."""
+    """Exact replays converge while mismatches and release stay atomic."""
     with _armed_gateway(tmp_path, VAULTSPEC_MAX_CONCURRENT_THREADS="3") as (
         base,
         auth,
     ):
         run_id, reservation_id = _prepare_exact_reservation(base, auth)
         _assert_exact_replay_and_release(base, auth, run_id, reservation_id)
+
+
+def test_release_commit_race_is_linearized(tmp_path: Path) -> None:
+    """The release/commit race starts with a fresh worker and reservation."""
+    with _armed_gateway(tmp_path, VAULTSPEC_MAX_CONCURRENT_THREADS="3") as (
+        base,
+        auth,
+    ):
         _assert_release_commit_race(base, auth)
 
 

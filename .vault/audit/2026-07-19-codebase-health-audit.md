@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:2b1f3f7dd2c18647a710958a8c59a34590355f39b48fbfb5033f9814a7653fb8'
+body_hash: 'sha256:0b1a3f1940b5de17d1ba3bfaec9e1169e3c18e53a468ebfb590e90c782f3f8fc'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3966,3 +3966,8 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - High / maintainability: `control/worker_management.py` exceeded the 1000-line strict limit. Extracted worker health and liveness, process shutdown, and readiness admission into three modules; the spawner/watchdog facade is now 874 lines. Review checked logger category, lifetime identity, retained-process cleanup, and import compatibility. Strict Ty, 73 focused worker lifecycle tests, import loadability (289 modules), Ruff, formatter, and zero unconsumed exports pass. No behavior finding remains from this pass.
 - Medium / integration: moved private helpers initially broke strict imports and export diagnostics. Explicit reexports restored the existing test and gateway surface. Removed two orphaned module constants left by extraction.
 - Remaining queue: 2 oversized modules and strict parameter, Ruff, preview nesting, and Pylint findings remain open.
+
+### 2026-09-20 registry cognitive complexity review
+
+- Medium / maintainability: `_record_from_dict` scored 16 against the cognitive-complexity limit of 15. Moved required identity validation into `_record_identity`, preserving all invalid-record rejections. Review found no changed output path. The function now passes complexity; all 19 focused registry tests, Ruff, and formatter pass.
+- Remaining queue: cognitive complexity has six offenders (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`, `_foreign_project_argument`, `CodexChatModel._consume_turn`, `_await_pytest_exit`).

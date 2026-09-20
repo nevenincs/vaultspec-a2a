@@ -173,8 +173,8 @@ def _coerce_command(value: object) -> list[str]:
     return items
 
 
-def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
-    """Build a :class:`ProcRecord` from a parsed record, or ``None`` if invalid."""
+def _record_identity(data: dict[str, Any]) -> tuple[str, str, int, int] | None:
+    """Read the required process identity fields from a parsed record."""
     name = data.get("name")
     role = data.get("role")
     pid = data.get("pid")
@@ -187,6 +187,15 @@ def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
         return None
     if not isinstance(port, int) or isinstance(port, bool):
         return None
+    return name, role, pid, port
+
+
+def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
+    """Build a :class:`ProcRecord` from a parsed record, or ``None`` if invalid."""
+    identity = _record_identity(data)
+    if identity is None:
+        return None
+    name, role, pid, port = identity
 
     def _opt_str(key: str) -> str:
         v = data.get(key)

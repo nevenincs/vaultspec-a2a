@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:b46b9050f5d8c7d3b0f611e6def7abea2801454e3bfb4cf6bdab3b6b0f4c9932'
+body_hash: 'sha256:1f86b1ee5d711b4db44a772c21d216ea396a467bab4c6bc990a12ffed76f8f0c'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3930,3 +3930,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Medium / maintainability: `control/tests/test_event_handlers.py` action-seeding and answered-rejection helpers exceeded the strict Ruff parameter limit. Grouped fixture input into frozen `_SeedActionSpec` and `_RejectionSpec`; focused handler tests (17), Ruff, formatter, and targeted Ty pass. Review found no behavioral issue.
 - Remaining queue: repository strict findings in production modules and functions remain open and must be reduced to zero before this audit closes.
 - Medium / type integration: commit-hook Ty exposed two transcript-availability tests calling the old relay helper signature. Updated both to pass `_RelayContext`; repository Ty and all five transcript tests now pass. This finding is resolved in the same pass.
+
+### 2026-09-20 Codex model split review
+
+- High / maintainability: `providers/codex_chat_model.py` exceeded the 1000-line strict limit. Extracted pure protocol projections into `_codex_protocol.py` and the subprocess JSON-RPC client into `_codex_app_server_client.py`; the model is now 768 lines. Preserved the existing import surface and logger category. Strict Ty, 59 focused Codex tests, import loadability (284 modules), and unconsumed exports (zero findings) pass. Review found no behavioral issue.
+- Medium / integration: moving private test imports first surfaced strict type and export diagnostics. Explicit exports and reexports resolved these before commit.
+- Remaining queue from full strict run: 4 oversized modules, 79 parameter-count findings, 124 selected Ruff findings, 30 preview nesting findings, and remaining Pylint design findings. Cyclomatic complexity and function length remain green. These findings remain open.

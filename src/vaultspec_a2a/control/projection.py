@@ -14,6 +14,8 @@ from ..database import (
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database import (
@@ -495,6 +497,35 @@ def apply_execution_state_projection(
     return snapshot
 
 
+def _merge_durable_permissions(
+    snapshot: ThreadStateData, durable_permissions: Sequence[PermissionRequestModel]
+) -> bool:
+    corrupted_plan_approval = False
+    if durable_permissions and snapshot.pause_cause is None:
+        snapshot.pause_cause = durable_permissions[0].pause_reason_type
+    existing = {permission.request_id for permission in snapshot.pending_permissions}
+    for permission in durable_permissions:
+        if permission.request_id in existing:
+            continue
+        try:
+            projected = _permission_data_from_model(permission)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            snapshot.snapshot_complete = False
+            if "permission_projection_unreadable" not in snapshot.degraded_reasons:
+                snapshot.degraded_reasons.append("permission_projection_unreadable")
+            snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+            snapshot.execution_readiness = (
+                RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+            )
+            if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+                snapshot.approval_status = None
+                snapshot.approval_request_id = None
+                corrupted_plan_approval = True
+            continue
+        snapshot.pending_permissions.append(projected)
+    return corrupted_plan_approval
+
+
 async def enrich_snapshot_from_durable_state(
     session: AsyncSession,
     *,
@@ -522,34 +553,7 @@ async def enrich_snapshot_from_durable_state(
         snapshot.approval_request_id = None
         return snapshot
 
-    corrupted_plan_approval = False
-    if durable_permissions:
-        if snapshot.pause_cause is None:
-            snapshot.pause_cause = durable_permissions[0].pause_reason_type
-        existing = {
-            permission.request_id for permission in snapshot.pending_permissions
-        }
-        for permission in durable_permissions:
-            if permission.request_id in existing:
-                continue
-            try:
-                projected = _permission_data_from_model(permission)
-            except (TypeError, ValueError, json.JSONDecodeError):
-                snapshot.snapshot_complete = False
-                if "permission_projection_unreadable" not in snapshot.degraded_reasons:
-                    snapshot.degraded_reasons.append("permission_projection_unreadable")
-                snapshot.repair_status = (
-                    RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
-                )
-                snapshot.execution_readiness = (
-                    RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
-                )
-                if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
-                    snapshot.approval_status = None
-                    snapshot.approval_request_id = None
-                    corrupted_plan_approval = True
-                continue
-            snapshot.pending_permissions.append(projected)
+    corrupted_plan_approval = _merge_durable_permissions(snapshot, durable_permissions)
     projected_plan_approvals = [
         permission
         for permission in snapshot.pending_permissions
@@ -569,6 +573,17 @@ async def enrich_snapshot_from_durable_state(
     return snapshot
 
 
+def _mark_execution_projection_unavailable(
+    snapshot: ThreadStateData, reason: str, *, repair_required: bool = False
+) -> None:
+    snapshot.snapshot_complete = False
+    if reason not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append(reason)
+    if repair_required:
+        snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+        snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+
+
 async def enrich_snapshot_from_execution_state(
     session: AsyncSession,
     *,
@@ -581,19 +596,17 @@ async def enrich_snapshot_from_execution_state(
     row = await get_thread_execution_state(session, thread.id)
     if row is None:
         if checkpoint_present:
-            snapshot.snapshot_complete = False
-            if "execution_state_projection_missing" not in snapshot.degraded_reasons:
-                snapshot.degraded_reasons.append("execution_state_projection_missing")
+            _mark_execution_projection_unavailable(
+                snapshot, "execution_state_projection_missing"
+            )
         return snapshot
 
     try:
         projection = project_execution_state_model(row)
     except ValueError:
-        snapshot.snapshot_complete = False
-        if "execution_state_projection_unreadable" not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append("execution_state_projection_unreadable")
-        snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
-        snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+        _mark_execution_projection_unavailable(
+            snapshot, "execution_state_projection_unreadable", repair_required=True
+        )
         return snapshot
 
     # Terminal threads should not merge execution state —

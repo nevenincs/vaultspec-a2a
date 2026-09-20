@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:1e702c3ba1e40c6edd2f4ca9d75b1e775f96bfb89be97e9f20eafec42926f871'
+body_hash: 'sha256:5dce8ef732e13fa5e1be66fb09accab3c3f5aeda1bbba133283f20e6f396cc94'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3284,3 +3284,7 @@ Two medium-severity strict Ruff complexity and branch findings in frozen catalog
 ### 2026-09-20 graph topology complexity review pass
 
 Two medium-severity cognitive-complexity findings in star and pipeline graph compilation were resolved. Supervisor prompt and metadata construction, and pipeline order validation now have focused helpers. Review checked the configured and fallback supervisor presentations, assignment metadata, worker resolution, and the existing empty-order and duplicate-order errors before node wiring. Sixty-seven focused compiler tests, routine quality gates, strict Ty, module complexipy, and diff review pass. The cyclomatic gate now reports 130 findings, down from 131. No new review findings were surfaced. Nine strict Ruff findings and the compiler module-length finding remain open; the remaining repository strict backlog stays open in the audit queue.
+
+### 2026-09-20 durable snapshot projection complexity review pass
+
+Two medium-severity strict Ruff cyclomatic-complexity findings in durable snapshot enrichment were resolved. Permission projection and execution-projection failure marking now have focused helpers. Review checked terminal permission clearing still takes precedence, valid siblings survive malformed permission rows, unreadable plan approval still clears its request id and demands repair, absent execution rows only degrade when a checkpoint exists, and unreadable execution rows still require operator intervention. Seventeen focused projection tests, focused strict Ruff and Ty, and module complexipy pass. The cyclomatic health gate falls from 130 to 129 findings. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

@@ -12,7 +12,8 @@ import logging
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from inspect import Parameter, Signature
+from typing import TYPE_CHECKING, cast, override
 
 from sqlalchemy.exc import OperationalError
 
@@ -64,19 +65,134 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
+class _CancelResultIdentity:
+    action_id: str | None
+    thread_id: str
+    idempotency_key: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _CancelResultOutcome:
+    cancelled: bool
+    thread_status: str
+    error_detail: str | None
+    accepted: bool
+    applied: bool
+    action_status: str
+    failure_type: FailureType | None
+
+
+_CANCEL_RESULT_SIGNATURE = Signature(
+    [
+        Parameter("action_id", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("thread_id", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("cancelled", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("thread_status", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("error_detail", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+        Parameter("accepted", Parameter.POSITIONAL_OR_KEYWORD, default=False),
+        Parameter("applied", Parameter.POSITIONAL_OR_KEYWORD, default=False),
+        Parameter(
+            "action_status",
+            Parameter.POSITIONAL_OR_KEYWORD,
+            default=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+        ),
+        Parameter("idempotency_key", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+        Parameter("failure_type", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+    ]
+)
+_CANCEL_RESULT_FIELDS = tuple(_CANCEL_RESULT_SIGNATURE.parameters)
+
+
+def _split_cancel_result_args(
+    args: tuple[object, ...], kwargs: dict[str, object]
+) -> tuple[_CancelResultIdentity, _CancelResultOutcome]:
+    bound = _CANCEL_RESULT_SIGNATURE.bind(*args, **kwargs)
+    bound.apply_defaults()
+    values = bound.arguments
+    return (
+        _CancelResultIdentity(
+            cast("str | None", values["action_id"]),
+            cast("str", values["thread_id"]),
+            cast("str | None", values.get("idempotency_key")),
+        ),
+        _CancelResultOutcome(
+            cast("bool", values["cancelled"]),
+            cast("str", values["thread_status"]),
+            cast("str | None", values.get("error_detail")),
+            cast("bool", values.get("accepted", False)),
+            cast("bool", values.get("applied", False)),
+            cast(
+                "str",
+                values.get(
+                    "action_status",
+                    ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+                ),
+            ),
+            cast("FailureType | None", values.get("failure_type")),
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True, init=False, repr=False)
 class CancelResult:
     """Outcome of a cancel-thread service call."""
 
-    action_id: str | None
-    thread_id: str
-    cancelled: bool
-    thread_status: str
-    error_detail: str | None = None
-    accepted: bool = False
-    applied: bool = False
-    action_status: str = ControlActionResultStatus.REJECTED_INVALID_STATE.value
-    idempotency_key: str | None = None
-    failure_type: FailureType | None = None
+    _identity: _CancelResultIdentity
+    _outcome: _CancelResultOutcome
+    __signature__ = _CANCEL_RESULT_SIGNATURE
+    __match_args__ = _CANCEL_RESULT_FIELDS
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        identity, outcome = _split_cancel_result_args(args, kwargs)
+        object.__setattr__(self, "_identity", identity)
+        object.__setattr__(self, "_outcome", outcome)
+
+    @property
+    def action_id(self) -> str | None:
+        return self._identity.action_id
+
+    @property
+    def thread_id(self) -> str:
+        return self._identity.thread_id
+
+    @property
+    def cancelled(self) -> bool:
+        return self._outcome.cancelled
+
+    @property
+    def thread_status(self) -> str:
+        return self._outcome.thread_status
+
+    @property
+    def error_detail(self) -> str | None:
+        return self._outcome.error_detail
+
+    @property
+    def accepted(self) -> bool:
+        return self._outcome.accepted
+
+    @property
+    def applied(self) -> bool:
+        return self._outcome.applied
+
+    @property
+    def action_status(self) -> str:
+        return self._outcome.action_status
+
+    @property
+    def idempotency_key(self) -> str | None:
+        return self._identity.idempotency_key
+
+    @property
+    def failure_type(self) -> FailureType | None:
+        return self._outcome.failure_type
+
+    @override
+    def __repr__(self) -> str:
+        values = ", ".join(
+            f"{name}={getattr(self, name)!r}" for name in _CANCEL_RESULT_FIELDS
+        )
+        return f"CancelResult({values})"
 
 
 @dataclass(frozen=True, slots=True)

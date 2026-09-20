@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from langgraph.types import Command
@@ -17,7 +16,6 @@ from langgraph.types import Command
 from ..domain_config import domain_config
 from ..ipc.serializers import sequenced_to_dict
 from ..providers.team_selection import model_assignment_digest
-from ..streaming.aggregator import EventAggregator
 from ..streaming.node_metadata import node_metadata_from_graph
 from ..telemetry import ws_span
 from ..thread.cancellation_evidence import CancellationEvidence
@@ -38,7 +36,7 @@ from ._dispatch_contract import (
     failure_evidence,
 )
 from ._dispatch_receipts import emit_dispatch_application_receipt
-from .catalog_store import RunCatalogStore
+from ._executor_state import DispatchCapacityState, RunResources
 from .graph_lifecycle import (
     GraphCacheKey,
     GraphCompilationError,
@@ -46,15 +44,19 @@ from .graph_lifecycle import (
     RegisteredCompiledGraph,
 )
 from .state_projection import StateProjector
-from .token_store import RunTokenStore
 
 if TYPE_CHECKING:
+    from contextvars import ContextVar
+
     from opentelemetry.trace import Span
 
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
+    from ..streaming.aggregator import EventAggregator
     from ..streaming.types import SequencedEvent, StreamableGraph
+    from .catalog_store import RunCatalogStore
     from .ipc import WorkerBridge
+    from .token_store import RunTokenStore
 
 # ``GraphCompilationError`` is imported to be CAUGHT here, not re-published:
 # ``graph_lifecycle`` raises it and is where every handler imports it from.
@@ -66,12 +68,7 @@ logger = logging.getLogger(__name__)
 
 
 class Executor:
-    """Dispatch orchestrator for LangGraph graph runs.
-
-    Delegates graph compilation/caching to ``GraphLifecycleManager`` and
-    checkpoint inspection/terminal events to ``StateProjector``.  Owns
-    the ``EventAggregator`` and concurrency gating (``_active_ingests``).
-    """
+    """Orchestrate graph runs, projections, events, and dispatch capacity."""
 
     def __init__(
         self,
@@ -87,17 +84,15 @@ class Executor:
             else domain_config.aget_state_timeout_seconds
         )
         self._bridge = bridge
-        self._aggregator = EventAggregator()
+        self._resources = RunResources()
 
         # Worker-scoped holder of per-run actor tokens. Registered when a
         # run's active window opens and dropped when it closes, so tokens live
         # only inside the owning worker for the run and never touch a checkpoint.
-        self._token_store = RunTokenStore()
 
         # Worker-scoped cache of per-run engine catalog snapshots, dropped on the
         # same terminal boundary as the token store so a snapshot never outlives a
         # run. Shared with the graph lifecycle's authoring-bridge provider.
-        self._catalog_store = RunCatalogStore()
 
         # Delegates
         self._graph_lifecycle = GraphLifecycleManager(
@@ -125,13 +120,39 @@ class Executor:
 
         self._aggregator.add_broadcast_hook(_relay_event)
 
-        self._active_ingests: dict[str, DispatchCapacityReservation] = {}
-        self._pending_cancellations: dict[str, str] = {}
-        self._ingest_lock = asyncio.Lock()
-        self._next_capacity_generation = 0
-        self._dispatch_reservation: ContextVar[DispatchCapacityReservation | None] = (
-            ContextVar("dispatch_capacity_reservation", default=None)
-        )
+        self._capacity = DispatchCapacityState()
+
+    @property
+    def _aggregator(self) -> EventAggregator:
+        return self._resources.aggregator
+
+    @property
+    def _token_store(self) -> RunTokenStore:
+        return self._resources.token_store
+
+    @property
+    def _catalog_store(self) -> RunCatalogStore:
+        return self._resources.catalog_store
+
+    @property
+    def _active_ingests(self) -> dict[str, DispatchCapacityReservation]:
+        return self._capacity.active_ingests
+
+    @property
+    def _pending_cancellations(self) -> dict[str, str]:
+        return self._capacity.pending_cancellations
+
+    @property
+    def _ingest_lock(self) -> asyncio.Lock:
+        return self._capacity.lock
+
+    @property
+    def _next_capacity_generation(self) -> int:
+        return self._capacity.next_generation
+
+    @property
+    def _dispatch_reservation(self) -> ContextVar[DispatchCapacityReservation | None]:
+        return self._capacity.reservation
 
     @property
     def aggregator(self) -> EventAggregator:
@@ -233,10 +254,10 @@ class Executor:
                 return None, _CAPACITY_THREAD_ACTIVE
             if len(self._active_ingests) >= domain_config.max_concurrent_threads:
                 return None, _CAPACITY_FULL
-            self._next_capacity_generation += 1
+            self._capacity.next_generation += 1
             reservation = DispatchCapacityReservation(
                 thread_id=thread_id,
-                generation=self._next_capacity_generation,
+                generation=self._capacity.next_generation,
             )
             self._active_ingests[thread_id] = reservation
             return reservation, _CAPACITY_ACCEPTED

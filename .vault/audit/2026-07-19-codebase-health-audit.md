@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:69e22f1c3c7ef035e137f89f30616f70778fc7ce9749b312946d4a8c44029f55'
+body_hash: 'sha256:667021fcf85fc40ed4fbd83c0dccbe98c51f808cfdfcb7f1604f74a5a2f092cf'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4192,3 +4192,19 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, low severity, module boundaries: cache methods lazily reference the public catalog status/exception classes and team selection uses a private record implementation behind public wrappers. Import loadability, export declaration tests, strict types, and focused behavior tests passed; keep broad integration verification queued.
 - Review finding, medium severity, quality: preview Ruff still has three live-test argument findings in concurrent edits. Pylint reports 30 instance-attribute, two module-length, and three public-method findings. These remain open and must be burned down before strict completion.
 - Verification: 34 cache tests, 23 team-selection/export tests, 47 lifecycle/service tests, 14 CLI tests, 34 worker tests, and 15 message-dispatch tests passed; `just check-type-strict` and production health passed. Diff review found no high-severity regression.
+
+### 2026-09-20 composed state and preview Ruff review
+
+- Implementation: moved graph lifecycle options and permission transition capture into private modules; grouped permission decision, dispatch wording, executor capacity and run resources, action lease, cancel and clarification result state, telemetry export state, provider health axes, and process role options. Reduced all three preview Ruff argument findings in the live verdict test to zero.
+- Review finding, low severity, compatibility: constructor binders preserve repository positional and keyword call patterns, yet runtime signature introspection on these grouped records differs. Preserve direct construction coverage in the broad unit suite.
+- Review finding, medium severity, concurrency: initial permission context properties read ORM state after the transition write and failed two concurrent lease tests. Capturing description and approval status in the immutable decision record corrected this; both tests now pass. Keep full suite verification queued.
+- Review finding, medium severity, quality: 20 instance-attribute and three public-method Pylint findings remain. These are still open in the audit queue; no strict-completion claim is warranted.
+- Review finding, medium severity, prerequisites: the live verdict loop test skipped without a reachable engine/gateway/worker stack. Repeat on a configured service host.
+- Verification: `just check-all`, `just check-type-strict`, normal and preview Ruff, relative-import guard, 59 executor tests, two concurrent permission lease tests, 39 telemetry tests, 27 catalog and route tests, and 41 cancel/clarification tests passed. Diff review found no high-severity regression; result is REVISION REQUIRED while strict Pylint remains nonzero.
+
+### 2026-09-20 lifecycle state and final scoped composition review
+
+- Implementation: grouped graph lifecycle runtime ports and cache/lock state into private records, preserving the lifecycle public methods. Desktop path groups and process role commands now retain the original construction and readable path/command attributes.
+- Review finding, low severity, compatibility: internal graph lifecycle attribute names changed to owned port/state records. No repository tests or callers access the old private fields; 59 executor tests and import-load verification passed.
+- Review finding, medium severity, quality: the post-pass strict Pylint census is 18 instance-attribute and three public-method findings. Keep all 21 open for further implementation and review; this pass remains REVISION REQUIRED.
+- Verification: 95 lifecycle, 25 desktop/seating, and 59 executor tests passed. `just check-type-strict`, standard and preview Ruff, scoped Pylint, and `just check-all` passed before the final lifecycle extraction; scoped Ruff/Pylint/Ty and executor tests passed after it. No high-severity issue surfaced in diff review.

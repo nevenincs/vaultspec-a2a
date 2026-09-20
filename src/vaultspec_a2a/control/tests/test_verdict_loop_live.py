@@ -40,6 +40,7 @@ from __future__ import annotations
 import pathlib
 import uuid
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -110,6 +111,47 @@ if TYPE_CHECKING:
 # repository is real, absolute, and present on either platform.
 _WORKSPACE = str(pathlib.Path.cwd())
 _TEST_INTERNAL_TOKEN = "verdict-loop-live-test-token"
+
+
+@dataclass(frozen=True, slots=True)
+class _LiveVerdictResources:
+    session_factory: async_sessionmaker[AsyncSession]
+    checkpointer: AsyncSqliteSaver
+    executor: Executor
+    graph: RegisteredCompiledGraph
+    definition: FrozenGraphDefinition
+    model_assignment: dict[str, dict[str, object]]
+    metadata: str
+
+
+@dataclass(frozen=True, slots=True)
+class _LiveVerdictIdentity:
+    thread_id: str
+    info: dict[str, str]
+    baseline: int
+
+
+@dataclass(frozen=True, slots=True)
+class _VerdictWorkerContext:
+    client: AuthoringClient
+    resources: _LiveVerdictResources
+    identity: _LiveVerdictIdentity
+
+
+@dataclass(frozen=True, slots=True)
+class _VerdictIngestContext:
+    worker_client: httpx.AsyncClient
+    resources: _LiveVerdictResources
+    identity: _LiveVerdictIdentity
+
+
+@dataclass(frozen=True, slots=True)
+class _VerdictResumeContext:
+    client: AuthoringClient
+    worker_client: httpx.AsyncClient
+    resources: _LiveVerdictResources
+    identity: _LiveVerdictIdentity
+    config: RunnableConfig
 
 
 @pytest.fixture(autouse=True)
@@ -253,45 +295,37 @@ async def _prepare_live_verdict_case(
 
 
 async def _ingest_live_verdict_run(
-    session_factory: async_sessionmaker[AsyncSession],
-    worker_client: httpx.AsyncClient,
-    graph: RegisteredCompiledGraph,
-    *,
-    thread_id: str,
-    info: dict[str, str],
-    definition: FrozenGraphDefinition,
-    model_assignment: dict[str, dict[str, object]],
-    metadata: str,
+    context: _VerdictIngestContext,
 ) -> RunnableConfig:
     authority = make_test_write_authority()
     ingest = DispatchRequest(
         dispatch_id=authority.action_receipt_id,
         action="ingest",
         workspace_root=_WORKSPACE,
-        thread_id=thread_id,
+        thread_id=context.identity.thread_id,
         content="drive to the gate",
         team_preset="mock-success-single",
-        graph_definition=definition,
+        graph_definition=context.resources.definition,
         recursion_limit=10,
-        model_assignment=model_assignment,
+        model_assignment=context.resources.model_assignment,
         actor_tokens=ActorTokenBundle(
             tokens={"vaultspec-synthesist": "vl-token"},
             engine_bearer="vl-bearer",
         ),
     )
-    async with session_factory() as db:
+    async with context.resources.session_factory() as db:
         await create_thread(
             db,
             write_authority=authority,
-            thread_id=thread_id,
+            thread_id=context.identity.thread_id,
             team_preset="mock-success-single",
-            metadata=metadata,
+            metadata=context.resources.metadata,
         )
         await create_control_action(
             db,
-            thread_id=thread_id,
+            thread_id=context.identity.thread_id,
             action_type=authority.action_type,
-            idempotency_key=f"thread-create:{thread_id}",
+            idempotency_key=f"thread-create:{context.identity.thread_id}",
             dispatch_id=authority.action_receipt_id,
             payload=freeze_accepted_input(
                 ingest, intent={"content": "drive to the gate"}
@@ -299,23 +333,23 @@ async def _ingest_live_verdict_run(
         )
         receipt = await prepare_graph_action_receipt(
             db,
-            thread_id=thread_id,
+            thread_id=context.identity.thread_id,
             dispatch_id=authority.action_receipt_id,
         )
         assert receipt is not None
         await db.commit()
-    response = await worker_client.post(
+    response = await context.worker_client.post(
         "/dispatch", json=ingest.model_dump(mode="json")
     )
     assert response.status_code == 200, response.text
 
     # Fire-and-forget: poll the REAL graph's own state until the seed node has
     # landed and the run is parked at the interrupt.
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    config: RunnableConfig = {"configurable": {"thread_id": context.identity.thread_id}}
     with anyio.fail_after(15.0):
         while True:
-            snap = await graph.aget_state(config)
-            if snap.values.get("gate_pending_proposal_id") == info[
+            snap = await context.resources.graph.aget_state(config)
+            if snap.values.get("gate_pending_proposal_id") == context.identity.info[
                 "proposal_id"
             ] and snap.next == ("gate",):
                 break
@@ -323,12 +357,14 @@ async def _ingest_live_verdict_run(
 
     # Seed the durable gate row the subscriber correlates against - the same
     # shape the engine-side reconcile tests seed, now AFTER a genuine interrupt.
-    async with session_factory() as db:
-        await update_thread_status(db, thread_id, ThreadStatus.INPUT_REQUIRED)
+    async with context.resources.session_factory() as db:
+        await update_thread_status(
+            db, context.identity.thread_id, ThreadStatus.INPUT_REQUIRED
+        )
         await record_permission_request(
             db,
-            request_id=f"{thread_id}:verdict-loop-gate",
-            thread_id=thread_id,
+            request_id=f"{context.identity.thread_id}:verdict-loop-gate",
+            thread_id=context.identity.thread_id,
             pause_reason_type="document_approval_request",
             description="Approve the test document",
             allowed_options=[
@@ -344,22 +380,13 @@ async def _ingest_live_verdict_run(
 
 
 async def _resume_live_verdict_run(
-    client: AuthoringClient,
-    session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: AsyncSqliteSaver,
-    worker_client: httpx.AsyncClient,
-    graph: RegisteredCompiledGraph,
-    config: RunnableConfig,
-    *,
-    baseline: int,
-    info: dict[str, str],
-    thread_id: str,
+    context: _VerdictResumeContext,
 ) -> None:
     subscriber = VerdictSubscriber(
         VerdictSubscriberConfig(
-            session_factory=session_factory,
-            checkpointer=checkpointer,
-            worker_client=worker_client,
+            session_factory=context.resources.session_factory,
+            checkpointer=context.resources.checkpointer,
+            worker_client=context.worker_client,
             circuit_breaker=WorkerCircuitBreaker(
                 failure_threshold=3, recovery_timeout=30.0
             ),
@@ -371,15 +398,23 @@ async def _resume_live_verdict_run(
         )
     )
 
-    frames = [f async for f in client.stream_lifecycle(last_seq=baseline)]
+    frames = [
+        f
+        async for f in context.client.stream_lifecycle(
+            last_seq=context.identity.baseline
+        )
+    ]
     lifecycle = [f for f in frames if isinstance(f, LifecycleEvent)]
     decided = [
         f
         for f in lifecycle
-        if info["proposal_id"] in f.correlation_ids()
+        if context.identity.info["proposal_id"] in f.correlation_ids()
         and f.event_kind == "approval.resolved"
     ]
-    assert decided, f"no approval.resolved frame correlates to {info['proposal_id']}"
+    assert decided, (
+        "no approval.resolved frame correlates to "
+        f"{context.identity.info['proposal_id']}"
+    )
 
     # The real end-to-end dispatch: subscriber -> real worker HTTP -> real
     # Executor -> real graph resume.
@@ -389,7 +424,7 @@ async def _resume_live_verdict_run(
     # own state until it reaches its terminal END.
     with anyio.fail_after(15.0):
         while True:
-            snap = await graph.aget_state(config)
+            snap = await context.resources.graph.aget_state(context.config)
             if snap.next == ():
                 break
             await anyio.sleep(0.05)
@@ -403,31 +438,22 @@ async def _resume_live_verdict_run(
     ), "the finish node never observed the real resume"
 
     # The durable gate row resolved and the thread left INPUT_REQUIRED.
-    async with session_factory() as db:
-        gate_row = await get_permission_request(db, f"{thread_id}:verdict-loop-gate")
+    async with context.resources.session_factory() as db:
+        gate_row = await get_permission_request(
+            db, f"{context.identity.thread_id}:verdict-loop-gate"
+        )
         assert gate_row is not None
         assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
-        thread = await get_thread(db, thread_id)
+        thread = await get_thread(db, context.identity.thread_id)
         assert thread is not None
         assert thread.status != ThreadStatus.INPUT_REQUIRED.value
 
 
 async def _run_live_verdict_worker(
-    client: AuthoringClient,
-    session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: AsyncSqliteSaver,
-    executor: Executor,
-    graph: RegisteredCompiledGraph,
-    *,
-    baseline: int,
-    info: dict[str, str],
-    thread_id: str,
-    definition: FrozenGraphDefinition,
-    model_assignment: dict[str, dict[str, object]],
-    metadata: str,
+    context: _VerdictWorkerContext,
 ) -> None:
     worker_app = create_worker_app(lifespan=_worker_test_lifespan)
-    worker_app.state.executor = executor
+    worker_app.state.executor = context.resources.executor
     async with (
         httpx.AsyncClient(
             transport=ASGITransport(app=worker_app),
@@ -440,25 +466,20 @@ async def _run_live_verdict_worker(
         # production dispatch route's task group is wired explicitly.
         worker_app.state.task_group = tg
         config = await _ingest_live_verdict_run(
-            session_factory,
-            worker_client,
-            graph,
-            thread_id=thread_id,
-            info=info,
-            definition=definition,
-            model_assignment=model_assignment,
-            metadata=metadata,
+            _VerdictIngestContext(
+                worker_client=worker_client,
+                resources=context.resources,
+                identity=context.identity,
+            )
         )
         await _resume_live_verdict_run(
-            client,
-            session_factory,
-            checkpointer,
-            worker_client,
-            graph,
-            config,
-            baseline=baseline,
-            info=info,
-            thread_id=thread_id,
+            _VerdictResumeContext(
+                client=context.client,
+                worker_client=worker_client,
+                resources=context.resources,
+                identity=context.identity,
+                config=config,
+            )
         )
 
 
@@ -497,17 +518,23 @@ async def _run_live_verdict_a2a(
             model_assignment_digest=execution_authority.model_assignment_digest,
         )
         await _run_live_verdict_worker(
-            client,
-            session_factory,
-            checkpointer,
-            executor,
-            graph,
-            baseline=baseline,
-            info=info,
-            thread_id=thread_id,
-            definition=definition,
-            model_assignment=execution_authority.model_assignment,
-            metadata=metadata,
+            _VerdictWorkerContext(
+                client=client,
+                resources=_LiveVerdictResources(
+                    session_factory=session_factory,
+                    checkpointer=checkpointer,
+                    executor=executor,
+                    graph=graph,
+                    definition=definition,
+                    model_assignment=execution_authority.model_assignment,
+                    metadata=metadata,
+                ),
+                identity=_LiveVerdictIdentity(
+                    thread_id=thread_id,
+                    info=info,
+                    baseline=baseline,
+                ),
+            )
         )
     await db_engine.dispose()
 

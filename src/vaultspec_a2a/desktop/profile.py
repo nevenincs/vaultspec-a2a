@@ -28,6 +28,10 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "DesktopProfile",
@@ -58,7 +62,97 @@ class DesktopProfileError(ValueError):
     """
 
 
+_MISSING_DESKTOP_STATE_PATH = object()
+_DESKTOP_STATE_PATH_FIELDS = (
+    "app_home",
+    "database_path",
+    "checkpoint_path",
+    "logs_dir",
+    "discovery_path",
+    "workspaces_root",
+    "credentials_dir",
+    "receipts_dir",
+    "temp_homes_dir",
+    "snapshots_dir",
+)
+_DESKTOP_STATE_PATH_DEFAULTS = (_MISSING_DESKTOP_STATE_PATH,) * len(
+    _DESKTOP_STATE_PATH_FIELDS
+)
+
+
+def _bind_desktop_state_paths(
+    args: tuple[object, ...],
+    options: Mapping[str, object],
+) -> tuple[object, ...]:
+    """Bind the original public field order for state-path construction."""
+    if len(args) > len(_DESKTOP_STATE_PATH_FIELDS):
+        raise TypeError(
+            "expected at most "
+            f"{len(_DESKTOP_STATE_PATH_FIELDS)} positional arguments, "
+            f"got {len(args)}"
+        )
+    unknown = next(
+        (name for name in options if name not in _DESKTOP_STATE_PATH_FIELDS),
+        None,
+    )
+    if unknown is not None:
+        raise TypeError(f"unexpected keyword argument {unknown!r}")
+    duplicate = next(
+        (name for name in _DESKTOP_STATE_PATH_FIELDS[: len(args)] if name in options),
+        None,
+    )
+    if duplicate is not None:
+        raise TypeError(f"multiple values for argument {duplicate!r}")
+    return tuple(
+        args[index]
+        if index < len(args)
+        else options.get(name, _DESKTOP_STATE_PATH_DEFAULTS[index])
+        for index, name in enumerate(_DESKTOP_STATE_PATH_FIELDS)
+    )
+
+
+def _required_desktop_state_path(name: str, value: object) -> Path:
+    if value is _MISSING_DESKTOP_STATE_PATH:
+        raise TypeError(f"missing required argument {name!r}")
+    return cast("Path", value)
+
+
 @dataclass(frozen=True, slots=True)
+class _DesktopSeatedPaths:
+    """Mutable paths with an active runtime consumer."""
+
+    app_home: Path
+    database_path: Path
+    checkpoint_path: Path
+    logs_dir: Path
+    discovery_path: Path
+    workspaces_root: Path
+
+
+@dataclass(frozen=True, slots=True)
+class _DesktopReservedPaths:
+    """Mutable paths reserved for consumers that have not landed yet."""
+
+    credentials_dir: Path
+    receipts_dir: Path
+    temp_homes_dir: Path
+    snapshots_dir: Path
+
+
+class _DesktopStatePathsOptions(TypedDict, total=False):
+    app_home: Path
+    database_path: Path
+    checkpoint_path: Path
+    logs_dir: Path
+    discovery_path: Path
+    workspaces_root: Path
+    credentials_dir: Path
+    receipts_dir: Path
+    temp_homes_dir: Path
+    snapshots_dir: Path
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class DesktopStatePaths:
     """The explicit mutable-state sub-paths derived from an application home.
 
@@ -80,16 +174,87 @@ class DesktopStatePaths:
     :meth:`DesktopProfile.ensure`.
     """
 
-    app_home: Path
-    database_path: Path
-    checkpoint_path: Path
-    logs_dir: Path
-    discovery_path: Path
-    workspaces_root: Path
-    credentials_dir: Path
-    receipts_dir: Path
-    temp_homes_dir: Path
-    snapshots_dir: Path
+    _seated: _DesktopSeatedPaths
+    _reserved: _DesktopReservedPaths
+
+    def __init__(
+        self,
+        *args: object,
+        **options: Unpack[_DesktopStatePathsOptions],
+    ) -> None:
+        values = _bind_desktop_state_paths(args, options)
+        object.__setattr__(
+            self,
+            "_seated",
+            _DesktopSeatedPaths(
+                app_home=_required_desktop_state_path("app_home", values[0]),
+                database_path=_required_desktop_state_path("database_path", values[1]),
+                checkpoint_path=_required_desktop_state_path(
+                    "checkpoint_path", values[2]
+                ),
+                logs_dir=_required_desktop_state_path("logs_dir", values[3]),
+                discovery_path=_required_desktop_state_path(
+                    "discovery_path", values[4]
+                ),
+                workspaces_root=_required_desktop_state_path(
+                    "workspaces_root", values[5]
+                ),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_reserved",
+            _DesktopReservedPaths(
+                credentials_dir=_required_desktop_state_path(
+                    "credentials_dir", values[6]
+                ),
+                receipts_dir=_required_desktop_state_path("receipts_dir", values[7]),
+                temp_homes_dir=_required_desktop_state_path(
+                    "temp_homes_dir", values[8]
+                ),
+                snapshots_dir=_required_desktop_state_path("snapshots_dir", values[9]),
+            ),
+        )
+
+    @property
+    def app_home(self) -> Path:
+        return self._seated.app_home
+
+    @property
+    def database_path(self) -> Path:
+        return self._seated.database_path
+
+    @property
+    def checkpoint_path(self) -> Path:
+        return self._seated.checkpoint_path
+
+    @property
+    def logs_dir(self) -> Path:
+        return self._seated.logs_dir
+
+    @property
+    def discovery_path(self) -> Path:
+        return self._seated.discovery_path
+
+    @property
+    def workspaces_root(self) -> Path:
+        return self._seated.workspaces_root
+
+    @property
+    def credentials_dir(self) -> Path:
+        return self._reserved.credentials_dir
+
+    @property
+    def receipts_dir(self) -> Path:
+        return self._reserved.receipts_dir
+
+    @property
+    def temp_homes_dir(self) -> Path:
+        return self._reserved.temp_homes_dir
+
+    @property
+    def snapshots_dir(self) -> Path:
+        return self._reserved.snapshots_dir
 
     @property
     def provisioned_directories(self) -> tuple[Path, ...]:
@@ -100,11 +265,11 @@ class DesktopStatePaths:
         the reserved directories are omitted until their phases consume them.
         """
         return (
-            self.app_home,
-            self.database_path.parent,
-            self.checkpoint_path.parent,
-            self.logs_dir,
-            self.workspaces_root,
+            self._seated.app_home,
+            self._seated.database_path.parent,
+            self._seated.checkpoint_path.parent,
+            self._seated.logs_dir,
+            self._seated.workspaces_root,
         )
 
 

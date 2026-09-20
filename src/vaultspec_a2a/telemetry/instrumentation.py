@@ -50,7 +50,7 @@ import dataclasses
 import importlib
 import logging
 import os
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast, override
 
 from opentelemetry import metrics, trace
 
@@ -125,6 +125,68 @@ _OTLP_EXPORTER_MODULES = (
 
 
 @dataclasses.dataclass(frozen=True)
+class _TelemetryExportState:
+    traces_exporting: bool
+    metrics_exporting: bool
+
+
+class _TelemetryConfigOptions(TypedDict, total=False):
+    sdk_available: bool
+    otlp_available: bool
+    sdk_enabled: bool
+    service_name: str
+    otlp_endpoint: str
+    langsmith_enabled: bool
+    traces_exporting: bool
+    metrics_exporting: bool
+
+
+_TELEMETRY_CONFIG_FIELDS = (
+    "sdk_available",
+    "otlp_available",
+    "sdk_enabled",
+    "service_name",
+    "otlp_endpoint",
+    "langsmith_enabled",
+    "traces_exporting",
+    "metrics_exporting",
+)
+_TELEMETRY_CONFIG_DEFAULTS = (object(),) * 6 + (False, False)
+
+
+def _bind_telemetry_config_fields(
+    args: tuple[object, ...], options: _TelemetryConfigOptions
+) -> tuple[object, ...]:
+    """Bind the original positional and keyword config fields."""
+    field_names = _TELEMETRY_CONFIG_FIELDS
+    if len(args) > len(field_names):
+        raise TypeError(
+            f"expected at most {len(field_names)} positional arguments, got {len(args)}"
+        )
+    unknown = next((name for name in options if name not in field_names), None)
+    if unknown is not None:
+        raise TypeError(f"unexpected keyword argument {unknown!r}")
+    duplicate = next(
+        (name for name in field_names[: len(args)] if name in options),
+        None,
+    )
+    if duplicate is not None:
+        raise TypeError(f"multiple values for argument {duplicate!r}")
+    return tuple(
+        args[index]
+        if index < len(args)
+        else options.get(name, _TELEMETRY_CONFIG_DEFAULTS[index])
+        for index, name in enumerate(field_names)
+    )
+
+
+def _required_telemetry_field(name: str, value: object) -> object:
+    if value is _TELEMETRY_CONFIG_DEFAULTS[0]:
+        raise TypeError(f"missing required argument {name!r}")
+    return value
+
+
+@dataclasses.dataclass(frozen=True, init=False)
 class TelemetryConfig:
     """Runtime snapshot of the active telemetry configuration.
 
@@ -151,8 +213,63 @@ class TelemetryConfig:
     service_name: str
     otlp_endpoint: str
     langsmith_enabled: bool
-    traces_exporting: bool = False
-    metrics_exporting: bool = False
+    _exporting: _TelemetryExportState = dataclasses.field(init=False, repr=False)
+
+    def __init__(
+        self,
+        *args: object,
+        **options: Unpack[_TelemetryConfigOptions],
+    ) -> None:
+        values = _bind_telemetry_config_fields(args, options)
+        object.__setattr__(
+            self,
+            "sdk_available",
+            cast("bool", _required_telemetry_field("sdk_available", values[0])),
+        )
+        object.__setattr__(
+            self,
+            "otlp_available",
+            cast("bool", _required_telemetry_field("otlp_available", values[1])),
+        )
+        object.__setattr__(
+            self,
+            "sdk_enabled",
+            cast("bool", _required_telemetry_field("sdk_enabled", values[2])),
+        )
+        object.__setattr__(
+            self,
+            "service_name",
+            cast("str", _required_telemetry_field("service_name", values[3])),
+        )
+        object.__setattr__(
+            self,
+            "otlp_endpoint",
+            cast("str", _required_telemetry_field("otlp_endpoint", values[4])),
+        )
+        object.__setattr__(
+            self,
+            "langsmith_enabled",
+            cast(
+                "bool",
+                _required_telemetry_field("langsmith_enabled", values[5]),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_exporting",
+            _TelemetryExportState(
+                traces_exporting=cast("bool", values[6]),
+                metrics_exporting=cast("bool", values[7]),
+            ),
+        )
+
+    @property
+    def traces_exporting(self) -> bool:
+        return self._exporting.traces_exporting
+
+    @property
+    def metrics_exporting(self) -> bool:
+        return self._exporting.metrics_exporting
 
     @override
     def __repr__(self) -> str:

@@ -8,7 +8,6 @@ protocol-agnostic service function.  Does NOT commit the session, raise
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -22,7 +21,6 @@ from ..database import (
     record_permission_response_submission,
     reset_permission_response_submission,
     set_thread_approval_state,
-    thread_write_expectation,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
@@ -77,9 +75,7 @@ from ._permission_response_contract import (
 from ._permission_response_contract import (
     response_payload as _response_payload,
 )
-from ._permission_response_contract import (
-    response_verdict as _response_verdict,
-)
+from ._permission_transition_context import permission_transition_context
 from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import freeze_accepted_input
 from .action_lease import (
@@ -110,7 +106,6 @@ if TYPE_CHECKING:
     from ..database import (
         PermissionRequestModel,
         ThreadModel,
-        ThreadWriteExpectation,
     )
 
 __all__ = [
@@ -118,63 +113,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class _PermissionTransitionContext:
-    """Immutable values shared by transition validation and persistence."""
-
-    request_id: str
-    option_id: str
-    notes: str | None
-    permission: PermissionRequestModel
-    thread_record: ThreadModel
-    write_expectation: ThreadWriteExpectation
-    thread_id: str
-    resolved_idempotency_key: str
-    is_locally_respondable: bool
-    permission_description: str
-    replay_approval_status: str | None
-    decision_verdict: str
-    submitted_approval_status: str | None
-
-
-def _permission_transition_context(
-    authorized: _AuthorizedPermission, response: PermissionInput
-) -> _PermissionTransitionContext:
-    """Capture transition inputs before any durable writes occur."""
-    request_id = response.request_id
-    option_id = response.option_id
-    notes = response.notes
-    permission = authorized.permission
-    thread_record = authorized.thread_record
-    write_expectation = thread_write_expectation(thread_record)
-    thread_id = authorized.thread_id
-    resolved_idempotency_key = authorized.resolved_idempotency_key
-    is_locally_respondable = (
-        permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
-    )
-    permission_description = permission.description
-    replay_approval_status = thread_record.approval_status
-    decision_verdict = _response_verdict(permission, option_id)
-    submitted_approval_status = (
-        decision_verdict if is_locally_respondable else replay_approval_status
-    )
-    return _PermissionTransitionContext(
-        request_id=request_id,
-        option_id=option_id,
-        notes=notes,
-        permission=permission,
-        thread_record=thread_record,
-        write_expectation=write_expectation,
-        thread_id=thread_id,
-        resolved_idempotency_key=resolved_idempotency_key,
-        is_locally_respondable=is_locally_respondable,
-        permission_description=permission_description,
-        replay_approval_status=replay_approval_status,
-        decision_verdict=decision_verdict,
-        submitted_approval_status=submitted_approval_status,
-    )
 
 
 async def _journal_rejection(
@@ -763,7 +701,7 @@ async def _record_permission_transition(
     operator really made is a fact about the run even when its delivery failed,
     and a re-answer appends a second row rather than rewriting the first.
     """
-    context = _permission_transition_context(authorized, response)
+    context = permission_transition_context(authorized, response)
 
     team_preset: str | None = context.thread_record.team_preset
     # The stored value is validated, not merely fetched. This is the workspace a

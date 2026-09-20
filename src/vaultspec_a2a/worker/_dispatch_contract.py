@@ -30,6 +30,19 @@ __all__ = [
 
 
 @dataclass(frozen=True, slots=True)
+class _FailureWording:
+    operator: str
+    detail: str
+    action: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _SlotWording:
+    operator: str
+    action: str
+
+
+@dataclass(frozen=True, slots=True)
 class _GuardWording:
     """Per-runtime-mode wording for the arms ingest and resume share.
 
@@ -46,37 +59,72 @@ class _GuardWording:
 
     runtime_mode: str
     compile_failure: str
-    graph_missing: str
-    graph_missing_detail: str
-    slot_held: str
-    slot_held_action: str
-    execution_failure: str
-    execution_failure_action: str
-    execution_failure_detail: str
+    missing: _FailureWording
+    slot: _SlotWording
+    execution: _FailureWording
+
+    @property
+    def graph_missing(self) -> str:
+        return self.missing.operator
+
+    @property
+    def graph_missing_detail(self) -> str:
+        return self.missing.detail
+
+    @property
+    def slot_held(self) -> str:
+        return self.slot.operator
+
+    @property
+    def slot_held_action(self) -> str:
+        return self.slot.action
+
+    @property
+    def execution_failure(self) -> str:
+        return self.execution.operator
+
+    @property
+    def execution_failure_action(self) -> str:
+        assert self.execution.action is not None
+        return self.execution.action
+
+    @property
+    def execution_failure_detail(self) -> str:
+        return self.execution.detail
 
 
 _INGEST_GUARDS = _GuardWording(
     runtime_mode="ingest",
     compile_failure="Graph compilation failed for thread %s: %s",
-    graph_missing="No graph for thread %s -- no team preset provided",
-    graph_missing_detail="No graph to run: the dispatch named no team preset",
-    slot_held="Ingest already active for thread %s -- dropping",
-    slot_held_action="ingest_rejected_active",
-    execution_failure="Ingest failed for thread %s",
-    execution_failure_action="ingest_failed",
-    execution_failure_detail="Graph execution failed unexpectedly",
+    missing=_FailureWording(
+        "No graph for thread %s -- no team preset provided",
+        "No graph to run: the dispatch named no team preset",
+    ),
+    slot=_SlotWording(
+        "Ingest already active for thread %s -- dropping", "ingest_rejected_active"
+    ),
+    execution=_FailureWording(
+        "Ingest failed for thread %s",
+        "Graph execution failed unexpectedly",
+        "ingest_failed",
+    ),
 )
 
 _RESUME_GUARDS = _GuardWording(
     runtime_mode="resume",
     compile_failure="Graph recompile failed for thread %s: %s",
-    graph_missing="No graph for thread %s -- cannot resume",
-    graph_missing_detail="No graph to resume: the run has no compiled graph",
-    slot_held="Ingest already active for thread %s -- cannot resume",
-    slot_held_action="resume_rejected_active",
-    execution_failure="Resume failed for thread %s",
-    execution_failure_action="resume_failed",
-    execution_failure_detail="Graph resume failed unexpectedly",
+    missing=_FailureWording(
+        "No graph for thread %s -- cannot resume",
+        "No graph to resume: the run has no compiled graph",
+    ),
+    slot=_SlotWording(
+        "Ingest already active for thread %s -- cannot resume", "resume_rejected_active"
+    ),
+    execution=_FailureWording(
+        "Resume failed for thread %s",
+        "Graph resume failed unexpectedly",
+        "resume_failed",
+    ),
 )
 
 # The provider condition every executor-side rejection resolves to, and it is a

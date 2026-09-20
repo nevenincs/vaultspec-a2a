@@ -11,7 +11,8 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from inspect import Parameter, Signature
+from typing import TYPE_CHECKING, Any, cast, override
 
 from sqlalchemy import select
 
@@ -77,20 +78,131 @@ _IDEMPOTENCY_PREFIX = "clarification-response:"
 
 
 @dataclass(frozen=True, slots=True)
-class ClarificationResult:
-    """Protocol-neutral outcome of resolving one questionnaire."""
-
+class _ClarificationResultIdentity:
     request_id: str
     thread_id: str
+    action_id: str | None
+    idempotency_key: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ClarificationResultOutcome:
     accepted: bool
     applied: bool
     action_status: str
-    action_id: str | None = None
-    idempotency_key: str | None = None
-    dispatched: bool = False
-    error_detail: str | None = None
-    error_status_code: int | None = None
-    failure_type: FailureType | None = None
+    dispatched: bool
+    error_detail: str | None
+    error_status_code: int | None
+    failure_type: FailureType | None
+
+
+_CLARIFICATION_RESULT_SIGNATURE = Signature(
+    [
+        Parameter("request_id", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("thread_id", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("accepted", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("applied", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("action_status", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("action_id", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+        Parameter("idempotency_key", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+        Parameter("dispatched", Parameter.POSITIONAL_OR_KEYWORD, default=False),
+        Parameter("error_detail", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+        Parameter("error_status_code", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+        Parameter("failure_type", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+    ]
+)
+_CLARIFICATION_RESULT_FIELDS = tuple(_CLARIFICATION_RESULT_SIGNATURE.parameters)
+
+
+def _split_clarification_result_args(
+    args: tuple[object, ...], kwargs: dict[str, object]
+) -> tuple[_ClarificationResultIdentity, _ClarificationResultOutcome]:
+    bound = _CLARIFICATION_RESULT_SIGNATURE.bind(*args, **kwargs)
+    bound.apply_defaults()
+    values = bound.arguments
+    return (
+        _ClarificationResultIdentity(
+            cast("str", values["request_id"]),
+            cast("str", values["thread_id"]),
+            cast("str | None", values.get("action_id")),
+            cast("str | None", values.get("idempotency_key")),
+        ),
+        _ClarificationResultOutcome(
+            cast("bool", values["accepted"]),
+            cast("bool", values["applied"]),
+            cast("str", values["action_status"]),
+            cast("bool", values.get("dispatched", False)),
+            cast("str | None", values.get("error_detail")),
+            cast("int | None", values.get("error_status_code")),
+            cast("FailureType | None", values.get("failure_type")),
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True, init=False, repr=False)
+class ClarificationResult:
+    """Protocol-neutral outcome of resolving one questionnaire."""
+
+    _identity: _ClarificationResultIdentity
+    _outcome: _ClarificationResultOutcome
+    __signature__ = _CLARIFICATION_RESULT_SIGNATURE
+    __match_args__ = _CLARIFICATION_RESULT_FIELDS
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        identity, outcome = _split_clarification_result_args(args, kwargs)
+        object.__setattr__(self, "_identity", identity)
+        object.__setattr__(self, "_outcome", outcome)
+
+    @property
+    def request_id(self) -> str:
+        return self._identity.request_id
+
+    @property
+    def thread_id(self) -> str:
+        return self._identity.thread_id
+
+    @property
+    def accepted(self) -> bool:
+        return self._outcome.accepted
+
+    @property
+    def applied(self) -> bool:
+        return self._outcome.applied
+
+    @property
+    def action_status(self) -> str:
+        return self._outcome.action_status
+
+    @property
+    def action_id(self) -> str | None:
+        return self._identity.action_id
+
+    @property
+    def idempotency_key(self) -> str | None:
+        return self._identity.idempotency_key
+
+    @property
+    def dispatched(self) -> bool:
+        return self._outcome.dispatched
+
+    @property
+    def error_detail(self) -> str | None:
+        return self._outcome.error_detail
+
+    @property
+    def error_status_code(self) -> int | None:
+        return self._outcome.error_status_code
+
+    @property
+    def failure_type(self) -> FailureType | None:
+        return self._outcome.failure_type
+
+    @override
+    def __repr__(self) -> str:
+        values = ", ".join(
+            f"{name}={getattr(self, name)!r}" for name in _CLARIFICATION_RESULT_FIELDS
+        )
+        return f"ClarificationResult({values})"
 
 
 @dataclass(frozen=True, slots=True)

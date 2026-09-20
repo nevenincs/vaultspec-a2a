@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Final
+from typing import Final, TypedDict, Unpack, cast
 
 from ._provider_catalog_cache import (
     CatalogCacheSnapshot as CatalogCacheSnapshot,
@@ -277,10 +277,7 @@ class ProviderHealthAxes:
     admission: AdmissionState
 
 
-@dataclass(frozen=True, slots=True)
-class StructuredProviderHealth:
-    """Independent provider health facts and their derived selectability."""
-
+class _StructuredProviderHealthOptions(TypedDict, total=False):
     configured: HealthState
     transport: HealthState
     authentication: AuthenticationState
@@ -289,6 +286,126 @@ class StructuredProviderHealth:
     selectable: bool
     reasons: tuple[str, ...]
     checked_at: datetime
+
+
+_STRUCTURED_PROVIDER_HEALTH_FIELDS = (
+    "configured",
+    "transport",
+    "authentication",
+    "catalog",
+    "admission",
+    "selectable",
+    "reasons",
+    "checked_at",
+)
+_STRUCTURED_PROVIDER_HEALTH_MISSING = object()
+
+
+def _bind_structured_provider_health_fields(
+    args: tuple[object, ...], options: _StructuredProviderHealthOptions
+) -> tuple[object, ...]:
+    """Bind the legacy health fields before grouping the five axes."""
+    field_names = _STRUCTURED_PROVIDER_HEALTH_FIELDS
+    if len(args) > len(field_names):
+        raise TypeError(
+            f"expected at most {len(field_names)} positional arguments, got {len(args)}"
+        )
+    unknown = next((name for name in options if name not in field_names), None)
+    if unknown is not None:
+        raise TypeError(f"unexpected keyword argument {unknown!r}")
+    duplicate = next(
+        (name for name in field_names[: len(args)] if name in options),
+        None,
+    )
+    if duplicate is not None:
+        raise TypeError(f"multiple values for argument {duplicate!r}")
+    return tuple(
+        args[index]
+        if index < len(args)
+        else options.get(name, _STRUCTURED_PROVIDER_HEALTH_MISSING)
+        for index, name in enumerate(field_names)
+    )
+
+
+def _required_health_field(name: str, value: object) -> object:
+    if value is _STRUCTURED_PROVIDER_HEALTH_MISSING:
+        raise TypeError(f"missing required argument {name!r}")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredProviderHealth:
+    """Independent provider health facts and their derived selectability."""
+
+    _axes: ProviderHealthAxes
+    selectable: bool
+    reasons: tuple[str, ...]
+    checked_at: datetime
+
+    def __init__(
+        self,
+        *args: object,
+        **options: Unpack[_StructuredProviderHealthOptions],
+    ) -> None:
+        values = _bind_structured_provider_health_fields(args, options)
+        object.__setattr__(
+            self,
+            "_axes",
+            ProviderHealthAxes(
+                configured=cast(
+                    "HealthState", _required_health_field("configured", values[0])
+                ),
+                transport=cast(
+                    "HealthState", _required_health_field("transport", values[1])
+                ),
+                authentication=cast(
+                    "AuthenticationState",
+                    _required_health_field("authentication", values[2]),
+                ),
+                catalog=cast(
+                    "CatalogStatus", _required_health_field("catalog", values[3])
+                ),
+                admission=cast(
+                    "AdmissionState", _required_health_field("admission", values[4])
+                ),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "selectable",
+            cast("bool", _required_health_field("selectable", values[5])),
+        )
+        object.__setattr__(
+            self,
+            "reasons",
+            cast("tuple[str, ...]", _required_health_field("reasons", values[6])),
+        )
+        object.__setattr__(
+            self,
+            "checked_at",
+            cast("datetime", _required_health_field("checked_at", values[7])),
+        )
+        self.__post_init__()
+
+    @property
+    def configured(self) -> HealthState:
+        return self._axes.configured
+
+    @property
+    def transport(self) -> HealthState:
+        return self._axes.transport
+
+    @property
+    def authentication(self) -> AuthenticationState:
+        return self._axes.authentication
+
+    @property
+    def catalog(self) -> CatalogStatus:
+        return self._axes.catalog
+
+    @property
+    def admission(self) -> AdmissionState:
+        return self._axes.admission
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "reasons", tuple(self.reasons))

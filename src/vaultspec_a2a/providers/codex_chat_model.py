@@ -1383,9 +1383,11 @@ class CodexChatModel(BaseChatModel):
             ):
                 for chunk in self._turn_item_chunks(method, params, state):
                     yield chunk
-            elif method == "error":
+                continue
+            if method == "error":
                 self._record_turn_error(params, state)
-            elif method == "thread/tokenUsage/updated":
+                continue
+            if method == "thread/tokenUsage/updated":
                 state.usage = _usage_metadata(
                     _required_object_field(
                         _required_object_field(
@@ -1397,7 +1399,8 @@ class CodexChatModel(BaseChatModel):
                         context="thread/tokenUsage/updated tokenUsage",
                     )
                 )
-            elif method == "turn/completed":
+                continue
+            if method == "turn/completed":
                 final_chunk = self._complete_turn(params, active_turn, state)
                 if final_chunk is not None:
                     yield final_chunk

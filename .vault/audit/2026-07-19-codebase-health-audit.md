@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:94494beefd85a7ad5beed4777acff0db35ca832df2f5f6e78aac6e08c3446241'
+body_hash: 'sha256:09479ea25e48409684abaf5c3e4de5e9a6eb3ed5c9c87052550072ea47ebb359'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3666,3 +3666,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved database queue rendering and mtime-cached vault document reading into module helpers, passing the graph-scoped cache and queue port explicitly. The factory still creates one cache per compiled graph; queue failure degrades to no block as before. Function-length findings reached zero, and selected Ruff design findings fell from 131 to 130.
 - Review finding (moderate, code health; queued): other strict dimensions remain red, including 35 cyclomatic findings and 130 selected Ruff design findings. The function-length gate is now green.
 - Verification: nine vault reader tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, `git diff --check`, and the function-length gate passed.
+
+### 2026-09-20 provider stream nesting review pass
+
+- Implementation: extracted ACP message-chunk enqueueing and flattened the mutually exclusive ACP and Codex notification branches with explicit exits. Message handling order, queue-full warnings, streamed chunks, usage updates, and terminal completion remain unchanged. Nesting-depth findings fell from two to zero.
+- Review finding (moderate, code health; queued): other strict dimensions remain red, including 35 cyclomatic and 130 selected Ruff design findings. The nesting-depth shape gate is now green.
+- Verification: 22 ACP command/stop tests and 61 Codex model/idle/condition tests passed (one deselected); `just check-all`, `just check-type-strict`, focused Ty and Ruff, `git diff --check`, and the nesting-depth gate passed.

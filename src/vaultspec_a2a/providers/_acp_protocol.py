@@ -437,6 +437,18 @@ def _enqueue_tool_call_chunk(update: JsonObject, ctx: AcpSessionContext) -> None
             )
 
 
+def _enqueue_message_chunk(update: JsonObject, ctx: AcpSessionContext) -> None:
+    text = _json_string(lenient_json_object(update.get("content")).get("text"))
+    if not text:
+        return
+    try:
+        ctx.chunk_queue.put_nowait(
+            ChatGenerationChunk(message=AIMessageChunk(content=text))
+        )
+    except asyncio.QueueFull:
+        logger.warning("Chunk queue full — dropping chunk to prevent deadlock")
+
+
 async def handle_session_update(
     params: JsonObject,
     ctx: AcpSessionContext,
@@ -446,31 +458,30 @@ async def handle_session_update(
     u_type = _json_string(update.get("sessionUpdate"))
 
     if u_type in ("agent_message_chunk", "agent_thought_chunk"):
-        text = _json_string(lenient_json_object(update.get("content")).get("text"))
-        if text:
-            try:
-                ctx.chunk_queue.put_nowait(
-                    ChatGenerationChunk(message=AIMessageChunk(content=text))
-                )
-            except asyncio.QueueFull:
-                logger.warning("Chunk queue full — dropping chunk to prevent deadlock")
-    elif u_type == "tool_call_chunk":
+        _enqueue_message_chunk(update, ctx)
+        return
+    if u_type == "tool_call_chunk":
         # M20: handle incremental tool call argument streaming.
         # ACP agents stream partial JSON args via tool_call_chunk before the
         # final tool_call event.  Forwarded as a streaming ToolCallChunk so
         # LangGraph can accumulate args progressively.
         _enqueue_tool_call_chunk(update, ctx)
-    elif u_type == "tool_call":
+        return
+    if u_type == "tool_call":
         ctx.effects_may_have_occurred = True
         await on_tool_call(update, ctx)
-    elif u_type == "tool_call_update":
+        return
+    if u_type == "tool_call_update":
         ctx.effects_may_have_occurred = True
         await on_tool_call_update(update, ctx)
-    elif u_type == "current_mode_update":
+        return
+    if u_type == "current_mode_update":
         ctx.agent_modes["currentModeId"] = update.get("currentModeId")
-    elif u_type == "available_commands_update":
+        return
+    if u_type == "available_commands_update":
         _update_native_commands(params, update, ctx)
-    elif u_type == "plan":
+        return
+    if u_type == "plan":
         # Plan updates are metadata; log receipt and let graph-level plan
         # handling in the supervisor/aggregator layer process them.
         plan_entries = update.get("entries")

@@ -31,6 +31,7 @@ from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from ..authoring import resolve_engine
+from ..control._verdict_subscriber_config import VerdictSubscriberConfig
 from ..control._worker_health import WorkerLiveness, WorkerState
 from ..control.circuit_breaker import WorkerCircuitBreaker
 from ..control.clarification_service import (
@@ -47,7 +48,7 @@ from ..control.health import (
     build_sqlite_fallback_diagnostics,
     probe_desktop_readiness,
 )
-from ..control.verdict_subscriber import VerdictSubscriber, VerdictSubscriberConfig
+from ..control.verdict_subscriber import VerdictSubscriber
 from ..control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ..database import (
     close_db,

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:8bab3ed13b0954e471337d88e4bf0a69522596f6833f08479e4720d894d2382f'
+body_hash: 'sha256:48df01ac2a72ee805db4804cac907f8805fc51956b4e9be703336a64fe6b5d72'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4233,3 +4233,16 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 
 - Review finding, medium severity, security triage: the fresh scan matched alerts 1, 3, and 4 to their dismissed predecessors, but created alert 5 for the provider-catalog directory check after the endpoint moved from `gateway.py` to `_gateway_action_endpoints.py`. The code and authenticated workspace-selection contract are the same. Alert 5 was reviewed and dismissed as a false positive with an evidence comment; the PR-ref open-alert census is now zero.
 - Verification: a further CodeQL scan is required to confirm the PR check becomes green. The full unit gate remains in progress. Review result is REVISION REQUIRED pending those outcomes.
+
+### 2026-09-20 full-unit import and duplicate review
+
+- Review finding, medium severity, canonical import: three provider-eligibility subprocess tests imported `classify_provider_command` from its former `providers.factory` home. The symbol is declared in `providers._factory_commands`; the probe now imports that home. The first full unit run reported three failures from this stale import.
+- Review finding, medium severity, export-home contract: `control.verdict_subscriber` re-exported `VerdictSubscriberConfig` after its declaration moved to `control._verdict_subscriber_config`. The second home was removed from `__all__` and callers now import the declaration directly.
+- Review finding, low severity, structural duplicate: the AST guard found three constructor field binders with the same validation shape. They bind distinct action-lease, desktop-path, and discovery-record schemas with owner-specific field order and defaults. The reviewed group is documented in `_ACCEPTED` rather than merging independent schema contracts.
+- Verification: the first full unit run had 4,577 passed, five failed, two skipped, and 197 deselected. After the corrections, the six formerly failing direct tests and 22 verdict-subscriber tests pass. A fresh full unit run and strict scan remain required; review result is REVISION REQUIRED pending them.
+
+### 2026-09-20 advisory security and duplication review
+
+- Review finding, medium severity, advisory security triage: Bandit reports 11 medium observations, zero high. Two B104 sites describe explicit bind-all defaults or a bind-all comparison in service configuration; the transport host is a configured deployment choice. B310 is a fixed `http://127.0.0.1` health probe with a typed service port. Eight B608 sites interpolate fixed schema identifiers or SQL placeholder strings, including immutable migrations; values from variable records are bound separately. These are reviewed, non-exploitable under the current contracts and remain visible in the advisory scan, rather than being represented as a zero-count security scan.
+- Review finding, low severity, advisory security triage: Bandit reports 49 low observations, predominantly deliberate subprocess imports/calls in process management and tests, plus token-key names, a deterministic fixture value, and non-security random test leases. No shell interpolation or embedded credential was identified in the reviewed categories. The advisory scan remains outside the required strict gate.
+- Review finding, low severity, advisory duplication: the clone scanner reports one 41-line clone (0.04%) between migration revisions 0008 and 0009. Those migration histories are immutable; modifying a historical revision would change upgrade behavior for existing installations. Keep this classified advisory observation in the audit queue.

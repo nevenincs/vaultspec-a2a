@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
+from ...control._verdict_subscriber_config import VerdictSubscriberConfig
 from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
@@ -47,7 +48,6 @@ from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import (
     VerdictSubscriber,
-    VerdictSubscriberConfig,
     _gate_resume_verdict,
     _iter_recovery_proposals,
     _proposal_reconcile_verdict,

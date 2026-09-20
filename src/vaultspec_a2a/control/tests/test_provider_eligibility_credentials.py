@@ -19,7 +19,7 @@ import json
 from vaultspec_a2a.control.config import settings
 from vaultspec_a2a.control.health import _eligible_provider_names
 from vaultspec_a2a.graph.enums import Provider
-from vaultspec_a2a.providers.factory import classify_provider_command
+from vaultspec_a2a.providers._factory_commands import classify_provider_command
 from vaultspec_a2a.providers.provider_readiness import probe_provider_readiness
 
 try:

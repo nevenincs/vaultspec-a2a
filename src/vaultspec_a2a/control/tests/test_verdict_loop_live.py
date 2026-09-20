@@ -91,8 +91,9 @@ from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_defin
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
+from .._verdict_subscriber_config import VerdictSubscriberConfig
 from ..circuit_breaker import WorkerCircuitBreaker
-from ..verdict_subscriber import VerdictSubscriber, VerdictSubscriberConfig
+from ..verdict_subscriber import VerdictSubscriber
 from ..worker_management import LazyWorkerSpawner
 from ._catalog_authority import current_execution_metadata
 from .test_verdict_subscriber_live import (

@@ -60,7 +60,6 @@ from ..thread.enums import (
 )
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
 from ._thread_metadata import dispatchable_workspace_root
-from ._verdict_subscriber_config import VerdictSubscriberConfig
 from .accepted_input import freeze_accepted_input
 from .action_lease import (
     ControlActionClaimRequest,
@@ -82,10 +81,10 @@ if TYPE_CHECKING:
     from ..authoring import EngineEndpoint
     from ..database import ControlActionModel, ThreadWriteExpectation
     from ..thread.executable_graph import FrozenGraphDefinition
+    from ._verdict_subscriber_config import VerdictSubscriberConfig
 
 __all__ = [
     "VerdictSubscriber",
-    "VerdictSubscriberConfig",
     "settle_verdict_dispatch_receipt",
 ]
 

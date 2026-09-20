@@ -68,6 +68,7 @@ from ...authoring import (
     verdict_from_event,
 )
 from ...conftest import materialize_schema
+from ...control._verdict_subscriber_config import VerdictSubscriberConfig
 from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
@@ -76,7 +77,6 @@ from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import (
     VerdictSubscriber,
-    VerdictSubscriberConfig,
     _verdict_resume_idempotency_key,
 )
 from ...control.worker_management import LazyWorkerSpawner

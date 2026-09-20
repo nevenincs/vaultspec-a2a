@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:e2edd521c9a2a6f18848f61af34b0019b3fd745266d8b2adf39913bcddc2b178'
+body_hash: 'sha256:cc7e308b3fe0155303dc2779feee209dc76d84fdbed04ee4115f835e6691ab28'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3578,3 +3578,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding (moderate, cross-platform type correctness; fixed): moving Windows calls out of a platform branch initially exposed `ctypes.get_last_error` and `msvcrt` functions to Linux and Darwin type checking. Explicit platform guards in both Windows helpers restore narrowing; strict type and platform checks pass.
 - Review finding (moderate, code health; queued): 47 cyclomatic findings and 134 selected Ruff design findings remain after this pass. Continue import-following refactors until all strict gates pass. The highest cyclomatic findings now include provider ACP session setup (18), supervisor response evaluation (17), and worker graph compilation (17).
 - Verification: desktop filesystem authority tests (7 passed) and credential/discovery/singleton integration tests (7 passed) before the platform guard; `just check-all`, `just check-type-strict`, Ruff selected design scan, Radon cyclomatic gate, and `git diff --check` after the guard. The Radon gate remains red because 47 findings remain.
+
+### 2026-09-20 ACP session setup review pass
+
+- Implementation: extracted the session setup request/authentication retry exchange and mode decoding from `setup_session`, preserving the existing request parameters, error handling, and session state writes. Removed an unused `resolve_env_vars` calculation and its imports after tracing that its result was never consumed. Cyclomatic findings fell from 47 to 46; selected Ruff design findings fell from 134 to 132.
+- Review finding (low, dead code; fixed): `setup_session` computed and updated an environment mapping which no request, process spawn, or return value read. The call performed only redundant local filesystem probing and environment preparation.
+- Review finding (moderate, code health; queued): 46 cyclomatic and 132 selected Ruff design findings remain. ACP initialization still measures 15 paths; supervisor response and graph compilation measure 17 each.
+- Verification: 27 ACP model selection, Kimi conditioning, and strict MCP tests passed (two live tests deselected); `just check-all` and `just check-type-strict` passed before the final unused-import removal; focused Ruff and Linux Ty passed after it, as did `git diff --check`. The cyclomatic gate remains red at 46 findings.

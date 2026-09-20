@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c7d5bc3d1ccbcdad4abc84242b1168e10afc0e5e55504b65cff31b80ecafda1f'
+body_hash: 'sha256:1e702c3ba1e40c6edd2f4ca9d75b1e775f96bfb89be97e9f20eafec42926f871'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3280,3 +3280,7 @@ Ten medium-severity strict Ruff argument-count, complexity, branch, and statemen
 ### 2026-09-20 frozen catalog preference parser review pass
 
 Two medium-severity strict Ruff complexity and branch findings in frozen catalog preference parsing were resolved. Assignment shape, one native-control entry, and the bounded native-control list now have focused validators. Review checked that primary and fallback field sets remain exact, schema version and provider errors retain their order, model and execution-mode strings remain required, native-control records still refuse unknown keys, blank ids/values, duplicates, and lists over 32, and provenance remains checked after controls. Eighty-nine focused compiler and persisted-selection tests pass; `just check-all`, `just check-type-strict`, focused strict Ruff/Ty, and diff check pass. Repository strict Ruff structure falls from 191 to 189 and radon findings from 132 to 131. No new review findings were surfaced. The compiler still has two cognitive-complexity and nine strict Ruff findings, plus its module-length finding; these and the remaining repository strict backlog stay open in the audit queue.
+
+### 2026-09-20 graph topology complexity review pass
+
+Two medium-severity cognitive-complexity findings in star and pipeline graph compilation were resolved. Supervisor prompt and metadata construction, and pipeline order validation now have focused helpers. Review checked the configured and fallback supervisor presentations, assignment metadata, worker resolution, and the existing empty-order and duplicate-order errors before node wiring. Sixty-seven focused compiler tests, routine quality gates, strict Ty, module complexipy, and diff review pass. The cyclomatic gate now reports 130 findings, down from 131. No new review findings were surfaced. Nine strict Ruff findings and the compiler module-length finding remain open; the remaining repository strict backlog stays open in the audit queue.

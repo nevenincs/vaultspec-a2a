@@ -1065,33 +1065,13 @@ def compile_team_graph(
     return graph
 
 
-def _compile_star(
-    builder: StateGraph[Any, None, Any, Any],
-    team_config: Any,
-    agent_configs: dict[str, Any],
+def _star_supervisor_presentation(
     supervisor_agent_config: Any | None,
-    *,
-    provider_factory: ProviderFactoryProtocol,
-    workspace_root: Path | None = None,
-    autonomous: bool = False,
-    feature_tag: str | None = None,
-    task_queue_port: TaskQueuePort | None = None,
-    cost_port: CostPort | None = None,
-    authoring_binding_provider: AuthoringBindingProvider | None = None,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> None:
-    """Wire up a star topology: supervisor -> workers -> supervisor -> END."""
-    worker_ids: list[str] = [w.agent_id for w in team_config.workers]
-    resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
-
-    supervisor_model, sv_provider, sv_model_name = _resolve_supervisor_model(
-        workspace_root,
-        provider_factory=provider_factory,
-        supervisor_agent_config=supervisor_agent_config,
-        frozen_assignment=frozen_assignment,
-    )
-    sv_assignment = {"provider": sv_provider.value, "model_name": sv_model_name}
-
+    supervisor_model: BaseChatModel,
+    resolved_agents: list[Any],
+    team_config: Any,
+    sv_assignment: dict[str, str],
+) -> tuple[str, dict[str, str]]:
     if supervisor_agent_config is not None:
         # Routed through the same composition as a worker so a supervisor persona
         # marking the spot cannot ship a literal placeholder to a model; the role
@@ -1134,6 +1114,43 @@ def _compile_star(
             "description": "Routes tasks to the appropriate specialist.",
             **sv_assignment,
         }
+    return supervisor_prompt, sv_meta
+
+
+def _compile_star(
+    builder: StateGraph[Any, None, Any, Any],
+    team_config: Any,
+    agent_configs: dict[str, Any],
+    supervisor_agent_config: Any | None,
+    *,
+    provider_factory: ProviderFactoryProtocol,
+    workspace_root: Path | None = None,
+    autonomous: bool = False,
+    feature_tag: str | None = None,
+    task_queue_port: TaskQueuePort | None = None,
+    cost_port: CostPort | None = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Wire up a star topology: supervisor -> workers -> supervisor -> END."""
+    worker_ids: list[str] = [w.agent_id for w in team_config.workers]
+    resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
+
+    supervisor_model, sv_provider, sv_model_name = _resolve_supervisor_model(
+        workspace_root,
+        provider_factory=provider_factory,
+        supervisor_agent_config=supervisor_agent_config,
+        frozen_assignment=frozen_assignment,
+    )
+    sv_assignment = {"provider": sv_provider.value, "model_name": sv_model_name}
+
+    supervisor_prompt, sv_meta = _star_supervisor_presentation(
+        supervisor_agent_config,
+        supervisor_model,
+        resolved_agents,
+        team_config,
+        sv_assignment,
+    )
 
     # Derive worker_phase_map from agent roles for phase prerequisite gates.
     worker_phase_map: dict[str, str] = {
@@ -1248,24 +1265,7 @@ def _compile_star(
     )
 
 
-def _compile_pipeline(
-    builder: StateGraph[Any, None, Any, Any],
-    team_config: Any,
-    agent_configs: dict[str, Any],
-    *,
-    provider_factory: ProviderFactoryProtocol,
-    workspace_root: Path | None = None,
-    autonomous: bool = False,
-    feature_tag: str | None = None,
-    task_queue_port: TaskQueuePort | None = None,
-    cost_port: CostPort | None = None,
-    authoring_binding_provider: AuthoringBindingProvider | None = None,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> None:
-    """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
-
-    No supervisor node.
-    """
+def _validated_pipeline_order(team_config: Any) -> list[str]:
     order = team_config.topology.order
 
     # M5: validate pipeline_order is non-empty before iterating.
@@ -1287,6 +1287,28 @@ def _compile_pipeline(
             f"Pipeline order for team {team_config.id!r} has duplicate entries: "
             f"{dupes_list}. Each agent may appear at most once."
         )
+    return order
+
+
+def _compile_pipeline(
+    builder: StateGraph[Any, None, Any, Any],
+    team_config: Any,
+    agent_configs: dict[str, Any],
+    *,
+    provider_factory: ProviderFactoryProtocol,
+    workspace_root: Path | None = None,
+    autonomous: bool = False,
+    feature_tag: str | None = None,
+    task_queue_port: TaskQueuePort | None = None,
+    cost_port: CostPort | None = None,
+    authoring_binding_provider: AuthoringBindingProvider | None = None,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
+
+    No supervisor node.
+    """
+    order = _validated_pipeline_order(team_config)
 
     node_names: list[str] = []
     mount_names: list[str] = []

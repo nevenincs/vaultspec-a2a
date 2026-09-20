@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:8ee794535eb993a0ed52b87117571e14101b6e7d4ba545a926732cc6fe20579b'
+body_hash: 'sha256:0af681127b23e7a31725b85f5a4d86c0c25072780bdf59424f4de8d7a95dd43b'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4261,3 +4261,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, CI concurrency: the next Linux unit run reduced failures from 17 to one (4,560 passed, 20 skipped, 197 deselected): one of four concurrent first-demand run starts returned HTTP 500 in the desktop lazy-worker proof. The test previously resolved the cold provider catalog independently inside all four racing calls, adding unrelated catalog probes to the worker-spawn race. It now resolves one in-process selection before the race, proves the worker remains cold afterward, and then starts four parallel runs against that same served selection. The assertion includes response bodies and the gateway log on failure. The Linux failure's precise server exception was unavailable in the previous status-only assertion; do not infer a production cause from that result alone.
 - Review finding, low severity, reproduction environment: eight isolated Linux WSL runs of the original focused test passed. A broader WSL run from the Windows worktree hit a Git metadata path error; a native Linux checkout then lacked this runner's acceptance-service readiness prerequisites. These failures do not prove a repository regression or reproduce the CI 500, so the PR CI rerun remains authoritative.
 - Verification: the revised focused test passes on Windows and in a native Linux checkout; Ruff check and format pass. Strict and Linux CI reruns are required. Review result remains REVISION REQUIRED pending those gates.
+
+### 2026-09-20 strict-gate closure review
+
+- Implementation review: the final desktop concurrency test separates catalog discovery from the four simultaneous worker-start demands, confirms the worker stays cold after catalog resolution, and reports response bodies plus gateway logs if a request fails. The current Linux CI run completed without a recurrence; its result supports the changed test boundary but does not establish a unique cause for the prior intermittent HTTP 500.
+- Verification: on `d5f7d771`, Linux canonical CI passed with 4,561 unit tests passed, 20 declared prerequisite/platform skips, and 197 service tests deselected; the source and wheel builds succeeded. The separate type-strict, complexity, cyclomatic, shape, Ruff limits/nesting, Pylint size, telemetry base-install, and strict documentation steps all passed. CodeQL, migration, workflow lint, and language analysis checks passed. The local full unit gate on the preceding source commit passed 4,582 with two prerequisite skips and 197 deselected; the only subsequent source change was the desktop test, which passed directly on Windows and native Linux. `just check-strict` and the dead-code burndown report zero findings on the final source commit.
+- Review classification: no new high, medium, or low implementation finding surfaced in the closing diff review. Advisory Bandit observations and the immutable migration clone retain their explicit prior classifications and remain visible in the audit. Live service proofs remain queued against their documented external prerequisites; neither is represented as a passed service proof.
+- Review result: PASS for the required Python quality gates and non-service unit/CI scope. The rolling audit queue retains only the separately classified advisory and live-prerequisite follow-ups.

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:e6ad16527902cdf0e6a8795249414b042d52dd49d6aedbebd8fc9aef98ab133e'
+body_hash: 'sha256:a0e52c692343364c9ed4808af7e9e599866cfcebc2610a061b73106f21734c1d'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3976,3 +3976,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 
 - High / security maintainability: `_foreign_project_argument` scored 25 cognitive complexity within the permission boundary. Split its depth-bound recursive scan into field, mapping, and value helpers while preserving first-match order, project binding, and depth cutoff. Review found no scope change. Strict Ty, Ruff, 27 focused project-confinement tests pass; the function now passes complexity.
 - Remaining queue: five cognitive-complexity offenders remain (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`, `CodexChatModel._consume_turn`, `_await_pytest_exit`).
+
+### 2026-09-20 authoring client parameter review
+
+- Medium / maintainability: `AuthoringClient.__init__` exceeded five parameters. A typed keyword-options shape retains `timeout` and `bearer_resolver` call compatibility while clearing the Ruff parameter gate. Review checked default values, injected-client behavior, resolver behavior, and unknown-key errors; 32 focused client tests and a compatibility smoke check pass. Ruff, formatter, and Ty on authoring pass.
+- Low / introspection: `timeout` and `bearer_resolver` now appear under a typed `**options` parameter at runtime. This signature visibility change is recorded for API documentation and introspection callers; no repo usage depends on runtime signature enumeration.
+- Remaining queue: other parameter-count findings remain open.

@@ -13,7 +13,7 @@ Token hygiene: tokens are never logged and never rendered in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast, override
 from urllib.parse import quote
 
 import httpx
@@ -41,6 +41,11 @@ ACTOR_TOKEN_HEADER = "x-authoring-actor-token"
 
 # The authoring subtree is nested under /authoring in the engine router.
 _AUTHORING_PREFIX = "/authoring"
+
+
+class _ClientOptions(TypedDict, total=False):
+    timeout: float
+    bearer_resolver: Callable[[], EngineEndpoint | None] | None
 
 
 async def _iter_sse_frames(response: httpx.Response) -> AsyncIterator[SseFrame]:
@@ -110,9 +115,16 @@ class AuthoringClient:
         *,
         actor_token: str | None = None,
         client: httpx.AsyncClient | None = None,
-        timeout: float = 30.0,
-        bearer_resolver: Callable[[], EngineEndpoint | None] | None = None,
+        **options: Unpack[_ClientOptions],
     ) -> None:
+        timeout = options.pop("timeout", 30.0)
+        bearer_resolver = options.pop("bearer_resolver", None)
+        if options:
+            unexpected = next(iter(options))
+            raise TypeError(
+                "AuthoringClient.__init__() got an unexpected keyword argument "
+                f"{unexpected!r}"
+            )
         self._base_url = base_url.rstrip("/")
         self._bearer_token = bearer_token
         self._actor_token = actor_token

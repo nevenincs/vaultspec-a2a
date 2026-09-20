@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:1211ade5d411d5f6c78bffe20bf276298cacd78b4c0772fb2f35a968a3c56fe1'
+body_hash: 'sha256:94494beefd85a7ad5beed4777acff0db35ca832df2f5f6e78aac6e08c3446241'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3660,3 +3660,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved dispatcher-owned argument sanitation into a module helper. Sanitization still strips model-supplied run identifiers before injecting the engine-owned values. Function-length findings fell from two to one.
 - Review finding (moderate, code health; queued): `create_mount_node` remains at 72 statements. The broader strict backlog includes 35 cyclomatic findings and 131 selected Ruff design findings.
 - Verification: the proposal lifecycle injection test, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The function-length gate remains red with one finding.
+
+### 2026-09-20 vault mount factory function-length review pass
+
+- Implementation: moved database queue rendering and mtime-cached vault document reading into module helpers, passing the graph-scoped cache and queue port explicitly. The factory still creates one cache per compiled graph; queue failure degrades to no block as before. Function-length findings reached zero, and selected Ruff design findings fell from 131 to 130.
+- Review finding (moderate, code health; queued): other strict dimensions remain red, including 35 cyclomatic findings and 130 selected Ruff design findings. The function-length gate is now green.
+- Verification: nine vault reader tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, `git diff --check`, and the function-length gate passed.

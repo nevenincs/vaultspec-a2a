@@ -124,6 +124,52 @@ def _select_paths(
     return adr_paths + phase_paths
 
 
+async def _render_queue_block(
+    state: TeamState, task_queue_port: TaskQueuePort | None
+) -> str | None:
+    """Render the database-backed queue view as a mounted block, if any."""
+    if task_queue_port is None:
+        return None
+    feature = state.get("active_feature")
+    phase: str | None = state.get("pipeline_phase")
+    thread_id = state.get("thread_id")
+    if not feature or phase not in _QUEUE_PHASES or not thread_id:
+        return None
+    try:
+        entries = await task_queue_port.get_queue_view(
+            thread_id,
+            state.get("current_task_id"),
+            domain_config.task_queue_pending_horizon,
+        )
+    except Exception:
+        # Best-effort context assembly: a queue read failure degrades to
+        # no queue block rather than failing the worker turn.
+        _logger.warning(
+            "task-queue injection failed for thread %s", thread_id, exc_info=True
+        )
+        return None
+    queue_text = render_queue_view(feature, entries)
+    if not queue_text:
+        return None
+    header = _DOC_SEPARATOR.format(path="task-queue")
+    return f"{header}\n{queue_text}\n{_DOC_FOOTER}"
+
+
+async def _read_vault_doc(path: Path, cache: dict[str, tuple[float, str]]) -> str:
+    """Read a .vault/ document asynchronously with an mtime-validated cache."""
+
+    def _read_with_stat() -> tuple[float, str]:
+        mtime = path.stat().st_mtime
+        cached = cache.get(str(path))
+        if cached is not None and cached[0] == mtime:
+            return cached
+        return mtime, path.read_text(encoding="utf-8")
+
+    mtime, content = await asyncio.to_thread(_read_with_stat)
+    cache[str(path)] = (mtime, content)
+    return content
+
+
 def create_mount_node(
     workspace_root: Path | None,
     task_queue_port: TaskQueuePort | None = None,
@@ -140,49 +186,6 @@ def create_mount_node(
     # its entry instead of accreting stale mtime-keyed copies, so the cache is
     # bounded by the number of mounted documents.
     cache: dict[str, tuple[float, str]] = {}
-
-    async def _read_vault_doc(path: Path) -> str:
-        """Read a .vault/ document asynchronously with an mtime-validated cache."""
-
-        def _read_with_stat() -> tuple[float, str]:
-            mtime = path.stat().st_mtime
-            cached = cache.get(str(path))
-            if cached is not None and cached[0] == mtime:
-                return cached
-            return mtime, path.read_text(encoding="utf-8")
-
-        mtime, content = await asyncio.to_thread(_read_with_stat)
-        cache[str(path)] = (mtime, content)
-        return content
-
-    async def _render_queue_block(state: TeamState) -> str | None:
-        """Render the database-backed queue view as a mounted block, if any."""
-        if task_queue_port is None:
-            return None
-        feature = state.get("active_feature")
-        phase: str | None = state.get("pipeline_phase")
-        thread_id = state.get("thread_id")
-        if not feature or phase not in _QUEUE_PHASES or not thread_id:
-            return None
-        try:
-            entries = await task_queue_port.get_queue_view(
-                thread_id,
-                state.get("current_task_id"),
-                domain_config.task_queue_pending_horizon,
-            )
-        except Exception:
-            # Best-effort context assembly: a queue read failure degrades to
-            # no queue block rather than failing the worker turn (parity with
-            # the file path skipping a missing document).
-            _logger.warning(
-                "task-queue injection failed for thread %s", thread_id, exc_info=True
-            )
-            return None
-        queue_text = render_queue_view(feature, entries)
-        if not queue_text:
-            return None
-        header = _DOC_SEPARATOR.format(path="task-queue")
-        return f"{header}\n{queue_text}\n{_DOC_FOOTER}"
 
     async def mount_node(state: TeamState) -> dict[str, Any]:
         """Preprocessing node: read .vault/ documents and assemble mounted_context.
@@ -219,7 +222,7 @@ def create_mount_node(
             if not path.exists():
                 continue
 
-            content = await _read_vault_doc(path)
+            content = await _read_vault_doc(path, cache)
 
             rel_path = str(path.relative_to(workspace_root))
             header = _DOC_SEPARATOR.format(path=rel_path)
@@ -240,7 +243,7 @@ def create_mount_node(
             else:
                 break
 
-        queue_block = await _render_queue_block(state)
+        queue_block = await _render_queue_block(state, task_queue_port)
         if queue_block is not None:
             queue_tokens = count_tokens_approximately(queue_block)
             if queue_tokens <= domain_config.mount_token_ceiling - tokens_used:

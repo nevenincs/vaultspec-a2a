@@ -12,7 +12,11 @@ from ..database import normalize_workspace_identity as normalize_workspace_ident
 from ..domain_config import domain_config
 from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import ThreadStatus
-from .recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
+from .recovery_authority import (
+    RecoveryRequest,
+    RecoveryTrigger,
+    reconcile_run_checkpoint,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -93,9 +97,11 @@ async def discover_active_runs(
         await reconcile_run_checkpoint(
             db,
             checkpointer,
-            candidate.id,
-            checkpoint_timeout_seconds=remaining,
-            trigger=RecoveryTrigger.READ,
+            RecoveryRequest(
+                thread_id=candidate.id,
+                checkpoint_timeout_seconds=remaining,
+                trigger=RecoveryTrigger.READ,
+            ),
         )
     # Re-query every projected field after reconciliation, including deletion
     # and a different winner. The first page was only a candidate list.

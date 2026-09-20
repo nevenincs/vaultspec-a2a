@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:4f8de83b976b2ed4a30fbf5a9b8dc5be39f36d03d74e6b29a1ab82dc93e2b634'
+body_hash: 'sha256:19e50b2181e6edabbefa2b40770dce8a9122478a282427b18b71c5c2047052c3'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3454,3 +3454,7 @@ Implementation: separated advertised-control validation, cache freshness and sup
 ### 2026-09-20 provider health axes review pass
 
 Implementation: grouped the five independent provider health observations in `ProviderHealthAxes` and updated all ten derivation call sites. Actual diff review used AST comparison to confirm every previous axis expression, reason, and timestamp is preserved; derived selectability still reads the same five axes and `StructuredProviderHealth` still validates the result. Verification: 57 provider, route, and redispatch tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The focused strict Ruff structure count for `provider_catalog.py` is zero (down from one); repository cyclomatic count remains 79. Remaining strict structure and health findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 checkpoint recovery authority review pass
+
+Implementation: separated incomplete and completed checkpoint elections, grouped the reconciliation trigger, timeout, sequence, and thread into a typed `RecoveryRequest`, and converted all eight production/test call sites. Actual diff review confirmed the original early refusal order, checkpoint transaction release, election effects, and final observation fields. AST comparison confirmed all eight call arguments were preserved. Review finding: the discovery projection test double still accepted the former positional thread ID; severity low, type test contract drift. It was updated to read the typed request, and the failed test passed on rerun. Verification: 11 recovery/reconciliation tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 79 to 78 offenders; this module has zero radon and focused strict Ruff structure findings. Remaining repository findings stay open, severity medium, type maintainability, in the existing codebase-health queue.

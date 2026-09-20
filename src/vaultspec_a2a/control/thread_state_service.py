@@ -24,7 +24,11 @@ from ..control.projection import (
     enrich_snapshot_from_execution_state,
     reconcile_checkpoint_permissions_with_durable_state,
 )
-from ..control.recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
+from ..control.recovery_authority import (
+    RecoveryRequest,
+    RecoveryTrigger,
+    reconcile_run_checkpoint,
+)
 from ..control.snapshot import (
     MinimalState,
     enrich_snapshot_from_state,
@@ -409,9 +413,11 @@ async def capture_thread_state(
     await reconcile_run_checkpoint(
         db,
         checkpointer,
-        thread_id,
-        checkpoint_timeout_seconds=domain_config.aget_state_timeout_seconds,
-        trigger=RecoveryTrigger.READ,
+        RecoveryRequest(
+            thread_id=thread_id,
+            checkpoint_timeout_seconds=domain_config.aget_state_timeout_seconds,
+            trigger=RecoveryTrigger.READ,
+        ),
     )
     await db.commit()
     thread = await db.get(ThreadModel, thread_id, populate_existing=True)

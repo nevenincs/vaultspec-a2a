@@ -387,16 +387,22 @@ async def _confirm_completed_terminal(
         )
         return False
     from ..domain_config import domain_config
-    from .recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
+    from .recovery_authority import (
+        RecoveryRequest,
+        RecoveryTrigger,
+        reconcile_run_checkpoint,
+    )
 
     async with factory() as db:
         observation = await reconcile_run_checkpoint(
             db,
             checkpointer,
-            thread_id,
-            trigger=RecoveryTrigger.WORKER_EVENT,
-            checkpoint_timeout_seconds=domain_config.aget_state_timeout_seconds,
-            last_sequence=last_sequence,
+            RecoveryRequest(
+                thread_id=thread_id,
+                trigger=RecoveryTrigger.WORKER_EVENT,
+                checkpoint_timeout_seconds=domain_config.aget_state_timeout_seconds,
+                last_sequence=last_sequence,
+            ),
         )
     if observation.status is not ThreadStatus.COMPLETED:
         logger.warning(

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from pytest import MonkeyPatch
 
     from ...database.checkpoints import Checkpointer
+    from ..recovery_authority import RecoveryRequest
 
 
 @pytest.mark.asyncio
@@ -83,9 +84,9 @@ async def test_discovery_discards_projection_captured_before_terminal_winner(
         async def elect_terminal_winner(
             db: AsyncSession,
             _checkpointer: Checkpointer,
-            thread_id: str,
-            **_kwargs: Any,
+            request: RecoveryRequest,
         ) -> None:
+            thread_id = request.thread_id
             current = await get_thread(db, thread_id)
             assert current is not None
             expectation = thread_write_expectation(current)

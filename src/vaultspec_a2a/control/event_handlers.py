@@ -128,10 +128,11 @@ async def _persist_proven_cancellation(
         action = await get_control_action_by_dispatch_id(
             db, thread_id=thread_id, dispatch_id=evidence.dispatch_id
         )
+        if thread is None or action is None:
+            await db.rollback()
+            return False
         if (
-            thread is None
-            or action is None
-            or action.action_type != ControlActionType.CANCEL.value
+            action.action_type != ControlActionType.CANCEL.value
             or thread.status != ThreadStatus.CANCELLING.value
             or thread.writer_action_type != ControlActionType.CANCEL.value
             or thread.writer_action_receipt_id != evidence.dispatch_id

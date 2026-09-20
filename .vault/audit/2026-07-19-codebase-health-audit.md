@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:eb6cd8b75ec91909b685a04b9dfac8d231c251e769b16f5c86f3deb79ac1a47d'
+body_hash: 'sha256:66a49a7110d210b9eaaf8c27dc74d8d80bfdf5acc4edf56b0f84d9ad578fce45'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3350,3 +3350,9 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: removed redundant checkpointer and tuple conditions from the stale execution-state comparison. `checkpoint_id` is assigned only when both conditions hold, so the comparison's behavior is unchanged.
 - Review: inspected the diff; 9 focused thread listing/checkpoint tests, routine quality gate, strict type gate, focused Pylint, and focused strict Ruff passed. Severity: none for this change; type: no contract drift found.
 - Queue: pre-existing Pylint instance-attribute findings in `thread_service.py` remain open. A trial split of the discovery record guard exposed a new strict Ruff return-count finding, so that trial was reverted; the existing discovery boolean-expression finding remains open.
+
+### 2026-09-20 cancellation evidence guard review pass
+
+- Implementation: split missing-record rejection from the exact cancellation authority comparison; both paths still roll back and return false.
+- Review: inspected the diff; 31 event/cancellation tests, routine quality gate, strict type gate, focused Pylint, and focused strict Ruff passed. Severity: none for this change; type: no contract drift found.
+- Queue: pre-existing `event_handlers.py` module-length and three strict Ruff parameter-count findings remain open. Other repository strict findings remain open.

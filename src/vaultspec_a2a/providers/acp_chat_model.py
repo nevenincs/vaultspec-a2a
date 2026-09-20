@@ -703,11 +703,7 @@ class AcpChatModel(BaseChatModel):
                 chunk = await asyncio.wait_for(ctx.chunk_queue.get(), timeout=0.1)
                 if chunk is None:
                     self._raise_for_early_exit(ctx, prompt_future)
-                if run_manager:
-                    token = chunk.message.content
-                    await run_manager.on_llm_new_token(
-                        token if isinstance(token, str) else "", chunk=chunk
-                    )
+                await self._notify_chunk(run_manager, chunk)
                 yield chunk
             except TimeoutError:
                 self._raise_if_prompt_future_error(ctx, prompt_future)
@@ -717,11 +713,7 @@ class AcpChatModel(BaseChatModel):
         while not ctx.chunk_queue.empty():
             chunk = ctx.chunk_queue.get_nowait()
             if chunk is not None:
-                if run_manager:
-                    token = chunk.message.content
-                    await run_manager.on_llm_new_token(
-                        token if isinstance(token, str) else "", chunk=chunk
-                    )
+                await self._notify_chunk(run_manager, chunk)
                 yield chunk
 
         # Propagate any interrupt that raced with end_turn
@@ -731,6 +723,17 @@ class AcpChatModel(BaseChatModel):
             ctx.prompt_stop_reason,
             effects_may_have_occurred=ctx.effects_may_have_occurred,
         )
+
+    @staticmethod
+    async def _notify_chunk(
+        run_manager: AsyncCallbackManagerForLLMRun | None,
+        chunk: ChatGenerationChunk,
+    ) -> None:
+        if run_manager is not None:
+            token = chunk.message.content
+            await run_manager.on_llm_new_token(
+                token if isinstance(token, str) else "", chunk=chunk
+            )
 
     def _raise_for_early_exit(
         self, ctx: AcpSessionContext, prompt_future: AcpResponseFuture

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:024acdf45b03c45d8491d09dfca1d6018ceedb5b80ac15f3cbaa9d147c33a7ad'
+body_hash: 'sha256:0f0ad08eecb74e5728edbcf263f560b5849fb5c1e156136f405249c680077bb9'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3839,3 +3839,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted checkpoint authoring-id collection from the verdict subscriber method. Timeout and read-failure handling remain in the caller; checkpoint value traversal preserves its prior order and filtering.
 - Verification: 22 verdict subscriber tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 9 to 8 offenders.
 - Review finding (medium, code health): 8 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 ACP chunk callback complexity review
+
+- Implementation: extracted repeated chunk callback invocation from active and drained ACP queue paths into `_notify_chunk`; callback timing and exception propagation remain within their original loops.
+- Verification: 11 focused ACP stop and deadline tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 8 to 7 offenders.
+- Review finding (medium, code health): 7 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.

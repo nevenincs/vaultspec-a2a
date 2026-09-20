@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:0af681127b23e7a31725b85f5a4d86c0c25072780bdf59424f4de8d7a95dd43b'
+body_hash: 'sha256:0127c0d55ae3ec852d4728c1309e93ecce1e5f31bd6f46d96e2ef3d45701c8ab'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4268,3 +4268,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Verification: on `d5f7d771`, Linux canonical CI passed with 4,561 unit tests passed, 20 declared prerequisite/platform skips, and 197 service tests deselected; the source and wheel builds succeeded. The separate type-strict, complexity, cyclomatic, shape, Ruff limits/nesting, Pylint size, telemetry base-install, and strict documentation steps all passed. CodeQL, migration, workflow lint, and language analysis checks passed. The local full unit gate on the preceding source commit passed 4,582 with two prerequisite skips and 197 deselected; the only subsequent source change was the desktop test, which passed directly on Windows and native Linux. `just check-strict` and the dead-code burndown report zero findings on the final source commit.
 - Review classification: no new high, medium, or low implementation finding surfaced in the closing diff review. Advisory Bandit observations and the immutable migration clone retain their explicit prior classifications and remain visible in the audit. Live service proofs remain queued against their documented external prerequisites; neither is represented as a passed service proof.
 - Review result: PASS for the required Python quality gates and non-service unit/CI scope. The rolling audit queue retains only the separately classified advisory and live-prerequisite follow-ups.
+
+### 2026-09-20 lease marker collision follow-up
+
+- Review finding, medium severity, concurrency correctness: the final-head Linux unit rerun found one failure (4,564 passed, 16 skipped, 197 deselected). A reclaimed live-pid marker and its successor can carry identical JSON when the same process acquires both in one millisecond. The displaced holder then mistakes the successor marker for its own and deletes it during release. This is a real lease ownership bug exposed by the full CI run.
+- Implementation: each marker now carries a random 128-bit release token in its payload. The existing token comparison on release therefore distinguishes successive claims even if pid, owner, and acquisition millisecond match. The regression test fixes the wall clock across both claims and asserts that releasing the displaced holder preserves the successor marker.
+- Verification: all nine lease tests pass locally; the strict gate and Linux CI rerun are in progress. Review result is REVISION REQUIRED pending those gates. The prior PASS records the preceding source commit only and does not cover this newly discovered issue.

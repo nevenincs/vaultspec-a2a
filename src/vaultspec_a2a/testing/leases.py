@@ -35,6 +35,7 @@ import json
 import os
 import random
 import re
+import secrets
 import threading
 import time
 from dataclasses import dataclass
@@ -154,7 +155,12 @@ def _write_marker_excl(path: Path, *, owner: str) -> str | None:
     holder can later prove the marker is still its own before unlinking it.
     """
     payload = json.dumps(
-        {"pid": os.getpid(), "owner": owner, "acquired_at_ms": int(time.time() * 1000)}
+        {
+            "pid": os.getpid(),
+            "owner": owner,
+            "acquired_at_ms": int(time.time() * 1000),
+            "release_token": secrets.token_hex(16),
+        }
     )
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)

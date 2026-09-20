@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:180aeca2755f438aecbf4d9799308b2222992be60fe901755e768f62e89ef380'
+body_hash: 'sha256:8a909fed0101203b7e901252fa6a801d78986fb5e8320a938bf2b40029018752'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3559,3 +3559,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: separated revision ancestry, schema/index/check validation, and populated-row/receipt validation while keeping the migration transaction and rollback boundary. The guard still refuses incomplete current authority before migrations run.
 - Review: inspected the actual refactor. A low-severity validation-order issue (type: revision read timing) surfaced: a short-circuit initially skipped the Alembic revision read for populated stores. This was fixed before commit. No unresolved new correctness findings remain. Migration, authority, and compatibility tests: 51 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 51 to 50 over limit. Ruff function-limit findings remain 139; all other strict findings remain open (severity: moderate; type: code health).
+
+### 2026-09-20 gateway lifespan review pass
+
+- Implementation: isolated database startup, discovery publication/pairing/heartbeat registration, and observability shutdown from gateway lifespan. Startup publication and pairing checks, the discovery registration boundary, and shutdown order are retained.
+- Review: inspected the actual diff and startup/teardown order. No new correctness findings surfaced (severity: none; type: implementation review). App/shutdown tests: 18 passed; live gateway and desktop readiness/credential tests: 32 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 50 to 49 over limit, Ruff function-limit findings from 139 to 138, and code-health nesting depth from 3 to 2. `_lifespan` still has Ruff C901 and PLR0915 findings, and the file still contributes function-length debt (severity: moderate; type: code health). Remaining strict findings stay open until zero.

@@ -16,6 +16,7 @@ import os
 import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -26,7 +27,7 @@ from fastapi.responses import JSONResponse
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from ..authoring import resolve_engine
 from ..control.circuit_breaker import WorkerCircuitBreaker
@@ -74,6 +75,7 @@ from ..lifecycle.registration import (
     refresh_registration,
     register_serve,
 )
+from ..lifecycle.registry import ProcRecord
 from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
 from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry
@@ -291,6 +293,134 @@ def _http_attach_authorized(request: Request, app: FastAPI) -> bool:
 # ---------------------------------------------------------------------------
 
 
+async def _initialize_gateway_database(app: FastAPI, *, armed: bool) -> AsyncEngine:
+    engine = await init_db(settings.database_url, apply_migrations=not armed)
+    if armed:
+        # Desktop boot validates the seated stores without migrating them.
+        from ..database.compatibility import validate_desktop_schema
+
+        await validate_desktop_schema(
+            database_url=settings.database_url,
+            checkpoint_path=settings.checkpoint_path,
+        )
+        logger.info(
+            "Desktop database schema validated (no migration performed, %s)",
+            settings.resolved_database_backend,
+        )
+    else:
+        logger.info(
+            "Database initialised (%s, migrations applied)",
+            settings.resolved_database_backend,
+        )
+    app.state.sqlite_fallback_diagnostics = build_sqlite_fallback_diagnostics()
+    if not armed and settings.resolved_checkpoint_backend == "sqlite":
+        backfill_teamstate_sdd_fields(settings.checkpoint_path)
+    return engine
+
+
+def _start_gateway_discovery(
+    app: FastAPI,
+) -> tuple[Path, int, ProcRecord | None, asyncio.Task[None]]:
+    discovery_path = service_json_path(settings.a2a_home)
+    discovery_pid = os.getpid()
+    armed = settings.desktop_profile_armed
+    desktop_generation: str | None = None
+    desktop_owner: str | None = None
+    desktop_credential_reference: str | None = None
+    if armed:
+        # The desktop record names the protected credential path, not its bearer.
+        from ..lifecycle.singleton import active_singleton, default_owner
+
+        singleton = active_singleton()
+        desktop_owner = singleton.owner if singleton is not None else default_owner()
+        desktop_generation = package_version()
+        references = settings.desktop_credential_paths
+        desktop_credential_reference = (
+            str(references.attach_path) if references is not None else None
+        )
+        write_desktop_discovery(
+            discovery_path,
+            generation=desktop_generation,
+            port=settings.port,
+            owner=desktop_owner,
+            credential_reference=desktop_credential_reference,
+            pid=discovery_pid,
+        )
+    else:
+        if another_resident_is_live(settings.a2a_home):
+            logger.warning(
+                "A live resident gateway already holds %s; starting anyway "
+                "(the port bind is the authoritative single-instance guard)",
+                discovery_path,
+            )
+        write_service_json(
+            discovery_path,
+            port=settings.port,
+            pid=discovery_pid,
+            service_token=app.state.v1_service_token,
+        )
+
+    # Check pairing after publication and before registration, as on the
+    # original boot path, so a refusal leaves no dev registry record.
+    from ..lifecycle.pairing import DispatchPairingStatus, verify_dispatch_pairing
+
+    pairing_status, pairing_message = verify_dispatch_pairing(
+        settings.worker_url, settings.port
+    )
+    if pairing_status is DispatchPairingStatus.MISPAIRED:
+        raise RuntimeError(pairing_message)
+    if pairing_status is DispatchPairingStatus.UNPAIRED:
+        logger.warning("Dispatch pairing: %s", pairing_message)
+        app.state.dispatch_pairing_warning = pairing_message
+
+    serve_record = register_serve(
+        "gateway-dev",
+        settings.port,
+        workspace=""
+        if settings.workspace_root is None
+        else str(settings.workspace_root),
+        command=["vaultspec-a2a", "serve", "--port", str(settings.port)],
+    )
+    if armed:
+        discovery_task = asyncio.create_task(
+            _desktop_discovery_heartbeat(
+                discovery_path,
+                generation=cast("str", desktop_generation),
+                port=settings.port,
+                owner=cast("str", desktop_owner),
+                credential_reference=desktop_credential_reference,
+                pid=discovery_pid,
+            )
+        )
+    else:
+        discovery_task = asyncio.create_task(
+            _discovery_heartbeat(
+                discovery_path,
+                settings.port,
+                discovery_pid,
+                app.state.v1_service_token,
+                serve_record,
+            )
+        )
+    logger.info("Service discovery published at %s", discovery_path)
+    return discovery_path, discovery_pid, serve_record, discovery_task
+
+
+async def _shutdown_observability(deadline: ShutdownDeadline) -> None:
+    provider = trace.get_tracer_provider()
+    if isinstance(provider, SdkTracerProvider):
+        await finish_before(
+            asyncio.to_thread(provider.shutdown), deadline, phase="trace provider"
+        )
+    meter_provider = metrics.get_meter_provider()
+    if isinstance(meter_provider, SdkMeterProvider):
+        await finish_before(
+            asyncio.to_thread(meter_provider.shutdown),
+            deadline,
+            phase="meter provider",
+        )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: startup and shutdown hooks.
@@ -308,30 +438,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings.validate_postgres_requirement()
 
     armed = settings.desktop_profile_armed
-    engine = await init_db(settings.database_url, apply_migrations=not armed)
-    if armed:
-        # Desktop profile: ordinary boot mutates no schema. Validate that the
-        # seated stores are already compatible and fail loud otherwise; the
-        # staged-generation migration entrypoint owns every mutation.
-        from ..database.compatibility import validate_desktop_schema
-
-        await validate_desktop_schema(
-            database_url=settings.database_url,
-            checkpoint_path=settings.checkpoint_path,
-        )
-        logger.info(
-            "Desktop database schema validated (no migration performed, %s)",
-            settings.resolved_database_backend,
-        )
-    else:
-        logger.info(
-            "Database initialised (%s, migrations applied)",
-            settings.resolved_database_backend,
-        )
-    app.state.sqlite_fallback_diagnostics = build_sqlite_fallback_diagnostics()
-
-    if not armed and settings.resolved_checkpoint_backend == "sqlite":
-        backfill_teamstate_sdd_fields(settings.checkpoint_path)
+    engine = await _initialize_gateway_database(app, armed=armed)
 
     async with open_checkpointer() as checkpointer:
         app.state.checkpointer = checkpointer
@@ -460,108 +567,9 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             worker_spawner.demand_ready_event = worker_demand_ready
         reconcile_task = asyncio.create_task(_redispatch_recovery())
 
-        # Publish and heartbeat the machine-global discovery file so the
-        # engine can attach-never-own. A crashed/stale prior record is reclaimed;
-        # a live resident is only warned about (the OS port bind is the real
-        # single-instance guard) so tests and intentional restarts are not broken.
-        discovery_path = service_json_path(settings.a2a_home)
-        discovery_pid = os.getpid()
-        armed = settings.desktop_profile_armed
-        desktop_generation: str | None = None
-        desktop_owner: str | None = None
-        desktop_credential_reference: str | None = None
-        if armed:
-            # Desktop profile: publish the versioned, secret-free record keyed to
-            # the runtime singleton this process already holds. The record names
-            # only the ACL-protected attach-credential reference, never a bearer.
-            from ..lifecycle.singleton import active_singleton, default_owner
-
-            singleton = active_singleton()
-            desktop_owner = (
-                singleton.owner if singleton is not None else default_owner()
-            )
-            desktop_generation = package_version()
-            references = settings.desktop_credential_paths
-            desktop_credential_reference = (
-                str(references.attach_path) if references is not None else None
-            )
-            write_desktop_discovery(
-                discovery_path,
-                generation=desktop_generation,
-                port=settings.port,
-                owner=desktop_owner,
-                credential_reference=desktop_credential_reference,
-                pid=discovery_pid,
-            )
-        else:
-            if another_resident_is_live(settings.a2a_home):
-                logger.warning(
-                    "A live resident gateway already holds %s; starting anyway "
-                    "(the port bind is the authoritative single-instance guard)",
-                    discovery_path,
-                )
-            write_service_json(
-                discovery_path,
-                port=settings.port,
-                pid=discovery_pid,
-                service_token=app.state.v1_service_token,
-            )
-        # Master-bug guard (BEFORE registration so a refusal leaves zero residue): a
-        # band gateway-dev whose dispatch target is outside the worker-dev band while
-        # a live band worker exists is mis-paired - refuse to boot rather than
-        # silently dispatch into the owner's resident worker. When no band worker
-        # exists the mismatch is a plausible dev intent, so warn only.
-        from ..lifecycle.pairing import (
-            DispatchPairingStatus,
-            verify_dispatch_pairing,
+        discovery_path, discovery_pid, serve_record, discovery_task = (
+            _start_gateway_discovery(app)
         )
-
-        pairing_status, pairing_message = verify_dispatch_pairing(
-            settings.worker_url, settings.port
-        )
-        if pairing_status is DispatchPairingStatus.MISPAIRED:
-            raise RuntimeError(pairing_message)
-        if pairing_status is DispatchPairingStatus.UNPAIRED:
-            logger.warning("Dispatch pairing: %s", pairing_message)
-            app.state.dispatch_pairing_warning = pairing_message
-
-        # A gateway booted on a band port (gateway-dev)
-        # self-registers so `procs` can enumerate/attach/reap it; a resident
-        # gateway on its fixed out-of-band port registers nothing (returns None).
-        serve_record = register_serve(
-            "gateway-dev",
-            settings.port,
-            # Absent is the empty string the registry documents, never the
-            # rendering of None: workspace_root carries no default, so
-            # stringifying it unconditionally registers the literal "None" as a
-            # directory for every process that never had one.
-            workspace=""
-            if settings.workspace_root is None
-            else str(settings.workspace_root),
-            command=["vaultspec-a2a", "serve", "--port", str(settings.port)],
-        )
-        if armed:
-            discovery_task = asyncio.create_task(
-                _desktop_discovery_heartbeat(
-                    discovery_path,
-                    generation=cast("str", desktop_generation),
-                    port=settings.port,
-                    owner=cast("str", desktop_owner),
-                    credential_reference=desktop_credential_reference,
-                    pid=discovery_pid,
-                )
-            )
-        else:
-            discovery_task = asyncio.create_task(
-                _discovery_heartbeat(
-                    discovery_path,
-                    settings.port,
-                    discovery_pid,
-                    app.state.v1_service_token,
-                    serve_record,
-                )
-            )
-        logger.info("Service discovery published at %s", discovery_path)
 
         verdict_subscriber_task: asyncio.Task[None] | None = None
         if settings.authoring_subscriber_enabled:
@@ -685,18 +693,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await finish_before(aggregator.shutdown(), deadline, phase="event aggregator")
         await finish_before(close_db(), deadline, phase="database")
 
-        provider = trace.get_tracer_provider()
-        if isinstance(provider, SdkTracerProvider):
-            await finish_before(
-                asyncio.to_thread(provider.shutdown), deadline, phase="trace provider"
-            )
-        meter_provider = metrics.get_meter_provider()
-        if isinstance(meter_provider, SdkMeterProvider):
-            await finish_before(
-                asyncio.to_thread(meter_provider.shutdown),
-                deadline,
-                phase="meter provider",
-            )
+        await _shutdown_observability(deadline)
 
         logger.info("Gateway shutdown complete")
 

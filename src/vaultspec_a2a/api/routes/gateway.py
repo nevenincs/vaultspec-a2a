@@ -98,6 +98,7 @@ from ...database import (
     normalize_workspace_identity,
 )
 from ...database.checkpoints import Checkpointer
+from ...database.models import ThreadModel
 from ...domain_config import domain_config
 from ...providers import ProviderCondition
 from ...providers.provider_catalog import (
@@ -390,17 +391,14 @@ async def run_start_endpoint(
     default) preserves the one-shot engine/Compose path.
     """
     db, _aggregator, _checkpointer, worker_client = services
+    runtime = _RunRuntime(circuit_breaker, worker_spawner, worker_client)
     if body.stage == RunStage.PREPARE:
         return await _run_prepare(request, body, worker_spawner, worker_client)
     if body.stage == RunStage.COMMIT:
-        return await _run_commit(
-            request, body, db, circuit_breaker, worker_spawner, worker_client
-        )
+        return await _run_commit(request, body, db, runtime)
     if body.stage == RunStage.RELEASE:
         return await _run_release(request, body)
-    return await _run_direct_start(
-        request, body, db, circuit_breaker, worker_spawner, worker_client
-    )
+    return await _run_direct_start(request, body, db, runtime)
 
 
 @dataclass(frozen=True, slots=True)
@@ -421,40 +419,34 @@ class _RunLeaseBinding:
     commit_digest: str
 
 
-async def _create_run_core(
-    request: Request,
-    body: RunStartRequest,
-    db: AsyncSession,
-    circuit_breaker: Any,
-    worker_spawner: Any,
-    worker_client: httpx.AsyncClient,
-    *,
-    commit_binding: _RunLeaseBinding | None,
-) -> _RunDispatchResult:
-    """Create and dispatch one durable run - the shared start/commit core.
+@dataclass(frozen=True, slots=True)
+class _RunRuntime:
+    circuit_breaker: Any
+    worker_spawner: Any
+    worker_client: httpx.AsyncClient
 
-    Refuses before any durable state is created: an unloadable preset, a
-    document-authoring preset with no target feature, or an actor-token bundle
-    that does not cover the preset's roles all raise a 4xx. A client-supplied
-    ``run_id`` makes creation dispatch-exactly-once under retry. When
-    *commit_binding* is supplied, the commit path persists it into the run's
-    metadata so terminal settlement and restart reconciliation can recover the
-    run's non-secret lease and replay identity durably.
-    """
-    # Client idempotency: a retry with the same stable run id returns the
-    # existing run rather than starting a second one (dispatch-exactly-once).
-    existing = await get_thread(db, body.run_id)
-    if existing is not None:
-        _replay_identity_or_conflict(existing.id, existing.thread_metadata, body)
-        return _RunDispatchResult(
-            thread_id=existing.id,
-            status=existing.status,
-            nickname=existing.nickname,
-            frozen=_read_persisted_team_selection(existing.thread_metadata),
-            replayed=True,
-        )
+
+@dataclass(frozen=True, slots=True)
+class _RunAdmission:
+    workspace_root: Path
+    nickname: str
+    metadata: ThreadMetadata | None
+    metadata_json: str
+    frozen: FrozenTeamSelection
+
+
+@dataclass(frozen=True, slots=True)
+class _RunWinner:
+    thread_id: str
+    status: str
+    nickname: str | None
+    metadata_json: str | None
+
+
+async def _prepare_run_admission(
+    request: Request, body: RunStartRequest, commit_binding: _RunLeaseBinding | None
+) -> _RunAdmission:
     run_id = body.run_id
-
     # Thread the target feature onto the metadata so it reaches dispatch and the
     # vault index; the top-level field is authoritative when both are present.
     # ``process_metadata`` enriches its input with the generated nickname and
@@ -513,6 +505,132 @@ async def _create_run_core(
     # durably, so terminal settlement and post-restart reconciliation recover it.
     if commit_binding is not None:
         metadata_json = _persist_lease(metadata_json, commit_binding)
+    return _RunAdmission(ws_root, nickname, metadata, metadata_json, frozen)
+
+
+async def _attempt_thread_creation(
+    db: AsyncSession,
+    body: RunStartRequest,
+    request: ThreadCreationRequest,
+    runtime: _RunRuntime,
+) -> ThreadCreationResult | _RunWinner:
+    for attempt in range(4):
+        try:
+            return await create_and_dispatch_thread(
+                db,
+                request,
+                runtime=ThreadDispatchRuntime(
+                    circuit_breaker=runtime.circuit_breaker,
+                    worker_spawner=runtime.worker_spawner,
+                    worker_client=runtime.worker_client,
+                    recursion_limit=domain_config.graph_recursion_limit,
+                    trace_headers=trace_headers(),
+                ),
+            )
+        except OperationalError as exc:
+            if (
+                db.get_bind().dialect.name != "sqlite"
+                or "database is locked" not in str(exc).lower()
+                or attempt == 3
+            ):
+                raise
+            await db.rollback()
+            winner = await get_thread(db, body.run_id)
+            if winner is not None:
+                return _RunWinner(
+                    winner.id,
+                    winner.status,
+                    winner.nickname,
+                    winner.thread_metadata,
+                )
+            await db.rollback()
+            await asyncio.sleep(0.05 * (attempt + 1))
+    raise RuntimeError("run admission retry exhausted without a result")
+
+
+async def _create_thread_with_retry(
+    db: AsyncSession,
+    body: RunStartRequest,
+    prepared: _RunAdmission,
+    runtime: _RunRuntime,
+) -> ThreadCreationResult | _RunWinner:
+    request = ThreadCreationRequest(
+        thread_id=body.run_id,
+        title=body.title,
+        initial_message=body.message,
+        team_preset=body.team_preset,
+        autonomous=body.autonomous,
+        nickname=prepared.nickname,
+        metadata=prepared.metadata,
+        metadata_json=prepared.metadata_json,
+        workspace_root=prepared.workspace_root,
+        actor_tokens=body.actor_tokens,
+        model_assignment=prepared.frozen.compiler_map(),
+    )
+    try:
+        return await _attempt_thread_creation(db, body, request, runtime)
+    except NicknameConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Run nickname already exists: {exc.nickname!r}",
+        ) from exc
+    except IntegrityError as exc:
+        await db.rollback()
+        winner = await get_thread(db, body.run_id)
+        if winner is not None:
+            logger.info(
+                "Run %s lost a concurrent insert race for its run id; "
+                "resolving the losing request against the durable winner",
+                body.run_id,
+            )
+            return _RunWinner(
+                winner.id,
+                winner.status,
+                winner.nickname,
+                winner.thread_metadata,
+            )
+        if "nickname" in str(exc).lower():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Run nickname already exists: {prepared.nickname!r}",
+            ) from exc
+        raise
+
+
+async def _create_run_core(
+    request: Request,
+    body: RunStartRequest,
+    db: AsyncSession,
+    runtime: _RunRuntime,
+    *,
+    commit_binding: _RunLeaseBinding | None,
+) -> _RunDispatchResult:
+    """Create and dispatch one durable run - the shared start/commit core.
+
+    Refuses before any durable state is created: an unloadable preset, a
+    document-authoring preset with no target feature, or an actor-token bundle
+    that does not cover the preset's roles all raise a 4xx. A client-supplied
+    ``run_id`` makes creation dispatch-exactly-once under retry. When
+    *commit_binding* is supplied, the commit path persists it into the run's
+    metadata so terminal settlement and restart reconciliation can recover the
+    run's non-secret lease and replay identity durably.
+    """
+    # Client idempotency: a retry with the same stable run id returns the
+    # existing run rather than starting a second one (dispatch-exactly-once).
+    existing = await get_thread(db, body.run_id)
+    if existing is not None:
+        _replay_identity_or_conflict(existing.id, existing.thread_metadata, body)
+        return _RunDispatchResult(
+            thread_id=existing.id,
+            status=existing.status,
+            nickname=existing.nickname,
+            frozen=_read_persisted_team_selection(existing.thread_metadata),
+            replayed=True,
+        )
+    run_id = body.run_id
+
+    prepared = await _prepare_run_admission(request, body, commit_binding)
+    frozen = prepared.frozen
 
     # Admission gate: a draining gateway refuses a new run before any durable
     # state is created, so drain closes admission ahead of bounded cancellation.
@@ -538,107 +656,20 @@ async def _create_run_core(
     # active run forever and never quiesce.
     persisted = False
     try:
-        try:
-            creation_request = ThreadCreationRequest(
-                thread_id=run_id,
-                title=body.title,
-                initial_message=body.message,
-                team_preset=body.team_preset,
-                autonomous=body.autonomous,
-                nickname=nickname,
-                metadata=metadata,
-                metadata_json=metadata_json,
-                workspace_root=ws_root,
-                actor_tokens=body.actor_tokens,
-                model_assignment=frozen.compiler_map(),
+        creation = await _create_thread_with_retry(db, body, prepared, runtime)
+        persisted = True
+        if isinstance(creation, _RunWinner):
+            _replay_identity_or_conflict(
+                creation.thread_id, creation.metadata_json, body
             )
-            result: ThreadCreationResult | None = None
-            for attempt in range(4):
-                try:
-                    result = await create_and_dispatch_thread(
-                        db,
-                        creation_request,
-                        runtime=ThreadDispatchRuntime(
-                            circuit_breaker=circuit_breaker,
-                            worker_spawner=worker_spawner,
-                            worker_client=worker_client,
-                            recursion_limit=domain_config.graph_recursion_limit,
-                            trace_headers=trace_headers(),
-                        ),
-                    )
-                    break
-                except OperationalError as exc:
-                    if (
-                        db.get_bind().dialect.name != "sqlite"
-                        or "database is locked" not in str(exc).lower()
-                        or attempt == 3
-                    ):
-                        raise
-                    # A concurrent SQLite writer can invalidate the snapshot
-                    # opened by the replay lookup. A new transaction either
-                    # sees the committed winner or can retry its own insert.
-                    await db.rollback()
-                    winner = await get_thread(db, run_id)
-                    if winner is not None:
-                        persisted = True
-                        _replay_identity_or_conflict(
-                            winner.id, winner.thread_metadata, body
-                        )
-                        return _RunDispatchResult(
-                            thread_id=winner.id,
-                            status=winner.status,
-                            nickname=winner.nickname,
-                            frozen=_read_persisted_team_selection(
-                                winner.thread_metadata
-                            ),
-                            replayed=True,
-                        )
-                    await db.rollback()
-                    await asyncio.sleep(0.05 * (attempt + 1))
-            if result is None:
-                raise RuntimeError("run admission retry exhausted without a result")
-        except NicknameConflictError as exc:
-            # No durable run was created; the finally drops the unused admission.
-            raise HTTPException(
-                status_code=409,
-                detail=f"Run nickname already exists: {exc.nickname!r}",
-            ) from exc
-        except IntegrityError as exc:
-            # Insert-or-return idempotency: two simultaneous requests with the same
-            # run_id race past the check-then-act guard above; the loser's insert
-            # hits the primary-key unique violation. Roll back and resolve against
-            # the winner's run rather than a 500.
-            await db.rollback()
-            winner = await get_thread(db, run_id)
-            if winner is not None:
-                # The winner owns the durable run and its admission from here on,
-                # whichever way the identity check below resolves; releasing the
-                # admission on the loser's path would drop the winner's active run
-                # out of the drain gate.
-                persisted = True
-                logger.info(
-                    "Run %s lost a concurrent insert race for its run id; "
-                    "resolving the losing request against the durable winner",
-                    run_id,
-                )
-                # A racing loser gets exactly the identity check a sequential
-                # replay gets: same run id plus the same request is the winner's
-                # run replayed, and a colliding body is a different intention that
-                # must be refused rather than answered with someone else's run.
-                _replay_identity_or_conflict(winner.id, winner.thread_metadata, body)
-                return _RunDispatchResult(
-                    thread_id=winner.id,
-                    status=winner.status,
-                    nickname=winner.nickname,
-                    frozen=_read_persisted_team_selection(winner.thread_metadata),
-                    replayed=True,
-                )
-            if "nickname" in str(exc).lower():
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Run nickname already exists: {nickname!r}",
-                ) from exc
-            raise
+            return _RunDispatchResult(
+                thread_id=creation.thread_id,
+                status=creation.status,
+                nickname=creation.nickname,
+                frozen=_read_persisted_team_selection(creation.metadata_json),
+                replayed=True,
+            )
+        result = creation
 
         # The durable run row now exists and owns its admission; the finally no
         # longer releases it, because a durable run is released by its terminal
@@ -676,18 +707,14 @@ async def _run_direct_start(
     request: Request,
     body: RunStartRequest,
     db: AsyncSession,
-    circuit_breaker: Any,
-    worker_spawner: Any,
-    worker_client: httpx.AsyncClient,
+    runtime: _RunRuntime,
 ) -> RunStartResponse:
     """One-shot start: create and dispatch a run in a single call (unchanged path)."""
     result = await _create_run_core(
         request,
         body,
         db,
-        circuit_breaker,
-        worker_spawner,
-        worker_client,
+        runtime,
         commit_binding=None,
     )
     return RunStartResponse(
@@ -772,9 +799,7 @@ async def _run_commit(
     request: Request,
     body: RunStartRequest,
     db: AsyncSession,
-    circuit_breaker: Any,
-    worker_spawner: Any,
-    worker_client: httpx.AsyncClient,
+    runtime: _RunRuntime,
 ) -> RunCommitResponse:
     """Bind actor tokens to a stable run under a prepared reservation.
 
@@ -794,60 +819,49 @@ async def _run_commit(
             request,
             body,
             db,
-            circuit_breaker,
-            worker_spawner,
-            worker_client,
+            runtime,
         )
 
 
-async def _run_commit_locked(
+async def _commit_replay(
+    existing: ThreadModel,
+    body: RunStartRequest,
+    broker: AdmissionBroker,
+    reservation_id: str,
+) -> RunCommitResponse:
+    canonical_body = _canonical_replay_body(existing.thread_metadata, body)
+    commit_digest = request_digest(canonical_body, prepared=False)
+    existing_modern = _read_persisted_team_selection(existing.thread_metadata)
+    binding = _persisted_lease_binding(existing.thread_metadata)
+    if binding is None:
+        raise HTTPException(
+            status_code=409,
+            detail="existing run was not committed under a prepared lease",
+        )
+    if binding.reservation_id != reservation_id or not hmac.compare_digest(
+        binding.commit_digest, commit_digest
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="commit replay does not exactly match the accepted request",
+        )
+    await broker.complete_commit(reservation_id, binding.lease_id)
+    return RunCommitResponse(
+        run_id=existing.id,
+        status=existing.status,
+        lease_id=binding.lease_id,
+        nickname=existing.nickname,
+        frozen_assignment=_modern_frozen_disclosure(existing_modern),
+    )
+
+
+async def _prepare_commit_eligibility(
     request: Request,
     body: RunStartRequest,
-    db: AsyncSession,
-    circuit_breaker: Any,
-    worker_spawner: Any,
-    worker_client: httpx.AsyncClient,
-) -> RunCommitResponse:
-    """Linearized commit implementation; caller holds its per-run stripe."""
-    reservation_id = body.reservation_id
-    if reservation_id is None:  # pragma: no cover - guarded by the schema
-        raise HTTPException(status_code=422, detail="commit requires a reservation id")
-    run_id = body.run_id
+    runtime: _RunRuntime,
+    reservation_id: str,
+) -> tuple[RunStartRequest, str]:
     broker = admission_broker(request.app)
-
-    # A commit acknowledgement can be lost after the durable run is created.
-    # Recover that exact replay before consulting the now-consumed reservation,
-    # returning the persisted non-secret gateway lease identity.
-    existing = await get_thread(db, run_id)
-    if existing is not None:
-        canonical_body = _canonical_replay_body(existing.thread_metadata, body)
-        commit_digest = request_digest(canonical_body, prepared=False)
-        existing_modern = _read_persisted_team_selection(existing.thread_metadata)
-        binding = _persisted_lease_binding(existing.thread_metadata)
-        if binding is None:
-            raise HTTPException(
-                status_code=409,
-                detail="existing run was not committed under a prepared lease",
-            )
-        if binding.reservation_id != reservation_id or not hmac.compare_digest(
-            binding.commit_digest, commit_digest
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="commit replay does not exactly match the accepted request",
-            )
-        # Repair any in-memory ACTIVE/COMMITTING reservation left by a failure
-        # after the exact durable row was written but before the response path
-        # completed. A process restart simply has no in-memory row, so false is
-        # benign here.
-        await broker.complete_commit(reservation_id, binding.lease_id)
-        return RunCommitResponse(
-            run_id=existing.id,
-            status=existing.status,
-            lease_id=binding.lease_id,
-            nickname=existing.nickname,
-            frozen_assignment=_modern_frozen_disclosure(existing_modern),
-        )
     ws_root = _prepare_workspace_root(body)
     team_config = _load_preset_or_refuse(body.team_preset, ws_root)
     frozen = await _validate_and_freeze_selection_or_refuse(
@@ -863,7 +877,7 @@ async def _run_commit_locked(
     from ...control.worker_management import probe_worker_health
 
     logger.info("commit step: probe_worker")
-    probe = await probe_worker_health(settings.worker_url, client=worker_client)
+    probe = await probe_worker_health(settings.worker_url, client=runtime.worker_client)
     # Same tri-state as prepare: only a probe that OBSERVED absence may report it.
     # An indeterminate one defers to the watchdog's seated state, so a worker busy
     # with an in-flight run stays execution-ready for the next commit.
@@ -893,6 +907,77 @@ async def _run_commit_locked(
         )
         await _release_ineligible_reservation(broker, reservation_id, canonical_body)
         raise HTTPException(status_code=503, detail=execution.reason)
+    return canonical_body, commit_digest
+
+
+async def _classify_failed_commit(
+    db: AsyncSession,
+    run_id: str,
+    binding: _RunLeaseBinding,
+    broker: AdmissionBroker,
+) -> None:
+    # A failed response may follow a durable commit. Reopen a reservation only
+    # when a fresh authoritative read proves that no run row exists.
+    try:
+        await db.rollback()
+        persisted = await get_thread(db, run_id)
+    except Exception:
+        logger.exception(
+            "Could not classify failed commit durability for run %s reservation %s",
+            run_id,
+            binding.reservation_id,
+        )
+        return
+    persisted_binding = (
+        _persisted_lease_binding(persisted.thread_metadata)
+        if persisted is not None
+        else None
+    )
+    if (
+        persisted_binding is not None
+        and persisted_binding.lease_id == binding.lease_id
+        and persisted_binding.reservation_id == binding.reservation_id
+        and hmac.compare_digest(persisted_binding.commit_digest, binding.commit_digest)
+    ):
+        await broker.complete_commit(binding.reservation_id, binding.lease_id)
+    elif persisted is None:
+        if not await broker.abort_commit(binding.reservation_id, binding.lease_id):
+            logger.error(
+                "Could not restore failed commit reservation %s for run %s",
+                binding.reservation_id,
+                run_id,
+            )
+    else:
+        logger.error(
+            "Failed commit for run %s found a conflicting durable binding; "
+            "reservation %s remains committing until expiry",
+            run_id,
+            binding.reservation_id,
+        )
+
+
+async def _run_commit_locked(
+    request: Request,
+    body: RunStartRequest,
+    db: AsyncSession,
+    runtime: _RunRuntime,
+) -> RunCommitResponse:
+    """Linearized commit implementation; caller holds its per-run stripe."""
+    reservation_id = body.reservation_id
+    if reservation_id is None:  # pragma: no cover - guarded by the schema
+        raise HTTPException(status_code=422, detail="commit requires a reservation id")
+    run_id = body.run_id
+    broker = admission_broker(request.app)
+
+    # A commit acknowledgement can be lost after the durable run is created.
+    # Recover that exact replay before consulting the now-consumed reservation,
+    # returning the persisted non-secret gateway lease identity.
+    existing = await get_thread(db, run_id)
+    if existing is not None:
+        return await _commit_replay(existing, body, broker, reservation_id)
+    canonical_body, commit_digest = await _prepare_commit_eligibility(
+        request, body, runtime, reservation_id
+    )
 
     presented_roles: set[str] = (
         set(body.actor_tokens.tokens.keys()) if body.actor_tokens is not None else set()
@@ -920,55 +1005,11 @@ async def _run_commit_locked(
             request,
             body,
             db,
-            circuit_breaker,
-            worker_spawner,
-            worker_client,
+            runtime,
             commit_binding=binding,
         )
     except BaseException:
-        # Dispatch can fail after `_create_run_core` has committed the exact run
-        # row. Never reopen that reservation: a replay will recover the durable
-        # binding. Roll back the request session first because a pre-durability
-        # conflict can leave SQLAlchemy's transaction unusable for the
-        # authoritative read. Abort only when the run is authoritatively absent;
-        # on a rollback/read error or conflicting durable row, retain COMMITTING
-        # rather than create duplicate admission authority.
-        try:
-            await db.rollback()
-            persisted = await get_thread(db, run_id)
-        except Exception:
-            logger.exception(
-                "Could not classify failed commit durability for run %s reservation %s",
-                run_id,
-                reservation_id,
-            )
-        else:
-            persisted_binding = (
-                _persisted_lease_binding(persisted.thread_metadata)
-                if persisted is not None
-                else None
-            )
-            if (
-                persisted_binding is not None
-                and persisted_binding.lease_id == outcome.lease_id
-                and persisted_binding.reservation_id == reservation_id
-                and hmac.compare_digest(persisted_binding.commit_digest, commit_digest)
-            ):
-                await broker.complete_commit(reservation_id, outcome.lease_id)
-            elif persisted is None:
-                if not await broker.abort_commit(reservation_id, outcome.lease_id):
-                    logger.error(
-                        "Could not restore failed commit reservation %s for run %s",
-                        reservation_id,
-                        run_id,
-                    )
-            else:
-                logger.error(
-                    "Failed commit for run %s found a conflicting durable binding; "
-                    "reservation %s remains committing until expiry",
-                    run_id,
-                    reservation_id,
-                )
+        await _classify_failed_commit(db, run_id, binding, broker)
         raise
     if not await broker.complete_commit(reservation_id, outcome.lease_id):
         logger.error(

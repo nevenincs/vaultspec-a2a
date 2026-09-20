@@ -726,8 +726,12 @@ def serve_up(
         )
         raise LifecycleError(detail)
     finally:
-        for reservation in held:
-            release_reservation(reservation)
+        _release_held_reservations(held)
+
+
+def _release_held_reservations(held: list[PortReservation]) -> None:
+    for reservation in held:
+        release_reservation(reservation)
 
 
 def _await_listener(

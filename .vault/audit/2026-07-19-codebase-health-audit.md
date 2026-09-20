@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:25665d4a337e8fed3719ec9291c849c41bbcf31f531b92393ef018a0f94d2408'
+body_hash: 'sha256:037b0e3adb3ae29c10a8af250e91f6a45b2b88489945949797363b5f6adab2e9'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3869,3 +3869,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved exception-to-result classification into `_native_command_error_result`, retaining the original exception order, logging, outcome, and effects flag.
 - Verification: 8 native-command tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate no longer reports `execute_native_command`.
 - Review finding (medium, code health): other cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 lifecycle reservation release complexity review
+
+- Implementation: extracted held port-reservation release into `_release_held_reservations`. The `finally` path still releases every held reservation in the same order.
+- Verification: 39 lifecycle manager tests passed; target Ruff, Ty, formatting, and diff checks passed. The shared worktree cyclomatic gate currently reports zero findings after concurrent bounded fixes.
+- Review finding (medium, code health): the strict suite still has non-cyclomatic findings; continue the existing burn-down queue. No new functional defect was found in this pass.

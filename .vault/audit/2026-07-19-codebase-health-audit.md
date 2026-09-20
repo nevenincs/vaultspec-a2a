@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:b2c97383e021f0330c058a9be9869155cf0500bdaeecad319df3a7cd6db6cb14'
+body_hash: 'sha256:eb2a2833d844a24472281be06d4eb2eaa4082898d2fb71d34865395fb017b4fe'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3332,3 +3332,9 @@ One medium-severity strict Ruff parameter-count finding, two cognitive-complexit
 ### 2026-09-20 persisted run lease binding shape review pass
 
 One medium-severity Pylint boolean-expression finding in durable staged-commit lease binding validation was resolved. The binding now reuses the existing typed string-field reader for lease id, reservation id, and commit digest, then rejects any blank or absent value before constructing a binding. Review checked that non-string, blank, and missing fields still refuse replay; no durable metadata or digest authority changed. Thirty live gateway tests, routine gates, strict Ty/basedpyright, focused Ruff/Pylint, and diff check pass. Pylint now reports 58 findings, including the gateway module-length finding and six remaining boolean-expression findings. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 receipt authority predicate review pass
+
+- Implementation: extracted the persisted graph receipt's writer identity and authority comparisons into a focused predicate. The comparisons and rejection behavior are unchanged.
+- Review: inspected the actual diff and checked the receipt tests (5 passed), routine gate, strict type gate, focused Pylint, and focused strict Ruff. No new correctness issue surfaced. Severity: none for this change; type: no contract drift.
+- Queue: the pre-existing `prepare_graph_action_receipt` return-count finding remains open in the strict Ruff queue. The repository still has other strict Ruff, Pylint, and code-health findings; this pass does not close them.

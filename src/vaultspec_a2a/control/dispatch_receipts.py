@@ -64,18 +64,34 @@ def validate_current_graph_receipt(
         expectation = thread_write_expectation(thread)
     except (ValueError, ValidationError):
         return None
+    if not _receipt_matches_current_writer(
+        receipt, thread, action, fingerprint, expectation
+    ):
+        return None
+    return receipt
+
+
+def _receipt_matches_current_writer(
+    receipt: GraphActionReceipt,
+    thread: ThreadModel,
+    action: ControlActionModel,
+    fingerprint: str,
+    expectation: ThreadWriteExpectation,
+) -> bool:
     if (
         receipt.thread_id != thread.id
         or receipt.action_id != action.id
         or receipt.payload_fingerprint != fingerprint
         or action.action_type != receipt.action_type
-        or receipt.action_type != expectation.authority.action_type
-        or receipt.dispatch_id != expectation.authority.action_receipt_id
-        or receipt.writer_generation != expectation.authority.writer_generation
-        or receipt.run_revision > expectation.authority.run_revision
     ):
-        return None
-    return receipt
+        return False
+    authority = expectation.authority
+    return (
+        receipt.action_type == authority.action_type
+        and receipt.dispatch_id == authority.action_receipt_id
+        and receipt.writer_generation == authority.writer_generation
+        and receipt.run_revision <= authority.run_revision
+    )
 
 
 async def prepare_graph_action_receipt(

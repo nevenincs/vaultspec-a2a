@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:a7730ef5c354e71c5cf8cf73d26abf9ea85f944c3b73c5cc4e9e7f7ffc3fc1a8'
+body_hash: 'sha256:183c84bb36f94b901859ce04e0e35e8927c9be0dfef998f77502d6750a0eb3d6'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3516,3 +3516,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: separated complete executable graph checks by team, agent roster, and supervisor authority; separated prepare and release run-stage checks. Validation order and exact errors are preserved.
 - Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Focused graph/accepted-input and run-selection/digest tests: 90 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 63 to 60 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.
+
+### 2026-09-20 desktop discovery and port reservation review pass
+
+- Implementation: isolated numeric and identity validation for desktop discovery records and the per-candidate atomic reservation attempt. Record rejection and exclusive marker arbitration retain their prior order.
+- Review: inspected both diffs and concurrency path. No new correctness findings surfaced (severity: none; type: implementation review). Discovery tests: 25 passed; registry/concurrency tests: 20 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 60 to 58 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.

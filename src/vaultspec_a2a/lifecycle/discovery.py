@@ -585,6 +585,51 @@ class DesktopDiscoveryRecord:
         return self.protocol_min <= version <= self.protocol_max
 
 
+def _desktop_record_numbers(
+    protocol: dict[str, object],
+    process: dict[str, object],
+    endpoint: dict[str, object],
+    info: dict[str, object],
+) -> tuple[int, int, int, int, int] | None:
+    protocol_min = coerce_int(protocol.get("min"))
+    protocol_max = coerce_int(protocol.get("max"))
+    pid = coerce_int(process.get("pid"))
+    port = coerce_int(endpoint.get("port"))
+    last_heartbeat = coerce_int(info.get("last_heartbeat"))
+    if (
+        protocol_min is None
+        or protocol_max is None
+        or pid is None
+        or port is None
+        or last_heartbeat is None
+        or protocol_min > protocol_max
+    ):
+        return None
+    return protocol_min, protocol_max, pid, port, last_heartbeat
+
+
+def _desktop_record_identity(
+    info: dict[str, object], process: dict[str, object], endpoint: dict[str, object]
+) -> tuple[str, str, str, str | None, str | None] | None:
+    host = endpoint.get("host")
+    owner = info.get("owner")
+    generation = info.get("generation")
+    if (
+        not isinstance(host, str)
+        or not host
+        or not isinstance(owner, str)
+        or not isinstance(generation, str)
+    ):
+        return None
+    fingerprint = process.get("start_fingerprint")
+    reference = info.get("credential_reference")
+    if (fingerprint is not None and not isinstance(fingerprint, str)) or (
+        reference is not None and not isinstance(reference, str)
+    ):
+        return None
+    return host, owner, generation, fingerprint, reference
+
+
 def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | None:
     """Map a parsed record dict to a versioned desktop record, or ``None``.
 
@@ -609,36 +654,14 @@ def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | N
     protocol = cast("dict[str, object]", protocol_raw)
     process = cast("dict[str, object]", process_raw)
     endpoint = cast("dict[str, object]", endpoint_raw)
-    protocol_min = coerce_int(protocol.get("min"))
-    protocol_max = coerce_int(protocol.get("max"))
-    pid = coerce_int(process.get("pid"))
-    port = coerce_int(endpoint.get("port"))
-    last_heartbeat = coerce_int(info.get("last_heartbeat"))
-    if (
-        protocol_min is None
-        or protocol_max is None
-        or pid is None
-        or port is None
-        or last_heartbeat is None
-        or protocol_min > protocol_max
-    ):
+    numbers = _desktop_record_numbers(protocol, process, endpoint, info)
+    if numbers is None:
         return None
-    host = endpoint.get("host")
-    owner = info.get("owner")
-    generation = info.get("generation")
-    if (
-        not isinstance(host, str)
-        or not host
-        or not isinstance(owner, str)
-        or not isinstance(generation, str)
-    ):
+    protocol_min, protocol_max, pid, port, last_heartbeat = numbers
+    identity = _desktop_record_identity(info, process, endpoint)
+    if identity is None:
         return None
-    fingerprint = process.get("start_fingerprint")
-    reference = info.get("credential_reference")
-    if (fingerprint is not None and not isinstance(fingerprint, str)) or (
-        reference is not None and not isinstance(reference, str)
-    ):
-        return None
+    host, owner, generation, fingerprint, reference = identity
     return DesktopDiscoveryRecord(
         version=DESKTOP_DISCOVERY_VERSION,
         profile=_DESKTOP_PROFILE,

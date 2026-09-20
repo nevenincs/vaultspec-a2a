@@ -449,6 +449,29 @@ def _live_reservation_ports(home: Path | None) -> set[int]:
     return ports
 
 
+def _try_reserve_candidate(
+    role: str, candidate: int, *, home: Path | None
+) -> PortReservation | None:
+    path = _reservation_path(role, candidate, home=home)
+    if path.exists():
+        # Use a fresh clock because peers may create markers during the band walk.
+        if _reservation_is_live(path, now=now_ms()):
+            return None
+        with contextlib.suppress(OSError):
+            path.unlink()
+    if not _port_is_free(candidate):
+        return None
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        return None
+    try:
+        os.write(fd, str(os.getpid()).encode("ascii"))
+    finally:
+        os.close(fd)
+    return PortReservation(port=candidate, path=path)
+
+
 def reserve_port(
     role: str,
     role_config: RoleConfig,
@@ -475,28 +498,9 @@ def reserve_port(
     for candidate in role_config.band:
         if candidate in claimed or candidate in resident_ports:
             continue
-        path = _reservation_path(role, candidate, home=home)
-        if path.exists():
-            # Fresh clock per candidate: the walk across a band takes long
-            # enough (bind probes) that the loop-entry snapshot would read a
-            # peer's just-created marker as future-dated.
-            if _reservation_is_live(path, now=now_ms()):
-                continue
-            # Stale marker: drop it, then the O_EXCL create below arbitrates the race.
-            with contextlib.suppress(OSError):
-                path.unlink()
-        if not _port_is_free(candidate):
-            continue
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            # Another allocator won this port between our checks and the create.
-            continue
-        try:
-            os.write(fd, str(os.getpid()).encode("ascii"))
-        finally:
-            os.close(fd)
-        return PortReservation(port=candidate, path=path)
+        reservation = _try_reserve_candidate(role, candidate, home=home)
+        if reservation is not None:
+            return reservation
     raise RuntimeError(
         f"role {role!r} band {role_config.band} is exhausted: no free port"
     )

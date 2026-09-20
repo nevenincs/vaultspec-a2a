@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...utils.process import kill_pid_tree_async, pid_is_live
+from ...utils._process_tree import kill_pid_tree_async, pid_is_live
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..antigravity_catalog import _read_listing, discover_antigravity_catalog
 from ..provider_catalog import AuthenticationState, ProviderCatalogKey

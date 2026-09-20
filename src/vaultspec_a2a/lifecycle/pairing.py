@@ -22,7 +22,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from ..control.config import GATEWAY_URL_ENV, WORKER_URL_ENV
+from ..control.infra_config import GATEWAY_URL_ENV, WORKER_URL_ENV
 from .discovery import is_pid_alive
 from .procs_config import ProcsConfigError, load_procs_config
 from .registry import list_records

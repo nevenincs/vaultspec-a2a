@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import psutil
 import pytest
 
-from ...utils.process import kill_pid_tree_async, pid_is_live
+from ...utils._process_tree import kill_pid_tree_async, pid_is_live
 from .._acp_protocol import process_stdout_loop
 from .._acp_rpc_handlers import on_terminal_create, on_terminal_release
 from .._acp_types import AcpSessionContext

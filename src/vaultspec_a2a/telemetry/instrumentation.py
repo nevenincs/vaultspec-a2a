@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING, cast, override
 
 from opentelemetry import metrics, trace
 
-from ..control.config import DEFAULT_OTLP_ENDPOINT
+from ..control.infra_config import DEFAULT_OTLP_ENDPOINT
 from ..utils.version import package_version
 
 if TYPE_CHECKING:

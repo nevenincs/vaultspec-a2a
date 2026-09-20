@@ -30,8 +30,8 @@ from ..thread.errors import (
 from ..thread.state import (
     TeamState,  # noqa: TC001 - LangGraph inspects route annotations
 )
+from ._compiler_retry import _NODE_RETRY_POLICY
 from .compiler import (
-    _NODE_RETRY_POLICY,
     _ROLE_TO_PHASE,
     _add_node,
     _build_supervisor_prompt,

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:7146f79cd17f11b6bbbc7dbfb275c3cf8b3c23df9070665bbc7e21360f773b6b'
+body_hash: 'sha256:a64a1e826303e9237b284561bad86dabbad74f7f4787a1b6fc7e706124a12c2e'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4125,3 +4125,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: typed keyword options close parameter findings in streaming aggregation and emission, lease acquisition, and ACP subprocess spawning. The streaming emitter retains positional and named calls through an explicit binder; the other calls retain their named defaults.
 - Review finding, medium severity, runtime signature: emitter introspection now sees `*args/**kwargs`; binder checks covered positional, named, mixed, default, and duplicate arguments. Call-site behavior and event construction remained stable in the inspected diff. Other typed option functions expose `**kwargs`; no current caller inspects their signatures.
 - Verification: 73 aggregation tests, 207 streaming tests, nine lease tests, five containment service tests, and two desktop subprocess tests passed in the bounded lanes. Whole-tree Ruff, format, configured strict typing, import loading, and unused-symbol coverage pass. Parameter findings remain open elsewhere.
+
+### 2026-09-20 canonical import batch review
+
+- Implementation: redirected callers of compiler retry, worker dispatch, permission response, infrastructure configuration, and process-tree names to their declaring modules. Removed those imported names from ordinary-module export lists and removed unused relay imports. The export declaration guard fell from 96 to 70 findings.
+- Review finding, medium severity, import compatibility: ordinary-module relay paths for 26 names are no longer declared as exports. Direct imports were moved across production and tests; package facades still carry their intended public names. Dynamic or external consumers of private relay paths are not represented in this tree, so their compatibility risk remains recorded. No new static import or type issue was found.
+- Verification: 67 compiler, 59 worker executor, 21 permission, 52 lifecycle and provenance, and 34 process tests passed. All 295 governed imports load; whole-tree strict typing and scoped Ruff pass. Six ordinary modules still account for 70 export declaration findings, so this review remains REVISION REQUIRED.

@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, TypedDict, override
 
 import pytest
 
-from ...control.config import INTERNAL_TOKEN_ENV, settings
+from ...control.config import settings
+from ...control.infra_config import INTERNAL_TOKEN_ENV
 from ...control.worker_management import (
     LazyWorkerSpawner,
     WorkerHealthProbe,

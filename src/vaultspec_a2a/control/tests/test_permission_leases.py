@@ -9,13 +9,13 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.permission_service import (
+from ...control._permission_response_contract import (
     PermissionInput,
     PermissionRuntime,
     permission_response_action_key,
-    respond_to_permission,
 )
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_thread,

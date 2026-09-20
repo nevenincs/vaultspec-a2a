@@ -47,26 +47,7 @@ from ._process_tree import (
     THREAD_SUSPEND_RESUME as _THREAD_SUSPEND_RESUME,
 )
 from ._process_tree import (
-    ListenerOwnership,
-    classify_listener_ownership,
-    detached_spawn_kwargs,
-    kill_pid_tree_async,
-    parse_netstat_listener_pid,
-    pid_is_live,
-    port_listener_pid,
-    posix_descendant_pids,
-)
-from ._process_tree import (
-    tcp_table_listener_pid as _tcp_table_listener_pid,
-)
-from ._process_tree import (
     win_kernel32 as _win_kernel32,
-)
-from ._process_tree import (
-    win_parent_map as _win_parent_map,
-)
-from ._process_tree import (
-    win_tree_kill as _win_tree_kill,
 )
 from .async_cleanup import complete_cleanup
 
@@ -74,20 +55,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
-    "ListenerOwnership",
     "ProcessContainment",
     "ProcessContainmentError",
-    "_tcp_table_listener_pid",
-    "_win_kernel32",
-    "_win_parent_map",
-    "_win_tree_kill",
-    "classify_listener_ownership",
-    "detached_spawn_kwargs",
-    "kill_pid_tree_async",
-    "parse_netstat_listener_pid",
-    "pid_is_live",
-    "port_listener_pid",
-    "posix_descendant_pids",
 ]
 
 logger = logging.getLogger(__name__)

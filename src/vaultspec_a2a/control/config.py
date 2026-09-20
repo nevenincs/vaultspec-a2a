@@ -26,32 +26,8 @@ from .infra_config import (
     _synchronous_url,
     _warn_seating_discard,
 )
-from .infra_config import (
-    DEFAULT_MOCK_API_BASE as DEFAULT_MOCK_API_BASE,
-)
-from .infra_config import (
-    DEFAULT_OTLP_ENDPOINT as DEFAULT_OTLP_ENDPOINT,
-)
-from .infra_config import (
-    GATEWAY_URL_ALT_ENV as GATEWAY_URL_ALT_ENV,
-)
-from .infra_config import (
-    GATEWAY_URL_ENV as GATEWAY_URL_ENV,
-)
-from .infra_config import (
-    INTERNAL_TOKEN_ENV as INTERNAL_TOKEN_ENV,
-)
-from .infra_config import (
-    WORKER_URL_ENV as WORKER_URL_ENV,
-)
 
 __all__ = [
-    "DEFAULT_MOCK_API_BASE",
-    "DEFAULT_OTLP_ENDPOINT",
-    "GATEWAY_URL_ALT_ENV",
-    "GATEWAY_URL_ENV",
-    "INTERNAL_TOKEN_ENV",
-    "WORKER_URL_ENV",
     "Settings",
     "settings",
 ]

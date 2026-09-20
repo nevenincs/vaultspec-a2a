@@ -41,13 +41,12 @@ from ...team.team_config import (
 from ...thread.errors import ConfigError, WorkerExecutionError
 from ...thread.state import TeamState
 from .._compiler_research import _make_research_producer
+from .._compiler_retry import _NODE_RETRY_POLICY, _worker_retry_on
 from ..compiler import (
-    _NODE_RETRY_POLICY,
     _build_supervisor_prompt,
     _loop_route,
     _parse_catalog_preferences,
     _route_from_supervisor,
-    _worker_retry_on,
     compile_team_graph,
     resolve_model_for_worker,
 )

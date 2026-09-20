@@ -2275,7 +2275,7 @@ class TestRecoverabilityFollowsTheCondition:
         frame and the real node predicate over the SAME real provider failure is
         what makes their agreement observable rather than assumed.
         """
-        from ...graph.compiler import _worker_retry_on
+        from ...graph._compiler_retry import _worker_retry_on
         from ...thread.errors import WorkerExecutionError
 
         for kind, thread_id, client_id in (

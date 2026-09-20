@@ -47,12 +47,12 @@ from ...thread.action_receipts import (
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
-from ..executor import (
+from .._dispatch_contract import (
     _INGEST_GUARDS,
     _RESUME_GUARDS,
     DispatchCapacityReservation,
-    Executor,
 )
+from ..executor import Executor
 from ..graph_lifecycle import (
     GraphCacheKey,
     GraphCompilationError,

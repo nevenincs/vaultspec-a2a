@@ -56,7 +56,8 @@ from ._worker_readiness import (
     _await_worker_ready,
     _reap_unready_worker,
 )
-from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
+from .config import settings
+from .infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV
 from .worker_status import WorkerConnectionStatus
 
 __all__ = [

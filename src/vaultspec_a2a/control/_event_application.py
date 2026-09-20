@@ -42,7 +42,7 @@ async def apply_permission_resolution(
         set_thread_repair_state,
     )
     from ..thread.enums import ControlActionResultStatus
-    from .permission_service import permission_response_action_key
+    from ._permission_response_contract import permission_response_action_key
 
     request_value = payload.get("request_id")
     request_id = request_value if isinstance(request_value, str) else ""

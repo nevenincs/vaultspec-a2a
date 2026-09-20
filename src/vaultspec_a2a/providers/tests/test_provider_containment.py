@@ -67,7 +67,7 @@ def _await_gone(pids: list[int], *, timeout: float = 10.0) -> None:
 
 
 async def _force_reap(pids: list[int]) -> None:
-    from ...utils.process import kill_pid_tree_async
+    from ...utils._process_tree import kill_pid_tree_async
 
     for pid in pids:
         if is_pid_alive(pid):

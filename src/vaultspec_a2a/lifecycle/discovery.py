@@ -345,7 +345,7 @@ def is_pid_alive(pid: int | None) -> bool:
     contract: an ``OpenProcess`` exit-code query on Windows, and on POSIX a
     signal-0 probe that discounts an unreaped zombie.
     """
-    from ..utils.process import pid_is_live
+    from ..utils._process_tree import pid_is_live
 
     if pid is None:
         return False

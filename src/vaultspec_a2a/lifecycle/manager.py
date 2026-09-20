@@ -28,8 +28,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
-from ..control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
-from ..utils.process import detached_spawn_kwargs, kill_pid_tree_async
+from ..control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
+from ..utils._process_tree import detached_spawn_kwargs, kill_pid_tree_async
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
     NAME_ENV,
@@ -748,7 +748,7 @@ def _await_listener(
     fails safe: when the listening pid cannot be resolved it degrades to the bare
     bound-port signal rather than stalling a legitimate boot.
     """
-    from ..utils.process import ListenerOwnership, classify_listener_ownership
+    from ..utils._process_tree import ListenerOwnership, classify_listener_ownership
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

@@ -23,8 +23,8 @@ from ..thread.errors import ConfigError
 from ..thread.state import (
     TeamState,  # noqa: TC001 - LangGraph inspects route annotations
 )
+from ._compiler_retry import _NODE_RETRY_POLICY
 from .compiler import (
-    _NODE_RETRY_POLICY,
     _add_node,
     _agent_node_metadata,
     _compose_persona_prompt,

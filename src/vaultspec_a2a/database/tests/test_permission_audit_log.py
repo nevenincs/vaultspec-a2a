@@ -25,12 +25,9 @@ import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...control._permission_response_contract import PermissionInput, PermissionRuntime
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.permission_service import (
-    PermissionInput,
-    PermissionRuntime,
-    respond_to_permission,
-)
+from ...control.permission_service import respond_to_permission
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...control.tests.test_dispatch_failure_transitions import (
     _seed_accepted_initial_action,

@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 
 from ...authoring.discovery import SERVICE_JSON_ENV
-from ...control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
+from ...control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ...testing.ports import free_port
 from ..discovery import is_pid_alive
 from ..manager import (

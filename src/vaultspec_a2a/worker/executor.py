@@ -59,9 +59,6 @@ if TYPE_CHECKING:
 # ``GraphCompilationError`` is imported to be CAUGHT here, not re-published:
 # ``graph_lifecycle`` raises it and is where every handler imports it from.
 __all__ = [
-    "_INGEST_GUARDS",
-    "_RESUME_GUARDS",
-    "DispatchCapacityReservation",
     "Executor",
 ]
 

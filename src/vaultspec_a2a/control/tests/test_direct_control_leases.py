@@ -30,6 +30,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...control import cancel_service
+from ...control._permission_response_contract import (
+    PermissionInput,
+    PermissionRuntime,
+    permission_response_action_key,
+)
 from ...control.accepted_input import freeze_accepted_input
 from ...control.action_lease import prepare_control_action_claim
 from ...control.cancel_service import CancelResult, CancelRuntime, cancel_thread
@@ -39,12 +44,7 @@ from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
 from ...control.message_service import MessageResult, send_followup_message
-from ...control.permission_service import (
-    PermissionInput,
-    PermissionRuntime,
-    permission_response_action_key,
-    respond_to_permission,
-)
+from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_control_action,

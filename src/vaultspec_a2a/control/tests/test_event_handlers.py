@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
+from ...control._permission_response_contract import permission_response_action_key
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import (
@@ -27,7 +28,6 @@ from ...control.event_handlers import (
     _handle_progress_event,
     _handle_terminal_event,
 )
-from ...control.permission_service import permission_response_action_key
 from ...database import (
     ThreadStatusElectionOutcome,
     acquire_control_action_lease,

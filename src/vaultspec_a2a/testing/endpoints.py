@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from ..control.config import GATEWAY_URL_ENV, WORKER_URL_ENV
+from ..control.infra_config import GATEWAY_URL_ENV, WORKER_URL_ENV
 from ..lifecycle import (
     ProcsConfig,
     ProcsConfigError,

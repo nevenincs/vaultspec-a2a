@@ -26,12 +26,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...conftest import materialize_schema
+from ...control._permission_response_contract import PermissionInput, PermissionRuntime
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.permission_service import (
-    PermissionInput,
-    PermissionRuntime,
-    respond_to_permission,
-)
+from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_thread,

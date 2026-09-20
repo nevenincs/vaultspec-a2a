@@ -27,8 +27,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ...control._permission_response_contract import permission_response_action_key
 from ...control.config import settings
-from ...control.permission_service import permission_response_action_key
 from ...database import (
     append_permission_log,
     create_artifact,

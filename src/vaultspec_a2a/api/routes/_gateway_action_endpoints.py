@@ -18,6 +18,7 @@ from fastapi import (
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...control._permission_response_contract import PermissionInput, PermissionRuntime
 from ...control.clarification_service import (
     ClarificationRuntime,
     respond_to_clarification,
@@ -30,11 +31,7 @@ from ...control.health import (
     probe_engine_discovery_freshness,
 )
 from ...control.message_service import MessageResult, send_followup_message
-from ...control.permission_service import (
-    PermissionInput,
-    PermissionRuntime,
-    respond_to_permission,
-)
+from ...control.permission_service import respond_to_permission
 from ...control.run_start_policy import (
     required_role_ids,
 )

@@ -24,7 +24,7 @@ from ..testing.tests._support.catalog_selection import (
     in_process_selection,
 )
 from ..tests.gateway_boot import GatewayBootError
-from ..utils.process import detached_spawn_kwargs
+from ..utils._process_tree import detached_spawn_kwargs
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

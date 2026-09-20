@@ -52,7 +52,7 @@ from ..thread.errors import (
     ConfigError,
 )
 from ..thread.state import TeamState
-from ._compiler_retry import _NODE_RETRY_POLICY, _worker_retry_on
+from ._compiler_retry import _NODE_RETRY_POLICY
 from .enums import PipelinePhase, Provider
 from .nodes.action_completion import GRAPH_COMPLETION_NODE, record_graph_completion
 from .nodes.diverge import (
@@ -65,7 +65,6 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = [
-    "_NODE_RETRY_POLICY",
     "_ROLE_TO_PHASE",
     "CompiledTeamGraph",
     "_add_node",
@@ -78,7 +77,6 @@ __all__ = [
     "_resolve_supervisor_model",
     "_route_from_supervisor",
     "_wire_diverge_stage",
-    "_worker_retry_on",
     "compile_team_graph",
     "resolve_model_for_worker",
 ]

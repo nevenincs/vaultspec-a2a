@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from ._dispatch_contract import DispatchCapacityReservation
+
 from uuid import uuid4
 
 import anyio  # anyio: structured task groups for heartbeat + dispatch.
@@ -34,7 +36,8 @@ from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 
-from ..control.config import GATEWAY_URL_ALT_ENV, GATEWAY_URL_ENV, settings
+from ..control.config import settings
+from ..control.infra_config import GATEWAY_URL_ALT_ENV, GATEWAY_URL_ENV
 from ..control.worker_management import (
     GATEWAY_LIFETIME_ENV,
     WORKER_GENERATION_ENV,
@@ -55,7 +58,7 @@ from ..utils import (
 )
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from .dispatch_ids import DispatchIdAdmission
-from .executor import DispatchCapacityReservation, Executor
+from .executor import Executor
 from .ipc import WorkerBridge
 
 __all__ = ["WorkerApp", "create_worker_app", "main"]

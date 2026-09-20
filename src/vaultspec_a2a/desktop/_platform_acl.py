@@ -146,6 +146,42 @@ def restrict_windows_file(path: Path) -> None:
         kernel32.LocalFree(descriptor)
 
 
+def _restricted_dacl_principals(dacl: ctypes.c_void_p) -> set[str] | None:
+    """Read allowed principals, rejecting inherited or non-allow ACEs."""
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    information = _AclSizeInformation()
+    if not advapi32.GetAclInformation(
+        dacl,
+        ctypes.byref(information),
+        ctypes.sizeof(information),
+        2,  # AclSizeInformation
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    principals: set[str] = set()
+    for index in range(information.ace_count):
+        ace = ctypes.c_void_p()
+        if not advapi32.GetAce(dacl, index, ctypes.byref(ace)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        header = ctypes.cast(ace, ctypes.POINTER(_AceHeader)).contents
+        if header.ace_type != 0 or header.ace_flags & 0x10:
+            return None
+        ace_address = ace.value
+        if ace_address is None:
+            return None
+        sid = ctypes.c_void_p(ace_address + ctypes.sizeof(_AceHeader) + 4)
+        rendered = ctypes.c_wchar_p()
+        if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(rendered)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            if rendered.value is None:
+                return None
+            principals.add(rendered.value)
+        finally:
+            kernel32.LocalFree(rendered)
+    return principals
+
+
 def windows_file_is_restricted(path: Path) -> bool:
     """Return whether *path* has exactly the private publication DACL.
 
@@ -173,36 +209,7 @@ def windows_file_is_restricted(path: Path) -> bool:
     try:
         if not dacl.value:
             return False
-        information = _AclSizeInformation()
-        if not advapi32.GetAclInformation(
-            dacl,
-            ctypes.byref(information),
-            ctypes.sizeof(information),
-            2,  # AclSizeInformation
-        ):
-            raise ctypes.WinError(ctypes.get_last_error())
-        principals: set[str] = set()
-        for index in range(information.ace_count):
-            ace = ctypes.c_void_p()
-            if not advapi32.GetAce(dacl, index, ctypes.byref(ace)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            header = ctypes.cast(ace, ctypes.POINTER(_AceHeader)).contents
-            if header.ace_type != 0 or header.ace_flags & 0x10:
-                return False
-            ace_address = ace.value
-            if ace_address is None:
-                return False
-            sid = ctypes.c_void_p(ace_address + ctypes.sizeof(_AceHeader) + 4)
-            rendered = ctypes.c_wchar_p()
-            if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(rendered)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            try:
-                if rendered.value is None:
-                    return False
-                principals.add(rendered.value)
-            finally:
-                kernel32.LocalFree(rendered)
-        return principals == {
+        return _restricted_dacl_principals(dacl) == {
             windows_current_user_sid(),
             "S-1-5-18",
             "S-1-5-32-544",

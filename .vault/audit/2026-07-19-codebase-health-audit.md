@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:ea379cb2ae7af0667a8de0577b248d66bae981fdcec221b6cdd35318118430b3'
+body_hash: 'sha256:c1b6552ca7418a530af01e05272626cd1fa96f3a947de8359aa21fd46b8d97d4'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3700,3 +3700,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved response identity, verdict, rejection payload validation, and immutable transition records from `control/permission_service.py` into `control/_permission_response_contract.py`. The service now has 971 lines; the module-length gate decreased from 11 to 10 offenders.
 - Review: inspected imports and callers after extraction. The response helper and state definitions retain their original behavior; the service re-exports its existing public API. Severity/type: no new defect found in this pass. Existing high-volume strict shape, complexity, and Ruff findings remain open in this audit queue.
 - Verification: Ruff check and format, strict Ty, focused permission lease tests, and module-length gate. `just check-all` run for repository-wide validation.
+
+### 2026-09-20 Windows ACL complexity review
+
+- Implementation: extracted native ACE inspection into `_restricted_dacl_principals` in `desktop/_platform_acl.py`. The public check retains descriptor ownership and exact principal-set comparison.
+- Review: inspected allocation and release paths, invalid ACE handling, and return semantics. Severity/type: no new defect found. Windows-specific ACL behavior remains dependent on native Windows integration tests; this host ran the desktop profile tests successfully. Existing strict complexity findings remain open in this audit queue.
+- Verification: selected Ruff complexity and full Ruff checks for the file, Ruff format, strict Ty, 12 desktop profile tests, and the cyclomatic gate. Cyclomatic findings decreased from 34 to 33.

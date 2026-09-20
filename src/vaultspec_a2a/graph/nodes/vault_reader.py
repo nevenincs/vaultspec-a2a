@@ -170,6 +170,40 @@ async def _read_vault_doc(path: Path, cache: dict[str, tuple[float, str]]) -> st
     return content
 
 
+async def _mount_document_blocks(
+    vault_index: dict[str, list[str]],
+    phase: str | None,
+    workspace_root: Path,
+    cache: dict[str, tuple[float, str]],
+) -> tuple[list[str], int]:
+    """Read selected documents within the mount token budget."""
+    blocks: list[str] = []
+    tokens_used = 0
+    for path in _select_paths(vault_index, phase, workspace_root):
+        if not path.exists():
+            continue
+
+        content = await _read_vault_doc(path, cache)
+        rel_path = str(path.relative_to(workspace_root))
+        header = _DOC_SEPARATOR.format(path=rel_path)
+        block = f"{header}\n{content}\n{_DOC_FOOTER}"
+        block_tokens = count_tokens_approximately(block)
+
+        remaining = domain_config.mount_token_ceiling - tokens_used
+        if block_tokens <= remaining:
+            blocks.append(block)
+            tokens_used += block_tokens
+        elif remaining > domain_config.min_remaining_tokens_for_mount:
+            ratio = remaining / block_tokens
+            truncate_at = int(len(content) * ratio * 0.9)
+            truncated = content[:truncate_at]
+            blocks.append(f"{header}\n{truncated}\n[TRUNCATED]\n{_DOC_FOOTER}")
+            break
+        else:
+            break
+    return blocks, tokens_used
+
+
 def create_mount_node(
     workspace_root: Path | None,
     task_queue_port: TaskQueuePort | None = None,
@@ -213,35 +247,9 @@ def create_mount_node(
             {"vault_index": refreshed_index} if refreshed_index else {}
         )
 
-        blocks: list[str] = []
-        tokens_used = 0
-
-        for path in _select_paths(
-            mount_index, state.get("pipeline_phase"), workspace_root
-        ):
-            if not path.exists():
-                continue
-
-            content = await _read_vault_doc(path, cache)
-
-            rel_path = str(path.relative_to(workspace_root))
-            header = _DOC_SEPARATOR.format(path=rel_path)
-            block = f"{header}\n{content}\n{_DOC_FOOTER}"
-            block_tokens = count_tokens_approximately(block)
-
-            remaining = domain_config.mount_token_ceiling - tokens_used
-            if block_tokens <= remaining:
-                blocks.append(block)
-                tokens_used += block_tokens
-            elif remaining > domain_config.min_remaining_tokens_for_mount:
-                ratio = remaining / block_tokens
-                truncate_at = int(len(content) * ratio * 0.9)
-                truncated = content[:truncate_at]
-                block = f"{header}\n{truncated}\n[TRUNCATED]\n{_DOC_FOOTER}"
-                blocks.append(block)
-                break
-            else:
-                break
+        blocks, tokens_used = await _mount_document_blocks(
+            mount_index, state.get("pipeline_phase"), workspace_root, cache
+        )
 
         queue_block = await _render_queue_block(state, task_queue_port)
         if queue_block is not None:

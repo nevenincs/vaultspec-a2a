@@ -138,11 +138,13 @@ async def _expire_overdue_actions(
         if row.dispatch_id is None or row.recovery_deadline_at is None:
             continue
         stored = _StoredAction(
-            dispatch_id=row.dispatch_id,
+            identity=_StoredActionIdentity(
+                dispatch_id=row.dispatch_id,
+                request_id=row.request_id,
+                idempotency_key=row.idempotency_key,
+            ),
             thread_id=row.thread_id,
             action_type=row.action_type,
-            request_id=row.request_id,
-            idempotency_key=row.idempotency_key,
             payload=_decode_payload(row.payload_json) or {},
             worker_generation=row.worker_generation,
             recovery_deadline_at=row.recovery_deadline_at,
@@ -194,12 +196,17 @@ class _Refusal:
 
 
 @dataclass(frozen=True, slots=True)
-class _StoredAction:
+class _StoredActionIdentity:
     dispatch_id: str
-    thread_id: str
-    action_type: str
     request_id: str | None
     idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class _StoredAction:
+    identity: _StoredActionIdentity
+    thread_id: str
+    action_type: str
     payload: dict[str, object]
     worker_generation: int
     recovery_deadline_at: datetime
@@ -292,7 +299,7 @@ async def _settle_permanent_refusal(
         select(ControlActionModel)
         .where(
             ControlActionModel.thread_id == action.thread_id,
-            ControlActionModel.dispatch_id == action.dispatch_id,
+            ControlActionModel.dispatch_id == action.identity.dispatch_id,
         )
         .with_for_update()
         .execution_options(populate_existing=True)
@@ -308,7 +315,7 @@ async def _settle_permanent_refusal(
     action_type = ControlActionType(action.action_type)
     if (
         expectation.authority.action_type is not action_type
-        or expectation.authority.action_receipt_id != action.dispatch_id
+        or expectation.authority.action_receipt_id != action.identity.dispatch_id
     ):
         return False
     if deadline_observed_at is not None:
@@ -328,7 +335,7 @@ async def _settle_permanent_refusal(
             successor=successor_thread_write_authority(
                 expectation,
                 action_type=action_type,
-                action_receipt_id=action.dispatch_id,
+                action_receipt_id=action.identity.dispatch_id,
             ),
         )
         if election.outcome is not ThreadStatusElectionOutcome.WON:
@@ -432,11 +439,13 @@ async def _settle_missing_action(
         quarantined = await _settle_permanent_refusal(
             db,
             _StoredAction(
-                dispatch_id=recovery_claim.authority.action_receipt_id,
+                identity=_StoredActionIdentity(
+                    dispatch_id=recovery_claim.authority.action_receipt_id,
+                    request_id=row.request_id,
+                    idempotency_key=row.idempotency_key,
+                ),
                 thread_id=recovery_claim.thread_id,
                 action_type=recovery_claim.authority.action_type.value,
-                request_id=row.request_id,
-                idempotency_key=row.idempotency_key,
                 payload=payload or {},
                 worker_generation=row.worker_generation,
                 recovery_deadline_at=recovery_claim.deadline_at,
@@ -606,11 +615,13 @@ async def _prepare_recovery_action(
     payload: dict[str, object],
 ) -> _PreparedRecovery | _RecoveryOutcome:
     action = _StoredAction(
-        dispatch_id=recovery_claim.authority.action_receipt_id,
+        identity=_StoredActionIdentity(
+            dispatch_id=recovery_claim.authority.action_receipt_id,
+            request_id=row.request_id,
+            idempotency_key=row.idempotency_key,
+        ),
         thread_id=recovery_claim.thread_id,
         action_type=recovery_claim.authority.action_type.value,
-        request_id=row.request_id,
-        idempotency_key=row.idempotency_key,
         payload=payload,
         worker_generation=row.worker_generation,
         recovery_deadline_at=recovery_claim.deadline_at,
@@ -622,10 +633,10 @@ async def _prepare_recovery_action(
         request=ControlActionClaimRequest(
             thread_id=action.thread_id,
             action_type=action.action_type,
-            request_id=action.request_id,
-            idempotency_key=action.idempotency_key,
+            request_id=action.identity.request_id,
+            idempotency_key=action.identity.idempotency_key,
             payload=action.payload,
-            dispatch_id=action.dispatch_id,
+            dispatch_id=action.identity.dispatch_id,
             worker_generation=action.worker_generation,
             recovery_deadline_at=action.recovery_deadline_at,
             now=claim_started,

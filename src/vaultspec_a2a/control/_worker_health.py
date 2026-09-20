@@ -59,6 +59,14 @@ _JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
 @dataclass
+class _RestartOutcome:
+    started_at: str | None = None
+    completed_at: str | None = None
+    succeeded: bool | None = None
+    attempts: int = 0
+
+
+@dataclass
 class WorkerState:
     """Mutable container for worker lifecycle metadata.
 
@@ -74,11 +82,40 @@ class WorkerState:
     worker_restart_count: int = 0
     worker_last_restart_reason: str | None = None
     worker_last_restart_detail: str | None = None
-    worker_last_restart_started_at: str | None = None
-    worker_last_restart_completed_at: str | None = None
-    worker_last_restart_succeeded: bool | None = None
-    worker_last_restart_attempts: int = 0
     worker_stderr_log_path: str | None = None
+    _restart_outcome: _RestartOutcome = field(default_factory=_RestartOutcome)
+
+    @property
+    def worker_last_restart_started_at(self) -> str | None:
+        return self._restart_outcome.started_at
+
+    @worker_last_restart_started_at.setter
+    def worker_last_restart_started_at(self, value: str | None) -> None:
+        self._restart_outcome.started_at = value
+
+    @property
+    def worker_last_restart_completed_at(self) -> str | None:
+        return self._restart_outcome.completed_at
+
+    @worker_last_restart_completed_at.setter
+    def worker_last_restart_completed_at(self, value: str | None) -> None:
+        self._restart_outcome.completed_at = value
+
+    @property
+    def worker_last_restart_succeeded(self) -> bool | None:
+        return self._restart_outcome.succeeded
+
+    @worker_last_restart_succeeded.setter
+    def worker_last_restart_succeeded(self, value: bool | None) -> None:
+        self._restart_outcome.succeeded = value
+
+    @property
+    def worker_last_restart_attempts(self) -> int:
+        return self._restart_outcome.attempts
+
+    @worker_last_restart_attempts.setter
+    def worker_last_restart_attempts(self, value: int) -> None:
+        self._restart_outcome.attempts = value
 
 
 @dataclass

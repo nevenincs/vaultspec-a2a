@@ -11,7 +11,7 @@ import asyncio
 import logging
 from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast, override
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, override
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -120,14 +120,20 @@ class RegisteredCompiledGraph(StreamableGraph, Protocol):
     ) -> object: ...
 
 
+class _AuthoringAttachOptional(TypedDict, total=False):
+    frozen_assignment: dict[str, dict[str, Any]] | None
+
+
+class _AuthoringAttachArgs(_AuthoringAttachOptional):
+    harness: Any
+    provider_factory: Any
+
+
 def assert_armed_authoring_attachable(
     team_config: Any,
     agent_configs: dict[str, AgentConfig],
     ws_root: Path | None,
-    *,
-    harness: Any,
-    provider_factory: Any,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
+    **kwargs: Unpack[_AuthoringAttachArgs],
 ) -> None:
     """Refuse an authoring-bridge-armed preset a worker cannot mount the bridge onto.
 
@@ -155,6 +161,9 @@ def assert_armed_authoring_attachable(
     remains unguarded here is a lane whose model exposes neither delivery
     surface, and that stays a silent no-op by design rather than by omission.
     """
+    harness = kwargs["harness"]
+    provider_factory = kwargs["provider_factory"]
+    frozen_assignment = kwargs.get("frozen_assignment")
     if harness is None or not harness.authoring_bridge:
         return
     unsupported: list[str] = []

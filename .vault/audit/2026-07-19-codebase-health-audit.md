@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:15f2af455e2df4d189daad4ac6600b6457a1be086aa77680837fe8089903ffab'
+body_hash: 'sha256:305fd7d8a5d8067cc2d4a63914a20c1b199c6cabb54be1747f11b85f44f71d62'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4058,3 +4058,21 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: grouped the worker IPC event buffer and deferred flush task into one batch-state object, closing one Pylint instance-attribute finding.
 - Review finding, medium severity, internal compatibility: worker and API tests inspect or replace the private `_flush_task` and read `_event_buffer`. The first test run caught the removed attributes. Read/write compatibility properties now forward to the batch state; the full 24 worker IPC tests and two relevant API tests pass.
 - Verification: scoped Ruff and Pylint pass. The other strict findings remain open.
+
+### 2026-09-20 stored recovery identity review
+
+- Implementation: grouped a recovered action's dispatch, request, and idempotency identifiers into one immutable identity object, closing one Pylint instance-attribute finding.
+- Review finding, low severity, internal shape: the stored action is private to the recovery module; all three materialization paths and downstream reads were updated together. No external import or serialization contract uses the private shape.
+- Verification: 16 direct recovery, accepted-input, and authority tests passed; scoped Ruff, Pylint, and basedpyright passed. Remaining design findings stay open.
+
+### 2026-09-20 attachability parameter review
+
+- Implementation: grouped the attachability gate's named harness, factory, and optional assignment fields into a typed keyword contract, closing one more parameter-count finding.
+- Review finding, low severity, signature introspection: the call site remains keyword based, and the required-key contract is explicit in the TypedDict. Runtime inspection now sees `**kwargs`; no consumer of that private helper inspects the signature.
+- Verification: three attachability gate tests, scoped Ruff, and basedpyright passed. Remaining parameter findings stay open.
+
+### 2026-09-20 worker restart outcome review
+
+- Implementation: grouped the four watchdog restart outcome values into one nested state record while preserving the flat read/write properties consumed by the watchdog and health response. This closes one Pylint instance-attribute finding.
+- Review finding, medium severity, constructor shape: `WorkerState` is internal gateway state but its dataclass constructor no longer accepts the four grouped restart outcome fields. Current construction sites use defaults and the flat writable properties; no current caller passes those fields at construction. Keep this shape change recorded for any future constructor consumer.
+- Verification: 11 focused watchdog and health tests passed; scoped Ruff, Pylint, and basedpyright passed. Remaining design findings stay open.

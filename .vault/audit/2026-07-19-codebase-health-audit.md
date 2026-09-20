@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:305fd7d8a5d8067cc2d4a63914a20c1b199c6cabb54be1747f11b85f44f71d62'
+body_hash: 'sha256:6d1eb3394b421f9ec25ef849f82e28f90cb6913f3a57aa5c8a910bbee40794dc'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4076,3 +4076,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: grouped the four watchdog restart outcome values into one nested state record while preserving the flat read/write properties consumed by the watchdog and health response. This closes one Pylint instance-attribute finding.
 - Review finding, medium severity, constructor shape: `WorkerState` is internal gateway state but its dataclass constructor no longer accepts the four grouped restart outcome fields. Current construction sites use defaults and the flat writable properties; no current caller passes those fields at construction. Keep this shape change recorded for any future constructor consumer.
 - Verification: 11 focused watchdog and health tests passed; scoped Ruff, Pylint, and basedpyright passed. Remaining design findings stay open.
+
+### 2026-09-20 permission request parameter review
+
+- Implementation: grouped required permission-request fields and optional tool/generation fields in a typed keyword contract. The repository function still receives the same named keywords and applies the same defaults, closing one parameter-count finding.
+- Review finding, low severity, signature introspection: the runtime signature now presents `**kwargs`; current callers pass named fields and the TypedDict retains required/optional checks. No caller in the repository inspects this function signature.
+- Verification: six permission-related repository tests and five permission-audit tests passed; scoped Ruff and basedpyright passed. Remaining parameter findings stay open.

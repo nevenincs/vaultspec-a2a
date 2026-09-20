@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from sqlalchemy import delete, func, or_, select, update
@@ -105,18 +105,31 @@ def _payload_matches(stored: str | None, expected: dict[str, object] | None) -> 
         return False
 
 
+class _PermissionRequestOptional(TypedDict, total=False):
+    tool_call: str | None
+    worker_generation: int
+
+
+class _PermissionRequestArgs(_PermissionRequestOptional):
+    request_id: str
+    thread_id: str
+    pause_reason_type: str
+    description: str
+    allowed_options: list[dict[str, object]]
+
+
 async def record_permission_request(
     session: AsyncSession,
-    *,
-    request_id: str,
-    thread_id: str,
-    pause_reason_type: str,
-    description: str,
-    allowed_options: list[dict[str, object]],
-    tool_call: str | None = None,
-    worker_generation: int = 0,
+    **kwargs: Unpack[_PermissionRequestArgs],
 ) -> PermissionRequestModel:
     """Create or refresh a durable permission request."""
+    request_id = kwargs["request_id"]
+    thread_id = kwargs["thread_id"]
+    pause_reason_type = kwargs["pause_reason_type"]
+    description = kwargs["description"]
+    allowed_options = kwargs["allowed_options"]
+    tool_call = kwargs.get("tool_call")
+    worker_generation = kwargs.get("worker_generation", 0)
     existing = await session.get(PermissionRequestModel, request_id)
     allowed_options_json = json.dumps(allowed_options)
     if existing is not None:

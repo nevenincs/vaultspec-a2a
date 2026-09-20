@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:a0e52c692343364c9ed4808af7e9e599866cfcebc2610a061b73106f21734c1d'
+body_hash: 'sha256:0362e562f1c3d109989a813a69cec3f6e23a49941307ccc437fb2944dc6e51eb'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3982,3 +3982,8 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Medium / maintainability: `AuthoringClient.__init__` exceeded five parameters. A typed keyword-options shape retains `timeout` and `bearer_resolver` call compatibility while clearing the Ruff parameter gate. Review checked default values, injected-client behavior, resolver behavior, and unknown-key errors; 32 focused client tests and a compatibility smoke check pass. Ruff, formatter, and Ty on authoring pass.
 - Low / introspection: `timeout` and `bearer_resolver` now appear under a typed `**options` parameter at runtime. This signature visibility change is recorded for API documentation and introspection callers; no repo usage depends on runtime signature enumeration.
 - Remaining queue: other parameter-count findings remain open.
+
+### 2026-09-20 Codex turn stream complexity review
+
+- Medium / maintainability: `CodexChatModel._consume_turn` scored 18 cognitive complexity. Extracted foreign-thread filtering and control-notification dispatch into small methods; item streaming, deferred error handling, usage, and turn completion remain in their original order. Review found no changed frame handling. Strict Ty, Ruff, and 48 focused Codex model/idle-timeout tests pass; the function now passes complexity.
+- Remaining queue: four cognitive-complexity offenders remain (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`, `_await_pytest_exit`).

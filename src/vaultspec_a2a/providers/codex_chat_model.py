@@ -718,6 +718,38 @@ class CodexChatModel(BaseChatModel):
             )
         return None
 
+    @staticmethod
+    def _foreign_turn_notification(
+        method: object, params: JsonObject, thread_id: str
+    ) -> bool:
+        return method != "error" and params.get("threadId") not in (None, thread_id)
+
+    @classmethod
+    def _turn_control_notification(
+        cls,
+        method: object,
+        params: JsonObject,
+        active_turn: _ActiveCodexTurn | None,
+        state: _TurnStreamState,
+    ) -> tuple[bool, ChatGenerationChunk | None]:
+        if method == "error":
+            cls._record_turn_error(params, state)
+        elif method == "thread/tokenUsage/updated":
+            state.usage = _usage_metadata(
+                _required_object_field(
+                    _required_object_field(
+                        params,
+                        "tokenUsage",
+                        context="thread/tokenUsage/updated notification",
+                    ),
+                    "total",
+                    context="thread/tokenUsage/updated tokenUsage",
+                )
+            )
+        elif method == "turn/completed":
+            return True, cls._complete_turn(params, active_turn, state)
+        return False, None
+
     async def _consume_turn(
         self,
         client: _CodexAppServerClient,
@@ -749,10 +781,7 @@ class CodexChatModel(BaseChatModel):
             raw_params = message.get("params")
             params = lenient_json_object(raw_params)
 
-            if method != "error" and params.get("threadId") not in (
-                None,
-                thread_id,
-            ):
+            if self._foreign_turn_notification(method, params, thread_id):
                 continue
             if method in (
                 "item/agentMessage/delta",
@@ -762,24 +791,10 @@ class CodexChatModel(BaseChatModel):
                 for chunk in self._turn_item_chunks(method, params, state):
                     yield chunk
                 continue
-            if method == "error":
-                self._record_turn_error(params, state)
-                continue
-            if method == "thread/tokenUsage/updated":
-                state.usage = _usage_metadata(
-                    _required_object_field(
-                        _required_object_field(
-                            params,
-                            "tokenUsage",
-                            context="thread/tokenUsage/updated notification",
-                        ),
-                        "total",
-                        context="thread/tokenUsage/updated tokenUsage",
-                    )
-                )
-                continue
-            if method == "turn/completed":
-                final_chunk = self._complete_turn(params, active_turn, state)
-                if final_chunk is not None:
-                    yield final_chunk
+            completed, final_chunk = self._turn_control_notification(
+                method, params, active_turn, state
+            )
+            if final_chunk is not None:
+                yield final_chunk
+            if completed:
                 return

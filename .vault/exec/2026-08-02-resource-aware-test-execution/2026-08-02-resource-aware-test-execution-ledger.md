@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#resource-aware-test-execution'
 date: '2026-08-02'
-modified: '2026-09-03'
+modified: '2026-09-20'
 body_schema: 'body-v2'
-body_hash: 'sha256:0c357015a0387084eeb4b12e60b3ca2008fb327662343a22461efa09288f3a16'
+body_hash: 'sha256:13c70cab80b4f12e39311968b807ca082f059ee9a815cbbb3814f7bd437b296b'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -35,3 +35,9 @@ related:
 - `S19` `T` `src/vaultspec_a2a/testing/`
 - `S20` `T` `src/vaultspec_a2a/testing/tests/`
 - `S21` `T` `dev/toolchain.py`
+- `S22` `M` `src/vaultspec_a2a/control/action_lease.py`
+- `S22` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S22` `M` `src/vaultspec_a2a/control/tests/test_dispatch_receipts.py`
+- `S22` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S22` `verify:` `ruff, ty, basedpyright` -> `pass`
+- `S22` `by:` `vaultspec-high-executor`

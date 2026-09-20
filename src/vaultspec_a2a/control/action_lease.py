@@ -190,7 +190,7 @@ async def prepare_control_action_claim(
             db,
             thread_id=request.thread_id,
             dispatch_id=dispatch_id,
-            install_from=request.write_expectation if reservation.created else None,
+            install_from=request.write_expectation,
         )
         if receipt is None:
             acquired = False

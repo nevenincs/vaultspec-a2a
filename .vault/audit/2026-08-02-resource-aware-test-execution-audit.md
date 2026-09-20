@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#resource-aware-test-execution'
 date: '2026-08-02'
-modified: '2026-09-19'
+modified: '2026-09-20'
 body_schema: 'body-v1'
-body_hash: 'sha256:7c4ba647a7e9bb2b7c1f75801c21505f463643d35a2c942fbd9bbaf266418cac'
+body_hash: 'sha256:96022452b33dea443b9daf91e585bc56ca2c15406dcb4350d3599cffdf6f5730'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -457,6 +457,29 @@ lease race failing. WAL and CLI failed-start tests were absent from its fifty
 slowest cases. The two Windows unclosed-transport warnings remain open cleanup
 evidence rather than a regression from this pass.
 
+### permission-response-visible-action-claim-race | high | resolved
+
+Type: product concurrency. Two identical permission responses could both clear
+deduplication before either action existed. After one inserted the durable action,
+the other could acquire that visible row before the creator installed its writer
+receipt. Shared claim preparation withheld the retry's valid pre-action witness
+because it had not inserted the row, converted the receipt CAS into an authority
+failure, and returned no action identity. Direct claimants now always offer their
+captured write witness; the CAS still prevents a stale caller from replacing a
+newer writer, while recovery continues to carry no witness. Fresh or applied
+permission actions also replay at deduplication without re-entering transition
+logic. The prior failure reproduced on iterations 13 and 15; after correction the
+concurrent proof passed twenty consecutive runs, and a deterministic visible-row
+ordering test plus the twelve-test lease/receipt bundle pass. Status: resolved.
+
+### s22-permission-lease-review-2026-09-20 | low | PASS
+
+Review result: PASS. The repair follows the accepted lease contract: durable
+identity wins, direct retries may install only through the same conditional writer
+witness, and recovery cannot promote an old action. Competing payloads still
+conflict, stale witnesses still lose, and only one network dispatch occurs. Ruff,
+ty, BasedPyright, focused concurrency stress, and the lease/receipt bundle pass.
+No new finding remains from S22.
 ## Recommendations
 
 - Migrate the outlying live suites (CLI live tests, authoring discovery retry

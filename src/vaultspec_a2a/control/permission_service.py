@@ -298,6 +298,22 @@ async def _deduplicate_permission_response(
                 error_status_code=409,
                 failure_type=FailureType.CONFLICT,
             )
+        claim_is_fresh = (
+            winning_action.claim_token is not None
+            and winning_action.claim_expires_at is not None
+            and winning_action.claim_expires_at > datetime.now(UTC)
+        )
+        if winning_action.applied_at is not None or claim_is_fresh:
+            return PermissionResult(
+                request_id=request_id,
+                thread_id=thread_id,
+                accepted=True,
+                applied=winning_action.applied_at is not None,
+                action_status=winning_action.result_status,
+                action_id=winning_action.id,
+                idempotency_key=resolved_idempotency_key,
+                approval_status=thread_record.approval_status,
+            )
         return _AuthorizedPermission(
             permission=permission,
             thread_record=thread_record,

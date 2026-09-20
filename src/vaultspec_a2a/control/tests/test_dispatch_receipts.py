@@ -196,6 +196,64 @@ async def test_retry_preserves_original_receipt_after_state_revision(
 
 
 @pytest.mark.asyncio
+async def test_identical_direct_replayer_can_install_visible_unowned_action(
+    sessions: async_sessionmaker[AsyncSession], tmp_path: Path
+):
+    witness = await _seed(sessions)
+    dispatch = DispatchRequest(
+        action="resume",
+        thread_id="run",
+        option_id="yes",
+        recursion_limit=25,
+        team_preset="mock-success-single",
+        graph_definition=freeze_graph_definition(
+            load_team_config("mock-success-single", workspace_root=tmp_path),
+            workspace_root=tmp_path,
+        ),
+    )
+    payload = freeze_accepted_input(dispatch, intent={"option_id": "yes"})
+    async with sessions() as db:
+        await create_control_action(
+            db,
+            thread_id="run",
+            action_type=ControlActionType.RESUME,
+            idempotency_key="resume-visible-before-claim",
+            dispatch_id="resume-visible-before-claim",
+            payload=payload,
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=1),
+        )
+        await db.commit()
+
+    async with sessions() as db:
+        claim = await prepare_control_action_claim(
+            db,
+            request=ControlActionClaimRequest(
+                thread_id="run",
+                action_type=ControlActionType.RESUME,
+                idempotency_key="resume-visible-before-claim",
+                payload=payload,
+                dispatch_id="different-retry-id-is-ignored",
+                write_expectation=witness,
+                recovery_timeout_seconds=60,
+            ),
+        )
+        assert not claim.created
+        assert claim.acquired
+        assert claim.authority_matches
+        assert claim.dispatch_id == "resume-visible-before-claim"
+        await finalize_control_action_acceptance(db, claim)
+
+    async with sessions() as db:
+        thread = await get_thread(db, "run")
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id="run", dispatch_id=claim.dispatch_id
+        )
+        assert thread is not None
+        assert thread.writer_action_receipt_id == claim.dispatch_id
+        assert action is not None and action.graph_receipt_json is not None
+
+
+@pytest.mark.asyncio
 async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
     sessions: async_sessionmaker[AsyncSession], tmp_path: Path
 ):

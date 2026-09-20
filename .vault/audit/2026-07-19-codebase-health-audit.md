@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:60e39837829ab48bb16683917e019e6107f34175e971dddc7981ffdef4792fbc'
+body_hash: 'sha256:87a974bf22b2b847b8d07f2c3bb0f636207c93f316f64e91c3dc662c9322e30f'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3422,3 +3422,7 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 ### 2026-09-20 graph compiler complexity and retry review pass
 
 Implementation: extracted the wrapped worker retry decision, topology validation, star worker context, plan approval route, and pipeline-loop duplicate scan from graph compilation. Review of the actual diff found no new behavior defect. The retry ordering, clarification rejection, and duplicate diagnostics remain intact. Verification: 67 graph compiler tests passed; strict Ty, routine checks, and `git diff --check` passed. The cyclomatic gate still reports 88 offenders (down from 91), and focused strict Ruff reports eight remaining compiler parameter-count findings (down from nine). These are open quality findings, severity medium, type maintainability; continue the existing codebase-health queue until all strict gates pass. No new functional issue was surfaced by this review.
+
+### 2026-09-20 ACP terminal creation complexity review pass
+
+Implementation: extracted terminal command allowlist and token checks, cwd containment, and environment override validation from `on_terminal_create` into focused helpers. Review of the actual diff found no new functional defect: validation order, sandbox refusal, audit logging, process cleanup, and JSON-RPC envelopes remain in the same order. The dict environment helper checks the same name and string-value contract. Verification: 63 focused tests passed (one service test deselected), routine checks passed, focused Ty and Basedpyright passed, and the cyclomatic gate fell from 88 to 87 offenders. Focused strict Ruff structure diagnostics for this module fell from three to zero. Remaining repository cyclomatic and strict structure findings are open, severity medium, type maintainability, in the existing codebase-health queue. No new behavioral issue was surfaced.

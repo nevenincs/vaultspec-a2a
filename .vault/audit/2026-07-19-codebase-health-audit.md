@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:9cb548aa7045319e7edbbb58755402ad7e761a1f2a8939e99795ae1bed128ff4'
+body_hash: 'sha256:e2edd521c9a2a6f18848f61af34b0019b3fd745266d8b2adf39913bcddc2b178'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3571,3 +3571,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: moved worker resource initialization, startup reconciliation, authoring subscriber creation, recovery tasks, and ordered gateway shutdown into focused helpers. Shutdown retains admission drain, task cancellation, discovery cleanup, worker/resource closing, and telemetry shutdown in the same order.
 - Review: inspected startup/teardown dependencies and the changed call boundaries. No new correctness findings surfaced (severity: none; type: implementation review). Live gateway, restart, app, and desktop tests: 45 passed. `just check-all`, `just check-type-strict`, and focused Pylint passed.
 - Queue: Ruff function-limit findings fell from 138 to 136, removing the lifespan C901 and PLR0915 findings. Code-health function-length findings fell from 4 to 3. Cyclomatic findings remain 49 and all other strict findings remain open (severity: moderate; type: code health).
+
+### 2026-09-20 filesystem authority complexity review pass
+
+- Implementation: split Windows and POSIX private-file creation and no-replace publication into platform helpers. Public entry points retain name validation, authority validation, and platform dispatch. Cyclomatic findings fell from 49 to 47; selected Ruff design findings fell from 136 to 134.
+- Review finding (moderate, cross-platform type correctness; fixed): moving Windows calls out of a platform branch initially exposed `ctypes.get_last_error` and `msvcrt` functions to Linux and Darwin type checking. Explicit platform guards in both Windows helpers restore narrowing; strict type and platform checks pass.
+- Review finding (moderate, code health; queued): 47 cyclomatic findings and 134 selected Ruff design findings remain after this pass. Continue import-following refactors until all strict gates pass. The highest cyclomatic findings now include provider ACP session setup (18), supervisor response evaluation (17), and worker graph compilation (17).
+- Verification: desktop filesystem authority tests (7 passed) and credential/discovery/singleton integration tests (7 passed) before the platform guard; `just check-all`, `just check-type-strict`, Ruff selected design scan, Radon cyclomatic gate, and `git diff --check` after the guard. The Radon gate remains red because 47 findings remain.

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:e482f6e5aa585871a7a07b4a1c12d40a99616368adb12a7ced4cc16428c7fff1'
+body_hash: 'sha256:fcd678442706e70af96d4c8bfee334f43dd74b31610766fc63984f9c863abcb5'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3406,3 +3406,9 @@ One medium-severity Pylint boolean-expression finding in durable staged-commit l
 - Implementation: extracted URL-origin validation, complete model-list shape checks, and timeout validation into focused helpers. The same fail-closed checks run in their previous order before model normalization or the HTTP request.
 - Review: inspected the diff; 26 catalog tests including real HTTP contract cases, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for this change; type: no contract drift found.
 - Queue: three prior radon offenders in `providers/openai_catalog.py` are closed. Repository-wide cyclomatic gate still has 97 offenders and other strict findings remain open.
+
+### 2026-09-20 checkpoint snapshot projection review pass
+
+- Implementation: extracted clarification question/options decoding, repeated checkpoint object coercion, and pending interrupt projection. Existing malformed-input handling, degraded reasons, and generated interrupt identifiers retain their order and values.
+- Review: inspected the diff; 108 snapshot/clarification tests, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for this change; type: no contract drift found.
+- Queue: three prior radon offenders and the C901 finding in `thread/snapshots.py` are closed. Five pre-existing Pylint instance-attribute findings in this module remain open. Repository-wide cyclomatic gate still has 94 offenders.

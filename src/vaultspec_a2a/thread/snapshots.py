@@ -206,6 +206,38 @@ def classify_permission_pause_reason(tool_call: str | None) -> str:
     return str(tool_call or "permission_request")
 
 
+def _clarification_options(raw_map: dict[str, object]) -> list[str]:
+    options: object = raw_map.get("options", [])
+    if not isinstance(options, list):
+        return []
+    return [
+        option for option in cast("list[object]", options) if isinstance(option, str)
+    ]
+
+
+def _clarification_question(raw: object) -> ClarificationQuestionData | None:
+    if not isinstance(raw, dict):
+        return None
+    raw_map = cast("dict[str, object]", raw)
+    qid = raw_map.get("id")
+    prompt = raw_map.get("prompt")
+    if not isinstance(qid, str) or not qid or not isinstance(prompt, str) or not prompt:
+        return None
+    kind_raw = raw_map.get("kind")
+    kind = (
+        kind_raw
+        if isinstance(kind_raw, str) and kind_raw in ("choice", "text")
+        else "text"
+    )
+    return ClarificationQuestionData(
+        id=qid,
+        prompt=prompt,
+        kind=kind,
+        required=bool(raw_map.get("required", False)),
+        options=_clarification_options(raw_map),
+    )
+
+
 def clarification_data_from_interrupt(
     interrupt: ProjectedInterrupt,
 ) -> ClarificationRequestData | None:
@@ -233,36 +265,9 @@ def clarification_data_from_interrupt(
         return None
     questions: list[ClarificationQuestionData] = []
     for raw in cast("list[object]", raw_questions):
-        if not isinstance(raw, dict):
-            continue
-        raw_map = cast("dict[str, object]", raw)
-        qid = raw_map.get("id")
-        prompt = raw_map.get("prompt")
-        if (
-            not isinstance(qid, str)
-            or not qid
-            or not isinstance(prompt, str)
-            or not prompt
-        ):
-            continue
-        kind_raw = raw_map.get("kind")
-        kind = (
-            kind_raw
-            if isinstance(kind_raw, str) and kind_raw in ("choice", "text")
-            else "text"
-        )
-        options: object = raw_map.get("options", [])
-        questions.append(
-            ClarificationQuestionData(
-                id=qid,
-                prompt=prompt,
-                kind=kind,
-                required=bool(raw_map.get("required", False)),
-                options=[o for o in cast("list[object]", options) if isinstance(o, str)]
-                if isinstance(options, list)
-                else [],
-            )
-        )
+        question = _clarification_question(raw)
+        if question is not None:
+            questions.append(question)
     if not questions:
         return None
     return ClarificationRequestData(
@@ -553,6 +558,10 @@ def _parse_checkpoint_created_at(value: object) -> datetime | None:
         return None
 
 
+def _object_dict(value: object) -> dict[str, object]:
+    return cast("dict[str, object]", value) if isinstance(value, dict) else {}
+
+
 def extract_checkpoint_fields(
     checkpoint_tuple: Any,
     *,
@@ -565,48 +574,17 @@ def extract_checkpoint_fields(
     that describe the checkpoint itself, not the pending work layered on it. The
     pending-write fold is a separate stage so the two concerns read apart.
     """
-    checkpoint_raw: object = checkpoint_tuple.checkpoint
-    checkpoint = (
-        cast("dict[str, object]", checkpoint_raw)
-        if isinstance(checkpoint_raw, dict)
-        else {}
-    )
-    metadata_raw: object = checkpoint_tuple.metadata
-    metadata = (
-        cast("dict[str, object]", metadata_raw)
-        if isinstance(metadata_raw, dict)
-        else {}
-    )
-    parent_config_raw: object = checkpoint_tuple.parent_config
-    parent_config = (
-        cast("dict[str, object]", parent_config_raw)
-        if isinstance(parent_config_raw, dict)
-        else {}
-    )
-    configurable_parent_raw: object = parent_config.get("configurable", {})
-    configurable_parent = (
-        cast("dict[str, object]", configurable_parent_raw)
-        if isinstance(configurable_parent_raw, dict)
-        else {}
-    )
-    config_raw: object = checkpoint_tuple.config
-    config = (
-        cast("dict[str, object]", config_raw) if isinstance(config_raw, dict) else {}
-    )
-    config_configurable_raw: object = config.get("configurable", {})
-    config_configurable = (
-        cast("dict[str, object]", config_configurable_raw)
-        if isinstance(config_configurable_raw, dict)
-        else {}
-    )
+    checkpoint = _object_dict(checkpoint_tuple.checkpoint)
+    metadata = _object_dict(checkpoint_tuple.metadata)
+    parent_config = _object_dict(checkpoint_tuple.parent_config)
+    configurable_parent = _object_dict(parent_config.get("configurable", {}))
+    config = _object_dict(checkpoint_tuple.config)
+    config_configurable = _object_dict(config.get("configurable", {}))
     checkpoint_id: object = checkpoint.get("id") or config_configurable.get(
         "checkpoint_id"
     )
-    channel_values_raw: object = checkpoint.get("channel_values", {})
-    channel_values = (
-        cast("dict[str, Any]", channel_values_raw)
-        if isinstance(channel_values_raw, dict)
-        else {}
+    channel_values = cast(
+        "dict[str, Any]", _object_dict(checkpoint.get("channel_values", {}))
     )
     parent_checkpoint_id_raw = configurable_parent.get("checkpoint_id")
     checkpoint_source_raw = metadata.get("source")
@@ -639,6 +617,38 @@ def extract_checkpoint_fields(
     if projection.checkpoint_id is not None:
         projection.config["configurable"]["checkpoint_id"] = projection.checkpoint_id
     return projection
+
+
+def _project_pending_interrupt(
+    projection: CheckpointProjection,
+    raw_interrupt: object,
+    *,
+    thread_id: str,
+    write_index: int,
+) -> None:
+    payload_raw: object = getattr(raw_interrupt, "value", raw_interrupt)
+    if not isinstance(payload_raw, dict):
+        if "interrupt_payload_unreadable" not in projection.degraded_reasons:
+            projection.degraded_reasons.append("interrupt_payload_unreadable")
+        return
+    payload = cast("dict[str, Any]", payload_raw)
+    interrupt_type = payload.get("type")
+    if not isinstance(interrupt_type, str):
+        if "interrupt_payload_untyped" not in projection.degraded_reasons:
+            projection.degraded_reasons.append("interrupt_payload_untyped")
+        return
+    interrupt_id = str(
+        payload.get("request_id")
+        or getattr(raw_interrupt, "id", None)
+        or f"{projection.checkpoint_id or thread_id}:interrupt:{write_index}"
+    )
+    projection.pending_interrupts.append(
+        ProjectedInterrupt(
+            interrupt_id=interrupt_id,
+            interrupt_type=interrupt_type,
+            payload=payload,
+        )
+    )
 
 
 def fold_pending_writes(
@@ -674,28 +684,8 @@ def fold_pending_writes(
             else [value]
         )
         for raw_interrupt in raw_interrupts:
-            payload_raw: object = getattr(raw_interrupt, "value", raw_interrupt)
-            if not isinstance(payload_raw, dict):
-                if "interrupt_payload_unreadable" not in projection.degraded_reasons:
-                    projection.degraded_reasons.append("interrupt_payload_unreadable")
-                continue
-            payload = cast("dict[str, Any]", payload_raw)
-            interrupt_type = payload.get("type")
-            if not isinstance(interrupt_type, str):
-                if "interrupt_payload_untyped" not in projection.degraded_reasons:
-                    projection.degraded_reasons.append("interrupt_payload_untyped")
-                continue
-            interrupt_id = str(
-                payload.get("request_id")
-                or getattr(raw_interrupt, "id", None)
-                or f"{projection.checkpoint_id or thread_id}:interrupt:{index}"
-            )
-            projection.pending_interrupts.append(
-                ProjectedInterrupt(
-                    interrupt_id=interrupt_id,
-                    interrupt_type=interrupt_type,
-                    payload=payload,
-                )
+            _project_pending_interrupt(
+                projection, raw_interrupt, thread_id=thread_id, write_index=index
             )
 
     if projection.pending_interrupts:

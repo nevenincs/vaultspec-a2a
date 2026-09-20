@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:64f1f92a6a67b2298298cfc0a51f434d888058eb6925f26c6839429682976bb9'
+body_hash: 'sha256:e3728f58643d3cef5213d75e7d6f4656266d507aec03102f228e051389a09590'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3528,3 +3528,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: isolated durable terminal replay frames from live SSE subscription and split versioned versus legacy authoring discovery parsing. Failure code/message fallback and record-shape precedence are preserved.
 - Review: inspected both diffs and replay/record branches. No new correctness findings surfaced (severity: none; type: implementation review). Stream tests: 11 passed; authoring discovery tests: 15 passed. `just check-all` and `just check-type-strict` passed.
 - Queue: cyclomatic complexity fell from 58 to 56 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.
+
+### 2026-09-20 context compaction and CLI selection review pass
+
+- Implementation: isolated pinned-message partitioning and recent-message budgeting, plus exact catalog-entry selection from the served lane. The original objective and latest-message preservation rules and explicit catalog choice remain unchanged.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Context and live CLI tests: 45 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 56 to 54 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.

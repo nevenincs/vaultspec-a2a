@@ -334,6 +334,30 @@ def run() -> None:
     """Start, inspect, and cancel runs via the run-* verbs."""
 
 
+def _selection_from_catalog_record(
+    record: dict[str, Any], provider_id: str, execution_mode: str, entry_id: str
+) -> dict[str, Any]:
+    catalog: dict[str, Any] = record.get("catalog") or {}
+    entries: list[dict[str, Any]] = catalog.get("models") or []
+    for entry in entries:
+        if entry.get("entry_id") == entry_id:
+            return {
+                "schema_version": 1,
+                "provider_id": provider_id,
+                "execution_mode": execution_mode,
+                "catalog_revision": cast(
+                    "dict[str, Any]", catalog.get("state") or {}
+                ).get("revision"),
+                "entry_id": entry_id,
+                "controls": {},
+            }
+    offered = ", ".join(str(e.get("entry_id")) for e in entries) or "(none)"
+    raise click.ClickException(
+        f"provider {provider_id!r} in mode {execution_mode!r} serves no entry "
+        f"{entry_id!r}. It currently offers: {offered}"
+    )
+
+
 def _resolve_catalog_selection(
     base: str,
     *,
@@ -371,24 +395,8 @@ def _resolve_catalog_selection(
             or record.get("execution_mode") != execution_mode
         ):
             continue
-        catalog: dict[str, Any] = record.get("catalog") or {}
-        entries: list[dict[str, Any]] = catalog.get("models") or []
-        for entry in entries:
-            if entry.get("entry_id") == entry_id:
-                return {
-                    "schema_version": 1,
-                    "provider_id": provider_id,
-                    "execution_mode": execution_mode,
-                    "catalog_revision": cast(
-                        "dict[str, Any]", catalog.get("state") or {}
-                    ).get("revision"),
-                    "entry_id": entry_id,
-                    "controls": {},
-                }
-        offered = ", ".join(str(e.get("entry_id")) for e in entries) or "(none)"
-        raise click.ClickException(
-            f"provider {provider_id!r} in mode {execution_mode!r} serves no entry "
-            f"{entry_id!r}. It currently offers: {offered}"
+        return _selection_from_catalog_record(
+            record, provider_id, execution_mode, entry_id
         )
     lanes = ", ".join(
         f"{r.get('provider_id')}/{r.get('execution_mode')}" for r in providers

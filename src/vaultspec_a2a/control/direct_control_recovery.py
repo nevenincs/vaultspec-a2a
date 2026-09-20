@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,12 +41,14 @@ from .accepted_input import (
 )
 from .action_lease import (
     CONTROL_ACTION_LEASE_TTL,
+    ControlActionClaim,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
 )
-from .dispatch import safe_dispatch
+from .dispatch import DispatchOutcome, safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .recovery import (
+    RecoveryAttemptClaim,
     acquire_due_recovery_attempts,
     record_recovery_deadline,
     release_recovery_attempt,
@@ -78,6 +81,29 @@ _RECOVERABLE_TYPES = frozenset(
 )
 _RECOVERY_PAGE_SIZE = 64
 _RECOVERY_CLAIM_TTL = timedelta(seconds=45)
+
+
+class _RecoveryOutcome(StrEnum):
+    DISPATCHED = "dispatched"
+    DEFERRED = "deferred"
+    CONFLICTED = "conflicted"
+    REFUSED = "refused"
+    APPLIED = "applied"
+
+
+@dataclass(frozen=True, slots=True)
+class _RecoveryRuntime:
+    worker_client: httpx.AsyncClient
+    circuit_breaker: WorkerCircuitBreaker
+    worker_spawner: LazyWorkerSpawner
+    trace_headers: dict[str, str] | None
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedRecovery:
+    action: _StoredAction
+    claim: ControlActionClaim
+    claim_started: datetime
 
 
 def _retry_delay(attempt_count: int) -> timedelta:
@@ -367,6 +393,319 @@ async def _settle_orphaned_refusal(
     return True
 
 
+async def _settle_action_refusal(
+    db: AsyncSession,
+    recovery_claim: RecoveryAttemptClaim,
+    action: _StoredAction,
+    refusal: _Refusal,
+    condition: RecoveryCondition,
+) -> _RecoveryOutcome:
+    if await _settle_permanent_refusal(db, action, refusal):
+        await settle_recovery_attempt(
+            db,
+            recovery_claim,
+            settled_at=datetime.now(UTC),
+            condition=condition,
+            detail=refusal.reason,
+        )
+        await db.commit()
+        return _RecoveryOutcome.REFUSED
+    await db.rollback()
+    return _RecoveryOutcome.CONFLICTED
+
+
+async def _settle_missing_action(
+    db: AsyncSession,
+    recovery_claim: RecoveryAttemptClaim,
+    row: ControlActionModel | None,
+    payload: dict[str, object] | None,
+) -> _RecoveryOutcome:
+    refusal = _Refusal(
+        FailureType.INCOMPATIBLE_STATE,
+        "accepted recovery input is absent or inconsistent",
+    )
+    if (
+        row is not None
+        and row.action_type == recovery_claim.authority.action_type.value
+    ):
+        quarantined = await _settle_permanent_refusal(
+            db,
+            _StoredAction(
+                dispatch_id=recovery_claim.authority.action_receipt_id,
+                thread_id=recovery_claim.thread_id,
+                action_type=recovery_claim.authority.action_type.value,
+                request_id=row.request_id,
+                idempotency_key=row.idempotency_key,
+                payload=payload or {},
+                worker_generation=row.worker_generation,
+                recovery_deadline_at=recovery_claim.deadline_at,
+            ),
+            refusal,
+        )
+    else:
+        quarantined = await _settle_orphaned_refusal(
+            db,
+            thread_id=recovery_claim.thread_id,
+            authority=recovery_claim.authority,
+            refusal=refusal,
+        )
+    if quarantined:
+        await settle_recovery_attempt(
+            db,
+            recovery_claim,
+            settled_at=datetime.now(UTC),
+            condition=RecoveryCondition.INCOMPATIBLE_STATE,
+            detail=refusal.reason,
+        )
+        await db.commit()
+        return _RecoveryOutcome.REFUSED
+    await db.rollback()
+    return _RecoveryOutcome.CONFLICTED
+
+
+async def _settle_delivery_failure(
+    db: AsyncSession,
+    recovery_claim: RecoveryAttemptClaim,
+    prepared: _PreparedRecovery,
+    outcome: DispatchOutcome,
+) -> _RecoveryOutcome:
+    action = prepared.action
+    claim = prepared.claim
+    _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
+    if failure_type is None:
+        raise RuntimeError("failed dispatch carries no failure type")
+    if failure_type is FailureType.INCOMPATIBLE_STATE:
+        refusal = _Refusal(
+            failure_type,
+            outcome.detail or "worker refused dispatch authority",
+        )
+        return await _settle_action_refusal(
+            db,
+            recovery_claim,
+            action,
+            refusal,
+            RecoveryCondition.INCOMPATIBLE_STATE,
+        )
+    if claim.claim_token is None:
+        raise RuntimeError("recovery dispatch lost its action claim")
+    if failure_type in {
+        FailureType.CIRCUIT_OPEN,
+        FailureType.AT_CAPACITY,
+        FailureType.REJECTED,
+    }:
+        await release_control_action_lease(
+            db,
+            claim.action_id,
+            claim_token=claim.claim_token,
+        )
+    failure_observed_at = datetime.now(UTC)
+    if failure_observed_at >= recovery_claim.deadline_at:
+        await release_recovery_attempt(
+            db, recovery_claim, released_at=failure_observed_at
+        )
+        await db.commit()
+        return _RecoveryOutcome.DEFERRED
+    retry_at = failure_observed_at + _retry_delay(recovery_claim.attempt_count)
+    retry_at = min(retry_at, recovery_claim.deadline_at)
+    await reschedule_recovery_attempt(
+        db,
+        recovery_claim,
+        condition=RecoveryCondition(failure_type.value),
+        observed_at=failure_observed_at,
+        next_eligible_at=retry_at,
+        detail=outcome.detail,
+    )
+    await db.commit()
+    return _RecoveryOutcome.DEFERRED
+
+
+async def _dispatch_prepared_claim(
+    db: AsyncSession,
+    recovery_claim: RecoveryAttemptClaim,
+    prepared: _PreparedRecovery,
+    runtime: _RecoveryRuntime,
+) -> _RecoveryOutcome:
+    action = prepared.action
+    claim = prepared.claim
+    claim_started = prepared.claim_started
+    dispatch = await _reconstruct_dispatch(
+        db,
+        action,
+        dispatch_id=claim.dispatch_id,
+    )
+    if isinstance(dispatch, _Refusal):
+        # Refusal aborts this prepared acceptance. The durable retry
+        # coordinator owns classification and later scheduling.
+        logger.warning(
+            "Direct control recovery refused %s on thread %s (%s): %s",
+            action.action_type,
+            action.thread_id,
+            dispatch.failure_type.value,
+            dispatch.reason,
+            extra={
+                "thread_id": action.thread_id,
+                "action": action.action_type,
+                "failure_type": dispatch.failure_type.value,
+            },
+        )
+        return await _settle_action_refusal(
+            db,
+            recovery_claim,
+            action,
+            dispatch,
+            RecoveryCondition(dispatch.failure_type.value),
+        )
+    owns_projection = await _restore_requested_state(
+        db,
+        action,
+        action_receipt_id=claim.dispatch_id,
+    )
+    if not owns_projection:
+        await settle_recovery_attempt(db, recovery_claim, settled_at=datetime.now(UTC))
+        await db.commit()
+        return _RecoveryOutcome.CONFLICTED
+    await finalize_control_action_acceptance(db, claim)
+    dispatch = await bind_graph_action_receipt(db, dispatch)
+    outcome = await safe_dispatch(
+        runtime.worker_client,
+        dispatch,
+        runtime.circuit_breaker,
+        runtime.worker_spawner,
+        bypass_circuit_breaker=(action.action_type == ControlActionType.CANCEL.value),
+        trace_headers=runtime.trace_headers,
+    )
+    if not outcome.success:
+        return await _settle_delivery_failure(db, recovery_claim, prepared, outcome)
+    delivered_at = datetime.now(UTC)
+    if delivered_at >= recovery_claim.deadline_at:
+        await release_recovery_attempt(db, recovery_claim, released_at=delivered_at)
+        await db.commit()
+        return _RecoveryOutcome.DISPATCHED
+    await reschedule_recovery_attempt(
+        db,
+        recovery_claim,
+        condition=RecoveryCondition.DISPATCH_PENDING,
+        observed_at=delivered_at,
+        next_eligible_at=min(
+            max(
+                delivered_at,
+                claim_started + CONTROL_ACTION_LEASE_TTL,
+            ),
+            recovery_claim.deadline_at,
+        ),
+        detail="worker accepted dispatch; application receipt pending",
+    )
+    await db.commit()
+    return _RecoveryOutcome.DISPATCHED
+
+
+async def _prepare_recovery_action(
+    db: AsyncSession,
+    recovery_claim: RecoveryAttemptClaim,
+    row: ControlActionModel,
+    payload: dict[str, object],
+) -> _PreparedRecovery | _RecoveryOutcome:
+    action = _StoredAction(
+        dispatch_id=recovery_claim.authority.action_receipt_id,
+        thread_id=recovery_claim.thread_id,
+        action_type=recovery_claim.authority.action_type.value,
+        request_id=row.request_id,
+        idempotency_key=row.idempotency_key,
+        payload=payload,
+        worker_generation=row.worker_generation,
+        recovery_deadline_at=recovery_claim.deadline_at,
+    )
+    action_claim_expires_at = row.claim_expires_at
+    claim_started = datetime.now(UTC)
+    claim = await prepare_control_action_claim(
+        db,
+        thread_id=action.thread_id,
+        action_type=action.action_type,
+        request_id=action.request_id,
+        idempotency_key=action.idempotency_key,
+        payload=action.payload,
+        dispatch_id=action.dispatch_id,
+        worker_generation=action.worker_generation,
+        recovery_deadline_at=action.recovery_deadline_at,
+        now=claim_started,
+    )
+    if not claim.authority_matches:
+        authority_checked_at = datetime.now(UTC)
+        if authority_checked_at >= recovery_claim.deadline_at:
+            await release_recovery_attempt(
+                db, recovery_claim, released_at=authority_checked_at
+            )
+            outcome = _RecoveryOutcome.DEFERRED
+        else:
+            await settle_recovery_attempt(
+                db, recovery_claim, settled_at=authority_checked_at
+            )
+            outcome = _RecoveryOutcome.CONFLICTED
+        await db.commit()
+        return outcome
+    if not claim.payload_matches:
+        refusal = _Refusal(
+            FailureType.INCOMPATIBLE_STATE,
+            "accepted recovery payload changed after acceptance",
+        )
+        return await _settle_action_refusal(
+            db,
+            recovery_claim,
+            action,
+            refusal,
+            RecoveryCondition.INCOMPATIBLE_STATE,
+        )
+    if not claim.acquired:
+        deferred_at = datetime.now(UTC)
+        if deferred_at >= recovery_claim.deadline_at:
+            await release_recovery_attempt(db, recovery_claim, released_at=deferred_at)
+        else:
+            await reschedule_recovery_attempt(
+                db,
+                recovery_claim,
+                condition=recovery_claim.condition,
+                observed_at=deferred_at,
+                next_eligible_at=min(
+                    max(deferred_at, action_claim_expires_at or deferred_at),
+                    recovery_claim.deadline_at,
+                ),
+                detail="accepted action lease remains owned",
+            )
+        await db.commit()
+        return _RecoveryOutcome.DEFERRED
+    return _PreparedRecovery(action, claim, claim_started)
+
+
+async def _redrive_one_claim(
+    session_factory: async_sessionmaker[AsyncSession],
+    recovery_claim: RecoveryAttemptClaim,
+    runtime: _RecoveryRuntime,
+) -> _RecoveryOutcome:
+    async with session_factory() as db:
+        row = await get_control_action_by_dispatch_id(
+            db,
+            thread_id=recovery_claim.thread_id,
+            dispatch_id=recovery_claim.authority.action_receipt_id,
+        )
+        payload = _decode_payload(row.payload_json) if row is not None else None
+        if (
+            row is None
+            or payload is None
+            or row.recovery_deadline_at != recovery_claim.deadline_at
+        ):
+            return await _settle_missing_action(db, recovery_claim, row, payload)
+        if row.applied_at is not None:
+            await settle_recovery_attempt(
+                db, recovery_claim, settled_at=datetime.now(UTC)
+            )
+            await db.commit()
+            return _RecoveryOutcome.APPLIED
+        prepared = await _prepare_recovery_action(db, recovery_claim, row, payload)
+        if isinstance(prepared, _RecoveryOutcome):
+            return prepared
+        return await _dispatch_prepared_claim(db, recovery_claim, prepared, runtime)
+
+
 async def redrive_direct_control_actions(
     session_factory: async_sessionmaker[AsyncSession],
     *,
@@ -393,298 +732,23 @@ async def redrive_direct_control_actions(
         )
         await db.commit()
 
-    dispatched = deferred = 0
-    refused = expired
-    conflicted = 0
+    runtime = _RecoveryRuntime(
+        worker_client=worker_client,
+        circuit_breaker=circuit_breaker,
+        worker_spawner=worker_spawner,
+        trace_headers=trace_headers,
+    )
+    outcomes: dict[_RecoveryOutcome, int] = {}
     for recovery_claim in recovery_claims:
-        async with session_factory() as db:
-            row = await get_control_action_by_dispatch_id(
-                db,
-                thread_id=recovery_claim.thread_id,
-                dispatch_id=recovery_claim.authority.action_receipt_id,
-            )
-            payload = _decode_payload(row.payload_json) if row is not None else None
-            if (
-                row is None
-                or payload is None
-                or row.recovery_deadline_at != recovery_claim.deadline_at
-            ):
-                refusal = _Refusal(
-                    FailureType.INCOMPATIBLE_STATE,
-                    "accepted recovery input is absent or inconsistent",
-                )
-                quarantined = (
-                    await _settle_permanent_refusal(
-                        db,
-                        _StoredAction(
-                            dispatch_id=recovery_claim.authority.action_receipt_id,
-                            thread_id=recovery_claim.thread_id,
-                            action_type=recovery_claim.authority.action_type.value,
-                            request_id=row.request_id,
-                            idempotency_key=row.idempotency_key,
-                            payload=payload or {},
-                            worker_generation=row.worker_generation,
-                            recovery_deadline_at=recovery_claim.deadline_at,
-                        ),
-                        refusal,
-                    )
-                    if (
-                        row is not None
-                        and row.action_type
-                        == recovery_claim.authority.action_type.value
-                    )
-                    else await _settle_orphaned_refusal(
-                        db,
-                        thread_id=recovery_claim.thread_id,
-                        authority=recovery_claim.authority,
-                        refusal=refusal,
-                    )
-                )
-                if quarantined:
-                    await settle_recovery_attempt(
-                        db,
-                        recovery_claim,
-                        settled_at=datetime.now(UTC),
-                        condition=RecoveryCondition.INCOMPATIBLE_STATE,
-                        detail=refusal.reason,
-                    )
-                    await db.commit()
-                    refused += 1
-                else:
-                    await db.rollback()
-                    conflicted += 1
-                continue
-            if row.applied_at is not None:
-                await settle_recovery_attempt(
-                    db, recovery_claim, settled_at=datetime.now(UTC)
-                )
-                await db.commit()
-                continue
-            action = _StoredAction(
-                dispatch_id=recovery_claim.authority.action_receipt_id,
-                thread_id=recovery_claim.thread_id,
-                action_type=recovery_claim.authority.action_type.value,
-                request_id=row.request_id,
-                idempotency_key=row.idempotency_key,
-                payload=payload,
-                worker_generation=row.worker_generation,
-                recovery_deadline_at=recovery_claim.deadline_at,
-            )
-            action_claim_expires_at = row.claim_expires_at
-            claim_started = datetime.now(UTC)
-            claim = await prepare_control_action_claim(
-                db,
-                thread_id=action.thread_id,
-                action_type=action.action_type,
-                request_id=action.request_id,
-                idempotency_key=action.idempotency_key,
-                payload=action.payload,
-                dispatch_id=action.dispatch_id,
-                worker_generation=action.worker_generation,
-                recovery_deadline_at=action.recovery_deadline_at,
-                now=claim_started,
-            )
-            if not claim.authority_matches:
-                authority_checked_at = datetime.now(UTC)
-                if authority_checked_at >= recovery_claim.deadline_at:
-                    await release_recovery_attempt(
-                        db, recovery_claim, released_at=authority_checked_at
-                    )
-                    deferred += 1
-                else:
-                    await settle_recovery_attempt(
-                        db, recovery_claim, settled_at=authority_checked_at
-                    )
-                    conflicted += 1
-                await db.commit()
-                continue
-            if not claim.payload_matches:
-                refusal = _Refusal(
-                    FailureType.INCOMPATIBLE_STATE,
-                    "accepted recovery payload changed after acceptance",
-                )
-                if await _settle_permanent_refusal(db, action, refusal):
-                    await settle_recovery_attempt(
-                        db,
-                        recovery_claim,
-                        settled_at=datetime.now(UTC),
-                        condition=RecoveryCondition.INCOMPATIBLE_STATE,
-                        detail=refusal.reason,
-                    )
-                    await db.commit()
-                    refused += 1
-                else:
-                    await db.rollback()
-                    conflicted += 1
-                continue
-            if not claim.acquired:
-                deferred_at = datetime.now(UTC)
-                if deferred_at >= recovery_claim.deadline_at:
-                    await release_recovery_attempt(
-                        db, recovery_claim, released_at=deferred_at
-                    )
-                else:
-                    await reschedule_recovery_attempt(
-                        db,
-                        recovery_claim,
-                        condition=recovery_claim.condition,
-                        observed_at=deferred_at,
-                        next_eligible_at=min(
-                            max(deferred_at, action_claim_expires_at or deferred_at),
-                            recovery_claim.deadline_at,
-                        ),
-                        detail="accepted action lease remains owned",
-                    )
-                await db.commit()
-                deferred += 1
-                continue
-            dispatch = await _reconstruct_dispatch(
-                db,
-                action,
-                dispatch_id=claim.dispatch_id,
-            )
-            if isinstance(dispatch, _Refusal):
-                # Refusal aborts this prepared acceptance. The durable retry
-                # coordinator owns classification and later scheduling.
-                logger.warning(
-                    "Direct control recovery refused %s on thread %s (%s): %s",
-                    action.action_type,
-                    action.thread_id,
-                    dispatch.failure_type.value,
-                    dispatch.reason,
-                    extra={
-                        "thread_id": action.thread_id,
-                        "action": action.action_type,
-                        "failure_type": dispatch.failure_type.value,
-                    },
-                )
-                if await _settle_permanent_refusal(db, action, dispatch):
-                    await settle_recovery_attempt(
-                        db,
-                        recovery_claim,
-                        settled_at=datetime.now(UTC),
-                        condition=RecoveryCondition(dispatch.failure_type.value),
-                        detail=dispatch.reason,
-                    )
-                    await db.commit()
-                    refused += 1
-                else:
-                    await db.rollback()
-                    conflicted += 1
-                continue
-            owns_projection = await _restore_requested_state(
-                db,
-                action,
-                action_receipt_id=claim.dispatch_id,
-            )
-            if not owns_projection:
-                await settle_recovery_attempt(
-                    db, recovery_claim, settled_at=datetime.now(UTC)
-                )
-                await db.commit()
-                conflicted += 1
-                continue
-            await finalize_control_action_acceptance(db, claim)
-            dispatch = await bind_graph_action_receipt(db, dispatch)
-            outcome = await safe_dispatch(
-                worker_client,
-                dispatch,
-                circuit_breaker,
-                worker_spawner,
-                bypass_circuit_breaker=(
-                    action.action_type == ControlActionType.CANCEL.value
-                ),
-                trace_headers=trace_headers,
-            )
-            if not outcome.success:
-                _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
-                if failure_type is None:
-                    raise RuntimeError("failed dispatch carries no failure type")
-                if failure_type is FailureType.INCOMPATIBLE_STATE:
-                    refusal = _Refusal(
-                        failure_type,
-                        outcome.detail or "worker refused dispatch authority",
-                    )
-                    if await _settle_permanent_refusal(db, action, refusal):
-                        await settle_recovery_attempt(
-                            db,
-                            recovery_claim,
-                            settled_at=datetime.now(UTC),
-                            condition=RecoveryCondition.INCOMPATIBLE_STATE,
-                            detail=refusal.reason,
-                        )
-                        await db.commit()
-                        refused += 1
-                    else:
-                        await db.rollback()
-                        conflicted += 1
-                    continue
-                if claim.claim_token is None:
-                    raise RuntimeError("recovery dispatch lost its action claim")
-                if failure_type in {
-                    FailureType.CIRCUIT_OPEN,
-                    FailureType.AT_CAPACITY,
-                    FailureType.REJECTED,
-                }:
-                    await release_control_action_lease(
-                        db,
-                        claim.action_id,
-                        claim_token=claim.claim_token,
-                    )
-                failure_observed_at = datetime.now(UTC)
-                if failure_observed_at >= recovery_claim.deadline_at:
-                    await release_recovery_attempt(
-                        db, recovery_claim, released_at=failure_observed_at
-                    )
-                    await db.commit()
-                    deferred += 1
-                    continue
-                retry_at = failure_observed_at + _retry_delay(
-                    recovery_claim.attempt_count
-                )
-                retry_at = min(retry_at, recovery_claim.deadline_at)
-                await reschedule_recovery_attempt(
-                    db,
-                    recovery_claim,
-                    condition=RecoveryCondition(failure_type.value),
-                    observed_at=failure_observed_at,
-                    next_eligible_at=retry_at,
-                    detail=outcome.detail,
-                )
-                await db.commit()
-                deferred += 1
-                continue
-            delivered_at = datetime.now(UTC)
-            if delivered_at >= recovery_claim.deadline_at:
-                await release_recovery_attempt(
-                    db, recovery_claim, released_at=delivered_at
-                )
-                await db.commit()
-                dispatched += 1
-                continue
-            await reschedule_recovery_attempt(
-                db,
-                recovery_claim,
-                condition=RecoveryCondition.DISPATCH_PENDING,
-                observed_at=delivered_at,
-                next_eligible_at=min(
-                    max(
-                        delivered_at,
-                        claim_started + CONTROL_ACTION_LEASE_TTL,
-                    ),
-                    recovery_claim.deadline_at,
-                ),
-                detail="worker accepted dispatch; application receipt pending",
-            )
-            await db.commit()
-            dispatched += 1
+        outcome = await _redrive_one_claim(session_factory, recovery_claim, runtime)
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
 
     summary = DirectControlRecoverySummary(
         examined=expired + len(recovery_claims),
-        dispatched=dispatched,
-        deferred=deferred,
-        conflicted=conflicted,
-        refused=refused,
+        dispatched=outcomes.get(_RecoveryOutcome.DISPATCHED, 0),
+        deferred=outcomes.get(_RecoveryOutcome.DEFERRED, 0),
+        conflicted=outcomes.get(_RecoveryOutcome.CONFLICTED, 0),
+        refused=expired + outcomes.get(_RecoveryOutcome.REFUSED, 0),
     )
     logger.info("Direct control recovery pass complete: %s", summary)
     return summary

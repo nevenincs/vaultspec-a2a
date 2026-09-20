@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:7e7b64cbbb59c2ae8c07e0886ed0c3adffaa854d50e3e96e5bd1a15b335f5799'
+body_hash: 'sha256:f41a900ea044b2657df7244c349900a2597f50079a8deea0bb2dc8a40745deba'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3268,3 +3268,7 @@ Three medium-severity strict Ruff complexity, branch, and statement findings and
 ### 2026-09-20 checkpoint evidence classification review pass
 
 Three medium-severity strict Ruff complexity, return, and branch findings and one cognitive-complexity finding in durable checkpoint evidence interpretation were resolved. Checkpoint schema, active action, completion receipt, and pending write classification now have focused functions. Review checked that unavailable and absent reads remain distinct, requested checkpoint ids are exact, malformed durable values and receipts remain incompatible, an older writer generation is reported as prior action only after incorporated evidence is verified, a valid completion still outranks pending writes, and error/interrupt channels retain their precedence and incorporation flag. Twenty-three focused recovery-authority and event-handler tests pass; `just check-all`, `just check-type-strict`, focused Ruff/Ty/basedpyright, module complexipy, and diff check pass. Repository strict Ruff structure falls from 207 to 204; radon findings from 135 to 134; code-health function-length findings from 13 to 12. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 direct-control recovery redrive review pass
+
+Three medium-severity strict Ruff complexity, branch, and statement findings and one cognitive-complexity finding in direct-control redrive were resolved. One due recovery claim now passes through focused missing-row quarantine, durable action claim, dispatch preparation, refusal settlement, delivery-failure settlement, and delivery-success functions; an outcome enum counts the same dispatched, deferred, conflicted, and refused cases while applied actions remain uncounted. Review checked that each early branch commits or rolls back before returning, an authority loss defers only after its deadline, payload mismatch and reconstruction refusal quarantine exact authority, definite non-delivery releases the action lease, ambiguous delivery retains it, and successful delivery schedules an application receipt without minting a new dispatch id. During extraction, a generated patch briefly left a literal plus and an invalid trace-header keyword; both were fixed before verification. Ten focused accepted-input and current-redrive tests pass; `just check-all`, `just check-type-strict`, focused Ruff/Ty/basedpyright, module complexipy, and diff check pass. Repository strict Ruff structure falls from 204 to 201; radon findings from 134 to 133; code-health function-length findings from 12 to 11. No unresolved new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

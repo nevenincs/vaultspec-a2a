@@ -16,7 +16,7 @@ map.  Four topology types are supported:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -219,17 +219,25 @@ _ROLE_TO_PHASE: dict[str, str] = {
 }
 
 
+class _ModelResolutionOptional(TypedDict, total=False):
+    frozen_assignment: dict[str, dict[str, Any]] | None
+
+
+class _ModelResolutionArgs(_ModelResolutionOptional):
+    provider_factory: ProviderFactoryProtocol
+
+
 def resolve_model_for_worker(
     worker_ref: Any,
     agent_config: Any,
     team_config: Any,
     workspace_root: Path | None = None,
-    *,
-    provider_factory: ProviderFactoryProtocol,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
+    **kwargs: Unpack[_ModelResolutionArgs],
 ) -> tuple[BaseChatModel, Provider, str]:
     """Construct a worker only from an exact catalog-frozen assignment."""
     del team_config
+    provider_factory = kwargs["provider_factory"]
+    frozen_assignment = kwargs.get("frozen_assignment")
     frozen = (frozen_assignment or {}).get(worker_ref.agent_id)
     if frozen is None or frozen.get("schema_version") != 1:
         raise ValueError(

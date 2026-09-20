@@ -150,7 +150,6 @@ class _Reservation:
     required_roles: tuple[str, ...]
     binding_digest: str
     expires_monotonic: float
-    expires_at_iso: str
     # The exact client-visible prepare body, kept separately because commit may
     # bind a server-normalized form (for example, advertised catalog defaults).
     release_digest: str | None = None
@@ -263,7 +262,6 @@ class AdmissionBroker:
                 required_roles=roles,
                 binding_digest=binding_digest,
                 expires_monotonic=now + self._ttl,
-                expires_at_iso=expires_at_iso,
                 release_digest=release_digest,
             )
         return PrepareOutcome(

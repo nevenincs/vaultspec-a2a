@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from sqlalchemy import exists, or_, select, update
@@ -75,18 +75,28 @@ def _validate_recovery_window(
         raise ValueError("action type is not recoverable")
 
 
+class _RecoveryFailureArgs(TypedDict):
+    thread_id: str
+    authority: RunWriteAuthority
+    condition: RecoveryCondition
+    observed_at: datetime
+    next_eligible_at: datetime
+    deadline_at: datetime
+    detail: str | None
+
+
 async def record_recovery_failure(
     session: AsyncSession,
-    *,
-    thread_id: str,
-    authority: RunWriteAuthority,
-    condition: RecoveryCondition,
-    observed_at: datetime,
-    next_eligible_at: datetime,
-    deadline_at: datetime,
-    detail: str | None,
+    **kwargs: Unpack[_RecoveryFailureArgs],
 ) -> RecoveryAttemptModel:
     """Create or advance the sole retry record for an exact run writer."""
+    thread_id = kwargs["thread_id"]
+    authority = kwargs["authority"]
+    condition = kwargs["condition"]
+    observed_at = kwargs["observed_at"]
+    next_eligible_at = kwargs["next_eligible_at"]
+    deadline_at = kwargs["deadline_at"]
+    detail = kwargs["detail"]
     _validate_recovery_window(
         observed_at, next_eligible_at, deadline_at, authority.action_type
     )
@@ -407,16 +417,23 @@ async def release_recovery_attempt(
     return result.rowcount == 1
 
 
+class _RescheduleArgs(TypedDict):
+    condition: RecoveryCondition
+    observed_at: datetime
+    next_eligible_at: datetime
+    detail: str | None
+
+
 async def reschedule_recovery_attempt(
     session: AsyncSession,
     claim: RecoveryAttemptClaim,
-    *,
-    condition: RecoveryCondition,
-    observed_at: datetime,
-    next_eligible_at: datetime,
-    detail: str | None,
+    **kwargs: Unpack[_RescheduleArgs],
 ) -> bool:
     """Advance one claimed retry after another classified failure."""
+    condition = kwargs["condition"]
+    observed_at = kwargs["observed_at"]
+    next_eligible_at = kwargs["next_eligible_at"]
+    detail = kwargs["detail"]
     if next_eligible_at < observed_at or next_eligible_at > claim.deadline_at:
         raise ValueError("next eligibility must fall between observation and deadline")
     result = cast(

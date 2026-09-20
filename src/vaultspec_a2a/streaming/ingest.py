@@ -9,7 +9,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from langgraph.types import Command
@@ -176,6 +176,12 @@ class IngestRequest:
     on_graph_started: Callable[[], Awaitable[None]] | None = None
 
 
+@dataclass(slots=True)
+class _FailureFacts:
+    reasons: dict[str, str] = field(default_factory=dict)
+    conditions: dict[str, ProviderCondition] = field(default_factory=dict)
+
+
 class IngestManager:
     """Graph consumption lifecycle: ingest, cancel, cleanup."""
 
@@ -202,14 +208,13 @@ class IngestManager:
         # after reading the outcome string, so it never outlives the run it
         # describes and never leaks across an unrelated later thread reusing
         # the same dict key.
-        self._failure_reasons: dict[str, str] = {}
+        self._failures = _FailureFacts()
         # The provider condition the most recent FAILED ingest resolved, held
         # on the same terms as the reason beside it and popped by the same
         # caller. It is kept as well as emitted because the error frame is
         # droppable and the durable column is not: a reloading client recovers
         # the condition only if the terminal write carried it, and the terminal
         # is written from what this dict hands back.
-        self._failure_conditions: dict[str, ProviderCondition] = {}
 
     # ------------------------------------------------------------------
     # Thread cancellation
@@ -241,8 +246,8 @@ class IngestManager:
         """Purge ingest-owned state scoped to ``thread_id``."""
         self._cancel_events.pop(thread_id, None)
         self._ingest_queues.pop(thread_id, None)
-        self._failure_reasons.pop(thread_id, None)
-        self._failure_conditions.pop(thread_id, None)
+        self._failures.reasons.pop(thread_id, None)
+        self._failures.conditions.pop(thread_id, None)
         task = self._fanout_tasks.pop(thread_id, None)
         if task is not None:
             task.cancel()
@@ -254,7 +259,7 @@ class IngestManager:
         consumed) â€” the caller's default, never-durably-record-anything
         behaviour is unchanged when there is nothing to report.
         """
-        return self._failure_reasons.pop(thread_id, None)
+        return self._failures.reasons.pop(thread_id, None)
 
     def take_failure_condition(self, thread_id: str) -> ProviderCondition | None:
         """Pop the provider condition ``thread_id``'s last FAILED ingest resolved.
@@ -264,7 +269,7 @@ class IngestManager:
         was already consumed. The caller supplies the floor in that case, so an
         absent value here never becomes an absent condition on a failed run.
         """
-        return self._failure_conditions.pop(thread_id, None)
+        return self._failures.conditions.pop(thread_id, None)
 
     # ------------------------------------------------------------------
     # LangGraph graph ingest (research Â§1.3)
@@ -387,7 +392,7 @@ class IngestManager:
             message=reason,
             recoverable=recoverable,
         )
-        self._failure_reasons[thread_id] = reason
+        self._failures.reasons[thread_id] = reason
         return ThreadStatus.FAILED
 
     async def _report_provider_failure(
@@ -396,7 +401,7 @@ class IngestManager:
         thread_id, agent_id = identity
         reason = summarize_ingest_exception(exc)
         condition = _resolve_provider_condition(exc)
-        self._failure_conditions[thread_id] = condition
+        self._failures.conditions[thread_id] = condition
         logger.exception("Error during graph ingest for thread %s", thread_id)
         span.set_attribute("error", True)
         span.set_attribute("error.provider_condition", condition.value)
@@ -407,7 +412,7 @@ class IngestManager:
             message=reason,
             recoverable=condition_is_retryable(condition),
         )
-        self._failure_reasons[thread_id] = reason
+        self._failures.reasons[thread_id] = reason
         return ThreadStatus.FAILED
 
     async def _report_graph_failure(

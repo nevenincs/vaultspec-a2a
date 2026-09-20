@@ -96,7 +96,6 @@ async def test_eligibility_failure_releases_an_omitted_default_prepare() -> None
         binding_digest=request_digest(canonical_commit, prepared=True),
         release_digest=_release_binding_digest(omitted_prepare),
         expires_monotonic=10.0,
-        expires_at_iso="bounded",
     )
     broker._reservations[reservation.reservation_id] = reservation
 

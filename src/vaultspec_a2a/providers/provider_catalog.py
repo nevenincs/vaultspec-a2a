@@ -496,6 +496,12 @@ class _StoredFailure:
 
 
 @dataclass(slots=True)
+class _CatalogSnapshots:
+    entries: dict[ProviderCatalogKey, _StoredCatalog]
+    failures: dict[ProviderCatalogKey, _StoredFailure]
+
+
+@dataclass(slots=True)
 class _LaneLock:
     lock: asyncio.Lock
     users: int = 0
@@ -541,8 +547,7 @@ class CatalogRefreshCache:
         self._ttl = ttl
         self._max_lanes = max_lanes
         self._failure_ttl = failure_ttl
-        self._entries: dict[ProviderCatalogKey, _StoredCatalog] = {}
-        self._failures: dict[ProviderCatalogKey, _StoredFailure] = {}
+        self._snapshots = _CatalogSnapshots(entries={}, failures={})
         self._locks: dict[ProviderCatalogKey, _LaneLock] = {}
         self._generations: dict[ProviderCatalogKey, int] = {}
         self._index_lock = asyncio.Lock()
@@ -556,15 +561,18 @@ class CatalogRefreshCache:
     async def _release_lock(self, key: ProviderCatalogKey, lane: _LaneLock) -> None:
         async with self._index_lock:
             lane.users -= 1
-            if lane.users == 0 and key not in self._entries:
+            if lane.users == 0 and key not in self._snapshots.entries:
                 self._locks.pop(key, None)
                 self._generations.pop(key, None)
 
     def _make_capacity(self, key: ProviderCatalogKey, now: float) -> None:
-        if key in self._entries or len(self._entries) < self._max_lanes:
+        if (
+            key in self._snapshots.entries
+            or len(self._snapshots.entries) < self._max_lanes
+        ):
             return
         candidates: list[tuple[float, ProviderCatalogKey]] = []
-        for lane_key, entry in self._entries.items():
+        for lane_key, entry in self._snapshots.entries.items():
             lane = self._locks.get(lane_key)
             if entry.deadline <= now and (lane is None or lane.users == 0):
                 candidates.append((entry.deadline, lane_key))
@@ -573,7 +581,7 @@ class CatalogRefreshCache:
                 "catalog cache capacity reached with no expired inactive lane"
             )
         _, evicted = min(candidates, key=lambda item: item[0])
-        self._entries.pop(evicted, None)
+        self._snapshots.entries.pop(evicted, None)
         self._locks.pop(evicted, None)
         self._generations.pop(evicted, None)
 
@@ -581,11 +589,11 @@ class CatalogRefreshCache:
         self, key: ProviderCatalogKey, now: float
     ) -> CatalogRefreshSuppressedError | None:
         """Return the error to raise for a lane still inside its failure TTL."""
-        failure = self._failures.get(key)
+        failure = self._snapshots.failures.get(key)
         if failure is None:
             return None
         if now >= failure.deadline:
-            del self._failures[key]
+            del self._snapshots.failures[key]
             return None
         return CatalogRefreshSuppressedError(
             failure.failure_type, failure.deadline - now
@@ -602,12 +610,19 @@ class CatalogRefreshCache:
         if ttl <= 0:
             return
         now = monotonic()
-        for expired in [k for k, v in self._failures.items() if now >= v.deadline]:
-            del self._failures[expired]
-        if key not in self._failures and len(self._failures) >= self._max_lanes:
-            oldest = min(self._failures.items(), key=lambda item: item[1].deadline)[0]
-            del self._failures[oldest]
-        self._failures[key] = _StoredFailure(
+        for expired in [
+            k for k, v in self._snapshots.failures.items() if now >= v.deadline
+        ]:
+            del self._snapshots.failures[expired]
+        if (
+            key not in self._snapshots.failures
+            and len(self._snapshots.failures) >= self._max_lanes
+        ):
+            oldest = min(
+                self._snapshots.failures.items(), key=lambda item: item[1].deadline
+            )[0]
+            del self._snapshots.failures[oldest]
+        self._snapshots.failures[key] = _StoredFailure(
             failure_type=failure_type, deadline=now + ttl
         )
 
@@ -625,7 +640,7 @@ class CatalogRefreshCache:
 
     def peek(self, key: ProviderCatalogKey) -> CatalogCacheSnapshot | None:
         """Return the snapshot, including stale data, without refreshing."""
-        entry = self._entries.get(key)
+        entry = self._snapshots.entries.get(key)
         return None if entry is None else self._snapshot(entry, monotonic())
 
     async def _load_catalog(
@@ -664,14 +679,14 @@ class CatalogRefreshCache:
                     "catalog lane was invalidated during refresh"
                 )
             self._make_capacity(key, monotonic())
-            self._entries[key] = stored
-            self._failures.pop(key, None)
+            self._snapshots.entries[key] = stored
+            self._snapshots.failures.pop(key, None)
         return self._snapshot(stored, monotonic())
 
     def _available_snapshot(
         self, key: ProviderCatalogKey, now: float
     ) -> CatalogCacheSnapshot | None:
-        current = self._entries.get(key)
+        current = self._snapshots.entries.get(key)
         if current is not None and now < current.deadline:
             return self._snapshot(current, now)
         suppressed = self._suppression(key, now)
@@ -688,7 +703,7 @@ class CatalogRefreshCache:
     ) -> CatalogCacheSnapshot:
         """Return a fresh snapshot, coalescing concurrent refreshes per lane."""
         now = monotonic()
-        current = self._entries.get(key)
+        current = self._snapshots.entries.get(key)
         observed = current
         # An explicit refresh is a caller asking to retry now, so it is never
         # suppressed; an ordinary read of a recently-failed lane is.
@@ -701,7 +716,7 @@ class CatalogRefreshCache:
         try:
             async with lane.lock:
                 now = monotonic()
-                current = self._entries.get(key)
+                current = self._snapshots.entries.get(key)
                 if force_refresh and current is not None and current is not observed:
                     return self._snapshot(current, now)
                 # Re-checked under the lane lock: the whole point of negative
@@ -724,13 +739,13 @@ class CatalogRefreshCache:
         Also drops any negative entry: invalidation is the explicit request to
         re-attempt a lane, which a retained failure record would silently refuse.
         """
-        self._failures.pop(key, None)
-        if key not in self._entries and key not in self._locks:
+        self._snapshots.failures.pop(key, None)
+        if key not in self._snapshots.entries and key not in self._locks:
             return
         self._generations[key] = self._generations.get(key, 0) + 1
-        current = self._entries.get(key)
+        current = self._snapshots.entries.get(key)
         if current is not None:
-            self._entries[key] = _StoredCatalog(
+            self._snapshots.entries[key] = _StoredCatalog(
                 catalog=current.catalog,
                 refreshed_at=current.refreshed_at,
                 expires_at=current.expires_at,

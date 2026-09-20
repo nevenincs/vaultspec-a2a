@@ -238,6 +238,12 @@ async def request_apply(
     )
 
 
+@dataclass(slots=True)
+class _ProducedIds:
+    changesets: list[str]
+    proposals: list[str]
+
+
 class AuthoringSession:
     """One authoring session bound to a single run.
 
@@ -278,8 +284,7 @@ class AuthoringSession:
         self._engine_run_id: str | None = None
         self._project_scope = project_scope or None
         # Produced Vaultspec ids, accumulated for thread-state cross-reference.
-        self._changeset_ids: list[str] = []
-        self._proposal_ids: list[str] = []
+        self._produced_ids = _ProducedIds(changesets=[], proposals=[])
 
     # ------------------------------------------------------------------
     # Identity and references
@@ -313,8 +318,8 @@ class AuthoringSession:
         """
         return {
             "authoring_session_id": self._session_id,
-            "authoring_changeset_ids": list(self._changeset_ids),
-            "authoring_proposal_ids": list(self._proposal_ids),
+            "authoring_changeset_ids": list(self._produced_ids.changesets),
+            "authoring_proposal_ids": list(self._produced_ids.proposals),
         }
 
     def _next_key(self, command: str) -> str:
@@ -347,8 +352,8 @@ class AuthoringSession:
         return derive_idempotency_key(self._run_id, command, str(self._seq - 1))
 
     def _record_changeset(self, changeset_id: str) -> None:
-        if changeset_id not in self._changeset_ids:
-            self._changeset_ids.append(changeset_id)
+        if changeset_id not in self._produced_ids.changesets:
+            self._produced_ids.changesets.append(changeset_id)
 
     def _bind_project(self, scope: str | None) -> str:
         """Settle the session's project from the binding and the call, or refuse.
@@ -572,8 +577,11 @@ class AuthoringSession:
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
             data = cast("dict[str, Any]", result.data)
             proposal_id = data.get("proposal_id")
-            if isinstance(proposal_id, str) and proposal_id not in self._proposal_ids:
-                self._proposal_ids.append(proposal_id)
+            if (
+                isinstance(proposal_id, str)
+                and proposal_id not in self._produced_ids.proposals
+            ):
+                self._produced_ids.proposals.append(proposal_id)
         return result
 
     async def rebase(

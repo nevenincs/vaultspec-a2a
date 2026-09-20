@@ -533,6 +533,21 @@ def _service_degraded_reasons(checks: dict[str, object]) -> list[str]:
     return reasons
 
 
+def _service_dependency_readiness(
+    checks: dict[str, object],
+) -> tuple[bool, bool, bool]:
+    return (
+        _service_check_ready(checks, "database"),
+        _service_check_ready(checks, "checkpoint"),
+        _service_check_ready(checks, "worker"),
+    )
+
+
+def _service_check_ready(checks: dict[str, object], name: str) -> bool:
+    check = coerce_object_mapping(checks.get(name)) or {}
+    return _string_field(check, "status") == "ok"
+
+
 @router.get("/service", response_model=ServiceStateResponse)
 async def service_state_endpoint(
     request: Request,
@@ -569,12 +584,9 @@ async def service_state_endpoint(
         include_pairing=True,
     )
     checks = coerce_object_mapping(full.get("checks")) or {}
-    database_check = coerce_object_mapping(checks.get("database")) or {}
-    checkpoint_check = coerce_object_mapping(checks.get("checkpoint")) or {}
-    worker_check = coerce_object_mapping(checks.get("worker")) or {}
-    database_ready = _string_field(database_check, "status") == "ok"
-    checkpoint_ready = _string_field(checkpoint_check, "status") == "ok"
-    worker_ready = _string_field(worker_check, "status") == "ok"
+    database_ready, checkpoint_ready, worker_ready = _service_dependency_readiness(
+        checks
+    )
     can_accept_run = full["status"] == "ok"
 
     if not database_ready:

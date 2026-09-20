@@ -79,8 +79,13 @@ class _ReceiverState:
         self.attempts: list[tuple[str | None, str]] = []  # (auth header, raw body)
         self.accepted: list[dict[str, Any]] = []
         self.revoked_leases: list[str] = []
-        self.rejected_auth: list[str | None] = []
         self._attempts_by_run: dict[str, int] = {}
+
+    @property
+    def rejected_auth(self) -> list[str | None]:
+        """Headers refused by the receiver, derived from the captured attempts."""
+        expected = f"Bearer {self.attach_secret}"
+        return [auth for auth, _raw in self.attempts if auth != expected]
 
 
 def _make_handler(state: _ReceiverState) -> type[BaseHTTPRequestHandler]:
@@ -100,7 +105,6 @@ def _make_handler(state: _ReceiverState) -> type[BaseHTTPRequestHandler]:
                 state.attempts.append((auth, raw))
                 # The dashboard authenticates settlement with attach-control only.
                 if auth != f"Bearer {state.attach_secret}":
-                    state.rejected_auth.append(auth)
                     self._respond(401)
                     return
                 body = json.loads(raw)

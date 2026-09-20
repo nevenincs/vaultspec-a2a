@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:7e0079fcba570ed3aa653967605ffbf0d329d54be8f5824394e894bf4bc2eddd'
+body_hash: 'sha256:15f2af455e2df4d189daad4ac6600b6457a1be086aa77680837fe8089903ffab'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4033,3 +4033,28 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted deletion-saga resume and Windows PID liveness helpers, consolidated the liveness log-filter fallback, and grouped agent-tool execution keyword fields in a TypedDict. Three PLR0911 return findings and one PLR0913 parameter finding are closed.
 - Review finding, low severity, compatibility: `execute_agent_tool` now accepts the same required keyword names through `Unpack[_AgentToolArgs]`; direct callers and dispatch tests pass. Runtime signature introspection now sees `**kwargs`, so any future signature consumer should use the explicit TypedDict contract.
 - Verification: 25 deletion tests, 53 process/logging tests, and 13 catalog/dispatch tests passed; strict Ty and scoped Ruff passed. Remaining strict findings stay open in this audit queue.
+
+### 2026-09-20 recovery and model-resolution parameter review
+
+- Implementation: grouped the required recovery failure, recovery reschedule, and model-resolution keyword fields into typed dictionaries while retaining their accepted keyword names and static types. Three parameter-count findings are closed.
+- Review finding, low severity, API introspection: these functions now expose `**kwargs` at runtime. All current call sites use the named keyword contract; the TypedDict classes mark required keys and optional model assignment correctly. If a future integration inspects signatures, it must use the declared contract rather than positional parameter reflection.
+- Verification: 74 combined recovery/graph tests and 113 compiler/provider tests passed; scoped Ruff and the module-length gate passed. Strict type check before concurrent test-file edits passed for the catalog pattern; the current shared-tree strict type run will be repeated after those edits settle.
+
+### 2026-09-20 state-shape and readiness review
+
+- Implementation: removed the unused reservation ISO expiry field; grouped cache success/failure snapshots; grouped produced authoring identifiers; derived rejected receiver headers from captured requests; extracted service dependency readiness. These close four Pylint attribute findings and one Ruff local-variable finding. Grouped exact permission-log keywords into a typed contract, closing one more parameter finding.
+- Review finding, low severity, test fixture contract: `_Reservation` construction in three expiry tests used the removed field; updated those fixtures. All three expiry tests passed.
+- Review finding, low severity, derived test observation: the receiver now derives rejected headers from all captured attempts under the same expected bearer predicate; the two live receiver tests passed.
+- Verification: 8 authoring session tests, 20 provider catalog/cache tests, 5 permission log tests, 3 service readiness tests, 3 admission expiry tests, and 2 terminal receiver tests passed. Scoped Ruff, Pylint for the affected classes, and basedpyright for the readiness route passed. Remaining strict findings remain open.
+
+### 2026-09-20 ingest state review
+
+- Implementation: grouped failure reasons and provider conditions into one ingest failure-facts container while keeping the separate per-thread dictionaries and consume-on-read behavior. This closes one Pylint instance-attribute finding.
+- Review finding, low severity, state lifetime: failure facts remain separate dictionaries under one owner; neither read/pop behavior nor thread cleanup ordering changed. No new issue was surfaced by the diff review.
+- Verification: all 73 streaming aggregator tests passed; scoped Ruff and Pylint passed. Remaining Pylint design findings stay open.
+
+### 2026-09-20 worker batch state review
+
+- Implementation: grouped the worker IPC event buffer and deferred flush task into one batch-state object, closing one Pylint instance-attribute finding.
+- Review finding, medium severity, internal compatibility: worker and API tests inspect or replace the private `_flush_task` and read `_event_buffer`. The first test run caught the removed attributes. Read/write compatibility properties now forward to the batch state; the full 24 worker IPC tests and two relevant API tests pass.
+- Verification: scoped Ruff and Pylint pass. The other strict findings remain open.

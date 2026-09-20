@@ -228,6 +228,15 @@ def resolve_tool_command(tool: AgentTool, arguments: dict[str, Any]) -> str:
     return tool.commands[0]
 
 
+def _inject_owned_fields(arguments: dict[str, Any], **fields: str | None) -> None:
+    # Sanitize-overwrite: strip any model-supplied value, then set the
+    # dispatcher-owned one (skipping None, e.g. a not-yet-known revision).
+    for key, value in fields.items():
+        arguments.pop(key, None)
+        if value is not None:
+            arguments[key] = value
+
+
 def make_tool_dispatch(
     client: AuthoringClient,
     *,
@@ -283,20 +292,12 @@ def make_tool_dispatch(
                 )
         return session.session_id
 
-    def _inject(arguments: dict[str, Any], **fields: str | None) -> None:
-        # Sanitize-overwrite: strip any model-supplied value, then set the
-        # dispatcher-owned one (skipping None, e.g. a not-yet-known revision).
-        for key, value in fields.items():
-            arguments.pop(key, None)
-            if value is not None:
-                arguments[key] = value
-
     async def _apply_injection(command: str, arguments: dict[str, Any]) -> None:
         if command == "create_proposal":
             session_id = await _ensure_session_id()
             if lifecycle["changeset_id"] is None:
                 lifecycle["changeset_id"] = session.new_changeset_id("bridge")
-            _inject(
+            _inject_owned_fields(
                 arguments,
                 session_id=session_id,
                 changeset_id=lifecycle["changeset_id"],
@@ -315,14 +316,14 @@ def make_tool_dispatch(
             # which is the only session_id-bearing command. session_id=None strips
             # any stray/forged model-supplied session_id (sanitize, never inject it
             # here).
-            _inject(
+            _inject_owned_fields(
                 arguments,
                 changeset_id=lifecycle["changeset_id"],
                 expected_revision=lifecycle["revision"],
                 session_id=None,
             )
         elif command == "request_apply":
-            _inject(
+            _inject_owned_fields(
                 arguments,
                 changeset_id=lifecycle["changeset_id"],
                 approval_id=lifecycle["approval_id"],

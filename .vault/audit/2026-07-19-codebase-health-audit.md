@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:52c5ee69c62296c5b51d46afc06443d4fc5145d593b817a58f9050fa0cf53287'
+body_hash: 'sha256:1211ade5d411d5f6c78bffe20bf276298cacd78b4c0772fb2f35a968a3c56fe1'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3654,3 +3654,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted SQLite store usage and path fallback from live storage diagnostics. Database remains the preferred volume anchor, with checkpoint used only when no measurable database path exists. The function now measures 9 paths and its helper 3; cyclomatic findings fell from 36 to 35.
 - Review finding (moderate, code health; queued): 35 cyclomatic and 131 selected Ruff design findings remain. The storage-diagnostics finding is closed.
 - Verification: four storage diagnostics tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 35 findings.
+
+### 2026-09-20 authoring dispatcher function-length review pass
+
+- Implementation: moved dispatcher-owned argument sanitation into a module helper. Sanitization still strips model-supplied run identifiers before injecting the engine-owned values. Function-length findings fell from two to one.
+- Review finding (moderate, code health; queued): `create_mount_node` remains at 72 statements. The broader strict backlog includes 35 cyclomatic findings and 131 selected Ruff design findings.
+- Verification: the proposal lifecycle injection test, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The function-length gate remains red with one finding.

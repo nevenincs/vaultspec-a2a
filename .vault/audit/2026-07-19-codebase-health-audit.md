@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:885e3453ecb167c95b1a9c5abc9c2cf3203d87e926c4f71906344b323e2310a0'
+body_hash: 'sha256:052193c1b7705c3ffabde848fd6831265b9525b4ae2ba00d2b93f5f4c78b8d64'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3304,3 +3304,7 @@ Four medium-severity strict Ruff complexity and return-count findings were resol
 ### 2026-09-20 IPC assignment schema review pass
 
 One medium-severity strict Ruff complexity finding in dispatch model-assignment validation was resolved. Fallback and selected-control field validation now use focused helpers with the same closed required/optional field sets. Review checked that primary lanes and provenance remain exact, malformed fallback lists and records retain their refusal messages, fallback display fields remain optional, and selected controls still reject missing or unknown fields. Nine focused IPC schema tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 178 to 177 and cyclomatic findings from 125 to 124. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 worker IPC flush review pass
+
+One medium-severity strict Ruff cyclomatic finding and one cognitive-complexity finding in buffered worker event relay were resolved. One batch POST, cancellation requeue, bounded retry wait, and exhausted-batch requeue now have focused methods. Review checked successful HTTP 200 acknowledgement, non-200 and network-error warning details, deadline-limited request timeout and backoff, cancellation requeue before a POST or during backoff, exhausted error logging, and buffer-cap preservation. Twenty-four focused worker IPC tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 177 to 176 and cyclomatic findings from 124 to 123. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.

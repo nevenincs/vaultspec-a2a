@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:b4fcbfab3b04c853965372db5669aac150bd16ff6289f441a9f702f7bace504e'
+body_hash: 'sha256:d94e9bd3683121d61c6d545bd3edeb1686d6bedade2f8c7bbec87ee7218a0516'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3635,3 +3635,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding (low, formatting; fixed): the first standard gate found a Ruff formatting change. Formatted the module and reran `just check-all` successfully.
 - Review finding (moderate, code health; queued): 38 cyclomatic and 131 selected Ruff design findings remain.
 - Verification: 41 in-process catalog tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 38 findings.
+
+### 2026-09-20 worker dispatch admission review pass
+
+- Implementation: extracted capacity reservation/replay and synchronous task-group scheduling from the worker dispatcher. Reservation still precedes dispatch-ID admission, and scheduling still occurs without a suspension after admission. The dispatcher measures 9 paths; cyclomatic findings fell from 38 to 37.
+- Review finding (moderate, code health; queued): 37 cyclomatic and 131 selected Ruff design findings remain. Worker-management shutdown is now the sole 14-path function.
+- Verification: six dispatch-ID tests including duplicate and capacity races, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 37 findings.

@@ -55,7 +55,7 @@ from ..utils import (
 )
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from .dispatch_ids import DispatchIdAdmission
-from .executor import Executor
+from .executor import DispatchCapacityReservation, Executor
 from .ipc import WorkerBridge
 
 __all__ = ["WorkerApp", "create_worker_app", "main"]
@@ -303,6 +303,40 @@ def _duplicate_dispatch_response(req: DispatchRequest) -> DispatchResponse:
     return DispatchResponse(status="dispatched", thread_id=req.thread_id)
 
 
+async def _reserve_dispatch_or_replay(
+    executor: Executor,
+    req: DispatchRequest,
+    dispatch_ids: DispatchIdAdmission,
+    owns_capacity: bool,
+) -> tuple[DispatchCapacityReservation | None, bool]:
+    if not owns_capacity:
+        return None, False
+    reservation = await executor.reserve_dispatch_capacity(req.thread_id)
+    if reservation is not None:
+        return reservation, False
+    # A duplicate can be admitted while this request waits for capacity.
+    if req.dispatch_id in dispatch_ids:
+        return None, True
+    raise HTTPException(
+        status_code=429,
+        detail="Worker at capacity — too many concurrent threads",
+    )
+
+
+def _start_dispatch_task(
+    tg: anyio.abc.TaskGroup,
+    executor: Executor,
+    req: DispatchRequest,
+    reservation: DispatchCapacityReservation | None,
+    owns_capacity: bool,
+) -> None:
+    if owns_capacity:
+        assert reservation is not None
+        tg.start_soon(executor.handle_reserved_dispatch, req, reservation)
+    else:
+        tg.start_soon(executor.handle_dispatch, req)
+
+
 async def _dispatch_request(app: FastAPI, req: DispatchRequest) -> DispatchResponse:
     """Admit one gateway dispatch and schedule it in the worker task group."""
     _require_dispatch_receipt(req)
@@ -313,19 +347,11 @@ async def _dispatch_request(app: FastAPI, req: DispatchRequest) -> DispatchRespo
         return _duplicate_dispatch_response(req)
 
     owns_capacity = req.action in {"ingest", "resume"}
-    reservation = (
-        await executor.reserve_dispatch_capacity(req.thread_id)
-        if owns_capacity
-        else None
+    reservation, replayed = await _reserve_dispatch_or_replay(
+        executor, req, dispatch_ids, owns_capacity
     )
-    if owns_capacity and reservation is None:
-        # A duplicate can be admitted while this request waits for capacity.
-        if req.dispatch_id in dispatch_ids:
-            return _duplicate_dispatch_response(req)
-        raise HTTPException(
-            status_code=429,
-            detail="Worker at capacity — too many concurrent threads",
-        )
+    if replayed:
+        return _duplicate_dispatch_response(req)
 
     # No await may be inserted between admission and scheduling.
     if not dispatch_ids.admit(req.dispatch_id):
@@ -335,11 +361,7 @@ async def _dispatch_request(app: FastAPI, req: DispatchRequest) -> DispatchRespo
         return DispatchResponse(status="dispatched", thread_id=req.thread_id)
 
     try:
-        if owns_capacity:
-            assert reservation is not None
-            tg.start_soon(executor.handle_reserved_dispatch, req, reservation)
-        else:
-            tg.start_soon(executor.handle_dispatch, req)
+        _start_dispatch_task(tg, executor, req, reservation, owns_capacity)
     except BaseException:
         if owns_capacity:
             assert reservation is not None

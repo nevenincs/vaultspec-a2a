@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c8dc3fad8598cf671977930025698349b767844ef5fee1143476f897de4c50fa'
+body_hash: 'sha256:d0da6d096c8a0f019beff0981cf19c973e70b2f7684bb24b4ce2863af0617d33'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3442,3 +3442,7 @@ Implementation: grouped the durable claim identity, timing, recovery authority, 
 ### 2026-09-20 completed action detail projection review pass
 
 Implementation: separated command text, file-change locations, MCP tool text, and shared content wrapping from `action_detail_projection`. Actual diff review found no new behavior defect; each variant retains the same required-field checks, empty output behavior, text shape, and file path locations. Verification: 119 streaming/provider tests passed (one service test deselected), full strict Ty/Basedpyright and routine checks passed, and `git diff --check` passed. The repository cyclomatic gate fell from 84 to 83 offenders; this module now has zero radon offenders. Remaining code-health and strict structure findings remain open, severity medium, type maintainability, in the existing audit queue. No new functional issue was surfaced.
+
+### 2026-09-20 gateway and worker pairing review pass
+
+Implementation: shared band lookup between gateway dispatch and worker heartbeat pairing, isolated the explicit/learned gateway decision, and parsed reported generations in a focused helper. Actual diff review found no new behavior defect: missing configuration and roles still pass through, live band records still govern refusal and learning, diagnostic messages remain unchanged, and malformed worker generations still fail closed. Verification: 17 pairing tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 83 to 81 offenders; this module has zero radon offenders (down from two) and zero focused strict Ruff structure findings (down from two). Remaining repository findings stay open, severity medium, type maintainability, in the existing codebase-health queue.

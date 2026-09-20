@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:1c551154003f669247aac54ac7dd30cf2a907d8fe4c1fde7540002cd5c052e8c'
+body_hash: 'sha256:c6991ff785f41034042cdc1d4e00cef74b320047cf071c4193e401d0e1d87e52'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3466,3 +3466,7 @@ Implementation: separated durable pending-thread eligibility sets and active age
 ### 2026-09-20 authoring feedback rendering review pass
 
 Implementation: separated individual feedback item rendering from the batch read-shape validation and instruction assembly. Actual diff review found no new behavior defect: malformed items and empty bodies still drop out, heading paths retain their ordering and string conversion, and empty batches still return no grounding block. Verification: five feedback reader tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 77 to 76 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 worker terminal evidence review pass
+
+Implementation: separated terminal outcome/evidence-kind validation from failure fingerprint and provider-condition matching. Actual diff review found no new behavior defect: cancellation and failure evidence are still required for their matching outcomes, mismatched kinds retain the same exceptions, and missing or mismatched failure payloads still fail closed. Verification: 12 worker projection tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 76 to 75 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.

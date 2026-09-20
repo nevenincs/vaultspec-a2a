@@ -433,6 +433,23 @@ def clarification_resolution_fingerprint(
     return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 
 
+def _normalized_clarification_answers(
+    candidate: dict[str, object],
+) -> dict[str, object]:
+    raw_answers = candidate.get("answers")
+    if not isinstance(raw_answers, dict):
+        return candidate
+    raw_items = cast("dict[object, object]", raw_answers)
+    return {
+        **candidate,
+        "answers": {
+            key: value
+            for key, value in raw_items.items()
+            if isinstance(key, str) and isinstance(value, str)
+        },
+    }
+
+
 def parse_clarification_resolution(
     payload: object,
     *,
@@ -445,19 +462,8 @@ def parse_clarification_resolution(
     candidate = cast("dict[str, object]", payload)
     try:
         if candidate.get("type") == CLARIFICATION_RESUME_TYPE:
-            raw_answers = candidate.get("answers")
-            if isinstance(raw_answers, dict):
-                raw_items = cast("dict[object, object]", raw_answers)
-                candidate = {
-                    **candidate,
-                    "answers": {
-                        key: value
-                        for key, value in raw_items.items()
-                        if isinstance(key, str) and isinstance(value, str)
-                    },
-                }
             resolution: ClarificationResolution = ClarificationAnswers.model_validate(
-                candidate
+                _normalized_clarification_answers(candidate)
             )
         elif candidate.get("type") == CLARIFICATION_CONTINUATION_TYPE:
             resolution = ClarificationContinuation.model_validate(candidate)
@@ -476,6 +482,22 @@ def parse_clarification_resolution(
         )
         raise ValueError(msg)
     return resolution
+
+
+def _question_answer_note(
+    question: ClarificationQuestion, answer: str | None
+) -> str | None:
+    if answer is None or not answer.strip():
+        if question.required:
+            return f"question {question.id!r} is required and unanswered"
+        return None
+    if question.kind is ClarificationKind.CHOICE:
+        options = question.options or []
+        if answer not in options:
+            return (
+                f"answer to question {question.id!r} is not one of its declared options"
+            )
+    return None
 
 
 def validate_clarification_answers(
@@ -504,18 +526,9 @@ def validate_clarification_answers(
             notes.append(f"unknown question id {answered_id!r}")
 
     for question in request.questions:
-        answer = answers.get(question.id)
-        if answer is None or not answer.strip():
-            if question.required:
-                notes.append(f"question {question.id!r} is required and unanswered")
-            continue
-        if question.kind is ClarificationKind.CHOICE:
-            options = question.options or []
-            if answer not in options:
-                notes.append(
-                    f"answer to question {question.id!r} is not one of its "
-                    f"declared options"
-                )
+        note = _question_answer_note(question, answers.get(question.id))
+        if note is not None:
+            notes.append(note)
     return notes
 
 

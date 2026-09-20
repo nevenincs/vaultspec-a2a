@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c9d1ef2362c4a84b0352ae056926a1ed3fb43a607452efcbd873f38cb442d642'
+body_hash: 'sha256:83aa7384fa9879e4d881fa060feaf0c81959489e8d57542f6128aeac9368f117'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3827,3 +3827,9 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: extracted telemetry SDK setup and test item placement into helpers while preserving their call order and effects.
 - Verification: 44 combined telemetry and plugin tests passed. Targeted Ruff, format, Ty, and diff checks passed. The shared cyclomatic gate reports 11 remaining offenders.
 - Review finding (medium, code health): the cyclomatic gate remains red at 11 offenders; continue the existing complexity burn-down queue. No new functional defect was found in these two changes.
+
+### 2026-09-20 clarification complexity review
+
+- Implementation: extracted clarification answer normalization and per-question answer validation into helpers. The validation ordering, error wording, and payload shape are preserved.
+- Verification: 44 clarification tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 11 to 9 offenders.
+- Review finding (medium, code health): 9 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.

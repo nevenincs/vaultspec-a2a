@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v1'
-body_hash: 'sha256:96022452b33dea443b9daf91e585bc56ca2c15406dcb4350d3599cffdf6f5730'
+body_hash: 'sha256:88863f826164f170d6776f2c27194de3545eb4229ca8a6fa30f549092c4c89a0'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -480,6 +480,27 @@ witness, and recovery cannot promote an old action. Competing payloads still
 conflict, stale witnesses still lose, and only one network dispatch occurs. Ruff,
 ty, BasedPyright, focused concurrency stress, and the lease/receipt bundle pass.
 No new finding remains from S22.
+
+### desktop-connect-timeout-readiness-race | high | resolved
+
+Type: product/test concurrency. Admission treated `httpx.ConnectTimeout` as a
+conclusive absence observation even though a live loopback worker can miss the
+connect budget under host saturation. That converted a transient observation
+between two prepares against the same gateway into `503 run admission is not
+execution-ready`. Connect timeouts are now indeterminate and use the seated
+watchdog/liveness evidence; a refused connection remains conclusive and still
+fails closed. The focused classifier/readiness bundle passes, and the real
+release/commit desktop scenario passed five consecutive process-level runs.
+Status: resolved.
+
+### s23-desktop-readiness-review-2026-09-20 | low | PASS
+
+Review result: PASS. The change narrows only the timeout classification and does
+not promote an unspawned, unpaired, down, or connection-refused worker. Existing
+readiness fallback coverage proves that only a seated live worker benefits from
+an indeterminate observation. Ruff, ty, BasedPyright, six focused readiness tests,
+and five repeated real desktop race runs pass. No new finding remains from S23.
+
 ## Recommendations
 
 - Migrate the outlying live suites (CLI live tests, authoring discovery retry

@@ -429,16 +429,17 @@ async def probe_worker_health(
 def _is_indeterminate_probe_failure(exc: BaseException) -> bool:
     """Whether *exc* leaves the worker's health genuinely unknown.
 
-    A connect failure is decisive evidence of absence: the transport reached the
-    port and nothing accepted. Every other transport failure - a read that outran
-    its budget, an exhausted client pool, a connection dropped mid-response - says
-    something about THIS observation, not about whether a worker exists. Timeouts
-    are classified before connect errors because ``ConnectTimeout`` is both, and
-    a connect that timed out is an absence observation, not an unknown one.
+    A refused connection is decisive evidence of absence: the transport reached
+    the port and nothing accepted. A connect timeout is different; under host
+    saturation the live loopback worker may not accept inside this observation's
+    budget. It therefore joins read timeouts, exhausted client pools, and dropped
+    responses as an unknown observation rather than proof that the worker vanished.
     """
     import httpx
 
-    if isinstance(exc, httpx.ConnectTimeout | httpx.ConnectError):
+    if isinstance(exc, httpx.ConnectTimeout):
+        return True
+    if isinstance(exc, httpx.ConnectError):
         return False
     return isinstance(exc, httpx.TransportError)
 

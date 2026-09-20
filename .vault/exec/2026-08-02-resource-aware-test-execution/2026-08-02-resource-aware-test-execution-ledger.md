@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-09-20'
 body_schema: 'body-v2'
-body_hash: 'sha256:13c70cab80b4f12e39311968b807ca082f059ee9a815cbbb3814f7bd437b296b'
+body_hash: 'sha256:b9bc23b6bea1c65d2ab4e1b18ee154351090c433d538916fba3d6e4a30eeea54'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -41,3 +41,11 @@ related:
 - `S22` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
 - `S22` `verify:` `ruff, ty, basedpyright` -> `pass`
 - `S22` `by:` `vaultspec-high-executor`
+- `S23` `M` `.vault/plan/2026-08-02-resource-aware-test-execution-plan.md`
+- `S23` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S23` `M` `src/vaultspec_a2a/control/worker_management.py`
+- `S23` `M` `src/vaultspec_a2a/control/tests/test_worker_health_probe.py`
+- `S23` `verify:` `uv run pytest -q src/vaultspec_a2a/control/tests/test_worker_health_probe.py src/vaultspec_a2a/control/tests/test_desktop_worker_readiness.py` -> `pass`
+- `S23` `by:` `root`
+- `S23` `verify:` `desktop race process proof x5` -> `pass`
+- `S23` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`

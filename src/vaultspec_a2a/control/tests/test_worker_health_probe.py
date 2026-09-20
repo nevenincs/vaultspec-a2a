@@ -85,3 +85,21 @@ async def test_worker_health_false_when_unreachable() -> None:
         healthy=False,
         body=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_worker_health_connect_timeout_is_indeterminate() -> None:
+    """A saturated live worker is not demoted merely because connect ran late."""
+
+    async def _connect_timeout(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("loopback accept missed the probe budget")
+
+    transport = httpx.MockTransport(_connect_timeout)
+    async with httpx.AsyncClient(transport=transport) as client:
+        probe = await probe_worker_health("http://127.0.0.1:9", client=client)
+
+    assert probe == WorkerHealthProbe(
+        healthy=False,
+        body=None,
+        indeterminate=True,
+    )

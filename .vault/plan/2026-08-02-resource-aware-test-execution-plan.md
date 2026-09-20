@@ -13,7 +13,7 @@ related:
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
 modified: '2026-09-20'
-body_hash: 'sha256:b638e3bf433b4bc7ab714d4b4335643da1d0026da4a6cf35a892881e75fe5357'
+body_hash: 'sha256:2d10f6f647bc9740d3c401bc7b43a435e3e2a54efe5cd9f2edbfbf8c5435501a'
 ---
 
 # `resource-aware-test-execution` plan
@@ -62,7 +62,7 @@ resolution, closing the audited harness-registry gap.
 - [x] `S20` - Tighten the proofs against fallback passes and isolated-home binds; `src/vaultspec_a2a/testing/tests/`.
 - [x] `S21` - Add the parallel toolchain lane for declaration-derived distribution; `dev/toolchain.py`.
 - [x] `S22` - Repair permission-response lease replay so concurrent identical retries share one durable action; `src/vaultspec_a2a/control/action_lease.py, src/vaultspec_a2a/control/permission_service.py, src/vaultspec_a2a/control/tests/test_permission_leases.py`.
-- [ ] `S23` - Stabilize desktop run-admission readiness through release and commit races; `src/vaultspec_a2a/control/admission.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/desktop_tests/test_run_admission.py`.
+- [x] `S23` - Stabilize desktop run-admission readiness through release and commit races; `src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/control/admission.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/control/tests/test_worker_health_probe.py, src/vaultspec_a2a/desktop_tests/test_run_admission.py`.
 - [ ] `S24` - Move prompt-free external provider discovery behind an explicit non-unit resource lane; `src/vaultspec_a2a/conftest.py, src/vaultspec_a2a/service_tests, src/vaultspec_a2a/providers/tests`.
 - [ ] `S25` - Prove ACP session isolation and safely amortize child-process setup where loop and mutable state allow; `src/vaultspec_a2a/providers/tests/conftest.py, src/vaultspec_a2a/providers/tests`.
 - [ ] `S26` - Replace raw test binary guards with canonical platform-aware provider resolvers; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/providers`.

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:c98fb459c396c74550bc5c285fa47e3a1e783362e39e6483e1d44b5cb07c9a93'
+body_hash: 'sha256:ce725942bff9bd6475a3792cd618177e6144501da840aa0a2a8af4def188b0b7'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4003,3 +4003,8 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 
 - Medium / maintainability: `make_tool_dispatch` scored 28 cognitive complexity because its nested lifecycle helpers counted against the factory. Moved session creation, proposal-field injection, and response tracking to module helpers with explicit run/session/lifecycle inputs. The returned dispatch closure retains run-local state and command order. Review found no behavior change. Strict Ty, Ruff, and 13 focused catalog/dispatch tests pass; the function now passes complexity.
 - Remaining queue: `create_worker_node` is the last cognitive-complexity offender.
+
+### 2026-09-20 worker node complexity review
+
+- High / maintainability: `create_worker_node` scored 28 cognitive complexity. Extracted queue-tool selection, feedback lookup, per-thread authoring binding, and harness composition into focused helpers. Deferred provider imports remain deferred and model composition retains the same order. Review found no behavior issue. `just check-complexity` is now green with zero offenders; strict Ty, Ruff, and 61 focused worker tests pass, including the import-cost and tool-composition tests.
+- Remaining queue: module length, parameter count, Ruff selected limits, preview nesting, and Pylint design findings remain open.

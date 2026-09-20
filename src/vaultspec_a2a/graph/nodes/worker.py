@@ -703,6 +703,68 @@ def _attach_authoring_tools(
     return attach_authoring_tools(model, binding, autonomous=autonomous)
 
 
+def _queue_tool_for_state(
+    state: TeamState,
+    task_queue_port: TaskQueuePort | None,
+    feature_tag: str | None,
+) -> BaseTool | None:
+    if task_queue_port is None or feature_tag is None:
+        return None
+    thread_id = state.get("thread_id")
+    return (
+        create_mark_task_complete_tool(task_queue_port, thread_id)
+        if thread_id
+        else None
+    )
+
+
+async def _feedback_for_state(
+    state: TeamState, feedback_reader: FeedbackContextReader | None
+) -> str | None:
+    if feedback_reader is None:
+        return None
+    batch_id = state.get("feedback_batch_id")
+    thread_id = state.get("thread_id")
+    if batch_id and thread_id:
+        return await feedback_reader.read(thread_id, batch_id)
+    return None
+
+
+async def _authoring_binding_for_state(
+    state: TeamState,
+    name: str,
+    provider: AuthoringBindingProvider | None,
+) -> AuthoringToolBinding | None:
+    if provider is None:
+        return None
+    thread_id = state.get("thread_id")
+    return await provider.binding_for(thread_id, name) if thread_id else None
+
+
+def _compose_worker_harness(
+    model: BaseChatModel,
+    names: list[str] | None,
+    autonomous: bool,
+    workspace_root: Path | None,
+) -> BaseChatModel:
+    if not names:
+        return model
+    from ...providers._acp_mcp import (
+        compose_harness_mcp_servers,
+        harness_allowed_tool_names,
+    )
+
+    lane = getattr(model, "provider", None)
+    allowed = harness_allowed_tool_names(names, lane=lane) if autonomous else None
+    return compose_harness_mcp_servers(
+        model,
+        names,
+        allowed_tools=allowed,
+        project_root=str(workspace_root) if workspace_root else None,
+        lane=lane,
+    )
+
+
 def create_worker_node(
     model: BaseChatModel,
     system_prompt: str,
@@ -758,23 +820,8 @@ def create_worker_node(
         # compiled graph is shared across threads and cannot close over it. The
         # tool returns a Command (revised contract); its update is propagated
         # through this node's return, not a side-channel drain.
-        queue_tool: BaseTool | None = None
-        if task_queue_port is not None and feature_tag is not None:
-            thread_id = state.get("thread_id")
-            if thread_id:
-                queue_tool = create_mark_task_complete_tool(task_queue_port, thread_id)
-
-        # Feedback-loop grounding: a revision run carries an opaque
-        # feedback_batch_id in state; retrieve the reviewer's comments by id from
-        # the engine and ground the writer on them. Best-effort and read-path-only:
-        # an unavailable batch degrades to no grounding rather than failing the
-        # turn. Absent id or reader = no grounding, zero behaviour change.
-        feedback_grounding: str | None = None
-        if feedback_reader is not None:
-            batch_id = state.get("feedback_batch_id")
-            thread_id = state.get("thread_id")
-            if batch_id and thread_id:
-                feedback_grounding = await feedback_reader.read(thread_id, batch_id)
+        queue_tool = _queue_tool_for_state(state, task_queue_port, feature_tag)
+        feedback_grounding = await _feedback_for_state(state, feedback_reader)
 
         messages = _build_worker_messages(
             state=state,
@@ -792,51 +839,15 @@ def create_worker_node(
         # and this worker's agent_id (``name``) - never closed over, so the shared
         # compiled graph holds no run-scoped tokens (R7). Absent provider or
         # coverage yields no binding, leaving the session's MCP surface unchanged.
-        authoring_binding = None
-        if authoring_binding_provider is not None:
-            thread_id = state.get("thread_id")
-            if thread_id:
-                authoring_binding = await authoring_binding_provider.binding_for(
-                    thread_id, name
-                )
+        authoring_binding = await _authoring_binding_for_state(
+            state, name, authoring_binding_provider
+        )
         effective_model = _attach_authoring_tools(
             effective_model, authoring_binding, autonomous=autonomous
         )
-        if harness_mcp_servers:
-            from ...providers._acp_mcp import (
-                compose_harness_mcp_servers,
-                harness_allowed_tool_names,
-            )
-
-            # Headless only: auto-permit exactly the composed servers' read tools
-            # so a surfaced rag tool is not blocked by a permission prompt. Unioned
-            # (in compose) with the authoring names the attach step already set;
-            # supervised runs keep their prompts. Parallel to the authoring-attach
-            # allowlist above.
-            # The lane is passed on BOTH calls, not just the composition: the
-            # allowlist is what auto-permits the composed servers' tools in an
-            # autonomous run, so naming a tool here that composition then refuses
-            # would leave the two halves disagreeing about what this role may
-            # reach.
-            harness_lane = getattr(effective_model, "provider", None)
-            harness_allowed = (
-                harness_allowed_tool_names(harness_mcp_servers, lane=harness_lane)
-                if autonomous
-                else None
-            )
-            # The run's project pins every harness server it surfaces. Without
-            # it a composed grounding server resolves its own project from the
-            # directory it inherits, which is the undeclared inheritance the pin
-            # replaces. Absent, composition stays unpinned rather than inventing
-            # a root - a default here would be that same inheritance, spelled
-            # invisibly.
-            effective_model = compose_harness_mcp_servers(
-                effective_model,
-                harness_mcp_servers,
-                allowed_tools=harness_allowed,
-                project_root=str(workspace_root) if workspace_root else None,
-                lane=harness_lane,
-            )
+        effective_model = _compose_worker_harness(
+            effective_model, harness_mcp_servers, autonomous, workspace_root
+        )
         from ...providers._acp_mcp import compose_native_read_tools
         from ...providers.lane_admission import web_tool_names_for
 

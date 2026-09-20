@@ -16,6 +16,7 @@ import os
 import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -205,14 +206,18 @@ async def _discovery_heartbeat(
         await asyncio.sleep(HEARTBEAT_REFRESH_SECONDS)
 
 
+@dataclass(frozen=True, slots=True)
+class _DesktopDiscoveryHeartbeatConfig:
+    path: Any
+    generation: str
+    port: int
+    owner: str
+    credential_reference: str | None
+    pid: int
+
+
 async def _desktop_discovery_heartbeat(
-    path: Any,
-    *,
-    generation: str,
-    port: int,
-    owner: str,
-    credential_reference: str | None,
-    pid: int,
+    config: _DesktopDiscoveryHeartbeatConfig,
 ) -> None:
     """Refresh the versioned desktop discovery record every cadence.
 
@@ -225,17 +230,17 @@ async def _desktop_discovery_heartbeat(
         try:
             await asyncio.to_thread(
                 write_desktop_discovery,
-                path,
-                generation=generation,
-                port=port,
-                owner=owner,
-                credential_reference=credential_reference,
-                pid=pid,
+                config.path,
+                generation=config.generation,
+                port=config.port,
+                owner=config.owner,
+                credential_reference=config.credential_reference,
+                pid=config.pid,
             )
         except OSError:
             logger.warning(
                 "Failed to refresh desktop discovery heartbeat at %s",
-                path,
+                config.path,
                 exc_info=True,
             )
         await asyncio.sleep(HEARTBEAT_REFRESH_SECONDS)
@@ -384,12 +389,14 @@ def _start_gateway_discovery(
     if armed:
         discovery_task = asyncio.create_task(
             _desktop_discovery_heartbeat(
-                discovery_path,
-                generation=cast("str", desktop_generation),
-                port=settings.port,
-                owner=cast("str", desktop_owner),
-                credential_reference=desktop_credential_reference,
-                pid=discovery_pid,
+                _DesktopDiscoveryHeartbeatConfig(
+                    path=discovery_path,
+                    generation=cast("str", desktop_generation),
+                    port=settings.port,
+                    owner=cast("str", desktop_owner),
+                    credential_reference=desktop_credential_reference,
+                    pid=discovery_pid,
+                )
             )
         )
     else:

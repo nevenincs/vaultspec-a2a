@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:57e20c5f556473d7b76cf501d85dd2fc82e90ec253984d39b9b3d1c1e8c78213'
+body_hash: 'sha256:6b10555c665e306806883e1cc3b3fe8469376e25e3a7457e04a9379669c646b3'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3949,3 +3949,14 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - High / maintainability: `providers/_acp_mcp.py` exceeded the 1000-line strict limit. Extracted immutable harness registry declarations to `_harness_mcp_registry.py` and native read-tool bounds to `_native_read_tools.py`; facade is now 925 lines. Review verified the reexport surface and the registry's immutable construction remained intact. Strict Ty, 125 focused MCP tests, import loadability (286 modules), Ruff, formatter, and zero unconsumed exports pass. No behavioral finding remains from this split.
 - Medium / integration: first extraction surfaced missing registry constants and helper reexports in downstream tests and capability resolution. Explicit imports and exports resolved the type errors. Five unused helper exports found by the export guard were removed.
 - Remaining queue: 3 oversized modules plus strict parameter, Ruff, preview nesting, and Pylint findings remain open.
+
+### 2026-09-20 RAG CLI acquisition lane review
+
+- Implementation: the remaining proof that executes the externally acquired `vaultspec-search-mcp --help` command now carries `service` and the exclusive `rag-service-control` resource marker. Its 34 deterministic registry/composition neighbours remain in the unit lane.
+- Verification: focused non-service collection selected 34 of 35 tests; all 34 passed in 1.22 seconds and Ruff passed.
+- Review finding (low, test isolation): RESOLVED. The invocation did not start the RAG daemon, but it still crossed the external package/CLI boundary from the unit lane and contradicted the operator's instruction to ignore RAG.
+
+### 2026-09-20 desktop heartbeat parameter review
+
+- Medium / maintainability: `api/app.py` desktop discovery heartbeat exceeded the strict five-parameter limit. Grouped its immutable inputs in a frozen slotted `_DesktopDiscoveryHeartbeatConfig`; the write call and log path still read the same values. Review found no behavior change. Ruff, formatter, Ty, and 11 focused API tests pass; the app file has zero PLR0913 findings.
+- Remaining queue: other strict parameter-count findings remain open.

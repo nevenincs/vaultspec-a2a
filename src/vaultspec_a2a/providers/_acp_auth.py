@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 from contextlib import suppress
-from typing import Never
+from typing import Never, TypedDict, Unpack
 
 from ..control.config import settings
 from ..utils.enums import AcpRequestId
@@ -36,18 +36,28 @@ class _AuthResponseCancelledError(RuntimeError):
     """Raised when the authenticate response future is cancelled in-band."""
 
 
+class _RuntimeLogOptions(TypedDict, total=False):
+    process: asyncio.subprocess.Process | None
+    handshake_step: str | None
+    timeout_seconds: float | None
+    session_id: str | None
+    stderr_event_count: int | None
+    exit_code: int | None
+    kill_strategy: str | None
+
+
 def runtime_log_extra(
     config: AcpModelConfig,
-    *,
-    process: asyncio.subprocess.Process | None = None,
-    handshake_step: str | None = None,
-    timeout_seconds: float | None = None,
-    session_id: str | None = None,
-    stderr_event_count: int | None = None,
-    exit_code: int | None = None,
-    kill_strategy: str | None = None,
+    **options: Unpack[_RuntimeLogOptions],
 ) -> dict[str, object]:
     """Build bounded ACP runtime metadata for structured logs."""
+    process = options.get("process")
+    handshake_step = options.get("handshake_step")
+    timeout_seconds = options.get("timeout_seconds")
+    session_id = options.get("session_id")
+    stderr_event_count = options.get("stderr_event_count")
+    exit_code = options.get("exit_code")
+    kill_strategy = options.get("kill_strategy")
     extra: dict[str, object] = {
         "provider": config.provider,
         "runtime_authority": config.runtime_authority,
@@ -157,16 +167,28 @@ def is_auth_rejected_error(error: JsonValue) -> bool:
     )
 
 
+class _AuthOutcomeRequired(TypedDict):
+    message: str
+    code: int
+    auth_outcome: str
+
+
+class _AuthOutcomeOptions(_AuthOutcomeRequired, total=False):
+    auth_url: str | None
+    last_auth_url: str | None
+    condition: ProviderCondition
+
+
 def raise_auth_outcome_error(
-    *,
-    message: str,
-    code: int,
-    auth_outcome: str,
-    auth_url: str | None = None,
-    last_auth_url: str | None = None,
-    condition: ProviderCondition = ProviderCondition.UNKNOWN,
+    **options: Unpack[_AuthOutcomeOptions],
 ) -> Never:
     """Raise AcpAuthError with a bounded machine-readable auth outcome."""
+    message = options["message"]
+    code = options["code"]
+    auth_outcome = options["auth_outcome"]
+    auth_url = options.get("auth_url")
+    last_auth_url = options.get("last_auth_url")
+    condition = options.get("condition", ProviderCondition.UNKNOWN)
     raise AcpAuthError(
         f"{message}{auth_url_hint(auth_url, last_auth_url)}",
         code=code,
@@ -180,19 +202,34 @@ def raise_auth_outcome_error(
 # ---------------------------------------------------------------------------
 
 
+class _AuthenticateRpcRequired(TypedDict):
+    ctx: AcpSessionContext | None
+    config: AcpModelConfig
+    auth_methods: list[JsonObject]
+    stdin: asyncio.StreamWriter
+    stdin_lock: asyncio.Lock
+    response_futures: AcpResponseFutures
+
+
+class _AuthenticateRpcOptions(_AuthenticateRpcRequired, total=False):
+    process: asyncio.subprocess.Process | None
+    stderr_event_count: int | None
+    auth_url: str | None
+
+
 async def authenticate_rpc(
-    *,
-    ctx: AcpSessionContext | None,
-    config: AcpModelConfig,
-    auth_methods: list[JsonObject],
-    stdin: asyncio.StreamWriter,
-    stdin_lock: asyncio.Lock,
-    response_futures: AcpResponseFutures,
-    process: asyncio.subprocess.Process | None = None,
-    stderr_event_count: int | None = None,
-    auth_url: str | None = None,
+    **options: Unpack[_AuthenticateRpcOptions],
 ) -> JsonObject:
     """Send the ACP authenticate RPC using the advertised method."""
+    ctx = options["ctx"]
+    config = options["config"]
+    auth_methods = options["auth_methods"]
+    stdin = options["stdin"]
+    stdin_lock = options["stdin_lock"]
+    response_futures = options["response_futures"]
+    process = options.get("process")
+    stderr_event_count = options.get("stderr_event_count")
+    auth_url = options.get("auth_url")
     last_auth_url = ctx.last_auth_url if ctx is not None else None
     if ctx is not None:
         ctx.last_auth_url = auth_url

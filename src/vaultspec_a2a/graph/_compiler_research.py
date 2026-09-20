@@ -324,6 +324,11 @@ def _doc_review_router(*, writer_target: str, gate_target: str) -> Any:
     return router
 
 
+def _research_harness_servers(team_config: Any) -> list[str]:
+    harness = team_config.effective_harness()
+    return list(harness.mcp_servers) if harness is not None else []
+
+
 def _compile_research_adr(
     builder: StateGraph[Any, None, Any, Any],
     team_config: Any,
@@ -402,8 +407,7 @@ def _compile_research_adr(
     # The team-harness MCP servers are a flat, team-level declaration composed
     # into every document-role model's ACP session (there is no per-role field
     # on the harness schema today). Empty when no harness is declared.
-    harness = team_config.effective_harness()
-    harness_mcp_servers = list(harness.mcp_servers) if harness is not None else []
+    harness_mcp_servers = _research_harness_servers(team_config)
 
     specs: list[dict[str, Any]] = [
         spec.model_dump() for spec in team_config.topology.research_threads

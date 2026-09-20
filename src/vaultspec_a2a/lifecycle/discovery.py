@@ -631,6 +631,28 @@ def _desktop_record_identity(
     return host, owner, generation, fingerprint, reference
 
 
+def _desktop_record_from_parts(
+    numbers: tuple[int, int, int, int, int],
+    identity: tuple[str, str, str, str | None, str | None],
+) -> DesktopDiscoveryRecord:
+    protocol_min, protocol_max, pid, port, last_heartbeat = numbers
+    host, owner, generation, fingerprint, reference = identity
+    return DesktopDiscoveryRecord(
+        version=DESKTOP_DISCOVERY_VERSION,
+        profile=_DESKTOP_PROFILE,
+        generation=generation,
+        protocol_min=protocol_min,
+        protocol_max=protocol_max,
+        pid=pid,
+        start_fingerprint=fingerprint,
+        host=host,
+        port=port,
+        last_heartbeat=last_heartbeat,
+        owner=owner,
+        credential_reference=reference,
+    )
+
+
 def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | None:
     """Map a parsed record dict to a versioned desktop record, or ``None``.
 
@@ -658,25 +680,10 @@ def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | N
     numbers = _desktop_record_numbers(protocol, process, endpoint, info)
     if numbers is None:
         return None
-    protocol_min, protocol_max, pid, port, last_heartbeat = numbers
     identity = _desktop_record_identity(info, process, endpoint)
     if identity is None:
         return None
-    host, owner, generation, fingerprint, reference = identity
-    return DesktopDiscoveryRecord(
-        version=DESKTOP_DISCOVERY_VERSION,
-        profile=_DESKTOP_PROFILE,
-        generation=generation,
-        protocol_min=protocol_min,
-        protocol_max=protocol_max,
-        pid=pid,
-        start_fingerprint=fingerprint,
-        host=host,
-        port=port,
-        last_heartbeat=last_heartbeat,
-        owner=owner,
-        credential_reference=reference,
-    )
+    return _desktop_record_from_parts(numbers, identity)
 
 
 def classify_desktop_discovery(

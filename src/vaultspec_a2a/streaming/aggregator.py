@@ -68,6 +68,31 @@ class _IngestOptions(TypedDict, total=False):
     on_graph_started: Callable[[], Awaitable[None]] | None
 
 
+def _validate_ingest_arguments(
+    args: tuple[object, ...], options: _IngestOptions
+) -> None:
+    unknown = set(options).difference({"graph_input", "config", "on_graph_started"})
+    if unknown:
+        unexpected = next(iter(unknown))
+        raise TypeError(
+            "EventAggregator.ingest() got an unexpected keyword argument "
+            f"{unexpected!r}"
+        )
+    if len(args) > 2:
+        raise TypeError(
+            "EventAggregator.ingest() takes 5 positional arguments but "
+            f"{len(args) + 4} were given"
+        )
+    if args and "graph_input" in options:
+        raise TypeError(
+            "EventAggregator.ingest() got multiple values for argument 'graph_input'"
+        )
+    if len(args) > 1 and "config" in options:
+        raise TypeError(
+            "EventAggregator.ingest() got multiple values for argument 'config'"
+        )
+
+
 class EventAggregator:
     """Central event bus — composition root delegating to sub-components.
 
@@ -390,27 +415,7 @@ class EventAggregator:
         *args: object,
         **options: Unpack[_IngestOptions],
     ) -> str:
-        unknown = set(options).difference({"graph_input", "config", "on_graph_started"})
-        if unknown:
-            unexpected = next(iter(unknown))
-            raise TypeError(
-                "EventAggregator.ingest() got an unexpected keyword argument "
-                f"{unexpected!r}"
-            )
-        if len(args) > 2:
-            raise TypeError(
-                f"EventAggregator.ingest() takes 5 positional arguments but "
-                f"{len(args) + 4} were given"
-            )
-        if args and "graph_input" in options:
-            raise TypeError(
-                "EventAggregator.ingest() got multiple values for argument "
-                "'graph_input'"
-            )
-        if len(args) > 1 and "config" in options:
-            raise TypeError(
-                "EventAggregator.ingest() got multiple values for argument 'config'"
-            )
+        _validate_ingest_arguments(args, options)
         if args:
             graph_input = cast("dict[str, Any] | Command[Any] | None", args[0])
         elif "graph_input" in options:

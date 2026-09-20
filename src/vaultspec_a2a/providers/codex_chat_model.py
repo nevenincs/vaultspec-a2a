@@ -476,7 +476,6 @@ class CodexChatModel(BaseChatModel):
             raise ValueError("CodexChatModel received no prompt content")
 
         workspace = self._workspace()
-        cwd = str(workspace)
         env = self._build_env(workspace)
         # Per-run isolated CODEX_HOME: ALWAYS emit a worker-owned config.toml,
         # carrying exactly the declared read-only servers when any are armed,
@@ -515,7 +514,7 @@ class CodexChatModel(BaseChatModel):
             process = await spawn_acp_process(
                 self.command,
                 env,
-                cwd,
+                str(workspace),
                 use_exec=False,
                 metadata=metadata,
             )
@@ -540,7 +539,7 @@ class CodexChatModel(BaseChatModel):
                 client.request(
                     "thread/start",
                     {
-                        "cwd": cwd,
+                        "cwd": str(workspace),
                         "model": self.model_name,
                         "approvalPolicy": self.approval_policy,
                         "sandbox": self.sandbox,

@@ -443,6 +443,25 @@ def _assert_stored_restart_metadata(case: _RestartCase) -> None:
     )
 
 
+def _retired_record(
+    current: dict[str, object],
+    *,
+    original_digest: object,
+    path: tuple[str, ...],
+    field: str,
+    value: object,
+) -> dict[str, object]:
+    record = deepcopy(current)
+    target = record
+    for key in path:
+        nested = target[key]
+        assert isinstance(nested, dict)
+        target = cast("dict[str, object]", nested)
+    target[field] = value
+    assert record["digest"] == original_digest
+    return record
+
+
 def test_current_schema_restart_reaches_a_fresh_production_worker(
     tmp_path: Path,
 ) -> None:
@@ -510,14 +529,13 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
         session_factory = get_session_factory()
         async with session_factory() as session:
             for label, path, field, value in retired_cases:
-                record = deepcopy(current)
-                target: dict[str, object] = record
-                for key in path:
-                    nested = target[key]
-                    assert isinstance(nested, dict)
-                    target = cast("dict[str, object]", nested)
-                target[field] = value
-                assert record["digest"] == original_digest
+                record = _retired_record(
+                    current,
+                    original_digest=original_digest,
+                    path=path,
+                    field=field,
+                    value=value,
+                )
                 authority = make_test_write_authority()
                 thread_id = f"retired-durable-{label}"
                 await create_thread(

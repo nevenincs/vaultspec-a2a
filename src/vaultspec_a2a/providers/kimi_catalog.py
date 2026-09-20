@@ -267,7 +267,6 @@ def catalog_from_provider_list(
             ),
             models=(),
         )
-    normalized_models = tuple(models)
     normalized_controls = tuple(controls)
     return ProviderCatalog(
         key=key,
@@ -277,7 +276,7 @@ def catalog_from_provider_list(
             revision=_revision(key, tuple(revision_rows), normalized_controls),
             expires_at=now + _CATALOG_TTL,
         ),
-        models=normalized_models,
+        models=tuple(models),
         native_controls=normalized_controls,
     )
 

@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:e88f7edb47970d7f38151bfa4e70b0d8646468037c98995aa6cdab4abffc79ea'
+body_hash: 'sha256:e58579cfd4f1c0f5ff0ea2c34cac52e31797d6993fcb3810bac4298116e06c1d'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4138,3 +4138,10 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, medium severity, broad import migration: 74 files changed. Canonical imports preserve symbol identity; 295 governed modules load, strict typing passes, and full `just check-all` passes. Compatibility remains at risk for external consumers of the removed ordinary-module relay paths; package facades and declared public exports were preserved. No in-tree caller remains on the removed paths.
 - Review finding, medium severity, duplicate test helper: the unit gate surfaced two identical authoring stream observers. The Codex case now calls the already imported solo-coder observer, which has the same timeout, engine polling, terminal check, and unconditional cancellation. The structural duplication guard passes after that fix.
 - Verification: the initial full unit run reported 4,579 passed, two skipped, and two failed guards (import declaration and duplicate test helper). Both failed guards pass after fixes; focused schema, provider MCP, watchdog, compiler, profile, cost, and snapshot tests passed. Full unit rerun remains queued after this batch. Other strict lint findings remain open, so the broad quality burndown is REVISION REQUIRED.
+
+### 2026-09-20 cyclomatic and locals review
+
+- Implementation: split ingest argument validation from binding, restoring the Radon cyclomatic gate to zero. Removed single locals findings in message follow-up, Kimi catalog normalization, Codex turn setup, and research topology wiring; grouped desktop discovery record construction. Bounded test helpers clear locals findings in catalog restart, cancel health trace, and provider condition service tests.
+- Review finding, low severity, semantics: the inlined expressions and tuple conversion retain the same values and order; the research harness helper still calls `effective_harness` once; the desktop record helper preserves all validated fields. The ingest helper performs the same checks before binding. No changed assertion or timeout was found in diff review.
+- Review finding, medium severity, service prerequisite: the cancel health/trace test reached the real stack but Jaeger `/api/services` returned an empty list before the new helper ran. Its observed failure cannot validate the extracted Jaeger assertion path. Keep this test result in the audit queue for a service run with populated Jaeger. A sibling service cancel test passed; provider condition service tests had four passes and one unarmed skip.
+- Verification: 73 aggregator, 15 message dispatch, seven Kimi catalog, 46 Codex model, 21 research ADR, and 21 discovery tests passed. Preview Ruff locals and Radon pass for the touched production functions. Remaining strict argument, locals, maintainability, and design findings stay open; review result is REVISION REQUIRED.

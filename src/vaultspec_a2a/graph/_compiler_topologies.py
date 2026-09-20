@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
@@ -127,20 +127,26 @@ def _star_worker_context(
     return worker_ids, resolved_agents, worker_phase_map
 
 
+class _TopologyOptional(TypedDict, total=False):
+    workspace_root: Path | None
+    autonomous: bool
+    feature_tag: str | None
+    task_queue_port: TaskQueuePort | None
+    cost_port: CostPort | None
+    authoring_binding_provider: AuthoringBindingProvider | None
+    frozen_assignment: dict[str, dict[str, Any]] | None
+
+
+class _TopologyOptions(_TopologyOptional):
+    provider_factory: ProviderFactoryProtocol
+
+
 def _compile_star(
     builder: StateGraph[Any, None, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     supervisor_agent_config: Any | None,
-    *,
-    provider_factory: ProviderFactoryProtocol,
-    workspace_root: Path | None = None,
-    autonomous: bool = False,
-    feature_tag: str | None = None,
-    task_queue_port: TaskQueuePort | None = None,
-    cost_port: CostPort | None = None,
-    authoring_binding_provider: AuthoringBindingProvider | None = None,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
+    **options: Unpack[_TopologyOptions],
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END."""
     worker_ids, resolved_agents, worker_phase_map = _star_worker_context(
@@ -148,33 +154,30 @@ def _compile_star(
     )
 
     supervisor_model, sv_provider, sv_model_name = _resolve_supervisor_model(
-        workspace_root,
-        provider_factory=provider_factory,
+        options.get("workspace_root"),
+        provider_factory=options["provider_factory"],
         supervisor_agent_config=supervisor_agent_config,
-        frozen_assignment=frozen_assignment,
+        frozen_assignment=options.get("frozen_assignment"),
     )
-    sv_assignment = {"provider": sv_provider.value, "model_name": sv_model_name}
-
     supervisor_prompt, sv_meta = _star_supervisor_presentation(
         supervisor_agent_config,
         supervisor_model,
         resolved_agents,
         team_config,
-        sv_assignment,
+        {"provider": sv_provider.value, "model_name": sv_model_name},
     )
 
-    supervisor_node = create_supervisor_node(
-        model=supervisor_model,
-        system_prompt=supervisor_prompt,
-        workers=worker_ids,
-        worker_phase_map=worker_phase_map or None,
-        autonomous=autonomous,
-        workspace_root=workspace_root,
-    )
     _add_node(
         builder,
         "supervisor",
-        supervisor_node,
+        create_supervisor_node(
+            model=supervisor_model,
+            system_prompt=supervisor_prompt,
+            workers=worker_ids,
+            worker_phase_map=worker_phase_map or None,
+            autonomous=options.get("autonomous", False),
+            workspace_root=options.get("workspace_root"),
+        ),
         metadata=sv_meta,
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -193,14 +196,14 @@ def _compile_star(
             worker_ref,
             agent_cfg,
             team_config,
-            workspace_root,
-            provider_factory=provider_factory,
-            frozen_assignment=frozen_assignment,
-            autonomous=autonomous,
-            feature_tag=feature_tag,
-            task_queue_port=task_queue_port,
-            cost_port=cost_port,
-            authoring_binding_provider=authoring_binding_provider,
+            options.get("workspace_root"),
+            provider_factory=options["provider_factory"],
+            frozen_assignment=options.get("frozen_assignment"),
+            autonomous=options.get("autonomous", False),
+            feature_tag=options.get("feature_tag"),
+            task_queue_port=options.get("task_queue_port"),
+            cost_port=options.get("cost_port"),
+            authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         _add_node(
             builder,
@@ -211,7 +214,9 @@ def _compile_star(
         )
         builder.add_edge(agent_cfg.id, "supervisor")
         # Insert mount node between supervisor routing and worker invocation.
-        mount_fn = create_mount_node(workspace_root, task_queue_port)
+        mount_fn = create_mount_node(
+            options.get("workspace_root"), options.get("task_queue_port")
+        )
         _add_node(builder, f"mount_{agent_cfg.id}", mount_fn)
         builder.add_edge(f"mount_{agent_cfg.id}", agent_cfg.id)
         compiled_worker_ids.append(agent_cfg.id)
@@ -227,13 +232,10 @@ def _compile_star(
     # The dedicated approval node owns the plan-approval
     # interrupt; the supervisor only marks approval_status="pending". The node
     # is replay-safe because nothing before its interrupt() has side effects.
-    approval_node = create_plan_approval_node(
-        compiled_worker_ids, worker_phase_map or None
-    )
     _add_node(
         builder,
         "plan_approval",
-        approval_node,
+        create_plan_approval_node(compiled_worker_ids, worker_phase_map or None),
         metadata={
             "display_name": "Plan Approval",
             "role": "gate",
@@ -289,15 +291,7 @@ def _compile_pipeline(
     builder: StateGraph[Any, None, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
-    *,
-    provider_factory: ProviderFactoryProtocol,
-    workspace_root: Path | None = None,
-    autonomous: bool = False,
-    feature_tag: str | None = None,
-    task_queue_port: TaskQueuePort | None = None,
-    cost_port: CostPort | None = None,
-    authoring_binding_provider: AuthoringBindingProvider | None = None,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
+    **options: Unpack[_TopologyOptions],
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
 
@@ -330,17 +324,19 @@ def _compile_pipeline(
             worker_ref,
             agent_cfg,
             team_config,
-            workspace_root,
-            provider_factory=provider_factory,
-            frozen_assignment=frozen_assignment,
-            autonomous=autonomous,
-            feature_tag=feature_tag,
-            task_queue_port=task_queue_port,
-            cost_port=cost_port,
-            authoring_binding_provider=authoring_binding_provider,
+            options.get("workspace_root"),
+            provider_factory=options["provider_factory"],
+            frozen_assignment=options.get("frozen_assignment"),
+            autonomous=options.get("autonomous", False),
+            feature_tag=options.get("feature_tag"),
+            task_queue_port=options.get("task_queue_port"),
+            cost_port=options.get("cost_port"),
+            authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         # Insert mount node between pipeline stages.
-        mount_fn = create_mount_node(workspace_root, task_queue_port)
+        mount_fn = create_mount_node(
+            options.get("workspace_root"), options.get("task_queue_port")
+        )
         mount_id = f"mount_{agent_cfg.id}"
         _add_node(builder, mount_id, mount_fn)
         _add_node(
@@ -449,15 +445,7 @@ def _compile_pipeline_loop(
     team_config: Any,
     agent_configs: dict[str, Any],
     _supervisor_agent_config: Any | None,
-    *,
-    provider_factory: ProviderFactoryProtocol,
-    workspace_root: Path | None = None,
-    autonomous: bool = False,
-    feature_tag: str | None = None,
-    task_queue_port: TaskQueuePort | None = None,
-    cost_port: CostPort | None = None,
-    authoring_binding_provider: AuthoringBindingProvider | None = None,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
+    **options: Unpack[_TopologyOptions],
 ) -> None:
     """Wire up a pipeline_loop topology.
 
@@ -489,21 +477,23 @@ def _compile_pipeline_loop(
             worker_ref,
             agent_cfg,
             team_config,
-            workspace_root,
-            provider_factory=provider_factory,
-            frozen_assignment=frozen_assignment,
-            autonomous=autonomous,
-            feature_tag=feature_tag,
-            task_queue_port=task_queue_port,
-            cost_port=cost_port,
-            authoring_binding_provider=authoring_binding_provider,
+            options.get("workspace_root"),
+            provider_factory=options["provider_factory"],
+            frozen_assignment=options.get("frozen_assignment"),
+            autonomous=options.get("autonomous", False),
+            feature_tag=options.get("feature_tag"),
+            task_queue_port=options.get("task_queue_port"),
+            cost_port=options.get("cost_port"),
+            authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         if agent_id == loop_node_id:
             worker_node = _wrap_loop_node(worker_node)
 
         # Insert mount node before each worker.
         mount_id = f"mount_{agent_cfg.id}"
-        mount_fn = create_mount_node(workspace_root, task_queue_port)
+        mount_fn = create_mount_node(
+            options.get("workspace_root"), options.get("task_queue_port")
+        )
         _add_node(builder, mount_id, mount_fn)
         _add_node(
             builder,
@@ -517,8 +507,7 @@ def _compile_pipeline_loop(
 
     # Wire: START -> mount_0 -> node_0 -> mount_1 -> node_1 -> ... -> loop_node
     all_sequential: list[str] = [*pre_loop, loop_node_id]
-    first_mount = mount_map[all_sequential[0]]
-    builder.add_edge(START, first_mount)
+    builder.add_edge(START, mount_map[all_sequential[0]])
     for i in range(len(all_sequential) - 1):
         next_mount = mount_map[all_sequential[i + 1]]
         builder.add_edge(all_sequential[i], next_mount)

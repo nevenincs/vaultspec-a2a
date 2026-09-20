@@ -57,6 +57,8 @@ from .test_s20_solo_coder_bridge_live import (
 from .test_tool_cores_floor_live import _snapshot_vault, _vault_write_delta
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..conftest import ExternalPrerequisiteRule
 
 _CODER_ROLE = "vaultspec-coder"
@@ -88,24 +90,10 @@ def _codex_authoring_case(feature: str) -> AcceptanceCase:
     )
 
 
-@pytest.mark.service
-@pytest.mark.resource("loopback-stack")
-@pytest.mark.asyncio
-async def test_codex_authoring_tool_call_reaches_the_engine(
+async def _codex_authoring_harness(
     external_prerequisite: ExternalPrerequisiteRule,
-) -> None:
-    """Live: a Codex-lane run's bridged authoring call lands in the engine.
-
-    Proven by ``cs:<run_id>:*`` appearing in ``GET /authoring/v1/proposals``.
-    Before the Codex permission rung existed this could not happen at all: the
-    approval codex raised for the tool went unanswered as a method-not-found, the
-    call was resolved as rejected, and the run still completed - which is why a
-    turn-completed status and real assistant prose are worth nothing here.
-
-    A before/after document-dir snapshot also asserts zero ``.vault`` writes: the
-    proposal belongs in the engine's review lane, never materialized to disk by
-    the agent.
-    """
+) -> tuple[AcceptanceHarness, Path, str, AcceptanceCase, str, str]:
+    """Resolve the live Codex lane and build its authenticated harness."""
     stack = _reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
@@ -125,6 +113,35 @@ async def test_codex_authoring_tool_call_reaches_the_engine(
         selection=selection,
         overrides=overrides,
     )
+    return harness, vault_root, feature, case, engine_base_url, engine_bearer
+
+
+@pytest.mark.service
+@pytest.mark.resource("loopback-stack")
+@pytest.mark.asyncio
+async def test_codex_authoring_tool_call_reaches_the_engine(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """Live: a Codex-lane run's bridged authoring call lands in the engine.
+
+    Proven by ``cs:<run_id>:*`` appearing in ``GET /authoring/v1/proposals``.
+    Before the Codex permission rung existed this could not happen at all: the
+    approval codex raised for the tool went unanswered as a method-not-found, the
+    call was resolved as rejected, and the run still completed - which is why a
+    turn-completed status and real assistant prose are worth nothing here.
+
+    A before/after document-dir snapshot also asserts zero ``.vault`` writes: the
+    proposal belongs in the engine's review lane, never materialized to disk by
+    the agent.
+    """
+    (
+        harness,
+        vault_root,
+        feature,
+        case,
+        engine_base_url,
+        engine_bearer,
+    ) = await _codex_authoring_harness(external_prerequisite)
 
     before = _snapshot_vault(vault_root)
     output_parts: list[str] = []

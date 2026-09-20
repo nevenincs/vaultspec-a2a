@@ -441,19 +441,22 @@ def _agent_node_metadata(
     }
 
 
+class _CompileWorkerOptions(TypedDict):
+    provider_factory: ProviderFactoryProtocol
+    frozen_assignment: dict[str, dict[str, Any]] | None
+    autonomous: bool
+    feature_tag: str | None
+    task_queue_port: TaskQueuePort | None
+    cost_port: CostPort | None
+    authoring_binding_provider: AuthoringBindingProvider | None
+
+
 def _compile_worker_node(
     worker_ref: Any,
     agent_cfg: Any,
     team_config: Any,
     workspace_root: Path | None,
-    *,
-    provider_factory: ProviderFactoryProtocol,
-    frozen_assignment: dict[str, dict[str, Any]] | None,
-    autonomous: bool,
-    feature_tag: str | None,
-    task_queue_port: TaskQueuePort | None,
-    cost_port: CostPort | None,
-    authoring_binding_provider: AuthoringBindingProvider | None,
+    **options: Unpack[_CompileWorkerOptions],
 ) -> tuple[WorkerNode, dict[str, str]]:
     """Resolve one worker's model and build its compiled node plus node metadata.
 
@@ -488,8 +491,8 @@ def _compile_worker_node(
         agent_cfg,
         team_config,
         workspace_root,
-        provider_factory=provider_factory,
-        frozen_assignment=frozen_assignment,
+        provider_factory=options["provider_factory"],
+        frozen_assignment=options["frozen_assignment"],
     )
     # Flat and team-level, exactly as the research_adr path reads it: the harness
     # schema carries no per-role MCP field, so every worker of the team gets the
@@ -500,12 +503,12 @@ def _compile_worker_node(
         model,
         _composed_worker_prompt(agent_cfg, model),
         name=agent_cfg.id,
-        autonomous=autonomous,
+        autonomous=options["autonomous"],
         workspace_root=workspace_root,
-        feature_tag=feature_tag,
-        task_queue_port=task_queue_port,
-        cost_port=cost_port,
-        authoring_binding_provider=authoring_binding_provider,
+        feature_tag=options["feature_tag"],
+        task_queue_port=options["task_queue_port"],
+        cost_port=options["cost_port"],
+        authoring_binding_provider=options["authoring_binding_provider"],
         role=agent_cfg.role,
         harness_mcp_servers=list(harness.mcp_servers) if harness is not None else [],
     )
@@ -804,23 +807,29 @@ def _loop_route(*, next_value: object, loop_count: int, max_loops: int) -> str:
     return "FINISH" if next_value == "FINISH" else "revise"
 
 
+class _CompileTeamOptional(TypedDict, total=False):
+    checkpointer: BaseCheckpointSaver[str] | None
+    supervisor_agent_config: Any | None
+    workspace_root: Path | None
+    autonomous: bool
+    step_timeout: float | None
+    feature_tag: str | None
+    task_queue_port: TaskQueuePort | None
+    cost_port: CostPort | None
+    proposal_submitter: DocumentProposalSubmitter | None
+    feedback_reader: FeedbackContextReader | None
+    authoring_binding_provider: AuthoringBindingProvider | None
+    model_assignment: dict[str, dict[str, Any]] | None
+
+
+class _CompileTeamOptions(_CompileTeamOptional):
+    provider_factory: ProviderFactoryProtocol
+
+
 def compile_team_graph(
     team_config: Any,
     agent_configs: dict[str, Any],
-    *,
-    provider_factory: ProviderFactoryProtocol,
-    checkpointer: BaseCheckpointSaver[str] | None = None,
-    supervisor_agent_config: Any | None = None,
-    workspace_root: Path | None = None,
-    autonomous: bool = False,
-    step_timeout: float | None = None,
-    feature_tag: str | None = None,
-    task_queue_port: TaskQueuePort | None = None,
-    cost_port: CostPort | None = None,
-    proposal_submitter: DocumentProposalSubmitter | None = None,
-    feedback_reader: FeedbackContextReader | None = None,
-    authoring_binding_provider: AuthoringBindingProvider | None = None,
-    model_assignment: dict[str, dict[str, Any]] | None = None,
+    **options: Unpack[_CompileTeamOptions],
 ) -> CompiledTeamGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
@@ -869,6 +878,18 @@ def compile_team_graph(
         _compile_star,
     )
 
+    provider_factory = options["provider_factory"]
+    workspace_root = options.get("workspace_root")
+    autonomous = options.get("autonomous", False)
+    step_timeout = options.get("step_timeout")
+    feature_tag = options.get("feature_tag")
+    task_queue_port = options.get("task_queue_port")
+    cost_port = options.get("cost_port")
+    proposal_submitter = options.get("proposal_submitter")
+    feedback_reader = options.get("feedback_reader")
+    authoring_binding_provider = options.get("authoring_binding_provider")
+    model_assignment = options.get("model_assignment")
+
     if step_timeout is None:
         step_timeout = team_config.graph.step_timeout_seconds
 
@@ -894,7 +915,7 @@ def compile_team_graph(
             builder,
             team_config,
             agent_configs,
-            supervisor_agent_config,
+            options.get("supervisor_agent_config"),
             provider_factory=provider_factory,
             workspace_root=workspace_root,
             autonomous=autonomous,
@@ -923,7 +944,7 @@ def compile_team_graph(
             builder,
             team_config,
             agent_configs,
-            supervisor_agent_config,
+            options.get("supervisor_agent_config"),
             provider_factory=provider_factory,
             workspace_root=workspace_root,
             autonomous=autonomous,
@@ -954,7 +975,7 @@ def compile_team_graph(
 
     graph = _compile_graph(
         builder,
-        checkpointer=checkpointer,
+        checkpointer=options.get("checkpointer"),
         interrupt_before=interrupt_nodes,
     )
 

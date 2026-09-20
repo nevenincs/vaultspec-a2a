@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:4896b2721d2f1871a2a16e8f1799d956c339b1af1f9d56bedb4060e66c2b3129'
+body_hash: 'sha256:5b9f0751f1254f72a21339bd8ed57f2bb99901a4201eb34cafa6d02a28640be0'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4176,3 +4176,11 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Review finding, low severity, compatibility: positional binders preserve accepted argument order and duplicate-key errors; runtime `inspect.signature` still changes. Follow through with broad integration coverage when the remaining signatures are refactored.
 - Review finding, medium severity, quality: the remaining 22 parameter-count and two maintainability findings remain open in this audit queue; strict gate is not complete.
 - Verification: 29 supervisor and 46 factory tests passed, along with gateway listing/cancel/history checks. `just check-all` and `just check-type-strict` passed across the integrated tree. No high-severity regression surfaced in the diff review.
+
+### 2026-09-20 compiler and repository review
+
+- Implementation: typed compile-team, compile-worker, and topology keyword controls while preserving positional topology inputs; reduced locals by inlining one-use values. Typed thread creation and execution-state projection keyword contracts, preserving required names and defaults. ACP session, lifecycle registration, and gateway action endpoint changes cleared further parameter findings.
+- Review finding, low severity, compatibility: the compiler and repository signatures expose `Unpack[TypedDict]` keyword controls to runtime introspection. Existing call sites, compiler tests, and database projection tests passed; retain this behavior in the integration review queue.
+- Review finding, medium severity, transient regression: the concurrent graph lifecycle positional binder raised cyclomatic complexity above the health threshold. Assigned to its owning implementation lane and require a zero cyclomatic census before this pass is closed.
+- Review finding, medium severity, quality: the current working tree has eight parameter-count findings, two maintainability findings, and 25 preview Ruff argument/local findings. Continue the audit queue to zero.
+- Verification: 72 compiler/topology, 76 database creation/election, and 17 projection tests passed; strict typing and scoped Ruff passed for stable compiler/repository changes. No new high-severity finding surfaced in diff review.

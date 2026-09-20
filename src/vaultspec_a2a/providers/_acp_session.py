@@ -5,7 +5,7 @@ Data carriers live in ``_acp_types``, auth logic in ``_acp_auth``.
 """
 
 import logging
-from typing import cast
+from typing import TypedDict, Unpack, cast
 
 from ..control.config import settings
 from ..utils.enums import AcpRequestId
@@ -219,17 +219,27 @@ async def _select_desired_model(
     )
 
 
+class _SelectConfigRequired(TypedDict):
+    config_id: str
+    desired_value: str
+    label: str
+
+
+class _SelectConfigOptions(_SelectConfigRequired, total=False):
+    allow_bracketed_variant: bool
+
+
 async def _select_config_option(
     ctx: AcpSessionContext,
     session_id: str,
     config_options: list[JsonObject],
-    *,
-    config_id: str,
-    desired_value: str,
-    label: str,
-    allow_bracketed_variant: bool = False,
+    **options: Unpack[_SelectConfigOptions],
 ) -> list[JsonObject]:
     """Apply and verify one adapter-advertised session configuration value."""
+    config_id = options["config_id"]
+    desired_value = options["desired_value"]
+    label = options["label"]
+    allow_bracketed_variant = options.get("allow_bracketed_variant", False)
     if not any(option.get("id") == config_id for option in config_options):
         raise AcpSessionError(
             f"ACP session does not advertise requested {label} configuration option",

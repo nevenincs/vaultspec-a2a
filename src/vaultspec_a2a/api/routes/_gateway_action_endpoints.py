@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +97,80 @@ from .gateway import (
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
 
+
+@dataclass(frozen=True, slots=True)
+class _ActionEndpointDependencies:
+    """Injected resources shared by run action endpoints."""
+
+    db: AsyncSession
+    worker_client: httpx.AsyncClient
+    circuit_breaker: Any
+    worker_spawner: Any
+
+
+def _get_action_endpoint_dependencies(
+    db: AsyncSession = Depends(get_db),
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
+) -> _ActionEndpointDependencies:
+    """Group existing action service providers without changing their overrides."""
+    return _ActionEndpointDependencies(
+        db=db,
+        worker_client=worker_client,
+        circuit_breaker=circuit_breaker,
+        worker_spawner=worker_spawner,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ActionEndpointContext:
+    """Request and idempotency context shared by message and permission routes."""
+
+    request: Request
+    dependencies: _ActionEndpointDependencies
+    idempotency_key: str | None
+
+
+def _get_action_endpoint_context(
+    request: Request,
+    dependencies: _ActionEndpointDependencies = Depends(
+        _get_action_endpoint_dependencies
+    ),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> _ActionEndpointContext:
+    """Collect request-scoped action inputs while retaining their route metadata."""
+    return _ActionEndpointContext(
+        request=request,
+        dependencies=dependencies,
+        idempotency_key=idempotency_key,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ClarificationEndpointContext:
+    """Request and injected services needed by clarification responses."""
+
+    request: Request
+    dependencies: _ActionEndpointDependencies
+    checkpointer: Checkpointer
+
+
+def _get_clarification_endpoint_context(
+    request: Request,
+    dependencies: _ActionEndpointDependencies = Depends(
+        _get_action_endpoint_dependencies
+    ),
+    checkpointer: Checkpointer = Depends(get_checkpointer),
+) -> _ClarificationEndpointContext:
+    """Collect clarification dependencies without changing provider wiring."""
+    return _ClarificationEndpointContext(
+        request=request,
+        dependencies=dependencies,
+        checkpointer=checkpointer,
+    )
+
+
 __all__ = ["_summarize_preset", "route_signature"]
 
 # ---------------------------------------------------------------------------
@@ -126,12 +201,7 @@ async def _raise_for_message_dispatch_failure(
 async def run_message_endpoint(
     run_id: PathSafeRunId,
     body: RunMessageRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    worker_client: httpx.AsyncClient = Depends(get_worker_client),
-    circuit_breaker: Any = Depends(get_circuit_breaker),
-    worker_spawner: Any = Depends(get_worker_spawner),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    context: _ActionEndpointContext = Depends(_get_action_endpoint_context),
 ) -> RunMessageResponse:
     """Send a follow-up turn into an existing run.
 
@@ -144,15 +214,16 @@ async def run_message_endpoint(
     continues asynchronously, so a caller reconciles from the stream or
     run-status rather than from this response.
     """
+    dependencies = context.dependencies
     result = await send_followup_message(
-        db=db,
+        db=dependencies.db,
         thread_id=run_id,
         content=body.content,
         agent_id=body.agent_id or DEFAULT_SUPERVISOR_ID,
-        idempotency_key=idempotency_key,
-        circuit_breaker=circuit_breaker,
-        worker_spawner=worker_spawner,
-        worker_client=worker_client,
+        idempotency_key=context.idempotency_key,
+        circuit_breaker=dependencies.circuit_breaker,
+        worker_spawner=dependencies.worker_spawner,
+        worker_client=dependencies.worker_client,
         recursion_limit=domain_config.graph_recursion_limit,
         trace_headers=trace_headers(),
     )
@@ -172,9 +243,9 @@ async def run_message_endpoint(
         raise HTTPException(status_code=409, detail=result.error_detail)
 
     if result.dispatched:
-        worker_liveness(request.app.state).record_contact()
+        worker_liveness(context.request.app.state).record_contact()
 
-    await _raise_for_message_dispatch_failure(request, result)
+    await _raise_for_message_dispatch_failure(context.request, result)
 
     return RunMessageResponse(
         run_id=result.thread_id,
@@ -182,7 +253,7 @@ async def run_message_endpoint(
             "accepted_not_applied" if result.dispatched else result.thread_status
         ),
         action_id=result.action_id,
-        idempotency_key=idempotency_key,
+        idempotency_key=context.idempotency_key,
     )
 
 
@@ -199,12 +270,7 @@ async def run_permission_respond_endpoint(
     run_id: PathSafeRunId,
     request_id: str,
     body: RunPermissionRespondRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    worker_client: httpx.AsyncClient = Depends(get_worker_client),
-    circuit_breaker: Any = Depends(get_circuit_breaker),
-    worker_spawner: Any = Depends(get_worker_spawner),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    context: _ActionEndpointContext = Depends(_get_action_endpoint_context),
 ) -> RunPermissionRespondResponse:
     """Answer a permission request the run raised on its progress stream.
 
@@ -226,7 +292,8 @@ async def run_permission_respond_endpoint(
     precedes the service call, a mismatch has no effect at all rather than being
     detected after the fact.
     """
-    permission = await get_permission_request(db, request_id)
+    dependencies = context.dependencies
+    permission = await get_permission_request(dependencies.db, request_id)
     if permission is None or permission.thread_id != run_id:
         raise HTTPException(
             status_code=404,
@@ -234,21 +301,21 @@ async def run_permission_respond_endpoint(
         )
 
     result = await respond_to_permission(
-        db=db,
+        db=dependencies.db,
         response=PermissionInput(
-            request_id, body.option_id, idempotency_key, body.notes
+            request_id, body.option_id, context.idempotency_key, body.notes
         ),
         runtime=PermissionRuntime(
-            circuit_breaker,
-            worker_spawner,
-            worker_client,
+            dependencies.circuit_breaker,
+            dependencies.worker_spawner,
+            dependencies.worker_client,
             domain_config.graph_recursion_limit,
             trace_headers(),
         ),
     )
 
     if result.dispatched:
-        worker_liveness(request.app.state).record_contact()
+        worker_liveness(context.request.app.state).record_contact()
     if result.circuit_open:
         raise HTTPException(status_code=503, detail=result.error_detail)
     if result.error_detail:
@@ -281,14 +348,12 @@ async def run_clarification_respond_endpoint(
     run_id: PathSafeRunId,
     request_id: str,
     body: RunClarificationRespondRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    worker_client: httpx.AsyncClient = Depends(get_worker_client),
-    circuit_breaker: Any = Depends(get_circuit_breaker),
-    worker_spawner: Any = Depends(get_worker_spawner),
-    checkpointer: Checkpointer = Depends(get_checkpointer),
+    context: _ClarificationEndpointContext = Depends(
+        _get_clarification_endpoint_context
+    ),
 ) -> RunClarificationRespondResponse:
     """Resolve through the durable clarification lease service."""
+    dependencies = context.dependencies
     resolution: ClarificationResolution
     if body.answers is not None:
         resolution = ClarificationAnswers(
@@ -306,15 +371,15 @@ async def run_clarification_respond_endpoint(
         )
 
     result = await respond_to_clarification(
-        db,
+        dependencies.db,
         thread_id=run_id,
         request_id=request_id,
         resolution=resolution,
         runtime=ClarificationRuntime(
-            checkpointer,
-            worker_client,
-            circuit_breaker,
-            worker_spawner,
+            context.checkpointer,
+            dependencies.worker_client,
+            dependencies.circuit_breaker,
+            dependencies.worker_spawner,
             domain_config.graph_recursion_limit,
             trace_headers(),
         ),
@@ -326,7 +391,7 @@ async def run_clarification_respond_endpoint(
         )
 
     if result.dispatched:
-        worker_liveness(request.app.state).record_contact()
+        worker_liveness(context.request.app.state).record_contact()
     return RunClarificationRespondResponse(
         run_id=result.thread_id,
         request_id=result.request_id,

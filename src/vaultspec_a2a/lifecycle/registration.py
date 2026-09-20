@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from .procs_config import ProcsConfigError, load_procs_config
 from .registry import (
@@ -68,17 +68,20 @@ def _eligible_config(
     return resolved_config
 
 
+class _RegisterServeOptions(TypedDict, total=False):
+    workspace: str
+    repo: str
+    owner: str | None
+    name: str | None
+    command: list[str] | None
+    home: Path | None
+    config: ProcsConfig | None
+
+
 def register_serve(
     role: str,
     port: int,
-    *,
-    workspace: str = "",
-    repo: str = "",
-    owner: str | None = None,
-    name: str | None = None,
-    command: list[str] | None = None,
-    home: Path | None = None,
-    config: ProcsConfig | None = None,
+    **options: Unpack[_RegisterServeOptions],
 ) -> ProcRecord | None:
     """Register the current process as a managed dev instance, or return ``None``.
 
@@ -88,6 +91,13 @@ def register_serve(
     ``VAULTSPEC_PROCS_NAME``) and returns it, so the caller can refresh and
     deregister it.
     """
+    workspace = options.get("workspace", "")
+    repo = options.get("repo", "")
+    owner = options.get("owner")
+    name = options.get("name")
+    command = options.get("command")
+    home = options.get("home")
+    config = options.get("config")
     resolved_config = _eligible_config(role, port, config)
     if resolved_config is None:
         return None

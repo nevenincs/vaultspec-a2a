@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
@@ -68,6 +68,26 @@ _RA_CLARIFY_GATE = "clarification_gate"
 # already uses a subset of the permitted alphabet, so truncation cannot produce
 # an invalid handle.
 _CLARIFICATION_ID_PREFIX = "clarify-"
+
+
+class _CompileResearchAdrOptionsRequired(TypedDict):
+    """Required injected controls for compiling the research topology."""
+
+    provider_factory: ProviderFactoryProtocol
+    proposal_submitter: DocumentProposalSubmitter | None
+
+
+class _CompileResearchAdrOptions(
+    _CompileResearchAdrOptionsRequired,
+    total=False,
+):
+    """Optional controls retaining the compiler's existing defaults."""
+
+    workspace_root: Path | None
+    autonomous: bool
+    feedback_reader: FeedbackContextReader | None
+    frozen_assignment: dict[str, dict[str, Any]] | None
+    cost_port: CostPort | None
 
 
 def _clarification_request_id(thread_id: str) -> str:
@@ -333,14 +353,7 @@ def _compile_research_adr(
     builder: StateGraph[Any, None, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
-    *,
-    provider_factory: ProviderFactoryProtocol,
-    workspace_root: Path | None = None,
-    autonomous: bool = False,
-    proposal_submitter: DocumentProposalSubmitter | None,
-    feedback_reader: FeedbackContextReader | None = None,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
-    cost_port: CostPort | None = None,
+    **options: Unpack[_CompileResearchAdrOptions],
 ) -> None:
     """Wire the research_adr document phase machine.
 
@@ -385,7 +398,7 @@ def _compile_research_adr(
     diverging. There is no programmatic override: the preset is the only way to
     arm it, so whether a run can stop to ask is answerable from config alone.
     """
-    if proposal_submitter is None:
+    if options["proposal_submitter"] is None:
         raise ConfigError(
             "research_adr topology requires a proposal_submitter for its phase "
             "gates; the control layer injects the concrete authoring client."
@@ -394,9 +407,9 @@ def _compile_research_adr(
     models = _resolve_research_adr_models(
         team_config,
         agent_configs,
-        workspace_root,
-        provider_factory=provider_factory,
-        frozen_assignment=frozen_assignment,
+        options.get("workspace_root"),
+        provider_factory=options["provider_factory"],
+        frozen_assignment=options.get("frozen_assignment"),
     )
     researcher_model, researcher_metadata = models["researcher"]
     synthesist_model, synthesist_metadata = models["synthesist"]
@@ -418,9 +431,9 @@ def _compile_research_adr(
         _composed_role_prompt(
             team_config, agent_configs, "researcher", researcher_model
         ),
-        workspace_root=workspace_root,
+        workspace_root=options.get("workspace_root"),
         harness_mcp_servers=harness_mcp_servers,
-        autonomous=autonomous,
+        autonomous=options.get("autonomous", False),
     )
 
     _wire_diverge_stage(
@@ -441,14 +454,14 @@ def _compile_research_adr(
                 team_config, agent_configs, "synthesist", synthesist_model
             ),
             name=_RA_SYNTHESIS,
-            autonomous=autonomous,
-            workspace_root=workspace_root,
+            autonomous=options.get("autonomous", False),
+            workspace_root=options.get("workspace_root"),
             role="synthesist",
             harness_mcp_servers=harness_mcp_servers,
-            cost_port=cost_port,
+            cost_port=options.get("cost_port"),
             # Feedback-loop grounding: the research-doc writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
-            feedback_reader=feedback_reader,
+            feedback_reader=options.get("feedback_reader"),
         ),
         metadata=synthesist_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -462,11 +475,11 @@ def _compile_research_adr(
                 team_config, agent_configs, "doc-reviewer", doc_reviewer_model
             ),
             name=_RA_RESEARCH_REVIEW,
-            autonomous=autonomous,
-            workspace_root=workspace_root,
+            autonomous=options.get("autonomous", False),
+            workspace_root=options.get("workspace_root"),
             role="doc-reviewer",
             harness_mcp_servers=harness_mcp_servers,
-            cost_port=cost_port,
+            cost_port=options.get("cost_port"),
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -480,14 +493,14 @@ def _compile_research_adr(
                 team_config, agent_configs, "adr-author", adr_author_model
             ),
             name=_RA_ADR_AUTHOR,
-            autonomous=autonomous,
-            workspace_root=workspace_root,
+            autonomous=options.get("autonomous", False),
+            workspace_root=options.get("workspace_root"),
             role="adr-author",
             harness_mcp_servers=harness_mcp_servers,
             # Feedback-loop grounding: the ADR writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
-            feedback_reader=feedback_reader,
-            cost_port=cost_port,
+            feedback_reader=options.get("feedback_reader"),
+            cost_port=options.get("cost_port"),
         ),
         metadata=adr_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -501,11 +514,11 @@ def _compile_research_adr(
                 team_config, agent_configs, "doc-reviewer", doc_reviewer_model
             ),
             name=_RA_ADR_REVIEW,
-            autonomous=autonomous,
-            workspace_root=workspace_root,
+            autonomous=options.get("autonomous", False),
+            workspace_root=options.get("workspace_root"),
             role="doc-reviewer",
             harness_mcp_servers=harness_mcp_servers,
-            cost_port=cost_port,
+            cost_port=options.get("cost_port"),
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -519,14 +532,14 @@ def _compile_research_adr(
                 team_config, agent_configs, "plan-author", plan_author_model
             ),
             name=_RA_PLAN_AUTHOR,
-            autonomous=autonomous,
-            workspace_root=workspace_root,
+            autonomous=options.get("autonomous", False),
+            workspace_root=options.get("workspace_root"),
             role="plan-author",
             harness_mcp_servers=harness_mcp_servers,
             # Feedback-loop grounding: the plan writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
-            feedback_reader=feedback_reader,
-            cost_port=cost_port,
+            feedback_reader=options.get("feedback_reader"),
+            cost_port=options.get("cost_port"),
         ),
         metadata=plan_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -540,11 +553,11 @@ def _compile_research_adr(
                 team_config, agent_configs, "doc-reviewer", doc_reviewer_model
             ),
             name=_RA_PLAN_REVIEW,
-            autonomous=autonomous,
-            workspace_root=workspace_root,
+            autonomous=options.get("autonomous", False),
+            workspace_root=options.get("workspace_root"),
             role="doc-reviewer",
             harness_mcp_servers=harness_mcp_servers,
-            cost_port=cost_port,
+            cost_port=options.get("cost_port"),
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -559,7 +572,7 @@ def _compile_research_adr(
         _RA_RESEARCH_SUBMIT,
         create_phase_submit_node(
             PipelinePhase.RESEARCH,
-            proposal_submitter,
+            options["proposal_submitter"],
             gate_target=_RA_RESEARCH_GATE,
             revision_target=_RA_SYNTHESIS,
         ),
@@ -578,7 +591,7 @@ def _compile_research_adr(
         _RA_ADR_SUBMIT,
         create_phase_submit_node(
             PipelinePhase.ADR,
-            proposal_submitter,
+            options["proposal_submitter"],
             gate_target=_RA_ADR_GATE,
             revision_target=_RA_ADR_AUTHOR,
         ),
@@ -597,7 +610,7 @@ def _compile_research_adr(
         _RA_PLAN_SUBMIT,
         create_phase_submit_node(
             PipelinePhase.PLAN,
-            proposal_submitter,
+            options["proposal_submitter"],
             gate_target=_RA_PLAN_GATE,
             revision_target=_RA_PLAN_AUTHOR,
         ),

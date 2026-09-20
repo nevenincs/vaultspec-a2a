@@ -95,6 +95,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from ..acceptance.tests._harness import CertifiedGateway
+    from ..api.schemas.gateway import ProviderCatalogSelection
     from ..conftest import ExternalPrerequisiteRule
     from ..providers._json_contract import JsonObject
 
@@ -501,6 +502,124 @@ def _submit_concurrent_continuations(
     return winning_marker, winning_key, accepted, conflicts
 
 
+def _clarification_request_id(body: JsonObject, *, at: str) -> str:
+    """Read the request id from a parked run-status payload."""
+    pending = _required_object(body, "pending_clarification", at=at)
+    return required_text(pending, "request_id", at=f"{at}.pending_clarification")
+
+
+def _assert_parked_clarification(
+    parked: JsonObject, expected_questions: list[JsonObject]
+) -> str:
+    """Assert the durable questionnaire shape and return its request id."""
+    pending = _required_object(parked, "pending_clarification", at="parked run-status")
+    request_id = required_text(pending, "request_id", at="parked pending clarification")
+    assert (
+        required_text(pending, "type", at="parked pending clarification")
+        == "clarification_request"
+    )
+    assert (
+        json_object_list(
+            pending.get("questions"), at="parked pending clarification.questions"
+        )
+        == expected_questions
+    )
+    topology = _required_object(parked, "topology", at="parked run-status")
+    assert (
+        required_text(topology, "pause_cause", at="parked topology")
+        == "clarification_request"
+    )
+    return request_id
+
+
+def _answers_for_questions(expected_questions: list[JsonObject]) -> dict[str, str]:
+    """Choose the same deterministic answer for every declared question."""
+    answers: dict[str, str] = {}
+    for question in expected_questions:
+        question_id = required_text(question, "id", at="declared question")
+        kind = required_text(question, "kind", at="declared question")
+        required = required_bool(question, "required", at="declared question")
+        options = _optional_text_list(question, "options", at="declared question")
+        if kind == "choice":
+            answers[question_id] = options[0] if options else ""
+        elif required:
+            answers[question_id] = "no additional constraints"
+    return answers
+
+
+def _assert_frozen_codex_selection(
+    parked: JsonObject, selection: ProviderCatalogSelection
+) -> None:
+    """Assert every frozen role reproduced the operator's Codex selection."""
+    frozen = _required_object(
+        parked, "frozen_assignment", at="Codex load parked run-status"
+    )
+    assignments = json_object_list(
+        frozen.get("assignments"), at="Codex load frozen assignments"
+    )
+    by_role = {
+        required_text(item, "role_id", at="frozen role assignment"): item
+        for item in assignments
+    }
+    assert set(by_role) == set(_required_roles())
+    for item in by_role.values():
+        assert item.get("provider_id") == selection.provider_id
+        assert item.get("execution_mode") == selection.execution_mode
+        assert item.get("catalog_revision") == selection.catalog_revision
+        assert item.get("entry_id") == selection.entry_id
+
+
+def _replay_codex_continuation(
+    gateway: CertifiedGateway,
+    run_id: str,
+    request_id: str,
+    winning_marker: str,
+    winning_key: str,
+) -> JsonObject:
+    """Poll the idempotent continuation until durable application is visible."""
+    replay_body: JsonObject = {}
+    replay_deadline = time.monotonic() + 90.0
+    while time.monotonic() < replay_deadline:
+        with gateway.client(timeout=60.0) as client:
+            replay = client.post(
+                f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
+                json={"prompt": winning_marker},
+                headers={"Idempotency-Key": winning_key},
+            )
+        assert replay.status_code == 200, replay.text
+        replay_body = _response_object(replay, at="replayed Codex continuation")
+        if replay_body.get("applied") is True:
+            break
+        time.sleep(0.5)
+    assert replay_body.get("applied") is True, replay_body
+    assert replay_body.get("action_status") == "applied"
+    return replay_body
+
+
+def _assert_codex_continuation_applied(
+    gateway: CertifiedGateway,
+    run_id: str,
+    winning_marker: str,
+    conflicts: list[ContinuationOutcome],
+    replay_body: JsonObject,
+) -> None:
+    """Assert one durable transcript turn, no losers, and successful cancel."""
+    state = _history_state(gateway, run_id)
+    messages = json_object_list(
+        state.get("messages"), at="Codex continuation transcript"
+    )
+    contents = [str(message.get("content") or "") for message in messages]
+    assert contents.count(winning_marker) == 1
+    assert all(contents.count(marker) == 0 for marker, _key, _resp in conflicts)
+    assert replay_body.get("accepted") is True
+
+    cancelled = gateway.cancel(
+        run_id,
+        idempotency_key=f"cancel-{run_id}",
+    )
+    assert cancelled.status_code == 200, cancelled.text
+
+
 # ---------------------------------------------------------------------------
 # The stitched loop
 # ---------------------------------------------------------------------------
@@ -541,29 +660,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
             # Ordering it ahead of the frame is what makes a later frame failure
             # diagnostic: it can no longer mean "the run never parked".
             parked = _await_parked(gateway, run_id, budget=_PARK_BUDGET)
-            pending = _required_object(
-                parked, "pending_clarification", at="parked run-status"
-            )
-            request_id = required_text(
-                pending, "request_id", at="parked pending clarification"
-            )
-
-            assert (
-                required_text(pending, "type", at="parked pending clarification")
-                == "clarification_request"
-            )
-            assert (
-                json_object_list(
-                    pending.get("questions"),
-                    at="parked pending clarification.questions",
-                )
-                == expected_questions
-            )
-            topology = _required_object(parked, "topology", at="parked run-status")
-            assert (
-                required_text(topology, "pause_cause", at="parked topology")
-                == "clarification_request"
-            )
+            request_id = _assert_parked_clarification(parked, expected_questions)
 
             # (3) Only now the relay. This assertion deliberately carries LESS
             # weight than the one above: the progress channel is droppable by
@@ -591,16 +688,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
                 assert option not in raw_frame
 
         # (4) Answer over real loopback HTTP, keyed by question id.
-        answers: dict[str, str] = {}
-        for question in expected_questions:
-            question_id = required_text(question, "id", at="declared question")
-            kind = required_text(question, "kind", at="declared question")
-            required = required_bool(question, "required", at="declared question")
-            options = _optional_text_list(question, "options", at="declared question")
-            if kind == "choice":
-                answers[question_id] = options[0] if options else ""
-            elif required:
-                answers[question_id] = "no additional constraints"
+        answers = _answers_for_questions(expected_questions)
         with gateway.client(timeout=60.0) as client:
             answered = client.post(
                 f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
@@ -740,32 +828,14 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
         assert started.status_code == 201, started.text
 
         parked = _await_parked(gateway, run_id, budget=_PARK_BUDGET)
-        pending = _required_object(
-            parked, "pending_clarification", at="Codex load parked run-status"
-        )
-        request_id = required_text(
-            pending, "request_id", at="Codex load pending clarification"
+        request_id = _clarification_request_id(
+            parked, at="Codex load pending clarification"
         )
 
         # This is the persisted freeze served by run-status, not the request
         # echoed back or a test-side re-resolution: every active role must
         # reproduce the operator's exact selection.
-        frozen = _required_object(
-            parked, "frozen_assignment", at="Codex load parked run-status"
-        )
-        assignments = json_object_list(
-            frozen.get("assignments"), at="Codex load frozen assignments"
-        )
-        by_role = {
-            required_text(item, "role_id", at="frozen role assignment"): item
-            for item in assignments
-        }
-        assert set(by_role) == set(_required_roles())
-        for item in by_role.values():
-            assert item.get("provider_id") == selection.provider_id
-            assert item.get("execution_mode") == selection.execution_mode
-            assert item.get("catalog_revision") == selection.catalog_revision
-            assert item.get("entry_id") == selection.entry_id
+        _assert_frozen_codex_selection(parked, selection)
 
         winning_marker, winning_key, accepted, conflicts = (
             _submit_concurrent_continuations(
@@ -780,34 +850,9 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
         assert accepted_body.get("accepted") is True
         assert accepted_body.get("action_status") == "accepted_not_applied"
 
-        replay_body: JsonObject = {}
-        replay_deadline = time.monotonic() + 90.0
-        while time.monotonic() < replay_deadline:
-            with gateway.client(timeout=60.0) as client:
-                replay = client.post(
-                    f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
-                    json={"prompt": winning_marker},
-                    headers={"Idempotency-Key": winning_key},
-                )
-            assert replay.status_code == 200, replay.text
-            replay_body = _response_object(replay, at="replayed Codex continuation")
-            if replay_body.get("applied") is True:
-                break
-            time.sleep(0.5)
-        assert replay_body.get("applied") is True, replay_body
-        assert replay_body.get("action_status") == "applied"
-
-        state = _history_state(gateway, run_id)
-        messages = json_object_list(
-            state.get("messages"), at="Codex continuation transcript"
+        replay_body = _replay_codex_continuation(
+            gateway, run_id, request_id, winning_marker, winning_key
         )
-        contents = [str(message.get("content") or "") for message in messages]
-        assert contents.count(winning_marker) == 1
-        assert all(contents.count(marker) == 0 for marker, _key, _resp in conflicts)
-        assert replay_body.get("accepted") is True
-
-        cancelled = gateway.cancel(
-            run_id,
-            idempotency_key=f"cancel-{run_id}",
+        _assert_codex_continuation_applied(
+            gateway, run_id, winning_marker, conflicts, replay_body
         )
-        assert cancelled.status_code == 200, cancelled.text

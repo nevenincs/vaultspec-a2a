@@ -178,6 +178,55 @@ async def _run_changeset_ids(ec: AuthoringClient, run_id: str) -> set[str]:
     return found
 
 
+async def _observe_solo_coder_run(
+    ec: AuthoringClient,
+    harness: AcceptanceHarness,
+    gateway_client: httpx.AsyncClient,
+    output_parts: list[str],
+    narrated_bridge_names: set[str],
+) -> set[str]:
+    """Poll the engine during the run, then cancel the stream unconditionally."""
+    deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
+    last_engine_poll = 0.0
+    run_changesets: set[str] = set()
+    try:
+        async with gateway_client.stream(
+            "GET",
+            f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
+            timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
+        ) as response:
+            response.raise_for_status()
+            async for raw_line in response.aiter_lines():
+                line = raw_line.strip()
+                terminal = False
+                if line.startswith("data:"):
+                    payload = _parse_event(line[len("data:") :].strip())
+                    content = _message_content(payload)
+                    if content:
+                        output_parts.append(content)
+                        narrated_bridge_names.update(
+                            _extract_bridge_tools("".join(output_parts))
+                        )
+                    terminal = payload.get("type") == "thread_terminal"
+                now = time.monotonic()
+                # Poll the engine (not the narration) for this run's changeset.
+                if now - last_engine_poll >= _ENGINE_POLL_SECONDS:
+                    last_engine_poll = now
+                    run_changesets = await _run_changeset_ids(ec, harness.run_id)
+                if run_changesets or now > deadline:
+                    break
+                if terminal:
+                    # Final authoritative check after the run settles.
+                    run_changesets = await _run_changeset_ids(ec, harness.run_id)
+                    break
+    finally:
+        await gateway_client.post(
+            f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
+            timeout=30.0,
+        )
+    return run_changesets
+
+
 @pytest.mark.service
 @pytest.mark.resource("loopback-stack")
 @pytest.mark.asyncio
@@ -216,7 +265,6 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
 
     before = _snapshot_vault(vault_root)
     output_parts: list[str] = []
-    run_changesets: set[str] = set()
     # Diagnostic only (NEVER asserted): the bridge tool names that appear in the
     # agent's narration. Retained to surface prompt-echo vs. real invocation when
     # reading a failure, but proof rests solely on the engine changeset below.
@@ -254,48 +302,13 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
                 feature=feature,
                 expect=201,
             )
-            deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
-            last_engine_poll = 0.0
-            try:
-                async with hc.stream(
-                    "GET",
-                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
-                    timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
-                ) as response:
-                    response.raise_for_status()
-                    async for raw_line in response.aiter_lines():
-                        line = raw_line.strip()
-                        terminal = False
-                        if line.startswith("data:"):
-                            payload = _parse_event(line[len("data:") :].strip())
-                            content = _message_content(payload)
-                            if content:
-                                output_parts.append(content)
-                                narrated_bridge_names.update(
-                                    _extract_bridge_tools("".join(output_parts))
-                                )
-                            terminal = payload.get("type") == "thread_terminal"
-                        now = time.monotonic()
-                        # Poll the engine (not the narration) for this run's
-                        # changeset - the unforgeable proof of a real invocation.
-                        if now - last_engine_poll >= _ENGINE_POLL_SECONDS:
-                            last_engine_poll = now
-                            run_changesets = await _run_changeset_ids(
-                                ec, harness.run_id
-                            )
-                        if run_changesets or now > deadline:
-                            break
-                        if terminal:
-                            # Final authoritative check after the run settles.
-                            run_changesets = await _run_changeset_ids(
-                                ec, harness.run_id
-                            )
-                            break
-            finally:
-                await hc.post(
-                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
-                    timeout=30.0,
-                )
+            run_changesets = await _observe_solo_coder_run(
+                ec,
+                harness,
+                hc,
+                output_parts,
+                narrated_bridge_names,
+            )
 
     after = _snapshot_vault(vault_root)
     delta = _vault_write_delta(before, after)

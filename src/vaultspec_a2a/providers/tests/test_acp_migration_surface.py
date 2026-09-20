@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -45,6 +46,108 @@ from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
 from ..factory import _CLAUDE_ACP_JS, _classify_acp_command
 from ._acp_frames import read_acp_frame
+
+if TYPE_CHECKING:
+    from asyncio.subprocess import Process
+
+
+async def _assert_initialize_surface(proc: Process) -> None:
+    assert proc.stdin is not None and proc.stdout is not None
+    init: JsonObject = {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": 1,
+            "clientCapabilities": {
+                "fs": {"readTextFile": True, "writeTextFile": False},
+            },
+            "clientInfo": {"name": "p02-s08-surface", "version": "1.0.0"},
+        },
+    }
+    proc.stdin.write(json.dumps(init).encode("utf-8") + b"\n")
+    await proc.stdin.drain()
+    init_frame = await read_acp_frame(proc.stdout, 0, 30.0)
+    assert "result" in init_frame, init_frame.get("error")
+    init_res = init_frame["result"]
+    assert isinstance(init_res, dict)
+
+    # protocolVersion our request pins and our fs/terminal RPC names are keyed to.
+    assert init_res.get("protocolVersion") == 1, init_res.get("protocolVersion")
+    # The two fields InitializeResult parses.
+    agent_caps = init_res.get("agentCapabilities")
+    assert isinstance(agent_caps, dict) and agent_caps
+    assert agent_caps.get("loadSession") is True
+    assert isinstance(init_res.get("authMethods"), list)
+
+
+async def _start_acp_session(proc: Process, workspace: str) -> tuple[str, str, str]:
+    assert proc.stdin is not None and proc.stdout is not None
+    # session/new with the claudeCode options block our layer emits on every
+    # claude-family session: strictMcpConfig plus the headless allowedTools
+    # auto-permit (production emission is pinned by the ACP-simulator
+    # conditioning tests; this proves the real adapter accepts the shape).
+    new: JsonObject = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "session/new",
+        "params": {
+            "cwd": workspace,
+            "mcpServers": list[JsonValue](),
+            "_meta": {
+                "claudeCode": {
+                    "options": {
+                        "strictMcpConfig": True,
+                        "allowedTools": ["mcp__vaultspec-rag__search"],
+                    }
+                }
+            },
+        },
+    }
+    proc.stdin.write(json.dumps(new).encode("utf-8") + b"\n")
+    await proc.stdin.drain()
+    new_frame = await read_acp_frame(proc.stdout, 1, 40.0)
+    assert "result" in new_frame, new_frame.get("error")
+    new_res = new_frame["result"]
+    assert isinstance(new_res, dict)
+
+    # The shape SessionSetupResult parses.
+    session_id = new_res.get("sessionId")
+    assert isinstance(session_id, str) and session_id
+    modes = new_res.get("modes")
+    assert isinstance(modes, dict), new_res
+    assert modes.get("currentModeId")
+    available = modes.get("availableModes")
+    assert isinstance(available, list) and available
+    assert all(isinstance(mode, dict) and "id" in mode for mode in available)
+
+    config_options = new_res.get("configOptions")
+    assert isinstance(config_options, list) and config_options
+    model_options = [
+        option
+        for option in config_options
+        if isinstance(option, dict) and option.get("category") == "model"
+    ]
+    assert len(model_options) == 1
+    model_option = model_options[0]
+    config_id = model_option.get("id")
+    assert isinstance(config_id, str) and config_id
+
+    # Take the model from what THIS session advertises, never from a table
+    # in source. External lanes carry no hardcoded model values precisely
+    # because provider catalogs move; a literal here would pass until the
+    # next CLI release retired the name and then fail for a reason that
+    # looks nothing like "the constant went stale".
+    advertised = model_option.get("options")
+    assert isinstance(advertised, list) and advertised, model_option
+    desired_model = next(
+        value
+        for choice in advertised
+        if isinstance(choice, dict)
+        for field in ("value", "modelId", "id")
+        if isinstance(value := choice.get(field), str) and value
+    )
+    return session_id, config_id, desired_model
 
 
 @pytest.mark.service
@@ -71,102 +174,14 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
     )
     assert proc.stdin is not None and proc.stdout is not None
     try:
-        init: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": 1,
-                "clientCapabilities": {
-                    "fs": {"readTextFile": True, "writeTextFile": False},
-                },
-                "clientInfo": {"name": "p02-s08-surface", "version": "1.0.0"},
-            },
-        }
-        proc.stdin.write(json.dumps(init).encode("utf-8") + b"\n")
-        await proc.stdin.drain()
-        init_frame = await read_acp_frame(proc.stdout, 0, 30.0)
-        assert "result" in init_frame, init_frame.get("error")
-        init_res = init_frame["result"]
-        assert isinstance(init_res, dict)
-
-        # protocolVersion our request pins and our fs/terminal RPC names are keyed to.
-        assert init_res.get("protocolVersion") == 1, init_res.get("protocolVersion")
-        # The two fields InitializeResult parses.
-        agent_caps = init_res.get("agentCapabilities")
-        assert isinstance(agent_caps, dict) and agent_caps
-        assert agent_caps.get("loadSession") is True
-        assert isinstance(init_res.get("authMethods"), list)
-
-        # session/new with the claudeCode options block our layer emits on every
-        # claude-family session: strictMcpConfig plus the headless allowedTools
-        # auto-permit (production emission is pinned by the ACP-simulator
-        # conditioning tests; this proves the real adapter accepts the shape).
-        new: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {
-                "cwd": workspace,
-                "mcpServers": list[JsonValue](),
-                "_meta": {
-                    "claudeCode": {
-                        "options": {
-                            "strictMcpConfig": True,
-                            "allowedTools": ["mcp__vaultspec-rag__search"],
-                        }
-                    }
-                },
-            },
-        }
-        proc.stdin.write(json.dumps(new).encode("utf-8") + b"\n")
-        await proc.stdin.drain()
-        new_frame = await read_acp_frame(proc.stdout, 1, 40.0)
-        assert "result" in new_frame, new_frame.get("error")
-        new_res = new_frame["result"]
-        assert isinstance(new_res, dict)
-
-        # The shape SessionSetupResult parses.
-        assert isinstance(new_res.get("sessionId"), str) and new_res["sessionId"]
-        modes = new_res.get("modes")
-        assert isinstance(modes, dict), new_res
-        assert modes.get("currentModeId")
-        available = modes.get("availableModes")
-        assert isinstance(available, list) and available
-        assert all(isinstance(mode, dict) and "id" in mode for mode in available)
-
-        config_options = new_res.get("configOptions")
-        assert isinstance(config_options, list) and config_options
-        model_options = [
-            option
-            for option in config_options
-            if isinstance(option, dict) and option.get("category") == "model"
-        ]
-        assert len(model_options) == 1
-        model_option = model_options[0]
-        config_id = model_option.get("id")
-        assert isinstance(config_id, str) and config_id
-
-        # Take the model from what THIS session advertises, never from a table
-        # in source. External lanes carry no hardcoded model values precisely
-        # because provider catalogs move; a literal here would pass until the
-        # next CLI release retired the name and then fail for a reason that
-        # looks nothing like "the constant went stale".
-        advertised = model_option.get("options")
-        assert isinstance(advertised, list) and advertised, model_option
-        desired_model = next(
-            value
-            for choice in advertised
-            if isinstance(choice, dict)
-            for field in ("value", "modelId", "id")
-            if isinstance(value := choice.get(field), str) and value
-        )
+        await _assert_initialize_surface(proc)
+        session_id, config_id, desired_model = await _start_acp_session(proc, workspace)
         select_model: JsonObject = {
             "jsonrpc": "2.0",
             "id": 2,
             "method": "session/set_config_option",
             "params": {
-                "sessionId": new_res["sessionId"],
+                "sessionId": session_id,
                 "configId": config_id,
                 "value": desired_model,
             },

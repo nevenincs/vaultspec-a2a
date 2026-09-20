@@ -15,7 +15,7 @@ import hashlib
 import logging
 import os
 import pathlib
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
@@ -70,21 +70,17 @@ if TYPE_CHECKING:
     from ...thread.state import TeamState
 
 
-class _Ingest(Protocol):
-    """Typed call signature for ``StreamAggregator.ingest``, whose production
-    ``graph_input`` parameter type carries an unparameterized ``Command``; re-typed
-    here so the call below doesn't propagate that Unknown into this test module."""
-
-    async def __call__(
-        self,
-        thread_id: str,
-        agent_id: str,
-        graph: StreamableGraph,
-        graph_input: dict[str, Any] | Command[Any] | None,
-        config: dict[str, Any],
-        *,
-        on_graph_started: Callable[[], Awaitable[None]] | None = None,
-    ) -> str: ...
+if TYPE_CHECKING:
+    _Ingest = Callable[
+        [
+            str,
+            str,
+            StreamableGraph,
+            dict[str, Any] | Command[Any] | None,
+            dict[str, Any],
+        ],
+        Awaitable[str],
+    ]
 
 
 # ---------------------------------------------------------------------------

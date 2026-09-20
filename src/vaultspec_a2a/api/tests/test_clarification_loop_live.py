@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -40,12 +41,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ...control.accepted_input import freeze_accepted_input
 from ...control.action_lease import (
     CONTROL_ACTION_LEASE_TTL,
+    ControlActionClaim,
     ControlActionClaimRequest,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.clarification_service import (
+    ClarificationRecoverySummary,
     ClarificationRuntime,
     redrive_clarification_actions,
 )
@@ -83,7 +86,13 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from ...worker.graph_lifecycle import GraphCacheKey
+    from ...database.models import ThreadModel
+    from ...worker.graph_lifecycle import (
+        GraphCacheKey,
+        GraphStateSnapshot,
+        RegisteredCompiledGraph,
+    )
+    from .clarification_harness import ParkedClarification
 
 _BUNDLE_FREE_PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
@@ -115,6 +124,141 @@ async def _worker_test_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     yield
 
 
+async def _wait_for_answered_clarification(
+    graph: RegisteredCompiledGraph, config: RunnableConfig
+) -> GraphStateSnapshot:
+    """Wait until the real graph records answers for the parked request."""
+    with anyio.fail_after(15.0):
+        while True:
+            snap = await graph.aget_state(config)
+            if snap.values.get("clarification_answers"):
+                return snap
+            await anyio.sleep(0.05)
+
+
+async def _wait_for_terminal_graph(
+    graph: RegisteredCompiledGraph,
+    config: RunnableConfig,
+    initial_messages: list[BaseMessage],
+) -> tuple[GraphStateSnapshot, list[BaseMessage]]:
+    """Wait for terminal graph state and return its durable transcript."""
+    with anyio.fail_after(15.0):
+        while True:
+            settled = await graph.aget_state(config)
+            messages = cast("list[BaseMessage]", settled.values["messages"])
+            if settled.next == () and len(messages) > len(initial_messages):
+                return settled, messages
+            await anyio.sleep(0.05)
+
+
+@dataclass(frozen=True, slots=True)
+class _ParkedRun:
+    """Gateway and checkpoint values for one parked clarification graph."""
+
+    thread_id: str
+    cache_key: GraphCacheKey
+    parked: ParkedClarification
+    config: RunnableConfig
+
+
+@dataclass(frozen=True, slots=True)
+class _ExpiredClaim:
+    """An accepted clarification resume whose lease has already expired."""
+
+    request_id: str
+    idempotency_key: str
+    claim: ControlActionClaim
+
+
+@dataclass(frozen=True, slots=True)
+class _RecoveryOutcome:
+    """The two recovery summaries and settled graph snapshot."""
+
+    first: ClarificationRecoverySummary
+    settled: GraphStateSnapshot
+    second: ClarificationRecoverySummary
+
+
+async def _create_parked_run(
+    gateway_client: httpx.AsyncClient,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+) -> _ParkedRun:
+    create_resp = await gateway_client.post(
+        "/v1/runs",
+        json={
+            "team_preset": _BUNDLE_FREE_PRESET,
+            "message": "plan it",
+            "run_id": f"clarify-loop-{next(_RUN_SEQ):02d}",
+            **await async_catalog_run_fields(gateway_client),
+        },
+    )
+    assert create_resp.status_code == 201
+    thread_id = create_resp.json()["run_id"]
+    cache_key = await _cache_key_for_thread(session_factory, thread_id)
+    parked = await park_clarification(
+        checkpointer,
+        thread_id=thread_id,
+        model_assignment_digest=cache_key[3],
+        graph_definition_digest=cache_key[4],
+    )
+    return _ParkedRun(
+        thread_id=thread_id,
+        cache_key=cache_key,
+        parked=parked,
+        config={"configurable": {"thread_id": thread_id}},
+    )
+
+
+async def _load_parked_run(
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    thread_id: str,
+) -> _ParkedRun:
+    cache_key = await _cache_key_for_thread(session_factory, thread_id)
+    parked = await park_clarification(checkpointer, thread_id=thread_id)
+    return _ParkedRun(
+        thread_id=thread_id,
+        cache_key=cache_key,
+        parked=parked,
+        config={"configurable": {"thread_id": thread_id}},
+    )
+
+
+async def _initial_messages(run: _ParkedRun) -> list[BaseMessage]:
+    before = await run.parked.graph.aget_state(run.config)
+    assert before.next == ("clarification_gate",)
+    assert before.values["clarification_request_id"] == run.parked.request.request_id
+    return cast("list[BaseMessage]", before.values["messages"])
+
+
+@asynccontextmanager
+async def _real_worker(
+    app: FastAPI | None,
+    run: _ParkedRun,
+    checkpointer: AsyncSqliteSaver,
+) -> AsyncGenerator[httpx.AsyncClient]:
+    """Attach a real worker client and shut its executor down on every exit."""
+    async with loopback_callback_bridge() as bridge:
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        executor.register_compiled_graph(run.thread_id, run.cache_key, run.parked.graph)
+        worker_app = create_worker_app(lifespan=_worker_test_lifespan)
+        worker_app.state.executor = executor
+        try:
+            async with (
+                httpx.AsyncClient(
+                    transport=ASGITransport(app=worker_app), base_url="http://worker"
+                ) as worker_client,
+                anyio.create_task_group() as tg,
+            ):
+                worker_app.state.task_group = tg
+                if app is not None:
+                    app.state.worker_client = worker_client
+                yield worker_client
+        finally:
+            await executor.shutdown()
+
+
 @pytest.mark.asyncio
 async def test_respond_resumes_through_a_real_worker_and_executor(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -131,29 +275,11 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://gateway"
     ) as gateway_client:
-        create_resp = await gateway_client.post(
-            "/v1/runs",
-            json={
-                "team_preset": _BUNDLE_FREE_PRESET,
-                "message": "plan it",
-                "run_id": f"clarify-loop-{next(_RUN_SEQ):02d}",
-                **await async_catalog_run_fields(gateway_client),
-            },
-        )
-        assert create_resp.status_code == 201
-        thread_id = create_resp.json()["run_id"]
-
-        cache_key = await _cache_key_for_thread(session_factory, thread_id)
-        parked = await park_clarification(
-            checkpointer,
-            thread_id=thread_id,
-            model_assignment_digest=cache_key[3],
-            graph_definition_digest=cache_key[4],
-        )
-        request_id = parked.request.request_id
+        run = await _create_parked_run(gateway_client, session_factory, checkpointer)
+        request_id = run.parked.request.request_id
 
         # Disclosure still works normally (unaffected by the worker swap below).
-        status_resp = await gateway_client.get(f"/v1/runs/{thread_id}")
+        status_resp = await gateway_client.get(f"/v1/runs/{run.thread_id}")
         assert status_resp.status_code == 200
         disclosed = status_resp.json()["pending_clarification"]
         assert disclosed is not None
@@ -162,83 +288,53 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
         # --- swap the recording receiver for a real Executor + real worker app,
         # wired to the SAME parked graph through the public atomic registration
         # seam and a real ephemeral loopback callback server. ---
-        async with loopback_callback_bridge() as bridge:
-            executor = Executor(checkpointer=checkpointer, bridge=bridge)
-            executor.register_compiled_graph(
-                thread_id,
-                cache_key,
-                parked.graph,
+        async with _real_worker(app, run, checkpointer):
+            respond_resp = await gateway_client.post(
+                f"/v1/runs/{run.thread_id}/clarifications/{request_id}/respond",
+                json={"answers": {"provider": "codex"}},
             )
+            assert respond_resp.status_code == 200
+            body = respond_resp.json()
+            assert body["accepted"] is True
 
-            worker_app = create_worker_app(lifespan=_worker_test_lifespan)
-            worker_app.state.executor = executor
-
-            async with (
-                httpx.AsyncClient(
-                    transport=ASGITransport(app=worker_app), base_url="http://worker"
-                ) as worker_client,
-                anyio.create_task_group() as tg,
-            ):
-                # ASGITransport never runs FastAPI's lifespan protocol, so the
-                # dispatch route's fire-and-forget scheduling needs its task
-                # group wired explicitly, matching the real worker's lifespan.
-                worker_app.state.task_group = tg
-                app.state.worker_client = worker_client
-
-                respond_resp = await gateway_client.post(
-                    f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
-                    json={"answers": {"provider": "codex"}},
-                )
-                assert respond_resp.status_code == 200
-                body = respond_resp.json()
-                assert body["accepted"] is True
-
-                # Race replay reads against the real worker's application
-                # receipt.  The lease helper may roll back a losing transaction;
-                # every response must remain an ordinary durable replay rather
-                # than dereferencing rollback-expired ORM state and returning
-                # MissingGreenlet/HTTP 500.
-                replay_path = (
-                    f"/v1/runs/{thread_id}/clarifications/{request_id}/respond"
-                )
-                replays = await asyncio.gather(
-                    *(
-                        gateway_client.post(
-                            replay_path,
-                            json={"answers": {"provider": "codex"}},
-                        )
-                        for _ in range(6)
+            # Race replay reads against the real worker's application
+            # receipt.  The lease helper may roll back a losing transaction;
+            # every response must remain an ordinary durable replay rather
+            # than dereferencing rollback-expired ORM state and returning
+            # MissingGreenlet/HTTP 500.
+            replay_path = (
+                f"/v1/runs/{run.thread_id}/clarifications/{request_id}/respond"
+            )
+            replays = await asyncio.gather(
+                *(
+                    gateway_client.post(
+                        replay_path,
+                        json={"answers": {"provider": "codex"}},
                     )
+                    for _ in range(6)
                 )
-                assert [response.status_code for response in replays] == [200] * 6, [
-                    response.text for response in replays
-                ]
+            )
+            assert [response.status_code for response in replays] == [200] * 6, [
+                response.text for response in replays
+            ]
 
-                # The dispatch is fire-and-forget inside the worker; poll the
-                # REAL graph's own state (not a recorded receiver call) until
-                # the real clarification node observes the resume.
-                config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-                with anyio.fail_after(15.0):
-                    while True:
-                        snap = await parked.graph.aget_state(config)
-                        if snap.values.get("clarification_answers"):
-                            break
-                        await anyio.sleep(0.05)
+            # The dispatch is fire-and-forget inside the worker; poll the
+            # REAL graph's own state (not a recorded receiver call) until
+            # the real clarification node observes the resume.
+            snap = await _wait_for_answered_clarification(run.parked.graph, run.config)
 
-                assert snap.values["clarification_answers"] == {
-                    request_id: {"provider": "codex"}
-                }
-                assert snap.next == (), "the graph did not reach its terminal state"
-                # The answered questionnaire also reaches the transcript - the
-                # one state downstream model turns actually read.
-                transcript = cast("list[BaseMessage]", snap.values["messages"])
-                assert transcript[-1].type == "human"
-                assert transcript[-1].content == (
-                    "Answers to the clarification questionnaire:\n"
-                    "- Which provider should author the plan?: codex"
-                )
-
-            await executor.shutdown()
+            assert snap.values["clarification_answers"] == {
+                request_id: {"provider": "codex"}
+            }
+            assert snap.next == (), "the graph did not reach its terminal state"
+            # The answered questionnaire also reaches the transcript - the
+            # one state downstream model turns actually read.
+            transcript = cast("list[BaseMessage]", snap.values["messages"])
+            assert transcript[-1].type == "human"
+            assert transcript[-1].content == (
+                "Answers to the clarification questionnaire:\n"
+                "- Which provider should author the plan?: codex"
+            )
 
 
 @pytest.mark.asyncio
@@ -257,81 +353,35 @@ async def test_new_prompt_resumes_the_parked_graph_as_a_real_human_turn(
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://gateway"
     ) as gateway_client:
-        create_resp = await gateway_client.post(
-            "/v1/runs",
-            json={
-                "team_preset": _BUNDLE_FREE_PRESET,
-                "message": "plan it",
-                "run_id": f"clarify-loop-{next(_RUN_SEQ):02d}",
-                **await async_catalog_run_fields(gateway_client),
-            },
-        )
-        assert create_resp.status_code == 201
-        thread_id = create_resp.json()["run_id"]
+        run = await _create_parked_run(gateway_client, session_factory, checkpointer)
+        request_id = run.parked.request.request_id
+        initial_messages = await _initial_messages(run)
 
-        cache_key = await _cache_key_for_thread(session_factory, thread_id)
-        parked = await park_clarification(
-            checkpointer,
-            thread_id=thread_id,
-            model_assignment_digest=cache_key[3],
-            graph_definition_digest=cache_key[4],
-        )
-        request_id = parked.request.request_id
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        async with _real_worker(app, run, checkpointer):
+            prompt = "Use your own judgement and compare both provider paths."
+            respond = await gateway_client.post(
+                f"/v1/runs/{run.thread_id}/clarifications/{request_id}/respond",
+                json={"prompt": prompt},
+            )
+            assert respond.status_code == 200, respond.text
 
-        before = await parked.graph.aget_state(config)
-        assert before.next == ("clarification_gate",)
-        assert before.values["clarification_request_id"] == request_id
-        initial_messages = cast("list[BaseMessage]", before.values["messages"])
-
-        async with loopback_callback_bridge() as bridge:
-            executor = Executor(checkpointer=checkpointer, bridge=bridge)
-            executor.register_compiled_graph(
-                thread_id,
-                cache_key,
-                parked.graph,
+            settled, messages = await _wait_for_terminal_graph(
+                run.parked.graph,
+                run.config,
+                initial_messages,
             )
 
-            worker_app = create_worker_app(lifespan=_worker_test_lifespan)
-            worker_app.state.executor = executor
-
-            async with (
-                httpx.AsyncClient(
-                    transport=ASGITransport(app=worker_app), base_url="http://worker"
-                ) as worker_client,
-                anyio.create_task_group() as tg,
-            ):
-                worker_app.state.task_group = tg
-                app.state.worker_client = worker_client
-
-                prompt = "Use your own judgement and compare both provider paths."
-                respond = await gateway_client.post(
-                    f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
-                    json={"prompt": prompt},
-                )
-                assert respond.status_code == 200, respond.text
-
-                with anyio.fail_after(15.0):
-                    while True:
-                        settled = await parked.graph.aget_state(config)
-                        messages = cast("list[BaseMessage]", settled.values["messages"])
-                        if settled.next == () and len(messages) > len(initial_messages):
-                            break
-                        await anyio.sleep(0.05)
-
-                appended = messages[len(initial_messages) :]
-                assert len(appended) == 1
-                assert appended[0].type == "human"
-                assert appended[0].content == prompt
-                assert settled.values.get("clarification_request") is None
-                assert settled.values.get("clarification_request_id") is None
-                recorded_answers = cast(
-                    "dict[str, dict[str, str]]",
-                    settled.values.get("clarification_answers", {}),
-                )
-                assert request_id not in recorded_answers
-
-            await executor.shutdown()
+            appended = messages[len(initial_messages) :]
+            assert len(appended) == 1
+            assert appended[0].type == "human"
+            assert appended[0].content == prompt
+            assert settled.values.get("clarification_request") is None
+            assert settled.values.get("clarification_request_id") is None
+            recorded_answers = cast(
+                "dict[str, dict[str, str]]",
+                settled.values.get("clarification_answers", {}),
+            )
+            assert request_id not in recorded_answers
 
 
 @pytest.mark.asyncio
@@ -351,94 +401,39 @@ async def test_decline_resumes_the_parked_graph_with_the_fixed_marker(
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://gateway"
     ) as gateway_client:
-        create_resp = await gateway_client.post(
-            "/v1/runs",
-            json={
-                "team_preset": _BUNDLE_FREE_PRESET,
-                "message": "plan it",
-                "run_id": f"clarify-loop-{next(_RUN_SEQ):02d}",
-                **await async_catalog_run_fields(gateway_client),
-            },
-        )
-        assert create_resp.status_code == 201
-        thread_id = create_resp.json()["run_id"]
+        run = await _create_parked_run(gateway_client, session_factory, checkpointer)
+        request_id = run.parked.request.request_id
+        initial_messages = await _initial_messages(run)
 
-        cache_key = await _cache_key_for_thread(session_factory, thread_id)
-        parked = await park_clarification(
-            checkpointer,
-            thread_id=thread_id,
-            model_assignment_digest=cache_key[3],
-            graph_definition_digest=cache_key[4],
-        )
-        request_id = parked.request.request_id
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        async with _real_worker(app, run, checkpointer):
+            respond = await gateway_client.post(
+                f"/v1/runs/{run.thread_id}/clarifications/{request_id}/respond",
+                json={"decline": True},
+            )
+            assert respond.status_code == 200, respond.text
 
-        before = await parked.graph.aget_state(config)
-        assert before.next == ("clarification_gate",)
-        initial_messages = cast("list[BaseMessage]", before.values["messages"])
-
-        async with loopback_callback_bridge() as bridge:
-            executor = Executor(checkpointer=checkpointer, bridge=bridge)
-            executor.register_compiled_graph(
-                thread_id,
-                cache_key,
-                parked.graph,
+            settled, messages = await _wait_for_terminal_graph(
+                run.parked.graph,
+                run.config,
+                initial_messages,
             )
 
-            worker_app = create_worker_app(lifespan=_worker_test_lifespan)
-            worker_app.state.executor = executor
-
-            async with (
-                httpx.AsyncClient(
-                    transport=ASGITransport(app=worker_app), base_url="http://worker"
-                ) as worker_client,
-                anyio.create_task_group() as tg,
-            ):
-                worker_app.state.task_group = tg
-                app.state.worker_client = worker_client
-
-                respond = await gateway_client.post(
-                    f"/v1/runs/{thread_id}/clarifications/{request_id}/respond",
-                    json={"decline": True},
-                )
-                assert respond.status_code == 200, respond.text
-
-                with anyio.fail_after(15.0):
-                    while True:
-                        settled = await parked.graph.aget_state(config)
-                        messages = cast("list[BaseMessage]", settled.values["messages"])
-                        if settled.next == () and len(messages) > len(initial_messages):
-                            break
-                        await anyio.sleep(0.05)
-
-                appended = messages[len(initial_messages) :]
-                assert len(appended) == 1
-                assert appended[0].type == "human"
-                assert appended[0].content == CLARIFICATION_DECLINE_MARKER
-                assert settled.values.get("clarification_request") is None
-                assert settled.values.get("clarification_request_id") is None
-                recorded_answers = cast(
-                    "dict[str, dict[str, str]]",
-                    settled.values.get("clarification_answers", {}),
-                )
-                assert request_id not in recorded_answers
-
-            await executor.shutdown()
+            appended = messages[len(initial_messages) :]
+            assert len(appended) == 1
+            assert appended[0].type == "human"
+            assert appended[0].content == CLARIFICATION_DECLINE_MARKER
+            assert settled.values.get("clarification_request") is None
+            assert settled.values.get("clarification_request_id") is None
+            recorded_answers = cast(
+                "dict[str, dict[str, str]]",
+                settled.values.get("clarification_answers", {}),
+            )
+            assert request_id not in recorded_answers
 
 
-@pytest.mark.asyncio
-async def test_restart_redrives_an_expired_committed_clarification_lease(
-    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
-) -> None:
-    """Startup recovery resumes a parked graph after claim-before-dispatch loss.
-
-    The database and checkpointer are both file-backed.  The first process is
-    represented by the production lease claim committed with an already-expired
-    ownership window, then disappearing before dispatch.  A new recovery pass
-    uses the stored typed payload and stable dispatch identity to drive the real
-    worker and Executor.  A second pass settles from checkpoint truth without
-    dispatching again.
-    """
+async def _seed_clarification_run(
+    session_factory: SessionFactory,
+) -> tuple[ThreadModel, str]:
     async with session_factory() as db:
         authority = make_test_write_authority()
         metadata = current_execution_metadata(Path.cwd())
@@ -480,25 +475,26 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
             is not None
         )
         await db.commit()
-        thread_id = thread.id
+        return thread, metadata
 
-    cache_key = await _cache_key_for_thread(session_factory, thread_id)
-    # This current-schema run predates checkpoint evidence. The production
-    # resume command must bind the exact durable digest atomically with the
-    # interrupt response, without an update_state call that invalidates it.
-    parked = await park_clarification(checkpointer, thread_id=thread_id)
-    request_id = parked.request.request_id
+
+async def _prepare_expired_claim(
+    session_factory: SessionFactory,
+    thread: ThreadModel,
+    metadata: str,
+    run: _ParkedRun,
+) -> _ExpiredClaim:
+    request_id = run.parked.request.request_id
     resolution = ClarificationAnswers(
         request_id=request_id,
         answers={"provider": "codex"},
     )
     idempotency_key = f"clarification-response:{request_id}"
-
     async with session_factory() as db:
-        definition = await read_accepted_graph_definition(db, thread_id)
+        definition = await read_accepted_graph_definition(db, run.thread_id)
         resume = DispatchRequest(
             action="resume",
-            thread_id=thread_id,
+            thread_id=run.thread_id,
             option_id=resolution.as_resume_value(),
             workspace_root=str(Path.cwd()),
             recursion_limit=100,
@@ -506,10 +502,10 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
             graph_definition=definition,
             model_assignment=resolve_execution_authority(metadata).model_assignment,
         )
-        lost_claim = await prepare_control_action_claim(
+        claim = await prepare_control_action_claim(
             db,
             request=ControlActionClaimRequest(
-                thread_id=thread_id,
+                thread_id=run.thread_id,
                 action_type=ControlActionType.RESUME,
                 idempotency_key=idempotency_key,
                 request_id=request_id,
@@ -523,88 +519,107 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
                 recovery_timeout_seconds=300,
             ),
         )
-        assert lost_claim.acquired is True
-        await finalize_control_action_acceptance(db, lost_claim)
+        assert claim.acquired is True
+        await finalize_control_action_acceptance(db, claim)
         await db.commit()
-    assert lost_claim.acquired is True
+    assert claim.acquired is True
+    return _ExpiredClaim(
+        request_id=request_id,
+        idempotency_key=idempotency_key,
+        claim=claim,
+    )
 
-    async with loopback_callback_bridge() as bridge:
-        executor = Executor(checkpointer=checkpointer, bridge=bridge)
-        executor.register_compiled_graph(
-            thread_id,
-            cache_key,
-            parked.graph,
+
+async def _wait_for_terminal_state(
+    graph: RegisteredCompiledGraph, config: RunnableConfig
+) -> GraphStateSnapshot:
+    """Wait until a recovery resume reaches the graph's terminal state."""
+    with anyio.fail_after(15.0):
+        while True:
+            settled = await graph.aget_state(config)
+            if settled.next == ():
+                return settled
+            await anyio.sleep(0.05)
+
+
+async def _redrive_expired_claim(
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    run: _ParkedRun,
+    claim: _ExpiredClaim,
+) -> _RecoveryOutcome:
+    circuit_breaker = WorkerCircuitBreaker(
+        failure_threshold=3,
+        recovery_timeout=30.0,
+    )
+    worker_spawner = LazyWorkerSpawner(
+        worker_url="http://worker",
+        worker_port=8001,
+        auto_spawn=False,
+    )
+    worker_spawner.replace_process(None)
+    async with _real_worker(None, run, checkpointer) as worker_client:
+        runtime = ClarificationRuntime(
+            checkpointer,
+            worker_client,
+            circuit_breaker,
+            worker_spawner,
+            100,
+            None,
         )
-        worker_app = create_worker_app(lifespan=_worker_test_lifespan)
-        worker_app.state.executor = executor
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=3,
-            recovery_timeout=30.0,
+        first = await redrive_clarification_actions(
+            session_factory,
+            runtime=runtime,
         )
-        worker_spawner = LazyWorkerSpawner(
-            worker_url="http://worker",
-            worker_port=8001,
-            auto_spawn=False,
+        settled = await _wait_for_terminal_state(run.parked.graph, run.config)
+        second = await redrive_clarification_actions(
+            session_factory,
+            runtime=runtime,
         )
-        worker_spawner.replace_process(None)
+    return _RecoveryOutcome(first=first, settled=settled, second=second)
 
-        async with (
-            httpx.AsyncClient(
-                transport=ASGITransport(app=worker_app), base_url="http://worker"
-            ) as worker_client,
-            anyio.create_task_group() as tg,
-        ):
-            worker_app.state.task_group = tg
-            first = await redrive_clarification_actions(
-                session_factory,
-                runtime=ClarificationRuntime(
-                    checkpointer,
-                    worker_client,
-                    circuit_breaker,
-                    worker_spawner,
-                    100,
-                    None,
-                ),
-            )
-            assert first.examined == 1
-            assert first.dispatched == 1
 
-            config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-            with anyio.fail_after(15.0):
-                while True:
-                    settled = await parked.graph.aget_state(config)
-                    if settled.next == ():
-                        break
-                    await anyio.sleep(0.05)
+@pytest.mark.asyncio
+async def test_restart_redrives_an_expired_committed_clarification_lease(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """Startup recovery resumes a parked graph after claim-before-dispatch loss.
 
-            assert settled.values["clarification_answers"] == {
-                request_id: {"provider": "codex"}
-            }
-            assert settled.values["model_assignment_digest"] == cache_key[3]
-
-            second = await redrive_clarification_actions(
-                session_factory,
-                runtime=ClarificationRuntime(
-                    checkpointer,
-                    worker_client,
-                    circuit_breaker,
-                    worker_spawner,
-                    100,
-                    None,
-                ),
-            )
-            assert second.examined == 1
-            assert second.applied == 1
-            assert second.dispatched == 0
-
-        await executor.shutdown()
+    The database and checkpointer are both file-backed.  The first process is
+    represented by the production lease claim committed with an already-expired
+    ownership window, then disappearing before dispatch.  A new recovery pass
+    uses the stored typed payload and stable dispatch identity to drive the real
+    worker and Executor.  A second pass settles from checkpoint truth without
+    dispatching again.
+    """
+    thread, metadata = await _seed_clarification_run(session_factory)
+    run = await _load_parked_run(session_factory, checkpointer, thread.id)
+    # This current-schema run predates checkpoint evidence. The production
+    # resume command must bind the exact durable digest atomically with the
+    # interrupt response, without an update_state call that invalidates it.
+    claim = await _prepare_expired_claim(session_factory, thread, metadata, run)
+    outcome = await _redrive_expired_claim(
+        session_factory,
+        checkpointer,
+        run,
+        claim,
+    )
+    assert outcome.first.examined == 1
+    assert outcome.first.dispatched == 1
+    assert outcome.settled.values["clarification_answers"] == {
+        claim.request_id: {"provider": "codex"}
+    }
+    assert outcome.settled.values["model_assignment_digest"] == run.cache_key[3]
+    assert outcome.second.examined == 1
+    assert outcome.second.applied == 1
+    assert outcome.second.dispatched == 0
 
     async with session_factory() as db:
         action = await get_control_action_by_idempotency_key(
             db,
-            thread_id=thread_id,
-            idempotency_key=idempotency_key,
+            thread_id=run.thread_id,
+            idempotency_key=claim.idempotency_key,
         )
     assert action is not None
-    assert action.dispatch_id == lost_claim.dispatch_id
+    assert action.dispatch_id == claim.claim.dispatch_id
     assert action.applied_at is not None

@@ -94,7 +94,11 @@ from ..circuit_breaker import WorkerCircuitBreaker
 from ..verdict_subscriber import VerdictSubscriber, VerdictSubscriberConfig
 from ..worker_management import LazyWorkerSpawner
 from ._catalog_authority import current_execution_metadata
-from .test_verdict_subscriber_live import _decide, _submit_proposal
+from .test_verdict_subscriber_live import (
+    _decide,
+    _DecisionRequest,
+    _submit_proposal,
+)
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -220,23 +224,9 @@ async def _worker_test_lifespan(app: FastAPI):
     yield
 
 
-@pytest.mark.service
-@pytest.mark.asyncio
-async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
-    client: AuthoringClient, tmp_path: Any
-) -> None:
-    """Engine verdict -> subscriber -> real worker HTTP -> real graph resume.
-
-    One proposal, submitted and approved for real against the live engine.
-    The subscriber correlates the real decision event and dispatches
-    ``Command(resume=...)`` over a REAL bearer-checked HTTP POST to a REAL
-    worker app, whose REAL Executor resumes a REAL checkpointed graph past
-    its interrupt. The test asserts the graph's own state (not a recording
-    stub) shows the resume landed, and that the durable gate row + thread
-    status resolved the same way the engine-side reconcile tests already
-    proved for a stubbed worker.
-    """
-    run_id = f"vl-{uuid.uuid4().hex[:8]}"
+async def _prepare_live_verdict_case(
+    client: AuthoringClient, run_id: str
+) -> tuple[int, dict[str, str]]:
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
     assert isinstance(minted, AuthoringResponse)
     client._actor_token = minted.data["raw_token"]
@@ -255,9 +245,230 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
     reviewer_token = reviewer.data["raw_token"]
 
     info = await _submit_proposal(session, run_id, "vl")
-    await _decide(client, reviewer_token, info, "approve", "ship it", run_id, "vl")
+    await _decide(
+        client,
+        _DecisionRequest(reviewer_token, info, "approve", "ship it", run_id, "vl"),
+    )
+    return baseline, info
 
-    # --- a2a side: real DB, real checkpointer, real worker, real graph ---
+
+async def _ingest_live_verdict_run(
+    session_factory: async_sessionmaker[AsyncSession],
+    worker_client: httpx.AsyncClient,
+    graph: RegisteredCompiledGraph,
+    *,
+    thread_id: str,
+    info: dict[str, str],
+    definition: FrozenGraphDefinition,
+    model_assignment: dict[str, dict[str, object]],
+    metadata: str,
+) -> RunnableConfig:
+    authority = make_test_write_authority()
+    ingest = DispatchRequest(
+        dispatch_id=authority.action_receipt_id,
+        action="ingest",
+        workspace_root=_WORKSPACE,
+        thread_id=thread_id,
+        content="drive to the gate",
+        team_preset="mock-success-single",
+        graph_definition=definition,
+        recursion_limit=10,
+        model_assignment=model_assignment,
+        actor_tokens=ActorTokenBundle(
+            tokens={"vaultspec-synthesist": "vl-token"},
+            engine_bearer="vl-bearer",
+        ),
+    )
+    async with session_factory() as db:
+        await create_thread(
+            db,
+            write_authority=authority,
+            thread_id=thread_id,
+            team_preset="mock-success-single",
+            metadata=metadata,
+        )
+        await create_control_action(
+            db,
+            thread_id=thread_id,
+            action_type=authority.action_type,
+            idempotency_key=f"thread-create:{thread_id}",
+            dispatch_id=authority.action_receipt_id,
+            payload=freeze_accepted_input(
+                ingest, intent={"content": "drive to the gate"}
+            ),
+        )
+        receipt = await prepare_graph_action_receipt(
+            db,
+            thread_id=thread_id,
+            dispatch_id=authority.action_receipt_id,
+        )
+        assert receipt is not None
+        await db.commit()
+    response = await worker_client.post(
+        "/dispatch", json=ingest.model_dump(mode="json")
+    )
+    assert response.status_code == 200, response.text
+
+    # Fire-and-forget: poll the REAL graph's own state until the seed node has
+    # landed and the run is parked at the interrupt.
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    with anyio.fail_after(15.0):
+        while True:
+            snap = await graph.aget_state(config)
+            if snap.values.get("gate_pending_proposal_id") == info[
+                "proposal_id"
+            ] and snap.next == ("gate",):
+                break
+            await anyio.sleep(0.05)
+
+    # Seed the durable gate row the subscriber correlates against - the same
+    # shape the engine-side reconcile tests seed, now AFTER a genuine interrupt.
+    async with session_factory() as db:
+        await update_thread_status(db, thread_id, ThreadStatus.INPUT_REQUIRED)
+        await record_permission_request(
+            db,
+            request_id=f"{thread_id}:verdict-loop-gate",
+            thread_id=thread_id,
+            pause_reason_type="document_approval_request",
+            description="Approve the test document",
+            allowed_options=[
+                {
+                    "option_id": "approve",
+                    "name": "Approve",
+                    "kind": "allow_once",
+                }
+            ],
+        )
+        await db.commit()
+    return config
+
+
+async def _resume_live_verdict_run(
+    client: AuthoringClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    worker_client: httpx.AsyncClient,
+    graph: RegisteredCompiledGraph,
+    config: RunnableConfig,
+    *,
+    baseline: int,
+    info: dict[str, str],
+    thread_id: str,
+) -> None:
+    subscriber = VerdictSubscriber(
+        VerdictSubscriberConfig(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            worker_client=worker_client,
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=3, recovery_timeout=30.0
+            ),
+            worker_spawner=LazyWorkerSpawner(
+                worker_url="http://worker", worker_port=1, auto_spawn=False
+            ),
+            endpoint_provider=lambda: None,
+            recursion_limit=10,
+        )
+    )
+
+    frames = [f async for f in client.stream_lifecycle(last_seq=baseline)]
+    lifecycle = [f for f in frames if isinstance(f, LifecycleEvent)]
+    decided = [
+        f
+        for f in lifecycle
+        if info["proposal_id"] in f.correlation_ids()
+        and f.event_kind == "approval.resolved"
+    ]
+    assert decided, f"no approval.resolved frame correlates to {info['proposal_id']}"
+
+    # The real end-to-end dispatch: subscriber -> real worker HTTP -> real
+    # Executor -> real graph resume.
+    await subscriber._process_event(decided[0])
+
+    # The dispatch is fire-and-forget inside the worker; poll the REAL graph's
+    # own state until it reaches its terminal END.
+    with anyio.fail_after(15.0):
+        while True:
+            snap = await graph.aget_state(config)
+            if snap.next == ():
+                break
+            await anyio.sleep(0.05)
+
+    assert snap.values["gate_verdict"] == "approved"
+    messages = snap.values["messages"]
+    assert isinstance(messages, list)
+    assert any(
+        getattr(m, "content", "") == "resumed:approved"
+        for m in cast("list[object]", messages)
+    ), "the finish node never observed the real resume"
+
+    # The durable gate row resolved and the thread left INPUT_REQUIRED.
+    async with session_factory() as db:
+        gate_row = await get_permission_request(db, f"{thread_id}:verdict-loop-gate")
+        assert gate_row is not None
+        assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
+        thread = await get_thread(db, thread_id)
+        assert thread is not None
+        assert thread.status != ThreadStatus.INPUT_REQUIRED.value
+
+
+async def _run_live_verdict_worker(
+    client: AuthoringClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    executor: Executor,
+    graph: RegisteredCompiledGraph,
+    *,
+    baseline: int,
+    info: dict[str, str],
+    thread_id: str,
+    definition: FrozenGraphDefinition,
+    model_assignment: dict[str, dict[str, object]],
+    metadata: str,
+) -> None:
+    worker_app = create_worker_app(lifespan=_worker_test_lifespan)
+    worker_app.state.executor = executor
+    async with (
+        httpx.AsyncClient(
+            transport=ASGITransport(app=worker_app),
+            base_url="http://worker",
+            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
+        ) as worker_client,
+        anyio.create_task_group() as tg,
+    ):
+        # ASGITransport never runs FastAPI's lifespan protocol, so the
+        # production dispatch route's task group is wired explicitly.
+        worker_app.state.task_group = tg
+        config = await _ingest_live_verdict_run(
+            session_factory,
+            worker_client,
+            graph,
+            thread_id=thread_id,
+            info=info,
+            definition=definition,
+            model_assignment=model_assignment,
+            metadata=metadata,
+        )
+        await _resume_live_verdict_run(
+            client,
+            session_factory,
+            checkpointer,
+            worker_client,
+            graph,
+            config,
+            baseline=baseline,
+            info=info,
+            thread_id=thread_id,
+        )
+
+
+async def _run_live_verdict_a2a(
+    client: AuthoringClient,
+    tmp_path: Path,
+    run_id: str,
+    info: dict[str, str],
+    baseline: int,
+) -> None:
     db_file = tmp_path / "vl.db"
     materialize_schema(Path(db_file))
     db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -285,165 +496,38 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
             definition=definition,
             model_assignment_digest=execution_authority.model_assignment_digest,
         )
-
-        worker_app = create_worker_app(lifespan=_worker_test_lifespan)
-        worker_app.state.executor = executor
-
-        async with (
-            httpx.AsyncClient(
-                transport=ASGITransport(app=worker_app),
-                base_url="http://worker",
-                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-            ) as worker_client,
-            anyio.create_task_group() as tg,
-        ):
-            # ASGITransport never runs FastAPI's lifespan protocol, so the
-            # production dispatch route's ``app.state.task_group`` (which its
-            # ``TaskGroup.start_soon`` fire-and-forget scheduling depends on)
-            # is wired explicitly, matching what the real ``_lifespan`` does.
-            worker_app.state.task_group = tg
-
-            # --- real ingest through the real worker HTTP route ---
-            authority = make_test_write_authority()
-            ingest = DispatchRequest(
-                dispatch_id=authority.action_receipt_id,
-                action="ingest",
-                workspace_root=_WORKSPACE,
-                thread_id=thread_id,
-                content="drive to the gate",
-                team_preset="mock-success-single",
-                graph_definition=definition,
-                recursion_limit=10,
-                model_assignment=execution_authority.model_assignment,
-                actor_tokens=ActorTokenBundle(
-                    tokens={"vaultspec-synthesist": "vl-token"},
-                    engine_bearer="vl-bearer",
-                ),
-            )
-            async with session_factory() as db:
-                await create_thread(
-                    db,
-                    write_authority=authority,
-                    thread_id=thread_id,
-                    team_preset="mock-success-single",
-                    metadata=metadata,
-                )
-                await create_control_action(
-                    db,
-                    thread_id=thread_id,
-                    action_type=authority.action_type,
-                    idempotency_key=f"thread-create:{thread_id}",
-                    dispatch_id=authority.action_receipt_id,
-                    payload=freeze_accepted_input(
-                        ingest, intent={"content": "drive to the gate"}
-                    ),
-                )
-                receipt = await prepare_graph_action_receipt(
-                    db,
-                    thread_id=thread_id,
-                    dispatch_id=authority.action_receipt_id,
-                )
-                assert receipt is not None
-                await db.commit()
-            resp = await worker_client.post(
-                "/dispatch", json=ingest.model_dump(mode="json")
-            )
-            assert resp.status_code == 200, resp.text
-
-            # Fire-and-forget: poll the REAL graph's own state (not a
-            # recording stub) until the seed node has landed and the run is
-            # parked at the interrupt.
-            config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-            with anyio.fail_after(15.0):
-                while True:
-                    snap = await graph.aget_state(config)
-                    if snap.values.get("gate_pending_proposal_id") == info[
-                        "proposal_id"
-                    ] and snap.next == ("gate",):
-                        break
-                    await anyio.sleep(0.05)
-
-            # Seed the durable gate row the subscriber correlates against -
-            # the same shape the engine-side reconcile tests seed, now
-            # AFTER a genuine interrupt (not a hand-typed checkpoint).
-            async with session_factory() as db:
-                await update_thread_status(db, thread_id, ThreadStatus.INPUT_REQUIRED)
-                await record_permission_request(
-                    db,
-                    request_id=f"{thread_id}:verdict-loop-gate",
-                    thread_id=thread_id,
-                    pause_reason_type="document_approval_request",
-                    description="Approve the test document",
-                    allowed_options=[
-                        {
-                            "option_id": "approve",
-                            "name": "Approve",
-                            "kind": "allow_once",
-                        }
-                    ],
-                )
-                await db.commit()
-
-            subscriber = VerdictSubscriber(
-                VerdictSubscriberConfig(
-                    session_factory=session_factory,
-                    checkpointer=checkpointer,
-                    worker_client=worker_client,
-                    circuit_breaker=WorkerCircuitBreaker(
-                        failure_threshold=3, recovery_timeout=30.0
-                    ),
-                    worker_spawner=LazyWorkerSpawner(
-                        worker_url="http://worker", worker_port=1, auto_spawn=False
-                    ),
-                    endpoint_provider=lambda: None,
-                    recursion_limit=10,
-                )
-            )
-
-            frames = [f async for f in client.stream_lifecycle(last_seq=baseline)]
-            lifecycle = [f for f in frames if isinstance(f, LifecycleEvent)]
-            decided = [
-                f
-                for f in lifecycle
-                if info["proposal_id"] in f.correlation_ids()
-                and f.event_kind == "approval.resolved"
-            ]
-            assert decided, (
-                f"no approval.resolved frame correlates to {info['proposal_id']}"
-            )
-
-            # The real end-to-end dispatch: subscriber -> real worker HTTP
-            # -> real Executor -> real graph resume.
-            await subscriber._process_event(decided[0])
-
-            # The dispatch is fire-and-forget inside the worker; poll the
-            # REAL graph's own state until it reaches its terminal END.
-            with anyio.fail_after(15.0):
-                while True:
-                    snap = await graph.aget_state(config)
-                    if snap.next == ():
-                        break
-                    await anyio.sleep(0.05)
-
-            assert snap.values["gate_verdict"] == "approved"
-            messages = snap.values["messages"]
-            assert isinstance(messages, list)
-            assert any(
-                getattr(m, "content", "") == "resumed:approved"
-                for m in cast("list[object]", messages)
-            ), "the finish node never observed the real resume"
-
-            # The durable gate row resolved and the thread left
-            # INPUT_REQUIRED — the same observable proof the engine-side
-            # reconcile tests assert against a stubbed worker.
-            async with session_factory() as db:
-                gate_row = await get_permission_request(
-                    db, f"{thread_id}:verdict-loop-gate"
-                )
-                assert gate_row is not None
-                assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
-                thread = await get_thread(db, thread_id)
-                assert thread is not None
-                assert thread.status != ThreadStatus.INPUT_REQUIRED.value
-
+        await _run_live_verdict_worker(
+            client,
+            session_factory,
+            checkpointer,
+            executor,
+            graph,
+            baseline=baseline,
+            info=info,
+            thread_id=thread_id,
+            definition=definition,
+            model_assignment=execution_authority.model_assignment,
+            metadata=metadata,
+        )
     await db_engine.dispose()
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
+    client: AuthoringClient, tmp_path: Any
+) -> None:
+    """Engine verdict -> subscriber -> real worker HTTP -> real graph resume.
+
+    One proposal, submitted and approved for real against the live engine.
+    The subscriber correlates the real decision event and dispatches
+    ``Command(resume=...)`` over a REAL bearer-checked HTTP POST to a REAL
+    worker app, whose REAL Executor resumes a REAL checkpointed graph past
+    its interrupt. The test asserts the graph's own state (not a recording
+    stub) shows the resume landed, and that the durable gate row + thread
+    status resolved the same way the engine-side reconcile tests already
+    proved for a stubbed worker.
+    """
+    run_id = f"vl-{uuid.uuid4().hex[:8]}"
+    baseline, info = await _prepare_live_verdict_case(client, run_id)
+    await _run_live_verdict_a2a(client, tmp_path, run_id, info, baseline)

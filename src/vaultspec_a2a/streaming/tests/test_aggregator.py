@@ -6,7 +6,7 @@ import sys
 from collections.abc import AsyncIterator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, cast, override
+from typing import Any, ClassVar, TypedDict, Unpack, cast, override
 
 import pytest
 from langchain_core.messages import AIMessageChunk
@@ -52,14 +52,19 @@ def aggregator() -> EventAggregator:
     return EventAggregator()
 
 
+class _IngestOptions(TypedDict):
+    """Typed keyword arguments forwarded to ``EventAggregator.ingest``."""
+
+    thread_id: str
+    agent_id: str
+    graph: StreamableGraph
+    graph_input: dict[str, Any] | Command[Any] | None
+    config: dict[str, Any]
+
+
 async def _ingest(
     aggregator: EventAggregator,
-    *,
-    thread_id: str,
-    agent_id: str,
-    graph: StreamableGraph,
-    graph_input: dict[str, Any] | Command[Any] | None,
-    config: dict[str, Any],
+    **options: Unpack[_IngestOptions],
 ) -> str:
     """Call ``EventAggregator.ingest`` through a fully typed seam.
 
@@ -70,13 +75,7 @@ async def _ingest(
     repeating the same cast.
     """
     typed_ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
-    return await typed_ingest(
-        thread_id=thread_id,
-        agent_id=agent_id,
-        graph=graph,
-        graph_input=graph_input,
-        config=config,
-    )
+    return await typed_ingest(**options)
 
 
 # ---------------------------------------------------------------------------

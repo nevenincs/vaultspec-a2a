@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:1c6fde1802b61da8ed171cb233c877555bb76740bfbf3c518bd1a15fafb8c60b'
+body_hash: 'sha256:7146f79cd17f11b6bbbc7dbfb275c3cf8b3c23df9070665bbc7e21360f773b6b'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4112,3 +4112,16 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 - Implementation: grouped the two optional keyword-only ACP error flags in a typed keyword contract, preserving the four positional arguments and defaults, and closing one parameter-count finding.
 - Review finding, low severity, signature introspection: runtime inspection sees `**kwargs` for the optional flags; all current callers pass them by name and static type checking enforces their types. The exception message and stored fields are unchanged.
 - Verification: 24 ACP exception tests passed; scoped Ruff and basedpyright passed. Remaining argument findings stay open.
+
+### 2026-09-20 broad test shape review
+
+- Implementation: extracted typed test setup, polling, and assertion helpers across API, control, desktop, provider, service, worker, graph, acceptance, and streaming tests to clear preview Ruff argument, branch, statement, nesting, and locals findings. Direct scoped tests and type checks passed in the contributing lanes; the full unit suite is running.
+- Review finding, medium severity, test semantics: the large fixture refactors move assertions into helpers. An AST assertion-count comparison found one API helper replaces two equivalent status assertions and the clarification helper replaces repeated assertions. No removed assertion was found in the inspected diffs. Service-backed tests require their live prerequisites; several lane checks were skipped when the stack was unavailable, while the stream follow-up service test passed locally. Keep the integrated unit and service result in the queue until complete.
+- Review finding, high severity, import declaration drift: the export declaration guard reports 96 republications across 11 ordinary modules after earlier decomposition. The test parser refactor yields the same bindings as the original algorithm; the failures are real outstanding import homes. Follow canonical declaration imports through all callers and remove duplicate ordinary-module exports, then rerun the guard. This pass is REVISION REQUIRED until the import guard and strict quality gates are zero.
+- Verification: full Ruff and strict typing passed after formatting five test files; PLR0912, PLR0915, and PLR1702 are at zero. The existing export guard fails with 96 findings; 27 preview locals findings remain after the streaming follow-up fix. Remaining argument, design, and maintainability findings remain open.
+
+### 2026-09-20 bounded streaming and lease parameter review
+
+- Implementation: typed keyword options close parameter findings in streaming aggregation and emission, lease acquisition, and ACP subprocess spawning. The streaming emitter retains positional and named calls through an explicit binder; the other calls retain their named defaults.
+- Review finding, medium severity, runtime signature: emitter introspection now sees `*args/**kwargs`; binder checks covered positional, named, mixed, default, and duplicate arguments. Call-site behavior and event construction remained stable in the inspected diff. Other typed option functions expose `**kwargs`; no current caller inspects their signatures.
+- Verification: 73 aggregation tests, 207 streaming tests, nine lease tests, five containment service tests, and two desktop subprocess tests passed in the bounded lanes. Whole-tree Ruff, format, configured strict typing, import loading, and unused-symbol coverage pass. Parameter findings remain open elsewhere.

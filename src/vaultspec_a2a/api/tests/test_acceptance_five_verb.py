@@ -159,6 +159,12 @@ def _vault_write_events(vault_root: Path) -> list[str]:
     return events
 
 
+async def _read_run_status(client: httpx.AsyncClient, thread_id: str) -> dict[str, Any]:
+    response = await client.get(f"/v1/runs/{thread_id}")
+    assert response.status_code == 200
+    return response.json()
+
+
 # ---------------------------------------------------------------------------
 # Acceptance tests
 # ---------------------------------------------------------------------------
@@ -251,9 +257,7 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
             _live_server(app) as base,
             httpx.AsyncClient(base_url=base) as client,
         ):
-            resp = await client.get(f"/v1/runs/{thread_id}")
-            assert resp.status_code == 200
-            body = resp.json()
+            body = await _read_run_status(client, thread_id)
             assert body["api_version"] == "v1"
             assert body["run_id"] == thread_id
             assert body["topology"]["team_preset"] == _PRESET
@@ -270,9 +274,7 @@ async def test_multirole_run_status_recovery_and_zero_vault_writes(
             _live_server(app2) as base2,
             httpx.AsyncClient(base_url=base2) as client2,
         ):
-            resp2 = await client2.get(f"/v1/runs/{thread_id}")
-            assert resp2.status_code == 200
-            body2 = resp2.json()
+            body2 = await _read_run_status(client2, thread_id)
             assert body2["run_id"] == thread_id
             assert body2["topology"]["team_preset"] == _PRESET
             assert body2["checkpoint_id"] == body["checkpoint_id"]

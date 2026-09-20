@@ -134,6 +134,7 @@ _WORKER_READY_BUDGET_SECONDS = "120"
 _PARK_BUDGET = 180.0
 _RESUME_BUDGET = 300.0
 _TEXT_LIST = TypeAdapter(list[str])
+type ContinuationOutcome = tuple[str, str, httpx.Response]
 
 
 def _response_object(response: httpx.Response, *, at: str) -> JsonObject:
@@ -463,6 +464,43 @@ def _history_state(gateway: CertifiedGateway, run_id: str) -> JsonObject:
     return _required_object(history, "state", at="run history")
 
 
+def _submit_concurrent_continuations(
+    gateway: CertifiedGateway,
+    run_id: str,
+    request_id: str,
+    markers: list[str],
+    keys: list[str],
+) -> tuple[str, str, httpx.Response, list[ContinuationOutcome]]:
+    barrier = threading.Barrier(len(markers))
+
+    def submit(candidate: tuple[str, str]) -> ContinuationOutcome:
+        marker, key = candidate
+        with gateway.client(timeout=90.0) as client:
+            barrier.wait(timeout=30.0)
+            response = client.post(
+                f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
+                json={"prompt": marker},
+                headers={"Idempotency-Key": key},
+            )
+        return marker, key, response
+
+    with ThreadPoolExecutor(max_workers=len(markers)) as pool:
+        outcomes = list(pool.map(submit, zip(markers, keys, strict=True)))
+
+    winners = [outcome for outcome in outcomes if outcome[2].status_code == 200]
+    conflicts = [outcome for outcome in outcomes if outcome[2].status_code == 409]
+    assert len(winners) == 1, [
+        (marker, response.status_code, response.text)
+        for marker, _key, response in outcomes
+    ]
+    assert len(conflicts) == len(markers) - 1, [
+        (marker, response.status_code, response.text)
+        for marker, _key, response in outcomes
+    ]
+    winning_marker, winning_key, accepted = winners[0]
+    return winning_marker, winning_key, accepted, conflicts
+
+
 # ---------------------------------------------------------------------------
 # The stitched loop
 # ---------------------------------------------------------------------------
@@ -729,33 +767,15 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
             assert item.get("catalog_revision") == selection.catalog_revision
             assert item.get("entry_id") == selection.entry_id
 
-        barrier = threading.Barrier(len(markers))
-
-        def submit(candidate: tuple[str, str]) -> tuple[str, str, httpx.Response]:
-            marker, key = candidate
-            with gateway.client(timeout=90.0) as client:
-                barrier.wait(timeout=30.0)
-                response = client.post(
-                    f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
-                    json={"prompt": marker},
-                    headers={"Idempotency-Key": key},
-                )
-            return marker, key, response
-
-        with ThreadPoolExecutor(max_workers=len(markers)) as pool:
-            outcomes = list(pool.map(submit, zip(markers, keys, strict=True)))
-
-        winners = [outcome for outcome in outcomes if outcome[2].status_code == 200]
-        conflicts = [outcome for outcome in outcomes if outcome[2].status_code == 409]
-        assert len(winners) == 1, [
-            (marker, response.status_code, response.text)
-            for marker, _key, response in outcomes
-        ]
-        assert len(conflicts) == len(markers) - 1, [
-            (marker, response.status_code, response.text)
-            for marker, _key, response in outcomes
-        ]
-        winning_marker, winning_key, accepted = winners[0]
+        winning_marker, winning_key, accepted, conflicts = (
+            _submit_concurrent_continuations(
+                gateway,
+                run_id,
+                request_id,
+                markers,
+                keys,
+            )
+        )
         accepted_body = _response_object(accepted, at="accepted Codex continuation")
         assert accepted_body.get("accepted") is True
         assert accepted_body.get("action_status") == "accepted_not_applied"

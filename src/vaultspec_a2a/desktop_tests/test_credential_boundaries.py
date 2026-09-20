@@ -49,6 +49,75 @@ _OWNERSHIP = "ownership-capability-token-fedcba0987654321"
 _LIFECYCLE_HEADER = "X-Vaultspec-Lifecycle-Capability"
 
 
+def _assert_credential_planes(
+    client: httpx.Client,
+    app_home: Path,
+    worker_ipc: str,
+) -> None:
+    """Assert the attach, worker IPC, and lifecycle credentials stay isolated."""
+    # --- Discovery record carries no secret, only the ACL-protected ref ---
+    discovery_text = (app_home / "service.json").read_text(encoding="utf-8")
+    for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
+        assert secret not in discovery_text
+    assert ATTACH_CREDENTIAL_NAME in discovery_text  # the reference path
+
+    # --- Unauthenticated liveness discloses nothing ---
+    live = client.get("/health")
+    assert live.status_code == 200
+    for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
+        assert secret not in live.text
+
+    # --- Attach plane: only the attach credential authenticates ---
+    assert client.get("/v1/service").status_code == 401
+    assert (
+        client.get(
+            "/v1/service", headers={"Authorization": f"Bearer {worker_ipc}"}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.get(
+            "/v1/service", headers={"Authorization": f"Bearer {_OWNERSHIP}"}
+        ).status_code
+        == 401
+    )
+    attach_ok = client.get(
+        "/v1/service", headers={"Authorization": f"Bearer {_ATTACH}"}
+    )
+    assert attach_ok.status_code == 200, attach_ok.text
+    for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
+        assert secret not in attach_ok.text
+
+    # --- Worker IPC plane: attach is rejected, worker IPC is accepted ---
+    assert (
+        client.get(
+            "/internal/health",
+            headers={"Authorization": f"Bearer {_ATTACH}"},
+        ).status_code
+        == 401
+    )
+    worker_ok = client.get(
+        "/internal/health",
+        headers={"Authorization": f"Bearer {worker_ipc}"},
+    )
+    assert worker_ok.status_code == 200
+
+    # --- Lifecycle plane: admin shutdown needs the ownership capability ---
+    attach_only = client.post(
+        "/admin/shutdown",
+        headers={"Authorization": f"Bearer {_ATTACH}"},
+    )
+    assert attach_only.status_code == 403
+    wrong_cap = client.post(
+        "/admin/shutdown",
+        headers={
+            "Authorization": f"Bearer {_ATTACH}",
+            _LIFECYCLE_HEADER: "not-the-capability",
+        },
+    )
+    assert wrong_cap.status_code == 403
+
+
 def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
     """The three planes are non-interchangeable and no secret ever leaks."""
     app_home = tmp_path / "app-home"
@@ -87,67 +156,7 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
         assert worker_ipc and worker_ipc not in (_ATTACH, _OWNERSHIP)
 
         with httpx.Client(base_url=base, timeout=5.0) as client:
-            # --- Discovery record carries no secret, only the ACL-protected ref ---
-            discovery_text = (app_home / "service.json").read_text(encoding="utf-8")
-            for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
-                assert secret not in discovery_text
-            assert ATTACH_CREDENTIAL_NAME in discovery_text  # the reference path
-
-            # --- Unauthenticated liveness discloses nothing ---
-            live = client.get("/health")
-            assert live.status_code == 200
-            for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
-                assert secret not in live.text
-
-            # --- Attach plane: only the attach credential authenticates ---
-            assert client.get("/v1/service").status_code == 401
-            assert (
-                client.get(
-                    "/v1/service", headers={"Authorization": f"Bearer {worker_ipc}"}
-                ).status_code
-                == 401
-            )
-            assert (
-                client.get(
-                    "/v1/service", headers={"Authorization": f"Bearer {_OWNERSHIP}"}
-                ).status_code
-                == 401
-            )
-            attach_ok = client.get(
-                "/v1/service", headers={"Authorization": f"Bearer {_ATTACH}"}
-            )
-            assert attach_ok.status_code == 200, attach_ok.text
-            for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
-                assert secret not in attach_ok.text
-
-            # --- Worker IPC plane: attach is rejected, worker IPC is accepted ---
-            assert (
-                client.get(
-                    "/internal/health",
-                    headers={"Authorization": f"Bearer {_ATTACH}"},
-                ).status_code
-                == 401
-            )
-            worker_ok = client.get(
-                "/internal/health",
-                headers={"Authorization": f"Bearer {worker_ipc}"},
-            )
-            assert worker_ok.status_code == 200
-
-            # --- Lifecycle plane: admin shutdown needs the ownership capability ---
-            attach_only = client.post(
-                "/admin/shutdown",
-                headers={"Authorization": f"Bearer {_ATTACH}"},
-            )
-            assert attach_only.status_code == 403
-            wrong_cap = client.post(
-                "/admin/shutdown",
-                headers={
-                    "Authorization": f"Bearer {_ATTACH}",
-                    _LIFECYCLE_HEADER: "not-the-capability",
-                },
-            )
-            assert wrong_cap.status_code == 403
+            _assert_credential_planes(client, app_home, worker_ipc)
 
         # --- The process logs never printed a secret ---
         log_handle.flush()

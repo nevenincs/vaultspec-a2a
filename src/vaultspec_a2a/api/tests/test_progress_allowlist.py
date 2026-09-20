@@ -74,6 +74,20 @@ async def _await_subscriber(agg: EventAggregator) -> None:
     raise AssertionError("stream subscriber never registered")
 
 
+def _assert_team_status_frame(frame: dict[str, object], raw: str, run_id: str) -> None:
+    """Assert the permitted team roster fields and the closed raw payload."""
+    team_agents_raw = frame.get("agents")
+    assert isinstance(team_agents_raw, list)
+    team_agents = cast("list[object]", team_agents_raw)
+    first_agent = team_agents[0]
+    assert isinstance(first_agent, dict)
+    first_agent_payload = cast("dict[str, object]", first_agent)
+    assert first_agent_payload["agent_id"] == "researcher_00"
+    assert first_agent_payload["state"] == "working"
+    assert frame["active_thread_ids"] == [run_id]
+    assert _METADATA_BODY not in raw
+
+
 @pytest.mark.asyncio(loop_scope="function")
 async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -301,16 +315,7 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
     assert "metadata" not in status_frame
     assert _METADATA_BODY not in status_raw
 
-    team_agents_raw = team_frame.get("agents")
-    assert isinstance(team_agents_raw, list)
-    team_agents = cast("list[object]", team_agents_raw)
-    first_agent = team_agents[0]
-    assert isinstance(first_agent, dict)
-    first_agent_payload = cast("dict[str, object]", first_agent)
-    assert first_agent_payload["agent_id"] == "researcher_00"
-    assert first_agent_payload["state"] == "working"
-    assert team_frame["active_thread_ids"] == [run_id]
-    assert _METADATA_BODY not in team_raw
+    _assert_team_status_frame(team_frame, team_raw, run_id)
 
     assert error_frame["message"] == "provider returned 502"
     assert error_frame["code"] == "worker_failed"

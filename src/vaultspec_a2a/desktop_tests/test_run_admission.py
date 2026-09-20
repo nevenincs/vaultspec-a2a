@@ -30,6 +30,7 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -59,6 +60,14 @@ _SPAWN_LINE = "Auto-spawning worker on port"
 # The INFO variant: its root logging handler is the only reason the auto-spawn
 # announcement asserted on below is written to the gateway log at all.
 _GATEWAY = gateway_script(log_level="info")
+
+
+@dataclass(frozen=True, slots=True)
+class _CommitOptions:
+    """Optional bindings that vary between commit admission probes."""
+
+    roles: dict[str, str] | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @contextmanager
@@ -159,10 +168,11 @@ def _commit(
     reservation_id: str,
     *,
     run_id: str | None = None,
-    roles: dict[str, str] | None = None,
-    metadata: dict[str, Any] | None = None,
+    options: _CommitOptions | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Fire one authenticated commit binding tokens under *reservation_id*."""
+    roles = options.roles if options is not None else None
+    metadata = options.metadata if options is not None else None
     workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
@@ -362,6 +372,99 @@ def test_reservation_times_out_and_expired_commit_creates_no_run(
         assert _active_run_count(base, auth) == 0
 
 
+def _prepare_exact_reservation(base: str, auth: str) -> tuple[str, str]:
+    """Create a reservation and reject mismatched commit bindings."""
+    run_id = "run-exact-replay"
+    status, prepared = _prepare(base, auth, run_id=run_id)
+    assert status == 201, prepared
+    reservation_id = prepared["reservation_id"]
+
+    mismatch_status, _ = _commit(
+        base, auth, reservation_id, run_id="run-binding-mismatch"
+    )
+    assert mismatch_status == 409
+    missing_status, _ = _commit(
+        base,
+        auth,
+        reservation_id,
+        run_id=run_id,
+        options=_CommitOptions(roles={}),
+    )
+    assert missing_status == 409
+    extra_status, _ = _commit(
+        base,
+        auth,
+        reservation_id,
+        run_id=run_id,
+        options=_CommitOptions(
+            roles={_REQUIRED_ROLE: "tok-coder", "unexpected-role": "tok-extra"}
+        ),
+    )
+    assert extra_status == 409
+    assert _active_run_count(base, auth) == 0
+    return run_id, reservation_id
+
+
+def _assert_exact_replay_and_release(
+    base: str, auth: str, run_id: str, reservation_id: str
+) -> None:
+    """Assert exact replay convergence, then release the committed lease."""
+
+    def _commit_replay(_index: int) -> tuple[int, dict[str, Any]]:
+        return _commit(base, auth, reservation_id, run_id=run_id)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        replays = list(pool.map(_commit_replay, range(2)))
+    assert [item[0] for item in replays] == [201, 201]
+    bodies = [item[1] for item in replays]
+    assert len({body["run_id"] for body in bodies}) == 1
+    assert len({body["lease_id"] for body in bodies}) == 1
+
+    with httpx.Client(base_url=base, timeout=10.0) as client:
+        response = client.get(f"/v1/runs/{run_id}", headers={"Authorization": auth})
+    assert response.status_code == 200, response.text
+    assert response.json()["lease_id"] == bodies[0]["lease_id"]
+    assert response.json()["reservation_id"] == reservation_id
+    committed_release_status, committed_release = _release(
+        base, auth, reservation_id, run_id=run_id
+    )
+    assert committed_release_status == 201
+    assert committed_release["released"] is False
+
+
+def _assert_release_commit_race(base: str, auth: str) -> None:
+    """Assert commit and release race to one linearized outcome."""
+    race_run_id = "run-release-commit-race"
+    race_status, race_prepared = _prepare(base, auth, run_id=race_run_id)
+    assert race_status == 201, race_prepared
+    race_reservation = race_prepared["reservation_id"]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        commit_future = pool.submit(
+            _commit,
+            base,
+            auth,
+            race_reservation,
+            run_id=race_run_id,
+        )
+        release_future = pool.submit(
+            _release,
+            base,
+            auth,
+            race_reservation,
+            run_id=race_run_id,
+        )
+        commit_outcome = commit_future.result()
+        release_outcome = release_future.result()
+    assert release_outcome[0] == 201
+    if commit_outcome[0] == 201:
+        assert release_outcome[1]["released"] is False
+        assert _run_exists(base, auth, race_run_id)
+    else:
+        assert commit_outcome[0] == 409
+        assert release_outcome[1]["released"] is True
+        assert not _run_exists(base, auth, race_run_id)
+
+
 def test_exact_commit_replay_role_binding_release_and_race_are_linearized(
     tmp_path: Path,
 ) -> None:
@@ -370,77 +473,9 @@ def test_exact_commit_replay_role_binding_release_and_race_are_linearized(
         base,
         auth,
     ):
-        run_id = "run-exact-replay"
-        status, prepared = _prepare(base, auth, run_id=run_id)
-        assert status == 201, prepared
-        reservation_id = prepared["reservation_id"]
-
-        mismatch_status, _ = _commit(
-            base, auth, reservation_id, run_id="run-binding-mismatch"
-        )
-        assert mismatch_status == 409
-        missing_status, _ = _commit(base, auth, reservation_id, run_id=run_id, roles={})
-        assert missing_status == 409
-        extra_status, _ = _commit(
-            base,
-            auth,
-            reservation_id,
-            run_id=run_id,
-            roles={_REQUIRED_ROLE: "tok-coder", "unexpected-role": "tok-extra"},
-        )
-        assert extra_status == 409
-        assert _active_run_count(base, auth) == 0
-
-        def _commit_replay(_index: int) -> tuple[int, dict[str, Any]]:
-            return _commit(base, auth, reservation_id, run_id=run_id)
-
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            replays = list(pool.map(_commit_replay, range(2)))
-        assert [item[0] for item in replays] == [201, 201]
-        bodies = [item[1] for item in replays]
-        assert len({body["run_id"] for body in bodies}) == 1
-        assert len({body["lease_id"] for body in bodies}) == 1
-
-        with httpx.Client(base_url=base, timeout=10.0) as client:
-            response = client.get(f"/v1/runs/{run_id}", headers={"Authorization": auth})
-        assert response.status_code == 200, response.text
-        assert response.json()["lease_id"] == bodies[0]["lease_id"]
-        assert response.json()["reservation_id"] == reservation_id
-        committed_release_status, committed_release = _release(
-            base, auth, reservation_id, run_id=run_id
-        )
-        assert committed_release_status == 201
-        assert committed_release["released"] is False
-
-        race_run_id = "run-release-commit-race"
-        race_status, race_prepared = _prepare(base, auth, run_id=race_run_id)
-        assert race_status == 201, race_prepared
-        race_reservation = race_prepared["reservation_id"]
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            commit_future = pool.submit(
-                _commit,
-                base,
-                auth,
-                race_reservation,
-                run_id=race_run_id,
-            )
-            release_future = pool.submit(
-                _release,
-                base,
-                auth,
-                race_reservation,
-                run_id=race_run_id,
-            )
-            commit_outcome = commit_future.result()
-            release_outcome = release_future.result()
-        assert release_outcome[0] == 201
-        if commit_outcome[0] == 201:
-            assert release_outcome[1]["released"] is False
-            assert _run_exists(base, auth, race_run_id)
-        else:
-            assert commit_outcome[0] == 409
-            assert release_outcome[1]["released"] is True
-            assert not _run_exists(base, auth, race_run_id)
+        run_id, reservation_id = _prepare_exact_reservation(base, auth)
+        _assert_exact_replay_and_release(base, auth, run_id, reservation_id)
+        _assert_release_commit_race(base, auth)
 
 
 def test_prepare_refuses_when_real_worker_is_not_execution_ready(
@@ -479,7 +514,7 @@ def test_pre_durability_commit_failure_restores_reservation_for_release(
             auth,
             owner_prepared["reservation_id"],
             run_id=owner_run_id,
-            metadata=metadata,
+            options=_CommitOptions(metadata=metadata),
         )
         assert owner_commit_status == 201, owner_commit
 
@@ -492,7 +527,7 @@ def test_pre_durability_commit_failure_restores_reservation_for_release(
             auth,
             reservation_id,
             run_id=failed_run_id,
-            metadata=metadata,
+            options=_CommitOptions(metadata=metadata),
         )
         assert commit_status == 409, conflict
         assert "nickname already exists" in conflict["detail"]

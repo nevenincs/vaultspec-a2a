@@ -39,6 +39,65 @@ _ATTACH = "attach-credential-readiness-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-readiness-fedcba0987654321"
 
 
+def _assert_readiness_surfaces(client: httpx.Client) -> None:
+    """Assert minimal public liveness and authenticated cold readiness."""
+    # --- Every ungated liveness surface is minimal, byte-for-byte. ---
+    # Both the top-level probe and the aggregate probe must disclose only
+    # the minimal alive signal - no process identity, service identity, or
+    # product state. The body shape is asserted at the byte level so a
+    # regression that re-adds a field cannot slip past a substring scan.
+    leaks = (
+        "pid",
+        "generation",
+        "profile",
+        "worker",
+        "gateway_readiness",
+        "circuit",
+        "backend",
+        "status",
+    )
+    live = client.get("/health")
+    assert live.status_code == 200
+    assert live.content == b'{"liveness":"alive"}'
+    assert live.json() == {"liveness": "alive"}
+    for token in leaks:
+        assert token not in live.text, token
+
+    # --- Readiness facts are reachable only through the attach credential. ---
+    assert client.get("/v1/service").status_code == 401
+
+    # --- Authenticated readiness carries identity and the cold ladder. ---
+    auth = {"Authorization": f"Bearer {_ATTACH}"}
+    ready = client.get("/health", headers=auth)
+    assert ready.status_code == 200
+    body = ready.json()
+    # Process identity is disclosed; the exact value is the real gateway
+    # process, not this launcher handle (a venv python is a launcher stub
+    # whose child pid differs), so identity is asserted present and
+    # consistent across both authenticated surfaces below.
+    gateway_pid = body["gateway_pid"]
+    assert isinstance(gateway_pid, int) and gateway_pid > 0
+    assert isinstance(body["generation"], str) and body["generation"]
+    assert body["profile"] == "desktop"
+    assert body["liveness"] == "alive"
+    assert body["provider_eligibility"] in {"eligible", "ineligible"}
+    # A valid database with a cold, startable worker: gateway-ready, worker
+    # cold, admission deferred - gateway-ready but not execution-ready.
+    assert body["gateway_readiness"] == "ready"
+    assert body["worker_state"] == "cold"
+    assert body["run_admission"] == "deferred"
+
+    # --- The service-state verb serves the same readiness projection. ---
+    svc = client.get("/v1/service", headers=auth)
+    assert svc.status_code == 200
+    readiness = svc.json()["readiness"]
+    # Same real gateway process serves both authenticated surfaces.
+    assert readiness["gateway_pid"] == gateway_pid
+    assert readiness["gateway_readiness"] == "ready"
+    assert readiness["worker_state"] == "cold"
+    assert readiness["run_admission"] == "deferred"
+
+
 def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
     tmp_path: Path,
 ) -> None:
@@ -76,61 +135,7 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
     proc, _port, _worker_port, base = spawn_until_ready(_spawn, log_path=log_path)
     try:
         with httpx.Client(base_url=base, timeout=5.0) as client:
-            # --- Every ungated liveness surface is minimal, byte-for-byte. ---
-            # Both the top-level probe and the aggregate probe must disclose only
-            # the minimal alive signal - no process identity, service identity, or
-            # product state. The body shape is asserted at the byte level so a
-            # regression that re-adds a field cannot slip past a substring scan.
-            leaks = (
-                "pid",
-                "generation",
-                "profile",
-                "worker",
-                "gateway_readiness",
-                "circuit",
-                "backend",
-                "status",
-            )
-            live = client.get("/health")
-            assert live.status_code == 200
-            assert live.content == b'{"liveness":"alive"}'
-            assert live.json() == {"liveness": "alive"}
-            for token in leaks:
-                assert token not in live.text, token
-
-            # --- Readiness facts are reachable only through the attach credential. ---
-            assert client.get("/v1/service").status_code == 401
-
-            # --- Authenticated readiness carries identity and the cold ladder. ---
-            auth = {"Authorization": f"Bearer {_ATTACH}"}
-            ready = client.get("/health", headers=auth)
-            assert ready.status_code == 200
-            body = ready.json()
-            # Process identity is disclosed; the exact value is the real gateway
-            # process, not this launcher handle (a venv python is a launcher stub
-            # whose child pid differs), so identity is asserted present and
-            # consistent across both authenticated surfaces below.
-            gateway_pid = body["gateway_pid"]
-            assert isinstance(gateway_pid, int) and gateway_pid > 0
-            assert isinstance(body["generation"], str) and body["generation"]
-            assert body["profile"] == "desktop"
-            assert body["liveness"] == "alive"
-            assert body["provider_eligibility"] in {"eligible", "ineligible"}
-            # A valid database with a cold, startable worker: gateway-ready, worker
-            # cold, admission deferred - gateway-ready but not execution-ready.
-            assert body["gateway_readiness"] == "ready"
-            assert body["worker_state"] == "cold"
-            assert body["run_admission"] == "deferred"
-
-            # --- The service-state verb serves the same readiness projection. ---
-            svc = client.get("/v1/service", headers=auth)
-            assert svc.status_code == 200
-            readiness = svc.json()["readiness"]
-            # Same real gateway process serves both authenticated surfaces.
-            assert readiness["gateway_pid"] == gateway_pid
-            assert readiness["gateway_readiness"] == "ready"
-            assert readiness["worker_state"] == "cold"
-            assert readiness["run_admission"] == "deferred"
+            _assert_readiness_surfaces(client)
     finally:
         # The TREE, not the handle: on Windows the virtual-environment
         # interpreter is a launcher stub, so a terminate() aimed at this handle

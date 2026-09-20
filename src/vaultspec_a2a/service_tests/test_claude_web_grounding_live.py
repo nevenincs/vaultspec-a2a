@@ -376,53 +376,20 @@ def _is_provider_rate_refusal(provider_condition: str) -> bool:
     return provider_condition == _RATE_REFUSAL_CONDITION
 
 
-@pytest.mark.service
-@pytest.mark.resource("loopback-stack")
-@pytest.mark.resource("claude-cli-lane")
-@pytest.mark.asyncio
-@pytest.mark.timeout(_OBSERVE_DEADLINE_SECONDS + 600.0)
-async def test_claude_lane_completes_a_real_web_retrieval(
-    external_prerequisite: ExternalPrerequisiteRule,
-) -> None:
-    """Live: an autonomous Claude run retrieves from the web and cites it both ways.
-
-    The Claude lane's completed-retrieval proof. Zero vault writes: the run is
-    observed only until the evidence lands in checkpointed state, then cancelled with
-    nothing ever applied, and a before / after snapshot of the engine workspace
-    asserts no document changed.
-    """
-    stack = _reachable_stack()
-    if stack is None:
-        external_prerequisite.absent("loopback-stack")
-    gateway_url, engine_base_url, engine_bearer, vault_root = stack
-
-    shas_before = _fetch_live_commit_shas()
-    if not shas_before:
-        pytest.skip(
-            f"could not resolve live commit SHAs from {_LIVE_SHA_URL} (network "
-            "unreachable or rate-limited); the completed-retrieval proof cannot be "
-            "posed without a live token the prompt never carried. This is a truthful "
-            "skip, not a masked failure"
-        )
-
-    feature = f"tool-cores-web-{int(time.time())}"
-    case = _web_grounding_case(feature)
-    harness = AcceptanceHarness(
-        case=case,
-        engine_base_url=engine_base_url,
-        engine_bearer=engine_bearer,
-        vault_root=vault_root,
-        gateway_url=gateway_url,
-    )
-
-    before = _snapshot_vault(vault_root)
+async def _observe_web_grounding_run(
+    harness: AcceptanceHarness,
+    case: AcceptanceCase,
+    feature: str,
+) -> tuple[_Evidence, str, str]:
     evidence = _Evidence(claims="", locator_urls=[], body="")
     failure_reason = ""
     failure_condition = ""
 
     from .test_pw7_acceptance import _ResilientAuthoringClient
 
-    async with _ResilientAuthoringClient(engine_base_url, engine_bearer) as ec:
+    async with _ResilientAuthoringClient(
+        harness.engine_base_url, harness.engine_bearer
+    ) as ec:
         run_tokens = {
             role: await harness._mint(ec, f"agent:{harness.run_id}:{role}", "agent")
             for role in case.roles
@@ -472,6 +439,52 @@ async def test_claude_lane_completes_a_real_web_retrieval(
                     f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
                     timeout=30.0,
                 )
+    return evidence, failure_reason, failure_condition
+
+
+@pytest.mark.service
+@pytest.mark.resource("loopback-stack")
+@pytest.mark.resource("claude-cli-lane")
+@pytest.mark.asyncio
+@pytest.mark.timeout(_OBSERVE_DEADLINE_SECONDS + 600.0)
+async def test_claude_lane_completes_a_real_web_retrieval(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """Live: an autonomous Claude run retrieves from the web and cites it both ways.
+
+    The Claude lane's completed-retrieval proof. Zero vault writes: the run is
+    observed only until the evidence lands in checkpointed state, then cancelled with
+    nothing ever applied, and a before / after snapshot of the engine workspace
+    asserts no document changed.
+    """
+    stack = _reachable_stack()
+    if stack is None:
+        external_prerequisite.absent("loopback-stack")
+    gateway_url, engine_base_url, engine_bearer, vault_root = stack
+
+    shas_before = _fetch_live_commit_shas()
+    if not shas_before:
+        pytest.skip(
+            f"could not resolve live commit SHAs from {_LIVE_SHA_URL} (network "
+            "unreachable or rate-limited); the completed-retrieval proof cannot be "
+            "posed without a live token the prompt never carried. This is a truthful "
+            "skip, not a masked failure"
+        )
+
+    feature = f"tool-cores-web-{int(time.time())}"
+    case = _web_grounding_case(feature)
+    harness = AcceptanceHarness(
+        case=case,
+        engine_base_url=engine_base_url,
+        engine_bearer=engine_bearer,
+        vault_root=vault_root,
+        gateway_url=gateway_url,
+    )
+
+    before = _snapshot_vault(vault_root)
+    evidence, failure_reason, failure_condition = await _observe_web_grounding_run(
+        harness, case, feature
+    )
 
     # A run that died before the evidence landed proves nothing either way, so the
     # two causes are separated rather than reported as one failure. A provider that

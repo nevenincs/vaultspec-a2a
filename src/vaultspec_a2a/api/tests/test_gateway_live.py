@@ -44,13 +44,15 @@ from ..routes.gateway import admission_gate
 from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Callable
+    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 
     from fastapi import FastAPI
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+    from ...control.drain import DrainGate
     from ...thread.action_receipts import GraphActionReceipt
+    from .conftest import _InProcessWorker
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonValue = bool | int | float | str | list[JsonValue] | JsonObject | None
@@ -619,6 +621,339 @@ async def _wait_until(
     raise AssertionError(f"timed out waiting for {what}")
 
 
+async def _run_same_id_insert_race(
+    client: httpx.AsyncClient,
+    engine: AsyncEngine,
+    gate: DrainGate,
+    checked_out: Callable[[], int],
+    run_id: str,
+    payload: Mapping[str, object],
+) -> tuple[httpx.Response, httpx.Response, httpx.Response]:
+    barrier = await engine.connect()
+    baseline = checked_out()
+    await barrier.exec_driver_sql("BEGIN IMMEDIATE")
+    try:
+        first = asyncio.create_task(client.post("/v1/runs", json=payload))
+        await _wait_until(
+            lambda: gate.is_active(run_id),
+            what="the first modern request to pass its read",
+        )
+        second = asyncio.create_task(client.post("/v1/runs", json=payload))
+        await _wait_until(
+            lambda: checked_out() >= baseline + 2,
+            what="the second modern request to reach the store",
+        )
+        await asyncio.sleep(0.25)
+    finally:
+        await barrier.exec_driver_sql("ROLLBACK")
+        await barrier.close()
+    first_response, second_response = await asyncio.gather(first, second)
+    replay = await client.post("/v1/runs", json=payload)
+    return first_response, second_response, replay
+
+
+async def _exercise_five_verbs(
+    client: httpx.AsyncClient, worker: _InProcessWorker
+) -> None:
+    """Exercise the five versioned gateway verbs over one live socket."""
+    presets = await client.get("/v1/presets")
+    assert presets.status_code == 200
+    pbody = presets.json()
+    assert pbody["api_version"] == "v1"
+    assert any(p["id"] == _PRESET for p in pbody["presets"])
+
+    service = await client.get("/v1/service")
+    assert service.status_code == 200
+    sbody = service.json()
+    assert sbody["api_version"] == "v1"
+    # Status is probe-derived, not hardcoded: the in-process worker /health,
+    # real DB, and real checkpointer all answer, so the service is ready.
+    assert sbody["status"] == "ready"
+    assert isinstance(sbody["ready"], bool)
+
+    start = await client.post(
+        "/v1/runs",
+        json={
+            "run_id": "gwlive-06",
+            "team_preset": _PRESET,
+            "message": "build it",
+            "autonomous": True,
+            "actor_tokens": {
+                "tokens": {"coder": "tok-coder"},
+                "engine_bearer": "bearer",
+            },
+            **await _run_fields(client),
+        },
+    )
+    assert start.status_code == 201
+    stbody = start.json()
+    assert stbody["api_version"] == "v1"
+    run_id = stbody["run_id"]
+    assert run_id
+    assert worker.dispatches, "run-start must dispatch to the worker"
+    assert worker.dispatches[-1]["actor_tokens"]["tokens"]["coder"] == "tok-coder"
+
+    status = await client.get(f"/v1/runs/{run_id}")
+    assert status.status_code == 200
+    rbody = status.json()
+    assert rbody["api_version"] == "v1"
+    assert rbody["run_id"] == run_id
+    assert rbody["topology"]["team_preset"] == _PRESET
+    assert "roles" in rbody
+    assert isinstance(rbody["proposal_ids"], list)
+    # Semantic phase projection: a dispatched coder run is a generic
+    # "running" (no fabricated authoring precision for a non-research_adr
+    # preset), and the target-feature / authoring-session fields are present.
+    assert rbody["semantic_phase"] == "running"
+    assert "feature_tag" in rbody
+    assert "authoring_session_id" in rbody
+
+    missing = await client.get("/v1/runs/does-not-exist")
+    assert missing.status_code == 404
+
+    first = await client.post(f"/v1/runs/{run_id}/cancel")
+    assert first.status_code == 200
+    assert first.json()["api_version"] == "v1"
+    second = await client.post(f"/v1/runs/{run_id}/cancel")
+    assert second.status_code == 200
+
+
+async def _run_nickname_insert_race(
+    client: httpx.AsyncClient,
+    engine: AsyncEngine,
+    gate: DrainGate,
+    checked_out: Callable[[], int],
+    selection: Mapping[str, object],
+    workspace_root: str,
+) -> tuple[httpx.Response, httpx.Response]:
+    """Race two distinct ids through one durable nickname collision."""
+    nickname = "shared-modern-race"
+    left_id = "rid-modern-nickname-left"
+    right_id = "rid-modern-nickname-right"
+    nickname_base: dict[str, object] = {
+        "team_preset": _PRESET,
+        "message": "nickname collision",
+        "selection": selection,
+        "metadata": {
+            "workspace_root": workspace_root,
+            "nickname": nickname,
+        },
+    }
+    await _wait_until(
+        lambda: checked_out() == 0,
+        what="the same-id race connections to return to the pool",
+    )
+    barrier = await engine.connect()
+    baseline = checked_out()
+    await barrier.exec_driver_sql("BEGIN IMMEDIATE")
+    try:
+        # `nickname_base` already carries the selection AND the metadata naming
+        # the shared nickname; adding `_run_fields` would dissolve the collision.
+        left = asyncio.create_task(
+            client.post(
+                "/v1/runs",
+                json={**nickname_base, "run_id": left_id},
+            )
+        )
+        await _wait_until(
+            lambda: gate.is_active(left_id),
+            what="the first nickname request to pass its read",
+        )
+        right = asyncio.create_task(
+            client.post(
+                "/v1/runs",
+                json={**nickname_base, "run_id": right_id},
+            )
+        )
+        await _wait_until(
+            lambda: checked_out() >= baseline + 2,
+            what="the second nickname request to reach the store",
+        )
+        await asyncio.sleep(0.25)
+    finally:
+        await barrier.exec_driver_sql("ROLLBACK")
+        await barrier.close()
+    return await asyncio.gather(left, right)
+
+
+def _assert_modern_race_results(
+    responses: tuple[httpx.Response, httpx.Response, httpx.Response],
+    nickname_responses: tuple[httpx.Response, httpx.Response],
+    *,
+    caplog: pytest.LogCaptureFixture,
+    worker: _InProcessWorker,
+    run_id: str,
+) -> None:
+    """Assert freeze convergence and the inverse nickname collision outcome."""
+    assert all(response.status_code == 201 for response in responses), [
+        response.text for response in responses
+    ]
+    assert [
+        record
+        for record in caplog.records
+        if "lost a concurrent insert race" in record.getMessage()
+        and run_id in record.getMessage()
+    ], "the integrity-error recovery branch did not execute"
+    frozen = [response.json()["frozen_assignment"] for response in responses]
+    assert all(item is not None for item in frozen)
+    assert frozen[0] == frozen[1] == frozen[2]
+    assert frozen[0]["schema_version"] == 1
+    assert frozen[0]["digest"]
+    assert len([d for d in worker.dispatches if d.get("thread_id") == run_id]) == 1
+    assert sorted(response.status_code for response in nickname_responses) == [201, 409]
+    nickname_conflict = next(
+        response for response in nickname_responses if response.status_code == 409
+    )
+    assert "nickname already exists" in nickname_conflict.json()["detail"]
+    nickname_dispatches = [
+        dispatch
+        for dispatch in worker.dispatches
+        if dispatch.get("thread_id")
+        in {"rid-modern-nickname-left", "rid-modern-nickname-right"}
+    ]
+    assert len(nickname_dispatches) == 1
+
+
+async def _run_modern_selection_races(
+    client: httpx.AsyncClient,
+    engine: AsyncEngine,
+    gate: DrainGate,
+    checked_out: Callable[[], int],
+    run_id: str,
+    selection: Mapping[str, object],
+    workspace_root: str,
+) -> tuple[
+    tuple[httpx.Response, httpx.Response, httpx.Response],
+    tuple[httpx.Response, httpx.Response],
+]:
+    """Run the same-id and inverse nickname races for one catalog selection."""
+    payload = {
+        "team_preset": _PRESET,
+        "message": "same durable intention",
+        "run_id": run_id,
+        "selection": selection,
+        "metadata": {"workspace_root": workspace_root},
+    }
+    first_response, second_response, replay = await _run_same_id_insert_race(
+        client,
+        engine,
+        gate,
+        checked_out,
+        run_id,
+        payload,
+    )
+    nickname_responses = await _run_nickname_insert_race(
+        client,
+        engine,
+        gate,
+        checked_out,
+        selection,
+        workspace_root,
+    )
+    return (first_response, second_response, replay), nickname_responses
+
+
+async def _run_different_body_race(
+    client: httpx.AsyncClient,
+    engine: AsyncEngine,
+    gate: DrainGate,
+    checked_out: Callable[[], int],
+    run_id: str,
+    first_body: Mapping[str, object],
+    second_body: Mapping[str, object],
+) -> tuple[httpx.Response, httpx.Response, httpx.Response, Mapping[str, object]]:
+    """Race two bodies for one id, then replay the winner's body."""
+    barrier = await engine.connect()
+    race_fields = await _run_fields(client)
+    baseline = checked_out()
+    await barrier.exec_driver_sql("BEGIN IMMEDIATE")
+    try:
+        first = asyncio.create_task(
+            client.post(
+                "/v1/runs",
+                json={
+                    **first_body,
+                    **race_fields,
+                },
+            )
+        )
+        # Admission happens after the check-then-act read and before the insert,
+        # so an active run id proves the first request read an absent run.
+        await _wait_until(
+            lambda: gate.is_active(run_id),
+            what="the first request to pass its read",
+        )
+        second = asyncio.create_task(
+            client.post(
+                "/v1/runs",
+                json={
+                    **second_body,
+                    **race_fields,
+                },
+            )
+        )
+        # A second leased connection proves the second request is issuing DB
+        # work of its own while the barrier bars every insert.
+        await _wait_until(
+            lambda: checked_out() >= baseline + 2,
+            what="the second request to reach the store",
+        )
+        await asyncio.sleep(0.25)
+    finally:
+        await barrier.exec_driver_sql("ROLLBACK")
+        await barrier.close()
+    first_response, second_response = await asyncio.gather(first, second)
+    if first_response.status_code == 201:
+        winner, loser = first_response, second_response
+        winning_body = first_body
+    else:
+        winner, loser = second_response, first_response
+        winning_body = second_body
+    # The winner's own request still replays after the colliding body is refused.
+    replay = await client.post("/v1/runs", json={**winning_body, **race_fields})
+    return winner, loser, replay, winning_body
+
+
+async def _assert_different_body_race(
+    race: tuple[
+        httpx.Response,
+        httpx.Response,
+        httpx.Response,
+        Mapping[str, object],
+    ],
+    *,
+    session_factory: SessionFactory,
+    worker: _InProcessWorker,
+    gate: DrainGate,
+    caplog: pytest.LogCaptureFixture,
+    run_id: str,
+) -> None:
+    """Assert the loser is refused and only the winner is durable and dispatched."""
+    winner, loser, replay, winning_body = race
+    assert sorted(r.status_code for r in (winner, loser)) == [201, 409], [
+        winner.text,
+        loser.text,
+    ]
+    assert [
+        record
+        for record in caplog.records
+        if "lost a concurrent insert race" in record.getMessage()
+        and run_id in record.getMessage()
+    ], "the integrity-error branch did not execute"
+    assert winner.json()["run_id"] == run_id
+    assert "different request body" in loser.json()["detail"]
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["run_id"] == run_id
+
+    async with session_factory() as verify:
+        _rows, total = await list_threads(verify)
+    assert total == 1
+    raced = [d for d in worker.dispatches if d.get("thread_id") == run_id]
+    assert len(raced) == 1
+    assert raced[0]["content"] == winning_body["message"]
+    assert gate.is_active(run_id)
+
+
 @pytest.mark.asyncio(loop_scope="function")
 async def test_five_verbs_over_live_socket(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -628,73 +963,7 @@ async def test_five_verbs_over_live_socket(
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        # presets-list
-        presets = await client.get("/v1/presets")
-        assert presets.status_code == 200
-        pbody = presets.json()
-        assert pbody["api_version"] == "v1"
-        assert any(p["id"] == _PRESET for p in pbody["presets"])
-
-        # service-state
-        service = await client.get("/v1/service")
-        assert service.status_code == 200
-        sbody = service.json()
-        assert sbody["api_version"] == "v1"
-        # Status is probe-derived, not hardcoded: the in-process worker /health,
-        # real DB, and real checkpointer all answer, so the service is ready.
-        assert sbody["status"] == "ready"
-        assert isinstance(sbody["ready"], bool)
-
-        # run-start (carries the R7 actor token bundle)
-        start = await client.post(
-            "/v1/runs",
-            json={
-                "run_id": "gwlive-06",
-                "team_preset": _PRESET,
-                "message": "build it",
-                "autonomous": True,
-                "actor_tokens": {
-                    "tokens": {"coder": "tok-coder"},
-                    "engine_bearer": "bearer",
-                },
-                **await _run_fields(client),
-            },
-        )
-        assert start.status_code == 201
-        stbody = start.json()
-        assert stbody["api_version"] == "v1"
-        run_id = stbody["run_id"]
-        assert run_id
-        # The worker received the dispatch carrying the tokens (transport).
-        assert worker.dispatches, "run-start must dispatch to the worker"
-        assert worker.dispatches[-1]["actor_tokens"]["tokens"]["coder"] == "tok-coder"
-
-        # run-status recovery snapshot
-        status = await client.get(f"/v1/runs/{run_id}")
-        assert status.status_code == 200
-        rbody = status.json()
-        assert rbody["api_version"] == "v1"
-        assert rbody["run_id"] == run_id
-        assert rbody["topology"]["team_preset"] == _PRESET
-        assert "roles" in rbody
-        assert isinstance(rbody["proposal_ids"], list)
-        # Semantic phase projection: a dispatched coder run is a generic
-        # "running" (no fabricated authoring precision for a non-research_adr
-        # preset), and the target-feature / authoring-session fields are present.
-        assert rbody["semantic_phase"] == "running"
-        assert "feature_tag" in rbody
-        assert "authoring_session_id" in rbody
-
-        # unknown run -> 404
-        missing = await client.get("/v1/runs/does-not-exist")
-        assert missing.status_code == 404
-
-        # run-cancel is idempotent: two calls both succeed
-        first = await client.post(f"/v1/runs/{run_id}/cancel")
-        assert first.status_code == 200
-        assert first.json()["api_version"] == "v1"
-        second = await client.post(f"/v1/runs/{run_id}/cancel")
-        assert second.status_code == 200
+        await _exercise_five_verbs(client, worker)
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -1743,114 +2012,23 @@ async def test_modern_selection_insert_race_and_direct_replay_disclose_same_free
             httpx.AsyncClient(base_url=base, timeout=30.0) as client,
         ):
             selection, workspace_root = await _in_process_catalog_selection(client)
-            payload = {
-                "team_preset": _PRESET,
-                "message": "same durable intention",
-                "run_id": run_id,
-                "selection": selection,
-                "metadata": {"workspace_root": workspace_root},
-            }
-            barrier = await engine.connect()
-            baseline = checked_out()
-            await barrier.exec_driver_sql("BEGIN IMMEDIATE")
-            try:
-                first = asyncio.create_task(client.post("/v1/runs", json=payload))
-                await _wait_until(
-                    lambda: gate.is_active(run_id),
-                    what="the first modern request to pass its read",
-                )
-                second = asyncio.create_task(client.post("/v1/runs", json=payload))
-                await _wait_until(
-                    lambda: checked_out() >= baseline + 2,
-                    what="the second modern request to reach the store",
-                )
-                await asyncio.sleep(0.25)
-            finally:
-                await barrier.exec_driver_sql("ROLLBACK")
-                await barrier.close()
-            first_response, second_response = await asyncio.gather(first, second)
-            replay = await client.post("/v1/runs", json=payload)
-
-            # The inverse collision is also classified after rollback: two
-            # different durable intentions sharing one explicit nickname must
-            # remain a nickname conflict, never a same-id replay or a 500.
-            nickname = "shared-modern-race"
-            left_id = "rid-modern-nickname-left"
-            right_id = "rid-modern-nickname-right"
-            nickname_base = {
-                "team_preset": _PRESET,
-                "message": "nickname collision",
-                "selection": selection,
-                "metadata": {
-                    "workspace_root": workspace_root,
-                    "nickname": nickname,
-                },
-            }
-            await _wait_until(
-                lambda: checked_out() == 0,
-                what="the same-id race connections to return to the pool",
+            responses, nickname_responses = await _run_modern_selection_races(
+                client,
+                engine,
+                gate,
+                checked_out,
+                run_id,
+                selection,
+                workspace_root,
             )
-            barrier = await engine.connect()
-            baseline = checked_out()
-            await barrier.exec_driver_sql("BEGIN IMMEDIATE")
-            try:
-                # `nickname_base` already carries the selection AND the metadata
-                # naming the shared nickname; spreading `_run_fields` on top
-                # would replace that metadata with the helper's nickname-free
-                # envelope and dissolve the very collision under test.
-                left = asyncio.create_task(
-                    client.post(
-                        "/v1/runs",
-                        json={**nickname_base, "run_id": left_id},
-                    )
-                )
-                await _wait_until(
-                    lambda: gate.is_active(left_id),
-                    what="the first nickname request to pass its read",
-                )
-                right = asyncio.create_task(
-                    client.post(
-                        "/v1/runs",
-                        json={**nickname_base, "run_id": right_id},
-                    )
-                )
-                await _wait_until(
-                    lambda: checked_out() >= baseline + 2,
-                    what="the second nickname request to reach the store",
-                )
-                await asyncio.sleep(0.25)
-            finally:
-                await barrier.exec_driver_sql("ROLLBACK")
-                await barrier.close()
-            nickname_responses = await asyncio.gather(left, right)
 
-    responses = (first_response, second_response, replay)
-    assert all(response.status_code == 201 for response in responses), [
-        response.text for response in responses
-    ]
-    assert [
-        record
-        for record in caplog.records
-        if "lost a concurrent insert race" in record.getMessage()
-        and run_id in record.getMessage()
-    ], "the integrity-error recovery branch did not execute"
-    frozen = [response.json()["frozen_assignment"] for response in responses]
-    assert all(item is not None for item in frozen)
-    assert frozen[0] == frozen[1] == frozen[2]
-    assert frozen[0]["schema_version"] == 1
-    assert frozen[0]["digest"]
-    assert len([d for d in worker.dispatches if d.get("thread_id") == run_id]) == 1
-    assert sorted(response.status_code for response in nickname_responses) == [201, 409]
-    nickname_conflict = next(
-        response for response in nickname_responses if response.status_code == 409
+    _assert_modern_race_results(
+        responses,
+        nickname_responses,
+        caplog=caplog,
+        worker=worker,
+        run_id=run_id,
     )
-    assert "nickname already exists" in nickname_conflict.json()["detail"]
-    nickname_dispatches = [
-        dispatch
-        for dispatch in worker.dispatches
-        if dispatch.get("thread_id") in {left_id, right_id}
-    ]
-    assert len(nickname_dispatches) == 1
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -1898,91 +2076,24 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
             _live_server(app) as base,
             httpx.AsyncClient(base_url=base, timeout=30.0) as client,
         ):
-            barrier = await engine.connect()
-            # Resolved ONCE and shared by both racers and the replay below.
-            # The replay must be byte-identical to the winner's body for
-            # the gateway to answer it idempotently; resolving twice would
-            # be equal in practice but would leave that guarantee to luck.
-            race_fields = await _run_fields(client)
-            baseline = checked_out()
-            await barrier.exec_driver_sql("BEGIN IMMEDIATE")
-            try:
-                first = asyncio.create_task(
-                    client.post(
-                        "/v1/runs",
-                        json={
-                            **first_body,
-                            **race_fields,
-                        },
-                    )
-                )
-                # Admission happens after the check-then-act read and before the
-                # insert, so an active run id proves the first request read an
-                # absent run and is now held at the barrier.
-                await _wait_until(
-                    lambda: gate.is_active(run_id),
-                    what="the first request to pass its read",
-                )
-                second = asyncio.create_task(
-                    client.post(
-                        "/v1/runs",
-                        json={
-                            **second_body,
-                            **race_fields,
-                        },
-                    )
-                )
-                # A second leased connection proves the second request is issuing
-                # DB work of its own - its read, which can only miss while the
-                # barrier bars every insert.
-                await _wait_until(
-                    lambda: checked_out() >= baseline + 2,
-                    what="the second request to reach the store",
-                )
-                await asyncio.sleep(0.25)
-            finally:
-                await barrier.exec_driver_sql("ROLLBACK")
-                await barrier.close()
-            first_response, second_response = await asyncio.gather(first, second)
-            if first_response.status_code == 201:
-                winner, loser = first_response, second_response
-                winning_body = first_body
-            else:
-                winner, loser = second_response, first_response
-                winning_body = second_body
-            # The refusal is specific to the colliding body, not a blanket
-            # rejection of the raced id: the winner's own request still replays.
-            replay = await client.post("/v1/runs", json={**winning_body, **race_fields})
+            race = await _run_different_body_race(
+                client,
+                engine,
+                gate,
+                checked_out,
+                run_id,
+                first_body,
+                second_body,
+            )
 
-    assert sorted(r.status_code for r in (winner, loser)) == [201, 409], [
-        winner.text,
-        loser.text,
-    ]
-    # Proof the refusal came from the insert-race branch and not the sequential
-    # check-then-act one: only the integrity path records the lost race.
-    assert [
-        record
-        for record in caplog.records
-        if "lost a concurrent insert race" in record.getMessage()
-        and run_id in record.getMessage()
-    ], "the integrity-error branch did not execute"
-    assert winner.json()["run_id"] == run_id
-    assert "different request body" in loser.json()["detail"]
-    assert replay.status_code == 201, replay.text
-    assert replay.json()["run_id"] == run_id
-
-    # The refused racer left no second run, and only the winner's intention was
-    # ever dispatched.
-    async with session_factory() as verify:
-        _rows, total = await list_threads(verify)
-    assert total == 1
-    raced = [d for d in worker.dispatches if d.get("thread_id") == run_id]
-    assert len(raced) == 1
-    assert raced[0]["content"] == winning_body["message"]
-
-    # The durable winner keeps its admission: the refused loser must not release
-    # the drain gate's active run out from under the run that owns it.
-    assert gate.is_active(run_id)
+    await _assert_different_body_race(
+        race,
+        session_factory=session_factory,
+        worker=worker,
+        gate=gate,
+        caplog=caplog,
+        run_id=run_id,
+    )
 
 
 @pytest.mark.asyncio(loop_scope="function")

@@ -12,7 +12,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 import httpx
 
@@ -32,6 +32,15 @@ if TYPE_CHECKING:
 # A process this harness owns, its label, and the log it writes: enough to fail
 # a readiness wait with the exit code and the tail that explain the death.
 _WatchedProcess = tuple[str, "subprocess.Popen[str]", Path]
+
+
+class _PermissionResponseOptions(TypedDict, total=False):
+    """Optional wire values accepted by :meth:`ServiceStack.respond_permission`."""
+
+    kind: str | None
+    idempotency_key: str | None
+    expected_status: int
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "service" / "docker-compose.integration.yml"
@@ -879,10 +888,11 @@ class ServiceStack:
         *,
         thread_id: str,
         option_id: str,
-        kind: str | None = None,
-        idempotency_key: str | None = None,
-        expected_status: int = 200,
+        **options: Unpack[_PermissionResponseOptions],
     ) -> dict[str, Any]:
+        kind = options.get("kind")
+        idempotency_key = options.get("idempotency_key")
+        expected_status = options.get("expected_status", 200)
         body: dict[str, Any] = {"option_id": option_id}
         if kind is not None:
             body["kind"] = kind

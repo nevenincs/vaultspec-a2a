@@ -15,7 +15,7 @@ is what callers see rather than the shape it replaced.
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import Any, TypedDict, Unpack, cast
 
 from langgraph.types import Command
 
@@ -31,6 +31,41 @@ from .transformer import project_run_progress
 from .types import SequencedEvent, StreamableGraph
 
 __all__ = ["EventAggregator"]
+
+
+class _ToolCallStartOptions(TypedDict, total=False):
+    kind: ToolKind
+    input_args: dict[str, Any] | None
+
+
+class _ToolCallUpdateOptions(TypedDict, total=False):
+    status: ToolCallStatus | None
+    title: str | None
+    content: list[dict[str, str | None]] | None
+
+
+class _PermissionRequestOptional(TypedDict, total=False):
+    tool_call: str | None
+    tool_kind: ToolKind | None
+
+
+class _PermissionRequestOptions(_PermissionRequestOptional):
+    thread_id: str
+    agent_id: str
+    request_id: str
+    description: str
+    options: list[dict[str, str]]
+
+
+class _ArtifactUpdateOptions(TypedDict, total=False):
+    append: bool
+    last_chunk: bool
+
+
+class _IngestOptions(TypedDict, total=False):
+    graph_input: dict[str, Any] | Command[Any] | None
+    config: dict[str, Any]
+    on_graph_started: Callable[[], Awaitable[None]] | None
 
 
 class EventAggregator:
@@ -202,11 +237,17 @@ class EventAggregator:
         agent_id: str,
         tool_call_id: str,
         title: str,
-        kind: ToolKind = ToolKind.OTHER,
-        input_args: dict[str, Any] | None = None,
+        **options: Unpack[_ToolCallStartOptions],
     ) -> None:
+        kind = options.get("kind", ToolKind.OTHER)
+        input_args = options.get("input_args")
         await self._emitters.emit_tool_call_start(
-            thread_id, agent_id, tool_call_id, title, kind, input_args
+            thread_id=thread_id,
+            agent_id=agent_id,
+            tool_call_id=tool_call_id,
+            title=title,
+            kind=kind,
+            input_args=input_args,
         )
 
     async def emit_tool_call_update(
@@ -214,32 +255,29 @@ class EventAggregator:
         thread_id: str,
         agent_id: str,
         tool_call_id: str,
-        status: ToolCallStatus | None = None,
-        title: str | None = None,
-        content: list[dict[str, str | None]] | None = None,
+        **options: Unpack[_ToolCallUpdateOptions],
     ) -> None:
         await self._emitters.emit_tool_call_update(
-            thread_id, agent_id, tool_call_id, status, title, content
+            thread_id=thread_id,
+            agent_id=agent_id,
+            tool_call_id=tool_call_id,
+            status=options.get("status"),
+            title=options.get("title"),
+            content=options.get("content"),
         )
 
     async def emit_permission_request(
         self,
-        thread_id: str,
-        agent_id: str,
-        request_id: str,
-        description: str,
-        options: list[dict[str, str]],
-        tool_call: str | None = None,
-        tool_kind: ToolKind | None = None,
+        **options: Unpack[_PermissionRequestOptions],
     ) -> None:
         await self._emitters.emit_permission_request(
-            thread_id,
-            agent_id,
-            request_id,
-            description,
-            options,
-            tool_call,
-            tool_kind,
+            thread_id=options["thread_id"],
+            agent_id=options["agent_id"],
+            request_id=options["request_id"],
+            description=options["description"],
+            options=options["options"],
+            tool_call=options.get("tool_call"),
+            tool_kind=options.get("tool_kind"),
         )
 
     def resolve_permission(self, request_id: str) -> None:
@@ -276,11 +314,15 @@ class EventAggregator:
         artifact_id: str,
         filename: str,
         content: str,
-        append: bool = False,
-        last_chunk: bool = True,
+        **options: Unpack[_ArtifactUpdateOptions],
     ) -> None:
         await self._emitters.emit_artifact_update(
-            thread_id, artifact_id, filename, content, append, last_chunk
+            thread_id=thread_id,
+            artifact_id=artifact_id,
+            filename=filename,
+            content=content,
+            append=options.get("append", False),
+            last_chunk=options.get("last_chunk", True),
         )
 
     async def emit_plan_update(
@@ -345,11 +387,46 @@ class EventAggregator:
         thread_id: str,
         agent_id: str,
         graph: StreamableGraph,
-        graph_input: dict[str, Any] | Command[Any] | None,
-        config: dict[str, Any],
-        *,
-        on_graph_started: Callable[[], Awaitable[None]] | None = None,
+        *args: object,
+        **options: Unpack[_IngestOptions],
     ) -> str:
+        unknown = set(options).difference({"graph_input", "config", "on_graph_started"})
+        if unknown:
+            unexpected = next(iter(unknown))
+            raise TypeError(
+                "EventAggregator.ingest() got an unexpected keyword argument "
+                f"{unexpected!r}"
+            )
+        if len(args) > 2:
+            raise TypeError(
+                f"EventAggregator.ingest() takes 5 positional arguments but "
+                f"{len(args) + 4} were given"
+            )
+        if args and "graph_input" in options:
+            raise TypeError(
+                "EventAggregator.ingest() got multiple values for argument "
+                "'graph_input'"
+            )
+        if len(args) > 1 and "config" in options:
+            raise TypeError(
+                "EventAggregator.ingest() got multiple values for argument 'config'"
+            )
+        if args:
+            graph_input = cast("dict[str, Any] | Command[Any] | None", args[0])
+        elif "graph_input" in options:
+            graph_input = options["graph_input"]
+        else:
+            raise TypeError(
+                "EventAggregator.ingest() missing required argument 'graph_input'"
+            )
+        if len(args) > 1:
+            config = cast("dict[str, Any]", args[1])
+        elif "config" in options:
+            config = options["config"]
+        else:
+            raise TypeError(
+                "EventAggregator.ingest() missing required argument 'config'"
+            )
         return await self._ingest.ingest(
             IngestRequest(
                 thread_id,
@@ -357,7 +434,7 @@ class EventAggregator:
                 graph,
                 graph_input,
                 config,
-                on_graph_started,
+                options.get("on_graph_started"),
             )
         )
 

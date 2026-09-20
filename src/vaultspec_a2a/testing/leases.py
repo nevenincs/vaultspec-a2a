@@ -38,7 +38,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 from ..lifecycle import is_pid_alive, procs_home
 
@@ -74,6 +74,17 @@ _SHARED_SUFFIX = ".shared"
 _KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 # Distinguishes multiple shared holds by one process; see _try_acquire_shared.
 _SHARED_SEQ = itertools.count()
+
+
+class _LeaseOptions(TypedDict, total=False):
+    """Optional keyword settings shared by the lease entry points."""
+
+    shared: bool
+    owner: str
+    home: Path | None
+    acquire_timeout_s: float | None
+    poll_interval_s: float
+    refresh_interval_s: float
 
 
 class LeaseAcquisitionTimeoutError(TimeoutError):
@@ -305,13 +316,7 @@ def _contention_detail(root: Path, key: str) -> str:
 
 def acquire(
     key: str,
-    *,
-    shared: bool = False,
-    owner: str = "",
-    home: Path | None = None,
-    acquire_timeout_s: float | None = None,
-    poll_interval_s: float = 0.25,
-    refresh_interval_s: float = _REFRESH_INTERVAL_S,
+    **options: Unpack[_LeaseOptions],
 ) -> Lease:
     """Block until the lease for *key* is held, then heartbeat it until release.
 
@@ -321,6 +326,12 @@ def acquire(
     :class:`LeaseAcquisitionTimeoutError` names the live holder so the contention is
     diagnosable rather than a bare clock expiry.
     """
+    shared = options.get("shared", False)
+    owner = options.get("owner", "")
+    home = options.get("home")
+    acquire_timeout_s = options.get("acquire_timeout_s")
+    poll_interval_s = options.get("poll_interval_s", 0.25)
+    refresh_interval_s = options.get("refresh_interval_s", _REFRESH_INTERVAL_S)
     _validate_key(key)
     root = lease_home(home)
     root.mkdir(parents=True, exist_ok=True)
@@ -358,24 +369,10 @@ def acquire(
 @contextlib.contextmanager
 def hold_lease(
     key: str,
-    *,
-    shared: bool = False,
-    owner: str = "",
-    home: Path | None = None,
-    acquire_timeout_s: float | None = None,
-    poll_interval_s: float = 0.25,
-    refresh_interval_s: float = _REFRESH_INTERVAL_S,
+    **options: Unpack[_LeaseOptions],
 ) -> Generator[Lease]:
     """Context-managed :func:`acquire`; releases on exit even under failure."""
-    lease = acquire(
-        key,
-        shared=shared,
-        owner=owner,
-        home=home,
-        acquire_timeout_s=acquire_timeout_s,
-        poll_interval_s=poll_interval_s,
-        refresh_interval_s=refresh_interval_s,
-    )
+    lease = acquire(key, **options)
     try:
         yield lease
     finally:

@@ -49,18 +49,12 @@ async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
         yield database_session
 
 
-@pytest.mark.asyncio
-async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
-    engine: AsyncEngine,
-    session: AsyncSession,
-    tmp_path: Path,
+async def _seed_history(
+    session: AsyncSession, workspace: str, foreign_workspace: str
 ) -> None:
-    """A 100k-row history must not turn the bounded read into a table scan."""
-    workspace = os.path.normcase(os.path.realpath(tmp_path / "workspace"))
-    foreign_workspace = os.path.normcase(os.path.realpath(tmp_path / "foreign"))
+    """Insert the indexed history mix used by the bounded discovery proof."""
     started_at = datetime(2026, 7, 19, tzinfo=UTC)
     insert_statement = insert(ThreadModel)
-
     for offset in range(0, _HISTORY_ROWS, 5_000):
         batch: list[dict[str, Any]] = []
         for index in range(offset, min(offset + 5_000, _HISTORY_ROWS)):
@@ -90,6 +84,11 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
         await session.execute(insert_statement, batch)
     await session.commit()
 
+
+async def _assert_active_indexes(
+    engine: AsyncEngine, session: AsyncSession, workspace: str
+) -> None:
+    """Assert both active-run selectors use their dedicated covering indexes."""
     statement = _active_thread_page_statement(
         limit=6,
         workspace_root=workspace,
@@ -128,34 +127,61 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
     assert "SCAN threads" not in feature_plan_details
     assert "USE TEMP B-TREE" not in feature_plan_details
 
+
+async def _measure_discovery(
+    session: AsyncSession,
+    checkpointer: AsyncSqliteSaver,
+    workspace_root: Path,
+) -> tuple[ActiveRunDiscoveryResult, list[float], int]:
+    """Warm discovery, then return its result, timings, and traced peak bytes."""
+    await discover_active_runs(
+        session,
+        checkpointer=checkpointer,
+        workspace_root=workspace_root,
+        feature_tag="a2a",
+        limit=5,
+    )
+    samples_ms: list[float] = []
+    result: ActiveRunDiscoveryResult | None = None
+    tracemalloc.start()
+    try:
+        for _ in range(20):
+            before = time.perf_counter()
+            result = await discover_active_runs(
+                session,
+                checkpointer=checkpointer,
+                workspace_root=workspace_root,
+                feature_tag="a2a",
+                limit=5,
+            )
+            samples_ms.append((time.perf_counter() - before) * 1_000)
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert result is not None
+    return result, samples_ms, peak_bytes
+
+
+@pytest.mark.asyncio
+async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
+    engine: AsyncEngine,
+    session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    """A 100k-row history must not turn the bounded read into a table scan."""
+    workspace = os.path.normcase(os.path.realpath(tmp_path / "workspace"))
+    foreign_workspace = os.path.normcase(os.path.realpath(tmp_path / "foreign"))
+    await _seed_history(session, workspace, foreign_workspace)
+    await _assert_active_indexes(engine, session, workspace)
+
     async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
         await checkpointer.setup()
-        await discover_active_runs(
+        result, samples_ms, peak_bytes = await _measure_discovery(
             session,
-            checkpointer=checkpointer,
-            workspace_root=tmp_path / "workspace",
-            feature_tag="a2a",
-            limit=5,
+            checkpointer,
+            tmp_path / "workspace",
         )
-        samples_ms: list[float] = []
-        result: ActiveRunDiscoveryResult | None = None
-        tracemalloc.start()
-        try:
-            for _ in range(20):
-                before = time.perf_counter()
-                result = await discover_active_runs(
-                    session,
-                    checkpointer=checkpointer,
-                    workspace_root=tmp_path / "workspace",
-                    feature_tag="a2a",
-                    limit=5,
-                )
-                samples_ms.append((time.perf_counter() - before) * 1_000)
-            _, peak_bytes = tracemalloc.get_traced_memory()
-        finally:
-            tracemalloc.stop()
 
-    assert result is not None
     assert [run.run_id for run in result.runs] == [
         "history-099999",
         "history-099998",

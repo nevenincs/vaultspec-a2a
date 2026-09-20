@@ -22,7 +22,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -36,6 +36,9 @@ from ...team.team_config import load_team_config
 from ...thread.enums import TERMINAL_STATUS_VALUES
 from ._harness import certified_gateway
 from .conftest import wait_for_run_status
+
+if TYPE_CHECKING:
+    from ._harness import CertifiedGateway
 
 _BUNDLE_ROOT_ENV = "VAULTSPEC_ACCEPTANCE_BUNDLE_DIR"
 _SCENARIO_PATH = (
@@ -120,59 +123,78 @@ class _ReviewBundleInput:
     history: dict[str, Any]
 
 
-def _emit_review_bundle(bundle_root: Path, evidence: _ReviewBundleInput) -> Path:
-    """Write and self-verify the automated evidence awaiting separate review."""
-    scenario = evidence.scenario
-    run_id = evidence.run_id
-    authored_output = evidence.authored_output
-    materialized = evidence.materialized
-    status = evidence.status
-    history = evidence.history
-    scenario_id = str(scenario["scenario_id"])
-    bundle = bundle_root / scenario_id / run_id
-    bundle.mkdir(parents=True, exist_ok=False)
+@dataclass(frozen=True, slots=True)
+class _BundleFiles:
+    """Files written into one deterministic completion review bundle."""
 
-    scenario_copy = bundle / "scenario.json"
+    scenario: Path
+    authored: Path
+    evidence: Path
+    manifest: Path
+    materialized: dict[str, Path]
+
+
+def _copy_materialized_documents(
+    bundle: Path, materialized: dict[str, Path]
+) -> dict[str, Path]:
+    copied_paths: dict[str, Path] = {}
+    for kind, source in materialized.items():
+        copied = bundle / f"authored-{kind}.md"
+        copied.write_bytes(source.read_bytes())
+        copied_paths[kind] = copied
+    return copied_paths
+
+
+def _write_bundle_files(bundle: Path, evidence: _ReviewBundleInput) -> _BundleFiles:
+    """Write the content files that make up one review bundle."""
+    scenario_id = str(evidence.scenario["scenario_id"])
+    scenario_path = bundle / "scenario.json"
     authored_path = bundle / "scripted-adr-output.md"
     evidence_path = bundle / "execution-evidence.json"
     manifest_path = bundle / "manifest.json"
 
-    _write_json(scenario_copy, scenario)
-    authored_path.write_text(authored_output, encoding="utf-8")
-    materialized_paths: dict[str, Path] = {}
-    for kind, source in materialized.items():
-        copied = bundle / f"authored-{kind}.md"
-        copied.write_bytes(source.read_bytes())
-        materialized_paths[kind] = copied
+    _write_json(scenario_path, evidence.scenario)
+    authored_path.write_text(evidence.authored_output, encoding="utf-8")
+    materialized_paths = _copy_materialized_documents(bundle, evidence.materialized)
     _write_json(
         evidence_path,
         {
             "scenario_id": scenario_id,
-            "run_id": run_id,
-            "terminal_status": status,
-            "run_history": history,
+            "run_id": evidence.run_id,
+            "terminal_status": evidence.status,
+            "run_history": evidence.history,
         },
     )
-    artifacts = {
-        scenario_copy.name: _digest(scenario_copy),
-        authored_path.name: _digest(authored_path),
-        evidence_path.name: _digest(evidence_path),
-    }
-    artifacts.update({path.name: _digest(path) for path in materialized_paths.values()})
-    _write_json(
-        manifest_path,
-        {
-            "bundle_id": f"{scenario_id}:{run_id}",
-            "scenario_id": scenario_id,
-            "run_id": run_id,
-            "review": {"status": "pending", "required_step": "W01.P02.S31"},
-            "artifacts": artifacts,
-        },
+    return _BundleFiles(
+        scenario=scenario_path,
+        authored=authored_path,
+        evidence=evidence_path,
+        manifest=manifest_path,
+        materialized=materialized_paths,
     )
 
+
+def _bundle_artifacts(files: _BundleFiles) -> dict[str, str]:
+    artifacts = {
+        files.scenario.name: _digest(files.scenario),
+        files.authored.name: _digest(files.authored),
+        files.evidence.name: _digest(files.evidence),
+    }
+    artifacts.update({path.name: _digest(path) for path in files.materialized.values()})
+    return artifacts
+
+
+def _verify_bundle_manifest(
+    bundle: Path,
+    files: _BundleFiles,
+    *,
+    scenario_id: str,
+    run_id: str,
+    authored_output: str,
+) -> None:
     manifest = _required_object(
-        json.loads(manifest_path.read_text(encoding="utf-8")),
-        at=f"review bundle manifest {manifest_path}",
+        json.loads(files.manifest.read_text(encoding="utf-8")),
+        at=f"review bundle manifest {files.manifest}",
     )
     assert _required_text(manifest.get("bundle_id"), at="manifest.bundle_id") == (
         f"{scenario_id}:{run_id}"
@@ -189,7 +211,32 @@ def _emit_review_bundle(bundle_root: Path, evidence: _ReviewBundleInput) -> Path
         artifact = bundle / name
         assert artifact.is_file(), f"required review artifact is absent: {artifact}"
         assert _digest(artifact) == identity, f"review artifact changed: {artifact}"
-    assert authored_path.read_text(encoding="utf-8") == authored_output
+    assert files.authored.read_text(encoding="utf-8") == authored_output
+
+
+def _emit_review_bundle(bundle_root: Path, evidence: _ReviewBundleInput) -> Path:
+    """Write and self-verify the automated evidence awaiting separate review."""
+    scenario_id = str(evidence.scenario["scenario_id"])
+    bundle = bundle_root / scenario_id / evidence.run_id
+    bundle.mkdir(parents=True, exist_ok=False)
+    files = _write_bundle_files(bundle, evidence)
+    _write_json(
+        files.manifest,
+        {
+            "bundle_id": f"{scenario_id}:{evidence.run_id}",
+            "scenario_id": scenario_id,
+            "run_id": evidence.run_id,
+            "review": {"status": "pending", "required_step": "W01.P02.S31"},
+            "artifacts": _bundle_artifacts(files),
+        },
+    )
+    _verify_bundle_manifest(
+        bundle,
+        files,
+        scenario_id=scenario_id,
+        run_id=evidence.run_id,
+        authored_output=evidence.authored_output,
+    )
     return bundle
 
 
@@ -237,25 +284,33 @@ async def _await_materialized_documents(
     )
 
 
-@pytest.mark.asyncio(loop_scope="function")
-async def test_deterministic_completion_emits_a_run_bound_review_bundle(
-    tmp_path: Path,
-    live_engine: EngineEndpoint,
-) -> None:
-    """A real deterministic run completes and emits exact, bound review evidence."""
+@dataclass(frozen=True, slots=True)
+class _CompletionPlan:
+    """Validated inputs shared by the deterministic completion run."""
+
+    scenario: dict[str, object]
+    preset: str
+    run_id: str
+    feature_tag: str
+    endpoint: EngineEndpoint
+    vault_root: Path
+    roles: tuple[str, ...]
+
+
+def _build_completion_plan(live_engine: EngineEndpoint) -> _CompletionPlan:
+    """Resolve and validate the external inputs required by the completion proof."""
     scenario = _read_scenario()
     preset = _required_text(scenario.get("team_preset"), at="scenario.team_preset")
     run_id = f"deterministic-completion-{uuid.uuid4().hex}"
     feature_tag = f"s05-deterministic-{run_id.rsplit('-', 1)[-1]}"
     team_config = load_team_config(preset)
-    roles = required_role_ids(team_config)
+    roles = tuple(required_role_ids(team_config))
     assert roles, f"deterministic preset {preset!r} declares no required roles"
     # Resolved through the ONE external-prerequisite rule rather than a local
     # probe. An absent cross-repo engine is reported as a skip naming the runbook
     # line, and becomes a hard failure for a caller that declared `loopback-stack`
     # present - which is how this suite keeps "no engine is a failure, not a
     # skip" without a red gate that says nothing about THIS repository's health.
-    endpoint = live_engine
     service_json = os.environ.get(SERVICE_JSON_ENV)
     assert service_json, (
         f"deterministic completion requires {SERVICE_JSON_ENV} to bind its "
@@ -263,62 +318,64 @@ async def test_deterministic_completion_emits_a_run_bound_review_bundle(
     )
     vault_root = Path(service_json).parents[2]
     assert vault_root.is_dir(), f"engine vault root is absent: {vault_root}"
+    return _CompletionPlan(
+        scenario=scenario,
+        preset=preset,
+        run_id=run_id,
+        feature_tag=feature_tag,
+        endpoint=live_engine,
+        vault_root=vault_root,
+        roles=roles,
+    )
 
-    async with AuthoringClient(endpoint.base_url, endpoint.bearer_token) as authoring:
-        tokens = {
-            role: await _mint_token(
-                authoring, actor_id=f"agent:{run_id}:{role}", kind="agent"
-            )
-            for role in roles
-        }
-        reviewer_token = await _mint_token(
-            authoring, actor_id=f"reviewer:{run_id}", kind="human"
+
+async def _mint_role_tokens(
+    client: AuthoringClient, plan: _CompletionPlan
+) -> dict[str, str]:
+    return {
+        role: await _mint_token(
+            client, actor_id=f"agent:{plan.run_id}:{role}", kind="agent"
         )
-        await _set_autonomous_mode(authoring, reviewer_token)
+        for role in plan.roles
+    }
 
-        with certified_gateway(
-            tmp_path, VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED="true"
-        ) as gateway:
-            started = gateway.client(timeout=90.0).post(
-                "/v1/runs",
-                json={
-                    "team_preset": preset,
-                    "stage": "start",
-                    "run_id": run_id,
-                    "message": _required_text(
-                        scenario.get("message"), at="scenario.message"
-                    ),
-                    "feature_tag": feature_tag,
-                    "metadata": {
-                        "workspace_root": str(vault_root.parent),
-                        "feature_tag": feature_tag,
-                        "nickname": run_id,
-                    },
-                    "autonomous": True,
-                    "actor_tokens": {
-                        "tokens": tokens,
-                        "engine_bearer": endpoint.bearer_token,
-                    },
-                },
-            )
-            assert started.status_code == 201, started.text
 
-            materialized = await _await_materialized_documents(
-                vault_root, feature_tag, timeout=180.0
-            )
-            terminal = await asyncio.to_thread(
-                wait_for_run_status,
-                gateway,
-                run_id,
-                lambda body: body.get("status") in TERMINAL_STATUS_VALUES,
-                timeout=180.0,
-            )
-            assert terminal["status"] == "completed", terminal
+def _start_completion_run(
+    gateway: CertifiedGateway,
+    plan: _CompletionPlan,
+    tokens: dict[str, str],
+) -> None:
+    message = _required_text(plan.scenario.get("message"), at="scenario.message")
+    started = gateway.client(timeout=90.0).post(
+        "/v1/runs",
+        json={
+            "team_preset": plan.preset,
+            "stage": "start",
+            "run_id": plan.run_id,
+            "message": message,
+            "feature_tag": plan.feature_tag,
+            "metadata": {
+                "workspace_root": str(plan.vault_root.parent),
+                "feature_tag": plan.feature_tag,
+                "nickname": plan.run_id,
+            },
+            "autonomous": True,
+            "actor_tokens": {
+                "tokens": tokens,
+                "engine_bearer": plan.endpoint.bearer_token,
+            },
+        },
+    )
+    assert started.status_code == 201, started.text
 
-            history_response = gateway.thread_state(run_id)
-            assert history_response.status_code == 200, history_response.text
-    history = _required_object(history_response.json(), at="run history")
 
+def _read_completion_history(gateway: CertifiedGateway, run_id: str) -> dict[str, Any]:
+    history_response = gateway.thread_state(run_id)
+    assert history_response.status_code == 200, history_response.text
+    return _required_object(history_response.json(), at="run history")
+
+
+def _healthy_history_messages(history: dict[str, Any]) -> list[object]:
     state = _required_object(history.get("state"), at=f"run history state: {history}")
     assert state.get("snapshot_complete") is True, state
     assert state.get("repair_status") == "healthy", state
@@ -326,7 +383,13 @@ async def test_deterministic_completion_emits_a_run_bound_review_bundle(
     assert state.get("degraded_reasons") == [], state
     messages = state.get("messages")
     assert isinstance(messages, list), f"run history has no messages: {history}"
-    typed_messages = cast("list[object]", messages)
+    return cast("list[object]", messages)
+
+
+def _authored_output(
+    history: dict[str, Any], scenario: dict[str, object], run_id: str
+) -> str:
+    typed_messages = _healthy_history_messages(history)
     expected = _required_object(
         scenario.get("authored_output"), at="scenario.authored_output"
     )
@@ -351,16 +414,56 @@ async def test_deterministic_completion_emits_a_run_bound_review_bundle(
     assert content == expected_content, (
         f"run {run_id} authored unexpected scripted content: {content!r}"
     )
+    return content
 
-    bundle = _emit_review_bundle(
-        _bundle_root(),
-        _ReviewBundleInput(
-            scenario=scenario,
-            run_id=run_id,
-            authored_output=content,
-            materialized=materialized,
-            status=terminal,
-            history=history,
-        ),
+
+async def _run_completion(tmp_path: Path, plan: _CompletionPlan) -> _ReviewBundleInput:
+    """Execute the real completion and return the evidence for bundle emission."""
+    async with AuthoringClient(
+        plan.endpoint.base_url, plan.endpoint.bearer_token
+    ) as authoring:
+        tokens = await _mint_role_tokens(authoring, plan)
+        reviewer_token = await _mint_token(
+            authoring, actor_id=f"reviewer:{plan.run_id}", kind="human"
+        )
+        await _set_autonomous_mode(authoring, reviewer_token)
+
+        with certified_gateway(
+            tmp_path, VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED="true"
+        ) as gateway:
+            _start_completion_run(gateway, plan, tokens)
+            materialized = await _await_materialized_documents(
+                plan.vault_root, plan.feature_tag, timeout=180.0
+            )
+            terminal = await asyncio.to_thread(
+                wait_for_run_status,
+                gateway,
+                plan.run_id,
+                lambda body: body.get("status") in TERMINAL_STATUS_VALUES,
+                timeout=180.0,
+            )
+            assert terminal["status"] == "completed", terminal
+            history = _read_completion_history(gateway, plan.run_id)
+
+    authored_output = _authored_output(history, plan.scenario, plan.run_id)
+    return _ReviewBundleInput(
+        scenario=plan.scenario,
+        run_id=plan.run_id,
+        authored_output=authored_output,
+        materialized=materialized,
+        status=terminal,
+        history=history,
     )
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_deterministic_completion_emits_a_run_bound_review_bundle(
+    tmp_path: Path,
+    live_engine: EngineEndpoint,
+) -> None:
+    """A real deterministic run completes and emits exact, bound review evidence."""
+    plan = _build_completion_plan(live_engine)
+    evidence = await _run_completion(tmp_path, plan)
+
+    bundle = _emit_review_bundle(_bundle_root(), evidence)
     assert bundle.is_dir(), f"review bundle was not emitted: {bundle}"

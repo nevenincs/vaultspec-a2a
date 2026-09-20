@@ -191,6 +191,121 @@ def _message_content(payload: JsonObject) -> str | None:
     return content if isinstance(content, str) else None
 
 
+def _parse_sse_payload(
+    raw_line: str,
+    *,
+    at: str,
+    error_source: str,
+) -> JsonObject | None:
+    """Decode one data frame, ignoring non-data and empty SSE lines."""
+    line = raw_line.strip()
+    if not line.startswith("data:"):
+        return None
+    body = line[len("data:") :].strip()
+    if not body:
+        return None
+    try:
+        decoded: object = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"malformed SSE JSON at {error_source}: {body!r}") from exc
+    return json_object(decoded, at=at)
+
+
+async def _observe_named_adr_run(
+    harness: AcceptanceHarness,
+    gateway_client: httpx.AsyncClient,
+    *,
+    adr_name: str,
+    adr_stem: str,
+    tokens: list[str],
+    output_parts: list[str],
+) -> tuple[bool, list[str]]:
+    """Observe the named-ADR evidence stream and cancel the run on exit."""
+    deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
+    cited = False
+    matched_tokens: list[str] = []
+    try:
+        async with gateway_client.stream(
+            "GET",
+            f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
+            timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
+        ) as response:
+            response.raise_for_status()
+            async for raw_line in response.aiter_lines():
+                payload = _parse_sse_payload(
+                    raw_line,
+                    at="grounding floor SSE stream",
+                    error_source="grounding floor stream",
+                )
+                if payload is None:
+                    continue
+                content = _message_content(payload)
+                if content:
+                    output_parts.append(content)
+                    joined = "".join(output_parts)
+                    if _cites_named_adr(joined, adr_name, adr_stem):
+                        cited = True
+                    matched_tokens = [token for token in tokens if token in joined]
+                if payload.get("type") == "thread_terminal":
+                    break
+                if (cited and matched_tokens) or time.monotonic() > deadline:
+                    break
+    finally:
+        await gateway_client.post(
+            f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
+            timeout=30.0,
+        )
+    return cited, matched_tokens
+
+
+async def _observe_rag_run(
+    harness: AcceptanceHarness,
+    gateway_client: httpx.AsyncClient,
+    *,
+    workspace_root: Path,
+    output_parts: list[str],
+) -> tuple[bool, bool, list[str]]:
+    """Observe RAG evidence and cancel the run on exit."""
+    deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
+    rag_invoked = False
+    service_down = False
+    resolving: list[str] = []
+    try:
+        async with gateway_client.stream(
+            "GET",
+            f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
+            timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
+        ) as response:
+            response.raise_for_status()
+            async for raw_line in response.aiter_lines():
+                payload = _parse_sse_payload(
+                    raw_line,
+                    at="semantic tool SSE stream",
+                    error_source="semantic tool stream",
+                )
+                if payload is None:
+                    continue
+                content = _message_content(payload)
+                if content:
+                    output_parts.append(content)
+                    joined = "".join(output_parts)
+                    if any(tool in joined for tool in _RAG_TOOLS):
+                        rag_invoked = True
+                    if _RAG_SERVICE_DOWN in joined.lower():
+                        service_down = True
+                    resolving = _resolving_citations(joined, workspace_root)
+                if payload.get("type") == "thread_terminal":
+                    break
+                if (rag_invoked and resolving) or time.monotonic() > deadline:
+                    break
+    finally:
+        await gateway_client.post(
+            f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
+            timeout=30.0,
+        )
+    return rag_invoked, service_down, resolving
+
+
 def _floor_case(feature: str, adr_name: str) -> AcceptanceCase:
     """The live floor case: a research prompt that names the target ADR to ground on.
 
@@ -265,8 +380,6 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
 
     before = _snapshot_vault(vault_root)
     output_parts: list[str] = []
-    cited = False
-    matched_tokens: list[str] = []
 
     from .test_pw7_acceptance import _ResilientAuthoringClient
 
@@ -283,45 +396,14 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
                 feature=feature,
                 expect=201,
             )
-            deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
-            try:
-                async with hc.stream(
-                    "GET",
-                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
-                    timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
-                ) as response:
-                    response.raise_for_status()
-                    async for raw_line in response.aiter_lines():
-                        line = raw_line.strip()
-                        if not line.startswith("data:"):
-                            continue
-                        body = line[len("data:") :].strip()
-                        if not body:
-                            continue
-                        try:
-                            decoded: object = json.loads(body)
-                        except json.JSONDecodeError as exc:
-                            raise AssertionError(
-                                "malformed SSE JSON at grounding floor stream: "
-                                f"{body!r}"
-                            ) from exc
-                        payload = json_object(decoded, at="grounding floor SSE stream")
-                        content = _message_content(payload)
-                        if content:
-                            output_parts.append(content)
-                            joined = "".join(output_parts)
-                            if _cites_named_adr(joined, adr_name, adr_stem):
-                                cited = True
-                            matched_tokens = [t for t in tokens if t in joined]
-                        if payload.get("type") == "thread_terminal":
-                            break
-                        if (cited and matched_tokens) or time.monotonic() > deadline:
-                            break
-            finally:
-                await hc.post(
-                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
-                    timeout=30.0,
-                )
+            cited, matched_tokens = await _observe_named_adr_run(
+                harness,
+                hc,
+                adr_name=adr_name,
+                adr_stem=adr_stem,
+                tokens=tokens,
+                output_parts=output_parts,
+            )
 
     after = _snapshot_vault(vault_root)
     delta = _vault_write_delta(before, after)
@@ -436,9 +518,6 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
 
     before = _snapshot_vault(vault_root)
     output_parts: list[str] = []
-    rag_invoked = False
-    service_down = False
-    resolving: list[str] = []
 
     from .test_pw7_acceptance import _ResilientAuthoringClient
 
@@ -455,46 +534,12 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
                 feature=feature,
                 expect=201,
             )
-            deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
-            try:
-                async with hc.stream(
-                    "GET",
-                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
-                    timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
-                ) as response:
-                    response.raise_for_status()
-                    async for raw_line in response.aiter_lines():
-                        line = raw_line.strip()
-                        if not line.startswith("data:"):
-                            continue
-                        body = line[len("data:") :].strip()
-                        if not body:
-                            continue
-                        try:
-                            decoded: object = json.loads(body)
-                        except json.JSONDecodeError as exc:
-                            raise AssertionError(
-                                f"malformed SSE JSON at semantic tool stream: {body!r}"
-                            ) from exc
-                        payload = json_object(decoded, at="semantic tool SSE stream")
-                        content = _message_content(payload)
-                        if content:
-                            output_parts.append(content)
-                            joined = "".join(output_parts)
-                            if any(tool in joined for tool in _RAG_TOOLS):
-                                rag_invoked = True
-                            if _RAG_SERVICE_DOWN in joined.lower():
-                                service_down = True
-                            resolving = _resolving_citations(joined, workspace_root)
-                        if payload.get("type") == "thread_terminal":
-                            break
-                        if (rag_invoked and resolving) or time.monotonic() > deadline:
-                            break
-            finally:
-                await hc.post(
-                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
-                    timeout=30.0,
-                )
+            rag_invoked, service_down, resolving = await _observe_rag_run(
+                harness,
+                hc,
+                workspace_root=workspace_root,
+                output_parts=output_parts,
+            )
 
     after = _snapshot_vault(vault_root)
     delta = _vault_write_delta(before, after)

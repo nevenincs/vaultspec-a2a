@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -186,34 +187,43 @@ async def _worker_runtime(
     await bridge.close()
 
 
+@dataclass(frozen=True, slots=True)
+class _ParkedThreadSeed:
+    """Checkpoint and thread values used to seed one parked run."""
+
+    thread_id: str
+    proposal_ids: list[str]
+    changeset_ids: list[str]
+    gate_pending: str | None = None
+    team_preset: str | None = None
+
+
 async def _seed_parked_thread(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
-    *,
-    thread_id: str,
-    proposal_ids: list[str],
-    changeset_ids: list[str],
-    gate_pending: str | None = None,
-    team_preset: str | None = None,
+    seed: _ParkedThreadSeed,
 ) -> None:
     """Create an INPUT_REQUIRED thread with a checkpoint carrying authoring ids."""
+    thread_id = seed.thread_id
+    proposal_ids = seed.proposal_ids
+    changeset_ids = seed.changeset_ids
     workspace = Path.cwd()
     metadata = current_execution_metadata(workspace)
     execution_authority = resolve_execution_authority(metadata)
     definition = (
         freeze_graph_definition(
-            load_team_config(team_preset, workspace_root=workspace),
+            load_team_config(seed.team_preset, workspace_root=workspace),
             workspace_root=workspace,
         )
-        if team_preset is not None
+        if seed.team_preset is not None
         else None
     )
     await checkpointer.setup()
     checkpoint = empty_checkpoint()
     checkpoint["channel_values"]["authoring_proposal_ids"] = proposal_ids
     checkpoint["channel_values"]["authoring_changeset_ids"] = changeset_ids
-    if gate_pending is not None:
-        checkpoint["channel_values"]["gate_pending_proposal_id"] = gate_pending
+    if seed.gate_pending is not None:
+        checkpoint["channel_values"]["gate_pending_proposal_id"] = seed.gate_pending
     if definition is not None:
         checkpoint["channel_values"]["model_assignment_digest"] = (
             execution_authority.model_assignment_digest
@@ -231,16 +241,16 @@ async def _seed_parked_thread(
             session,
             write_authority=authority,
             thread_id=thread_id,
-            team_preset=team_preset,
+            team_preset=seed.team_preset,
             metadata=metadata,
         )
-        if team_preset is not None and definition is not None:
+        if seed.team_preset is not None and definition is not None:
             dispatch = DispatchRequest(
                 dispatch_id=authority.action_receipt_id,
                 action="ingest",
                 thread_id=thread_id,
                 content="seed accepted graph authority",
-                team_preset=team_preset,
+                team_preset=seed.team_preset,
                 graph_definition=definition,
                 workspace_root=str(workspace),
                 recursion_limit=25,
@@ -279,9 +289,11 @@ async def test_correlates_parked_thread_by_proposal_id(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="thread-parked-1",
-            proposal_ids=["prop_abc"],
-            changeset_ids=["cs_abc"],
+            _ParkedThreadSeed(
+                thread_id="thread-parked-1",
+                proposal_ids=["prop_abc"],
+                changeset_ids=["cs_abc"],
+            ),
         )
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         matched = await subscriber._find_parked_thread({"prop_abc"})
@@ -300,9 +312,11 @@ async def test_correlates_parked_thread_by_changeset_id(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="thread-parked-2",
-            proposal_ids=[],
-            changeset_ids=["cs_xyz"],
+            _ParkedThreadSeed(
+                thread_id="thread-parked-2",
+                proposal_ids=[],
+                changeset_ids=["cs_xyz"],
+            ),
         )
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         matched = await subscriber._find_parked_thread({"cs_xyz", "unrelated"})
@@ -321,9 +335,11 @@ async def test_unknown_ids_correlate_to_nothing(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="thread-parked-3",
-            proposal_ids=["prop_known"],
-            changeset_ids=["cs_known"],
+            _ParkedThreadSeed(
+                thread_id="thread-parked-3",
+                proposal_ids=["prop_known"],
+                changeset_ids=["cs_known"],
+            ),
         )
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         assert await subscriber._find_parked_thread({"prop_missing"}) is None
@@ -342,9 +358,11 @@ async def test_non_parked_thread_is_not_correlated(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="thread-running",
-            proposal_ids=["prop_running"],
-            changeset_ids=[],
+            _ParkedThreadSeed(
+                thread_id="thread-running",
+                proposal_ids=["prop_running"],
+                changeset_ids=[],
+            ),
         )
         async with session_factory() as session:
             await update_thread_status(session, "thread-running", ThreadStatus.RUNNING)
@@ -503,9 +521,11 @@ async def test_process_event_non_verdict_is_a_noop(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="thread-noverdict",
-            proposal_ids=["prop_nv"],
-            changeset_ids=[],
+            _ParkedThreadSeed(
+                thread_id="thread-noverdict",
+                proposal_ids=["prop_nv"],
+                changeset_ids=[],
+            ),
         )
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         event = LifecycleEvent(
@@ -542,9 +562,11 @@ async def test_process_event_verdict_with_unreachable_worker_does_not_crash(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="thread-verdict",
-            proposal_ids=["prop_v"],
-            changeset_ids=[],
+            _ParkedThreadSeed(
+                thread_id="thread-verdict",
+                proposal_ids=["prop_v"],
+                changeset_ids=[],
+            ),
         )
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         event = LifecycleEvent(
@@ -575,9 +597,11 @@ async def test_reconcile_recovery_no_verdict_status_is_a_noop(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="thread-recon-1",
-            proposal_ids=[],
-            changeset_ids=["cs_recon"],
+            _ParkedThreadSeed(
+                thread_id="thread-recon-1",
+                proposal_ids=[],
+                changeset_ids=["cs_recon"],
+            ),
         )
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         data = _recovery_snapshot(
@@ -604,9 +628,11 @@ async def test_reconcile_recovery_terminal_verdict_dispatches_without_crash(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="thread-recon-2",
-            proposal_ids=["prop_recon"],
-            changeset_ids=["cs_recon2"],
+            _ParkedThreadSeed(
+                thread_id="thread-recon-2",
+                proposal_ids=["prop_recon"],
+                changeset_ids=["cs_recon2"],
+            ),
         )
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         data = _recovery_snapshot(
@@ -754,10 +780,12 @@ async def test_pending_gate_proposal_is_the_current_gate_not_a_stale_one(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="thread-adr-gate",
-            proposal_ids=["proposal:research", "proposal:adr"],
-            changeset_ids=["cs:research", "cs:adr"],
-            gate_pending="proposal:adr",
+            _ParkedThreadSeed(
+                thread_id="thread-adr-gate",
+                proposal_ids=["proposal:research", "proposal:adr"],
+                changeset_ids=["cs:research", "cs:adr"],
+                gate_pending="proposal:adr",
+            ),
         )
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         pending = await subscriber._thread_pending_gate_proposal("thread-adr-gate")
@@ -815,10 +843,12 @@ async def test_resume_skips_a_superseded_gate_verdict(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="superseded",
-            proposal_ids=["proposal:research", "proposal:adr"],
-            changeset_ids=["cs:research", "cs:adr"],
-            gate_pending="proposal:adr",
+            _ParkedThreadSeed(
+                thread_id="superseded",
+                proposal_ids=["proposal:research", "proposal:adr"],
+                changeset_ids=["cs:research", "cs:adr"],
+                gate_pending="proposal:adr",
+            ),
         )
         async with _worker_runtime(checkpointer) as (
             worker_client,
@@ -852,11 +882,13 @@ async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="dedup",
-            proposal_ids=["proposal:research"],
-            changeset_ids=["cs:research"],
-            gate_pending="proposal:research",
-            team_preset="mock-success-single",
+            _ParkedThreadSeed(
+                thread_id="dedup",
+                proposal_ids=["proposal:research"],
+                changeset_ids=["cs:research"],
+                gate_pending="proposal:research",
+                team_preset="mock-success-single",
+            ),
         )
         async with _worker_runtime(
             checkpointer,
@@ -893,11 +925,13 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
         await _seed_parked_thread(
             session_factory,
             checkpointer,
-            thread_id="competing-verdicts",
-            proposal_ids=["proposal:research"],
-            changeset_ids=["cs:research"],
-            gate_pending="proposal:research",
-            team_preset="mock-success-single",
+            _ParkedThreadSeed(
+                thread_id="competing-verdicts",
+                proposal_ids=["proposal:research"],
+                changeset_ids=["cs:research"],
+                gate_pending="proposal:research",
+                team_preset="mock-success-single",
+            ),
         )
         async with _worker_runtime(
             checkpointer,

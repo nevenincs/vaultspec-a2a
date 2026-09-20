@@ -132,6 +132,47 @@ async def _production_gateway(
             await process.communicate()
 
 
+async def _assert_unauthenticated_routes(anonymous: httpx.AsyncClient) -> None:
+    route_classes = (
+        ("GET", "/v1/runs"),
+        ("POST", "/v1/runs"),
+        ("GET", "/v1/runs/no-such-run"),
+        ("GET", "/v1/runs/no-such-run/stream"),
+        ("POST", "/v1/runs/no-such-run/cancel"),
+        ("GET", "/v1/presets"),
+        ("GET", "/v1/service"),
+    )
+    for method, target in route_classes:
+        missing = await anonymous.request(method, target)
+        wrong = await anonymous.request(
+            method,
+            target,
+            headers={"Authorization": "Bearer wrong-service-token"},
+        )
+        worker_credential = await anonymous.request(
+            method,
+            target,
+            headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
+        )
+        assert missing.status_code == 401, (target, missing.text)
+        assert wrong.status_code == 401, (target, wrong.text)
+        assert worker_credential.status_code == 401, (
+            target,
+            worker_credential.text,
+        )
+    gateway_on_worker_boundary = await anonymous.get(
+        "/internal/health",
+        headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+    )
+    worker_on_worker_boundary = await anonymous.get(
+        "/internal/health",
+        headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
+    )
+    assert gateway_on_worker_boundary.status_code == 401
+    assert worker_on_worker_boundary.status_code == 200
+    assert (await anonymous.get("/health")).status_code == 200
+
+
 @pytest.mark.asyncio(loop_scope="function")
 async def test_active_run_discovery_rebinds_to_authoritative_status(
     tmp_path: Path,
@@ -152,44 +193,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
         ) as client,
     ):
         async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as anonymous:
-            route_classes = (
-                ("GET", "/v1/runs"),
-                ("POST", "/v1/runs"),
-                ("GET", "/v1/runs/no-such-run"),
-                ("GET", "/v1/runs/no-such-run/stream"),
-                ("POST", "/v1/runs/no-such-run/cancel"),
-                ("GET", "/v1/presets"),
-                ("GET", "/v1/service"),
-            )
-            for method, target in route_classes:
-                missing = await anonymous.request(method, target)
-                wrong = await anonymous.request(
-                    method,
-                    target,
-                    headers={"Authorization": "Bearer wrong-service-token"},
-                )
-                worker_credential = await anonymous.request(
-                    method,
-                    target,
-                    headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
-                )
-                assert missing.status_code == 401, (target, missing.text)
-                assert wrong.status_code == 401, (target, wrong.text)
-                assert worker_credential.status_code == 401, (
-                    target,
-                    worker_credential.text,
-                )
-            gateway_on_worker_boundary = await anonymous.get(
-                "/internal/health",
-                headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
-            )
-            worker_on_worker_boundary = await anonymous.get(
-                "/internal/health",
-                headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
-            )
-            assert gateway_on_worker_boundary.status_code == 401
-            assert worker_on_worker_boundary.status_code == 200
-            assert (await anonymous.get("/health")).status_code == 200
+            await _assert_unauthenticated_routes(anonymous)
 
         discovery = json.loads(
             (tmp_path / "a2a-home" / "service.json").read_text(encoding="utf-8")

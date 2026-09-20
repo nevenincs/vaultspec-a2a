@@ -73,6 +73,36 @@ def _checkpoint_config(
     return {"configurable": configurable}
 
 
+def _assert_resume_dispatch_log(
+    caplog: pytest.LogCaptureFixture,
+    *,
+    thread_id: str,
+    request_id: str,
+    dispatch_id: object,
+) -> None:
+    """Assert the structured log fields emitted for a permission resume."""
+    record = next(
+        rec
+        for rec in caplog.records
+        if "Dispatching resume dispatch_id=" in rec.message
+    )
+    record_thread_id = getattr(record, "thread_id", None)
+    record_request_id = getattr(record, "request_id", None)
+    record_dispatch_id = getattr(record, "dispatch_id", None)
+    record_action = getattr(record, "action", None)
+    record_option_id = getattr(record, "option_id", None)
+    assert isinstance(record_thread_id, str)
+    assert isinstance(record_request_id, str)
+    assert isinstance(record_dispatch_id, str)
+    assert isinstance(record_action, str)
+    assert isinstance(record_option_id, str)
+    assert record_thread_id == thread_id
+    assert record_request_id == request_id
+    assert record_dispatch_id == dispatch_id
+    assert record_action == "resume"
+    assert record_option_id == "allow_once"
+
+
 # ---------------------------------------------------------------------------
 # POST /threads
 # ---------------------------------------------------------------------------
@@ -2126,26 +2156,12 @@ class TestPermissionRespond:
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
         assert dispatch["option_id"] == "allow_once"
-        record = next(
-            rec
-            for rec in caplog.records
-            if "Dispatching resume dispatch_id=" in rec.message
+        _assert_resume_dispatch_log(
+            caplog,
+            thread_id=thread_id,
+            request_id=request_id,
+            dispatch_id=dispatch["dispatch_id"],
         )
-        record_thread_id = getattr(record, "thread_id", None)
-        record_request_id = getattr(record, "request_id", None)
-        record_dispatch_id = getattr(record, "dispatch_id", None)
-        record_action = getattr(record, "action", None)
-        record_option_id = getattr(record, "option_id", None)
-        assert isinstance(record_thread_id, str)
-        assert isinstance(record_request_id, str)
-        assert isinstance(record_dispatch_id, str)
-        assert isinstance(record_action, str)
-        assert isinstance(record_option_id, str)
-        assert record_thread_id == thread_id
-        assert record_request_id == request_id
-        assert record_dispatch_id == dispatch["dispatch_id"]
-        assert record_action == "resume"
-        assert record_option_id == "allow_once"
 
     def test_respond_success_marks_permission_response_submitted_as_applied(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver

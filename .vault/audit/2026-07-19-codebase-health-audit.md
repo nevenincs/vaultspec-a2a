@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-19'
 modified: '2026-09-20'
-body_hash: 'sha256:87a974bf22b2b847b8d07f2c3bb0f636207c93f316f64e91c3dc662c9322e30f'
+body_hash: 'sha256:e08a91b64d1914aea3b85f11947e654f7507864aeaa192d7cb76d954b5ad4c8b'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -3426,3 +3426,7 @@ Implementation: extracted the wrapped worker retry decision, topology validation
 ### 2026-09-20 ACP terminal creation complexity review pass
 
 Implementation: extracted terminal command allowlist and token checks, cwd containment, and environment override validation from `on_terminal_create` into focused helpers. Review of the actual diff found no new functional defect: validation order, sandbox refusal, audit logging, process cleanup, and JSON-RPC envelopes remain in the same order. The dict environment helper checks the same name and string-value contract. Verification: 63 focused tests passed (one service test deselected), routine checks passed, focused Ty and Basedpyright passed, and the cyclomatic gate fell from 88 to 87 offenders. Focused strict Ruff structure diagnostics for this module fell from three to zero. Remaining repository cyclomatic and strict structure findings are open, severity medium, type maintainability, in the existing codebase-health queue. No new behavioral issue was surfaced.
+
+### 2026-09-20 pytest process owner review pass
+
+Implementation: separated child creation, containment assignment, root and session timeout decisions, and progress reporting in the bounded pytest owner. Added a process probe test for a run that never produces a session result. Actual diff review found no new functional defect: the same timeout precedence, exit codes, diagnostic messages, containment cleanup, and assignment failure cleanup are preserved. Verification: five runner tests passed, including teardown, descendant, progress, and run timeouts; routine checks, strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 87 to 86 offenders; this module has zero focused strict Ruff structure findings (down from three) and zero radon offenders (down from one). Remaining repository findings are open, severity medium, type maintainability, in the existing codebase-health queue.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:00e833a83445b39e29ebaa574bc64a5961005f36742f1d12e2187ac4ceb26b81'
+body_hash: 'sha256:7bd4a7774ab079a3989c2d589f09576a0f65d2144b36121b79ff54c09befbd14'
 related:
   - "[[2026-09-21-ci-merge-gate-plan]]"
 ---
@@ -23,3 +23,8 @@ related:
 - `S01` `A` `.vault/index/ci-merge-gate.index.md`
 - `S01` `verify:` `just ci-merge` -> `pass`
 - `S01` `by:` `vaultspec-high-executor`
+- `S02` `M` `dev/tests/test_ci_contract.py`
+- `S02` `M` `.github/ci-contract-allow.txt`
+- `S02` `verify:` `just check-workflow` -> `pass`
+- `S02` `by:` `vaultspec-high-executor`
+

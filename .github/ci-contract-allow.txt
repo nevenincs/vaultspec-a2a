@@ -15,6 +15,11 @@ bootstrap-branch.yml:Bootstrap local worktree
 # is already permitted, and differs only in reaching it through a shell
 # conditional.
 
+# The aggregate evaluates the result of its only measuring job. It runs no
+# repository tool and is intentionally inline so the required verdict remains
+# intelligible even when checkout or environment setup failed.
+merge-gate.yml:Judge the required checks
+
 # --- pending ----------------------------------------------------------------
 # Installs the Codex CLI the prerequisite gates spawn, UNPINNED and globally:
 # `npm install -g @openai/codex`. An unpinned global install decides what a

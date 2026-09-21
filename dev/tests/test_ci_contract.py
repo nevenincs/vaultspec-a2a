@@ -36,10 +36,10 @@ STRICT_SENTINELS = (
 )
 
 
-def _ci_recipe_lines() -> list[str]:
-    """Return the tracked root ``ci`` recipe body exactly as written."""
+def _recipe_lines(name: str) -> list[str]:
+    """Return one tracked root recipe body exactly as written."""
     lines = (ROOT / "Justfile").read_text(encoding="utf-8").splitlines()
-    start = lines.index("ci:") + 1
+    start = lines.index(f"{name}:") + 1
     body: list[str] = []
     for line in lines[start:]:
         if not line.strip():
@@ -56,6 +56,13 @@ def _test_job_steps() -> list[dict[str, object]]:
     return workflow["jobs"]["test"]["steps"]
 
 
+def _merge_workflow() -> dict[str, object]:
+    """Read the committed merge workflow through the production YAML parser."""
+    return yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "merge-gate.yml").read_text(encoding="utf-8")
+    )
+
+
 def _run_steps(steps: list[dict[str, object]], command: str) -> list[dict[str, object]]:
     """Return live workflow steps whose complete command equals ``command``."""
     return [step for step in steps if step.get("run") == command]
@@ -63,8 +70,11 @@ def _run_steps(steps: list[dict[str, object]], command: str) -> list[dict[str, o
 
 def test_ci_contract() -> None:
     """Keep the root facade, registry, and hosted CI declarations in agreement."""
-    assert _ci_recipe_lines() == [
+    assert _recipe_lines("ci") == [
         "    uv run --isolated --no-project python -m dev ci all"
+    ]
+    assert _recipe_lines("ci-merge") == [
+        "    uv run --isolated --no-project python -m dev ci merge"
     ]
 
     lint = find_verb("lint")
@@ -169,3 +179,40 @@ def test_ci_contract() -> None:
         if isinstance(step, Cmd) and step.argv[-2:] == ("test", "unit")
     )
     assert vault_index < harness_index < unit_index
+
+
+def test_merge_gate_contract() -> None:
+    """Keep the required status stable, Linux-only, and fully aggregated."""
+    workflow = _merge_workflow()
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    assert set(jobs) == {"basic", "gate"}
+
+    basic = jobs["basic"]
+    gate = jobs["gate"]
+    assert isinstance(basic, dict)
+    assert isinstance(gate, dict)
+    assert basic["name"] == "Check: Basic CI (Linux)"
+    assert basic["runs-on"] == ["self-hosted", "Linux", "X64"]
+    assert basic["if"] == (
+        "${{ github.event_name != 'pull_request' || "
+        "github.event.pull_request.head.repo.full_name == github.repository }}"
+    )
+    assert len(_run_steps(basic["steps"], "just ci-merge")) == 1
+
+    assert gate["name"] == "Check: Merge gate (Linux)"
+    assert gate["needs"] == ["basic"]
+    assert gate["if"] == "always()"
+    assert gate["runs-on"] == "ubuntu-24.04"
+
+    ci_merge = CI.find("merge")
+    assert ci_merge is not None
+    commands = [step.argv for step in ci_merge.steps if isinstance(step, Cmd)]
+    assert [command[-2:] for command in commands] == [
+        ("deps", "check"),
+        ("lint", "all"),
+        ("check", "all"),
+        ("test", "harness"),
+        ("test", "merge"),
+    ]
+    assert commands[2][-4:] == ("vaultspec-core", "vault", "check", "all")

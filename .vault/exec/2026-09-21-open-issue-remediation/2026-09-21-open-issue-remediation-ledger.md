@@ -5,11 +5,10 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:14cbe213fb4dbc80b5a15bf1b2487937b9e34ad6e48d7368bb281dd599fe4cd0'
+body_hash: 'sha256:590f710daeb493237002beec64426358335f3049331bf9bc4e43607d17429d94'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
-
 
 # `open-issue-remediation` ledger
 
@@ -39,6 +38,18 @@ related:
 - `S05` `verify:` `just check-workflow (actionlint and CI contract)` -> `pass`
 - `S05` `by:` `readonly-hooks-luna-max`
 - `S03` `by:` `readonly-hooks-luna-max`
+- `S03` `A` `src/vaultspec_a2a/api/workspace.py`
+- `S03` `A` `src/vaultspec_a2a/api/tests/test_workspace_root_authority.py`
+- `S03` `M` `src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`
+- `S03` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S03` `M` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S03` `M` `src/vaultspec_a2a/api/tests/test_active_run_discovery_live.py`
+- `S03` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S03` `M` `src/vaultspec_a2a/control/tests/test_active_project_identity.py`
+- `S03` `M` `.vault/adr/2026-09-21-workspace-root-authority-compose-provider-boundary-adr.md`
+- `S03` `verify:` `Ruff and Ty focused checks` -> `pass`
+- `S03` `by:` `metadata-integration-coordinator`
+- `S03` `verify:` `P01.S03 focused admission suite (67 tests; 14 independent boundary cases)` -> `pass`
 
 ## Notes
 

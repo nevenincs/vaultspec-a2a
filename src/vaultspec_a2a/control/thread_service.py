@@ -15,12 +15,14 @@ import logging
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
 from ..control.accepted_input import freeze_accepted_input
+from ..control.config import settings
 from ..control.dispatch import DispatchOutcome, safe_dispatch
 from ..control.dispatch_receipts import (
     bind_graph_action_receipt,
@@ -75,8 +77,6 @@ from .repositories import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -94,11 +94,47 @@ __all__ = [
     "delete_thread_service",
     "list_threads_service",
     "process_metadata",
+    "require_admitted_workspace_root",
 ]
 
 logger = logging.getLogger(__name__)
 
 _PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
+
+
+def require_admitted_workspace_root(value: str | Path) -> Path:
+    """Return an existing canonical root permitted by the active profile.
+
+    The desktop dashboard is the workspace authority for its local, armed
+    profile and may select any existing directory. An unarmed service with a
+    configured workspace root is a managed profile (including every shipped
+    Compose profile), so the configured root is its filesystem authority. An
+    unarmed development service with no configured root retains the historical
+    arbitrary-root behavior.
+
+    Both the candidate and configured boundary are resolved before comparison.
+    A symlink beneath the configured tree therefore cannot admit a target
+    outside it.
+    """
+    canonical = Path(canonical_project_root(value))
+    try:
+        is_directory = canonical.is_dir()
+    except OSError:
+        is_directory = False
+    if not is_directory:
+        raise ValueError(f"workspace_root is not an existing directory: {value!r}")
+
+    configured = settings.workspace_root
+    if settings.desktop_profile_armed or configured is None:
+        return canonical
+
+    try:
+        boundary = Path(canonical_project_root(configured))
+    except ValueError as exc:
+        raise ValueError("configured workspace root is not an absolute path") from exc
+    if not canonical.is_relative_to(boundary):
+        raise ValueError("workspace_root must be within the configured workspace root")
+    return canonical
 
 
 def _degrade_stale_execution_state_summary(
@@ -466,14 +502,7 @@ def process_metadata(
         )
         raise ValueError(msg)
 
-    import pathlib
-
-    ws_root = pathlib.Path(canonical_project_root(metadata.workspace_root))
-    if not ws_root.is_dir():
-        msg = (
-            f"workspace_root is not an existing directory: {metadata.workspace_root!r}"
-        )
-        raise ValueError(msg)
+    ws_root = require_admitted_workspace_root(metadata.workspace_root)
     metadata.workspace_root = str(ws_root)
 
     if metadata.feature_tag and not metadata.context_refs:

@@ -20,7 +20,6 @@ import asyncio
 import json
 import logging
 from enum import StrEnum
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import (
@@ -32,6 +31,8 @@ from fastapi import (
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import httpx
 
 from ...control.admission import AdmissionBroker, AdmissionReadiness
@@ -42,9 +43,6 @@ from ...control.health import (
 )
 from ...control.run_start_policy import (
     required_role_ids,
-)
-from ...database import (
-    normalize_workspace_identity,
 )
 from ...domain_config import domain_config
 from ...providers.provider_catalog import (
@@ -62,9 +60,6 @@ from ...providers.team_selection import (
     freeze_team_selection,
     normalize_replay_selection,
 )
-from ...thread.constants import (
-    MAX_WORKSPACE_ROOT_LENGTH,
-)
 from ...thread.dispatch_policy import FailureType
 from ...utils.coercion import coerce_object_mapping
 from ..auth import authenticate_request
@@ -77,6 +72,7 @@ from ..schemas.gateway import (
     ProviderCatalogSelection,
     RunStartRequest,
 )
+from ..workspace import require_existing_workspace_root
 
 router = APIRouter(
     prefix="/v1",
@@ -279,8 +275,7 @@ def _prepare_workspace_root(body: RunStartRequest) -> Path | None:
     workspace_root = getattr(metadata, "workspace_root", None) if metadata else None
     if not workspace_root:
         return None
-    candidate = Path(workspace_root)
-    return candidate if candidate.is_absolute() else None
+    return require_existing_workspace_root(workspace_root)
 
 
 def _release_binding_digest(body: RunStartRequest) -> str:
@@ -449,12 +444,7 @@ async def _validate_and_freeze_selection_or_refuse(
             status_code=422,
             detail="explicit provider selection requires an existing workspace_root",
         )
-    canonical = normalize_workspace_identity(str(workspace_root))
-    if len(canonical) > MAX_WORKSPACE_ROOT_LENGTH or not Path(canonical).is_dir():
-        raise HTTPException(
-            status_code=422,
-            detail="workspace_root must identify an existing directory",
-        )
+    canonical = str(require_existing_workspace_root(str(workspace_root)))
     try:
         records = await _catalog_records_within_budget(app, canonical)
     except ProviderCatalogScopeCapacityError:

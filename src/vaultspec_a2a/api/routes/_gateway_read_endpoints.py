@@ -2,7 +2,6 @@
 
 import logging
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import httpx
@@ -90,6 +89,7 @@ from ..schemas.gateway import (
 )
 from ..schemas.snapshots import ThreadStateSnapshot
 from ..thread_stream import build_thread_stream_response
+from ..workspace import require_existing_workspace_root
 from .gateway import (
     _modern_frozen_disclosure,
     _optional_enum,
@@ -195,10 +195,13 @@ async def active_runs_endpoint(
     history cannot perturb a single byte of the certified discovery response.
     """
     workspace = (
-        Path(options.workspace_root) if options.workspace_root is not None else None
+        require_existing_workspace_root(
+            options.workspace_root,
+            absolute_detail="workspace_root must be absolute",
+        )
+        if options.workspace_root is not None
+        else None
     )
-    if workspace is not None and not workspace.is_absolute():
-        raise HTTPException(status_code=422, detail="workspace_root must be absolute")
 
     if options.state == "all":
         listing = await list_threads_service(

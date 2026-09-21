@@ -38,11 +38,7 @@ from ...control.run_start_policy import (
     required_role_ids,
 )
 from ...control.worker_status import WorkerConnectionStatus
-from ...database import (
-    get_db,
-    get_permission_request,
-    normalize_workspace_identity,
-)
+from ...database import get_db, get_permission_request
 from ...database.checkpoints import Checkpointer
 from ...domain_config import domain_config
 from ...providers.provider_catalog_service import (
@@ -86,6 +82,7 @@ from ..schemas.gateway import (
     ServiceStateResponse,
 )
 from ..schemas.provider_catalog import ProviderCatalogResponse
+from ..workspace import require_existing_workspace_root
 from .gateway import (
     _DEGRADED_CHECK_STATUSES,
     _bool_field,
@@ -422,17 +419,7 @@ async def provider_catalog_endpoint(
             status_code=422,
             detail="provider-catalog accepts exactly one workspace_root query value",
         )
-    requested = Path(workspace_root)
-    if not requested.is_absolute():
-        raise HTTPException(
-            status_code=422, detail="workspace_root must be an absolute directory"
-        )
-    canonical = normalize_workspace_identity(workspace_root)
-    if len(canonical) > MAX_WORKSPACE_ROOT_LENGTH or not Path(canonical).is_dir():
-        raise HTTPException(
-            status_code=422,
-            detail="workspace_root must identify an existing directory",
-        )
+    canonical = str(require_existing_workspace_root(workspace_root))
     try:
         records = await _catalog_records_within_budget(request.app, canonical)
     except ProviderCatalogScopeCapacityError:
@@ -462,7 +449,9 @@ async def presets_list_endpoint(
     omitted or allowed to crash the whole listing. File I/O runs off the event
     loop.
     """
-    ws_root = Path(workspace_root) if workspace_root else None
+    ws_root = (
+        require_existing_workspace_root(workspace_root) if workspace_root else None
+    )
     presets = await asyncio.to_thread(_build_preset_summaries, ws_root)
     return PresetsListResponse(presets=presets)
 

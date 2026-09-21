@@ -29,6 +29,7 @@ from pydantic import ValidationError
 from ...api.tests.clarification_harness import new_state_graph
 from ...context.metadata import ThreadMetadata
 from ...control._thread_metadata import dispatchable_workspace_root
+from ...control.config import settings
 from ...database.thread_repository import normalize_workspace_identity
 from ...ipc.schemas import DispatchRequest, canonical_project_root
 from ...providers.team_selection import model_assignment_digest
@@ -212,6 +213,34 @@ class TestAdmissionMintsOnce:
             process_metadata(
                 ThreadMetadata(workspace_root=str(tmp_path / "absent")), "run-1", None
             )
+
+    def test_managed_unarmed_profile_refuses_foreign_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        managed = tmp_path / "managed"
+        foreign = tmp_path / "foreign"
+        managed.mkdir()
+        foreign.mkdir()
+        monkeypatch.setattr(settings, "desktop_app_home", None)
+        monkeypatch.setattr(settings, "workspace_root", managed)
+
+        with pytest.raises(ValueError, match="configured workspace root"):
+            process_metadata(ThreadMetadata(workspace_root=str(foreign)), "run-1", None)
+
+    def test_managed_unarmed_profile_accepts_configured_root_descendant(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        managed = tmp_path / "managed"
+        project = managed / "project"
+        project.mkdir(parents=True)
+        monkeypatch.setattr(settings, "desktop_app_home", None)
+        monkeypatch.setattr(settings, "workspace_root", managed)
+
+        admitted, _nickname, _metadata_json = process_metadata(
+            ThreadMetadata(workspace_root=str(project)), "run-1", None
+        )
+
+        assert admitted == project.resolve()
 
 
 class TestDispatchCarriesTheMintedProject:

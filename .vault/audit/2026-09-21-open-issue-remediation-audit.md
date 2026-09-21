@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:c25ac34cddbd7e3b53b5ee25fcd511dce115c798d55d55f63b1006ce9450d9ed'
+body_hash: 'sha256:09b68bc4807ec0382f219a168cac5f2b56630f1f3f99d5e3d45752cca482fddc'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -63,6 +63,16 @@ write/create ancestor traversal, directory anchoring, bounded handle lifetime,
 and fail-closed behavior, while preserving desktop compatibility. No proof is
 claimed yet; issue #25 remains open pending S03 admission and S10 OS-boundary
 implementation plus negative live tests.
+
+### workspace-admission-independent-review | high | independent review confirms canonical admission correction | resolved
+
+The independent P01.S03 review passed: the canonicalize-before-validation
+correction at `src/vaultspec_a2a/api/routes/gateway.py:277` is exercised across
+managed foreign, ancestor, and symlink cases at both prepare and commit. The
+focused admission suite passed 67 tests, including 14 independent boundary
+cases, and the scoped Ruff and Ty checks passed. The high admission finding is
+resolved and S03 is ready to close; no GitHub issue action is taken in this
+metadata pass, so issue #25 remains an integrated disposition for P02.S09.
 ### staged-hook-isolation | low | shared dirty worktree hid concurrent S03 symbols from staged hooks | resolved
 
 The first shared-worktree S06 commit attempt correctly ran the normal hooks but

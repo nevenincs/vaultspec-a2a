@@ -18,7 +18,7 @@ related:
   - '[[2026-09-21-workspace-root-authority-compose-provider-boundary-adr]]'
 modified: '2026-09-21'
 body_schema: body-v2
-body_hash: 'sha256:c7fad987686a9905dc595e1d267054256101c88deb68b47b0ce5a35ade44bc6c'
+body_hash: 'sha256:cd1be1cc87f01625bc4ad51637083f33ff892ec29443e18f561efbdc2338b1d4'
 ---
 
 # `open-issue-remediation` plan
@@ -68,7 +68,7 @@ Settle and implement each issue lane against its current governing contracts, wi
 - [x] `P01.S10` - Enforce the Compose provider execution identity boundary, prove service-state denial across callbacks and child tools, and close issue #25 only after the high-severity finding is discharged; `service/docker/prod.Dockerfile, service/docker-compose.dev.yml, service/docker-compose.integration.yml, service/docker-compose.prod.yml, service/docker/service_entrypoint.py, src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/providers/_subprocess.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests/test_provider_service_state_isolation.py, src/vaultspec_a2a/providers/tests/test_project_confinement.py, src/vaultspec_a2a/service_tests/test_compose_provider_service_state_isolation.py, service/README.md, service/docker/README.md, service/docker/provider_identity_launcher.c, src/vaultspec_a2a/workspace/environment.py, src/vaultspec_a2a/workspace/tests/test_environment.py, GitHub issue #25`.
 - [x] `P01.S11` - Resolve the locked quality-correction findings, document the Compose service-identity variables, and gate completion on deterministic coverage; `.env.example, src/vaultspec_a2a/api/tests/test_workspace_root_authority.py, src/vaultspec_a2a/control/tests/test_active_project_identity.py, src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, scripts/prepare_release.py, src/vaultspec_a2a/providers/tests/test_project_confinement.py, service/docker/service_entrypoint.py, src/vaultspec_a2a/control/tests/test_env_example_coverage.py`.
 - [x] `P01.S12` - Repair blocked-stream cancellation by racing cancel_event against the blocked next-event await while preserving receipt and terminal invariants; `src/vaultspec_a2a/control/direct_control_recovery.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/control/tests/test_direct_control_recovery_current.py, src/vaultspec_a2a/control/tests/test_event_handlers.py, src/vaultspec_a2a/worker/tests/test_executor.py, src/vaultspec_a2a/streaming/tests/test_aggregator.py, src/vaultspec_a2a/service_tests/test_blocked_stream_cancellation.py, src/vaultspec_a2a/api/tests/test_cancel_settled_run_status.py, GitHub issue #73, Dashboard issue #137`.
-- [ ] `P01.S13` - Investigate and bound SQLite terminal-election contention, proving bridge retry or correcting bounded transaction/retry ownership; `src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/tests/test_event_handlers.py`.
+- [x] `P01.S13` - Investigate and bound SQLite terminal-election contention, proving bridge retry or correcting bounded transaction/retry ownership; `src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/tests/test_event_handlers.py`.
 
 ### Phase `P02` - integrate review and issue closure
 

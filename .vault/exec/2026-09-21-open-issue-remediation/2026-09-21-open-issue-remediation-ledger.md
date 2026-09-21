@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:96f7e7be49265fa842380e27e1992d8ec5775de493116d983866eacb0a5d68b9'
+body_hash: 'sha256:a5a8e0bb1ed30046f944a22a73edd09153ffc895308fc7d61f568ba908350e50'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -108,6 +108,11 @@ related:
 - `S12` `M` `src/vaultspec_a2a/api/tests/test_cancel_settled_run_status.py`
 - `S12` `verify:` `focused pytest 175; Ruff; Ty; captured independent service 4` -> `pass`
 - `S12` `by:` `terra-high-integration-coordinator`
+- `S13` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S13` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
+- `S13` `verify:` `uv run --no-sync ty check src/vaultspec_a2a/control/tests/test_event_handlers.py` -> `pass`
+- `S13` `by:` `vaultspec-standard-executor`
+- `S13` `verify:` `event-handler 22 + WorkerBridge IPC 24 + Ruff + format + Ty` -> `pass`
 
 ## Notes
 

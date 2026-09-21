@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:dae21e9a433c02650a4ecc81d6196ede54d475f1d74163cabfddb0f8c68582a3'
+body_hash: 'sha256:1a8e08f89f07c7a7a7b6ac2c6afb06a2f80edf6af5fdb77a9bc633429ffc4333'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -135,6 +135,8 @@ related:
 - `S15` `verify:` `just check-type (Ty)` -> `pass`
 - `S15` `by:` `dispatch-deadlock-fix`
 - `S15` `verify:` `Ruff format/check` -> `pass`
+- `S15` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
+- `S15` `verify:` `focused pytest target repeated 3 times: 6/6 passed` -> `pass`
 
 ## Notes
 
@@ -153,3 +155,4 @@ related:
 - `S12` Service evidence: C:/Users/hello/AppData/Local/Temp/vaultspec-s12-arch-service-20260921.out; summaries: vaultspec-service-tests-2b9990ec and vaultspec-service-tests-26323e17.
 - `S15` Root cause classified as test-infrastructure ordering: same-thread terminal arbitration leaves one ingest-lock waiter; no production defect. Durable output retained at ignored tmp/s15-dispatch_ids-full.log; exact process tree cleanup completed.
 - `S15` Existing evidence retained: exact parametrized target passed 3 consecutive repetitions (6/6); full src/vaultspec_a2a/worker/tests/test_dispatch_ids.py passed 6/6 in 21.93s with durable tmp/s15-dispatch_ids-full.log; Ruff format/check and Ty passed. Repeated verify flags may collapse in this CLI, so this note is the authoritative evidence summary.
+- `S15` Traceability correction only; source-inclusive S15 commit 1f794eaa already contains implementation and existing full-file evidence.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:e36690163a16783c50f3c87d67fc7ef8b2d3c0161951f4de7b797392c5574a61'
+body_hash: 'sha256:a40aa23ff3513002a3d1189fbc949b83c94a98106af25531a7b6a5b64b5802fc'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -334,4 +334,4 @@ Two canonical runs recorded 40 failure marks across five API files, while 136/13
 
 ### canonical-dispatch-id-concurrency-deadlock-rereview | low/review | PASS
 
-P01.S15 review found the stall was test-infrastructure ordering, not a production capacity defect: same-thread duplicate requests serialize at terminal arbitration, leaving one request on the held ingest lock and the other behind the arbitration lock. The corrected real TestClient/ThreadPoolExecutor tests await two arbitration users and one ingest waiter, release the held lock in finally, and assert identical replay or distinct-ID refusal. No critical or high finding remains in the changed path. Full dispatch-ID coverage passed 6/6; Ruff format/check and Ty passed. The ignored durable run log is `tmp/s15-dispatch_ids-full.log`mp/s15-dispatch_ids-full.log.
+P01.S15 review found the stall was test-infrastructure ordering, not a production capacity defect: same-thread duplicate requests serialize at terminal arbitration, leaving one request on the held ingest lock and the other behind the arbitration lock. The corrected real TestClient/ThreadPoolExecutor tests await two arbitration users and one ingest waiter, release the held lock in finally, and assert identical replay or distinct-ID refusal. No critical or high finding remains in the changed path. Full dispatch-ID coverage passed 6/6; Ruff format/check and Ty passed. The ignored durable run log is `tmp/s15-dispatch_ids-full.log`.

@@ -29,7 +29,7 @@ def _owned_directory(path: Path, mode: int) -> None:
     metadata = path.lstat()
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
         raise RuntimeError(f"service state path is not a real directory: {path}")
-    if metadata.st_uid != os.getuid():  # ty: ignore[unresolved-attribute]
+    if metadata.st_uid != _service_uid():
         raise RuntimeError(f"service state path has unexpected owner: {path}")
     os.chmod(path, mode, follow_symlinks=False)
 
@@ -45,6 +45,17 @@ def _required_posix(name: str) -> Any:
     if value is None:
         raise RuntimeError(f"service entrypoint requires os.{name}")
     return value
+
+
+def _service_uid() -> int:
+    """Return the service UID, failing closed when POSIX identity is unavailable."""
+    getuid = getattr(os, "getuid", None)
+    if not callable(getuid):
+        raise RuntimeError("service entrypoint requires POSIX os.getuid")
+    uid = getuid()
+    if not isinstance(uid, int):
+        raise RuntimeError("service entrypoint received an invalid service UID")
+    return uid
 
 
 def _migrate_managed_workspace(path: Path, agent_gid: int) -> None:
@@ -171,7 +182,7 @@ def _tighten_sqlite_state(path: Path) -> None:
             continue
         if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
             raise RuntimeError(f"SQLite state is not a regular file: {candidate}")
-        if metadata.st_uid != os.getuid():  # ty: ignore[unresolved-attribute]
+        if metadata.st_uid != _service_uid():
             raise RuntimeError(f"SQLite state has unexpected owner: {candidate}")
         os.chmod(candidate, 0o600, follow_symlinks=False)
 

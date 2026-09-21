@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:d161bdd1fbaf02b241ea33e7a1eece2f1a4c849d5c8b89a28b050768871a2e24'
+body_hash: 'sha256:7733890cf56e2d9444c3a742d772f99c8dbf27ba03557b659e12454cbbb07764'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -85,6 +85,17 @@ related:
 - `S01` `verify:` `P01.S01 live Jaeger trace test (1)` -> `pass`
 - `S01` `verify:` `P01.S01 unresolved-listener path code review` -> `pass`
 - `S01` `verify:` `P01.S01 isolated live Jaeger trace target` -> `pass`
+- `S11` `M` `.env.example`
+- `S11` `M` `src/vaultspec_a2a/api/tests/test_workspace_root_authority.py`
+- `S11` `M` `src/vaultspec_a2a/control/tests/test_active_project_identity.py`
+- `S11` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S11` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S11` `A` `scripts/prepare_release.py`
+- `S11` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S11` `M` `service/docker/service_entrypoint.py`
+- `S11` `M` `src/vaultspec_a2a/control/tests/test_env_example_coverage.py`
+- `S11` `verify:` `ty check src dev docs scripts` -> `pass`
+- `S11` `by:` `terra-high-integration-coordinator`
 
 ## Notes
 

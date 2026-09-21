@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:247c9ea9787506d87062e3d914f27981f5f9c4751cd0e5a57a9455af27e745b6'
+body_hash: 'sha256:a6ee09bf89390178b8f69a895ce055f354d0471b57c3234c562c550fca501de4'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -243,3 +243,23 @@ frontend result does not substitute for that engine-side check.
   test coverage; keep the absence classified as tooling until checked.
 - Keep the five legacy A2A issues closed; future work belongs to current
   Dashboard paths and issue #137 rather than recreating the retired UI surface.
+
+### locked-quality-type-policy | medium/type-policy | prohibited type suppressions removed without replacement | resolved
+
+P01.S11's exact staged snapshot removes the prohibited suppressions without
+adding another type escape. The lock-pinned Ty gate passes.
+
+### locked-quality-type-safety | medium/type-safety | reviewed S11 snapshot is clean under the official Ty gate | resolved
+
+The isolated source snapshot exactly matches the shared staged index for all nine
+S11 paths. The official Ty command over `src dev docs scripts` passes.
+
+### locked-quality-format | low/formatting | S11 snapshot passes focused Ruff validation | resolved
+
+Focused Ruff validation passes for every Python path affected by the S11 snapshot.
+
+### locked-env-example-service-identity | medium/CI-blocking | root operator example documents required Compose agent identity variables | resolved
+
+`.env.example` documents the launcher, UID and GID defaults, states the host or
+desktop exclusion, and the deterministic coverage test passes. The Compose
+service boundary remains an S10 dependency already present in this chain.

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ..worker_management import _read_log_tail
+from .._worker_health import _read_log_tail
 
 if TYPE_CHECKING:
     from pathlib import Path

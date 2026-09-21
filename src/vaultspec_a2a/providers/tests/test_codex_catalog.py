@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,8 +13,10 @@ import psutil
 import pytest
 
 from ...control.config import settings
+from ...graph.enums import Provider
 from ...workspace.environment import resolve_env_vars
 from .._stdio_rpc import OutputBudget
+from ..cli_resolution import resolve_provider_cli_executable
 from ..codex_catalog import (
     CodexCatalogProtocolError,
     _authentication,
@@ -265,7 +266,7 @@ def test_stdout_and_stderr_share_one_aggregate_output_budget() -> None:
 
 
 def _real_codex_inputs() -> tuple[tuple[str, ...], dict[str, str]]:
-    executable = shutil.which("codex")
+    executable = resolve_provider_cli_executable(Provider.CODEX)
     if executable is None:
         pytest.fail("Codex CLI is not installed")
     workspace = Path.cwd()

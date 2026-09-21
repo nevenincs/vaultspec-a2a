@@ -20,12 +20,11 @@ import pytest
 from ...lifecycle.discovery import is_pid_alive
 from ...lifecycle.manager import _await_listener
 from ...testing.ports import free_port
-from ...utils.process import (
+from ...utils._process_tree import (
     ListenerOwnership,
     _win_tree_kill,
     classify_listener_ownership,
     kill_pid_tree_async,
-    listener_belongs_to,
     parse_netstat_listener_pid,
     pid_is_live,
     port_listener_pid,
@@ -210,38 +209,12 @@ def test_port_listener_pid_resolves_a_real_listener() -> None:
         resolved = port_listener_pid(port)
         assert resolved is not None
         assert is_pid_alive(resolved)
-        assert listener_belongs_to(port, listener.pid) is True
+        assert (
+            classify_listener_ownership(port, listener.pid)
+            is ListenerOwnership.CONFIRMED
+        )
     finally:
         _reap(listener)
-
-
-def test_listener_belongs_to_accepts_the_owning_process() -> None:
-    listener, port = _spawn_listener()
-    try:
-        assert listener_belongs_to(port, listener.pid) is True
-    finally:
-        _reap(listener)
-
-
-def test_listener_belongs_to_rejects_a_positively_foreign_holder() -> None:
-    """A port held by one real process is not owned by an unrelated real root."""
-    listener, port = _spawn_listener()
-    stranger = subprocess.Popen([sys.executable, "-c", _SLEEP])
-    try:
-        # The listener genuinely holds the port, but the unrelated stranger's tree
-        # does not contain the listening pid, so ownership is positively refused.
-        assert listener_belongs_to(port, stranger.pid) is False
-    finally:
-        _reap(listener, stranger)
-
-
-def test_listener_belongs_to_degrades_to_true_when_no_listener() -> None:
-    """An unresolved owner (no listener at all) fails safe, never falsely rejects."""
-    free = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    free.bind(("127.0.0.1", 0))
-    port = free.getsockname()[1]
-    free.close()  # nothing is listening now
-    assert listener_belongs_to(port, os.getpid()) is True
 
 
 def test_await_listener_accepts_a_port_our_child_owns() -> None:
@@ -430,7 +403,7 @@ def test_windows_tcp_table_resolves_a_real_listener_without_parsing_text() -> No
     silently report an empty table, which is what keeps the caller from treating
     "cannot answer" as "nothing is listening".
     """
-    from ...utils.process import _tcp_table_listener_pid
+    from ...utils._process_tree import _tcp_table_listener_pid
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", 0))
@@ -454,7 +427,7 @@ def test_windows_tcp_table_reports_no_listener_on_an_unbound_port() -> None:
     table" is what earns the ``netstat`` fallback. Collapsing them would spawn a
     subprocess on every iteration of the readiness loop.
     """
-    from ...utils.process import _tcp_table_listener_pid
+    from ...utils._process_tree import _tcp_table_listener_pid
 
     if sys.platform == "win32":
         assert _tcp_table_listener_pid(free_port()) is None
@@ -462,21 +435,3 @@ def test_windows_tcp_table_reports_no_listener_on_an_unbound_port() -> None:
         # POSIX never reaches this path; it must refuse rather than answer "none".
         with pytest.raises(OSError):
             _tcp_table_listener_pid(free_port())
-
-
-def test_the_boolean_contract_is_unchanged_by_the_classification() -> None:
-    """The bool still accepts both accepting cases and refuses only the foreign one.
-
-    Guards the refactor itself: the tri-state was added underneath an existing
-    fail-open contract that other call sites still rely on, so widening or
-    narrowing that contract would be a silent behaviour change rather than an
-    observability improvement.
-    """
-    listener, port = _spawn_listener()
-    stranger = subprocess.Popen([sys.executable, "-c", _SLEEP])
-    try:
-        assert listener_belongs_to(port, listener.pid) is True  # CONFIRMED
-        assert listener_belongs_to(free_port(), listener.pid) is True  # UNRESOLVED
-        assert listener_belongs_to(port, stranger.pid) is False  # OUTSIDE
-    finally:
-        _reap(listener, stranger)

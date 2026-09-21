@@ -16,17 +16,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from ...control._worker_health import WorkerLiveness, WorkerState
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.health import assemble_health_status
-from ...control.worker_management import (
-    LazyWorkerSpawner,
-    WorkerLiveness,
-    WorkerState,
-    WorkerWatchdog,
-)
-from ...testing.listeners import health_listener
+from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ...testing.ports import free_port
+from ...testing.tests._support.listeners import health_listener
 
 
 def _stale_app_state(**singletons: object) -> SimpleNamespace:

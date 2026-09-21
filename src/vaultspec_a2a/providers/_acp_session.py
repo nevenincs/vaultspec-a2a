@@ -5,12 +5,10 @@ Data carriers live in ``_acp_types``, auth logic in ``_acp_auth``.
 """
 
 import logging
-from pathlib import Path
-from typing import cast
+from typing import TypedDict, Unpack, cast
 
 from ..control.config import settings
 from ..utils.enums import AcpRequestId
-from ..workspace.environment import resolve_env_vars
 from ._acp_auth import (
     auth_hint,
     authenticate_rpc,
@@ -221,17 +219,27 @@ async def _select_desired_model(
     )
 
 
+class _SelectConfigRequired(TypedDict):
+    config_id: str
+    desired_value: str
+    label: str
+
+
+class _SelectConfigOptions(_SelectConfigRequired, total=False):
+    allow_bracketed_variant: bool
+
+
 async def _select_config_option(
     ctx: AcpSessionContext,
     session_id: str,
     config_options: list[JsonObject],
-    *,
-    config_id: str,
-    desired_value: str,
-    label: str,
-    allow_bracketed_variant: bool = False,
+    **options: Unpack[_SelectConfigOptions],
 ) -> list[JsonObject]:
     """Apply and verify one adapter-advertised session configuration value."""
+    config_id = options["config_id"]
+    desired_value = options["desired_value"]
+    label = options["label"]
+    allow_bracketed_variant = options.get("allow_bracketed_variant", False)
     if not any(option.get("id") == config_id for option in config_options):
         raise AcpSessionError(
             f"ACP session does not advertise requested {label} configuration option",
@@ -412,6 +420,24 @@ async def initialize_session(
         raise _session_wire_error(
             f"ACP initialize failed: {resp['error']}", resp["error"]
         )
+    return _validated_initialize_result(resp, config)
+
+
+def _validated_auth_methods(result: JsonObject) -> list[JsonObject]:
+    auth_methods = result.get("authMethods", [])
+    if not isinstance(auth_methods, list) or not all(
+        isinstance(method, dict) for method in auth_methods
+    ):
+        raise AcpSessionError(
+            "ACP initialize returned malformed authMethods",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    return cast("list[JsonObject]", auth_methods)
+
+
+def _validated_initialize_result(
+    resp: JsonObject, config: AcpModelConfig
+) -> InitializeResult:
     result = resp.get("result")
     if not isinstance(result, dict):
         raise AcpSessionError(
@@ -442,18 +468,102 @@ async def initialize_session(
             "loadSession support",
             code=AcpErrorCode.INVALID_PARAMS,
         )
-    auth_methods = result.get("authMethods", [])
-    if not isinstance(auth_methods, list) or not all(
-        isinstance(method, dict) for method in auth_methods
-    ):
-        raise AcpSessionError(
-            "ACP initialize returned malformed authMethods",
-            code=AcpErrorCode.INTERNAL_ERROR,
-        )
     return InitializeResult(
         agent_capabilities=capabilities,
-        auth_methods=cast("list[JsonObject]", auth_methods),
+        auth_methods=_validated_auth_methods(result),
     )
+
+
+async def _session_setup_response(
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
+    method: str,
+    params: JsonObject,
+    auth_methods: list[JsonObject],
+) -> JsonObject:
+    attempted_auth = False
+    while True:
+        future = await issue_request(
+            ctx.response_futures,
+            stdin=ctx.stdin,
+            stdin_lock=ctx.stdin_lock,
+            rpc_id=AcpRequestId.SESSION_SETUP,
+            method=method,
+            params=params,
+        )
+        resp = await await_response(
+            future,
+            timeout=settings.acp_startup_timeout_seconds,
+            on_timeout=lambda: logger.error(
+                "ACP session setup timed out",
+                extra=runtime_log_extra(
+                    config,
+                    process=ctx.process,
+                    handshake_step=method,
+                    timeout_seconds=settings.acp_startup_timeout_seconds,
+                    stderr_event_count=ctx.stderr_event_count,
+                ),
+            ),
+        )
+        if "error" not in resp:
+            return resp
+        err = resp["error"]
+        error = lenient_json_object(err)
+        err_msg = str(error.get("message", err)) if error else str(err)
+        if not attempted_auth and auth_methods and is_auth_required_error(err):
+            attempted_auth = True
+            await authenticate_rpc(
+                ctx=ctx,
+                config=config,
+                auth_methods=auth_methods,
+                stdin=ctx.stdin,
+                stdin_lock=ctx.stdin_lock,
+                response_futures=ctx.response_futures,
+                process=ctx.process,
+                stderr_event_count=ctx.stderr_event_count,
+                auth_url=ctx.auth_url,
+            )
+            continue
+        if is_auth_required_error(err):
+            logger.error(
+                "ACP session setup requires authentication",
+                extra=runtime_log_extra(
+                    config,
+                    process=ctx.process,
+                    handshake_step=method,
+                    timeout_seconds=settings.acp_startup_timeout_seconds,
+                    stderr_event_count=ctx.stderr_event_count,
+                ),
+            )
+            hint = auth_hint()
+            raise _session_wire_error(
+                f"ACP {method} failed — authentication required. {hint}",
+                err,
+                condition=ProviderCondition.UNAUTHENTICATED,
+            )
+        logger.error(
+            "ACP session setup returned an error",
+            extra=runtime_log_extra(
+                config,
+                process=ctx.process,
+                handshake_step=method,
+                timeout_seconds=settings.acp_startup_timeout_seconds,
+                stderr_event_count=ctx.stderr_event_count,
+            ),
+        )
+        raise _session_wire_error(f"ACP {method} failed: {err_msg}", err)
+
+
+def _session_modes(result: JsonObject) -> JsonObject:
+    modes = result.get("modes")
+    if not modes:
+        return {}
+    if not isinstance(modes, dict):
+        modes = {}
+    return {
+        "currentModeId": modes.get("currentModeId"),
+        "availableModes": modes.get("availableModes", []),
+    }
 
 
 async def setup_session(
@@ -512,80 +622,7 @@ async def setup_session(
         method = "session/load"
         params["sessionId"] = config.session_id
 
-    env = resolve_env_vars(Path(working_dir))
-    env.update(config.env_vars)
-    attempted_auth = False
-    while True:
-        rpc_id = AcpRequestId.SESSION_SETUP
-        future = await issue_request(
-            ctx.response_futures,
-            stdin=ctx.stdin,
-            stdin_lock=ctx.stdin_lock,
-            rpc_id=rpc_id,
-            method=method,
-            params=params,
-        )
-        resp = await await_response(
-            future,
-            timeout=settings.acp_startup_timeout_seconds,
-            on_timeout=lambda: logger.error(
-                "ACP session setup timed out",
-                extra=runtime_log_extra(
-                    config,
-                    process=ctx.process,
-                    handshake_step=method,
-                    timeout_seconds=settings.acp_startup_timeout_seconds,
-                    stderr_event_count=ctx.stderr_event_count,
-                ),
-            ),
-        )
-        if "error" not in resp:
-            break
-        err = resp["error"]
-        error = lenient_json_object(err)
-        err_msg = str(error.get("message", err)) if error else str(err)
-        if not attempted_auth and auth_methods and is_auth_required_error(err):
-            attempted_auth = True
-            await authenticate_rpc(
-                ctx=ctx,
-                config=config,
-                auth_methods=auth_methods,
-                stdin=ctx.stdin,
-                stdin_lock=ctx.stdin_lock,
-                response_futures=ctx.response_futures,
-                process=ctx.process,
-                stderr_event_count=ctx.stderr_event_count,
-                auth_url=ctx.auth_url,
-            )
-            continue
-        if is_auth_required_error(err):
-            logger.error(
-                "ACP session setup requires authentication",
-                extra=runtime_log_extra(
-                    config,
-                    process=ctx.process,
-                    handshake_step=method,
-                    timeout_seconds=settings.acp_startup_timeout_seconds,
-                    stderr_event_count=ctx.stderr_event_count,
-                ),
-            )
-            hint = auth_hint()
-            raise _session_wire_error(
-                f"ACP {method} failed — authentication required. {hint}",
-                err,
-                condition=ProviderCondition.UNAUTHENTICATED,
-            )
-        logger.error(
-            "ACP session setup returned an error",
-            extra=runtime_log_extra(
-                config,
-                process=ctx.process,
-                handshake_step=method,
-                timeout_seconds=settings.acp_startup_timeout_seconds,
-                stderr_event_count=ctx.stderr_event_count,
-            ),
-        )
-        raise _session_wire_error(f"ACP {method} failed: {err_msg}", err)
+    resp = await _session_setup_response(ctx, config, method, params, auth_methods)
     result = resp.get("result")
     if not isinstance(result, dict):
         raise AcpSessionError(
@@ -605,14 +642,7 @@ async def setup_session(
     config_options = await _select_desired_config_options(
         ctx, config, session_id, config_options
     )
-    agent_modes: JsonObject = {}
-    if modes := result.get("modes"):
-        if not isinstance(modes, dict):
-            modes = {}
-        agent_modes = {
-            "currentModeId": modes.get("currentModeId"),
-            "availableModes": modes.get("availableModes", []),
-        }
+    agent_modes = _session_modes(result)
     ctx.tool_calls = {}
     ctx.agent_modes = agent_modes
     ctx.config_options = config_options

@@ -27,6 +27,26 @@ if TYPE_CHECKING:
 __all__ = ["FeedbackContextReader", "render_feedback_batch"]
 
 
+def _render_feedback_item(raw_item: object) -> str | None:
+    if not isinstance(raw_item, dict):
+        return None
+    item = cast("dict[str, Any]", raw_item)
+    body = item.get("body")
+    if not isinstance(body, str) or not body.strip():
+        return None
+    anchor = item.get("anchor")
+    heading_path = (
+        cast("dict[str, Any]", anchor).get("heading_path")
+        if isinstance(anchor, dict)
+        else None
+    )
+    if isinstance(heading_path, list) and heading_path:
+        heading_path = cast("list[object]", heading_path)
+        location = " > ".join(str(seg) for seg in heading_path)
+        return f"- {location}: {body.strip()}"
+    return f"- {body.strip()}"
+
+
 def render_feedback_batch(data: Any) -> str | None:
     """Render an engine feedback-batch READ record into a grounding text block.
 
@@ -61,24 +81,9 @@ def render_feedback_batch(data: Any) -> str | None:
         lines.append(instruction.strip())
 
     for item in items:
-        if not isinstance(item, dict):
-            continue
-        item = cast("dict[str, Any]", item)
-        body = item.get("body")
-        if not isinstance(body, str) or not body.strip():
-            continue
-        anchor = item.get("anchor")
-        heading_path = (
-            cast("dict[str, Any]", anchor).get("heading_path")
-            if isinstance(anchor, dict)
-            else None
-        )
-        if isinstance(heading_path, list) and heading_path:
-            heading_path = cast("list[object]", heading_path)
-            location = " > ".join(str(seg) for seg in heading_path)
-            lines.append(f"- {location}: {body.strip()}")
-        else:
-            lines.append(f"- {body.strip()}")
+        rendered = _render_feedback_item(item)
+        if rendered is not None:
+            lines.append(rendered)
 
     if not lines:
         return None

@@ -38,7 +38,6 @@ from .worker import WorkerNode
 __all__ = [
     "MAX_WEB_LOCATORS_PER_FINDING",
     "MAX_WEB_LOCATOR_EXCERPT_CHARS",
-    "MAX_WEB_LOCATOR_TITLE_CHARS",
     "MAX_WEB_LOCATOR_URL_CHARS",
     "WEB_LOCATOR_KIND",
     "ResearchFindingProducer",

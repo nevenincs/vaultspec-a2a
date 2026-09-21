@@ -28,7 +28,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from ...thread.state import TeamState
-from ..compiler import _make_research_producer, _wire_diverge_stage
+from .._compiler_research import _make_research_producer
+from ..compiler import _wire_diverge_stage
 from ..nodes.diverge import (
     MAX_WEB_LOCATOR_EXCERPT_CHARS,
     MAX_WEB_LOCATOR_URL_CHARS,

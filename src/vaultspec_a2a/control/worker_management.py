@@ -10,576 +10,58 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import math
 import os
-import re
 import subprocess
 import threading
 import time
-import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import psutil
-from pydantic import TypeAdapter, ValidationError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
     from pathlib import Path
-
-    import httpx
 
     from ..lifecycle.shutdown import ShutdownDeadline
     from .circuit_breaker import WorkerCircuitBreaker
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
-from ..lifecycle.pairing import (
-    WorkerPairingVerdict,
-    classify_worker_pairing,
-    eviction_is_authorized,
-)
 from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..utils.runtime_exec import module_command
-from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
+from ._worker_health import (
+    GATEWAY_LIFETIME_ENV,
+    GATEWAY_LIFETIME_ID,
+    WORKER_GENERATION_ENV,
+    WorkerState,
+    _build_worker_restart_detail,
+    _desktop_worker_port_clear,
+    _internal_auth_headers,
+    _shared_worker_port_clear,
+    _worker_stderr_log_path,
+    probe_worker_health,
+    sweep_orphan_worker_logs,
+    worker_liveness,
+    worker_ready_and_ours,
+)
+from ._worker_process_stop import (
+    _reap_retained_processes,
+    _shutdown_worker_process,
+)
+from ._worker_readiness import (
+    WorkerReadySpec,
+    _await_worker_ready,
+)
+from .config import settings
+from .infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV
 from .worker_status import WorkerConnectionStatus
 
 __all__ = [
     "LazyWorkerSpawner",
-    "WorkerHealthProbe",
-    "WorkerLiveness",
-    "WorkerState",
     "WorkerWatchdog",
-    "probe_worker_health",
-    "sweep_orphan_worker_logs",
-    "worker_liveness",
-    "worker_ready_and_ours",
 ]
 
 logger = logging.getLogger(__name__)
-
-_WORKER_STDERR_TAIL_BYTES = 4096
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-
-
-# ---------------------------------------------------------------------------
-# WorkerState dataclass — decouples watchdog from app.state
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class WorkerState:
-    """Mutable container for worker lifecycle metadata.
-
-    The watchdog writes to this dataclass instead of directly onto
-    ``app.state``.  The lifespan creates it, passes it to the watchdog,
-    and also stores it on ``app.state`` for route handlers to read.
-
-    Attributes match the 9 fields the watchdog previously wrote directly
-    onto ``app.state``.
-    """
-
-    worker_status: str = WorkerConnectionStatus.PENDING.value
-    worker_restart_count: int = 0
-    worker_last_restart_reason: str | None = None
-    worker_last_restart_detail: str | None = None
-    worker_last_restart_started_at: str | None = None
-    worker_last_restart_completed_at: str | None = None
-    worker_last_restart_succeeded: bool | None = None
-    worker_last_restart_attempts: int = 0
-    worker_stderr_log_path: str | None = None
-
-
-@dataclass
-class WorkerLiveness:
-    """When the gateway last heard from its worker, and what it was running.
-
-    Sited beside the timeout rule that gives the value meaning, because the rule
-    is the only thing that makes a monotonic float mean "connected" or "stale".
-    Both readings are declared here as :meth:`is_fresh` and :meth:`is_stale`, and
-    they are deliberately not complements: at exactly the timeout neither holds,
-    and a worker never heard from is not stale, it has simply not started.
-
-    Recording contact and interpreting it used to sit apart. The stamp was an
-    undeclared attribute assigned inline at five sites, so neither reader could
-    assume it existed and both read it through a defaulted ``getattr`` with their
-    own copy of the validity guard. That defensiveness was not protection: an
-    absent stamp and a stamp nobody had written yet arrive identically, and both
-    surface as "worker unreachable" — the one failure the value exists to rule
-    out. A writer that must be reached through this type cannot forget it, and a
-    reader can now ask a question instead of guessing at a field.
-    """
-
-    last_contact_ts: float | None = None
-    active_threads: list[str] = field(default_factory=list)
-
-    def record_contact(
-        self,
-        *,
-        when: float | None = None,
-        active_threads: Sequence[str] | None = None,
-    ) -> None:
-        """Record that the worker was heard from.
-
-        *when* is a :func:`time.monotonic` reading, defaulting to now; a caller
-        supplies one only when contact happened measurably before it could say
-        so. *active_threads* is omitted by a caller that observed contact without
-        learning what the worker is running (a socket accept, a dispatch
-        acknowledgement) — omission leaves the last known set standing rather
-        than blanking it, which an empty list would.
-        """
-        self.last_contact_ts = time.monotonic() if when is None else when
-        if active_threads is not None:
-            self.active_threads = list(active_threads)
-
-    def age_seconds(self, *, now: float | None = None) -> float | None:
-        """Seconds since the last recorded contact, or ``None`` if never heard from.
-
-        A stamp that is not a finite real number reads as no contact at all. The
-        guard survives the move because ``app.state`` stays an untyped attribute
-        bag that an embedding host can seat anything on, and because both
-        predicates below must agree about a degenerate value rather than one
-        reading it as fresh and the other as stale.
-        """
-        stamp: object = self.last_contact_ts
-        if (
-            isinstance(stamp, bool)
-            or not isinstance(stamp, (int, float))
-            or not math.isfinite(stamp)
-        ):
-            return None
-        return (time.monotonic() if now is None else now) - stamp
-
-    def is_fresh(self, *, now: float | None = None) -> bool:
-        """Whether contact is recent enough to report the worker as connected."""
-        age = self.age_seconds(now=now)
-        return age is not None and age < settings.worker_heartbeat_timeout_seconds
-
-    def is_stale(self, *, now: float | None = None) -> bool:
-        """Whether contact was made and has since aged past the heartbeat timeout.
-
-        A worker never heard from is NOT stale. Reporting it as such would hand
-        the watchdog a crash signal for a worker that has not finished starting.
-        """
-        age = self.age_seconds(now=now)
-        return age is not None and age > settings.worker_heartbeat_timeout_seconds
-
-
-def worker_liveness(app_state: Any) -> WorkerLiveness:
-    """Return the liveness record on *app_state*, seating one when it has none.
-
-    The single accessor every writer and reader goes through. Seating on demand
-    keeps a host that embeds the internal router without the gateway lifespan
-    working, and costs nothing in meaning: a fresh record says the worker has
-    never been heard from, which is exactly what an app carrying no record knows.
-    """
-    existing = getattr(app_state, "worker_liveness", None)
-    if isinstance(existing, WorkerLiveness):
-        return existing
-    seated = WorkerLiveness()
-    app_state.worker_liveness = seated
-    return seated
-
-
-@dataclass(frozen=True, slots=True)
-class WorkerHealthProbe:
-    """One authenticated worker health observation.
-
-    ``healthy`` is determined solely by an exact HTTP 200.  ``body`` is an
-    optional decoded object: it carries pairing evidence when readable, while
-    ``None`` deliberately distinguishes unreadable evidence from a healthy
-    occupant's absence only through ``healthy``.
-
-    ``indeterminate`` separates the two ways ``healthy`` can be False. A refused
-    connection PROVES no worker holds the port. A read that outran its budget
-    proves only that this observation did not finish in time - a worker busy
-    compiling a graph for an already-admitted run is unresponsive for seconds and
-    then answers normally. Callers that must not act on absence they did not
-    observe (run admission) read this and fall back to the watchdog's seated
-    state; callers that restart on a hung worker keep reading ``healthy`` alone.
-    """
-
-    healthy: bool
-    body: Mapping[str, object] | None
-    indeterminate: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------------
-
-
-def _runtime_dir() -> Path:
-    """Return the machine-global runtime directory for gateway-managed process logs.
-
-    Lives under the A2A home, not inside ``.vault/`` — vaultspec
-    firmware rejects foreign directories inside the vault.
-    """
-    runtime_dir = settings.a2a_home / "runtime"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    return runtime_dir
-
-
-def _worker_stderr_log_path(worker_port: int) -> Path:
-    """Return the deterministic stderr log path for the auto-spawned worker."""
-    return _runtime_dir() / f"worker-autospawn-{worker_port}.stderr.log"
-
-
-GATEWAY_LIFETIME_ENV = "VAULTSPEC_GATEWAY_LIFETIME_ID"
-"""Env name carrying the spawning gateway's lifetime identity to its worker."""
-
-WORKER_GENERATION_ENV = "VAULTSPEC_WORKER_GENERATION"
-"""Env name carrying the spawn generation this worker belongs to."""
-
-# One value per gateway PROCESS, not per port or per host. A gateway that
-# restarts on the same port is a different incarnation, and a worker still
-# holding the previous value is paired to a gateway that no longer exists -
-# the condition a URL comparison cannot see, and the one that let dispatch
-# reach a foreign worker.
-GATEWAY_LIFETIME_ID = uuid.uuid4().hex
-
-
-_WORKER_LOG_NAME_RE = re.compile(r"^worker-autospawn-(\d+)\.stderr\.log$")
-
-# The port-keyed filename is why this artifact accumulated: a dev-band worker
-# takes a fresh port each boot, so every boot minted a new file and nothing
-# reclaimed the previous one. The sweep below is the enforcement, and it runs
-# once per gateway boot rather than continuously, so orphans from a boot that
-# never recurs are only reclaimed when some later gateway starts.
-WORKER_STDERR_LOG_DECLARATION = ArtifactDeclaration(
-    name="worker-autospawn-stderr-log",
-    root="<a2a_home>/runtime/worker-autospawn-<port>.stderr.log",
-    owner="control.worker_management",
-    disposition=RetentionDisposition.SESSION_SCOPED,
-    mechanism=(
-        "truncated on each spawn, and orphans for ports with no live registry "
-        "claim are deleted by sweep_orphan_worker_logs once per gateway boot"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    WORKER_STDERR_LOG_DECLARATION,
-)
-
-
-def sweep_orphan_worker_logs(
-    *, current_worker_port: int, registry_home: Path | None = None
-) -> list[Path]:
-    """Delete ``worker-autospawn-<port>.stderr.log`` files with no live claim.
-
-    A dev-band worker instance gets a fresh port (hence a fresh log filename)
-    every boot, so the runtime dir accumulates one orphaned file per past
-    instance forever - no reap ever touched them (research: 15+ accumulated at
-    audit time). Meant to run once per gateway boot, before this process spawns
-    its own worker: a file's port is kept when it is the port THIS process is
-    about to (re)use, or when the dev-process registry (``~/.vaultspec/procs``,
-    a separate registry from this gateway's own service discovery) still shows
-    a live record on that port; every other file is a stale orphan and removed.
-    Best-effort per file and per registry read - neither may abort a real boot.
-    """
-    from ..lifecycle.registry import StalenessState, classify_record, list_records
-
-    try:
-        live_ports: set[int] = {
-            record.port
-            for record in list_records(registry_home)
-            if classify_record(record, None) is StalenessState.LIVE
-        }
-    except OSError:
-        live_ports = set()
-
-    removed: list[Path] = []
-    for path in _runtime_dir().glob("worker-autospawn-*.stderr.log"):
-        match = _WORKER_LOG_NAME_RE.match(path.name)
-        if match is None:
-            continue
-        port = int(match.group(1))
-        if port == current_worker_port or port in live_ports:
-            continue
-        with contextlib.suppress(OSError):
-            path.unlink()
-            removed.append(path)
-    return removed
-
-
-# A UTF-8 continuation byte matches 0b10xxxxxx, a pattern no character ever
-# starts with, and a character spans at most four bytes - so at most three
-# continuation bytes can sit between an arbitrary offset and the next boundary.
-_UTF8_CONTINUATION_MASK = 0xC0
-_UTF8_CONTINUATION_MARKER = 0x80
-_UTF8_MAX_CONTINUATION_BYTES = 3
-
-
-def _advance_to_character_boundary(raw: bytes) -> bytes:
-    """Drop the partial character a byte-offset seek may have landed inside."""
-    index = 0
-    while (
-        index < min(len(raw), _UTF8_MAX_CONTINUATION_BYTES)
-        and raw[index] & _UTF8_CONTINUATION_MASK == _UTF8_CONTINUATION_MARKER
-    ):
-        index += 1
-    return raw[index:]
-
-
-def _read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -> str:
-    """Read and decode the tail of a worker stderr log file.
-
-    The tail starts at a byte offset, which for a log carrying non-ASCII provider
-    output lands inside a character as often as not. Trimming the stranded
-    continuation bytes costs at most three bytes of an already-truncated
-    diagnostic and keeps the first line readable, where decoding them would open
-    every non-ASCII tail with replacement characters.
-    """
-    if max_bytes <= 0 or not log_path.exists():
-        return ""
-    with log_path.open("rb") as handle:
-        handle.seek(0, 2)
-        size = handle.tell()
-        offset = max(size - max_bytes, 0)
-        handle.seek(offset)
-        raw = handle.read(max_bytes)
-    if offset:
-        raw = _advance_to_character_boundary(raw)
-    return raw.decode("utf-8", errors="replace").strip()
-
-
-def _build_worker_restart_detail(
-    *,
-    returncode: int | None,
-    stderr_log_path: Path | None,
-) -> str:
-    """Build a compact diagnostic string for health/readiness surfaces."""
-    detail = f"returncode={returncode}"
-    stderr_tail = _read_log_tail(stderr_log_path) if stderr_log_path is not None else ""
-    if stderr_tail:
-        compact_tail = re.sub(r"\s+", " ", stderr_tail)[:500]
-        detail += f"; stderr_tail={compact_tail}"
-    detail += f"; stderr_log={stderr_log_path}"
-    return detail
-
-
-async def _tcp_port_ready(host: str, port: int) -> bool:
-    """Fast-path: check if a TCP port is accepting connections.
-
-    Much cheaper than a full HTTP health check — used to skip expensive
-    httpx probes while the process is still binding.
-    """
-    try:
-        _reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=0.5,
-        )
-        writer.close()
-        await writer.wait_closed()
-    except (OSError, TimeoutError):
-        return False
-    return True
-
-
-def _internal_auth_headers() -> dict[str, str] | None:
-    """Return the worker-IPC bearer header when the internal token is configured.
-
-    The gateway-worker pair authenticates every probe and command with the shared
-    worker interprocess-communication credential; a DEVELOPMENT gateway with no
-    token sends none, matching the bearer rule the worker enforces.
-    """
-    if settings.internal_token is None:
-        return None
-    return {"Authorization": f"Bearer {settings.internal_token}"}
-
-
-async def probe_worker_health(
-    url: str,
-    timeout: float = 2.0,
-    *,
-    client: httpx.AsyncClient | None = None,
-) -> WorkerHealthProbe:
-    """Probe the worker's ``GET /health`` once.
-
-    The single worker-health primitive for every caller - the boot/spawn paths,
-    the watchdog's authoritative crash check, and ``/health``. Request-path
-    callers pass the app-pooled *client* to reuse its connection pool (already
-    carrying the worker IPC bearer); the watchdog and boot paths pass none and get
-    a self-contained one-shot client that presents the same bearer, so a worker
-    that enforces the credential on ``/health`` still answers its owner.
-
-    The health verdict is an exact ``200`` and nothing else, so every caller
-    agrees and ``/health`` can never silently diverge from the watchdog's
-    restart decision (a ``204`` fails both, not one). The decoded body is a
-    strictly additive by-product for callers that also want what the worker
-    *reported*: a body that will not decode leaves the verdict untouched and
-    yields ``None``, so reporting can never turn a healthy worker unhealthy.
-    """
-    import httpx
-
-    async def _probe(active: httpx.AsyncClient) -> WorkerHealthProbe:
-        resp = await active.get(f"{url}/health", timeout=timeout)
-        if resp.status_code != 200:
-            return WorkerHealthProbe(healthy=False, body=None)
-        try:
-            decoded: object = resp.json()
-        except ValueError:
-            return WorkerHealthProbe(healthy=True, body=None)
-        try:
-            body = _JSON_OBJECT.validate_python(decoded)
-        except ValidationError:
-            return WorkerHealthProbe(healthy=True, body=None)
-        return WorkerHealthProbe(healthy=True, body=body)
-
-    try:
-        if client is not None:
-            return await _probe(client)
-        async with httpx.AsyncClient(headers=_internal_auth_headers()) as owned:
-            return await _probe(owned)
-    except Exception as exc:
-        # An unreachable verdict decides run admission, so a silent swallow here
-        # makes an operator-visible 503 unexplainable: a refused worker, a timed
-        # out one, and a crashed one all present identically. Name the cause.
-        indeterminate = _is_indeterminate_probe_failure(exc)
-        logger.info(
-            "Worker health probe failed for %s: %s: %s (indeterminate=%s)",
-            url,
-            type(exc).__name__,
-            exc,
-            indeterminate,
-        )
-        return WorkerHealthProbe(healthy=False, body=None, indeterminate=indeterminate)
-
-
-def _is_indeterminate_probe_failure(exc: BaseException) -> bool:
-    """Whether *exc* leaves the worker's health genuinely unknown.
-
-    A connect failure is decisive evidence of absence: the transport reached the
-    port and nothing accepted. Every other transport failure - a read that outran
-    its budget, an exhausted client pool, a connection dropped mid-response - says
-    something about THIS observation, not about whether a worker exists. Timeouts
-    are classified before connect errors because ``ConnectTimeout`` is both, and
-    a connect that timed out is an absence observation, not an unknown one.
-    """
-    import httpx
-
-    if isinstance(exc, httpx.ConnectTimeout | httpx.ConnectError):
-        return False
-    return isinstance(exc, httpx.TransportError)
-
-
-def _same_gateway(worker_target: object, our_gateway: str) -> bool:
-    """Whether a worker explicitly declares *this* gateway as its target."""
-    return (
-        isinstance(worker_target, str)
-        and bool(worker_target.strip())
-        and worker_target.rstrip("/") == our_gateway.rstrip("/")
-    )
-
-
-def _classify_worker_body(
-    body: Mapping[str, object], *, current_generation: int
-) -> WorkerPairingVerdict:
-    """Classify a fetched worker health body against this gateway's identity.
-
-    The single enforcement seam for the authenticated pairing policy: the
-    worker's reported ``paired_gateway_lifetime`` and ``worker_generation`` are
-    judged by :func:`~vaultspec_a2a.lifecycle.pairing.classify_worker_pairing`
-    against THIS process's lifetime identity and the spawner's current
-    generation. Blank or foreign evidence fails closed.
-    """
-    lifetime = body.get("paired_gateway_lifetime")
-    generation = body.get("worker_generation")
-    return classify_worker_pairing(
-        reported_lifetime=lifetime if isinstance(lifetime, str) else None,
-        reported_generation=generation if isinstance(generation, str) else None,
-        gateway_lifetime=GATEWAY_LIFETIME_ID,
-        current_generation=current_generation,
-    )
-
-
-async def worker_ready_and_ours(
-    worker_url: str, *, current_generation: int = 0
-) -> bool:
-    """Whether a healthy worker at *worker_url* is provably THIS gateway's.
-
-    The provenance-aware readiness signal for every adoption decision: a bare
-    ``/health`` 200 only proves *some* worker holds the port, which a foreign
-    orphan squatting a shared band port satisfies just as well as our own.
-
-    Profile-split enforcement (the authenticated-pairing decision): under the
-    ARMED desktop profile the authenticated pairing verdict is the authority -
-    only a worker whose reported gateway lifetime and spawn generation classify
-    as ``OWNED`` is adopted; missing, blank, or foreign evidence fails closed.
-    Unarmed profiles require an exact declared ``gateway_url`` match. Registry-
-    and Compose-managed workers publish that current evidence through health.
-
-    An occupant that answered but reported nothing readable is not ours under
-    either profile. This is the opposite reading from the spawn path, which
-    treats the same occupant as a reason NOT to spawn - deliberately so: "some
-    process holds this port" and "this process is provably mine" are different
-    questions, and the safe answer to the first is the unsafe answer to the
-    second. Missing, blank and unreadable targets are all absence of evidence.
-    """
-    probe = await probe_worker_health(worker_url)
-    body = probe.body
-    if not probe.healthy or body is None:
-        return False
-    if settings.desktop_profile_armed:
-        verdict = _classify_worker_body(body, current_generation=current_generation)
-        if verdict is not WorkerPairingVerdict.OWNED:
-            logger.warning(
-                "Worker at %s is not adoptable under the armed profile "
-                "(pairing verdict: %s)",
-                worker_url,
-                verdict.value,
-            )
-            return False
-        return True
-    return _same_gateway(body.get("gateway_url"), settings.gateway_url)
-
-
-async def _evict_stale_worker(
-    worker_url: str,
-    worker_port: int,
-    *,
-    timeout: float = 10.0,
-) -> bool:
-    """Terminate a stale worker and wait for the port to free.
-
-    Posts the worker's bearer-authenticated ``/admin/shutdown`` (an
-    ``os.kill(SIGTERM)`` that is an immediate ``TerminateProcess`` on Windows, not
-    a graceful run-draining stop) and polls the TCP port until it stops accepting
-    connections. Only ever aimed at a foreign-gateway orphan, never at a worker
-    serving this gateway's runs, so the abrupt stop cannot drop live work of ours.
-    Returns ``True`` once the port is free, ``False`` if it is still bound after
-    *timeout* seconds. The internal token is presented so the shutdown is accepted
-    only when this gateway is the worker's paired owner.
-    """
-    import httpx
-
-    with contextlib.suppress(Exception):
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"{worker_url}/admin/shutdown",
-                headers=_internal_auth_headers(),
-                timeout=2.0,
-            )
-
-    deadline = asyncio.get_event_loop().time() + timeout
-    freed = False
-    while asyncio.get_event_loop().time() < deadline:
-        if not await _tcp_port_ready("127.0.0.1", worker_port):
-            freed = True
-            break
-        await asyncio.sleep(0.25)
-    else:
-        freed = not await _tcp_port_ready("127.0.0.1", worker_port)
-    if freed:
-        # The evicted worker's own stderr log is a dead end from this point:
-        # nothing will append to it unless OUR spawn reuses the same port (which
-        # truncates it anyway), and an eviction whose follow-up spawn then fails
-        # would otherwise leave it behind exactly like the registry orphans this
-        # step's kill/reap deletion closes.
-        with contextlib.suppress(OSError):
-            _worker_stderr_log_path(worker_port).unlink(missing_ok=True)
-    return freed
 
 
 async def _spawn_worker(
@@ -630,103 +112,10 @@ async def _spawn_worker(
     # spawn loudly with no eviction - it may be serving someone else's runs,
     # and silence is not evidence of ownership.
     if settings.desktop_profile_armed:
-        occupant = await probe_worker_health(worker_url)
-        if occupant.healthy:
-            verdict = _classify_worker_body(
-                occupant.body or {}, current_generation=generation
-            )
-            if verdict is WorkerPairingVerdict.OWNED:
-                logger.info(
-                    "Worker already running at %s with an owned pairing "
-                    "verdict — adopting instead of spawning",
-                    worker_url,
-                )
-                return None
-            if eviction_is_authorized(
-                verdict, desktop_profile_armed=settings.desktop_profile_armed
-            ):
-                logger.warning(
-                    "Worker at %s is this gateway's prior generation "
-                    "(verdict: %s) — evicting before spawning the replacement",
-                    worker_url,
-                    verdict.value,
-                )
-                if not await _evict_stale_worker(worker_url, worker_port):
-                    logger.error(
-                        "Prior-generation worker at %s did not release port %d "
-                        "after an authorized eviction — refusing to spawn onto "
-                        "a held port (conflict, no adoption)",
-                        worker_url,
-                        worker_port,
-                    )
-                    return None
-            else:
-                logger.error(
-                    "Worker port %d is held by a process this gateway cannot "
-                    "adopt or evict (pairing verdict: %s) — refusing to spawn "
-                    "(conflict, no adoption, no eviction)",
-                    worker_port,
-                    verdict.value,
-                )
-                return None
-    # Only the Compose and development band profiles probe the port for an
-    # already-running same-gateway worker (adopt) or a stale foreign orphan
-    # (evict) before spawning, using the exact declared gateway target.
-    if not settings.desktop_profile_armed:
-        existing = await probe_worker_health(worker_url)
-        if existing.healthy:
-            if existing.body is None:
-                logger.error(
-                    "Worker port %d is held by a healthy worker with unreadable "
-                    "pairing evidence — refusing to spawn or adopt",
-                    worker_port,
-                )
-                return None
-            declared_target = existing.body.get("gateway_url")
-            if not isinstance(declared_target, str) or not declared_target.strip():
-                logger.error(
-                    "Worker port %d is held by a healthy worker without an exact "
-                    "gateway target — refusing to spawn, adopt, or evict",
-                    worker_port,
-                )
-                return None
-            if _same_gateway(
-                declared_target,
-                settings.gateway_url,
-            ):
-                logger.info(
-                    "Worker already running at %s targeting this gateway (%s)"
-                    " — skipping auto-spawn",
-                    worker_url,
-                    settings.gateway_url,
-                )
-                return None
-            # A stale orphan from a dead dev-band gateway is squatting the worker
-            # port: it heartbeats a gateway that no longer exists and would never
-            # be re-pointed. Evict it and spawn a fresh worker wired to THIS
-            # gateway.
-            logger.warning(
-                "Worker at %s targets a foreign gateway (%s != %s) — evicting the"
-                " stale orphan before spawning a fresh worker",
-                worker_url,
-                declared_target,
-                settings.gateway_url,
-            )
-            if not await _evict_stale_worker(worker_url, worker_port):
-                # The foreign orphan would not release the port. Spawning anyway is
-                # the adoption hazard this guard exists to close: our new worker
-                # cannot bind the held port, and the readiness probe would find the
-                # SURVIVING foreign worker healthy and hand it back as ours. Fail
-                # loud instead of spawning a competitor onto a port a foreign
-                # gateway's worker still serves.
-                logger.error(
-                    "Stale worker at %s did not release port %d after eviction —"
-                    " refusing to spawn onto a foreign-held port (manual reap"
-                    " required)",
-                    worker_url,
-                    worker_port,
-                )
-                return None
+        if not await _desktop_worker_port_clear(worker_url, worker_port, generation):
+            return None
+    elif not await _shared_worker_port_clear(worker_url, worker_port):
+        return None
 
     logger.info(
         "Auto-spawning worker on port %d",
@@ -783,143 +172,10 @@ async def _spawn_worker(
     return await _await_worker_ready(
         process,
         containment,
-        worker_url=worker_url,
-        worker_port=worker_port,
-        generation=generation,
-        worker_command=worker_command,
-        stderr_log_path=stderr_log_path,
+        WorkerReadySpec(
+            worker_url, worker_port, generation, worker_command, stderr_log_path
+        ),
     )
-
-
-async def _await_worker_ready(
-    process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
-    *,
-    worker_url: str,
-    worker_port: int,
-    generation: int,
-    worker_command: Sequence[str],
-    stderr_log_path: Path,
-) -> subprocess.Popen[bytes] | None:
-    """Seat the spawned worker in its containment and wait for it to be ours.
-
-    Returns the handle once the worker at *worker_url* answers as this gateway's,
-    or ``None`` when it exited early or never became ready - reaping the tree in
-    both cases, so a ``None`` return never leaves a process on the worker port.
-
-    Split out of :func:`_spawn_worker` because this is exactly the region that
-    runs with a live process nobody else can yet reach: the handle exists only in
-    this frame until it is returned. A raise here - a cancellation on gateway
-    shutdown being the realistic one - would therefore strand the worker as an
-    orphan holding the port, which the next spawn refuses as an unidentified
-    occupant, wedging the band rather than merely leaking a process. Owning the
-    process and owning its failure are the same job, so they are the same
-    function.
-    """
-    try:
-        return await _await_worker_ready_inner(
-            process,
-            containment,
-            worker_url=worker_url,
-            worker_port=worker_port,
-            generation=generation,
-            worker_command=worker_command,
-            stderr_log_path=stderr_log_path,
-        )
-    except BaseException:
-        await _reap_unready_worker(process, containment)
-        raise
-
-
-async def _await_worker_ready_inner(
-    process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
-    *,
-    worker_url: str,
-    worker_port: int,
-    generation: int,
-    worker_command: Sequence[str],
-    stderr_log_path: Path,
-) -> subprocess.Popen[bytes] | None:
-    """Seat and poll the worker; see :func:`_await_worker_ready` for the guard."""
-    if containment is not None:
-        # Assign the worker to its containment before it boots far enough to spawn
-        # any descendant (provider roots, MCP bridges). A worker this gateway owns
-        # is not admitted without durable tree authority: otherwise a descendant
-        # created during cooperative exit can outlive a root that exits first.
-        containment.assign_process(process)
-    logger.info(
-        "Worker process spawned (PID %d) via `%s` with stderr at %s",
-        process.pid,
-        " ".join(worker_command),
-        stderr_log_path,
-    )
-
-    # Adaptive health polling (PHASE-1e): fast initial probes, exponential
-    # backoff to cap.  TCP fast-path skips expensive HTTP checks while the
-    # process is still binding its port.
-    ready_timeout = settings.worker_ready_timeout_seconds
-    started = asyncio.get_event_loop().time()
-    deadline = started + ready_timeout
-    interval = settings.worker_poll_initial_interval_seconds
-    last_log = 0.0  # elapsed seconds at last progress log
-
-    while asyncio.get_event_loop().time() < deadline:
-        # Detect OUR spawn dying before probing health. A spawn that crashed on its
-        # bind (the port was held by a surviving foreign worker) must be reported as
-        # a failed spawn, never as ready off the foreign worker still answering on
-        # the port - so the liveness check leads the readiness check.
-        if process.poll() is not None:
-            detail = _build_worker_restart_detail(
-                returncode=process.returncode,
-                stderr_log_path=stderr_log_path,
-            )
-            logger.error(
-                "Worker exited prematurely: %s",
-                detail,
-            )
-            # The root died on its own, but a descendant it had already spawned
-            # did not necessarily die with it, and one still holding the worker
-            # port wedges the next spawn exactly like a timed-out worker's tree
-            # would. Reap on the same terms rather than trusting a dead root to
-            # mean a dead tree; the reap also waits the handle, so no zombie is
-            # left on POSIX.
-            await _reap_unready_worker(process, containment)
-            return None
-
-        # Ready only when OUR worker answers: the port being open and healthy is not
-        # enough when a foreign orphan can squat a shared band port, so readiness
-        # requires the responding worker to declare THIS gateway as its target.
-        if await _tcp_port_ready(
-            "127.0.0.1", worker_port
-        ) and await worker_ready_and_ours(worker_url, current_generation=generation):
-            elapsed = asyncio.get_event_loop().time() - started
-            logger.info(
-                "Worker ready at %s (PID %d) in %.1fs",
-                worker_url,
-                process.pid,
-                elapsed,
-            )
-            return process
-
-        elapsed = asyncio.get_event_loop().time() - started
-        if elapsed - last_log >= settings.worker_poll_log_interval_seconds:
-            logger.info("Waiting for worker... (%.0fs elapsed)", elapsed)
-            last_log = elapsed
-
-        await asyncio.sleep(interval)
-        interval = min(
-            interval * settings.worker_poll_backoff_factor,
-            settings.worker_poll_max_interval_seconds,
-        )
-
-    logger.error(
-        "Worker failed to become ready within %.0f seconds; stderr_log=%s",
-        ready_timeout,
-        stderr_log_path,
-    )
-    await _reap_unready_worker(process, containment)
-    return None
 
 
 async def _spawn_worker_owned(
@@ -962,188 +218,37 @@ async def _spawn_worker_owned(
             containment.close()
 
 
-async def _reap_unready_worker(
-    process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
-) -> None:
-    """Reap a worker that spawned but never became ready, tree and all.
-
-    Every failure path must escalate and fell the whole tree, because the caller
-    returns ``None`` afterwards - it reports the spawn as failed, and anything
-    still alive is by definition an orphan holding the worker port. The next
-    spawn then meets its own leftover on that port and refuses it as an
-    unidentified occupant, so an incomplete reap here wedges the band rather
-    than merely leaking a process.
-
-    An assigned Job Object or process group is authoritative for the tree. If
-    assignment failed before authority was recorded, cleanup suspends the exact
-    retained ``Popen`` identity, retains its descendants with creation guards,
-    and terminates only those identities before waiting the root handle.
-
-    Either way the handle is waited afterwards so no zombie is left on POSIX.
-    """
-    await complete_cleanup(_stop_worker_tree(process, containment, term_timeout=5.0))
-
-
-async def _stop_worker_tree(
-    process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
-    *,
-    term_timeout: float,
-    kill_timeout: float = 5.0,
-) -> None:
-    try:
-        if containment is not None and containment.assigned:
-            reaped = await containment.terminate(
-                term_timeout=term_timeout, kill_timeout=kill_timeout
-            )
-        else:
-            reaped = await _stop_exact_popen_tree(
-                process,
-                term_timeout=term_timeout,
-                kill_timeout=kill_timeout,
-            )
-        if not reaped:
-            raise ProcessContainmentError(
-                f"Worker process tree {process.pid} did not terminate"
-            )
-    finally:
-        await asyncio.to_thread(process.wait, 0.1)
-
-
-def _retained_process_owner(
-    process: subprocess.Popen[bytes],
-) -> psutil.Process | None:
-    """Return a reuse-guarded psutil identity for the exact live ``Popen``."""
-    if process.poll() is not None:
-        return None
-    try:
-        owner = psutil.Process(process.pid)
-        owner.create_time()
-    except psutil.NoSuchProcess:
-        return None
-    # The first poll proved our retained handle live before lookup; the second
-    # rejects an exit/reuse race during lookup. ``owner`` has cached creation
-    # identity, so every later signal refuses a reused numeric pid.
-    if process.poll() is not None:
-        return None
-    return owner
-
-
-async def _stop_exact_popen_tree(
-    process: subprocess.Popen[bytes],
-    *,
-    term_timeout: float,
-    kill_timeout: float,
-) -> bool:
-    """Stop the exact retained root and its observed tree without reopening a pid."""
-    owner = _retained_process_owner(process)
-    if owner is None:
-        return process.poll() is not None
-    retained: list[psutil.Process] = [owner]
-    try:
-        owner.suspend()
-        for child in owner.children(recursive=True):
-            try:
-                if child.is_running():
-                    child.suspend()
-                    retained.append(child)
-            except psutil.NoSuchProcess:
-                pass
-        for target in reversed(retained):
-            try:
-                if target.is_running():
-                    target.terminate()
-            except psutil.NoSuchProcess:
-                pass
-        _, alive = await asyncio.to_thread(
-            psutil.wait_procs, retained, timeout=term_timeout
-        )
-        for target in alive:
-            try:
-                if target.is_running():
-                    target.kill()
-            except psutil.NoSuchProcess:
-                pass
-        if alive:
-            _, alive = await asyncio.to_thread(
-                psutil.wait_procs, alive, timeout=kill_timeout
-            )
-        return not alive
-    except (psutil.AccessDenied, psutil.NoSuchProcess):
-        return process.poll() is not None
-
-
-async def _shutdown_worker_process(
-    process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None = None,
-    *,
-    deadline: ShutdownDeadline | None = None,
-) -> None:
-    """Shut down the worker child process and its whole tree.
-
-    Assigned containment reaps through a POSIX process group or Windows Job
-    Object. Missing or unassigned containment uses exact retained process
-    identities, including creation-time reuse guards, and never treats an empty
-    containment as authority for a live root.
-    """
-    if process.poll() is not None and containment is None:
-        return
-    logger.info(
-        "Shutting down worker process (PID %d)",
-        process.pid,
-    )
-    if deadline is None:
-        term_timeout = 10.0
-        kill_timeout = 5.0
-    else:
-        remaining = deadline.remaining()
-        term_timeout = max((remaining - 0.5) / 2.0, 0.0)
-        kill_timeout = max(remaining - term_timeout, 0.1)
-    await complete_cleanup(
-        _stop_worker_tree(
-            process,
-            containment,
-            term_timeout=term_timeout,
-            kill_timeout=kill_timeout,
-        )
-    )
-    logger.info("Worker process stopped")
-
-
-async def _reap_retained_processes(
-    processes: list[psutil.Process], *, deadline: ShutdownDeadline | None
-) -> None:
-    """Reap retained process identities without acting on a reused pid."""
-    if not processes:
-        return
-    remaining = deadline.remaining() if deadline is not None else 5.0
-    term_timeout = max((remaining - 0.1) / 2.0, 0.0)
-    for process in reversed(processes):
-        try:
-            if process.is_running():
-                process.terminate()
-        except psutil.NoSuchProcess:
-            pass
-    _, alive = await asyncio.to_thread(
-        psutil.wait_procs, processes, timeout=term_timeout
-    )
-    for process in alive:
-        try:
-            if process.is_running():
-                process.kill()
-        except psutil.NoSuchProcess:
-            pass
-    if alive:
-        remaining = deadline.remaining() if deadline is not None else 2.5
-        _, alive = await asyncio.to_thread(psutil.wait_procs, alive, timeout=remaining)
-    if alive:
-        raise ProcessContainmentError("Retained worker descendants did not terminate")
-
-
 # ---------------------------------------------------------------------------
 # Lazy worker spawner (PHASE-1a)
 # ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class _WorkerSpawnConfig:
+    """Connection and policy values shared by a worker spawner."""
+
+    url: str
+    port: int
+    auto_spawn: bool
+    stderr_log_path: Path | None
+
+
+@dataclass(slots=True)
+class _WorkerProcessState:
+    """Owned process handles and the readiness state for one worker."""
+
+    process: subprocess.Popen[bytes] | None = None
+    containment: ProcessContainment | None = None
+    spawned: bool = False
+
+
+@dataclass(slots=True)
+class _WorkerSynchronization:
+    """Locks and generation counter shared by async and thread callers."""
+
+    generation: int = 0
+    generation_lock: threading.Lock = field(default_factory=threading.Lock)
+    spawn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class LazyWorkerSpawner:
@@ -1164,28 +269,26 @@ class LazyWorkerSpawner:
         auto_spawn: bool,
     ) -> None:
         """Initialise with worker connection details and spawn policy."""
-        self._worker_url = worker_url
-        self._worker_port = worker_port
-        self._auto_spawn = auto_spawn
-        self._process: subprocess.Popen[bytes] | None = None
+        self._config = _WorkerSpawnConfig(
+            url=worker_url,
+            port=worker_port,
+            auto_spawn=auto_spawn,
+            stderr_log_path=(
+                _worker_stderr_log_path(worker_port) if auto_spawn else None
+            ),
+        )
         # Every worker spawned by this gateway carries OS containment. ``None``
         # means no owned process or an explicitly restored fallback handle that
         # shutdown must seat before offering a cooperative interval.
-        self._containment: ProcessContainment | None = None
-        self._stderr_log_path = (
-            _worker_stderr_log_path(worker_port) if auto_spawn else None
-        )
-        self._spawned = False
+        self._process_state = _WorkerProcessState()
         # Incremented before each spawn, so the value a worker carries names the
         # attempt that produced it. A restart yields a distinct generation even
         # when the port, the host and the gateway are unchanged.
-        self._generation = 0
         # A plain increment is not atomic - it loads, adds and stores - so two
         # callers can read the same value and issue one generation twice. The
         # asyncio lock below does not help: the watchdog reaches this from a
         # worker thread, not the event loop.
-        self._generation_lock = threading.Lock()
-        self._lock = asyncio.Lock()
+        self._synchronization = _WorkerSynchronization()
         # Optional demand-readiness signal wired by the armed desktop gateway. It
         # is fired once, on the authenticated demand path, after the single-flight
         # worker start reaches readiness, so deferred boot reconciliation runs only
@@ -1203,17 +306,17 @@ class LazyWorkerSpawner:
     @property
     def spawned(self) -> bool:
         """Whether the worker has been spawned (or was already running)."""
-        return self._spawned
+        return self._process_state.spawned
 
     @property
     def process(self) -> subprocess.Popen[bytes] | None:
         """The worker subprocess handle, if we spawned it."""
-        return self._process
+        return self._process_state.process
 
     @property
     def stderr_log_path(self) -> Path | None:
         """The worker stderr log path used for gateway-managed spawns."""
-        return self._stderr_log_path
+        return self._config.stderr_log_path
 
     async def ensure_worker(self) -> None:
         """Spawn the worker if not already running.  No-op after first call.
@@ -1228,53 +331,57 @@ class LazyWorkerSpawner:
         can only ever mean "a worker this gateway can use exists", and an
         exception is one of the ways it does not.
         """
-        if self._spawned:
+        if self._process_state.spawned:
             return
-        async with self._lock:
+        async with self._synchronization.spawn_lock:
             # Double-check after acquiring lock.
-            if self._spawned:
+            if self._process_state.spawned:
                 return
-            if not self._auto_spawn:
+            if not self._config.auto_spawn:
                 # Not configured to auto-spawn; attach only to a worker that
                 # declares THIS gateway as its target, never a foreign orphan that
                 # merely answers /health on the port. Under the armed profile
                 # this attach requires the OWNED pairing verdict, which an
                 # externally-managed worker can never present - armed without
                 # auto-spawn is a misconfiguration and fails closed.
-                self._spawned = await worker_ready_and_ours(
-                    self._worker_url, current_generation=self._generation
+                self._process_state.spawned = await worker_ready_and_ours(
+                    self._config.url,
+                    current_generation=self._synchronization.generation,
                 )
-                if not self._spawned:
+                if not self._process_state.spawned:
                     logger.warning(
                         "No worker targeting this gateway at %s and"
                         " auto_spawn_worker=False",
-                        self._worker_url,
+                        self._config.url,
                     )
                 return
             logger.info(
                 "First dispatch received — starting worker at %s...",
-                self._worker_url,
+                self._config.url,
             )
             # Every gateway-spawned worker is seated inside OS containment and its
             # whole tree is reaped on shutdown. The spawn seam hands containment
             # back only alongside the live tree it contains.
             generation = self.next_generation()
-            self._process, self._containment = await _spawn_worker_owned(
-                self._worker_url,
-                self._worker_port,
+            process, containment = await _spawn_worker_owned(
+                self._config.url,
+                self._config.port,
                 generation=generation,
             )
+            self._process_state.process = process
+            self._process_state.containment = containment
             # Mark as spawned even if _spawn_worker found it already running
             # (returns None when a same-gateway worker was already healthy). The
             # fallback probe must confirm the running worker is OURS: a bare health
             # check here would let a refused-eviction foreign orphan (spawn returned
             # None) be adopted as this gateway's worker.
-            self._spawned = self._process is not None or (
+            self._process_state.spawned = process is not None or (
                 await worker_ready_and_ours(
-                    self._worker_url, current_generation=self._generation
+                    self._config.url,
+                    current_generation=self._synchronization.generation,
                 )
             )
-            if self._spawned:
+            if self._process_state.spawned:
                 logger.info("Worker available — processing dispatch")
             else:
                 logger.error(
@@ -1290,17 +397,17 @@ class LazyWorkerSpawner:
         running worker but must never spawn or restart it (that belongs to whoever
         owns it, e.g. the dev-process registry).
         """
-        return self._auto_spawn
+        return self._config.auto_spawn
 
     @property
     def worker_url(self) -> str:
         """The worker's base URL."""
-        return self._worker_url
+        return self._config.url
 
     @property
     def worker_port(self) -> int:
         """The worker's port number."""
-        return self._worker_port
+        return self._config.port
 
     def next_generation(self) -> int:
         """Advance and return the spawn generation for a replacement worker.
@@ -1310,14 +417,14 @@ class LazyWorkerSpawner:
         counters would let a restarted worker claim a generation the gateway
         never issued.
         """
-        with self._generation_lock:
-            self._generation += 1
-            return self._generation
+        with self._synchronization.generation_lock:
+            self._synchronization.generation += 1
+            return self._synchronization.generation
 
     @property
     def generation(self) -> int:
         """Return the spawn generation of the worker this spawner last started."""
-        return self._generation
+        return self._synchronization.generation
 
     def replace_process(
         self,
@@ -1338,37 +445,102 @@ class LazyWorkerSpawner:
         else would ever close. ``close`` is idempotent, so releasing on both paths
         costs nothing and removes the distinction as a thing to get right.
         """
-        outgoing = self._containment
+        outgoing = self._process_state.containment
         if outgoing is not None and outgoing is not containment:
             outgoing.close()
-        self._process = process
-        self._containment = containment
-        self._spawned = True
+        self._process_state.process = process
+        self._process_state.containment = containment
+        self._process_state.spawned = True
 
     @property
     def containment(self) -> ProcessContainment | None:
         """The OS containment owning the worker tree, if this gateway spawned it."""
-        return self._containment
+        return self._process_state.containment
+
+    async def _cooperative_shutdown(
+        self, process: subprocess.Popen[bytes], deadline: ShutdownDeadline
+    ) -> None:
+        """Ask a contained worker to stop before the forced cleanup window."""
+        cooperative_budget = min(deadline.remaining(reserve=3.0), 1.0)
+        if cooperative_budget > 0:
+            import httpx
+
+            try:
+                async with httpx.AsyncClient(
+                    headers=_internal_auth_headers(),
+                    timeout=cooperative_budget,
+                ) as client:
+                    response = await client.post(f"{self._config.url}/admin/shutdown")
+                    if response.status_code != 202:
+                        logger.warning(
+                            "Worker cooperative shutdown refused with HTTP %d",
+                            response.status_code,
+                        )
+            except httpx.HTTPError:
+                logger.warning(
+                    "Worker cooperative shutdown request failed; escalating",
+                    exc_info=True,
+                )
+        # Containment remains authoritative after the root exits, so the
+        # worker can receive a cooperative grace interval without losing
+        # descendants it creates while handling the request.
+        wait_budget = min(deadline.remaining(reserve=2.0), 5.0)
+        if wait_budget > 0 and process.poll() is None:
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                await asyncio.to_thread(process.wait, wait_budget)
+
+    @staticmethod
+    def _live_descendants(process: subprocess.Popen[bytes]) -> list[psutil.Process]:
+        try:
+            owner = psutil.Process(process.pid)
+            return [
+                child for child in owner.children(recursive=True) if child.is_running()
+            ]
+        except psutil.NoSuchProcess:
+            return []
+
+    async def _reap_shutdown_process(
+        self,
+        process: subprocess.Popen[bytes],
+        shutdown_containment: ProcessContainment | None,
+        transient_containment: ProcessContainment | None,
+        retained_descendants: list[psutil.Process],
+        deadline: ShutdownDeadline | None,
+    ) -> None:
+        try:
+            if process.poll() is None or shutdown_containment is not None:
+                await complete_cleanup(
+                    _shutdown_worker_process(
+                        process, shutdown_containment, deadline=deadline
+                    )
+                )
+        finally:
+            try:
+                if retained_descendants:
+                    await complete_cleanup(
+                        _reap_retained_processes(
+                            retained_descendants, deadline=deadline
+                        )
+                    )
+            finally:
+                self._process_state.process = None
+                if self._process_state.containment is not None:
+                    self._process_state.containment.close()
+                if transient_containment is not None:
+                    transient_containment.close()
+                self._process_state.containment = None
 
     async def shutdown(self, *, deadline: ShutdownDeadline | None = None) -> None:
         """Cooperatively stop the owned worker, then reap its tree by deadline."""
-        if self._process is None:
+        if self._process_state.process is None:
             return
-        process = self._process
-        shutdown_containment = self._containment
+        process = self._process_state.process
+        shutdown_containment = self._process_state.containment
         transient_containment: ProcessContainment | None = None
         retained_descendants: list[psutil.Process] = []
         try:
             if shutdown_containment is None and process.poll() is None:
-                try:
-                    owner = psutil.Process(process.pid)
-                    retained_descendants = [
-                        child
-                        for child in owner.children(recursive=True)
-                        if child.is_running()
-                    ]
-                except psutil.NoSuchProcess:
-                    pass
+                retained_descendants = self._live_descendants(process)
                 try:
                     transient_containment = ProcessContainment.create()
                     transient_containment.assign_process(process)
@@ -1388,58 +560,15 @@ class LazyWorkerSpawner:
                 and process.poll() is None
                 and shutdown_containment is not None
             ):
-                cooperative_budget = min(deadline.remaining(reserve=3.0), 1.0)
-                if cooperative_budget > 0:
-                    import httpx
-
-                    try:
-                        async with httpx.AsyncClient(
-                            headers=_internal_auth_headers(),
-                            timeout=cooperative_budget,
-                        ) as client:
-                            response = await client.post(
-                                f"{self._worker_url}/admin/shutdown"
-                            )
-                            if response.status_code != 202:
-                                logger.warning(
-                                    "Worker cooperative shutdown refused with HTTP %d",
-                                    response.status_code,
-                                )
-                    except httpx.HTTPError:
-                        logger.warning(
-                            "Worker cooperative shutdown request failed; escalating",
-                            exc_info=True,
-                        )
-                # Containment remains authoritative after the root exits, so the
-                # worker can receive a cooperative grace interval without losing
-                # descendants it creates while handling the request.
-                wait_budget = min(deadline.remaining(reserve=2.0), 5.0)
-                if wait_budget > 0 and process.poll() is None:
-                    with contextlib.suppress(subprocess.TimeoutExpired):
-                        await asyncio.to_thread(process.wait, wait_budget)
+                await self._cooperative_shutdown(process, deadline)
         finally:
-            try:
-                if process.poll() is None or shutdown_containment is not None:
-                    await complete_cleanup(
-                        _shutdown_worker_process(
-                            process, shutdown_containment, deadline=deadline
-                        )
-                    )
-            finally:
-                try:
-                    if retained_descendants:
-                        await complete_cleanup(
-                            _reap_retained_processes(
-                                retained_descendants, deadline=deadline
-                            )
-                        )
-                finally:
-                    self._process = None
-                    if self._containment is not None:
-                        self._containment.close()
-                    if transient_containment is not None:
-                        transient_containment.close()
-                    self._containment = None
+            await self._reap_shutdown_process(
+                process,
+                shutdown_containment,
+                transient_containment,
+                retained_descendants,
+                deadline,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1608,60 +737,13 @@ class WorkerWatchdog:
         needs_recovery = self._needs_recovery(
             crashed=crashed, stale=stale, http_ready=http_ready
         )
-
-        # --- Adopted / externally-managed worker: reconcile purely from the probe ---
-        # We hold no process handle (same-gateway adoption returns None, or the worker
-        # is owned by the dev-process registry), so there is no restart path that could
-        # ever flip a stuck "down" back up. The owned-worker state machine below keeps a
-        # "down" worker down until a real restart recovers it - correct for a worker we
-        # can restart, but for an adopted one it would freeze a healthy worker's status
-        # at "down"/"pending" and make plain /health readiness lie. Track the live HTTP
-        # probe every tick instead, so an adopted healthy worker reaches "up".
-        if self._spawner.process is None:
-            self._worker_state.worker_status = (
-                WorkerConnectionStatus.UP.value
-                if http_ready
-                else WorkerConnectionStatus.DOWN.value
-            )
-            return
-
-        # Promote to "up" only after a positive worker health probe.
-        if self._worker_state.worker_status == WorkerConnectionStatus.PENDING:
-            if http_ready and not needs_recovery:
-                self._worker_state.worker_status = WorkerConnectionStatus.UP.value
-                return
-            if not needs_recovery:
-                return
-
-        # --- Healthy / degraded-but-alive: reconcile status, never restart ---
-        if not needs_recovery:
-            if self._worker_state.worker_status == WorkerConnectionStatus.UP:
-                return
-            # Recovered from a transient state (a "down" worker stays down until a
-            # real recovery flips it).
-            if self._worker_state.worker_status != WorkerConnectionStatus.DOWN:
-                self._worker_state.worker_status = WorkerConnectionStatus.UP.value
-            return
-
-        # --- Needs recovery ---
-        # The gateway only restarts a worker it OWNS. For an external/adopted worker
-        # (or a no-auto-spawn deployment) it reports the truth and leaves recovery to
-        # the owner - never force-opening the breaker or spawning a competitor.
-        if not self._owns_worker():
-            self._worker_state.worker_status = (
-                WorkerConnectionStatus.UP.value
-                if http_ready
-                else WorkerConnectionStatus.DOWN.value
-            )
-            return
-
-        # Global inter-cycle cooldown: a persistent crash signal cannot spin restart
-        # cycles faster than the configured cooldown.
-        if not self._restart_cooldown_elapsed():
+        if self._reconcile_probe(http_ready, needs_recovery):
             return
 
         reason = "process_exited" if crashed else "heartbeat_stale"
         proc = self._spawner.process
+        if proc is None:
+            return
         detail = None
         if crashed:
             detail = _build_worker_restart_detail(
@@ -1679,11 +761,8 @@ class WorkerWatchdog:
         # Force circuit breaker open so dispatches return 503.
         self._cb.force_open()
 
-        # --- Restart with exponential backoff ---
-        # Stamp the cycle even when the restart raises, so the inter-cycle
-        # cooldown throttles a failing cycle exactly as it throttles a failed one.
-        # Without this the loop's per-tick failure containment would retry a
-        # raising spawn at the poll interval instead of the cooldown.
+        # Stamp the cycle even when restart raises: the cooldown must also
+        # throttle failed spawn attempts.
         try:
             restarted, attempts = await self._attempt_restart()
         finally:
@@ -1701,6 +780,61 @@ class WorkerWatchdog:
                 "Run: uv run vaultspec service start",
                 settings.watchdog_max_retries,
             )
+
+    def _reconcile_probe(self, http_ready: bool, needs_recovery: bool) -> bool:
+        """Return whether this poll settles without an owned-worker restart."""
+
+        # --- Adopted / externally-managed worker: reconcile purely from the probe ---
+        # We hold no process handle (same-gateway adoption returns None, or the worker
+        # is owned by the dev-process registry), so there is no restart path that could
+        # ever flip a stuck "down" back up. The owned-worker state machine below keeps a
+        # "down" worker down until a real restart recovers it - correct for a worker we
+        # can restart, but for an adopted one it would freeze a healthy worker's status
+        # at "down"/"pending" and make plain /health readiness lie. Track the live HTTP
+        # probe every tick instead, so an adopted healthy worker reaches "up".
+        if self._spawner.process is None:
+            self._worker_state.worker_status = (
+                WorkerConnectionStatus.UP.value
+                if http_ready
+                else WorkerConnectionStatus.DOWN.value
+            )
+            return True
+
+        # Promote to "up" only after a positive worker health probe.
+        if (
+            self._worker_state.worker_status == WorkerConnectionStatus.PENDING
+            and not needs_recovery
+        ):
+            if http_ready:
+                self._worker_state.worker_status = WorkerConnectionStatus.UP.value
+            return True
+
+        # --- Healthy / degraded-but-alive: reconcile status, never restart ---
+        if not needs_recovery:
+            # Recovered from a transient state (a "down" worker stays down until a
+            # real recovery flips it).
+            if self._worker_state.worker_status not in (
+                WorkerConnectionStatus.UP,
+                WorkerConnectionStatus.DOWN,
+            ):
+                self._worker_state.worker_status = WorkerConnectionStatus.UP.value
+            return True
+
+        # --- Needs recovery ---
+        # The gateway only restarts a worker it OWNS. For an external/adopted worker
+        # (or a no-auto-spawn deployment) it reports the truth and leaves recovery to
+        # the owner - never force-opening the breaker or spawning a competitor.
+        if not self._owns_worker():
+            self._worker_state.worker_status = (
+                WorkerConnectionStatus.UP.value
+                if http_ready
+                else WorkerConnectionStatus.DOWN.value
+            )
+            return True
+
+        # Global inter-cycle cooldown: a persistent crash signal cannot spin restart
+        # cycles faster than the configured cooldown.
+        return not self._restart_cooldown_elapsed()
 
     async def _attempt_restart(self) -> tuple[bool, int]:
         """Try to restart the worker with exponential backoff.

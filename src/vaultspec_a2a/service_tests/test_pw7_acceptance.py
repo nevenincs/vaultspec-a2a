@@ -93,7 +93,10 @@ from ..control.run_start_policy import required_role_ids
 from ..graph.enums import PermissionOptionKind, ToolKind
 from ..team.team_config import load_team_config
 from ..testing import resolve_gateway_url
-from ..testing.catalog_selection import NoSelectableLaneError, in_process_selection
+from ..testing.tests._support.catalog_selection import (
+    NoSelectableLaneError,
+    in_process_selection,
+)
 from ._provider_catalog_live import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
@@ -285,22 +288,47 @@ class AcceptanceCase:
     autonomous: bool = False
 
 
-def _research_adr_case(
-    label: str,
-    feature: str,
-    gate_policy: dict[str, str],
-    *,
-    preset: str = _PRESET_DETERMINISTIC,
-    lane_provider: str | None = None,
-    requires_live_selection: bool = False,
-    override_roles: tuple[str, ...] = (),
-    required_env: tuple[str, ...] = (),
-    autonomous: bool = False,
-) -> AcceptanceCase:
+@dataclass(frozen=True, slots=True)
+class _ResearchAdrSpec:
+    """Inputs that vary across the research-to-ADR acceptance lanes."""
+
+    label: str
+    feature: str
+    gate_policy: dict[str, str]
+    preset: str = _PRESET_DETERMINISTIC
+    lane_provider: str | None = None
+    requires_live_selection: bool = False
+    override_roles: tuple[str, ...] = ()
+    required_env: tuple[str, ...] = ()
+    autonomous: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _HumanGateContext:
+    """Runtime values shared by one human gate's polling and decisions."""
+
+    gate: str
+    reviewer_token: str
+    handled: set[str]
+    poll_seconds: float
+    deadline: float
+
+
+@dataclass(frozen=True, slots=True)
+class _AutoGateContext:
+    """Runtime values shared by one automatic gate's polling and receipt."""
+
+    gate: str
+    handled_changesets: set[str]
+    poll_seconds: float
+    deadline: float
+
+
+def _research_adr_case(spec: _ResearchAdrSpec) -> AcceptanceCase:
     return AcceptanceCase(
-        label=label,
-        preset=preset,
-        feature=feature,
+        label=spec.label,
+        preset=spec.preset,
+        feature=spec.feature,
         prompt=(
             "research and decide an SSE reconnection and cursor-persistence "
             "strategy for long-lived dashboard event streams"
@@ -311,14 +339,14 @@ def _research_adr_case(
         # lane at the eligibility gate, before dispatch, with no graph ever run.
         # That is exactly what a hardcoded copy of these ids did when the preset
         # gained its plan-author role.
-        roles=tuple(required_role_ids(load_team_config(preset))),
+        roles=tuple(required_role_ids(load_team_config(spec.preset))),
         expected_doc_kinds=("research", "adr"),
-        gate_policy=gate_policy,
-        lane_provider=lane_provider,
-        requires_live_selection=requires_live_selection,
-        override_roles=override_roles,
-        required_env=required_env,
-        autonomous=autonomous,
+        gate_policy=spec.gate_policy,
+        lane_provider=spec.lane_provider,
+        requires_live_selection=spec.requires_live_selection,
+        override_roles=spec.override_roles,
+        required_env=spec.required_env,
+        autonomous=spec.autonomous,
     )
 
 
@@ -329,32 +357,44 @@ def _research_adr_case(
 # real-Claude preset - the Option C real-provider proof - carrying `live` in its
 # id so `-k "not live"` runs the fast lanes and `-k live` runs Option C alone.
 CASE_AUTO = _research_adr_case(
-    "auto", "pw7-acceptance-auto", {"research": POLICY_AUTO, "adr": POLICY_AUTO}
+    _ResearchAdrSpec(
+        "auto", "pw7-acceptance-auto", {"research": POLICY_AUTO, "adr": POLICY_AUTO}
+    )
 )
 CASE_HUMAN = _research_adr_case(
-    "human", "pw7-acceptance-human", {"research": POLICY_HUMAN, "adr": POLICY_HUMAN}
+    _ResearchAdrSpec(
+        "human",
+        "pw7-acceptance-human",
+        {"research": POLICY_HUMAN, "adr": POLICY_HUMAN},
+    )
 )
 CASE_MIXED = _research_adr_case(
-    "mixed", "pw7-acceptance-mixed", {"research": POLICY_AUTO, "adr": POLICY_HUMAN}
+    _ResearchAdrSpec(
+        "mixed", "pw7-acceptance-mixed", {"research": POLICY_AUTO, "adr": POLICY_HUMAN}
+    )
 )
 CASE_LIVE_MIXED = _research_adr_case(
-    "live-mixed",
-    "pw7-acceptance-live",
-    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
-    preset=_PRESET_LIVE,
-    lane_provider=_LANE_CLAUDE,
+    _ResearchAdrSpec(
+        "live-mixed",
+        "pw7-acceptance-live",
+        {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+        preset=_PRESET_LIVE,
+        lane_provider=_LANE_CLAUDE,
+    )
 )
 # The headless-autonomous live lane: AUTO at both gates AND autonomous dispatch,
 # so the worker never wires the permission-interrupt callback and a live model's
 # read-only tool use (web search) proceeds unattended. This is the product's
 # target headless mode; live-mixed keeps the interrupt-driven HUMAN coverage.
 CASE_LIVE_AUTO = _research_adr_case(
-    "live-auto",
-    "pw7-acceptance-liveauto",
-    {"research": POLICY_AUTO, "adr": POLICY_AUTO},
-    preset=_PRESET_LIVE,
-    lane_provider=_LANE_CLAUDE,
-    autonomous=True,
+    _ResearchAdrSpec(
+        "live-auto",
+        "pw7-acceptance-liveauto",
+        {"research": POLICY_AUTO, "adr": POLICY_AUTO},
+        preset=_PRESET_LIVE,
+        lane_provider=_LANE_CLAUDE,
+        autonomous=True,
+    )
 )
 # The provider-axis lanes. Both use the live preset with a mixed-provider
 # profile overlay and the same MIXED gate shape as live-mixed - the same acceptance
@@ -363,21 +403,25 @@ CASE_LIVE_AUTO = _research_adr_case(
 # skips loudly naming ZAI_AUTH_TOKEN when absent rather than faking a pass. Each
 # carries its provider name in its id so `-k codex` / `-k zai` selects it alone.
 CASE_CODEX = _research_adr_case(
-    "codex",
-    "pw7-acceptance-codex",
-    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
-    preset=_PRESET_LIVE,
-    lane_provider=_LANE_CODEX,
-    override_roles=(_MIXED_OVERRIDE_ROLE,),
+    _ResearchAdrSpec(
+        "codex",
+        "pw7-acceptance-codex",
+        {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+        preset=_PRESET_LIVE,
+        lane_provider=_LANE_CODEX,
+        override_roles=(_MIXED_OVERRIDE_ROLE,),
+    )
 )
 CASE_ZAI = _research_adr_case(
-    "zai",
-    "pw7-acceptance-zai",
-    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
-    preset=_PRESET_LIVE,
-    lane_provider=_LANE_ZAI,
-    override_roles=(_MIXED_OVERRIDE_ROLE,),
-    required_env=(_ZAI_CREDENTIAL_ENV,),
+    _ResearchAdrSpec(
+        "zai",
+        "pw7-acceptance-zai",
+        {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+        preset=_PRESET_LIVE,
+        lane_provider=_LANE_ZAI,
+        override_roles=(_MIXED_OVERRIDE_ROLE,),
+        required_env=(_ZAI_CREDENTIAL_ENV,),
+    )
 )
 # The single-provider Codex lane: every role, doc-reviewer included, routes to
 # codex, so the run consumes no other provider's credential. That is what the
@@ -385,11 +429,13 @@ CASE_ZAI = _research_adr_case(
 # least one role - and it is witnessable with ZERO credential handling, since
 # codex authenticates from its own file-based local session.
 CASE_CODEX_ALL = _research_adr_case(
-    "codex-all",
-    "pw7-acceptance-codex-all",
-    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
-    preset=_PRESET_LIVE,
-    lane_provider=_LANE_CODEX,
+    _ResearchAdrSpec(
+        "codex-all",
+        "pw7-acceptance-codex-all",
+        {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+        preset=_PRESET_LIVE,
+        lane_provider=_LANE_CODEX,
+    )
 )
 
 _ALL_CASES = (
@@ -1475,14 +1521,14 @@ class AcceptanceHarness:
         self,
         ec: AuthoringClient,
         hc: httpx.AsyncClient,
-        *,
-        gate: str,
-        reviewer_token: str,
-        handled: set[str],
-        poll_seconds: float,
-        deadline: float,
+        context: _HumanGateContext,
     ) -> None:
         """Reject-with-notes -> revision -> approve -> apply for one human gate."""
+        gate = context.gate
+        reviewer_token = context.reviewer_token
+        handled = context.handled
+        poll_seconds = context.poll_seconds
+        deadline = context.deadline
         # 1. Park at the gate.
         first = await self._await(
             lambda: self._find_queue_item(ec, handled),
@@ -1533,13 +1579,13 @@ class AcceptanceHarness:
         self,
         ec: AuthoringClient,
         hc: httpx.AsyncClient,
-        *,
-        gate: str,
-        handled_changesets: set[str],
-        poll_seconds: float,
-        deadline: float,
+        context: _AutoGateContext,
     ) -> None:
         """Assert the system operation-modes auto-approval + materialization."""
+        gate = context.gate
+        handled_changesets = context.handled_changesets
+        poll_seconds = context.poll_seconds
+        deadline = context.deadline
         marker = await self._await(
             lambda: self._find_policy_marker(ec, handled_changesets),
             hc,
@@ -1745,20 +1791,24 @@ class AcceptanceHarness:
                         await self._drive_auto_gate(
                             ec,
                             hc,
-                            gate=gate,
-                            handled_changesets=handled_changesets,
-                            poll_seconds=poll_seconds,
-                            deadline=deadline,
+                            _AutoGateContext(
+                                gate=gate,
+                                handled_changesets=handled_changesets,
+                                poll_seconds=poll_seconds,
+                                deadline=deadline,
+                            ),
                         )
                     else:
                         await self._drive_human_gate(
                             ec,
                             hc,
-                            gate=gate,
-                            reviewer_token=reviewer_human,
-                            handled=handled_proposals,
-                            poll_seconds=poll_seconds,
-                            deadline=deadline,
+                            _HumanGateContext(
+                                gate=gate,
+                                reviewer_token=reviewer_human,
+                                handled=handled_proposals,
+                                poll_seconds=poll_seconds,
+                                deadline=deadline,
+                            ),
                         )
                     gates_done.append(gate)
                     # Switch the mode for the NEXT gate before the run submits it.

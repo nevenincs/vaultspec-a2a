@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +11,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...graph.enums import Provider
+from ..cli_resolution import resolve_provider_cli_executable
 from ..factory import ProviderCatalogRegistration, ProviderFactory
 from ..provider_catalog import AuthenticationState, CatalogStatus
 
@@ -83,7 +84,7 @@ asyncio.run(main())
 def test_installed_kimi_registration_uses_isolated_persisted_config(
     tmp_path: Path,
 ) -> None:
-    if shutil.which("kimi") is None:
+    if resolve_provider_cli_executable(Provider.KIMI) is None:
         pytest.fail("Kimi Code CLI is not installed")
     kimi_home = tmp_path / "kimi-home"
     kimi_home.mkdir()

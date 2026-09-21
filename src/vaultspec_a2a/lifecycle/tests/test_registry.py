@@ -42,6 +42,37 @@ from ..registry import (
     write_record,
 )
 
+# These tests exercise dynamically selected real loopback bands. Keep selection and
+# use serialized across xdist workers and concurrent pytest sessions: their isolated
+# registry homes do not isolate sockets.
+_REGISTRY_SOCKET_BAND = pytest.mark.resource("scratch-registry-socket-band")
+
+
+def _available_band(width: int) -> PortBand:
+    """Return a contiguous loopback band that is free at selection time."""
+    # Avoid bind-to-zero's ephemeral range: after the probes close, unrelated
+    # sockets can immediately receive an ephemeral candidate from the kernel.
+    # The resource marker serializes this suite's users of the test-only range.
+    first_candidate = 20_000 + (time.time_ns() % (10_000 - width))
+    for attempt in range(100):
+        start = 20_000 + ((first_candidate - 20_000 + attempt * width) % 10_000)
+        if start + width - 1 >= 30_000:
+            continue
+        probes: list[socket.socket] = []
+        try:
+            for port in range(start, start + width):
+                probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                probe.bind(("127.0.0.1", port))
+                probes.append(probe)
+        except OSError:
+            continue
+        else:
+            return PortBand(start, start + width - 1)
+        finally:
+            for probe in probes:
+                probe.close()
+    raise RuntimeError(f"could not find {width} contiguous free loopback ports")
+
 
 def _dead_pid() -> int:
     """Spawn a trivial process, wait for it to exit, and return its now-dead pid."""
@@ -210,11 +241,11 @@ def _config(band: PortBand) -> ProcsConfig:
     )
 
 
+@_REGISTRY_SOCKET_BAND
 def test_allocate_returns_a_free_band_port_and_skips_live_claims(
     tmp_path: Path,
 ) -> None:
-    # A small band of real, high, likely-free ports for a deterministic bind test.
-    band = PortBand(18900, 18902)
+    band = _available_band(3)
     role = _role(band, heartbeat=False)
     config = _config(band)
 
@@ -230,8 +261,9 @@ def test_allocate_returns_a_free_band_port_and_skips_live_claims(
     assert second in band and second != first
 
 
+@_REGISTRY_SOCKET_BAND
 def test_allocate_raises_when_band_exhausted(tmp_path: Path) -> None:
-    band = PortBand(18900, 18901)
+    band = _available_band(2)
     role = _role(band, heartbeat=False)
     config = _config(band)
     # Claim every port in the band with live records.
@@ -244,12 +276,13 @@ def test_allocate_raises_when_band_exhausted(tmp_path: Path) -> None:
         allocate_port("scratch", role, home=tmp_path, config=config)
 
 
+@_REGISTRY_SOCKET_BAND
 def test_reserve_port_is_exclusive_across_back_to_back_callers(tmp_path: Path) -> None:
     # The allocate-and-claim race closer: a held reservation blocks the SAME port,
     # so two back-to-back reservations (neither yet backed by a record) differ.
     # (The O_EXCL create is the concurrency arbiter; this proves the held-marker
     # exclusion that makes it race-free.)
-    band = PortBand(18900, 18902)
+    band = _available_band(3)
     role = _role(band, heartbeat=False)
     config = _config(band)
 
@@ -265,8 +298,9 @@ def test_reserve_port_is_exclusive_across_back_to_back_callers(tmp_path: Path) -
     assert allocated not in {first.port, second.port}
 
 
+@_REGISTRY_SOCKET_BAND
 def test_commit_reservation_writes_record_and_clears_marker(tmp_path: Path) -> None:
-    band = PortBand(18900, 18902)
+    band = _available_band(3)
     role = _role(band, heartbeat=False)
     config = _config(band)
 
@@ -280,8 +314,9 @@ def test_commit_reservation_writes_record_and_clears_marker(tmp_path: Path) -> N
     assert persisted.port == reservation.port
 
 
+@_REGISTRY_SOCKET_BAND
 def test_release_reservation_frees_the_port(tmp_path: Path) -> None:
-    band = PortBand(18900, 18900)  # single-port band
+    band = _available_band(1)
     role = _role(band, heartbeat=False)
     config = _config(band)
 
@@ -295,8 +330,9 @@ def test_release_reservation_frees_the_port(tmp_path: Path) -> None:
     assert again.port == first.port
 
 
+@_REGISTRY_SOCKET_BAND
 def test_stale_reservation_marker_is_reclaimable(tmp_path: Path) -> None:
-    band = PortBand(18900, 18900)
+    band = _available_band(1)
     role = _role(band, heartbeat=False)
     config = _config(band)
 
@@ -310,19 +346,20 @@ def test_stale_reservation_marker_is_reclaimable(tmp_path: Path) -> None:
     assert reclaimed.port == stale.port
 
 
+@_REGISTRY_SOCKET_BAND
 def test_reserve_reclaims_a_marker_whose_reserver_pid_is_dead(tmp_path: Path) -> None:
-    band = PortBand(18900, 18900)  # single-port band
+    band = _available_band(1)
     role = _role(band, heartbeat=False)
     config = _config(band)
 
     # A fresh marker (well within the TTL backstop) stamped with a DEAD reserver
     # pid: liveness-aware reclaim must free the port immediately rather than wait
     # out the backstop, so a crashed reserver never wedges a band port.
-    marker = tmp_path / "scratch-18900.reserved"
+    marker = tmp_path / f"scratch-{band.start}.reserved"
     marker.write_text(str(_dead_pid()), encoding="ascii")
 
     reclaimed = reserve_port("scratch", role, home=tmp_path, config=config)
-    assert reclaimed.port == 18900
+    assert reclaimed.port == band.start
 
 
 def test_port_free_and_reserve_skip_a_foreign_reuseaddr_listener(
@@ -357,6 +394,7 @@ def test_port_free_and_reserve_skip_a_foreign_reuseaddr_listener(
         foreign.close()
 
 
+@_REGISTRY_SOCKET_BAND
 def test_concurrent_reservers_in_two_processes_never_share_a_port(
     tmp_path: Path,
 ) -> None:
@@ -377,7 +415,7 @@ def test_concurrent_reservers_in_two_processes_never_share_a_port(
         "from vaultspec_a2a.lifecycle.procs_config import (\n"
         "    PortBand, ProcsConfig, RoleConfig)\n"
         "home = Path(sys.argv[1])\n"
-        "band = PortBand(18900, 18999)\n"
+        "band = PortBand(int(sys.argv[4]), int(sys.argv[5]))\n"
         "role = RoleConfig(name='scratch', band=band, heartbeat=False,\n"
         "                  staleness_ms=1000, build=[], serve=[])\n"
         "config = ProcsConfig(resident={}, roles={'scratch': role})\n"
@@ -391,6 +429,7 @@ def test_concurrent_reservers_in_two_processes_never_share_a_port(
         "assert peer.exists(), 'peer never published; holds did not overlap'\n"
     )
     home = tmp_path / "home"
+    band = _available_band(20)
 
     def _spawn(tag: str, peer: str) -> subprocess.Popen[bytes]:
         return subprocess.Popen(
@@ -401,6 +440,8 @@ def test_concurrent_reservers_in_two_processes_never_share_a_port(
                 str(home),
                 str(tmp_path / f"{tag}.json"),
                 str(tmp_path / f"{peer}.json"),
+                str(band.start),
+                str(band.end),
             ]
         )
 

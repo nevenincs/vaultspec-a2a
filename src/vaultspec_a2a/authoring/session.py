@@ -14,13 +14,16 @@ append_draft, replace_draft, submit_for_review, rebase. Reads
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 from urllib.parse import quote
 
 from ._envelope import AuthoringResponse
 from ._ids import derive_idempotency_key, validate_id
 
 if TYPE_CHECKING:
+    from typing import Unpack
+
     from ._envelope import Denial
     from .client import AuthoringClient
 
@@ -52,6 +55,33 @@ _REVIEW_DECISION_COMMAND: dict[str, str] = {
     REVIEW_DECISION_REJECT: "reject",
     REVIEW_DECISION_EDIT: "edit_proposal",
 }
+
+
+class _ReviewDecisionOptional(TypedDict, total=False):
+    comment: str | None
+    actor_token: str | None
+
+
+class _ReviewDecisionKwargs(_ReviewDecisionOptional):
+    """Keyword arguments accepted by :func:`decide_review`."""
+
+    approval_id: str
+    proposal_id: str
+    decision: str
+    reviewed_revision: str
+    idempotency_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class _DraftMutation:
+    """Arguments shared by the append and replace draft verbs."""
+
+    verb: str
+    changeset_id: str
+    expected_revision: str
+    summary: str
+    operations: list[dict[str, Any]]
+    idempotency_key: str | None = None
 
 
 async def close_authoring_session(
@@ -105,14 +135,7 @@ async def mint_actor_token(
 
 async def decide_review(
     client: AuthoringClient,
-    *,
-    approval_id: str,
-    proposal_id: str,
-    decision: str,
-    reviewed_revision: str,
-    idempotency_key: str,
-    comment: str | None = None,
-    actor_token: str | None = None,
+    **kwargs: Unpack[_ReviewDecisionKwargs],
 ) -> AuthoringResponse | Denial:
     """Record a reviewer's decision on a queued approval (``submit_review_decision``).
 
@@ -144,6 +167,14 @@ async def decide_review(
     derive it from durable material (e.g. run id + approval id + command), never
     fresh per call.
     """
+    approval_id = kwargs["approval_id"]
+    proposal_id = kwargs["proposal_id"]
+    decision = kwargs["decision"]
+    reviewed_revision = kwargs["reviewed_revision"]
+    idempotency_key = kwargs["idempotency_key"]
+    comment = kwargs.get("comment")
+    actor_token = kwargs.get("actor_token")
+
     command = _REVIEW_DECISION_COMMAND.get(decision)
     if command is None:
         raise ValueError(
@@ -207,6 +238,12 @@ async def request_apply(
     )
 
 
+@dataclass(slots=True)
+class _ProducedIds:
+    changesets: list[str]
+    proposals: list[str]
+
+
 class AuthoringSession:
     """One authoring session bound to a single run.
 
@@ -247,8 +284,7 @@ class AuthoringSession:
         self._engine_run_id: str | None = None
         self._project_scope = project_scope or None
         # Produced Vaultspec ids, accumulated for thread-state cross-reference.
-        self._changeset_ids: list[str] = []
-        self._proposal_ids: list[str] = []
+        self._produced_ids = _ProducedIds(changesets=[], proposals=[])
 
     # ------------------------------------------------------------------
     # Identity and references
@@ -282,8 +318,8 @@ class AuthoringSession:
         """
         return {
             "authoring_session_id": self._session_id,
-            "authoring_changeset_ids": list(self._changeset_ids),
-            "authoring_proposal_ids": list(self._proposal_ids),
+            "authoring_changeset_ids": list(self._produced_ids.changesets),
+            "authoring_proposal_ids": list(self._produced_ids.proposals),
         }
 
     def _next_key(self, command: str) -> str:
@@ -316,8 +352,8 @@ class AuthoringSession:
         return derive_idempotency_key(self._run_id, command, str(self._seq - 1))
 
     def _record_changeset(self, changeset_id: str) -> None:
-        if changeset_id not in self._changeset_ids:
-            self._changeset_ids.append(changeset_id)
+        if changeset_id not in self._produced_ids.changesets:
+            self._produced_ids.changesets.append(changeset_id)
 
     def _bind_project(self, scope: str | None) -> str:
         """Settle the session's project from the binding and the call, or refuse.
@@ -463,12 +499,14 @@ class AuthoringSession:
     ) -> AuthoringResponse | Denial:
         """Append operations to an existing draft (``append_draft``)."""
         return await self._draft_mutation(
-            "append",
-            changeset_id,
-            expected_revision,
-            summary,
-            operations,
-            idempotency_key,
+            _DraftMutation(
+                "append",
+                changeset_id,
+                expected_revision,
+                summary,
+                operations,
+                idempotency_key,
+            )
         )
 
     async def replace_draft(
@@ -482,37 +520,34 @@ class AuthoringSession:
     ) -> AuthoringResponse | Denial:
         """Replace a draft's operations (``replace_draft``)."""
         return await self._draft_mutation(
-            "replace",
-            changeset_id,
-            expected_revision,
-            summary,
-            operations,
-            idempotency_key,
+            _DraftMutation(
+                "replace",
+                changeset_id,
+                expected_revision,
+                summary,
+                operations,
+                idempotency_key,
+            )
         )
 
     async def _draft_mutation(
         self,
-        verb: str,
-        changeset_id: str,
-        expected_revision: str,
-        summary: str,
-        operations: list[dict[str, Any]],
-        idempotency_key: str | None = None,
+        request: _DraftMutation,
     ) -> AuthoringResponse | Denial:
-        command = "append_draft" if verb == "append" else "replace_draft"
+        command = "append_draft" if request.verb == "append" else "replace_draft"
         self._require_project(command)
-        validate_id(changeset_id, field="changeset_id")
-        validate_id(expected_revision, field="expected_revision")
+        validate_id(request.changeset_id, field="changeset_id")
+        validate_id(request.expected_revision, field="expected_revision")
         return await self._client.post_command(
-            f"/v1/proposals/{changeset_id}/{verb}",
+            f"/v1/proposals/{request.changeset_id}/{request.verb}",
             command=command,
             payload={
-                "changeset_id": changeset_id,
-                "expected_revision": expected_revision,
-                "summary": summary,
-                "operations": operations,
+                "changeset_id": request.changeset_id,
+                "expected_revision": request.expected_revision,
+                "summary": request.summary,
+                "operations": request.operations,
             },
-            idempotency_key=self._resolve_key(command, idempotency_key),
+            idempotency_key=self._resolve_key(command, request.idempotency_key),
         )
 
     async def submit(
@@ -542,8 +577,11 @@ class AuthoringSession:
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
             data = cast("dict[str, Any]", result.data)
             proposal_id = data.get("proposal_id")
-            if isinstance(proposal_id, str) and proposal_id not in self._proposal_ids:
-                self._proposal_ids.append(proposal_id)
+            if (
+                isinstance(proposal_id, str)
+                and proposal_id not in self._produced_ids.proposals
+            ):
+                self._produced_ids.proposals.append(proposal_id)
         return result
 
     async def rebase(

@@ -36,15 +36,13 @@ def _secured_app(session_factory: Any, checkpointer: Any) -> Any:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-@pytest.mark.parametrize(("method", "path", "kwargs", "expected"), _ROUTE_CLASSES)
+@pytest.mark.parametrize("route_case", _ROUTE_CLASSES)
 async def test_every_v1_route_class_accepts_discovery_bearer(
     session_factory: Any,
     checkpointer: Any,
-    method: str,
-    path: str,
-    kwargs: dict[str, Any],
-    expected: int,
+    route_case: tuple[str, str, dict[str, Any], int],
 ) -> None:
+    method, path, kwargs, expected = route_case
     app = _secured_app(session_factory, checkpointer)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -57,17 +55,15 @@ async def test_every_v1_route_class_accepts_discovery_bearer(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-@pytest.mark.parametrize(("method", "path", "kwargs", "_expected"), _ROUTE_CLASSES)
+@pytest.mark.parametrize("route_case", _ROUTE_CLASSES)
 @pytest.mark.parametrize("authorization", [None, "Bearer wrong-token"])
 async def test_every_v1_route_class_rejects_missing_or_wrong_bearer(
     session_factory: Any,
     checkpointer: Any,
-    method: str,
-    path: str,
-    kwargs: dict[str, Any],
-    _expected: int,
+    route_case: tuple[str, str, dict[str, Any], int],
     authorization: str | None,
 ) -> None:
+    method, path, kwargs, _expected = route_case
     app = _secured_app(session_factory, checkpointer)
     headers = {"Authorization": authorization} if authorization is not None else {}
     async with httpx.AsyncClient(

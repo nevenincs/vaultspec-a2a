@@ -2,18 +2,25 @@
 
 Owns the full cancel workflow: thread validation, idempotency dedup,
 control-action creation, repair-state transition, and dispatch.
-Does NOT commit, raise HTTPException, or touch FastAPI request state.
+Commits durable transitions; does not raise HTTPException or touch FastAPI state.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from inspect import Parameter, Signature
+from typing import TYPE_CHECKING, cast, override
+
+from sqlalchemy.exc import OperationalError
 
 from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
+    ControlActionClaim,
+    ControlActionClaimRequest,
     DispatchFailureDisposition,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
@@ -49,26 +56,168 @@ if TYPE_CHECKING:
 
     from ..control.circuit_breaker import WorkerCircuitBreaker
     from ..control.worker_management import LazyWorkerSpawner
+    from ..database import ThreadWriteExpectation
+    from ..thread.cancel_policy import CancelEligibility
 
-__all__ = ["CancelResult", "cancel_thread"]
+__all__ = ["CancelResult", "CancelRuntime", "cancel_thread"]
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
+class _CancelResultIdentity:
+    action_id: str | None
+    thread_id: str
+    idempotency_key: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _CancelResultOutcome:
+    cancelled: bool
+    thread_status: str
+    error_detail: str | None
+    accepted: bool
+    applied: bool
+    action_status: str
+    failure_type: FailureType | None
+
+
+_CANCEL_RESULT_SIGNATURE = Signature(
+    [
+        Parameter("action_id", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("thread_id", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("cancelled", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("thread_status", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("error_detail", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+        Parameter("accepted", Parameter.POSITIONAL_OR_KEYWORD, default=False),
+        Parameter("applied", Parameter.POSITIONAL_OR_KEYWORD, default=False),
+        Parameter(
+            "action_status",
+            Parameter.POSITIONAL_OR_KEYWORD,
+            default=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+        ),
+        Parameter("idempotency_key", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+        Parameter("failure_type", Parameter.POSITIONAL_OR_KEYWORD, default=None),
+    ]
+)
+_CANCEL_RESULT_FIELDS = tuple(_CANCEL_RESULT_SIGNATURE.parameters)
+
+
+def _split_cancel_result_args(
+    args: tuple[object, ...], kwargs: dict[str, object]
+) -> tuple[_CancelResultIdentity, _CancelResultOutcome]:
+    bound = _CANCEL_RESULT_SIGNATURE.bind(*args, **kwargs)
+    bound.apply_defaults()
+    values = bound.arguments
+    return (
+        _CancelResultIdentity(
+            cast("str | None", values["action_id"]),
+            cast("str", values["thread_id"]),
+            cast("str | None", values.get("idempotency_key")),
+        ),
+        _CancelResultOutcome(
+            cast("bool", values["cancelled"]),
+            cast("str", values["thread_status"]),
+            cast("str | None", values.get("error_detail")),
+            cast("bool", values.get("accepted", False)),
+            cast("bool", values.get("applied", False)),
+            cast(
+                "str",
+                values.get(
+                    "action_status",
+                    ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+                ),
+            ),
+            cast("FailureType | None", values.get("failure_type")),
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True, init=False, repr=False)
 class CancelResult:
     """Outcome of a cancel-thread service call."""
 
-    action_id: str | None
+    _identity: _CancelResultIdentity
+    _outcome: _CancelResultOutcome
+    __signature__ = _CANCEL_RESULT_SIGNATURE
+    __match_args__ = _CANCEL_RESULT_FIELDS
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        identity, outcome = _split_cancel_result_args(args, kwargs)
+        object.__setattr__(self, "_identity", identity)
+        object.__setattr__(self, "_outcome", outcome)
+
+    @property
+    def action_id(self) -> str | None:
+        return self._identity.action_id
+
+    @property
+    def thread_id(self) -> str:
+        return self._identity.thread_id
+
+    @property
+    def cancelled(self) -> bool:
+        return self._outcome.cancelled
+
+    @property
+    def thread_status(self) -> str:
+        return self._outcome.thread_status
+
+    @property
+    def error_detail(self) -> str | None:
+        return self._outcome.error_detail
+
+    @property
+    def accepted(self) -> bool:
+        return self._outcome.accepted
+
+    @property
+    def applied(self) -> bool:
+        return self._outcome.applied
+
+    @property
+    def action_status(self) -> str:
+        return self._outcome.action_status
+
+    @property
+    def idempotency_key(self) -> str | None:
+        return self._identity.idempotency_key
+
+    @property
+    def failure_type(self) -> FailureType | None:
+        return self._outcome.failure_type
+
+    @override
+    def __repr__(self) -> str:
+        values = ", ".join(
+            f"{name}={getattr(self, name)!r}" for name in _CANCEL_RESULT_FIELDS
+        )
+        return f"CancelResult({values})"
+
+
+@dataclass(frozen=True, slots=True)
+class CancelRuntime:
+    circuit_breaker: WorkerCircuitBreaker
+    worker_spawner: LazyWorkerSpawner
+    worker_client: httpx.AsyncClient
+    recursion_limit: int
+    trace_headers: dict[str, str] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _CancelContext:
+    runtime: CancelRuntime
     thread_id: str
-    cancelled: bool
+    response_idempotency_key: str
     thread_status: str
-    error_detail: str | None = None
-    accepted: bool = False
-    applied: bool = False
-    action_status: str = ControlActionResultStatus.REJECTED_INVALID_STATE.value
-    idempotency_key: str | None = None
-    failure_type: FailureType | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _CancelPreflight:
+    thread: ThreadModel
+    thread_status: str
+    expectation: ThreadWriteExpectation
+    recovery_deadline_at: datetime
 
 
 def raise_for_cancel_failure(result: CancelResult, *, resource_noun: str) -> None:
@@ -139,22 +288,9 @@ def raise_for_cancel_failure(result: CancelResult, *, resource_noun: str) -> Non
         )
 
 
-async def cancel_thread(
-    db: AsyncSession,
-    *,
-    thread_id: str,
-    idempotency_key: str | None,
-    circuit_breaker: WorkerCircuitBreaker,
-    worker_spawner: LazyWorkerSpawner,
-    worker_client: httpx.AsyncClient,
-    recursion_limit: int,
-    trace_headers: dict[str, str] | None = None,
-) -> CancelResult:
-    """Execute the cancel-thread workflow.
-
-    Returns a :class:`CancelResult` describing what happened.  Commits the
-    session before returning — the service owns its transaction boundary.
-    """
+async def _cancel_preflight(
+    db: AsyncSession, thread_id: str
+) -> _CancelPreflight | CancelResult:
     thread = await get_thread(db, thread_id)
     if thread is None:
         return CancelResult(
@@ -206,6 +342,30 @@ async def cancel_thread(
             error_detail="The accepted run deadline has expired",
             failure_type=FailureType.DEADLINE_EXCEEDED,
         )
+    return _CancelPreflight(
+        thread, thread_status, expectation, owning_action.recovery_deadline_at
+    )
+
+
+async def cancel_thread(
+    db: AsyncSession,
+    *,
+    thread_id: str,
+    idempotency_key: str | None,
+    runtime: CancelRuntime,
+    _busy_retries: int = 0,
+) -> CancelResult:
+    """Execute the cancel-thread workflow.
+
+    Returns a :class:`CancelResult` describing what happened.  Commits the
+    session before returning — the service owns its transaction boundary.
+    """
+    preflight = await _cancel_preflight(db, thread_id)
+    if isinstance(preflight, CancelResult):
+        return preflight
+    thread = preflight.thread
+    thread_status = preflight.thread_status
+    expectation = preflight.expectation
 
     # Cancellation is a resource transition, so one thread has one durable
     # ownership key even when racing callers supplied different retry labels.
@@ -216,17 +376,66 @@ async def cancel_thread(
     dispatch = DispatchRequest(
         action=to_dispatch_action(ControlActionType.CANCEL),
         thread_id=thread_id,
-        recursion_limit=recursion_limit,
+        recursion_limit=runtime.recursion_limit,
     )
-    claim = await prepare_control_action_claim(
+    try:
+        claim = await prepare_control_action_claim(
+            db,
+            request=ControlActionClaimRequest(
+                thread_id=thread_id,
+                action_type=ControlActionType.CANCEL,
+                idempotency_key=resolved_idempotency_key,
+                payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
+                dispatch_id=dispatch.dispatch_id,
+                recovery_deadline_at=preflight.recovery_deadline_at,
+            ),
+        )
+    except OperationalError as exc:
+        if (
+            not isinstance(exc.orig, sqlite3.OperationalError)
+            or "locked" not in str(exc.orig).lower()
+            or _busy_retries >= 4
+        ):
+            raise
+        await db.rollback()
+        await asyncio.sleep(0.02 * (_busy_retries + 1))
+        return await cancel_thread(
+            db,
+            thread_id=thread_id,
+            idempotency_key=idempotency_key,
+            runtime=runtime,
+            _busy_retries=_busy_retries + 1,
+        )
+    replay = await _existing_cancel_claim(
+        db, claim, thread_id, thread_status, response_idempotency_key
+    )
+    if replay is not None:
+        return replay
+    context = _CancelContext(
+        runtime, thread_id, response_idempotency_key, thread_status
+    )
+    election_result = await _elect_cancel_authority(
+        db, thread, claim, expectation, context
+    )
+    if election_result is not None:
+        return election_result
+
+    return await _dispatch_cancellation(
         db,
-        thread_id=thread_id,
-        action_type=ControlActionType.CANCEL,
-        idempotency_key=resolved_idempotency_key,
-        payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
-        dispatch_id=dispatch.dispatch_id,
-        recovery_deadline_at=owning_action.recovery_deadline_at,
+        thread,
+        claim,
+        dispatch,
+        context,
     )
+
+
+async def _existing_cancel_claim(
+    db: AsyncSession,
+    claim: ControlActionClaim,
+    thread_id: str,
+    thread_status: str,
+    response_idempotency_key: str,
+) -> CancelResult | None:
     if not claim.payload_matches:
         return CancelResult(
             action_id=claim.action_id,
@@ -282,11 +491,45 @@ async def cancel_thread(
             action_status=claim.result_status,
             idempotency_key=response_idempotency_key,
         )
-    already_owned = (
+    return None
+
+
+def _cancel_authority_already_owned(
+    expectation: ThreadWriteExpectation, dispatch_id: str
+) -> bool:
+    """Return whether the expected writer already owns this cancel receipt."""
+    return (
         expectation.status is ThreadStatus.CANCELLING
         and expectation.authority.action_type is ControlActionType.CANCEL
-        and expectation.authority.action_receipt_id == claim.dispatch_id
+        and expectation.authority.action_receipt_id == dispatch_id
     )
+
+
+def _cancel_election_conflict(
+    eligibility: CancelEligibility,
+) -> tuple[FailureType | None, str | None]:
+    """Classify a lost cancellation election against the refreshed thread."""
+    if eligibility.already_cancelled:
+        return None, None
+    if eligibility.allowed:
+        return (
+            FailureType.CONFLICT,
+            "Thread authority changed during cancellation election",
+        )
+    return FailureType.TERMINAL, eligibility.reason
+
+
+async def _elect_cancel_authority(
+    db: AsyncSession,
+    thread: ThreadModel,
+    claim: ControlActionClaim,
+    expectation: ThreadWriteExpectation,
+    context: _CancelContext,
+) -> CancelResult | None:
+    thread_id = context.thread_id
+    thread_status = context.thread_status
+    response_idempotency_key = context.response_idempotency_key
+    already_owned = _cancel_authority_already_owned(expectation, claim.dispatch_id)
     election = (
         None
         if already_owned
@@ -328,15 +571,7 @@ async def cancel_thread(
             )
         await db.refresh(thread)
         eligibility = can_cancel(thread.status)
-        if eligibility.already_cancelled:
-            failure_type = None
-            error_detail = None
-        elif eligibility.allowed:
-            failure_type = FailureType.CONFLICT
-            error_detail = "Thread authority changed during cancellation election"
-        else:
-            failure_type = FailureType.TERMINAL
-            error_detail = eligibility.reason
+        failure_type, error_detail = _cancel_election_conflict(eligibility)
         return CancelResult(
             action_id=claim.action_id,
             thread_id=thread_id,
@@ -352,7 +587,19 @@ async def cancel_thread(
     if election is not None:
         await mark_cancel_requested(db, thread_id)
     await finalize_control_action_acceptance(db, claim)
+    return None
 
+
+async def _dispatch_cancellation(
+    db: AsyncSession,
+    thread: ThreadModel,
+    claim: ControlActionClaim,
+    dispatch: DispatchRequest,
+    context: _CancelContext,
+) -> CancelResult:
+    runtime = context.runtime
+    thread_id = context.thread_id
+    response_idempotency_key = context.response_idempotency_key
     dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
     logger.info(
         "Dispatching cancel dispatch_id=%s for thread %s",
@@ -366,12 +613,11 @@ async def cancel_thread(
     )
 
     outcome = await safe_dispatch(
-        worker_client,
+        runtime.worker_client,
         dispatch,
-        circuit_breaker,
-        worker_spawner,
-        bypass_circuit_breaker=True,
-        trace_headers=trace_headers,
+        runtime.circuit_breaker,
+        runtime.worker_spawner,
+        trace_headers=runtime.trace_headers,
     )
 
     if not outcome.success:

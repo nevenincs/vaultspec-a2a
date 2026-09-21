@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#repository-tooling-hardening'
 date: '2026-08-02'
-modified: '2026-09-03'
+modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:e92735c66ca733c5bb2c5713498acc304d6daaf99a2452092b2cf1e39539a88b'
+body_hash: 'sha256:8213aa3c683fecbd283eccdb63a1d2e24d444de7a393639ee76099a34e36f4ab'
 related:
   - '[[2026-07-19-repository-tooling-hardening-W01-P01-summary]]'
   - '[[2026-07-19-repository-tooling-hardening-W01-P02-summary]]'
@@ -55,6 +55,8 @@ related:
   - '[[2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s26-friend-tests-audit]]'
   - '[[2026-08-02-repository-tooling-hardening-strict-s26-provider-tests-audit]]'
+  - '[[2026-09-19-repository-tooling-hardening-optional-node-setup-review-audit]]'
+  - '[[2026-09-19-repository-tooling-hardening-streaming-complexity-review-audit]]'
 ---
 
 # `repository-tooling-hardening` feature index
@@ -100,6 +102,8 @@ Auto-generated index of all documents tagged with `#repository-tooling-hardening
 - `2026-08-02-repository-tooling-hardening-strict-s25-provider-lazy-exports-audit` - `repository-tooling-hardening` audit: `Provider lazy export contract review`
 - `2026-08-02-repository-tooling-hardening-strict-s26-friend-tests-audit` - `repository-tooling-hardening` audit: `Provider and service friend-test policy review`
 - `2026-08-02-repository-tooling-hardening-strict-s26-provider-tests-audit` - `repository-tooling-hardening` audit: `S26 provider and service test typing`
+- `2026-09-19-repository-tooling-hardening-optional-node-setup-review-audit` - `repository-tooling-hardening` audit: `optional Node setup review`
+- `2026-09-19-repository-tooling-hardening-streaming-complexity-review-audit` - `repository-tooling-hardening` audit: `streaming complexity reduction review`
 
 ### exec
 

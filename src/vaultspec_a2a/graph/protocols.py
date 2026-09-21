@@ -10,7 +10,15 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, override, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Protocol,
+    TypedDict,
+    Unpack,
+    override,
+    runtime_checkable,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,6 +31,7 @@ __all__ = [
     "QueueEntryView",
     "TaskQueuePort",
     "TelemetryHook",
+    "UsageRecordArgs",
 ]
 
 
@@ -81,6 +90,15 @@ class TaskQueuePort(Protocol):
         ...
 
 
+class UsageRecordArgs(TypedDict):
+    thread_id: str
+    agent_id: str
+    provider: str | None
+    model: str | None
+    input_tokens: int
+    output_tokens: int
+
+
 @runtime_checkable
 class CostPort(Protocol):
     """Protocol for durable per-invocation token accounting.
@@ -99,16 +117,7 @@ class CostPort(Protocol):
     rather than back-filled with a stand-in that would read as a real lane.
     """
 
-    async def record_usage(
-        self,
-        *,
-        thread_id: str,
-        agent_id: str,
-        provider: str | None,
-        model: str | None,
-        input_tokens: int,
-        output_tokens: int,
-    ) -> None:
+    async def record_usage(self, **kwargs: Unpack[UsageRecordArgs]) -> None:
         """Persist one invocation's reported token usage."""
         ...
 

@@ -27,7 +27,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from ...graph.enums import PipelinePhase
-from ...testing.http_handlers import JsonReplyHandler
+from ...testing.tests._support.http_handlers import JsonReplyHandler
 from ...thread.actor_tokens import ActorTokenBundle
 from ...worker.token_store import RunTokenStore
 from ..client import AuthoringClient

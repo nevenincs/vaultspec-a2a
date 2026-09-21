@@ -248,4 +248,4 @@ class DomainSettingsConfig(DomainConfig):
 # Module-level singleton — Layer 1 modules import this directly.
 domain_config = DomainSettingsConfig()
 
-__all__ = ["DomainConfig", "DomainSettingsConfig", "domain_config"]
+__all__ = ["DomainSettingsConfig", "domain_config"]

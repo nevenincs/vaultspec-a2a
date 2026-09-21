@@ -23,10 +23,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...control import run_discovery_service
 from ...control.run_discovery_service import discover_active_runs
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..models import Base
 from ..thread_repository import (

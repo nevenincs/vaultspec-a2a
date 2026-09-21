@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#resource-aware-test-execution'
 date: '2026-08-02'
-modified: '2026-09-03'
+modified: '2026-09-20'
 body_schema: 'body-v2'
-body_hash: 'sha256:0c357015a0387084eeb4b12e60b3ca2008fb327662343a22461efa09288f3a16'
+body_hash: 'sha256:f32b4dc6916dc3e2ae0b99d68efe3ed8ebda735b8445b5446dab6857ebdbc036'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -35,3 +35,73 @@ related:
 - `S19` `T` `src/vaultspec_a2a/testing/`
 - `S20` `T` `src/vaultspec_a2a/testing/tests/`
 - `S21` `T` `dev/toolchain.py`
+- `S22` `M` `src/vaultspec_a2a/control/action_lease.py`
+- `S22` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S22` `M` `src/vaultspec_a2a/control/tests/test_dispatch_receipts.py`
+- `S22` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S22` `verify:` `ruff, ty, basedpyright` -> `pass`
+- `S22` `by:` `vaultspec-high-executor`
+- `S23` `M` `.vault/plan/2026-08-02-resource-aware-test-execution-plan.md`
+- `S23` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S23` `M` `src/vaultspec_a2a/control/worker_management.py`
+- `S23` `M` `src/vaultspec_a2a/control/tests/test_worker_health_probe.py`
+- `S23` `verify:` `uv run pytest -q src/vaultspec_a2a/control/tests/test_worker_health_probe.py src/vaultspec_a2a/control/tests/test_desktop_worker_readiness.py` -> `pass`
+- `S23` `by:` `root`
+- `S23` `verify:` `desktop race process proof x5` -> `pass`
+- `S23` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`
+- `S24` `M` `.vault/plan/2026-08-02-resource-aware-test-execution-plan.md`
+- `S24` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S24` `M` `src/vaultspec_a2a/testing/resources.py`
+- `S24` `M` `src/vaultspec_a2a/api/tests/test_provider_catalog_route.py`
+- `S24` `verify:` `unit/service collection split and focused execution` -> `pass`
+- `S24` `by:` `root`
+- `S24` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`
+- `S25` `M` `.vault/plan/2026-08-02-resource-aware-test-execution-plan.md`
+- `S25` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S25` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S25` `M` `src/vaultspec_a2a/providers/tests/test_resource_lifetimes.py`
+- `S25` `verify:` `170 ACP fixture consumers and isolation proof` -> `pass`
+- `S25` `by:` `root`
+- `S25` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`
+- `S26` `M` `.vault/plan/2026-08-02-resource-aware-test-execution-plan.md`
+- `S26` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S26` `A` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S26` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S26` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests`
+- `S26` `verify:` `110 deterministic + 12 installed provider proofs` -> `pass`
+- `S26` `by:` `root`
+- `S26` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`
+- `S27` `M` `.vault/plan/2026-08-02-resource-aware-test-execution-plan.md`
+- `S27` `M` `.vault/audit/2026-08-02-resource-aware-test-execution-audit.md`
+- `S27` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `S27` `verify:` `five asyncio-debug transport-owner repeats` -> `pass`
+- `S27` `by:` `root`
+- `S27` `verify:` `75 endpoint tests with unraisable warnings as errors` -> `pass`
+- `S27` `verify:` `ruff + ty + basedpyright focused checks` -> `pass`
+- `S28` `M` `src/vaultspec_a2a/testing/resources.py`
+- `S28` `A` `src/vaultspec_a2a/desktop_tests/conftest.py`
+- `S28` `A` `src/vaultspec_a2a/desktop_tests/test_execution_resource.py`
+- `S28` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
+- `S28` `verify:` `parallel-desktop-subset-12-tests` -> `pass`
+- `S28` `by:` `codex`
+- `S29` `M` `src/vaultspec_a2a/testing/resources.py`
+- `S29` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S29` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
+- `S29` `verify:` `ruff-S29` -> `pass`
+- `S29` `by:` `codex`
+- `S30` `M` `src/vaultspec_a2a/api/tests/conftest.py`
+- `S30` `M` `src/vaultspec_a2a/api/tests/test_provider_catalog_route.py`
+- `S30` `M` `src/vaultspec_a2a/api/tests/test_active_run_discovery_live.py`
+- `S30` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
+- `S30` `verify:` `ruff-basedpyright-S30` -> `pass`
+- `S30` `by:` `codex`
+- `S31` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`
+- `S31` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
+- `S31` `verify:` `rag-contract-34-tests` -> `pass`
+- `S31` `by:` `codex`
+
+## Notes
+
+- `S28` Full desktop directory remained host-contention-bound at 288.10s parallel versus 286.24s serial; focused distribution proof achieved 3.2x against cumulative duration.
+- `S29` Resource suite: 69 passed, then unrelated concurrent InfraConfig NameError broke plugin load.

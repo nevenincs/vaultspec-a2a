@@ -11,15 +11,14 @@ import pytest
 from httpx import ASGITransport
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.health import build_sqlite_fallback_diagnostics
-from ...control.worker_management import (
-    LazyWorkerSpawner,
+from ...control._worker_health import (
     WorkerState,
-    WorkerWatchdog,
     _build_worker_restart_detail,
     _worker_stderr_log_path,
 )
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.health import build_sqlite_fallback_diagnostics
+from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:

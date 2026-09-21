@@ -13,11 +13,10 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ....database import create_thread, seed_task_queue
 from ....database.models import Base
 from ....domain_config import domain_config
+from ....tests._write_authority import make_test_write_authority
 from ....thread.state import TeamState
 from ....worker.task_queue_port import SqlTaskQueuePort
 from ...nodes.vault_reader import build_initial_vault_index, create_mount_node

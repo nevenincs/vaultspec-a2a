@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
@@ -30,6 +31,7 @@ from ...providers.provider_catalog import (
     NativeControlOption,
     ProviderCatalog,
     ProviderCatalogKey,
+    ProviderHealthAxes,
     ProviderRecord,
     StructuredProviderHealth,
 )
@@ -39,11 +41,11 @@ from ...providers.provider_catalog_service import (
     ProviderCatalogService,
     validate_public_catalog_bounds,
 )
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from fastapi import FastAPI
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 _TOKEN = "provider-catalog-attach-token-0123456789"
 
@@ -57,6 +59,24 @@ def _gated_app() -> FastAPI:
     app.state.v1_service_token = _TOKEN
     app.state.allow_unauthenticated_v1_for_testing = False
     return app
+
+
+@pytest.mark.asyncio
+async def test_unit_app_catalog_uses_only_real_in_process_registrations(
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://desktop.test"
+    ) as client:
+        response = await client.get(
+            "/v1/provider-catalog", params={"workspace_root": str(Path.cwd())}
+        )
+
+    assert response.status_code == 200, response.text
+    providers = response.json()["providers"]
+    assert [record["provider_id"] for record in providers] == ["deterministic"]
 
 
 @pytest.mark.asyncio
@@ -116,6 +136,8 @@ async def test_route_rejects_refresh_and_duplicate_workspace_queries(
 
 
 @pytest.mark.asyncio
+@pytest.mark.service
+@pytest.mark.resource("provider-catalog-discovery")
 async def test_authenticated_route_serves_all_registered_lanes_in_order(
     tmp_path: Path,
 ) -> None:
@@ -308,11 +330,13 @@ def test_wire_projection_omits_provider_execution_values() -> None:
         ),
     )
     health = StructuredProviderHealth.derive(
-        configured=HealthState.AVAILABLE,
-        transport=HealthState.AVAILABLE,
-        authentication=AuthenticationState.AUTHENTICATED,
-        catalog=CatalogStatus.AVAILABLE,
-        admission=AdmissionState.ADMITTED,
+        axes=ProviderHealthAxes(
+            configured=HealthState.AVAILABLE,
+            transport=HealthState.AVAILABLE,
+            authentication=AuthenticationState.AUTHENTICATED,
+            catalog=CatalogStatus.AVAILABLE,
+            admission=AdmissionState.ADMITTED,
+        ),
         checked_at=now,
     )
     response = ProviderCatalogResponse.from_records(

@@ -235,14 +235,23 @@ def pytest_collection_modifyitems(
         for root, members in components.items()
     }
     for item, claims in item_claims:
-        keys = exclusive_keys(claims)
-        if keys:
-            item.add_marker(pytest.mark.xdist_group(group_names[unions.find(keys[0])]))
-        elif not claims and _is_live_tier(item):
-            item.add_marker(pytest.mark.xdist_group(_SERIAL_CATCHALL_GROUP))
-        backstop = max((claim.spec.backstop_s for claim in claims), default=0)
-        if backstop > 0 and item.get_closest_marker("timeout") is None:
-            item.add_marker(pytest.mark.timeout(backstop))
+        _mark_item_placement(item, claims, unions, group_names)
+
+
+def _mark_item_placement(
+    item: pytest.Item,
+    claims: tuple[ResourceClaim, ...],
+    unions: _UnionFind,
+    group_names: dict[str, str],
+) -> None:
+    keys = exclusive_keys(claims)
+    if keys:
+        item.add_marker(pytest.mark.xdist_group(group_names[unions.find(keys[0])]))
+    elif not claims and _is_live_tier(item):
+        item.add_marker(pytest.mark.xdist_group(_SERIAL_CATCHALL_GROUP))
+    backstop = max((claim.spec.backstop_s for claim in claims), default=0)
+    if backstop > 0 and item.get_closest_marker("timeout") is None:
+        item.add_marker(pytest.mark.timeout(backstop))
 
 
 def _gate_probeable_prerequisites(

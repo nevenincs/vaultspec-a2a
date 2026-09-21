@@ -23,7 +23,27 @@ from .._ids import (
     is_valid_id,
     validate_id,
 )
-from ..client import ACTOR_TOKEN_HEADER, BEARER_HEADER, AuthoringClient
+from ..client import (
+    ACTOR_TOKEN_HEADER,
+    BEARER_HEADER,
+    AuthoringClient,
+    _iter_sse_frames,
+)
+from ..lifecycle import StreamError
+
+
+@pytest.mark.asyncio
+async def test_sse_frames_flush_at_blank_line_and_eof() -> None:
+    body = (
+        'event: error\ndata: {"error_kind":"first","error":"one","tiers":{}}\n\n'
+        'event: error\ndata: {"error_kind":"second","error":"two","tiers":{}}'
+    )
+    frames = [frame async for frame in _iter_sse_frames(httpx.Response(200, text=body))]
+    assert all(isinstance(frame, StreamError) for frame in frames)
+    assert [frame.error_kind for frame in frames if isinstance(frame, StreamError)] == [
+        "first",
+        "second",
+    ]
 
 
 class TestIds:

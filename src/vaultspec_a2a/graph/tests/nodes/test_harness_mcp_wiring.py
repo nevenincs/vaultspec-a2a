@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ....graph.compiler import _make_research_producer
+from ..._compiler_research import _make_research_producer
 from ...nodes.worker import create_worker_node
 
 if TYPE_CHECKING:

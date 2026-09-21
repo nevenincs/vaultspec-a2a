@@ -29,7 +29,7 @@ import time
 from contextlib import contextmanager, suppress
 from http import HTTPStatus
 from importlib.resources import files
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, TextIO, TypedDict, Unpack, override
 
 import httpx
 import pytest
@@ -56,6 +56,41 @@ _RUN_ID = "run-cross-repo-lost-ack"
 _ENGINE_COMMAND_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
 _MAX_RELAY_MESSAGE_BYTES = 4 * 1024 * 1024
 _JSON_OBJECT = TypeAdapter(dict[str, object])
+
+
+class _WorkerLogScanOptions(TypedDict):
+    """State and bounds carried between worker log scans."""
+
+    offset: int
+    pending: str
+    observed_tail: str
+    dispatch_count: int
+    hard_deadline: float
+
+
+class _LostAckEngineOptions(TypedDict):
+    """Inputs for one production lost-ack engine run."""
+
+    workspace: Path
+    app_home: Path
+    engine_port: int
+    engine_base: str
+    engine_log: Path
+    gateway_base: str
+    auth: str
+    relay: _RelayServer
+
+
+class _LostAckFlowOptions(TypedDict):
+    """Resources needed for the HTTP side of the lost-ack proof."""
+
+    app_home: Path
+    workspace: Path
+    engine_base: str
+    gateway_base: str
+    auth: str
+    relay: _RelayServer
+    token: str
 
 
 def _json_object(raw: str | bytes, *, source: str) -> dict[str, object]:
@@ -125,6 +160,39 @@ class _RelayServer(socketserver.ThreadingTCPServer):
         return token
 
 
+def _actor_token_from_body(parsed_body: dict[str, object]) -> str | None:
+    actor_tokens = _optional_json_object(parsed_body.get("actor_tokens"))
+    tokens = (
+        _optional_json_object(actor_tokens.get("tokens"))
+        if actor_tokens is not None
+        else None
+    )
+    token = tokens.get("vaultspec-coder") if tokens is not None else None
+    return token if isinstance(token, str) and token else None
+
+
+def _record_relay_stage(
+    relay: _RelayServer,
+    stage: str | None,
+    request_body: bytes,
+    parsed_body: dict[str, object],
+) -> bool:
+    if stage not in {"prepare", "commit"}:
+        return False
+    with relay._lock:
+        if stage == "prepare":
+            relay.prepare_posts += 1
+        else:
+            relay.commit_posts += 1
+            relay.commit_digests.append(hashlib.sha256(request_body).hexdigest())
+            if relay._actor_token is None:
+                relay._actor_token = _actor_token_from_body(parsed_body)
+            if relay.dropped_commit_acknowledgements == 0:
+                relay.dropped_commit_acknowledgements = 1
+                return True
+    return False
+
+
 class _RelayHandler(socketserver.BaseRequestHandler):
     def _relay_server(self) -> _RelayServer:
         """Narrow the base handler's server at the construction boundary."""
@@ -147,35 +215,7 @@ class _RelayHandler(socketserver.BaseRequestHandler):
             )
             stage_value = parsed_body.get("stage")
             stage = stage_value if isinstance(stage_value, str) else None
-            drop = False
-            if stage in {"prepare", "commit"}:
-                with relay._lock:
-                    if stage == "prepare":
-                        relay.prepare_posts += 1
-                    else:
-                        relay.commit_posts += 1
-                        relay.commit_digests.append(
-                            hashlib.sha256(request_body).hexdigest()
-                        )
-                        if relay._actor_token is None:
-                            actor_tokens = _optional_json_object(
-                                parsed_body.get("actor_tokens")
-                            )
-                            tokens = (
-                                _optional_json_object(actor_tokens.get("tokens"))
-                                if actor_tokens is not None
-                                else None
-                            )
-                            token = (
-                                tokens.get("vaultspec-coder")
-                                if tokens is not None
-                                else None
-                            )
-                            if isinstance(token, str) and token:
-                                relay._actor_token = token
-                        if relay.dropped_commit_acknowledgements == 0:
-                            relay.dropped_commit_acknowledgements = 1
-                            drop = True
+            drop = _record_relay_stage(relay, stage, request_body, parsed_body)
             with socket.create_connection(
                 ("127.0.0.1", relay.upstream_port), timeout=120
             ) as upstream:
@@ -383,6 +423,53 @@ def _one_active_engine_lease_per_required_actor(workspace: Path) -> None:
     assert tokens == [("vaultspec-coder", "agent:vaultspec-coder")]
 
 
+def _scan_worker_log(
+    log: TextIO,
+    **options: Unpack[_WorkerLogScanOptions],
+) -> tuple[int, str, str, int, bool]:
+    log.seek(options["offset"])
+    saw_data = False
+    while chunk := log.read(64 * 1024):
+        if time.monotonic() >= options["hard_deadline"]:
+            raise AssertionError(
+                "worker log scan exceeded its hard deadline: "
+                f"{options['observed_tail']}"
+            )
+        saw_data = True
+        options["offset"] = log.tell()
+        options["observed_tail"] = (options["observed_tail"] + chunk)[-64 * 1024 :]
+        complete = (options["pending"] + chunk).splitlines(keepends=True)
+        options["pending"] = ""
+        if complete and not complete[-1].endswith(("\n", "\r")):
+            options["pending"] = complete.pop()
+            if len(options["pending"]) > 1024 * 1024:
+                raise AssertionError(
+                    "worker emitted an unterminated log record over 1 MiB"
+                )
+        for line in complete:
+            if not line.strip():
+                continue
+            record = _json_object(line, source="worker log record")
+            if (
+                record.get("thread_id") == _RUN_ID
+                and record.get("action") == "dispatch_accepted"
+                and record.get("dispatch_action") == "ingest"
+            ):
+                options["dispatch_count"] += 1
+                if options["dispatch_count"] > 1:
+                    raise AssertionError(
+                        "worker accepted more than one matching dispatch: "
+                        f"{options['observed_tail']}"
+                    )
+    return (
+        options["offset"],
+        options["pending"],
+        options["observed_tail"],
+        options["dispatch_count"],
+        saw_data,
+    )
+
+
 def _await_exactly_one_worker_dispatch(app_home: Path) -> None:
     first_dispatch_deadline = time.monotonic() + 10
     hard_deadline = time.monotonic() + 20
@@ -396,47 +483,161 @@ def _await_exactly_one_worker_dispatch(app_home: Path) -> None:
     ):
         worker_logs = list((app_home / "runtime").glob("worker-autospawn-*.stderr.log"))
         if len(worker_logs) == 1:
-            saw_data = False
             with worker_logs[0].open("r", encoding="utf-8", errors="replace") as log:
-                log.seek(offset)
-                while chunk := log.read(64 * 1024):
-                    if time.monotonic() >= hard_deadline:
-                        raise AssertionError(
-                            "worker log scan exceeded its hard deadline: "
-                            f"{observed_tail}"
-                        )
-                    saw_data = True
-                    offset = log.tell()
-                    observed_tail = (observed_tail + chunk)[-64 * 1024 :]
-                    complete = (pending + chunk).splitlines(keepends=True)
-                    pending = ""
-                    if complete and not complete[-1].endswith(("\n", "\r")):
-                        pending = complete.pop()
-                        if len(pending) > 1024 * 1024:
-                            raise AssertionError(
-                                "worker emitted an unterminated log record over 1 MiB"
-                            )
-                    for line in complete:
-                        if not line.strip():
-                            continue
-                        record = _json_object(line, source="worker log record")
-                        if (
-                            record.get("thread_id") == _RUN_ID
-                            and record.get("action") == "dispatch_accepted"
-                            and record.get("dispatch_action") == "ingest"
-                        ):
-                            dispatch_count += 1
-                            if dispatch_count > 1:
-                                raise AssertionError(
-                                    "worker accepted more than one matching dispatch: "
-                                    f"{observed_tail}"
-                                )
+                offset, pending, observed_tail, dispatch_count, saw_data = (
+                    _scan_worker_log(
+                        log,
+                        offset=offset,
+                        pending=pending,
+                        observed_tail=observed_tail,
+                        dispatch_count=dispatch_count,
+                        hard_deadline=hard_deadline,
+                    )
+                )
             # The duplicate-free quiet window starts only after the scanner has
             # caught up to EOF; any subsequent log activity restarts it.
             if dispatch_count and saw_data:
                 quiet_deadline = time.monotonic() + 2
         time.sleep(0.05)
     assert dispatch_count == 1, observed_tail
+
+
+def _exercise_lost_ack_flow(**options: Unpack[_LostAckFlowOptions]) -> None:
+    """Run and assert the HTTP portion of the lost-ack proof."""
+    session = httpx.get(
+        f"{options['engine_base']}/session",
+        headers={"Authorization": f"Bearer {options['token']}"},
+        timeout=10,
+    )
+    session.raise_for_status()
+    scope = session.json()["data"]["active_scope"]
+    catalog_response = httpx.post(
+        f"{options['engine_base']}/ops/a2a/provider-catalog",
+        headers={"Authorization": f"Bearer {options['token']}"},
+        json={"expected_scope": scope},
+        timeout=30,
+    )
+    assert catalog_response.status_code == HTTPStatus.OK, catalog_response.text
+    catalog_body = _json_object(
+        catalog_response.content, source="engine provider-catalog response"
+    )
+    catalog_data = _optional_json_object(catalog_body.get("data"))
+    assert catalog_data is not None, catalog_body
+    selection = selection_from_served_catalog(catalog_data.get("envelope"))
+    started = httpx.post(
+        f"{options['engine_base']}/ops/a2a/run-start",
+        headers={"Authorization": f"Bearer {options['token']}"},
+        json={
+            "run_id": _RUN_ID,
+            "team_preset": "vaultspec-solo-coder",
+            "selection": selection.model_dump(mode="json"),
+            "message": "Prove one durable dispatch after a lost ack.",
+            "expected_scope": scope,
+            "feature_tag": "cross-repo-lost-ack",
+        },
+        timeout=90,
+    )
+    assert started.status_code == HTTPStatus.OK, started.text
+    payload = started.json()
+    assert payload["data"]["envelope"].get("run_id") == _RUN_ID, payload
+
+    direct = httpx.get(
+        f"{options['gateway_base']}/v1/runs/{_RUN_ID}",
+        headers={"Authorization": options["auth"]},
+        timeout=10,
+    )
+    assert direct.status_code == HTTPStatus.OK, direct.text
+    _one_durable_a2a_run(options["app_home"])
+    _one_active_engine_lease_per_required_actor(options["workspace"])
+    assert options["relay"].prepare_posts == 1
+    assert options["relay"].commit_posts == 2
+    assert options["relay"].dropped_commit_acknowledgements == 1
+    assert not options["relay"].errors, options["relay"].errors
+
+    assert len(options["relay"].commit_digests) == 2
+    assert len(set(options["relay"].commit_digests)) == 1
+    actor_token = options["relay"].take_actor_token()
+    mutation = httpx.post(
+        f"{options['engine_base']}/authoring/v1/sessions",
+        headers={
+            "Authorization": f"Bearer {options['token']}",
+            "x-authoring-actor-token": actor_token,
+        },
+        json={
+            "api_version": "v1",
+            "command": "create_session",
+            "idempotency_key": "idem:cross-repo:role-actor",
+            "payload": {
+                "scope": "cross-repo-proof",
+                "title": "Prepared role actor proof",
+            },
+        },
+        timeout=30,
+    )
+    assert mutation.status_code == HTTPStatus.OK, mutation.text
+
+    _await_exactly_one_worker_dispatch(options["app_home"])
+
+
+def _run_lost_ack_engine(
+    tmp_path: Path,
+    **options: Unpack[_LostAckEngineOptions],
+) -> None:
+    """Boot the engine, run the lost-ack flow, and always tear it down."""
+    discovery_home = tmp_path / "a2a-discovery"
+    write_service_json(
+        discovery_home / "service.json",
+        port=int(options["relay"].server_address[1]),
+        pid=os.getpid(),
+        service_token=ATTACH_CREDENTIAL,
+    )
+    environment = {
+        **{
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"VAULTSPEC_APP_HOME", "VAULTSPEC_DESKTOP_APP_HOME"}
+        },
+        "VAULTSPEC_A2A_HOME": str(discovery_home),
+        "VAULTSPEC_APP_HOME": str(tmp_path / "dashboard-product-home"),
+    }
+    with options["engine_log"].open("wb") as output:
+        containment = ProcessContainment.create()
+        # Pass the containment's session flag explicitly rather than
+        # ``**spawn_kwargs()`` so the binary-stdout Popen resolves to
+        # ``Popen[bytes]`` (the sanctioned worker-management spawn pattern);
+        # ``start_new_session`` is a no-op on Windows where the flag is unset.
+        new_session = bool(containment.spawn_kwargs().get("start_new_session"))
+        process: subprocess.Popen[bytes] | None = None
+        token: str | None = None
+        try:
+            process = subprocess.Popen(
+                _engine_command(options["engine_port"], options["workspace"]),
+                cwd=options["workspace"],
+                env=environment,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                start_new_session=new_session,
+            )
+            containment.assign(process.pid)
+            token = _wait_for_engine(
+                options["workspace"], options["engine_base"], process
+            )
+            _exercise_lost_ack_flow(
+                app_home=options["app_home"],
+                workspace=options["workspace"],
+                engine_base=options["engine_base"],
+                gateway_base=options["gateway_base"],
+                auth=options["auth"],
+                relay=options["relay"],
+                token=token,
+            )
+        finally:
+            if process is None:
+                containment.close()
+            elif token is not None:
+                _shutdown_engine(process, containment, options["engine_base"], token)
+            else:
+                _force_engine_tree_exit(process, containment)
 
 
 @pytest.mark.requires_prerequisites(*LIVE_PROVIDER_PREREQUISITES)
@@ -463,122 +664,14 @@ def test_production_engine_recovers_lost_run_start_ack_exactly_once(
         ),
         _ack_dropping_relay(gateway_base) as relay,
     ):
-        discovery_home = tmp_path / "a2a-discovery"
-        write_service_json(
-            discovery_home / "service.json",
-            port=int(relay.server_address[1]),
-            pid=os.getpid(),
-            service_token=ATTACH_CREDENTIAL,
+        _run_lost_ack_engine(
+            tmp_path,
+            workspace=workspace,
+            app_home=app_home,
+            engine_port=engine_port,
+            engine_base=engine_base,
+            engine_log=engine_log,
+            gateway_base=gateway_base,
+            auth=auth,
+            relay=relay,
         )
-        environment = {
-            **{
-                key: value
-                for key, value in os.environ.items()
-                if key not in {"VAULTSPEC_APP_HOME", "VAULTSPEC_DESKTOP_APP_HOME"}
-            },
-            "VAULTSPEC_A2A_HOME": str(discovery_home),
-            "VAULTSPEC_APP_HOME": str(tmp_path / "dashboard-product-home"),
-        }
-        with engine_log.open("wb") as output:
-            containment = ProcessContainment.create()
-            # Pass the containment's session flag explicitly rather than
-            # ``**spawn_kwargs()`` so the binary-stdout Popen resolves to
-            # ``Popen[bytes]`` (the sanctioned worker-management spawn pattern);
-            # ``start_new_session`` is a no-op on Windows where the flag is unset.
-            new_session = bool(containment.spawn_kwargs().get("start_new_session"))
-            process: subprocess.Popen[bytes] | None = None
-            token: str | None = None
-            try:
-                process = subprocess.Popen(
-                    _engine_command(engine_port, workspace),
-                    cwd=workspace,
-                    env=environment,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=new_session,
-                )
-                containment.assign(process.pid)
-                token = _wait_for_engine(workspace, engine_base, process)
-                session = httpx.get(
-                    f"{engine_base}/session",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=10,
-                )
-                session.raise_for_status()
-                scope = session.json()["data"]["active_scope"]
-                catalog_response = httpx.post(
-                    f"{engine_base}/ops/a2a/provider-catalog",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={"expected_scope": scope},
-                    timeout=30,
-                )
-                assert catalog_response.status_code == HTTPStatus.OK, (
-                    catalog_response.text
-                )
-                catalog_body = _json_object(
-                    catalog_response.content, source="engine provider-catalog response"
-                )
-                catalog_data = _optional_json_object(catalog_body.get("data"))
-                assert catalog_data is not None, catalog_body
-                catalog_envelope = catalog_data.get("envelope")
-                selection = selection_from_served_catalog(catalog_envelope)
-                started = httpx.post(
-                    f"{engine_base}/ops/a2a/run-start",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={
-                        "run_id": _RUN_ID,
-                        "team_preset": "vaultspec-solo-coder",
-                        "selection": selection.model_dump(mode="json"),
-                        "message": "Prove one durable dispatch after a lost ack.",
-                        "expected_scope": scope,
-                        "feature_tag": "cross-repo-lost-ack",
-                    },
-                    timeout=90,
-                )
-                assert started.status_code == HTTPStatus.OK, started.text
-                payload = started.json()
-                assert payload["data"]["envelope"].get("run_id") == _RUN_ID, payload
-
-                direct = httpx.get(
-                    f"{gateway_base}/v1/runs/{_RUN_ID}",
-                    headers={"Authorization": auth},
-                    timeout=10,
-                )
-                assert direct.status_code == HTTPStatus.OK, direct.text
-                _one_durable_a2a_run(app_home)
-                _one_active_engine_lease_per_required_actor(workspace)
-                assert relay.prepare_posts == 1
-                assert relay.commit_posts == 2
-                assert relay.dropped_commit_acknowledgements == 1
-                assert not relay.errors, relay.errors
-
-                assert len(relay.commit_digests) == 2
-                assert len(set(relay.commit_digests)) == 1
-                actor_token = relay.take_actor_token()
-                mutation = httpx.post(
-                    f"{engine_base}/authoring/v1/sessions",
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "x-authoring-actor-token": actor_token,
-                    },
-                    json={
-                        "api_version": "v1",
-                        "command": "create_session",
-                        "idempotency_key": "idem:cross-repo:role-actor",
-                        "payload": {
-                            "scope": "cross-repo-proof",
-                            "title": "Prepared role actor proof",
-                        },
-                    },
-                    timeout=30,
-                )
-                assert mutation.status_code == HTTPStatus.OK, mutation.text
-
-                _await_exactly_one_worker_dispatch(app_home)
-            finally:
-                if process is None:
-                    containment.close()
-                elif token is not None:
-                    _shutdown_engine(process, containment, engine_base, token)
-                else:
-                    _force_engine_tree_exit(process, containment)

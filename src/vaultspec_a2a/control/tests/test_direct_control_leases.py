@@ -9,6 +9,7 @@ the worker's synchronous dispatch-ID admission boundary.
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -24,23 +25,26 @@ from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...api.tests.clarification_harness import new_state_graph
+from ...control import cancel_service
+from ...control._permission_response_contract import (
+    PermissionInput,
+    PermissionRuntime,
+    permission_response_action_key,
+)
 from ...control.accepted_input import freeze_accepted_input
-from ...control.cancel_service import CancelResult, cancel_thread
+from ...control.action_lease import prepare_control_action_claim
+from ...control.cancel_service import CancelResult, CancelRuntime, cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
 from ...control.message_service import MessageResult, send_followup_message
-from ...control.permission_service import (
-    permission_response_action_key,
-    respond_to_permission,
-)
+from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_control_action,
@@ -52,8 +56,8 @@ from ...database import (
 )
 from ...database.models import Base, RecoveryAttemptModel
 from ...ipc.schemas import DispatchRequest
-from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -308,16 +312,12 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
         async with session_factory() as db:
             result = await respond_to_permission(
                 db,
-                request_id=request_id,
-                option_id="allow_once",
-                notes=None,
-                idempotency_key="permission-client-retry",
-                aggregator=EventAggregator(),
-                circuit_breaker=_circuit_breaker(),
-                worker_spawner=_spawner(),
-                worker_client=worker_client,
-                recursion_limit=25,
-                trace_headers=None,
+                response=PermissionInput(
+                    request_id, "allow_once", "permission-client-retry"
+                ),
+                runtime=PermissionRuntime(
+                    _circuit_breaker(), _spawner(), worker_client, 25, None
+                ),
             )
         assert result.accepted is True
         assert result.applied is False
@@ -467,6 +467,49 @@ async def test_competing_same_key_messages_conflict_and_dispatch_once(
 
 
 @pytest.mark.asyncio
+async def test_cancel_retries_sqlite_lock_before_claim(
+    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thread_id = "locked-cancel-thread"
+    await _running_thread(session_factory, thread_id)
+    original_claim = prepare_control_action_claim
+    attempts = 0
+
+    async def locked_once(*args: Any, **kwargs: Any) -> Any:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OperationalError(
+                "INSERT INTO control_actions",
+                {},
+                sqlite3.OperationalError("database is locked"),
+            )
+        return await original_claim(*args, **kwargs)
+
+    monkeypatch.setattr(cancel_service, "prepare_control_action_claim", locked_once)
+    async with _worker_runtime(tmp_path / "locked-cancel-checkpoints.db") as (
+        worker_client,
+        worker_app,
+        _bridge,
+        _checkpointer,
+    ):
+        async with session_factory() as db:
+            result = await cancel_thread(
+                db,
+                thread_id=thread_id,
+                idempotency_key=None,
+                runtime=CancelRuntime(
+                    _circuit_breaker(), _spawner(), worker_client, 25
+                ),
+            )
+        assert result.accepted
+        assert attempts == 2
+        assert len(worker_app.state.dispatch_ids) == 1
+
+
+@pytest.mark.asyncio
 async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
@@ -487,10 +530,9 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
                     db,
                     thread_id=thread_id,
                     idempotency_key=label,
-                    circuit_breaker=_circuit_breaker(),
-                    worker_spawner=_spawner(),
-                    worker_client=worker_client,
-                    recursion_limit=25,
+                    runtime=CancelRuntime(
+                        _circuit_breaker(), _spawner(), worker_client, 25
+                    ),
                 )
 
         first, second = await asyncio.gather(
@@ -621,11 +663,12 @@ async def test_ambiguous_cancel_preserves_durable_cancelling_intent(
             db,
             thread_id=thread_id,
             idempotency_key="desktop-cancel-attempt",
-            circuit_breaker=_circuit_breaker(),
-            worker_spawner=_spawner("http://127.0.0.1:1"),
-            worker_client=unreachable_client,
-            recursion_limit=25,
-            trace_headers=None,
+            runtime=CancelRuntime(
+                _circuit_breaker(),
+                _spawner("http://127.0.0.1:1"),
+                unreachable_client,
+                25,
+            ),
         )
 
     assert result.accepted is True
@@ -670,11 +713,7 @@ async def test_definite_cancel_non_delivery_never_rolls_back_lifecycle_authority
             db,
             thread_id=thread_id,
             idempotency_key="definite-cancel-attempt",
-            circuit_breaker=_circuit_breaker(),
-            worker_spawner=_spawner(),
-            worker_client=worker_client,
-            recursion_limit=25,
-            trace_headers=None,
+            runtime=CancelRuntime(_circuit_breaker(), _spawner(), worker_client, 25),
         )
     assert result.cancelled is False
     assert result.accepted is False
@@ -718,10 +757,9 @@ async def test_terminal_state_before_cancel_prevents_dispatch_reservation(
             db,
             thread_id=thread_id,
             idempotency_key="too-late",
-            circuit_breaker=_circuit_breaker(),
-            worker_spawner=_spawner("http://127.0.0.1:1"),
-            worker_client=worker_client,
-            recursion_limit=25,
+            runtime=CancelRuntime(
+                _circuit_breaker(), _spawner("http://127.0.0.1:1"), worker_client, 25
+            ),
         )
     assert result.accepted is False
     assert result.failure_type is FailureType.TERMINAL

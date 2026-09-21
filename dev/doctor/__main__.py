@@ -17,7 +17,7 @@ import argparse
 
 from dev.doctor._docker import docker_optional, docker_required
 from dev.doctor._pep561 import repair_markers
-from dev.doctor._tools import required
+from dev.doctor._tools import node, required
 
 
 def _pep561() -> int:
@@ -31,6 +31,7 @@ def _pep561() -> int:
 #: The selectable checks, mapped to the callable that performs each one.
 CHECKS = {
     "required": required,
+    "node": node,
     "docker": docker_required,
     "docker-optional": docker_optional,
     "pep561": _pep561,

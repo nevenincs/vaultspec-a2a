@@ -27,7 +27,6 @@ from ..thread.enums import ControlActionType
 from ..thread.executable_graph import FrozenGraphDefinition
 
 __all__ = [
-    "ActiveProjectRoot",
     "DispatchApplicationReceiptPayload",
     "DispatchRequest",
     "DispatchResponse",
@@ -102,6 +101,50 @@ def canonical_project_root(value: str | os.PathLike[str]) -> str:
 # put an unminted spelling on a dispatch.
 ActiveProjectRoot = Annotated[str, AfterValidator(canonical_project_root)]
 
+_FALLBACK_FIELDS = frozenset(
+    {
+        "provider_id",
+        "execution_mode",
+        "catalog_revision",
+        "entry_id",
+        "model_name",
+        "controls",
+        "defaulted_control_ids",
+        "schema_version",
+    }
+)
+_FALLBACK_OPTIONAL_FIELDS = frozenset({"provider_display_name", "model_display_name"})
+_CONTROL_FIELDS = frozenset({"control_id", "option_id", "provider_value"})
+_CONTROL_OPTIONAL_FIELDS = frozenset({"display_name", "option_display_name"})
+
+
+def _validate_model_assignment_control(raw_selected: object) -> None:
+    if not isinstance(raw_selected, dict):
+        raise ValueError("model_assignment control has invalid fields")
+    selected = cast("dict[str, object]", raw_selected)
+    if not _CONTROL_FIELDS.issubset(selected) or (
+        set(selected) - _CONTROL_FIELDS - _CONTROL_OPTIONAL_FIELDS
+    ):
+        raise ValueError("model_assignment control has invalid fields")
+
+
+def _validate_model_assignment_candidate(
+    raw_candidate: object, *, fallback: bool
+) -> None:
+    if not isinstance(raw_candidate, dict):
+        raise ValueError("model_assignment fallback is invalid")
+    candidate = cast("dict[str, object]", raw_candidate)
+    if fallback and (
+        not _FALLBACK_FIELDS.issubset(candidate)
+        or set(candidate) - _FALLBACK_FIELDS - _FALLBACK_OPTIONAL_FIELDS
+    ):
+        raise ValueError("model_assignment fallback has invalid fields")
+    controls: object = candidate.get("controls")
+    if not isinstance(controls, list):
+        raise ValueError("model_assignment controls are invalid")
+    for raw_selected in cast("list[object]", controls):
+        _validate_model_assignment_control(raw_selected)
+
 
 class DispatchRequest(BaseModel):
     """Work dispatch command from gateway to worker."""
@@ -156,27 +199,33 @@ class DispatchRequest(BaseModel):
         """Require a matching current receipt before graph execution admission."""
         self.require_graph_definition()
         receipt = self.graph_action_receipt
-        if (
-            receipt is None
-            or receipt.thread_id != self.thread_id
-            or receipt.dispatch_id != self.dispatch_id
-            or (
-                self.action == "ingest"
-                and receipt.action_type
-                not in {
+        allowed_ingest = (
+            self.action == "ingest"
+            and receipt is not None
+            and (
+                receipt.action_type
+                in {
                     ControlActionType.INGEST,
                     ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
                 }
             )
-            or (
-                self.action == "resume"
-                and receipt.action_type
-                not in {
+        )
+        allowed_resume = (
+            self.action == "resume"
+            and receipt is not None
+            and (
+                receipt.action_type
+                in {
                     ControlActionType.RESUME,
                     ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
                 }
             )
-            or self.action == "cancel"
+        )
+        if (
+            receipt is None
+            or receipt.thread_id != self.thread_id
+            or receipt.dispatch_id != self.dispatch_id
+            or not (allowed_ingest or allowed_resume)
         ):
             raise ValueError("incompatible graph dispatch authority")
         return receipt
@@ -208,19 +257,6 @@ class DispatchRequest(BaseModel):
             "provenance",
             "schema_version",
         }
-        fallback = {
-            "provider_id",
-            "execution_mode",
-            "catalog_revision",
-            "entry_id",
-            "model_name",
-            "controls",
-            "defaulted_control_ids",
-            "schema_version",
-        }
-        control = {"control_id", "option_id", "provider_value"}
-        control_optional = {"display_name", "option_display_name"}
-        lane_optional = {"provider_display_name", "model_display_name"}
         for lane in value.values():
             if set(lane) != primary:
                 raise ValueError("model_assignment lane has invalid fields")
@@ -234,26 +270,7 @@ class DispatchRequest(BaseModel):
                 raise ValueError("model_assignment fallback is invalid")
             candidates: list[object] = [lane, *cast("list[object]", raw_fallbacks)]
             for index, raw_candidate in enumerate(candidates):
-                if not isinstance(raw_candidate, dict):
-                    raise ValueError("model_assignment fallback is invalid")
-                candidate = cast("dict[str, object]", raw_candidate)
-                if index and (
-                    not fallback.issubset(candidate)
-                    or set(candidate) - fallback - lane_optional
-                ):
-                    raise ValueError("model_assignment fallback has invalid fields")
-                controls: object = candidate.get("controls")
-                if not isinstance(controls, list):
-                    raise ValueError("model_assignment controls are invalid")
-                for raw_selected in cast("list[object]", controls):
-                    if not isinstance(raw_selected, dict):
-                        raise ValueError("model_assignment control has invalid fields")
-                    selected = cast("dict[str, object]", raw_selected)
-                    if (
-                        not control.issubset(selected)
-                        or set(selected) - control - control_optional
-                    ):
-                        raise ValueError("model_assignment control has invalid fields")
+                _validate_model_assignment_candidate(raw_candidate, fallback=index > 0)
         return value
 
     @model_validator(mode="after")

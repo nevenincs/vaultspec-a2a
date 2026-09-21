@@ -38,21 +38,16 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import cast
+from typing import NoReturn, TypeGuard, cast
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..utils.atomic_write import atomic_write_text
 from .discovery import is_pid_alive
 from .registry import now_ms
 
 __all__ = [
-    "ARTIFACT_DECLARATIONS",
-    "SINGLETON_LOCK_DECLARATION",
-    "SINGLETON_RECORD_DECLARATION",
     "SINGLETON_RECORD_VERSION",
     "RuntimeSingleton",
     "SingletonConflictError",
-    "SingletonError",
     "SingletonHeldError",
     "SingletonRecord",
     "SingletonState",
@@ -65,7 +60,6 @@ __all__ = [
     "process_start_fingerprint",
     "recorded_process_is_live",
     "set_active_singleton",
-    "singleton_lock_path",
     "singleton_record_path",
 ]
 
@@ -76,48 +70,6 @@ SINGLETON_RECORD_VERSION = 1
 _LOCK_NAME = "gateway.singleton.lock"
 _RECORD_NAME = "gateway.singleton.json"
 _RUNTIME_DIR = "runtime"
-
-# The two files this module leaves under the application home, and why their
-# retention differs. The anchor's permanence is the point rather than an
-# omission: mutual exclusion is held on THAT inode, so a release that unlinked it
-# would let the next acquirer create a fresh file and take a lock a live
-# contender is not contending for. The record has no such property and is
-# released.
-SINGLETON_LOCK_DECLARATION = ArtifactDeclaration(
-    name="gateway-singleton-lock-anchor",
-    root=f"<app_home>/{_RUNTIME_DIR}/{_LOCK_NAME}",
-    owner="lifecycle.singleton",
-    disposition=RetentionDisposition.PERMANENT,
-    reason=(
-        "the operating-system lock is held on this file's inode, so removing it "
-        "on release would let a later acquirer lock a different file and grant "
-        "two live gateways one application home; the anchor must outlive every "
-        "holder for the exclusion to mean anything"
-    ),
-    mechanism=(
-        "nothing removes it, and nothing needs to: it is one fixed-name file per "
-        "application home whose contents are never written, so it neither grows "
-        "nor multiplies"
-    ),
-)
-
-SINGLETON_RECORD_DECLARATION = ArtifactDeclaration(
-    name="gateway-singleton-owner-record",
-    root=f"<app_home>/{_RUNTIME_DIR}/{_RECORD_NAME}",
-    owner="lifecycle.singleton",
-    disposition=RetentionDisposition.SESSION_SCOPED,
-    mechanism=(
-        "unlinked by RuntimeSingleton.release when the recorded pid is still this "
-        "holder's, and overwritten by an owner-matching stale takeover at the next "
-        "acquire; a crash leaves the record behind until that next acquire, where "
-        "it reads as STALE rather than as a live resident"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    SINGLETON_LOCK_DECLARATION,
-    SINGLETON_RECORD_DECLARATION,
-)
 
 # The runtime singleton the current process holds for its desktop application
 # home, if any. The desktop serve entrypoint acquires the singleton before the
@@ -321,23 +273,33 @@ def _read_record(path: Path) -> SingletonRecord | None:
         return None
     if not isinstance(data, dict):
         return None
-    record = cast("dict[str, object]", data)
+    return _parse_record(cast("dict[str, object]", data))
+
+
+def _is_record_integer(value: object, *, minimum: int | None = None) -> TypeGuard[int]:
+    if not isinstance(value, int) or isinstance(value, bool):
+        return False
+    return minimum is None or value >= minimum
+
+
+def _parse_record(record: dict[str, object]) -> SingletonRecord | None:
+    """Validate the published process identity before trusting the record."""
     version = record.get("version")
     pid = record.get("pid")
     owner = record.get("owner")
     acquired = record.get("acquired_at_ms")
-    if not isinstance(version, int) or isinstance(version, bool):
+    if not _is_record_integer(version):
         return None
     if version != SINGLETON_RECORD_VERSION:
         return None
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+    if not _is_record_integer(pid, minimum=1):
         return None
     if not isinstance(owner, str):
         return None
     fingerprint = record.get("start_fingerprint")
     if fingerprint is not None and not isinstance(fingerprint, str):
         return None
-    if not isinstance(acquired, int) or isinstance(acquired, bool):
+    if not _is_record_integer(acquired):
         acquired = 0
     return SingletonRecord(
         version=version,
@@ -510,6 +472,56 @@ def _acquire_lock_or_conflict(fd: int, record_path: Path) -> bool:
         time.sleep(_ORPHAN_LOCK_POLL_S)
 
 
+def _raise_lock_conflict(app_home: Path, record_path: Path, principal: str) -> NoReturn:
+    prior = _read_record(record_path)
+    if (
+        prior is not None
+        and prior.owner == principal
+        and recorded_process_is_live(prior)
+    ):
+        raise SingletonHeldError(
+            f"desktop application home {app_home} is already owned by a live "
+            f"gateway of this owner ({principal!r}, pid {prior.pid}); refusing to "
+            "start a second gateway on one application home.",
+            state=SingletonState.HELD,
+            record=prior,
+        )
+    owner_desc = (
+        f"owner {prior.owner!r}, pid {prior.pid}" if prior else "an unverifiable owner"
+    )
+    raise SingletonConflictError(
+        f"desktop application home {app_home} is held by a live foreign gateway "
+        f"({owner_desc}); this is an immutable conflict — attach to the resident "
+        "service instead of starting a competing gateway.",
+        state=SingletonState.FOREIGN,
+        record=prior,
+    )
+
+
+def _reject_foreign_record(
+    fd: int, app_home: Path, prior: SingletonRecord | None, principal: str
+) -> None:
+    if prior is None or prior.owner == principal:
+        return
+    prior_is_live = recorded_process_is_live(prior)
+    _unlock(fd)
+    os.close(fd)
+    if prior_is_live:
+        raise SingletonConflictError(
+            f"desktop application home {app_home} records a live foreign gateway "
+            f"(owner {prior.owner!r}, pid {prior.pid}); refusing takeover.",
+            state=SingletonState.FOREIGN,
+            record=prior,
+        )
+    raise SingletonConflictError(
+        f"desktop application home {app_home} holds a stale record of a foreign "
+        f"owner ({prior.owner!r}, pid {prior.pid}); its owner must quarantine it "
+        "under the installation lock before a different owner may claim the home.",
+        state=SingletonState.STALE,
+        record=prior,
+    )
+
+
 def acquire_singleton(app_home: Path, *, owner: str | None = None) -> RuntimeSingleton:
     """Acquire the runtime singleton for *app_home*, or fail closed on a conflict.
 
@@ -542,58 +554,11 @@ def acquire_singleton(app_home: Path, *, owner: str | None = None) -> RuntimeSin
 
     if not _acquire_lock_or_conflict(fd, record_path):
         os.close(fd)
-        prior = _read_record(record_path)
-        if (
-            prior is not None
-            and prior.owner == principal
-            and recorded_process_is_live(prior)
-        ):
-            raise SingletonHeldError(
-                f"desktop application home {app_home} is already owned by a live "
-                f"gateway of this owner ({principal!r}, pid {prior.pid}); refusing to "
-                "start a second gateway on one application home.",
-                state=SingletonState.HELD,
-                record=prior,
-            )
-        owner_desc = (
-            f"owner {prior.owner!r}, pid {prior.pid}"
-            if prior
-            else "an unverifiable owner"
-        )
-        raise SingletonConflictError(
-            f"desktop application home {app_home} is held by a live foreign gateway "
-            f"({owner_desc}); this is an immutable conflict — attach to the resident "
-            "service instead of starting a competing gateway.",
-            state=SingletonState.FOREIGN,
-            record=prior,
-        )
+        _raise_lock_conflict(app_home, record_path, principal)
 
     # The lock is ours. Classify the prior record before overwriting it.
     prior = _read_record(record_path)
-    prior_is_live = prior is not None and recorded_process_is_live(prior)
-    if prior is not None and prior_is_live and prior.owner != principal:
-        # A foreign process is recorded live even though the lock was free; do not
-        # steal the home from a possibly-live foreign owner. Fail closed.
-        _unlock(fd)
-        os.close(fd)
-        raise SingletonConflictError(
-            f"desktop application home {app_home} records a live foreign gateway "
-            f"(owner {prior.owner!r}, pid {prior.pid}); refusing takeover.",
-            state=SingletonState.FOREIGN,
-            record=prior,
-        )
-    if prior is not None and not prior_is_live and prior.owner != principal:
-        # Foreign-stale: only the matching receipt owner may quarantine stale state
-        # under the installation lock (per the desktop discovery decision). Refuse.
-        _unlock(fd)
-        os.close(fd)
-        raise SingletonConflictError(
-            f"desktop application home {app_home} holds a stale record of a foreign "
-            f"owner ({prior.owner!r}, pid {prior.pid}); its owner must quarantine it "
-            "under the installation lock before a different owner may claim the home.",
-            state=SingletonState.STALE,
-            record=prior,
-        )
+    _reject_foreign_record(fd, app_home, prior, principal)
 
     # FREE, or an owner-matching STALE record: quarantine (overwrite) and take over.
     record = SingletonRecord(

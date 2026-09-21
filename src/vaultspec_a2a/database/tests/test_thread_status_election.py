@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -66,6 +67,7 @@ async def _seed(
             action_type=ControlActionType.INGEST,
             idempotency_key=f"{thread_id}-ingest",
             dispatch_id=receipt,
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         expectation = thread_write_expectation(thread)
         await session.commit()
@@ -184,6 +186,7 @@ async def test_winner_refreshes_same_session_identity_map(
             action_type=ControlActionType.CANCEL,
             idempotency_key="same-session-cancel",
             dispatch_id="same-session-cancel-receipt",
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         successor = _successor(
             expected,
@@ -291,6 +294,7 @@ async def test_successor_requires_same_thread_action_receipt(
             action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
             idempotency_key="wrong-action",
             dispatch_id="wrong-action-receipt",
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         await session.commit()
 
@@ -332,6 +336,7 @@ async def test_changed_action_advances_generation_and_exact_receipt_wins(
             action_type=ControlActionType.CANCEL,
             idempotency_key="changed-action-cancel",
             dispatch_id="changed-action-cancel-receipt",
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         await session.commit()
     successor = _successor(

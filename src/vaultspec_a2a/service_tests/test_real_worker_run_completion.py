@@ -59,12 +59,16 @@ from typing import TYPE_CHECKING
 import pytest
 import yaml
 
-from ..acceptance import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET, certified_gateway
-from ..testing.payloads import json_object, json_object_list
+from ..acceptance.tests._harness import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    certified_gateway,
+)
+from ..testing.tests._support.payloads import json_object, json_object_list
 from ._net import tape_server_listening
 
 if TYPE_CHECKING:
-    from ..acceptance import CertifiedGateway
+    from ..acceptance.tests._harness import CertifiedGateway
     from ..providers._json_contract import JsonObject
 
 # The scripted backend the mock provider proxies to. The compose service publishes

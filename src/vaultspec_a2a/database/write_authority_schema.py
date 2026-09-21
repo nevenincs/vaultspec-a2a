@@ -6,6 +6,9 @@ import re
 from typing import TYPE_CHECKING, cast
 
 from ..thread.enums import ControlActionType
+from ._write_authority_check_parser import (
+    extract_named_check_predicates as extract_named_check_predicates,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -64,134 +67,6 @@ def normalize_schema_expression(expression: str, *, dialect: str = "sqlite") -> 
         result = result.replace("(", "").replace(")", "")
         result = result.replace("inarray", "in")
     return result
-
-
-def _skip_quoted(sql: str, cursor: int, opener: str) -> tuple[int, bool]:
-    """Skip one SQL string or quoted identifier, honoring doubled closers."""
-    closer = "]" if opener == "[" else opener
-    cursor += 1
-    while cursor < len(sql):
-        if sql[cursor] != closer:
-            cursor += 1
-            continue
-        if closer != "]" and cursor + 1 < len(sql) and sql[cursor + 1] == closer:
-            cursor += 2
-            continue
-        return cursor + 1, True
-    return len(sql), False
-
-
-def _skip_space_and_comments(sql: str, cursor: int) -> tuple[int, bool]:
-    """Skip SQL trivia and report an unterminated block comment."""
-    while cursor < len(sql):
-        if sql[cursor].isspace():
-            cursor += 1
-        elif sql.startswith("--", cursor):
-            newline = sql.find("\n", cursor + 2)
-            cursor = len(sql) if newline < 0 else newline + 1
-        elif sql.startswith("/*", cursor):
-            end = sql.find("*/", cursor + 2)
-            if end < 0:
-                return len(sql), False
-            cursor = end + 2
-        else:
-            break
-    return cursor, True
-
-
-def _read_identifier(sql: str, cursor: int) -> tuple[str | None, int, bool]:
-    """Read one bare or SQLite-quoted identifier."""
-    if cursor >= len(sql):
-        return None, cursor, True
-    if sql[cursor] in ('"', "`", "["):
-        opener = sql[cursor]
-        end, valid = _skip_quoted(sql, cursor, opener)
-        if not valid:
-            return None, end, False
-        closer_width = 1
-        raw = sql[cursor + 1 : end - closer_width]
-        closer = "]" if opener == "[" else opener
-        if closer != "]":
-            raw = raw.replace(closer * 2, closer)
-        return raw, end, True
-    end = cursor
-    while end < len(sql) and (sql[end].isalnum() or sql[end] in "_$"):
-        end += 1
-    if end == cursor:
-        return None, cursor, True
-    return sql[cursor:end], end, True
-
-
-def extract_named_check_predicates(create_table_sql: str) -> dict[str, str]:
-    """Extract real named SQLite CHECKs, ignoring comments and quoted content."""
-    checks: dict[str, str] = {}
-    cursor = 0
-    while cursor < len(create_table_sql):
-        cursor, valid = _skip_space_and_comments(create_table_sql, cursor)
-        if not valid:
-            return {}
-        if cursor >= len(create_table_sql):
-            break
-        if create_table_sql[cursor] in ("'", '"', "`", "["):
-            cursor, valid = _skip_quoted(
-                create_table_sql, cursor, create_table_sql[cursor]
-            )
-            if not valid:
-                return {}
-            continue
-        word, after_word, valid = _read_identifier(create_table_sql, cursor)
-        if not valid:
-            return {}
-        if word is None:
-            cursor += 1
-            continue
-        cursor = after_word
-        if word.lower() != "constraint":
-            continue
-        cursor, valid = _skip_space_and_comments(create_table_sql, cursor)
-        if not valid:
-            return {}
-        name, cursor, valid = _read_identifier(create_table_sql, cursor)
-        if not valid or name is None:
-            return {}
-        cursor, valid = _skip_space_and_comments(create_table_sql, cursor)
-        if not valid:
-            return {}
-        check_word, cursor, valid = _read_identifier(create_table_sql, cursor)
-        if not valid or check_word is None or check_word.lower() != "check":
-            continue
-        cursor, valid = _skip_space_and_comments(create_table_sql, cursor)
-        if not valid or cursor >= len(create_table_sql):
-            return {}
-        if create_table_sql[cursor] != "(":
-            continue
-        depth = 1
-        cursor += 1
-        start = cursor
-        while cursor < len(create_table_sql) and depth:
-            character = create_table_sql[cursor]
-            if create_table_sql.startswith(("--", "/*"), cursor):
-                cursor, valid = _skip_space_and_comments(create_table_sql, cursor)
-                if not valid:
-                    return {}
-                continue
-            if character in ("'", '"', "`", "["):
-                cursor, valid = _skip_quoted(create_table_sql, cursor, character)
-                if not valid:
-                    return {}
-                continue
-            if character == "(":
-                depth += 1
-            elif character == ")":
-                depth -= 1
-            cursor += 1
-        if depth != 0:
-            return {}
-        normalized_name = name.lower()
-        if normalized_name in checks:
-            return {}
-        checks[normalized_name] = create_table_sql[start : cursor - 1]
-    return checks
 
 
 def write_authority_checks_match(

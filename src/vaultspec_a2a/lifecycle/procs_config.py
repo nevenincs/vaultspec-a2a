@@ -17,8 +17,9 @@ to end.
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from dataclasses import dataclass
+from inspect import Parameter, Signature
+from typing import TYPE_CHECKING, cast, override
 
 from ..control.config import settings
 
@@ -62,6 +63,65 @@ class PortBand:
 
 
 @dataclass(frozen=True, slots=True)
+class _RoleCommands:
+    """Command templates and environment for one lifecycle role."""
+
+    build: list[str]
+    serve: list[str]
+    env: dict[str, str]
+
+
+class _RoleConfigEnvDefault:
+    """Signature sentinel that renders like dataclasses' default factory."""
+
+    @override
+    def __repr__(self) -> str:
+        return "<factory>"
+
+
+_ROLE_CONFIG_ENV_DEFAULT = _RoleConfigEnvDefault()
+_ROLE_CONFIG_SIGNATURE = Signature(
+    [
+        Parameter("name", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("band", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("heartbeat", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("staleness_ms", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("build", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter("serve", Parameter.POSITIONAL_OR_KEYWORD),
+        Parameter(
+            "env",
+            Parameter.POSITIONAL_OR_KEYWORD,
+            default=_ROLE_CONFIG_ENV_DEFAULT,
+        ),
+        Parameter("require_repo", Parameter.POSITIONAL_OR_KEYWORD, default=False),
+    ]
+)
+_ROLE_CONFIG_FIELDS = tuple(_ROLE_CONFIG_SIGNATURE.parameters)
+
+
+def _split_role_config_args(
+    positional: tuple[object, ...], keywords: dict[str, object]
+) -> tuple[str, PortBand, bool, int, list[str], list[str], dict[str, str], bool]:
+    """Split the legacy RoleConfig constructor into grouped state."""
+    bound = _ROLE_CONFIG_SIGNATURE.bind(*positional, **keywords)
+    bound.apply_defaults()
+    values = bound.arguments
+    env = values["env"]
+    if env is _ROLE_CONFIG_ENV_DEFAULT:
+        env = {}
+    return (
+        cast("str", values["name"]),
+        cast("PortBand", values["band"]),
+        cast("bool", values["heartbeat"]),
+        cast("int", values["staleness_ms"]),
+        cast("list[str]", values["build"]),
+        cast("list[str]", values["serve"]),
+        cast("dict[str, str]", env),
+        cast("bool", values["require_repo"]),
+    )
+
+
+@dataclass(frozen=True, slots=True, init=False, repr=False)
 class RoleConfig:
     """A dev/test role's band, staleness policy, and command templates."""
 
@@ -69,14 +129,59 @@ class RoleConfig:
     band: PortBand
     heartbeat: bool
     staleness_ms: int
-    build: list[str]
-    serve: list[str]
-    env: dict[str, str] = field(default_factory=dict)
+    _commands: _RoleCommands
     # A data-seating role (engine-dev seats its data store from the serve cwd) sets
     # this so the lifecycle verbs refuse to serve it from an implicit default cwd -
     # the silent project-root fallback once seated a dev engine's store on top of
     # the resident engine's. An explicit repo is then mandatory at boot/resume.
     require_repo: bool = False
+
+    __signature__ = _ROLE_CONFIG_SIGNATURE
+    __match_args__ = _ROLE_CONFIG_FIELDS
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        (
+            name,
+            band,
+            heartbeat,
+            staleness_ms,
+            build,
+            serve,
+            env,
+            require_repo,
+        ) = _split_role_config_args(args, kwargs)
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "band", band)
+        object.__setattr__(self, "heartbeat", heartbeat)
+        object.__setattr__(self, "staleness_ms", staleness_ms)
+        object.__setattr__(
+            self,
+            "_commands",
+            _RoleCommands(build=build, serve=serve, env=env),
+        )
+        object.__setattr__(self, "require_repo", require_repo)
+
+    @property
+    def build(self) -> list[str]:
+        """Return the role's build command template."""
+        return self._commands.build
+
+    @property
+    def serve(self) -> list[str]:
+        """Return the role's serve command template."""
+        return self._commands.serve
+
+    @property
+    def env(self) -> dict[str, str]:
+        """Return the environment template used by the role's serve command."""
+        return self._commands.env
+
+    @override
+    def __repr__(self) -> str:
+        values = ", ".join(
+            f"{name}={getattr(self, name)!r}" for name in _ROLE_CONFIG_FIELDS
+        )
+        return f"RoleConfig({values})"
 
 
 @dataclass(frozen=True, slots=True)

@@ -99,6 +99,30 @@ _CATALOG: tuple[ResourceSpec, ...] = (
         backstop_s=1800,
     ),
     ResourceSpec(
+        key="provider-catalog-discovery",
+        description=(
+            "prompt-free discovery across installed external provider adapters; "
+            "one catalog boot per host at a time"
+        ),
+        backstop_s=1800,
+    ),
+    ResourceSpec(
+        key="rag-service-control",
+        description=(
+            "private vaultspec-rag data-plane service startup and teardown; "
+            "live proofs are excluded from the deterministic unit lane"
+        ),
+        backstop_s=1800,
+    ),
+    ResourceSpec(
+        key="desktop-processes",
+        description=(
+            "isolated local desktop gateway and worker process capacity; tests "
+            "own separate application homes and dynamically reserved ports"
+        ),
+        backstop_s=1800,
+    ),
+    ResourceSpec(
         key="claude-cli-lane",
         description="the Claude Code ACP CLI's live usage window",
         prerequisite_id="claude-cli",

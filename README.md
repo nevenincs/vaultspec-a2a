@@ -28,7 +28,7 @@ Install these host prerequisites:
 - [Git](https://git-scm.com/)
 - [Just](https://just.systems/man/en/packages.html) 1.31 or later
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
-- [Node.js](https://nodejs.org/) 24 with npm, for the pinned Claude ACP runtime
+- [Node.js](https://nodejs.org/) matching `.node-version`, with npm, for Claude and Z.ai ACP workflows
 - Docker, only for container workflows
 
 The project requires Python 3.13 or later and currently selects the Python 3.13
@@ -39,9 +39,11 @@ git clone https://github.com/nevenincs/vaultspec-a2a
 cd vaultspec-a2a
 uv python install 3.13
 just doctor-check
-just deps-tooling
-just deps-node
+just init
 ```
+
+Run `just init-full` when you need the Claude or Z.ai ACP runtime. It also
+restores the pinned Node dependency graph.
 
 `just doctor-check` verifies the required command-line tools and reports Docker as
 optional. The [development guide](docs/development.rst) defines its diagnostic

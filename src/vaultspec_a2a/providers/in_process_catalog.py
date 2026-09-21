@@ -51,8 +51,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "IN_PROCESS_EXECUTION_MODES",
-    "SERVE_IN_PROCESS_LANES_ENV",
-    "InProcessCatalogDiscovery",
     "build_in_process_catalog",
     "discover_in_process_catalog",
     "in_process_catalog_key",

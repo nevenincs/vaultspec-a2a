@@ -415,6 +415,24 @@ agent_id = "coder"
         cfg = load_team_config("vaultspec-solo-coder", workspace_root=tmp_path)
         assert cfg.display_name == "Custom Override"
 
+    def test_workspace_override_cannot_follow_a_link_outside_teams(
+        self, tmp_path: Path
+    ) -> None:
+        """An override filename must resolve inside its configured directory."""
+        override_dir = tmp_path / ".vaultspec" / "teams"
+        override_dir.mkdir(parents=True)
+        outside = tmp_path / "outside.toml"
+        outside.write_text(
+            '[team]\nid = "external_config"\ndisplay_name = "External"\n',
+            encoding="utf-8",
+        )
+        try:
+            (override_dir / "external_config.toml").symlink_to(outside)
+        except OSError:
+            pytest.skip("this host does not permit creating symlinks")
+        with pytest.raises(TeamConfigNotFoundError):
+            load_team_config("external_config", workspace_root=tmp_path)
+
     def test_missing_team_raises_not_found(self) -> None:
         """An unknown team_id raises TeamConfigNotFoundError."""
         with pytest.raises(TeamConfigNotFoundError) as exc_info:

@@ -32,16 +32,16 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import cast, override
+from typing import BinaryIO, TypedDict, Unpack, cast, override
 
 import httpx
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..authoring.discovery import (
     heartbeat_is_fresh,
     read_service_json,
 )
 from ..desktop._filesystem_authority import (
+    DirectoryAuthority,
     assert_directory_authority,
     create_anonymous_file,
     create_private_file,
@@ -63,26 +63,29 @@ from ..desktop._platform_acl import (
 )
 from ..utils.atomic_write import atomic_write_text
 from ..utils.coercion import coerce_int
+from ._desktop_discovery_record_parts import (
+    DesktopDiscoveryRecordOptions,
+    DesktopRecordEndpoint,
+    DesktopRecordIdentity,
+    DesktopRecordProcess,
+    DesktopRecordProtocol,
+    DesktopRecordState,
+    bind_desktop_record_fields,
+    required_desktop_record_field,
+)
 
 __all__ = [
-    "ARTIFACT_DECLARATIONS",
     "DESKTOP_DISCOVERY_VERSION",
     "DESKTOP_PROTOCOL_MAX",
-    "DESKTOP_PROTOCOL_MIN",
     "HEARTBEAT_REFRESH_SECONDS",
-    "SERVICE_CREDENTIAL_DECLARATION",
-    "SERVICE_DISCOVERY_DECLARATION",
-    "DesktopDiscoveryRecord",
     "DesktopDiscoveryState",
     "DiscoveryState",
-    "ServiceInfo",
     "another_resident_is_live",
     "classify_desktop_discovery",
     "classify_discovery",
     "is_pid_alive",
     "port_has_listener",
     "probe_health",
-    "read_desktop_discovery",
     "read_resident_service",
     "remove_service_json_if_owned",
     "service_json_path",
@@ -95,39 +98,6 @@ __all__ = [
 HEARTBEAT_REFRESH_SECONDS = 15
 
 _SERVICE_JSON_NAME = "service.json"
-
-# What this module leaves on disk, and who is answerable for it afterwards.
-# Both records are session-scoped in intent: they describe a running gateway and
-# are meaningless once it exits. Enforcement is currently partial, and the
-# mechanism text says so rather than implying a reaper that does not exist - a
-# record outliving its process is exactly how a pre-feature discovery file was
-# read as a live unauthenticated gateway two days after the process died.
-SERVICE_DISCOVERY_DECLARATION = ArtifactDeclaration(
-    name="service-discovery-record",
-    root="<a2a_home>/service.json",
-    owner="lifecycle.discovery",
-    disposition=RetentionDisposition.SESSION_SCOPED,
-    mechanism=(
-        "removed by remove_service_json_if_owned on a clean exit; NOT removed on "
-        "a crash, so a stale record can outlive its gateway indefinitely"
-    ),
-)
-
-SERVICE_CREDENTIAL_DECLARATION = ArtifactDeclaration(
-    name="service-handoff-credential",
-    root="<a2a_home>/service.token",
-    owner="lifecycle.discovery",
-    disposition=RetentionDisposition.SESSION_SCOPED,
-    mechanism=(
-        "replaced on each authenticated publication and unlinked by a deliberate "
-        "tokenless un-publish; shares the discovery record's crash exposure"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    SERVICE_DISCOVERY_DECLARATION,
-    SERVICE_CREDENTIAL_DECLARATION,
-)
 
 
 class DiscoveryState(StrEnum):
@@ -176,44 +146,43 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
         if candidate != expected or path_is_link_like(candidate):
             return None
         with directory_lease(authority) as leased:
-            if path_is_link_like(expected):
-                return None
-            if os.name == "posix":
-                if leased.dir_fd is None or not hasattr(os, "O_NOFOLLOW"):
-                    return None
-                descriptor = os.open(
-                    "service.token",
-                    unfollowed_read_flags(),
-                    dir_fd=leased.dir_fd,
-                )
-                named = os.stat(
-                    "service.token", dir_fd=leased.dir_fd, follow_symlinks=False
-                )
-            else:
-                # Shares DELETE: a plain `os.open` here would block the very
-                # publication this read is checking against, for as long as the
-                # read holds the file.
-                descriptor = open_shared_read_descriptor(expected)
-                named = expected.stat(follow_symlinks=False)
-            try:
-                opened = os.fstat(descriptor)
-                if not confirm_opened_secret(descriptor, named=named, path=expected):
-                    return None
-                with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
-                    descriptor = -1
-                    token = handle.read().strip()
-                assert_directory_authority(leased)
-                named_after = expected.stat(follow_symlinks=False)
-                if path_is_link_like(expected) or (
-                    named_after.st_dev,
-                    named_after.st_ino,
-                ) != (opened.st_dev, opened.st_ino):
-                    return None
-            finally:
-                if descriptor >= 0:
-                    os.close(descriptor)
+            return _read_leased_credential(leased, expected)
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def _read_leased_credential(leased: DirectoryAuthority, expected: Path) -> str | None:
+    """Read one verified token while holding its parent directory authority."""
+    if path_is_link_like(expected):
+        return None
+    if os.name == "posix":
+        if leased.dir_fd is None or not hasattr(os, "O_NOFOLLOW"):
+            return None
+        descriptor = os.open(
+            "service.token", unfollowed_read_flags(), dir_fd=leased.dir_fd
+        )
+        named = os.stat("service.token", dir_fd=leased.dir_fd, follow_symlinks=False)
+    else:
+        # DELETE sharing keeps a credential read from blocking publication.
+        descriptor = open_shared_read_descriptor(expected)
+        named = expected.stat(follow_symlinks=False)
+    try:
+        opened = os.fstat(descriptor)
+        if not confirm_opened_secret(descriptor, named=named, path=expected):
+            return None
+        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+            descriptor = -1
+            token = handle.read().strip()
+        assert_directory_authority(leased)
+        named_after = expected.stat(follow_symlinks=False)
+        if path_is_link_like(expected) or (
+            named_after.st_dev,
+            named_after.st_ino,
+        ) != (opened.st_dev, opened.st_ino):
+            return None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     return token or None
 
 
@@ -244,82 +213,85 @@ def _publish_credential(path: Path, payload: bytes) -> Path:
     raise last
 
 
+def _remove_existing_credential(leased: DirectoryAuthority, destination: Path) -> None:
+    if path_is_link_like(destination):
+        raise OSError("credential destination is link-like")
+    try:
+        metadata = destination.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISREG(metadata.st_mode):
+        raise OSError("credential destination is not a regular file")
+    destination.unlink()
+    assert_directory_authority(leased)
+
+
+def _claim_credential_source(
+    leased: DirectoryAuthority, source_name: str
+) -> tuple[BinaryIO, bool]:
+    if os.name != "nt":
+        try:
+            return create_anonymous_file(leased), True
+        except OSError:
+            pass
+    return create_private_file(leased, source_name), False
+
+
+def _publish_posix_credential(
+    leased: DirectoryAuthority, handle: BinaryIO, source_name: str
+) -> None:
+    if leased.dir_fd is None:
+        raise OSError("POSIX credential authority is not leased")
+    os.link(
+        source_name,
+        "service.token",
+        src_dir_fd=leased.dir_fd,
+        dst_dir_fd=leased.dir_fd,
+        follow_symlinks=False,
+    )
+    opened = os.fstat(handle.fileno())
+    published = os.stat("service.token", dir_fd=leased.dir_fd, follow_symlinks=False)
+    if not stat.S_ISREG(published.st_mode) or (
+        published.st_dev,
+        published.st_ino,
+    ) != (opened.st_dev, opened.st_ino):
+        os.unlink("service.token", dir_fd=leased.dir_fd)
+        raise OSError("credential publication identity changed")
+    os.unlink(source_name, dir_fd=leased.dir_fd)
+
+
+def _publish_credential_source(
+    leased: DirectoryAuthority,
+    handle: BinaryIO,
+    source_name: str,
+    anonymous: bool,
+) -> None:
+    if os.name == "nt" or anonymous:
+        publish_no_replace(
+            leased, source_name, "service.token", source_fd=handle.fileno()
+        )
+        if os.name == "nt":
+            # Restrict the published name after rename to avoid sharing conflicts.
+            _restrict_windows_file(leased.path / "service.token")
+    else:
+        _publish_posix_credential(leased, handle, source_name)
+
+
 def _replace_private_credential(path: Path, payload: bytes) -> Path:
     """Replace the adjacent credential through one leased parent authority."""
     authority = resolve_directory_authority(path.parent)
-    destination_name = "service.token"
-    destination = authority.path / destination_name
+    destination = authority.path / "service.token"
     with directory_lease(authority, publication=True) as leased:
-        if path_is_link_like(destination):
-            raise OSError("credential destination is link-like")
-        try:
-            metadata = destination.stat(follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        else:
-            if not stat.S_ISREG(metadata.st_mode):
-                raise OSError("credential destination is not a regular file")
-            destination.unlink()
-            assert_directory_authority(leased)
-
-        anonymous = False
-        if os.name == "nt":
-            source_name = f".service-token-{os.getpid()}-{secrets.token_hex(16)}"
-            handle = create_private_file(leased, source_name)
-        else:
-            source_name = f".service-token-{os.getpid()}-{secrets.token_hex(16)}"
-            try:
-                handle = create_anonymous_file(leased)
-                anonymous = True
-            except OSError:
-                handle = create_private_file(leased, source_name)
+        _remove_existing_credential(leased, destination)
+        source_name = f".service-token-{os.getpid()}-{secrets.token_hex(16)}"
+        handle, anonymous = _claim_credential_source(leased, source_name)
         try:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
             if os.name == "posix":
                 os.fchmod(handle.fileno(), 0o600)
-            if os.name == "nt" or anonymous:
-                publish_no_replace(
-                    leased,
-                    source_name,
-                    destination_name,
-                    source_fd=handle.fileno(),
-                )
-                if os.name == "nt":
-                    # Restrict the PUBLISHED file, not the source.
-                    # `SetNamedSecurityInfoW` opens by NAME, and doing that to
-                    # the source between creating it and renaming it put a
-                    # second opener on the exact file the rename needs
-                    # delete-class access to - a sharing violation the publisher
-                    # then took the blame for. Deferring exposes nothing: the
-                    # credential only ever exists inside the parent authority,
-                    # which this module restricts and verifies before writing
-                    # anything into it.
-                    _restrict_windows_file(leased.path / destination_name)
-            else:
-                if leased.dir_fd is None:
-                    raise OSError("POSIX credential authority is not leased")
-                os.link(
-                    source_name,
-                    destination_name,
-                    src_dir_fd=leased.dir_fd,
-                    dst_dir_fd=leased.dir_fd,
-                    follow_symlinks=False,
-                )
-                opened = os.fstat(handle.fileno())
-                published = os.stat(
-                    destination_name,
-                    dir_fd=leased.dir_fd,
-                    follow_symlinks=False,
-                )
-                if not stat.S_ISREG(published.st_mode) or (
-                    published.st_dev,
-                    published.st_ino,
-                ) != (opened.st_dev, opened.st_ino):
-                    os.unlink(destination_name, dir_fd=leased.dir_fd)
-                    raise OSError("credential publication identity changed")
-                os.unlink(source_name, dir_fd=leased.dir_fd)
+            _publish_credential_source(leased, handle, source_name, anonymous)
         finally:
             handle.close()
             if not anonymous:
@@ -383,7 +355,7 @@ def is_pid_alive(pid: int | None) -> bool:
     contract: an ``OpenProcess`` exit-code query on Windows, and on POSIX a
     signal-0 probe that discounts an unreaped zombie.
     """
-    from ..utils.process import pid_is_live
+    from ..utils._process_tree import pid_is_live
 
     if pid is None:
         return False
@@ -429,15 +401,18 @@ def _harden_record_parent(parent: Path) -> None:
     _harden_credential_path(resolve_directory_authority(parent).path)
 
 
-def write_service_json(
-    path: Path,
-    *,
-    port: int,
-    pid: int,
-    service_token: str | None = None,
-    now_ms: int | None = None,
-    allow_tokenless: bool = False,
-) -> None:
+class _ServiceWriteOptional(TypedDict, total=False):
+    service_token: str | None
+    now_ms: int | None
+    allow_tokenless: bool
+
+
+class _ServiceWriteArgs(_ServiceWriteOptional):
+    port: int
+    pid: int
+
+
+def write_service_json(path: Path, **kwargs: Unpack[_ServiceWriteArgs]) -> None:
     """Atomically publish the discovery record with a fresh heartbeat.
 
     Writes to a sibling temp file then ``os.replace`` so a concurrent reader
@@ -455,6 +430,11 @@ def write_service_json(
     Raises:
         ValueError: If *service_token* is absent and *allow_tokenless* is not set.
     """
+    port = kwargs["port"]
+    pid = kwargs["pid"]
+    service_token = kwargs.get("service_token")
+    now_ms = kwargs.get("now_ms")
+    allow_tokenless = kwargs.get("allow_tokenless", False)
     if not service_token and not allow_tokenless:
         raise ValueError(
             "refusing to publish a discovery record without a service token: "
@@ -591,7 +571,7 @@ class DesktopDiscoveryState(StrEnum):
     ABSENT = "absent"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class DesktopDiscoveryRecord:
     """A parsed versioned desktop discovery record. Carries no credential value.
 
@@ -600,18 +580,129 @@ class DesktopDiscoveryRecord:
     ``None`` on platforms without a cheap process start-time source.
     """
 
-    version: int
-    profile: str
-    generation: str
-    protocol_min: int
-    protocol_max: int
-    pid: int
-    start_fingerprint: str | None
-    host: str
-    port: int
-    last_heartbeat: int
-    owner: str
-    credential_reference: str | None
+    _identity: DesktopRecordIdentity
+    _protocol: DesktopRecordProtocol
+    _process: DesktopRecordProcess
+    _endpoint: DesktopRecordEndpoint
+    _state: DesktopRecordState
+
+    def __init__(
+        self,
+        *args: object,
+        **options: Unpack[DesktopDiscoveryRecordOptions],
+    ) -> None:
+        values = bind_desktop_record_fields(args, options)
+        object.__setattr__(
+            self,
+            "_identity",
+            DesktopRecordIdentity(
+                version=cast(
+                    "int", required_desktop_record_field("version", values[0])
+                ),
+                profile=cast(
+                    "str", required_desktop_record_field("profile", values[1])
+                ),
+                generation=cast(
+                    "str", required_desktop_record_field("generation", values[2])
+                ),
+                owner=cast("str", required_desktop_record_field("owner", values[10])),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_protocol",
+            DesktopRecordProtocol(
+                protocol_min=cast(
+                    "int",
+                    required_desktop_record_field("protocol_min", values[3]),
+                ),
+                protocol_max=cast(
+                    "int",
+                    required_desktop_record_field("protocol_max", values[4]),
+                ),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_process",
+            DesktopRecordProcess(
+                pid=cast("int", required_desktop_record_field("pid", values[5])),
+                start_fingerprint=cast(
+                    "str | None",
+                    required_desktop_record_field("start_fingerprint", values[6]),
+                ),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_endpoint",
+            DesktopRecordEndpoint(
+                host=cast("str", required_desktop_record_field("host", values[7])),
+                port=cast("int", required_desktop_record_field("port", values[8])),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_state",
+            DesktopRecordState(
+                last_heartbeat=cast(
+                    "int",
+                    required_desktop_record_field("last_heartbeat", values[9]),
+                ),
+                credential_reference=cast(
+                    "str | None",
+                    required_desktop_record_field("credential_reference", values[11]),
+                ),
+            ),
+        )
+
+    @property
+    def version(self) -> int:
+        return self._identity.version
+
+    @property
+    def profile(self) -> str:
+        return self._identity.profile
+
+    @property
+    def generation(self) -> str:
+        return self._identity.generation
+
+    @property
+    def protocol_min(self) -> int:
+        return self._protocol.protocol_min
+
+    @property
+    def protocol_max(self) -> int:
+        return self._protocol.protocol_max
+
+    @property
+    def pid(self) -> int:
+        return self._process.pid
+
+    @property
+    def start_fingerprint(self) -> str | None:
+        return self._process.start_fingerprint
+
+    @property
+    def host(self) -> str:
+        return self._endpoint.host
+
+    @property
+    def port(self) -> int:
+        return self._endpoint.port
+
+    @property
+    def last_heartbeat(self) -> int:
+        return self._state.last_heartbeat
+
+    @property
+    def owner(self) -> str:
+        return self._identity.owner
+
+    @property
+    def credential_reference(self) -> str | None:
+        return self._state.credential_reference
 
     @property
     def base_url(self) -> str:
@@ -623,27 +714,12 @@ class DesktopDiscoveryRecord:
         return self.protocol_min <= version <= self.protocol_max
 
 
-def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | None:
-    """Map a parsed record dict to a versioned desktop record, or ``None``.
-
-    Fail-closed: an absent or unknown ``version``, a non-``desktop`` profile, or
-    any missing required identity/endpoint field yields ``None`` (classified
-    ``MALFORMED``) rather than a partially trusted record.
-    """
-    if info.get("version") != DESKTOP_DISCOVERY_VERSION:
-        return None
-    if info.get("profile") != _DESKTOP_PROFILE:
-        return None
-    protocol_raw = info.get("protocol")
-    process_raw = info.get("process")
-    endpoint_raw = info.get("endpoint")
-    if not isinstance(protocol_raw, dict) or not isinstance(process_raw, dict):
-        return None
-    if not isinstance(endpoint_raw, dict):
-        return None
-    protocol = cast("dict[str, object]", protocol_raw)
-    process = cast("dict[str, object]", process_raw)
-    endpoint = cast("dict[str, object]", endpoint_raw)
+def _desktop_record_numbers(
+    protocol: dict[str, object],
+    process: dict[str, object],
+    endpoint: dict[str, object],
+    info: dict[str, object],
+) -> tuple[int, int, int, int, int] | None:
     protocol_min = coerce_int(protocol.get("min"))
     protocol_max = coerce_int(protocol.get("max"))
     pid = coerce_int(process.get("pid"))
@@ -659,19 +735,37 @@ def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | N
         return None
     if protocol_min > protocol_max:
         return None
+    return protocol_min, protocol_max, pid, port, last_heartbeat
+
+
+def _desktop_record_identity(
+    info: dict[str, object], process: dict[str, object], endpoint: dict[str, object]
+) -> tuple[str, str, str, str | None, str | None] | None:
     host = endpoint.get("host")
     owner = info.get("owner")
     generation = info.get("generation")
-    if not isinstance(host, str) or not host:
-        return None
-    if not isinstance(owner, str) or not isinstance(generation, str):
+    if (
+        not isinstance(host, str)
+        or not host
+        or not isinstance(owner, str)
+        or not isinstance(generation, str)
+    ):
         return None
     fingerprint = process.get("start_fingerprint")
-    if fingerprint is not None and not isinstance(fingerprint, str):
-        return None
     reference = info.get("credential_reference")
-    if reference is not None and not isinstance(reference, str):
+    if (fingerprint is not None and not isinstance(fingerprint, str)) or (
+        reference is not None and not isinstance(reference, str)
+    ):
         return None
+    return host, owner, generation, fingerprint, reference
+
+
+def _desktop_record_from_parts(
+    numbers: tuple[int, int, int, int, int],
+    identity: tuple[str, str, str, str | None, str | None],
+) -> DesktopDiscoveryRecord:
+    protocol_min, protocol_max, pid, port, last_heartbeat = numbers
+    host, owner, generation, fingerprint, reference = identity
     return DesktopDiscoveryRecord(
         version=DESKTOP_DISCOVERY_VERSION,
         profile=_DESKTOP_PROFILE,
@@ -688,12 +782,37 @@ def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | N
     )
 
 
-def read_desktop_discovery(path: Path) -> DesktopDiscoveryRecord | None:
-    """Read and validate a versioned desktop discovery record, or ``None``."""
-    info = read_service_json(path)
-    if info is None:
+def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | None:
+    """Map a parsed record dict to a versioned desktop record, or ``None``.
+
+    Fail-closed: an absent or unknown ``version``, a non-``desktop`` profile, or
+    any missing required identity/endpoint field yields ``None`` (classified
+    ``MALFORMED``) rather than a partially trusted record.
+    """
+    if (
+        info.get("version") != DESKTOP_DISCOVERY_VERSION
+        or info.get("profile") != _DESKTOP_PROFILE
+    ):
         return None
-    return _parse_desktop_record(info)
+    protocol_raw = info.get("protocol")
+    process_raw = info.get("process")
+    endpoint_raw = info.get("endpoint")
+    if not (
+        isinstance(protocol_raw, dict)
+        and isinstance(process_raw, dict)
+        and isinstance(endpoint_raw, dict)
+    ):
+        return None
+    protocol = cast("dict[str, object]", protocol_raw)
+    process = cast("dict[str, object]", process_raw)
+    endpoint = cast("dict[str, object]", endpoint_raw)
+    numbers = _desktop_record_numbers(protocol, process, endpoint, info)
+    if numbers is None:
+        return None
+    identity = _desktop_record_identity(info, process, endpoint)
+    if identity is None:
+        return None
+    return _desktop_record_from_parts(numbers, identity)
 
 
 def classify_desktop_discovery(
@@ -740,19 +859,24 @@ def desktop_record_process_is_live(record: DesktopDiscoveryRecord) -> bool:
     return current == record.start_fingerprint
 
 
+class _DesktopWriteOptional(TypedDict, total=False):
+    credential_reference: str | None
+    host: str
+    protocol_min: int
+    protocol_max: int
+    pid: int | None
+    start_fingerprint: str | None
+    now_ms: int | None
+
+
+class _DesktopWriteArgs(_DesktopWriteOptional):
+    generation: str
+    port: int
+    owner: str
+
+
 def write_desktop_discovery(
-    path: Path,
-    *,
-    generation: str,
-    port: int,
-    owner: str,
-    credential_reference: str | None = None,
-    host: str = "127.0.0.1",
-    protocol_min: int = DESKTOP_PROTOCOL_MIN,
-    protocol_max: int = DESKTOP_PROTOCOL_MAX,
-    pid: int | None = None,
-    start_fingerprint: str | None = None,
-    now_ms: int | None = None,
+    path: Path, **kwargs: Unpack[_DesktopWriteArgs]
 ) -> DesktopDiscoveryRecord:
     """Atomically publish the versioned desktop discovery record and return it.
 
@@ -764,6 +888,16 @@ def write_desktop_discovery(
     """
     from .singleton import current_process_fingerprint
 
+    generation = kwargs["generation"]
+    port = kwargs["port"]
+    owner = kwargs["owner"]
+    credential_reference = kwargs.get("credential_reference")
+    host = kwargs.get("host", "127.0.0.1")
+    protocol_min = kwargs.get("protocol_min", DESKTOP_PROTOCOL_MIN)
+    protocol_max = kwargs.get("protocol_max", DESKTOP_PROTOCOL_MAX)
+    pid = kwargs.get("pid")
+    start_fingerprint = kwargs.get("start_fingerprint")
+    now_ms = kwargs.get("now_ms")
     resolved_pid = pid if pid is not None else os.getpid()
     fingerprint = (
         start_fingerprint

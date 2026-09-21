@@ -29,8 +29,6 @@ from typing import cast
 
 __all__ = [
     "ProviderCondition",
-    "acp_mapped_error_kinds",
-    "codex_mapped_error_infos",
     "condition_from_acp_error",
     "condition_from_codex_error_info",
     "condition_from_codex_turn_error",
@@ -265,18 +263,6 @@ _ACP_CODE_CONDITIONS: Mapping[int, ProviderCondition] = {
 }
 
 
-def acp_mapped_error_kinds() -> frozenset[str]:
-    """Return the ACP error kinds this module resolves explicitly.
-
-    Exposed so coverage can assert that every kind the INSTALLED adapter can
-    emit has a considered entry here. Totality alone is too weak a property to
-    test for - the floor makes every input return something - so the meaningful
-    question is whether a kind reaches its member by decision or by falling
-    through, and this set is what distinguishes the two.
-    """
-    return frozenset(_ACP_KIND_CONDITIONS)
-
-
 def condition_from_acp_error(error: object) -> ProviderCondition:
     """Resolve one ACP JSON-RPC error object into a provider condition.
 
@@ -392,19 +378,6 @@ _CODEX_HTTP_STATUS_CONDITIONS: Mapping[int, ProviderCondition] = {
 # failed, not that it is over capacity, and this lane names overload explicitly
 # when it means it; inferring overload from a status would put a wait-and-retry
 # remedy in front of a client on evidence the wire never gave.
-
-
-def codex_mapped_error_infos() -> frozenset[str]:
-    """Return the Codex error-info variants this module resolves explicitly.
-
-    Covers both shapes the discriminator takes - the bare categorical strings
-    and the keys of the object variants - so coverage can assert that every
-    variant the INSTALLED app-server schema declares was decided here rather
-    than left to fall through to the floor.
-    """
-    return frozenset(_CODEX_ERROR_INFO_CONDITIONS) | frozenset(
-        _CODEX_OBJECT_INFO_CONDITIONS
-    )
 
 
 def _codex_http_status_condition(payload: object) -> ProviderCondition | None:

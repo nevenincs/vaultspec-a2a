@@ -35,14 +35,12 @@ import pytest
 from ...thread.errors import ConfigError
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
-from .._acp_mcp import codex_mcp_server_specs, declared_harness_tools
+from .._acp_mcp import codex_mcp_server_specs
 from .._codex_config_home import (
-    _SPEC_LAUNCH_KEYS,
-    _SPEC_SURFACE_KEYS,
-    _SPEC_VARIANT_KEYS,
     registry_tools_divergence,
     render_codex_config_toml,
 )
+from .._harness_mcp_registry import declared_harness_tools
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -185,26 +183,3 @@ def test_the_bridge_rides_beside_a_registry_server_in_one_render() -> None:
     both = [_with_tools(rag, _WRITE_VERBS), bridge]
     with pytest.raises(ConfigError, match="registry entry declares"):
         render_codex_config_toml(both, web_search=CodexWebSearchMode.DISABLED)
-
-
-def test_the_compared_fields_partition_what_the_producer_emits() -> None:
-    """Every field a Codex spec carries is classified, so none goes uncompared.
-
-    Asserted against the keys ``codex_mcp_server_specs`` actually produces rather
-    than against a union of the three constants, which would agree with itself no
-    matter what the producer did. A field added to the Codex serialization lands
-    here as a failure until someone decides which part it belongs to - which is
-    the review ``tools`` never got.
-    """
-    surface, launch, variant = (
-        set(_SPEC_SURFACE_KEYS),
-        set(_SPEC_LAUNCH_KEYS),
-        set(_SPEC_VARIANT_KEYS),
-    )
-
-    assert surface.isdisjoint(launch)
-    assert surface.isdisjoint(variant)
-    assert launch.isdisjoint(variant)
-
-    [pinned] = codex_mcp_server_specs([_RAG], project_root="Y:/proj")
-    assert set(pinned) == surface | launch | variant

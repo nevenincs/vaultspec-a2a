@@ -17,7 +17,6 @@ def test_expired_uncertain_commit_releases_capacity() -> None:
         required_roles=("vaultspec-coder",),
         binding_digest="a" * 64,
         expires_monotonic=10.0,
-        expires_at_iso="bounded",
         state=ReservationState.COMMITTING,
     )
     broker._reservations[uncertain.reservation_id] = uncertain
@@ -38,7 +37,6 @@ async def test_release_uses_client_binding_not_canonical_commit_binding() -> Non
         binding_digest="canonical-selection",
         release_digest="client-selection-with-omitted-default",
         expires_monotonic=10.0,
-        expires_at_iso="bounded",
     )
     broker._reservations[reservation.reservation_id] = reservation
 
@@ -62,7 +60,6 @@ async def test_failed_commit_cleanup_uses_canonical_binding() -> None:
         binding_digest="canonical-selection",
         release_digest="client-selection-with-omitted-default",
         expires_monotonic=10.0,
-        expires_at_iso="bounded",
     )
     broker._reservations[reservation.reservation_id] = reservation
 

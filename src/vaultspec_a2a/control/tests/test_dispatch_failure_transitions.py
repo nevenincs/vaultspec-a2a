@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,23 +18,32 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...api.tests.clarification_harness import park_clarification
 from ...conftest import materialize_schema
+from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.clarification_service import respond_to_clarification
+from ...control.clarification_service import (
+    ClarificationRuntime,
+    respond_to_clarification,
+)
+from ...control.dispatch_receipts import prepare_graph_action_receipt
+from ...control.execution_authority import resolve_execution_authority
 from ...control.message_service import send_followup_message
 from ...control.repair_transitions import apply_dispatch_failure
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
+    create_control_action,
     create_thread,
     get_thread,
 )
+from ...ipc.schemas import DispatchRequest
 from ...providers.conditions import ProviderCondition
+from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
 from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
@@ -73,6 +83,44 @@ def _active_project_metadata() -> str:
     return current_execution_metadata(Path(_ACTIVE_PROJECT))
 
 
+async def _seed_accepted_initial_action(
+    session: AsyncSession, thread_id: str, *, workspace: Path | None = None
+) -> None:
+    thread = await get_thread(session, thread_id)
+    assert thread is not None
+    metadata = thread.thread_metadata or _active_project_metadata()
+    workspace = workspace or Path(_ACTIVE_PROJECT)
+    dispatch = DispatchRequest(
+        dispatch_id=thread.writer_action_receipt_id,
+        action="ingest",
+        thread_id=thread_id,
+        content="initial fixture",
+        workspace_root=str(workspace),
+        team_preset="mock-success-single",
+        graph_definition=freeze_graph_definition(
+            load_team_config("mock-success-single", workspace_root=workspace),
+            workspace_root=workspace,
+        ),
+        model_assignment=resolve_execution_authority(metadata).model_assignment,
+        recursion_limit=25,
+    )
+    await create_control_action(
+        session,
+        thread_id=thread_id,
+        action_type=thread.writer_action_type,
+        idempotency_key=f"thread-create:{thread_id}",
+        dispatch_id=thread.writer_action_receipt_id,
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+        payload=freeze_accepted_input(dispatch, intent={"content": "initial fixture"}),
+    )
+    assert (
+        await prepare_graph_action_receipt(
+            session, thread_id=thread_id, dispatch_id=thread.writer_action_receipt_id
+        )
+        is not None
+    )
+
+
 @pytest.mark.asyncio
 async def test_ambiguous_followup_failure_preserves_redrive_eligibility(
     session_factory: async_sessionmaker[AsyncSession],
@@ -87,6 +135,7 @@ async def test_ambiguous_followup_failure_preserves_redrive_eligibility(
             execution_readiness="healthy",
             metadata=_active_project_metadata(),
         )
+        await _seed_accepted_initial_action(session, thread.id)
         await session.commit()
 
     spawner = LazyWorkerSpawner(
@@ -151,6 +200,7 @@ async def test_a_definitely_undelivered_followup_records_why_it_did_not_arrive(
             execution_readiness="healthy",
             metadata=_active_project_metadata(),
         )
+        await _seed_accepted_initial_action(session, thread.id)
         await session.commit()
 
     spawner = LazyWorkerSpawner(
@@ -309,6 +359,7 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
                 execution_readiness="paused_resumable",
                 metadata=current_execution_metadata(tmp_path),
             )
+            await _seed_accepted_initial_action(session, thread_id, workspace=tmp_path)
             await session.commit()
 
         spawner = LazyWorkerSpawner(
@@ -335,12 +386,9 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
                     request_id=parked.request.request_id,
                     answers={"provider": "codex"},
                 ),
-                checkpointer=checkpointer,
-                worker_client=client,
-                circuit_breaker=circuit_breaker,
-                worker_spawner=spawner,
-                recursion_limit=1,
-                trace_headers=None,
+                runtime=ClarificationRuntime(
+                    checkpointer, client, circuit_breaker, spawner, 1, None
+                ),
             )
 
     assert result.dispatched is False

@@ -1,6 +1,7 @@
 """Focused replay/idempotency tests for worker->gateway event handlers."""
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -17,10 +18,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
+from ...control._permission_response_contract import permission_response_action_key
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import (
@@ -28,7 +28,6 @@ from ...control.event_handlers import (
     _handle_progress_event,
     _handle_terminal_event,
 )
-from ...control.permission_service import permission_response_action_key
 from ...database import (
     ThreadStatusElectionOutcome,
     acquire_control_action_lease,
@@ -46,6 +45,7 @@ from ...database.models import ControlActionModel, RunWriteAuthority, ThreadMode
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
@@ -53,15 +53,20 @@ from ...thread.executable_graph import freeze_graph_definition
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 
 
+@dataclass(frozen=True, slots=True)
+class _SeedActionSpec:
+    action_type: ControlActionType
+    idempotency_key: str
+    request_id: str | None = None
+    completed: bool = False
+
+
 async def _seed_unapplied_leased_action(
     session: AsyncSession,
     checkpointer: InMemorySaver,
     *,
     thread_id: str,
-    action_type: ControlActionType,
-    idempotency_key: str,
-    request_id: str | None = None,
-    completed: bool = False,
+    spec: _SeedActionSpec,
 ) -> tuple[ControlActionModel, GraphActionReceipt, str]:
     """Create current accepted graph authority and its unapplied lease."""
     dispatch_id = uuid4().hex
@@ -70,7 +75,7 @@ async def _seed_unapplied_leased_action(
         workspace_root=Path.cwd(),
     )
     intent: dict[str, object]
-    if action_type is ControlActionType.MESSAGE_FOLLOWUP_REQUESTED:
+    if spec.action_type is ControlActionType.MESSAGE_FOLLOWUP_REQUESTED:
         dispatch = DispatchRequest(
             dispatch_id=dispatch_id,
             action="ingest",
@@ -85,7 +90,7 @@ async def _seed_unapplied_leased_action(
             "content": "current follow-up",
             "agent_id": dispatch.agent_id,
         }
-    elif action_type is ControlActionType.PERMISSION_RESPONSE_SUBMITTED:
+    elif spec.action_type is ControlActionType.PERMISSION_RESPONSE_SUBMITTED:
         dispatch = DispatchRequest(
             dispatch_id=dispatch_id,
             action="resume",
@@ -98,15 +103,16 @@ async def _seed_unapplied_leased_action(
         )
         intent = {"option_id": "allow_once", "notes": None}
     else:
-        raise ValueError(f"unsupported graph action fixture: {action_type}")
+        raise ValueError(f"unsupported graph action fixture: {spec.action_type}")
     action = await create_control_action(
         session,
         thread_id=thread_id,
-        action_type=action_type,
-        idempotency_key=idempotency_key,
-        request_id=request_id,
+        action_type=spec.action_type,
+        idempotency_key=spec.idempotency_key,
+        request_id=spec.request_id,
         dispatch_id=dispatch_id,
         payload=freeze_accepted_input(dispatch, intent=intent),
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     thread = await session.get(ThreadModel, thread_id)
     assert thread is not None
@@ -118,7 +124,7 @@ async def _seed_unapplied_leased_action(
         status=expectation.status,
         successor=successor_thread_write_authority(
             expectation,
-            action_type=action_type,
+            action_type=spec.action_type,
             action_receipt_id=dispatch_id,
         ),
     )
@@ -134,7 +140,7 @@ async def _seed_unapplied_leased_action(
         "active_graph_action_receipt": receipt.model_dump(mode="json"),
         "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
     }
-    if completed:
+    if spec.completed:
         completion = GraphCompletionReceipt(
             schema_version="graph-completion-v1",
             action=receipt,
@@ -147,7 +153,7 @@ async def _seed_unapplied_leased_action(
         "active_graph_action_receipt": 1,
         "graph_action_receipts": 1,
     }
-    if completed:
+    if spec.completed:
         checkpoint["channel_versions"]["graph_completion_receipts"] = 1
     await checkpointer.aput(
         {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
@@ -182,8 +188,10 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
             session,
             checkpointer,
             thread_id=thread.id,
-            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-            idempotency_key="message:other",
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+                idempotency_key="message:other",
+            ),
         )
         (
             expected,
@@ -193,8 +201,10 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
             session,
             checkpointer,
             thread_id=thread.id,
-            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-            idempotency_key="message:expected",
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+                idempotency_key="message:expected",
+            ),
         )
         await session.commit()
 
@@ -242,8 +252,10 @@ async def test_dispatch_application_receipt_requires_named_durable_checkpoint(
             session,
             checkpointer,
             thread_id=thread.id,
-            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-            idempotency_key="message:missing-checkpoint",
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+                idempotency_key="message:missing-checkpoint",
+            ),
         )
         await session.commit()
 
@@ -320,6 +332,7 @@ async def _seed_current_cancel(
                 ),
                 intent={"cancel": True},
             ),
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         acquired = await acquire_control_action_lease(
             session,
@@ -470,9 +483,11 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
             session,
             checkpointer,
             thread_id=thread.id,
-            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-            idempotency_key=permission_response_action_key(request_id),
-            request_id=request_id,
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+                idempotency_key=permission_response_action_key(request_id),
+                request_id=request_id,
+            ),
         )
         await session.commit()
 
@@ -640,6 +655,7 @@ async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
             request_id=request_id,
             idempotency_key=f"permission-response:{request_id}",
             payload={"option_id": "allow"},
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         assert response.dispatch_id is not None
         election = await elect_thread_status(
@@ -716,9 +732,11 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
             session,
             checkpointer,
             thread_id=thread_id,
-            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-            idempotency_key="message:terminal-proof",
-            completed=True,
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+                idempotency_key="message:terminal-proof",
+                completed=True,
+            ),
         )
         await session.commit()
 
@@ -764,8 +782,10 @@ async def test_failure_evidence_elects_only_its_current_graph_action(
             session,
             checkpointer,
             thread_id=thread.id,
-            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-            idempotency_key="message:exact-failure",
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+                idempotency_key="message:exact-failure",
+            ),
         )
         await session.commit()
     evidence = GraphFailureEvidence(
@@ -870,14 +890,19 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
         assert thread.approval_request_id == request_id
 
 
+@dataclass(frozen=True, slots=True)
+class _RejectionSpec:
+    title: str
+    pause_reason_type: str
+    options: list[dict[str, object]]
+    stamp_thread_rejected: bool
+
+
 async def _answered_rejection(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: InMemorySaver,
     *,
-    title: str,
-    pause_reason_type: str,
-    options: list[dict[str, object]],
-    stamp_thread_rejected: bool,
+    spec: _RejectionSpec,
 ) -> tuple[str, str, str, GraphActionReceipt, str]:
     """Park a thread on a permission the human denied, awaiting settlement.
 
@@ -890,7 +915,7 @@ async def _answered_rejection(
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
-            title=title,
+            title=spec.title,
             status="input_required",
         )
         request_id = f"{thread.id}:perm-reject"
@@ -898,10 +923,10 @@ async def _answered_rejection(
             session,
             request_id=request_id,
             thread_id=thread.id,
-            pause_reason_type=pause_reason_type,
+            pause_reason_type=spec.pause_reason_type,
             description="Approve?",
-            allowed_options=options,
-            tool_call=pause_reason_type,
+            allowed_options=spec.options,
+            tool_call=spec.pause_reason_type,
         )
         await record_permission_response_submission(
             session,
@@ -917,11 +942,13 @@ async def _answered_rejection(
             session,
             checkpointer,
             thread_id=thread.id,
-            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-            idempotency_key=permission_response_action_key(request_id),
-            request_id=request_id,
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+                idempotency_key=permission_response_action_key(request_id),
+                request_id=request_id,
+            ),
         )
-        if stamp_thread_rejected:
+        if spec.stamp_thread_rejected:
             await set_thread_approval_state(
                 session,
                 thread.id,
@@ -984,10 +1011,12 @@ async def test_plan_rejection_survives_the_resolution_projection(
     ) = await _answered_rejection(
         session_factory,
         checkpointer,
-        title="Plan rejection",
-        pause_reason_type="plan_approval_request",
-        options=_PLAN_OPTIONS,
-        stamp_thread_rejected=True,
+        spec=_RejectionSpec(
+            title="Plan rejection",
+            pause_reason_type="plan_approval_request",
+            options=_PLAN_OPTIONS,
+            stamp_thread_rejected=True,
+        ),
     )
 
     await _handle_permission_event(
@@ -1021,10 +1050,12 @@ async def test_generic_progress_does_not_settle_an_answered_permission(
     ) = await _answered_rejection(
         session_factory,
         checkpointer,
-        title="Plan rejection via progress",
-        pause_reason_type="plan_approval_request",
-        options=_PLAN_OPTIONS,
-        stamp_thread_rejected=True,
+        spec=_RejectionSpec(
+            title="Plan rejection via progress",
+            pause_reason_type="plan_approval_request",
+            options=_PLAN_OPTIONS,
+            stamp_thread_rejected=True,
+        ),
     )
 
     await _handle_progress_event(
@@ -1064,10 +1095,12 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     ) = await _answered_rejection(
         session_factory,
         checkpointer,
-        title="Kimi denial via resolution",
-        pause_reason_type="bash",
-        options=_KIMI_OPTIONS,
-        stamp_thread_rejected=False,
+        spec=_RejectionSpec(
+            title="Kimi denial via resolution",
+            pause_reason_type="bash",
+            options=_KIMI_OPTIONS,
+            stamp_thread_rejected=False,
+        ),
     )
     await _handle_permission_event(
         resolved_thread,
@@ -1084,10 +1117,12 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     ) = await _answered_rejection(
         session_factory,
         checkpointer,
-        title="Kimi denial via progress",
-        pause_reason_type="bash",
-        options=_KIMI_OPTIONS,
-        stamp_thread_rejected=False,
+        spec=_RejectionSpec(
+            title="Kimi denial via progress",
+            pause_reason_type="bash",
+            options=_KIMI_OPTIONS,
+            stamp_thread_rejected=False,
+        ),
     )
     await _handle_progress_event(
         progress_thread,

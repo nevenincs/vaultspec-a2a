@@ -20,7 +20,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ....providers._acp_authoring import authoring_allowed_tool_names
-from ....providers._acp_mcp import NATIVE_READ_TOOL_NAMES
+from ....providers._native_read_tools import NATIVE_READ_TOOL_NAMES
 from ...nodes.worker import create_worker_node
 from .test_worker_authoring_wiring import binding, stdio_provider
 

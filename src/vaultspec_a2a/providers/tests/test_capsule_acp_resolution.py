@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...thread.errors import ConfigError
-from ..factory import (
+from .._factory_commands import (
     _CLAUDE_ACP_JS,
     _classify_acp_command,
     capsule_acp_entry,

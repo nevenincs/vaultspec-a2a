@@ -69,6 +69,16 @@ _TEST_NODE_FLOOR: Final = 60
 # that editing an accepted duplicate does not spuriously fail this suite; what
 # fails is a NEW function joining one of these shapes, or a new shape entirely.
 _ACCEPTED: Final[tuple[frozenset[str], ...]] = (
+    # These bind distinct public constructor schemas: action lease fields,
+    # desktop state paths, and discovery records. Each uses the same argument
+    # validation shape, while its field order and defaults belong to its owner.
+    frozenset(
+        {
+            "control/action_lease.py::_bind_legacy_fields",
+            "desktop/profile.py::_bind_desktop_state_paths",
+            "lifecycle/_desktop_discovery_record_parts.py::bind_desktop_record_fields",
+        }
+    ),
     # The PEP 562 lazy-import shim. Each package's map of attribute to module
     # differs; only the lookup-and-import dance is shared. A factory generating
     # these would move the cost from three short readable functions to one

@@ -28,7 +28,7 @@ from ...control.run_start_policy import (
 from ...team.team_config import discover_team_preset_ids, load_team_config
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.errors import ConfigError
-from ..routes.gateway import _summarize_preset
+from ..routes._gateway_action_endpoints import _summarize_preset
 
 
 def _real_preset_ids() -> list[str]:

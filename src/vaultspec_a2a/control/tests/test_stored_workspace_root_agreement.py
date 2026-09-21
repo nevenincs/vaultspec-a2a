@@ -24,14 +24,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
-
 from ...control._thread_metadata import (
     dispatchable_workspace_root,
     workspace_root_from_metadata,
 )
 from ...control.cleanup.executor import _workspace_root_from_thread
 from ...database.models import ThreadModel
+from ...tests._write_authority import make_test_thread_authority_columns
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -123,16 +122,10 @@ def test_the_cleanup_pass_admits_a_real_root_and_agrees_on_its_spelling(
     assert str(resolved) == dispatchable_workspace_root(_stored(str(workspace)))
 
 
-def test_the_cleanup_pass_alone_also_refuses_a_root_that_no_longer_exists(
+def test_cleanup_and_resume_refuse_a_root_that_no_longer_exists(
     tmp_path: Path,
 ) -> None:
-    """The one place cleanup is deliberately stricter, kept because it deletes.
-
-    Containment is judged against a directory. A vanished root must refuse every
-    artifact rather than admit paths under a tree that is gone - while a resume
-    reading the identical bytes still gets a usable project back, because
-    re-siting a run is not the same act as removing files.
-    """
+    """A vanished root cannot ground either cleanup or a new dispatch."""
     gone = tmp_path / "deleted-checkout"
     encoded = _stored(str(gone))
     thread = ThreadModel(
@@ -140,4 +133,4 @@ def test_the_cleanup_pass_alone_also_refuses_a_root_that_no_longer_exists(
     )
 
     assert _workspace_root_from_thread(thread) is None
-    assert dispatchable_workspace_root(encoded) == str(gone)
+    assert dispatchable_workspace_root(encoded) is None

@@ -78,6 +78,15 @@ def _resolve_head_revision() -> str:
     return heads[0]
 
 
+def test_migration_config_carries_the_sqlite_busy_timeout() -> None:
+    """The migration engine receives the configured lock-wait budget."""
+    config = build_migration_config(
+        "sqlite+aiosqlite:///:memory:", sqlite_busy_timeout_ms=73
+    )
+
+    assert config.attributes["sqlite_busy_timeout_ms"] == 73
+
+
 #: The revision an ``upgrade``/``stamp`` to ``head`` must land on. Derived from
 #: the chain rather than hardcoded, so adding a migration needs no edit here.
 _HEAD_REVISION = _resolve_head_revision()

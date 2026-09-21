@@ -10,7 +10,7 @@ independently of the tool surface.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from ..harness import DEFAULT_REQUIRED_TEMPLATES, verify_harness
 
@@ -24,18 +24,14 @@ def _provision(
     rules: bool = True,
     templates: tuple[str, ...] = DEFAULT_REQUIRED_TEMPLATES,
     skills: tuple[str, ...] = (),
-    agents: bool = True,
-    empty_agents: bool = False,
-    mcps: bool = False,
+    agent_state: Literal["complete", "empty", "missing"] = "complete",
 ) -> None:
     """Write a minimal but real ``.vaultspec/`` corpus into *root*.
 
-    ``agents`` lays the agent-definition corpus a real ``vaultspec-core install``
-    produces; ``empty_agents`` creates the directory without content, which is
-    what a partial install leaves and what mere existence checks cannot tell
-    apart from a complete one. ``mcps`` lays the server corpus an install also
-    produces - off by default, because the verifier deliberately does not check
-    it and the tests below prove its presence changes no verdict either way.
+    ``agent_state="complete"`` lays the agent-definition corpus a real
+    ``vaultspec-core install`` produces. ``"empty"`` creates it without content,
+    which is what a partial install leaves and what mere existence checks cannot tell
+    apart from a complete one. ``"missing"`` leaves the directory absent.
     """
     if rules:
         rules_dir = root / ".vaultspec" / "rules"
@@ -49,17 +45,20 @@ def _provision(
         skill_dir = root / ".vaultspec" / "skills" / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
-    if agents or empty_agents:
+    if agent_state != "missing":
         agents_dir = root / ".vaultspec" / "agents"
         agents_dir.mkdir(parents=True, exist_ok=True)
-        if not empty_agents:
+        if agent_state == "complete":
             (agents_dir / "vaultspec-adr-author.md").write_text(
                 "# adr author\n", encoding="utf-8"
             )
-    if mcps:
-        mcps_dir = root / ".vaultspec" / "mcps"
-        mcps_dir.mkdir(parents=True, exist_ok=True)
-        (mcps_dir / "vaultspec-core.json").write_text("{}\n", encoding="utf-8")
+
+
+def _provision_mcps(root: Path) -> None:
+    """Add the optional MCP corpus without changing the harness readiness result."""
+    mcps_dir = root / ".vaultspec" / "mcps"
+    mcps_dir.mkdir(parents=True, exist_ok=True)
+    (mcps_dir / "vaultspec-core.json").write_text("{}\n", encoding="utf-8")
 
 
 def test_fully_provisioned_workspace_is_ready(tmp_path: Path) -> None:
@@ -77,7 +76,7 @@ def test_missing_agents_corpus_is_a_reason(tmp_path: Path) -> None:
     a persona. A workspace without it dispatches an agent working from
     definitions that are simply absent, with nothing anywhere reporting it.
     """
-    _provision(tmp_path, agents=False)
+    _provision(tmp_path, agent_state="missing")
 
     verdict = verify_harness(tmp_path)
 
@@ -99,8 +98,9 @@ def test_workspace_mcps_corpus_changes_no_verdict(tmp_path: Path) -> None:
     with_mcps = tmp_path / "with-mcps"
     without.mkdir()
     with_mcps.mkdir()
-    _provision(without, mcps=False)
-    _provision(with_mcps, mcps=True)
+    _provision(without)
+    _provision(with_mcps)
+    _provision_mcps(with_mcps)
 
     absent = verify_harness(without)
     present = verify_harness(with_mcps)
@@ -119,7 +119,7 @@ def test_an_empty_corpus_directory_is_not_provisioned(tmp_path: Path) -> None:
     as provisioned to anything that only asks whether the path exists - which is
     exactly how a surface degrades silently.
     """
-    _provision(tmp_path, agents=False, empty_agents=True)
+    _provision(tmp_path, agent_state="empty")
 
     verdict = verify_harness(tmp_path)
 

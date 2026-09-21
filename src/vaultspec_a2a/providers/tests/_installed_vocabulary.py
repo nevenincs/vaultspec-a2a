@@ -15,16 +15,17 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 from typing import cast
+
+from ...graph.enums import Provider
+from ..cli_resolution import resolve_provider_cli_executable
 
 __all__ = [
     "MissingInstalledVocabularyError",
     "acp_adapter_error_kinds",
     "acp_error_kinds",
-    "acp_sdk_types_path",
     "codex_error_info_variants",
 ]
 
@@ -123,39 +124,24 @@ def acp_adapter_error_kinds() -> frozenset[str]:
     return frozenset(_ACP_ADAPTER_OWN_KIND.findall(source))
 
 
-def codex_error_info_variants(destination: Path) -> frozenset[str]:
-    """Return the Codex error-info variants the INSTALLED app-server declares.
+def _codex_error_branch_names(raw_branch: object) -> set[str]:
+    """Read string or single-key object variants from one schema branch."""
+    if not isinstance(raw_branch, dict):
+        return set()
+    branch = cast("dict[str, object]", raw_branch)
+    branch_type = branch.get("type")
+    key = "enum" if branch_type == "string" else "required"
+    if branch_type not in {"string", "object"}:
+        return set()
+    members = branch.get(key)
+    if not isinstance(members, list):
+        return set()
+    return {
+        member for member in cast("list[object]", members) if isinstance(member, str)
+    }
 
-    Generated from the binary on the spot rather than read from a committed
-    copy: a checked-in schema records what the protocol looked like when someone
-    last refreshed it, which is the drift this reader exists to detect. The
-    generation writes into *destination*, which the caller owns.
 
-    Both shapes the discriminator takes are returned in one set - the bare
-    categorical strings and the keys of the single-key object variants - because
-    the mapping treats them as one vocabulary.
-    """
-    executable = shutil.which("codex")
-    if executable is None:
-        raise MissingInstalledVocabularyError(
-            "the codex CLI is not on PATH, so the app-server protocol schema "
-            "cannot be generated from the installed binary"
-        )
-    destination.mkdir(parents=True, exist_ok=True)
-    completed = subprocess.run(
-        [executable, "app-server", "generate-json-schema", "--out", str(destination)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise MissingInstalledVocabularyError(
-            "the installed codex CLI could not generate its protocol schema "
-            f"(exit {completed.returncode}): {completed.stderr.strip()[:400]}"
-        )
-
-    schema_path = destination / "codex_app_server_protocol.v2.schemas.json"
+def _parse_codex_error_info_variants(schema_path: Path) -> frozenset[str]:
     try:
         raw_schema: object = json.loads(schema_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -181,25 +167,45 @@ def codex_error_info_variants(destination: Path) -> frozenset[str]:
 
     variants: set[str] = set()
     for raw_branch in cast("list[object]", branches):
-        if not isinstance(raw_branch, dict):
-            continue
-        branch = cast("dict[str, object]", raw_branch)
-        if branch.get("type") == "string":
-            members = branch.get("enum")
-            if isinstance(members, list):
-                variants.update(
-                    m for m in cast("list[object]", members) if isinstance(m, str)
-                )
-        elif branch.get("type") == "object":
-            required = branch.get("required")
-            if isinstance(required, list):
-                variants.update(
-                    name
-                    for name in cast("list[object]", required)
-                    if isinstance(name, str)
-                )
+        variants.update(_codex_error_branch_names(raw_branch))
     if not variants:
         raise MissingInstalledVocabularyError(
             f"the generated CodexErrorInfo union lists no variants in {schema_path}"
         )
     return frozenset(variants)
+
+
+def codex_error_info_variants(destination: Path) -> frozenset[str]:
+    """Return the Codex error-info variants the INSTALLED app-server declares.
+
+    Generated from the binary on the spot rather than read from a committed
+    copy: a checked-in schema records what the protocol looked like when someone
+    last refreshed it, which is the drift this reader exists to detect. The
+    generation writes into *destination*, which the caller owns.
+
+    Both shapes the discriminator takes are returned in one set - the bare
+    categorical strings and the keys of the single-key object variants - because
+    the mapping treats them as one vocabulary.
+    """
+    executable = resolve_provider_cli_executable(Provider.CODEX)
+    if executable is None:
+        raise MissingInstalledVocabularyError(
+            "the codex CLI is not on PATH, so the app-server protocol schema "
+            "cannot be generated from the installed binary"
+        )
+    destination.mkdir(parents=True, exist_ok=True)
+    completed = subprocess.run(
+        [executable, "app-server", "generate-json-schema", "--out", str(destination)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise MissingInstalledVocabularyError(
+            "the installed codex CLI could not generate its protocol schema "
+            f"(exit {completed.returncode}): {completed.stderr.strip()[:400]}"
+        )
+
+    schema_path = destination / "codex_app_server_protocol.v2.schemas.json"
+    return _parse_codex_error_info_variants(schema_path)

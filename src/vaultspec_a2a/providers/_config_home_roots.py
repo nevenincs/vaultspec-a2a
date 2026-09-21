@@ -24,15 +24,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
-
-__all__ = [
-    "ARTIFACT_DECLARATIONS",
-    "ORPHAN_HOME_MIN_AGE_SECONDS",
-    "TEMP_HOME_ROOT_DECLARATION",
-    "sweep_orphan_homes",
-    "temp_home_root",
-]
+__all__ = ["ORPHAN_HOME_MIN_AGE_SECONDS", "sweep_orphan_homes", "temp_home_root"]
 
 logger = logging.getLogger(__name__)
 
@@ -43,32 +35,6 @@ A home carries no owning process id, so age stands in for liveness. The window i
 deliberately generous: deleting a live run's configuration is far worse than
 keeping residue for another cycle.
 """
-
-# ``temp_home_root`` creates this container directory, which is a separate
-# artifact from the homes inside it. Its permanence is deliberate: it is one
-# fixed directory whose contents are what grow, and removing it would race a
-# concurrent run creating a home inside it. The bound that matters lives on the
-# CONTENTS, and it is declared at the seam that builds each home.
-TEMP_HOME_ROOT_DECLARATION = ArtifactDeclaration(
-    name="ephemeral-provider-home-root",
-    root="<desktop_app_home>/tmp/homes/",
-    owner="providers._config_home_roots",
-    disposition=RetentionDisposition.PERMANENT,
-    reason=(
-        "the root exists so an armed desktop install can account for every "
-        "ephemeral home at uninstall and so a system-wide temporary sweep cannot "
-        "delete a live run's home; a container that comes and goes would defeat "
-        "both, and it is created only on the armed profile in the first place"
-    ),
-    mechanism=(
-        "nothing removes the directory itself, and nothing needs to: it is one "
-        "fixed path per application home holding no files of its own. Its "
-        "CONTENTS are bounded by sweep_orphan_homes, declared by each caller "
-        "beside the code that builds a home"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (TEMP_HOME_ROOT_DECLARATION,)
 
 
 def temp_home_root() -> Path | None:
@@ -100,6 +66,18 @@ def temp_home_root() -> Path | None:
         )
         return None
     return declared
+
+
+def _orphan_home_is_collectable(
+    candidate: Path, *, keep: Path | None, cutoff: float
+) -> bool:
+    """Select an old directory while tolerating concurrent removal."""
+    if not candidate.is_dir() or (keep is not None and candidate == keep):
+        return False
+    try:
+        return candidate.stat().st_mtime <= cutoff
+    except OSError:
+        return False
 
 
 def sweep_orphan_homes(
@@ -140,12 +118,7 @@ def sweep_orphan_homes(
     except OSError:
         return removed
     for candidate in candidates:
-        if not candidate.is_dir() or (keep is not None and candidate == keep):
-            continue
-        try:
-            if candidate.stat().st_mtime > cutoff:
-                continue
-        except OSError:
+        if not _orphan_home_is_collectable(candidate, keep=keep, cutoff=cutoff):
             continue
         shutil.rmtree(candidate, ignore_errors=True)
         if not candidate.exists():

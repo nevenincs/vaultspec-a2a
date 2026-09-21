@@ -222,7 +222,7 @@ def _antigravity_installed() -> bool:
 def _antigravity_credentialed() -> bool:
     """The CLI's persisted OAuth login, at the path the lane resolves."""
     from .control.config import settings
-    from .providers.antigravity_cli import antigravity_credential_path
+    from .testing.tests._support.antigravity import antigravity_credential_path
 
     return antigravity_credential_path(home=settings.antigravity_cli_home).is_file()
 

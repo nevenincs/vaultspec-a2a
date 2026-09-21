@@ -32,12 +32,13 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from ...control.worker_management import (
-    LazyWorkerSpawner,
+from ...control._worker_process_stop import _shutdown_worker_process
+from ...control._worker_readiness import (
+    WorkerReadySpec,
     _await_worker_ready,
     _reap_unready_worker,
-    _shutdown_worker_process,
 )
+from ...control.worker_management import LazyWorkerSpawner
 from ...lifecycle.discovery import is_pid_alive
 from ...lifecycle.shutdown import ShutdownDeadline
 from ...utils import kill_pid_tree_async
@@ -178,11 +179,13 @@ async def test_failed_containment_assignment_reaps_exact_tree_and_propagates(
             await _await_worker_ready(
                 process,
                 containment,
-                worker_url="http://127.0.0.1:9",
-                worker_port=9,
-                generation=1,
-                worker_command=["assignment-failure-worker"],
-                stderr_log_path=tmp_path / "assignment-failure.log",
+                WorkerReadySpec(
+                    "http://127.0.0.1:9",
+                    9,
+                    1,
+                    ["assignment-failure-worker"],
+                    tmp_path / "assignment-failure.log",
+                ),
             )
         elapsed = asyncio.get_running_loop().time() - started
         assert elapsed < 15.2, f"assignment-failure reap took {elapsed:.4f}s"

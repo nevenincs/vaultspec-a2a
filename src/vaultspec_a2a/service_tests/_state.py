@@ -17,7 +17,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from ..testing.payloads import json_object, json_object_list
+from ..testing.tests._support.payloads import json_object, json_object_list
 
 if TYPE_CHECKING:
     from collections.abc import Callable

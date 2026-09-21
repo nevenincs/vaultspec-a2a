@@ -217,44 +217,51 @@ def parse_action_detail(raw_args: object) -> dict[str, Any] | None:
     return cast("dict[str, Any]", parsed) if isinstance(parsed, dict) else None
 
 
+def _action_text(text: str) -> list[dict[str, str | None]]:
+    return [{"content_type": "text", "text": text}] if text else []
+
+
+def _command_detail(detail: dict[str, Any]) -> str:
+    command = detail.get("command")
+    exit_code = detail.get("exit_code")
+    parts = [f"$ {command}"] if command else []
+    if exit_code is not None:
+        parts.append(f"(exit {exit_code})")
+    return "\n".join(parts)
+
+
+def _file_change_locations(detail: dict[str, Any]) -> list[dict[str, str | int | None]]:
+    changes: object = detail.get("changes")
+    locations: list[dict[str, str | int | None]] = []
+    if isinstance(changes, list):
+        change_list = cast("list[object]", changes)
+        for change in change_list:
+            if isinstance(change, dict):
+                change_map = cast("dict[str, object]", change)
+                path = change_map.get("path")
+                if isinstance(path, str) and path:
+                    locations.append({"path": path, "line": None})
+    return locations
+
+
+def _mcp_tool_detail(detail: dict[str, Any]) -> str:
+    server = detail.get("server")
+    tool = detail.get("tool")
+    return f"{server}:{tool}" if server and tool else str(tool or server or "")
+
+
 def action_detail_projection(
     item_type: str, detail: dict[str, Any]
 ) -> tuple[list[dict[str, str | None]], list[dict[str, str | int | None]]]:
-    """Project a Codex completed-action detail onto (content, locations).
-
-    Each action item type carries different REQUIRED fields (see
-    ``codex_chat_model._completed_action_chunk``, which reads only the
-    schema-required fields per variant); this mirrors that per-type shape
-    rather than guessing at a common one. ``fileChange`` is the only variant
-    that names a location a frontend could jump to, so it is the only one
-    that returns non-empty locations.
-    """
+    """Project each completed action's required fields onto content and locations."""
     if item_type == "commandExecution":
-        command = detail.get("command")
-        exit_code = detail.get("exit_code")
-        parts = [f"$ {command}"] if command else []
-        if exit_code is not None:
-            parts.append(f"(exit {exit_code})")
-        text = "\n".join(parts)
-        return ([{"content_type": "text", "text": text}] if text else []), []
+        return _action_text(_command_detail(detail)), []
     if item_type == "fileChange":
-        changes: object = detail.get("changes")
-        locations: list[dict[str, str | int | None]] = []
-        if isinstance(changes, list):
-            change_list = cast("list[object]", changes)
-            for change in change_list:
-                if isinstance(change, dict):
-                    change_map = cast("dict[str, object]", change)
-                    path = change_map.get("path")
-                    if isinstance(path, str) and path:
-                        locations.append({"path": path, "line": None})
+        locations = _file_change_locations(detail)
         text = f"{len(locations)} file(s) changed" if locations else ""
-        return ([{"content_type": "text", "text": text}] if text else []), locations
+        return _action_text(text), locations
     if item_type == "mcpToolCall":
-        server = detail.get("server")
-        tool = detail.get("tool")
-        text = f"{server}:{tool}" if server and tool else str(tool or server or "")
-        return ([{"content_type": "text", "text": text}] if text else []), []
+        return _action_text(_mcp_tool_detail(detail)), []
     return [], []
 
 

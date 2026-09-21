@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
-from .factory import (
+from ._factory_commands import (
     classify_provider_command,
     kimi_temporary_model_configuration_reason,
 )
@@ -21,8 +21,6 @@ if TYPE_CHECKING:
     from ..context.harness import HarnessReadiness
 
 __all__ = [
-    "ProviderReadiness",
-    "probe_engine_reachable",
     "probe_harness_ready",
     "probe_provider_readiness",
 ]
@@ -43,6 +41,39 @@ def _has_text(value: str | None) -> bool:
     return bool(value and value.strip())
 
 
+def _api_key_readiness(provider: Provider, key: str | None) -> ProviderReadiness:
+    if _has_text(key):
+        return ProviderReadiness(provider=provider, ready=True)
+    name = "OpenAI" if provider == Provider.OPENAI else "Zhipu"
+    return ProviderReadiness(
+        provider=provider, ready=False, reason=f"no {name} API key configured"
+    )
+
+
+def _zai_readiness() -> ProviderReadiness:
+    if not _has_text(settings.zai_auth_token):
+        return ProviderReadiness(
+            provider=Provider.ZAI, ready=False, reason="no Z.ai auth token configured"
+        )
+    return _command_readiness(Provider.ZAI)
+
+
+def _kimi_readiness() -> ProviderReadiness:
+    # Temporary definitions are checked before any command is resolved. A
+    # missing definition remains eligible for persisted-config/device-session mode.
+    key = settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
+    reason = kimi_temporary_model_configuration_reason(
+        kimi_api_key=key,
+        kimi_base_url=settings.kimi_base_url,
+        kimi_temporary_model_name=settings.kimi_temporary_model_name,
+        kimi_temporary_model_max_context_size=settings.kimi_temporary_model_max_context_size,
+        kimi_temporary_model_capabilities=settings.kimi_temporary_model_capabilities,
+    )
+    if reason is not None:
+        return ProviderReadiness(provider=Provider.KIMI, ready=False, reason=reason)
+    return _command_readiness(Provider.KIMI)
+
+
 def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
     """Report whether ``provider`` is runnable without instantiating anything.
 
@@ -57,70 +88,24 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
         # server is reachable or that it can satisfy the completion floor.
         return ProviderReadiness(provider=provider, ready=True)
 
-    if provider == Provider.CLAUDE:
-        # No credential term, by contract: this layer implements no
-        # authentication and reads no credential. The spawned CLI inherits the
-        # ambient environment and resolves whatever auth the operator has (a
-        # logged-in session, a key in the env); if nothing authenticates it, the
-        # provider itself says so at run time. Readiness is therefore command
-        # resolvability only, the same shape as Codex.
+    if provider in (Provider.CLAUDE, Provider.CODEX):
+        # This layer does not inspect CLI authentication. Claude inherits ambient
+        # auth; Codex uses its persisted session. Both require a resolvable command.
         return _command_readiness(provider)
 
-    if provider == Provider.OPENAI:
-        if not _has_text(settings.openai_api_key):
-            return ProviderReadiness(
-                provider=provider, ready=False, reason="no OpenAI API key configured"
-            )
-        return ProviderReadiness(provider=provider, ready=True)
-
-    if provider == Provider.CODEX:
-        # Codex auth is a file-based persisted session in the Codex home, not a
-        # configured secret, so readiness is command resolvability only — the
-        # probe never spawns the CLI or reads the session file.
-        return _command_readiness(provider)
+    if provider in (Provider.OPENAI, Provider.ZHIPU):
+        key = (
+            settings.openai_api_key
+            if provider == Provider.OPENAI
+            else settings.zhipu_api_key
+        )
+        return _api_key_readiness(provider, key)
 
     if provider == Provider.ZAI:
-        if not _has_text(settings.zai_auth_token):
-            return ProviderReadiness(
-                provider=provider,
-                ready=False,
-                reason="no Z.ai auth token configured",
-            )
-        return _command_readiness(provider)
-
-    if provider == Provider.ZHIPU:
-        if not _has_text(settings.zhipu_api_key):
-            return ProviderReadiness(
-                provider=provider, ready=False, reason="no Zhipu API key configured"
-            )
-        return ProviderReadiness(provider=provider, ready=True)
+        return _zai_readiness()
 
     if provider == Provider.KIMI:
-        # No temporary definition means persisted-config/device-session mode and
-        # is eligible for the later provider-list probe. A complete temporary
-        # definition is also eligible. Partial definitions fail before launch;
-        # neither case is authentication or completed-turn proof.
-        key = (
-            settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
-        )
-        reason = kimi_temporary_model_configuration_reason(
-            kimi_api_key=key,
-            kimi_base_url=settings.kimi_base_url,
-            kimi_temporary_model_name=settings.kimi_temporary_model_name,
-            kimi_temporary_model_max_context_size=(
-                settings.kimi_temporary_model_max_context_size
-            ),
-            kimi_temporary_model_capabilities=(
-                settings.kimi_temporary_model_capabilities
-            ),
-        )
-        if reason is not None:
-            return ProviderReadiness(
-                provider=provider,
-                ready=False,
-                reason=reason,
-            )
-        return _command_readiness(provider)
+        return _kimi_readiness()
 
     return ProviderReadiness(
         provider=provider, ready=False, reason=f"unsupported provider {provider.value}"
@@ -144,18 +129,6 @@ def _command_readiness(provider: Provider) -> ProviderReadiness:
             reason="provider launch command is not installed or resolvable",
         )
     return ProviderReadiness(provider=provider, ready=True)
-
-
-def probe_engine_reachable() -> bool:
-    """Return whether the authoring backend is reachable via the discovery contract.
-
-    Uses the same ``resolve_engine`` attach-never-own discovery + liveness probe
-    the subscriber uses; no secret is returned, only a boolean. Blocking (file
-    read + a short ``/health`` probe); callers on an event loop should offload it.
-    """
-    from ..authoring import resolve_engine
-
-    return resolve_engine() is not None
 
 
 def probe_harness_ready(

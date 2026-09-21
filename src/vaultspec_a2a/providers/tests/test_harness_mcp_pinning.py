@@ -42,20 +42,21 @@ from mcp.client.stdio import stdio_client
 from ...thread.errors import ConfigError
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from .._acp_mcp import (
-    _KNOWN_MCP_SERVERS,
-    _declare_registry,
-    _launch_spec,
-    _require_root_pin,
     _require_trust_root,
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
-    harness_server_root_pin,
     harness_spawn_env,
     pin_harness_mcp_servers,
     resolve_harness_mcp_servers,
 )
 from .._acp_session import session_surface_mcp_servers
 from .._acp_types import AcpModelConfig
+from .._harness_mcp_registry import (
+    _KNOWN_MCP_SERVERS,
+    _declare_registry,
+    _launch_spec,
+    _require_root_pin,
+)
 from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
 
@@ -106,6 +107,122 @@ class _CleanupReceipt:
     late_service_record_observed: bool = False
     process_absent: bool = False
     port_absent: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _CleanupContext:
+    """Owned service state needed by the bounded cleanup operation."""
+
+    owner: _OwnedRagService
+    receipt: _CleanupReceipt
+
+
+@dataclass(frozen=True, slots=True)
+class _RagServiceOptions:
+    """Optional control and cleanup settings for an isolated RAG service."""
+
+    start_timeout_seconds: float = _SERVICE_CONTROL_TIMEOUT_SECONDS
+    cleanup_receipt: _CleanupReceipt | None = None
+    start_control_prefix: tuple[str, ...] = ()
+    stop_control_prefix: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class _IsolatedRagServiceState:
+    """Configuration and mutable lifecycle state for one private service."""
+
+    requirement: str
+    locked_version: str
+    port: int
+    status_dir: Path
+    env: dict[str, str]
+    receipt: _CleanupReceipt
+    operation_deadline: float
+    cleanup_start_deadline: float
+    control_deadline: float
+    start_control_prefix: tuple[str, ...]
+    stop_control_prefix: tuple[str, ...]
+    started: bool = False
+    start_attempted: bool = False
+
+    @property
+    def service_record_path(self) -> Path:
+        return self.status_dir / "service.json"
+
+
+def _isolated_rag_service_state(
+    project_root: Path,
+    sandbox: Path,
+    options: _RagServiceOptions | None,
+) -> _IsolatedRagServiceState:
+    """Prepare isolated service configuration without owning a process yet."""
+    service_options = options or _RagServiceOptions()
+    requirement = _locked_rag_requirement(project_root)
+    port = _reserve_loopback_port()
+    status_dir = sandbox / "service-status"
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PYTEST_") and key != RAG_PIN_VARIABLE
+    }
+    env.update(
+        {
+            "VAULTSPEC_RAG_STATUS_DIR": str(status_dir),
+            "VAULTSPEC_RAG_DATA_DIR": str(sandbox / "service-data"),
+            "VAULTSPEC_RAG_QDRANT_STORAGE_DIR": str(sandbox / "qdrant-storage"),
+            "VAULTSPEC_RAG_PORT": str(port),
+        }
+    )
+    operation_deadline = (
+        asyncio.get_running_loop().time() + service_options.start_timeout_seconds
+    )
+    cleanup_start_deadline = operation_deadline - _SERVICE_CLEANUP_RESERVE_SECONDS
+    return _IsolatedRagServiceState(
+        requirement=requirement,
+        locked_version=requirement.rsplit("==", maxsplit=1)[1],
+        port=port,
+        status_dir=status_dir,
+        env=env,
+        receipt=service_options.cleanup_receipt or _CleanupReceipt(),
+        operation_deadline=operation_deadline,
+        cleanup_start_deadline=cleanup_start_deadline,
+        control_deadline=cleanup_start_deadline - _SERVICE_LATE_RECORD_RESERVE_SECONDS,
+        start_control_prefix=service_options.start_control_prefix,
+        stop_control_prefix=service_options.stop_control_prefix,
+    )
+
+
+async def _reap_timed_out_rag_process(
+    process: asyncio.subprocess.Process,
+    control_owner: psutil.Process,
+    *,
+    total_deadline: float,
+) -> None:
+    """Reap a timed-out RAG command and every child it retained."""
+    try:
+        owned_tree = [*control_owner.children(recursive=True), control_owner]
+    except psutil.NoSuchProcess:
+        owned_tree = []
+    for owned in reversed(owned_tree):
+        try:
+            if owned.is_running():
+                owned.kill()
+        except psutil.NoSuchProcess:
+            pass
+    if process.returncode is None:
+        with suppress(ProcessLookupError):
+            process.kill()
+    loop = asyncio.get_running_loop()
+    remaining = max(0.0, total_deadline - loop.time())
+    async with asyncio.timeout(remaining):
+        await process.wait()
+        if owned_tree:
+            remaining = max(0.0, total_deadline - loop.time())
+            async with asyncio.timeout_at(total_deadline):
+                _, alive = await asyncio.to_thread(
+                    psutil.wait_procs, owned_tree, timeout=remaining
+                )
+            assert not alive, "the exact RAG control process tree survived its deadline"
 
 
 def _locked_rag_requirement(project_root: Path) -> str:
@@ -180,34 +297,11 @@ async def _run_rag_cli(
                 await process.wait()
         except TimeoutError:
             if process is not None and control_owner is not None:
-                try:
-                    owned_tree = [
-                        *control_owner.children(recursive=True),
-                        control_owner,
-                    ]
-                except psutil.NoSuchProcess:
-                    owned_tree = []
-                for owned in reversed(owned_tree):
-                    try:
-                        if owned.is_running():
-                            owned.kill()
-                    except psutil.NoSuchProcess:
-                        pass
-                if process.returncode is None:
-                    with suppress(ProcessLookupError):
-                        process.kill()
-                remaining = max(0.0, total_deadline - loop.time())
-                async with asyncio.timeout(remaining):
-                    await process.wait()
-                    if owned_tree:
-                        remaining = max(0.0, total_deadline - loop.time())
-                        async with asyncio.timeout_at(total_deadline):
-                            _, alive = await asyncio.to_thread(
-                                psutil.wait_procs, owned_tree, timeout=remaining
-                            )
-                        assert not alive, (
-                            "the exact RAG control process tree survived its deadline"
-                        )
+                await _reap_timed_out_rag_process(
+                    process,
+                    control_owner,
+                    total_deadline=total_deadline,
+                )
             raise
         rendered_stdout = read_capped(stdout_handle)
         rendered_stderr = read_capped(stderr_handle)
@@ -292,15 +386,16 @@ async def _await_private_service_absent(
 
 
 async def _cleanup_private_rag_service(
+    context: _CleanupContext,
     *,
-    owner: _OwnedRagService,
     requirement: str,
     env: dict[str, str],
-    receipt: _CleanupReceipt,
     absolute_deadline: float,
     stop_control_prefix: tuple[str, ...] = (),
 ) -> None:
     """Stop the private daemon, falling back only through its retained identity."""
+    owner = context.owner
+    receipt = context.receipt
     async with asyncio.timeout_at(absolute_deadline):
         try:
             loop = asyncio.get_running_loop()
@@ -407,107 +502,82 @@ async def _isolated_rag_service(
     *,
     project_root: Path,
     sandbox: Path,
-    start_timeout_seconds: float = _SERVICE_CONTROL_TIMEOUT_SECONDS,
-    cleanup_receipt: _CleanupReceipt | None = None,
-    start_control_prefix: tuple[str, ...] = (),
-    stop_control_prefix: tuple[str, ...] = (),
+    options: _RagServiceOptions | None = None,
 ) -> AsyncGenerator[tuple[str, dict[str, str], _CleanupReceipt]]:
     """Run the lockfile-selected RAG service behind owned state and cleanup."""
-    requirement = _locked_rag_requirement(project_root)
-    locked_version = requirement.rsplit("==", maxsplit=1)[1]
-    port = _reserve_loopback_port()
-    status_dir = sandbox / "service-status"
-    data_dir = sandbox / "service-data"
-    qdrant_storage_dir = sandbox / "qdrant-storage"
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("PYTEST_") and key != RAG_PIN_VARIABLE
-    }
-    env.update(
-        {
-            "VAULTSPEC_RAG_STATUS_DIR": str(status_dir),
-            "VAULTSPEC_RAG_DATA_DIR": str(data_dir),
-            "VAULTSPEC_RAG_QDRANT_STORAGE_DIR": str(qdrant_storage_dir),
-            "VAULTSPEC_RAG_PORT": str(port),
-        }
-    )
-    started = False
-    start_attempted = False
-    service_record_path = status_dir / "service.json"
+    state = _isolated_rag_service_state(project_root, sandbox, options)
     owner: _OwnedRagService | None = None
-    receipt = cleanup_receipt or _CleanupReceipt()
-    operation_deadline = asyncio.get_running_loop().time() + start_timeout_seconds
-    cleanup_start_deadline = operation_deadline - _SERVICE_CLEANUP_RESERVE_SECONDS
-    control_deadline = cleanup_start_deadline - _SERVICE_LATE_RECORD_RESERVE_SECONDS
     try:
-        start_attempted = True
+        state.start_attempted = True
         start = await _run_rag_cli(
-            requirement,
+            state.requirement,
             "--target",
             str(project_root),
             "server",
             "start",
             "--port",
-            str(port),
+            str(state.port),
             "--local-only",
             "--no-updates",
             "--json",
-            env=env,
-            command_prefix=start_control_prefix,
-            absolute_deadline=control_deadline,
+            env=state.env,
+            command_prefix=state.start_control_prefix,
+            absolute_deadline=state.control_deadline,
         )
         assert start.get("ok") is True, start
         raw_start_data = start.get("data")
         assert isinstance(raw_start_data, dict), start
         start_data = cast("dict[str, object]", raw_start_data)
-        assert start_data.get("port") == port, start
-        started = True
+        assert start_data.get("port") == state.port, start
+        state.started = True
 
         owner = _read_private_service_owner(
-            service_record_path,
-            expected_port=port,
-            expected_version=locked_version,
+            state.service_record_path,
+            expected_port=state.port,
+            expected_version=state.locked_version,
         )
         assert owner is not None, "the private RAG service exited before use"
         assert await _private_endpoint_matches(owner), (
             "the private RAG health identity does not match its service record"
         )
-        yield requirement, env, receipt
+        yield state.requirement, state.env, state.receipt
     finally:
         # A bounded start may time out after the daemon has published its owned
         # identity. The private status record is the authority to clean that
         # process up; without it, never issue a stop against a merely reserved
         # port that another process could have acquired.
-        if owner is None and start_attempted and not service_record_path.exists():
+        if (
+            owner is None
+            and state.start_attempted
+            and not state.service_record_path.exists()
+        ):
             # The CLI control process can time out just before its detached
             # daemon atomically publishes identity. Fund a bounded discovery
             # window so that late-owned service is still reaped.
             while (
-                not service_record_path.exists()
-                and asyncio.get_running_loop().time() < cleanup_start_deadline
+                not state.service_record_path.exists()
+                and asyncio.get_running_loop().time() < state.cleanup_start_deadline
             ):
                 await asyncio.sleep(0.05)
-        if owner is None and (started or service_record_path.exists()):
-            receipt.late_service_record_observed = True
+        if owner is None and (state.started or state.service_record_path.exists()):
+            state.receipt.late_service_record_observed = True
             owner = _read_private_service_owner(
-                service_record_path,
-                expected_port=port,
-                expected_version=locked_version,
+                state.service_record_path,
+                expected_port=state.port,
+                expected_version=state.locked_version,
             )
             if owner is None:
-                receipt.process_absent = True
-                receipt.port_absent = _loopback_port_is_closed(port)
-                service_record_path.unlink(missing_ok=True)
+                state.receipt.process_absent = True
+                state.receipt.port_absent = _loopback_port_is_closed(state.port)
+                state.service_record_path.unlink(missing_ok=True)
         if owner is not None:
             cleanup = asyncio.create_task(
                 _cleanup_private_rag_service(
-                    owner=owner,
-                    requirement=requirement,
-                    env=env,
-                    receipt=receipt,
-                    absolute_deadline=operation_deadline,
-                    stop_control_prefix=stop_control_prefix,
+                    _CleanupContext(owner=owner, receipt=state.receipt),
+                    requirement=state.requirement,
+                    env=state.env,
+                    absolute_deadline=state.operation_deadline,
+                    stop_control_prefix=state.stop_control_prefix,
                 )
             )
             await _shield_private_cleanup(cleanup)
@@ -559,12 +629,6 @@ def test_every_registry_entry_declares_the_root_pin_axis() -> None:
         assert pin is None or (isinstance(pin, str) and pin), (
             f"{name} declares a malformed root pin: {pin!r}"
         )
-
-
-def test_the_search_server_declares_its_own_root_channel() -> None:
-    # The variable is the server's, not a convention invented here: it is the
-    # root authority the installed server itself honours (proven live below).
-    assert harness_server_root_pin(RAG) == RAG_PIN_VARIABLE
 
 
 def test_registry_construction_refuses_an_omitted_root_pin() -> None:
@@ -855,6 +919,8 @@ def test_codex_specs_refuse_an_unusable_pin(project_root: str) -> None:
         codex_mcp_server_specs([RAG], project_root=project_root)
 
 
+@pytest.mark.service
+@pytest.mark.resource("rag-service-control")
 @pytest.mark.asyncio
 async def test_the_declared_channel_is_the_servers_own_root_authority(
     tmp_path: Path,
@@ -957,6 +1023,8 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
     assert str(launch_root) not in diagnosis, diagnosis
 
 
+@pytest.mark.service
+@pytest.mark.resource("rag-service-control")
 @pytest.mark.asyncio
 async def test_cancelled_probe_reaps_private_service_when_stop_command_fails(
     tmp_path: Path,
@@ -994,6 +1062,8 @@ async def test_cancelled_probe_reaps_private_service_when_stop_command_fails(
     assert _shared_service_digest() == shared_before
 
 
+@pytest.mark.service
+@pytest.mark.resource("rag-service-control")
 @pytest.mark.asyncio
 async def test_hung_real_stop_preserves_fallback_and_absence_budget(
     tmp_path: Path,
@@ -1032,9 +1102,11 @@ while True:
     async with _isolated_rag_service(
         project_root=launch_root,
         sandbox=tmp_path / "hung-stop-service",
-        start_timeout_seconds=120.0,
-        cleanup_receipt=receipt,
-        stop_control_prefix=(sys.executable, str(wrapper), str(marker)),
+        options=_RagServiceOptions(
+            start_timeout_seconds=120.0,
+            cleanup_receipt=receipt,
+            stop_control_prefix=(sys.executable, str(wrapper), str(marker)),
+        ),
     ):
         pass
 
@@ -1056,6 +1128,8 @@ while True:
     assert _shared_service_digest() == shared_before
 
 
+@pytest.mark.service
+@pytest.mark.resource("rag-service-control")
 @pytest.mark.asyncio
 async def test_timed_out_start_reaps_a_late_published_private_service(
     tmp_path: Path,
@@ -1094,13 +1168,15 @@ while True:
         async with _isolated_rag_service(
             project_root=launch_root,
             sandbox=sandbox,
-            start_timeout_seconds=60.0,
-            cleanup_receipt=receipt,
-            start_control_prefix=(
-                sys.executable,
-                str(wrapper),
-                str(publication_marker),
-                str(service_record_path),
+            options=_RagServiceOptions(
+                start_timeout_seconds=60.0,
+                cleanup_receipt=receipt,
+                start_control_prefix=(
+                    sys.executable,
+                    str(wrapper),
+                    str(publication_marker),
+                    str(service_record_path),
+                ),
             ),
         ):
             pytest.fail("the deliberately short readiness budget was not enforced")
@@ -1150,8 +1226,7 @@ class TestThePinReachesTheSpawnedChild:
     def test_the_hoist_carries_the_pinned_value_the_surface_only_references(
         self, tmp_path: Path
     ) -> None:
-        variable = harness_server_root_pin(RAG)
-        assert variable is not None
+        variable = RAG_PIN_VARIABLE
 
         pinned = pin_harness_mcp_servers(
             [_launch_spec(RAG, _shipped_entry(RAG))], project_root=str(tmp_path)

@@ -36,11 +36,9 @@ from ._json_contract import JsonObject, lenient_json_object
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "ACCEPT_ACTION",
     "DECLINE_ACTION",
     "ELICITATION_METHOD",
     "CodexPermissionRung",
-    "CodexToolCall",
     "elicitation_response",
 ]
 

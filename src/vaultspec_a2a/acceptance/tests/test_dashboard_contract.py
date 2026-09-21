@@ -31,17 +31,17 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...testing.sse import read_frame
+from ...testing.tests._support.sse import read_frame
 from ...thread.enums import (
     TERMINAL_STATUS_VALUES,
     TERMINAL_STATUSES,
     ThreadStatus,
 )
-from .. import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET
+from ._harness import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET
 from .conftest import wait_for_terminal
 
 if TYPE_CHECKING:
-    from .. import CertifiedGateway
+    from ._harness import CertifiedGateway
 
 
 def test_authenticated_prepare_reserves_without_run_or_token(

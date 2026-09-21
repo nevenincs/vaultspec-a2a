@@ -27,6 +27,7 @@ dependencies = [
   "mcp>=2,<3",
   "opentelemetry-sdk>=1.39.1",
   "opentelemetry-instrumentation-fastapi>=0.60b0",
+  "psutil>=7.2.2",
   "pydantic>=2.12.5",
   "pydantic-settings>=2.13.1",
   "pyyaml>=6.0.2",
@@ -117,10 +118,6 @@ tooling = [
   # (C0302, R0902, R0904, R0916). Everything else pylint would report is
   # already covered by ruff and stays disabled in [tool.pylint].
   "pylint>=4.0",
-  # The provider catalog tests inspect real processes to prove a launched
-  # provider is the one they think it is. That arrived transitively; a test
-  # importing it directly declares it directly.
-  "psutil>=7.2.2",
   "pytest>=9.0.2",
   "pytest-asyncio>=1.3.0",
   "pytest-cov>=6.0.0",
@@ -449,9 +446,6 @@ DEP002 = [
 DEP004 = [
   "jsonschema",
   "packaging",
-  # The provider catalog tests inspect real processes; psutil is a tooling-group
-  # package a test imports, exactly like pytest below.
-  "psutil",
   "pytest",
   "pytest_asyncio",
   # dev/health/report.py uses radon's library API to measure this tree.
@@ -481,6 +475,7 @@ root = [".", "src"]
 [tool.basedpyright]
 include = ["src", "dev"]
 exclude = ["**/__pycache__", "**/node_modules", ".venv"]
+stubPath = "typings"
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 

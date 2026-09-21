@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -32,7 +33,11 @@ from ...thread.state import TeamState
 from ..accepted_input import freeze_accepted_input
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..graph_definition import read_accepted_graph_definition
-from ..recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
+from ..recovery_authority import (
+    RecoveryRequest,
+    RecoveryTrigger,
+    reconcile_run_checkpoint,
+)
 from ..run_discovery_service import discover_active_runs
 
 if TYPE_CHECKING:
@@ -70,6 +75,7 @@ async def durable_run(
             action_type=ControlActionType.INGEST,
             idempotency_key="thread-create:run",
             dispatch_id="accepted",
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             payload=freeze_accepted_input(
                 DispatchRequest(
                     action="ingest",
@@ -148,9 +154,11 @@ async def test_each_entry_settles_checkpoint_completion_and_reads_fresh_state(
             observed = await reconcile_run_checkpoint(
                 db,
                 saver,
-                "run",
-                trigger=RecoveryTrigger.READ,
-                checkpoint_timeout_seconds=5,
+                RecoveryRequest(
+                    thread_id="run",
+                    trigger=RecoveryTrigger.READ,
+                    checkpoint_timeout_seconds=5,
+                ),
             )
             assert observed.changed
             assert observed.status is ThreadStatus.COMPLETED
@@ -187,7 +195,13 @@ async def test_empty_pending_writes_do_not_prove_completion(durable_run: Durable
     assert evidence.kind is CheckpointEvidenceKind.PENDING
     async with sessions() as db:
         observed = await reconcile_run_checkpoint(
-            db, saver, "run", trigger=RecoveryTrigger.READ, checkpoint_timeout_seconds=5
+            db,
+            saver,
+            RecoveryRequest(
+                thread_id="run",
+                trigger=RecoveryTrigger.READ,
+                checkpoint_timeout_seconds=5,
+            ),
         )
         assert not observed.changed
         assert observed.status is ThreadStatus.RECONCILING
@@ -201,9 +215,11 @@ async def test_only_startup_demotes_unfinished_execution(durable_run: DurableRun
         observed = await reconcile_run_checkpoint(
             db,
             saver,
-            "run",
-            trigger=RecoveryTrigger.READ,
-            checkpoint_timeout_seconds=5,
+            RecoveryRequest(
+                thread_id="run",
+                trigger=RecoveryTrigger.READ,
+                checkpoint_timeout_seconds=5,
+            ),
         )
         assert observed.status is ThreadStatus.RUNNING
         assert not observed.changed
@@ -211,9 +227,11 @@ async def test_only_startup_demotes_unfinished_execution(durable_run: DurableRun
         observed = await reconcile_run_checkpoint(
             db,
             saver,
-            "run",
-            trigger=RecoveryTrigger.STARTUP,
-            checkpoint_timeout_seconds=5,
+            RecoveryRequest(
+                thread_id="run",
+                trigger=RecoveryTrigger.STARTUP,
+                checkpoint_timeout_seconds=5,
+            ),
         )
         assert observed.status is ThreadStatus.RECONCILING
         assert observed.changed

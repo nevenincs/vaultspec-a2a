@@ -15,12 +15,10 @@ from uuid import uuid4
 
 from langgraph.errors import GraphBubbleUp
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..graph.acp_options import option_id_of, valid_option_ids
 from ..utils.async_cleanup import complete_cleanup
 from ..workspace.environment import resolve_env_vars
-from ._acp_mcp import NATIVE_READ_TOOL_NAMES
 from ._acp_types import (
     AcpModelConfig,
     AcpRpcId,
@@ -33,47 +31,12 @@ from ._json_contract import (
     lenient_json_object,
     lenient_json_object_list,
 )
+from ._native_read_tools import NATIVE_READ_TOOL_NAMES
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process
 from .acp_exceptions import AcpErrorCode
 
-__all__: list[str] = [
-    "AGENT_WORKSPACE_FILE_DECLARATION",
-    "ARTIFACT_DECLARATIONS",
-]
-
 logger = logging.getLogger(__name__)
-
-# The largest durable surface in this system, and the one furthest from this
-# project's authority: files an agent writes through ``fs/write_text_file`` land
-# in the operator's own project tree at paths the model chooses. Permanence is
-# not a shrug here - it is the only defensible answer, and the ordering
-# constraint (disarm the destructive workspace-delete path before anything
-# persists artifact rows) exists precisely because this seam feeds it.
-AGENT_WORKSPACE_FILE_DECLARATION = ArtifactDeclaration(
-    name="agent-workspace-file",
-    root="<run workspace_root>/<agent-chosen relative path>",
-    owner="providers._acp_rpc_handlers",
-    disposition=RetentionDisposition.PERMANENT,
-    reason=(
-        "these files are the run's product, written into the operator's own "
-        "project at the agent's direction and indistinguishable afterwards from "
-        "anything a human wrote there; reclaiming an agent's work on a clock "
-        "would destroy the reason the run was started"
-    ),
-    mechanism=(
-        "NOTHING bounds them. The write is confined - sandbox_path holds it under "
-        "the run's workspace root and a .vault/ target is refused outright - but "
-        "confinement is not retention. The run-delete cleanup manifest can unlink "
-        "only artifact rows explicitly recorded against the run AND resolving "
-        "inside its workspace root; a file the agent wrote without a recorded row "
-        "is never a cleanup target and is left to the operator"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    AGENT_WORKSPACE_FILE_DECLARATION,
-)
 
 # Allowlist of permitted executable names for terminal/create.
 # Only the base name (no path component) is checked so that full paths like
@@ -383,6 +346,44 @@ _PROJECT_ARGUMENT_KEYS: frozenset[str] = frozenset(
 _MAX_ARGUMENT_SCAN_DEPTH = 6
 
 
+def _foreign_project_field(key: str, value: JsonValue, config: AcpModelConfig) -> bool:
+    return (
+        key in _PROJECT_ARGUMENT_KEYS
+        and isinstance(value, str)
+        and bool(value.strip())
+        and not config.binds_project_path(value.strip())
+    )
+
+
+def _scan_foreign_project_mapping(
+    value: JsonObject, config: AcpModelConfig, depth: int
+) -> str | None:
+    for key, item in value.items():
+        if _foreign_project_field(key, item, config):
+            return str(item)
+        if (
+            found := _scan_foreign_project_argument(item, config, depth + 1)
+        ) is not None:
+            return found
+    return None
+
+
+def _scan_foreign_project_argument(
+    value: JsonValue, config: AcpModelConfig, depth: int
+) -> str | None:
+    if depth > _MAX_ARGUMENT_SCAN_DEPTH:
+        return None
+    if isinstance(value, dict):
+        return _scan_foreign_project_mapping(value, config, depth)
+    if isinstance(value, list):
+        for item in value:
+            if (
+                found := _scan_foreign_project_argument(item, config, depth + 1)
+            ) is not None:
+                return found
+    return None
+
+
 def _foreign_project_argument(args: JsonObject, config: AcpModelConfig) -> str | None:
     """Return the first argument naming a project outside the run's, or ``None``.
 
@@ -397,28 +398,7 @@ def _foreign_project_argument(args: JsonObject, config: AcpModelConfig) -> str |
     agent asked and hide that it asked it.
     """
 
-    def scan(value: JsonValue, depth: int) -> str | None:
-        if depth > _MAX_ARGUMENT_SCAN_DEPTH:
-            return None
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if (
-                    key in _PROJECT_ARGUMENT_KEYS
-                    and isinstance(item, str)
-                    and item.strip()
-                    and not config.binds_project_path(item.strip())
-                ):
-                    return item
-                if (found := scan(item, depth + 1)) is not None:
-                    return found
-            return None
-        if isinstance(value, list):
-            for item in value:
-                if (found := scan(item, depth + 1)) is not None:
-                    return found
-        return None
-
-    return scan(args, 0)
+    return _scan_foreign_project_argument(args, config, 0)
 
 
 async def on_request_permission(
@@ -619,6 +599,92 @@ async def on_fs_write_text_file(
         }
 
 
+def _terminal_command_args(params: JsonObject) -> tuple[str, list[str]]:
+    command = _required_string(params, "command")
+    raw_args = params.get("args")
+    if raw_args is None:
+        args: list[str] = []
+    elif isinstance(raw_args, list):
+        args = [argument for argument in raw_args if isinstance(argument, str)]
+        if len(args) != len(raw_args):
+            raise ValueError("ACP field 'args' must be a list of strings")
+    else:
+        raise ValueError("ACP field 'args' must be a list of strings")
+
+    cmd_base = Path(command).stem.lower()
+    if cmd_base not in _TERMINAL_COMMAND_ALLOWLIST:
+        raise ValueError(
+            f"Command {command!r} is not in the terminal allowlist. "
+            f"Permitted executables: {sorted(_TERMINAL_COMMAND_ALLOWLIST)}"
+        )
+    for token in [command, *args]:
+        if _SHELL_METACHAR_RE.search(str(token)):
+            raise ValueError(
+                f"Shell metacharacter detected in terminal token {token!r}. "
+                "Command injection attempt rejected."
+            )
+    return command, args
+
+
+def _terminal_cwd(params: JsonObject, config: AcpModelConfig) -> Path:
+    requested_cwd = params.get("cwd")
+    raw_cwd = (
+        requested_cwd
+        if isinstance(requested_cwd, str) and requested_cwd
+        else str(
+            require_workspace_root(config.workspace_root, surface="agent terminal cwd")
+        )
+    )
+    sandbox_root = require_workspace_root(
+        config.workspace_root, surface="agent terminal sandbox root"
+    ).resolve()
+    resolved_cwd = Path(raw_cwd).resolve()
+    if not resolved_cwd.is_relative_to(sandbox_root):
+        raise ValueError(
+            f"Terminal cwd {raw_cwd!r} escapes sandbox root {sandbox_root}"
+        )
+    return resolved_cwd
+
+
+def _terminal_env_list_overrides(extra_env: list[JsonValue]) -> dict[str, str]:
+    validated_env: dict[str, str] = {}
+    env_entries = lenient_json_object_list(extra_env)
+    if len(env_entries) != len(extra_env):
+        raise ValueError("ACP terminal env entries must be objects")
+    for entry in env_entries:
+        name = _required_string(entry, "name")
+        value = _required_string(entry, "value")
+        if not _ENV_NAME_RE.match(name):
+            raise ValueError(f"Invalid environment variable name: {name!r}")
+        validated_env[name] = value
+    return validated_env
+
+
+def _terminal_env_dict_overrides(extra_env: dict[str, JsonValue]) -> dict[str, str]:
+    validated_env: dict[str, str] = {}
+    for name, value in extra_env.items():
+        if not _ENV_NAME_RE.match(name):
+            raise ValueError(f"Invalid environment variable name: {name!r}")
+        if not isinstance(value, str):
+            raise ValueError(f"ACP terminal env value for {name!r} must be a string")
+        validated_env[name] = value
+    return validated_env
+
+
+def _terminal_env_overrides(extra_env: JsonValue | None) -> dict[str, str]:
+    if isinstance(extra_env, list) and extra_env:
+        return _terminal_env_list_overrides(extra_env)
+    if isinstance(extra_env, dict) and extra_env:
+        return _terminal_env_dict_overrides(extra_env)
+    return {}
+
+
+def _terminal_environment(params: JsonObject, resolved_cwd: Path) -> dict[str, str]:
+    terminal_env = resolve_env_vars(resolved_cwd)
+    terminal_env.update(_terminal_env_overrides(params.get("env")))
+    return terminal_env
+
+
 async def on_terminal_create(
     rpc_id: AcpRpcId,
     params: JsonObject,
@@ -635,54 +701,8 @@ async def on_terminal_create(
     try:
         if ctx.closing:
             raise RuntimeError("ACP session is closing")
-        command = _required_string(params, "command")
-        raw_args = params.get("args")
-        if raw_args is None:
-            args: list[str] = []
-        elif isinstance(raw_args, list):
-            args = [argument for argument in raw_args if isinstance(argument, str)]
-            if len(args) != len(raw_args):
-                raise ValueError("ACP field 'args' must be a list of strings")
-        else:
-            raise ValueError("ACP field 'args' must be a list of strings")
-
-        # --- Security: command allowlist validation (C4) ----------------
-        # Extract the base name without directory path and .exe suffix so
-        # that both "python" and "/usr/bin/python3.13" resolve the same.
-        cmd_base = Path(command).stem.lower()
-        if cmd_base not in _TERMINAL_COMMAND_ALLOWLIST:
-            raise ValueError(
-                f"Command {command!r} is not in the terminal allowlist. "
-                f"Permitted executables: {sorted(_TERMINAL_COMMAND_ALLOWLIST)}"
-            )
-        # Reject shell metacharacters in the command or any argument.
-        for token in [command, *args]:
-            if _SHELL_METACHAR_RE.search(str(token)):
-                raise ValueError(
-                    f"Shell metacharacter detected in terminal token {token!r}. "
-                    "Command injection attempt rejected."
-                )
-        # ----------------------------------------------------------------
-
-        # Sandbox the terminal cwd: must be within the agent workspace root.
-        requested_cwd = params.get("cwd")
-        raw_cwd = (
-            requested_cwd
-            if isinstance(requested_cwd, str) and requested_cwd
-            else str(
-                require_workspace_root(
-                    config.workspace_root, surface="agent terminal cwd"
-                )
-            )
-        )
-        sandbox_root = require_workspace_root(
-            config.workspace_root, surface="agent terminal sandbox root"
-        ).resolve()
-        resolved_cwd = Path(raw_cwd).resolve()
-        if not resolved_cwd.is_relative_to(sandbox_root):
-            raise ValueError(
-                f"Terminal cwd {raw_cwd!r} escapes sandbox root {sandbox_root}"
-            )
+        command, args = _terminal_command_args(params)
+        resolved_cwd = _terminal_cwd(params, config)
 
         # Audit log for all terminal commands
         logger.info(
@@ -694,33 +714,7 @@ async def on_terminal_create(
 
         # Build env: use resolve_env_vars() to scrub API credentials,
         # then apply any agent-supplied overrides from the RPC params.
-        terminal_env = resolve_env_vars(resolved_cwd)
-        if extra_env := params.get("env"):
-            if isinstance(extra_env, list):
-                # ACP protocol: env is list[EnvVariable] with name/value keys
-                # Validate env variable names before applying
-                env_entries = lenient_json_object_list(extra_env)
-                if len(env_entries) != len(extra_env):
-                    raise ValueError("ACP terminal env entries must be objects")
-                validated_env: dict[str, str] = {}
-                for entry in env_entries:
-                    name = _required_string(entry, "name")
-                    value = _required_string(entry, "value")
-                    if not _ENV_NAME_RE.match(name):
-                        raise ValueError(f"Invalid environment variable name: {name!r}")
-                    validated_env[name] = value
-                terminal_env.update(validated_env)
-            elif isinstance(extra_env, dict):
-                validated_env = {}
-                for name, value in extra_env.items():
-                    if not _ENV_NAME_RE.match(name):
-                        raise ValueError(f"Invalid environment variable name: {name!r}")
-                    if not isinstance(value, str):
-                        raise ValueError(
-                            f"ACP terminal env value for {name!r} must be a string"
-                        )
-                    validated_env[name] = value
-                terminal_env.update(validated_env)
+        terminal_env = _terminal_environment(params, resolved_cwd)
         process = await spawn_acp_process(
             [command, *args], terminal_env, str(resolved_cwd), use_exec=True
         )

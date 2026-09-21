@@ -26,6 +26,12 @@ class FrozenGraphDefinition(BaseModel):
 
     @model_validator(mode="after")
     def validate_complete_definition(self) -> Self:
+        team = self._validated_team()
+        self._validate_agents(team)
+        self._validate_supervisor(team)
+        return self
+
+    def _validated_team(self) -> TeamConfig:
         team = TeamConfig.model_validate(self.team)
         if team.model_dump(mode="json") != self.team:
             raise ValueError("graph definition contains an incomplete team")
@@ -41,6 +47,9 @@ class FrozenGraphDefinition(BaseModel):
             or team.graph.run_timeout_seconds <= 0
         ):
             raise ValueError("graph execution requires a declared positive run timeout")
+        return team
+
+    def _validate_agents(self, team: TeamConfig) -> None:
         expected_agents = {worker.agent_id for worker in team.workers}
         if set(self.agents) != expected_agents:
             raise ValueError(
@@ -50,6 +59,8 @@ class FrozenGraphDefinition(BaseModel):
             agent = AgentConfig.model_validate(raw)
             if agent.id != key or agent.model_dump(mode="json") != raw:
                 raise ValueError("graph definition contains an incomplete agent")
+
+    def _validate_supervisor(self, team: TeamConfig) -> None:
         requires_supervisor = team.topology.type in {
             TopologyType.STAR,
             TopologyType.PIPELINE_LOOP,
@@ -63,7 +74,6 @@ class FrozenGraphDefinition(BaseModel):
                 or supervisor.model_dump(mode="json") != self.supervisor
             ):
                 raise ValueError("graph definition contains an incomplete supervisor")
-        return self
 
     def digest(self) -> str:
         encoded = json.dumps(

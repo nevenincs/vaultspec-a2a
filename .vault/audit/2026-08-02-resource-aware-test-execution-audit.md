@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#resource-aware-test-execution'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-09-20'
 body_schema: 'body-v1'
-body_hash: 'sha256:63fd34dcf59b83c0a6c8b1866bcf229cfb65a705fc46cc3ccff82edb041e5a57'
+body_hash: 'sha256:58e1a9cd594b88cf4825bd59063afcb61c4f7a2fcc5badbd65979d2056a53c7f'
 related:
   - "[[2026-08-02-resource-aware-test-execution-plan]]"
 ---
@@ -225,6 +225,359 @@ removed the config-home None short-circuit the desktop contract relied on;
 two desktop-profile provider tests fail in isolation asserting a value the
 narrowed signature forbids. Traced, not fixed here.
 
+### prerequisite-plugin-eager-provider-stack | medium | resolved
+
+Type: performance. The root prerequisite plugin imported the live catalog
+validator only to reuse its environment-name tuple and completeness probe. The
+validator's module-level schema imports loaded gateway schemas, provider catalog
+types, OpenAI, LangChain, and MCP in every pytest process. A locked interpreter
+measured 1.19-1.31s for this helper import versus 0.10-0.11s for an empty
+launch. Validation-only imports now occur inside the validation function, and a
+real subprocess regression test proves that importing the root conftest does
+not load those schema modules. The helper now imports in 0.12-0.14s; all three
+collection-lane wall times fell by 0.75-1.20s while item-discovery time stayed
+flat. Status: resolved.
+
+### concurrent-full-lane-loses-terminal-result | medium | open
+
+Type: process handling and execution admission. A serial unit lane that began
+without peers was later overlapped by an independently launched 12-worker
+session in the same worktree. The serial lane reached roughly 96 percent, then
+the Windows thread-timeout path terminated pytest at 1,913.854s without a
+normal summary or duration table. The peer controller and workers were still
+owned and were deliberately not reaped by this pass. This is evidence that the
+configure-time admission snapshot does not guarantee graceful progress when a
+large distributed peer starts later. The exact timed-out item was lost with the
+thread-method process exit, so dynamic admission or a result-preserving timeout
+path needs separate scoped work before a repair is chosen. Status: open.
+
+### acp-context-process-per-test | low | open
+
+Type: fixture lifecycle. The function-scoped `acp_session_context` fixture is
+referenced 132 times across eight provider test modules and creates and reaps a
+real Python subprocess on every invocation. It is the largest repeated fixture
+lifecycle candidate found. Its streams are event-loop-bound and its terminal
+map is mutable, so broadening scope without module-level loop and state-reset
+proof would change semantics. Capture clean duration evidence before changing
+it. Status: open.
+
+### unit-gate-launches-live-provider-discovery | medium | open
+
+Type: lane isolation. Real gateway catalog coverage in the default unit lane
+was observed launching `agy models`, `kimi provider list --json`, and the Claude
+ACP Node adapter. These are prompt-free discovery calls, not completed turns,
+and the billable proof gate correctly withheld two tests lacking dashboard and
+explicit selection prerequisites. The calls nevertheless make the unit lane's
+runtime depend on installed external binaries and their timeout behavior.
+Either place these catalog boots in a declared non-unit resource lane or prove
+that the production catalog contract requires them in the default gate and add
+bounded shared discovery evidence. Status: open.
+
+### executable-availability-checks-bypass-classifiers | low | open
+
+Type: portability and duplication. Production launch construction is
+centralized and platform-aware, including capsule Node layout and Antigravity's
+installer location, but several live tests still perform their own raw
+`shutil.which` availability checks before calling the production classifier.
+No platform failure was reproduced in this pass. Migrate those guards to the
+canonical resolver when next touched so test admission and production launch
+cannot disagree. Status: open.
+
+### collection-import-optimization-review-2026-09-19 | low | PASS
+
+Review result: PASS for the implemented lazy-import change. The change preserves
+the selector's single source of truth, defers only validation-only imports,
+executes the deferred path successfully, and is covered by a subprocess import
+boundary test. Ruff, ty, the nine prerequisite-rule tests, and all three
+post-change collection lanes pass. The unresolved medium and low findings above
+are follow-up scope rather than defects introduced by this change.
+
+### isolated-registry-tests-shared-real-ports | medium | resolved
+
+Type: test isolation and process handling. Seven registry tests used isolated
+registry homes but fixed real loopback ports `18900-18902`; under xdist the
+filesystem state was isolated while the sockets were not. The first measured
+parallel unit lane failed six of those tests, and a focused four-worker run
+proved that the module's two-process reservation test could contend with them.
+The tests now select a probed contiguous band from a serialized test-only range,
+pass that band into the child interpreters, and derive marker assertions from
+the selected band. A separate manager test that really binds its one-port band
+now obtains a machine-global held scratch reservation instead of naming
+`18996`. The two previously failing bind cases passed ten consecutive
+two-worker stress iterations; the reviewed focused bundle passed 68 tests.
+Status: resolved.
+
+### recording-span-tests-depended-on-worker-order | medium | resolved
+
+Type: test isolation. Two telemetry tests asserted `Span.is_recording()` but
+depended on an earlier `configure_telemetry` test having run in the same pytest
+worker. Selecting only those two tests reproduced both failures. Each test now
+configures the real SDK provider before asserting a recording span. The isolated
+pair passes and the full telemetry module passes 39 tests under four workers.
+Status: resolved.
+
+### identical-permission-retries-can-lose-current-authority | high | open
+
+Type: product concurrency. The real-SQLite concurrent permission-lease proof is
+nondeterministic: two identical responses sometimes produce one expected
+unreachable result and one `INCOMPATIBLE_STATE` result with no action id, rather
+than sharing the single durable action. It failed in a full parallel lane and
+then reproduced on the eighth standalone stress iteration. The losing retry can
+observe the winner's accepted action after the winner's definite non-delivery
+path releases its lease, acquire a redrive attempt from a stale write witness,
+and fail the current-authority receipt gate. This is not caused by the collection
+or port changes and changes permission-response semantics, so it remains queued
+for a dedicated action-lease/receipt repair with a deterministic barrier proof.
+Status: open.
+
+### optimization-pass-review-2026-09-19 | medium | PASS
+
+Review result: PASS for the scoped implementation, with the high-severity
+permission race above explicitly open. Review corrected the first dynamic-port
+attempt after a full lane showed that a released bind-to-zero ephemeral band
+could be reassigned immediately. Registry bands now come from a separately
+serialized test range, while the single manager bind uses the canonical held
+reservation. The implementation does not alter production registry, telemetry,
+or permission semantics. Ruff, ty, BasedPyright, the 68-test focused bundle,
+ten repeated two-worker port iterations, and all collection lanes pass. The
+non-RAG full unit lane has not produced an all-green result because each pass
+surfaced independent pre-existing concurrency defects; exact results and timing
+are retained in the linked reference rather than hidden.
+
+### wal-maintenance-test-write-amplification | medium | resolved
+
+Type: performance and fixture design. The WAL-maintenance suite created its
+evidence with 2,500-6,000 tiny fsync-heavy autocommits per test. An isolated
+serial baseline was 105.12s for fourteen tests; the slowest cases took 30.62s,
+16.80s, 15.96s, and 14.62s. The assertions depend on pages and WAL state, not
+tiny-row count or crash durability. Test rows are now 16 KiB, counts are reduced
+while retaining the multi-megabyte and freelist thresholds, and test-only data
+generators use `synchronous=OFF` plus a 50ms busy timeout. Production-model and
+administrative subprocess paths remain real. Two post-change serial runs passed
+in 8.87s and 9.37s, a roughly 91% reduction, and no WAL case appears in the next
+full lane's fifty slowest items. Status: resolved.
+
+### migration-engine-ignored-configured-busy-timeout | medium | resolved
+
+Type: process idle time and configuration drift. The application, checkpoint,
+and administrative SQLAlchemy connections honored
+`VAULTSPEC_SQLITE_BUSY_TIMEOUT_MS`, but Alembic's async engine and the raw
+`migrate --fix` connection inherited sqlite defaults. The blocked-checkpoint
+proof therefore idled for about five seconds despite selecting a 50ms test
+budget. The programmatic migration config now carries the configured timeout,
+the Alembic environment passes it as SQLite `connect_args`, and the raw fix
+connection uses the existing administrative pragma authority. Migration,
+administration, and WAL coverage passes 40 tests under four workers. Status:
+resolved.
+
+### manager-real-bind-tests-used-shared-literal-bands | medium | resolved
+
+Type: test isolation. The prior repair covered the one manager failure then
+observed, but additional `serve_up`/`resume` tests still bound real listeners in
+`18990-18997` through isolated homes. A later full lane failed two environment
+injection tests after all three ports were occupied. Every single-port real bind
+now takes a held machine-global scratch reservation; the two tests that require
+a contiguous multi-port band select a probed test-only band under the same
+resource lease as registry socket-band tests. The manager module passes 39 tests
+across four workers. Status: resolved.
+
+### desktop-run-admission-readiness-race | high | open
+
+Type: product/test concurrency. The post-WAL full lane reached the serialized
+desktop admission proof but `test_exact_commit_replay_role_binding_release_and_race_are_linearized`
+received `503 run admission is not execution-ready` while preparing its final
+release/commit race. Earlier operations against the same real gateway succeeded,
+so execution readiness changed during the scenario. This is separate from the
+WAL and port work and requires a dedicated reproduction that captures worker
+health and gateway logs at the transition. Status: open.
+
+### wal-and-manager-optimization-review-2026-09-20 | high | REVISION REQUIRED
+
+Review result: the scoped WAL, migration-timeout, and manager-port changes pass
+review; the overall lane remains REVISION REQUIRED because the high-severity
+desktop admission race above is open. The review removed a load-sensitive
+four-second timing assertion and replaced it with deterministic configuration
+coverage, while retaining real contention behavior. Ruff, formatting, ty,
+BasedPyright, 40 database tests, two serial WAL repetitions, and all 39 manager
+tests pass. The non-RAG full lane completed in 386.11s with 4,534 passes, one
+skip, and three failures: the two manager port failures fixed after that run and
+the queued desktop race. An unrelated concurrent edit to `providers/codex_catalog.py`
+was present in the worktree and is excluded from this pass.
+
+### model-stack-identical-cold-probe-duplication | low | resolved
+
+Type: fixture lifecycle and cache opportunity. Two assertions in the model-stack
+warmup module launched identical isolated interpreters and performed the same
+cold graph compile even though both consumed a read-only report from the same
+measurement boundary. A module-scoped fixture now creates that immutable report
+once; the separate five-trial loaded campaign remains unchanged because its
+repetition and CPU contention are the behavior under proof. The isolated module
+improved from 52.71s to 46.52-48.48s across post-change runs. Status: resolved.
+
+### cli-failed-start-test-used-production-readiness-budget | low | resolved
+
+Type: process handling and idle time. The real detached-process failure proof
+held the requested TCP port and then passed a 25-second readiness deadline. The
+occupied port makes readiness impossible, so the test spent nearly all of its
+26.25s hotspot duration waiting for a production-sized budget before exercising
+the tree-kill path. It now retains the real socket, detached process, timeout,
+tree kill, and no-live-resident assertion with a three-second test deadline.
+Repeated focused calls completed in 3.18s and 5.31s. Status: resolved.
+
+### model-and-cli-hotspot-review-2026-09-20 | low | PASS
+
+Review result: PASS for the scoped test-only changes. The compile cache shares
+only an immutable subprocess report between independent assertions and does not
+reduce the five cold trials under load. The CLI proof still launches and fells a
+real detached tree on an unavailable port; only its explicitly injected test
+deadline changed. No production timeout or process semantics changed. Ruff, ty,
+BasedPyright, the five-test model-stack module, repeated CLI failure calls, and
+the complete service-verb module pass. The high-severity desktop readiness and
+permission-response races remain separately queued.
+
+### provider-idle-control-windows-were-oversized | low | resolved
+
+Type: process handling and idle time. Six Codex/ACP deadline proofs correctly
+used real silent subprocesses and opposing timeout configurations, but waited
+6-15 seconds per control even though only the ordering of the injected limits
+is material. The focused pair of modules took 47.33s. Their short deadline is
+now 0.75s and their observation window is 3s; the fourfold separation preserves
+the discriminating deadline-versus-still-waiting outcomes. The stderr-liveness
+agent emits every 0.1s so it continues to demonstrate repeated deadline resets.
+Two post-change runs passed in 23.69s and 24.76s. Status: resolved.
+
+### timeout-window-optimization-review-2026-09-20 | low | PASS
+
+Review result: PASS. Only test-injected durations changed. All six proofs still
+spawn real agents, traverse the production Codex or ACP wait path, and retain
+their inverse controls; no production default or cleanup budget changed. The
+latest full non-RAG lane before this final focused change completed in 376.43s
+with 4,536 passes, one skip, and only the already queued permission-response
+lease race failing. WAL and CLI failed-start tests were absent from its fifty
+slowest cases. The two Windows unclosed-transport warnings remain open cleanup
+evidence rather than a regression from this pass.
+
+### permission-response-visible-action-claim-race | high | resolved
+
+Type: product concurrency. Two identical permission responses could both clear
+deduplication before either action existed. After one inserted the durable action,
+the other could acquire that visible row before the creator installed its writer
+receipt. Shared claim preparation withheld the retry's valid pre-action witness
+because it had not inserted the row, converted the receipt CAS into an authority
+failure, and returned no action identity. Direct claimants now always offer their
+captured write witness; the CAS still prevents a stale caller from replacing a
+newer writer, while recovery continues to carry no witness. Fresh or applied
+permission actions also replay at deduplication without re-entering transition
+logic. The prior failure reproduced on iterations 13 and 15; after correction the
+concurrent proof passed twenty consecutive runs, and a deterministic visible-row
+ordering test plus the twelve-test lease/receipt bundle pass. Status: resolved.
+
+### s22-permission-lease-review-2026-09-20 | low | PASS
+
+Review result: PASS. The repair follows the accepted lease contract: durable
+identity wins, direct retries may install only through the same conditional writer
+witness, and recovery cannot promote an old action. Competing payloads still
+conflict, stale witnesses still lose, and only one network dispatch occurs. Ruff,
+ty, BasedPyright, focused concurrency stress, and the lease/receipt bundle pass.
+No new finding remains from S22.
+
+### desktop-connect-timeout-readiness-race | high | resolved
+
+Type: product/test concurrency. Admission treated `httpx.ConnectTimeout` as a
+conclusive absence observation even though a live loopback worker can miss the
+connect budget under host saturation. That converted a transient observation
+between two prepares against the same gateway into `503 run admission is not
+execution-ready`. Connect timeouts are now indeterminate and use the seated
+watchdog/liveness evidence; a refused connection remains conclusive and still
+fails closed. The focused classifier/readiness bundle passes, and the real
+release/commit desktop scenario passed five consecutive process-level runs.
+Status: resolved.
+
+### s23-desktop-readiness-review-2026-09-20 | low | PASS
+
+Review result: PASS. The change narrows only the timeout classification and does
+not promote an unspawned, unpaired, down, or connection-refused worker. Existing
+readiness fallback coverage proves that only a seated live worker benefits from
+an indeterminate observation. Ruff, ty, BasedPyright, six focused readiness tests,
+and five repeated real desktop race runs pass. No new finding remains from S23.
+
+### unit-gate-launches-live-provider-discovery | medium | resolved
+
+Type: lane isolation. The one route proof that composes every production catalog
+registration now declares the service tier and the exclusive
+`provider-catalog-discovery` resource. The default non-service lane retains all
+ten deterministic route, validation, bounds, and cache tests but no longer
+launches installed Antigravity, Kimi, Claude, or other external adapters. The
+service lane retains the real prompt-free catalog proof and accepts unavailable
+provider catalogs as production does. Focused collection shows a 10/1 split,
+and both sides pass. Status: resolved.
+
+### s24-provider-discovery-lane-review-2026-09-20 | low | PASS
+
+Review result: PASS. Only the production-adapter composition proof moved lanes;
+no catalog assertion or adapter behavior changed. The new resource has no
+presence prerequisite because provider absence is part of the catalog contract,
+but it serializes installed-host discovery across sessions. Ruff, ty,
+BasedPyright, resource-vocabulary tests, collection proofs, and both execution
+selections pass. No new finding remains from S24.
+### function-scoped-acp-child-fixture | low | resolved
+
+Type: fixture lifecycle and process handling. The ACP handler fixture formerly
+spawned and reaped one idle Python child for every consumer. The child streams
+are now owned by a module-scoped async fixture on a module-scoped event loop,
+while each test still receives a newly constructed `AcpSessionContext` with its
+own futures, queue, event, lock, lists, terminal map, task set, tool calls,
+command catalogs, and config options. Consumers do not perform I/O through the
+shared streams; they exist only to retain the production context shape. An
+explicit isolation regression mutates one context and proves a sibling remains
+empty. The 170-test consumer bundle improved from 11.09s to 8.54s. Status:
+resolved.
+
+### s25-acp-fixture-review-2026-09-20 | low | PASS
+
+Review result: PASS. Scope widened only for the immutable process/stream holder,
+not for mutable ACP authority. Subprocess setup and teardown execute on the same
+module loop, including `StreamWriter.wait_closed`; per-test asyncio objects are
+created by the function-scoped fixture. All affected tests, Ruff, ty, and
+BasedPyright pass without transport warnings. No new finding remains from S25.
+### executable-availability-checks-bypass-classifiers | low | resolved
+
+Type: portability and duplication. Claude, Codex, and Kimi system-CLI
+resolution now has one production helper used by factory classification, ACP
+environment construction, installed-vocabulary readers, and live test guards.
+It accepts explicit `.cmd` and `.exe` shims on Windows even when `PATHEXT` is
+incomplete, while Unix admits only the unsuffixed executable. All provider-test
+raw availability guards now call that resolver. Three platform-resolution
+regressions, 110 deterministic provider tests, and twelve installed prompt-free
+or keyless service proofs pass. Status: resolved.
+
+### s26-binary-resolution-review-2026-09-20 | low | PASS
+
+Review result: PASS. Command construction and availability now share one path;
+Antigravity retains its separate canonical installer-aware resolver. The helper
+rejects API-only providers and returns no credential or secret material. Ruff,
+ty, BasedPyright, deterministic coverage, and installed Windows service proofs
+pass. No new finding remains from S26.
+### windows-cross-loop-client-transports | medium | resolved
+
+Type: test cleanup and event-loop ownership. Two endpoint cases injected an
+`httpx.AsyncClient` into an app running on TestClient's background Proactor loop,
+then closed the client later through a new `asyncio.run()` loop. The two clients
+matched the two delayed Windows transport finalizer warnings in broad runs. Each
+case now restores the application client and closes the injected client through
+TestClient's owning portal in `finally`. The ACP fixture correction in S25 also
+joins its shared subprocess writer and process on their owning module loop. Five
+repeated asyncio-debug runs of both endpoint cases and the complete 75-test
+endpoint module pass with unraisable warnings promoted to errors. Status:
+resolved.
+
+### s27-windows-transport-review-2026-09-20 | low | PASS
+
+Review result: PASS. The repair changes only test-owned injected-client cleanup;
+production dispatch behavior and ambiguity assertions are unchanged. Cleanup is
+exception-safe, restores the original pooled client before closure, and runs on
+the loop that opened the transport. Ruff, ty, BasedPyright, five debug repeats,
+and the full endpoint module pass. No new finding remains from S27.
 ## Recommendations
 
 - Migrate the outlying live suites (CLI live tests, authoring discovery retry
@@ -238,3 +591,17 @@ narrowed signature forbids. Traced, not fixed here.
   per worker.
 - Have the code-reviewer persona confirm this audit and the lease-layer
   concurrency argument before the plan is treated as closed beyond S10.
+- Preserve the lightweight root-conftest import boundary when adding new
+  prerequisite probes; live schema and provider adapters belong behind the
+  probe or validation call that uses them.
+- Capture one uncontended full-lane duration report before changing ACP fixture
+  scope, then prioritize only setup/teardown costs that appear in that report.
+- Give prompt-free external provider discovery an explicit lane/resource
+  contract instead of letting installed host binaries silently determine unit
+  gate cost.
+- Repair the permission-response replay/redrive race around a released lease and
+  stale writer witness, then retain a deterministic two-caller barrier test.
+- Capture worker-health transitions around the desktop admission release/commit
+  race before changing its readiness contract.
+- Keep production-scale timeouts injectable in real-process failure proofs, but
+  use the shortest test deadline that still reaches and verifies cleanup.

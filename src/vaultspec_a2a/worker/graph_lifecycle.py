@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast, override
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, override
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -29,6 +28,11 @@ from ..telemetry import ws_span
 from ..thread.errors import (
     ConfigError,
 )
+from ._graph_lifecycle_options import (
+    GraphLifecycleOptions,
+    bind_graph_lifecycle_options,
+)
+from ._graph_lifecycle_state import GraphLifecyclePorts, GraphLifecycleState
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -41,15 +45,12 @@ if TYPE_CHECKING:
     from ..ipc.schemas import DispatchRequest
     from ..streaming.aggregator import EventAggregator
     from .authoring_binding import AuthoringBindingProvider
-    from .catalog_store import RunCatalogStore
     from .ipc import WorkerBridge
-    from .token_store import RunTokenStore
 
 __all__ = [
     "GraphCacheKey",
     "GraphCompilationError",
     "GraphLifecycleManager",
-    "GraphStateSnapshot",
     "RegisteredCompiledGraph",
     "graph_cache_key",
 ]
@@ -121,14 +122,20 @@ class RegisteredCompiledGraph(StreamableGraph, Protocol):
     ) -> object: ...
 
 
+class _AuthoringAttachOptional(TypedDict, total=False):
+    frozen_assignment: dict[str, dict[str, Any]] | None
+
+
+class _AuthoringAttachArgs(_AuthoringAttachOptional):
+    harness: Any
+    provider_factory: Any
+
+
 def assert_armed_authoring_attachable(
     team_config: Any,
     agent_configs: dict[str, AgentConfig],
     ws_root: Path | None,
-    *,
-    harness: Any,
-    provider_factory: Any,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
+    **kwargs: Unpack[_AuthoringAttachArgs],
 ) -> None:
     """Refuse an authoring-bridge-armed preset a worker cannot mount the bridge onto.
 
@@ -156,6 +163,9 @@ def assert_armed_authoring_attachable(
     remains unguarded here is a lane whose model exposes neither delivery
     surface, and that stays a silent no-op by design rather than by omission.
     """
+    harness = kwargs["harness"]
+    provider_factory = kwargs["provider_factory"]
+    frozen_assignment = kwargs.get("frozen_assignment")
     if harness is None or not harness.authoring_bridge:
         return
     unsupported: list[str] = []
@@ -192,6 +202,18 @@ def assert_armed_authoring_attachable(
         )
 
 
+def _validated_checkpoint_digest(values: dict[str, object], field: str) -> str:
+    """Return one validated compilation digest from checkpoint channel values."""
+    digest = values.get(field)
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(char not in "0123456789abcdef" for char in digest)
+    ):
+        raise GraphCompilationError("durable compilation authority is incompatible")
+    return digest
+
+
 class GraphLifecycleManager:
     """Manages graph compilation, LRU caching, and input construction.
 
@@ -210,52 +232,35 @@ class GraphLifecycleManager:
         checkpointer: Checkpointer,
         bridge: WorkerBridge,
         aggregator: EventAggregator,
-        token_store: RunTokenStore,
-        catalog_store: RunCatalogStore,
-        checkpoint_read_timeout_seconds: float | None = None,
+        *args: object,
+        **options: Unpack[GraphLifecycleOptions],
     ) -> None:
         from ..database import get_session_factory
         from ..providers.factory import ProviderFactory
         from .cost_port import SqlCostPort
         from .task_queue_port import SqlTaskQueuePort
 
-        self._checkpointer = checkpointer
+        (
+            token_store,
+            catalog_store,
+            checkpoint_read_timeout_seconds,
+        ) = bind_graph_lifecycle_options(args, options)
+        self._ports = GraphLifecyclePorts(
+            checkpointer=checkpointer,
+            bridge=bridge,
+            aggregator=aggregator,
+            token_store=token_store,
+            catalog_store=catalog_store,
+            provider_factory=ProviderFactory(),
+        )
         self._checkpoint_read_timeout_seconds = (
             checkpoint_read_timeout_seconds
             if checkpoint_read_timeout_seconds is not None
             else domain_config.aget_state_timeout_seconds
         )
-        self._bridge = bridge
-        self._aggregator = aggregator
-        # The worker lifecycle is the single site that constructs the
-        # production authoring submitter, fed the run's per-role tokens from here.
-        self._token_store = token_store
-        # Per-run engine catalog cache, shared with the authoring-bridge provider
-        # so the run fetches its catalog once regardless of worker count.
-        self._catalog_store = catalog_store
-        self._provider_factory = ProviderFactory()
-        # The worker reaches the app database (task_queue_entries) via
-        # the shared session factory; migrations are owned by the gateway.
         self._task_queue_port = SqlTaskQueuePort(get_session_factory())
-        # Token accounting reaches the same app database (cost_tracking) over
-        # the same shared session factory.
         self._cost_port = SqlCostPort(get_session_factory())
-        self._graph_cache: OrderedDict[GraphCacheKey, RegisteredCompiledGraph] = (
-            OrderedDict()
-        )
-        # Maps thread_id -> cache key so resume can find the graph
-        # and recompile if evicted.
-        self._thread_to_cache_key: dict[str, GraphCacheKey] = {}
-        # Assignment identity outlives LRU entries. Per-thread locks make the
-        # first binding atomic across duplicate/concurrent dispatch delivery.
-        self._thread_compilation_digests: dict[str, tuple[str, str]] = {}
-        self._thread_compile_locks: dict[str, asyncio.Lock] = {}
-        self._thread_compile_lock_users: dict[str, int] = {}
-        # Threads bind their durable assignment before joining this second,
-        # exact-key flight. This prevents equivalent first dispatches for
-        # different threads from compiling the same provider graph in parallel.
-        self._cache_key_compile_locks: dict[GraphCacheKey, asyncio.Lock] = {}
-        self._cache_key_compile_lock_users: dict[GraphCacheKey, int] = {}
+        self._state = GraphLifecycleState()
 
     # ------------------------------------------------------------------
     # Public accessors
@@ -264,49 +269,49 @@ class GraphLifecycleManager:
     @property
     def graph_count(self) -> int:
         """Number of compiled graphs currently held."""
-        return len(self._graph_cache)
+        return len(self._state.graph_cache)
 
     def has_thread(self, thread_id: str) -> bool:
         """Return whether this worker has a cache-key record for *thread_id*."""
-        return thread_id in self._thread_to_cache_key
+        return thread_id in self._state.thread_to_cache_key
 
     def cache_key_for_thread(self, thread_id: str) -> GraphCacheKey | None:
         """Return the cache key known for *thread_id*, if the worker has one."""
-        return self._thread_to_cache_key.get(thread_id)
+        return self._state.thread_to_cache_key.get(thread_id)
 
     @property
     def thread_binding_count(self) -> int:
         """Number of non-terminal thread identities retained by this worker."""
-        return len(self._thread_compilation_digests)
+        return len(self._state.thread_compilation_digests)
 
     @property
     def compile_flight_count(self) -> int:
         """Number of exact cache keys with compilation callers in flight."""
-        return len(self._cache_key_compile_locks)
+        return len(self._state.cache_key_compile_locks)
 
     @property
     def thread_compile_lock_count(self) -> int:
         """Number of thread-scoped first-dispatch callers in flight."""
-        return len(self._thread_compile_locks)
+        return len(self._state.thread_compile_locks)
 
     def release_thread(self, thread_id: str) -> None:
         """Release terminal thread identity without evicting a shared graph."""
-        self._thread_to_cache_key.pop(thread_id, None)
-        self._thread_compilation_digests.pop(thread_id, None)
+        self._state.thread_to_cache_key.pop(thread_id, None)
+        self._state.thread_compilation_digests.pop(thread_id, None)
 
     def clear(self) -> None:
         """Clear all cached graphs and thread mappings."""
-        self._graph_cache.clear()
-        self._thread_to_cache_key.clear()
-        self._thread_compilation_digests.clear()
-        self._thread_compile_locks.clear()
-        self._thread_compile_lock_users.clear()
-        self._cache_key_compile_locks.clear()
-        self._cache_key_compile_lock_users.clear()
+        self._state.graph_cache.clear()
+        self._state.thread_to_cache_key.clear()
+        self._state.thread_compilation_digests.clear()
+        self._state.thread_compile_locks.clear()
+        self._state.thread_compile_lock_users.clear()
+        self._state.cache_key_compile_locks.clear()
+        self._state.cache_key_compile_lock_users.clear()
 
     def evict_cached_graphs(self) -> None:
         """Evict compiled graphs while retaining immutable thread bindings."""
-        self._graph_cache.clear()
+        self._state.graph_cache.clear()
 
     def register_compiled_graph(
         self,
@@ -324,21 +329,21 @@ class GraphLifecycleManager:
         for the same workspace would find, rather than shadowing it.
         """
         cache_key = graph_cache_key(*cache_key)
-        bound = self._thread_compilation_digests.get(thread_id)
+        bound = self._state.thread_compilation_digests.get(thread_id)
         if bound is not None and bound != (cache_key[3], cache_key[4]):
             raise GraphCompilationError(
                 "dispatch compilation authority does not match the bound run"
             )
-        self._thread_compilation_digests[thread_id] = (cache_key[3], cache_key[4])
+        self._state.thread_compilation_digests[thread_id] = (cache_key[3], cache_key[4])
         while (
-            cache_key not in self._graph_cache
-            and len(self._graph_cache) >= domain_config.max_cached_graphs
+            cache_key not in self._state.graph_cache
+            and len(self._state.graph_cache) >= domain_config.max_cached_graphs
         ):
-            self._graph_cache.popitem(last=False)
-        self._graph_cache[cache_key] = graph
-        self._graph_cache.move_to_end(cache_key)
-        self._thread_to_cache_key[thread_id] = cache_key
-        self._aggregator.register_graph(thread_id, graph)
+            self._state.graph_cache.popitem(last=False)
+        self._state.graph_cache[cache_key] = graph
+        self._state.graph_cache.move_to_end(cache_key)
+        self._state.thread_to_cache_key[thread_id] = cache_key
+        self._ports.aggregator.register_graph(thread_id, graph)
 
     # ------------------------------------------------------------------
     # Graph cache lookup and compilation
@@ -357,9 +362,11 @@ class GraphLifecycleManager:
         compile a new one, cache it, and register with the aggregator.
         Missing accepted graph authority is a compilation refusal.
         """
-        lock = self._thread_compile_locks.setdefault(req.thread_id, asyncio.Lock())
-        self._thread_compile_lock_users[req.thread_id] = (
-            self._thread_compile_lock_users.get(req.thread_id, 0) + 1
+        lock = self._state.thread_compile_locks.setdefault(
+            req.thread_id, asyncio.Lock()
+        )
+        self._state.thread_compile_lock_users[req.thread_id] = (
+            self._state.thread_compile_lock_users.get(req.thread_id, 0) + 1
         )
         try:
             async with lock:
@@ -367,12 +374,65 @@ class GraphLifecycleManager:
                     req, checkpoint_deadline=checkpoint_deadline
                 )
         finally:
-            users = self._thread_compile_lock_users[req.thread_id] - 1
+            users = self._state.thread_compile_lock_users[req.thread_id] - 1
             if users == 0:
-                self._thread_compile_lock_users.pop(req.thread_id, None)
-                self._thread_compile_locks.pop(req.thread_id, None)
+                self._state.thread_compile_lock_users.pop(req.thread_id, None)
+                self._state.thread_compile_locks.pop(req.thread_id, None)
             else:
-                self._thread_compile_lock_users[req.thread_id] = users
+                self._state.thread_compile_lock_users[req.thread_id] = users
+
+    async def _resume_checkpoint_missing(
+        self,
+        req: DispatchRequest,
+        bound: tuple[str, str] | None,
+        checkpoint_digest: tuple[str, str] | None,
+        checkpoint_deadline: float | None,
+    ) -> bool:
+        if req.action != "resume" or checkpoint_digest is not None:
+            return False
+        if bound is None:
+            return True
+        return not await self._checkpoint_present(
+            req.thread_id, checkpoint_deadline=checkpoint_deadline
+        )
+
+    async def _bind_compilation_authority(
+        self,
+        req: DispatchRequest,
+        compilation_digests: tuple[str, str],
+        checkpoint_deadline: float | None,
+    ) -> bool:
+        """Verify durable and bound compilation identities before cache lookup."""
+        bound = self._state.thread_compilation_digests.get(req.thread_id)
+        checkpoint_digest = (
+            await self._checkpoint_compilation_digests(
+                req.thread_id, checkpoint_deadline=checkpoint_deadline
+            )
+            if bound is None
+            else None
+        )
+        if await self._resume_checkpoint_missing(
+            req, bound, checkpoint_digest, checkpoint_deadline
+        ):
+            return False
+        if bound is None:
+            if (
+                checkpoint_digest is not None
+                and checkpoint_digest != compilation_digests
+            ):
+                raise GraphCompilationError(
+                    "dispatch compilation authority does not match the durable run"
+                )
+            self._state.thread_compilation_digests[req.thread_id] = compilation_digests
+        elif bound != compilation_digests:
+            raise GraphCompilationError(
+                "dispatch compilation authority does not match the bound run"
+            )
+        elif checkpoint_digest is not None and checkpoint_digest != compilation_digests:
+            raise GraphCompilationError(
+                "dispatch compilation authority does not match the durable run"
+            )
+        return True
 
     async def _get_or_compile_graph_locked(
         self,
@@ -392,35 +452,22 @@ class GraphLifecycleManager:
         definition_digest = definition.digest()
         assignment_digest = model_assignment_digest(req.model_assignment)
         compilation_digests = (assignment_digest, definition_digest)
-        bound = self._thread_compilation_digests.get(req.thread_id)
-        if bound is None:
-            checkpoint_digest = await self._checkpoint_compilation_digests(
-                req.thread_id, checkpoint_deadline=checkpoint_deadline
-            )
-            if (
-                checkpoint_digest is not None
-                and checkpoint_digest != compilation_digests
-            ):
-                raise GraphCompilationError(
-                    "dispatch compilation authority does not match the durable run"
-                )
-            self._thread_compilation_digests[req.thread_id] = compilation_digests
-        elif bound != compilation_digests:
-            raise GraphCompilationError(
-                "dispatch compilation authority does not match the bound run"
-            )
+        if not await self._bind_compilation_authority(
+            req, compilation_digests, checkpoint_deadline
+        ):
+            return None
 
         # Check if thread already has a cached graph. A thread's accepted
         # assignment is immutable; changing it under the same identity is a
         # structural dispatch error, never a reason to reuse or replace a graph.
-        cache_key = self._thread_to_cache_key.get(req.thread_id)
-        if cache_key and cache_key in self._graph_cache:
+        cache_key = self._state.thread_to_cache_key.get(req.thread_id)
+        if cache_key and cache_key in self._state.graph_cache:
             if (cache_key[3], cache_key[4]) != compilation_digests:
                 raise GraphCompilationError(
                     "dispatch compilation authority does not match the compiled run"
                 )
-            self._graph_cache.move_to_end(cache_key)
-            return self._graph_cache[cache_key]
+            self._state.graph_cache.move_to_end(cache_key)
+            return self._state.graph_cache[cache_key]
 
         team_preset = definition.team_id
         workspace_root = req.workspace_root
@@ -434,8 +481,8 @@ class GraphLifecycleManager:
         )
 
         graph = await self._get_or_compile_cache_key(req, new_key, team_preset)
-        self._thread_to_cache_key[req.thread_id] = new_key
-        self._aggregator.register_graph(req.thread_id, graph)
+        self._state.thread_to_cache_key[req.thread_id] = new_key
+        self._ports.aggregator.register_graph(req.thread_id, graph)
         # Relay node metadata to the control-surface aggregator so
         # REST /team-status and WS team_status events include role/display_name.
         await self._send_graph_registered(req.thread_id, graph)
@@ -448,15 +495,15 @@ class GraphLifecycleManager:
         team_preset: str,
     ) -> RegisteredCompiledGraph:
         """Compile one exact graph key once across all concurrent threads."""
-        lock = self._cache_key_compile_locks.setdefault(cache_key, asyncio.Lock())
-        self._cache_key_compile_lock_users[cache_key] = (
-            self._cache_key_compile_lock_users.get(cache_key, 0) + 1
+        lock = self._state.cache_key_compile_locks.setdefault(cache_key, asyncio.Lock())
+        self._state.cache_key_compile_lock_users[cache_key] = (
+            self._state.cache_key_compile_lock_users.get(cache_key, 0) + 1
         )
         try:
             async with lock:
-                cached = self._graph_cache.get(cache_key)
+                cached = self._state.graph_cache.get(cache_key)
                 if cached is not None:
-                    self._graph_cache.move_to_end(cache_key)
+                    self._state.graph_cache.move_to_end(cache_key)
                     return cached
 
                 async with ws_span(
@@ -476,17 +523,39 @@ class GraphLifecycleManager:
                         span.set_attribute("error", True)
                         raise GraphCompilationError(str(exc)) from exc
 
-                while len(self._graph_cache) >= domain_config.max_cached_graphs:
-                    self._graph_cache.popitem(last=False)
-                self._graph_cache[cache_key] = graph
+                while len(self._state.graph_cache) >= domain_config.max_cached_graphs:
+                    self._state.graph_cache.popitem(last=False)
+                self._state.graph_cache[cache_key] = graph
                 return graph
         finally:
-            users = self._cache_key_compile_lock_users[cache_key] - 1
+            users = self._state.cache_key_compile_lock_users[cache_key] - 1
             if users == 0:
-                self._cache_key_compile_lock_users.pop(cache_key, None)
-                self._cache_key_compile_locks.pop(cache_key, None)
+                self._state.cache_key_compile_lock_users.pop(cache_key, None)
+                self._state.cache_key_compile_locks.pop(cache_key, None)
             else:
-                self._cache_key_compile_lock_users[cache_key] = users
+                self._state.cache_key_compile_lock_users[cache_key] = users
+
+    async def _checkpoint_present(
+        self, thread_id: str, *, checkpoint_deadline: float | None
+    ) -> bool:
+        """Check that a bound resume has a durable checkpoint to resume."""
+        timeout = self._checkpoint_read_timeout_seconds
+        if checkpoint_deadline is not None:
+            timeout = min(
+                timeout, checkpoint_deadline - asyncio.get_running_loop().time()
+            )
+        if timeout <= 0:
+            raise GraphCompilationError("durable checkpoint read timed out")
+        try:
+            checkpoint_tuple = await asyncio.wait_for(
+                self._ports.checkpointer.aget_tuple(
+                    {"configurable": {"thread_id": thread_id}}
+                ),
+                timeout=timeout,
+            )
+        except TimeoutError as exc:
+            raise GraphCompilationError("durable checkpoint read timed out") from exc
+        return checkpoint_tuple is not None
 
     async def _checkpoint_compilation_digests(
         self, thread_id: str, *, checkpoint_deadline: float | None
@@ -501,7 +570,7 @@ class GraphLifecycleManager:
             raise GraphCompilationError("durable checkpoint read timed out")
         try:
             checkpoint_tuple = await asyncio.wait_for(
-                self._checkpointer.aget_tuple(
+                self._ports.checkpointer.aget_tuple(
                     {"configurable": {"thread_id": thread_id}}
                 ),
                 timeout=timeout,
@@ -518,19 +587,10 @@ class GraphLifecycleManager:
         if not isinstance(values, dict):
             raise GraphCompilationError("durable checkpoint state is incompatible")
         values_obj = cast("dict[str, object]", values)
-        digests: list[str] = []
-        for field in ("model_assignment_digest", "graph_definition_digest"):
-            digest = values_obj.get(field)
-            if (
-                not isinstance(digest, str)
-                or len(digest) != 64
-                or any(char not in "0123456789abcdef" for char in digest)
-            ):
-                raise GraphCompilationError(
-                    "durable compilation authority is incompatible"
-                )
-            digests.append(digest)
-        return digests[0], digests[1]
+        return (
+            _validated_checkpoint_digest(values_obj, "model_assignment_digest"),
+            _validated_checkpoint_digest(values_obj, "graph_definition_digest"),
+        )
 
     async def _send_graph_registered(
         self, thread_id: str, graph: RegisteredCompiledGraph
@@ -543,7 +603,7 @@ class GraphLifecycleManager:
         """
         nodes = node_metadata_from_graph(graph)
         if nodes:
-            await self._bridge.send_event(
+            await self._ports.bridge.send_event(
                 thread_id,
                 {"type": "graph_registered", "nodes": nodes},
             )
@@ -630,7 +690,7 @@ class GraphLifecycleManager:
                 agent_configs,
                 ws_root,
                 harness=harness,
-                provider_factory=self._provider_factory,
+                provider_factory=self._ports.provider_factory,
                 frozen_assignment=req.model_assignment,
             )
 
@@ -639,7 +699,7 @@ class GraphLifecycleManager:
             compile_team_graph(
                 team_config=team_config,
                 agent_configs=agent_configs,
-                checkpointer=self._checkpointer,
+                checkpointer=self._ports.checkpointer,
                 supervisor_agent_config=supervisor_config,
                 workspace_root=ws_root,
                 autonomous=req.autonomous,
@@ -648,7 +708,7 @@ class GraphLifecycleManager:
                 feature_tag=req.active_feature,
                 task_queue_port=self._task_queue_port,
                 cost_port=self._cost_port,
-                provider_factory=self._provider_factory,
+                provider_factory=self._ports.provider_factory,
                 proposal_submitter=proposal_submitter,
                 feedback_reader=feedback_reader,
                 authoring_binding_provider=authoring_binding_provider,
@@ -720,7 +780,7 @@ class GraphLifecycleManager:
             )
         return DocumentProposalSubmitter(
             engine_base_url=engine.base_url,
-            token_store=self._token_store,
+            token_store=self._ports.token_store,
             workspace_root=workspace_root,
             phases={
                 "research": PhaseAuthoringSpec(
@@ -769,8 +829,8 @@ class GraphLifecycleManager:
             )
         return AuthoringBindingProvider(
             engine_base_url=engine.base_url,
-            token_store=self._token_store,
-            catalog_store=self._catalog_store,
+            token_store=self._ports.token_store,
+            catalog_store=self._ports.catalog_store,
         )
 
     def _build_feedback_reader(self) -> FeedbackContextReader | None:
@@ -792,7 +852,7 @@ class GraphLifecycleManager:
             return None
         return FeedbackContextReader(
             engine_base_url=engine.base_url,
-            token_store=self._token_store,
+            token_store=self._ports.token_store,
             read_role="vaultspec-synthesist",
         )
 

@@ -25,9 +25,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
+from ...control._permission_response_contract import PermissionInput, PermissionRuntime
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
@@ -38,7 +37,7 @@ from ...database import (
     record_permission_request,
 )
 from ...database.models import ControlActionModel
-from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionResultStatus, ThreadStatus
 
 _CONFLICT = 409
@@ -87,15 +86,8 @@ async def _respond(
     async with httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client:
         return await respond_to_permission(
             session,
-            request_id=request_id,
-            option_id=option_id,
-            idempotency_key=None,
-            aggregator=EventAggregator(),
-            circuit_breaker=circuit_breaker,
-            worker_spawner=spawner,
-            worker_client=client,
-            recursion_limit=25,
-            trace_headers=None,
+            response=PermissionInput(request_id, option_id, None),
+            runtime=PermissionRuntime(circuit_breaker, spawner, client, 25, None),
         )
 
 

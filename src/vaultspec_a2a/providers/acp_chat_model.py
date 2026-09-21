@@ -16,10 +16,8 @@ Architecture:
 
 import asyncio
 import logging
-import shutil
 import sys
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
 from typing import Any, Never, override
 
 from langchain_core.callbacks import (
@@ -41,8 +39,8 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
+from ..graph.enums import Provider
 from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
@@ -51,7 +49,30 @@ from ._acp_authoring import (
     AUTHORING_MCP_SERVER_NAME,
     config_home_authoring_entry,
 )
+from ._acp_chunks import notify_chunk
 from ._acp_mcp import harness_spawn_env
+from ._acp_model_state import (
+    AcpModelState,
+    AcpSessionBusyError,
+    NativeCommandRequest,
+    NativeCommandUnavailableError,
+    model_state_or_none,
+    model_state_path,
+    read_model_state,
+    write_model_state,
+)
+from ._acp_prompt_outcomes import (
+    is_executable_native_command_name as _is_executable_native_command_name,
+)
+from ._acp_prompt_outcomes import (
+    raise_for_prompt_stop_reason as _raise_for_prompt_stop_reason,
+)
+from ._acp_prompt_outcomes import (
+    raise_prompt_error as _raise_prompt_error,
+)
+from ._acp_prompt_outcomes import (
+    required_session_id as _required_session_id,
+)
 from ._acp_protocol import process_stdout_loop
 from ._acp_request import await_response, issue_request
 from ._acp_rpc_handlers import (
@@ -66,7 +87,6 @@ from ._acp_rpc_handlers import (
 )
 from ._acp_session import initialize_session, setup_prompt, setup_session
 from ._acp_types import (
-    MAX_NATIVE_COMMAND_NAME_LENGTH,
     AcpModelConfig,
     AcpResponseFuture,
     AcpResponseFutures,
@@ -93,174 +113,13 @@ from .acp_exceptions import (
     AcpPromptCancelledError,
     AcpPromptError,
 )
-from .conditions import ProviderCondition, condition_from_acp_error
+from .cli_resolution import resolve_provider_cli_executable
 
-__all__ = [
-    "ACP_SESSION_TRANSCRIPT_DECLARATION",
-    "ARTIFACT_DECLARATIONS",
-    "AcpChatModel",
-]
+__all__ = ["AcpChatModel"]
 
 logger = logging.getLogger(__name__)
 _COMMAND_ADVERTISEMENT_TIMEOUT_SECONDS = 5.0
 _MAX_NATIVE_COMMAND_ARGUMENT_LENGTH = 8192
-
-
-@dataclass(frozen=True, slots=True)
-class _NativeCommandRequest:
-    name: str
-    arguments: str | None
-
-
-class _NativeCommandUnavailableError(RuntimeError):
-    def __init__(
-        self, name: str, disposition: NativeCommandDisposition, reason: str
-    ) -> None:
-        super().__init__(reason)
-        self.name = name
-        self.disposition = disposition
-
-
-class _AcpSessionBusyError(RuntimeError):
-    """The model already owns an in-flight provider session."""
-
-
-# The spawned CLI writes its own session transcript into the OPERATOR's real
-# config home, partitioned by the ABSOLUTE path of the directory the session
-# opened in. Nothing here creates, names, opens, or can reach that file; the
-# spawn is merely what causes it to exist, which is why this declaration sits
-# at a spawning seam.
-#
-# TWO seams spawn, and the declaration covers both. This one opens a session at
-# the run's active project. Catalog discovery opens one too - the prompt-free
-# probe in ``acp_catalog`` issues session/new with the caller's cwd - and it is
-# the HIGHER-frequency seam, because one catalog read probes every registered
-# lane while a run spawns only the lane it selected.
-#
-# What orphans a partition is therefore NOT which seam opened it. Neither mints
-# one per run; both mint one per WORKSPACE, and a partition is orphaned exactly
-# when the directory it keys stops existing. Served production hands both seams
-# the operator's own project, so their partitions coincide with the ones the
-# operator's interactive CLI already writes. A caller that mints a fresh
-# workspace per invocation collapses per-workspace into per-invocation, and
-# every such invocation leaves a partition behind - which is the accumulation
-# actually measured, and it is a property of the CALLER's workspace lifetime.
-#
-# Two measured facts fix the disposition. The CLI bounds the tree itself, and
-# this project never reads a transcript back: session/load is wired, but no
-# production construction supplies session_id, so provider-native resume has no
-# caller on this lane - the same posture the Codex lane ratified. That second
-# fact is what makes suppression, rather than reclamation, the correct remedy;
-# it is simply not available from here (see mechanism).
-ACP_SESSION_TRANSCRIPT_DECLARATION = ArtifactDeclaration(
-    name="acp-cli-session-transcript",
-    root="<operator CLAUDE_CONFIG_DIR>/projects/<encoded spawn workspace path>/",
-    owner="providers.acp_chat_model",
-    disposition=RetentionDisposition.BOUNDED_BY_AGE,
-    mechanism=(
-        "the CLI's OWN cleanupPeriodDays sweep, 30 days by default, applied "
-        "independently of this project. Nothing here bounds it and nothing here "
-        "may acquire the authority to: the transcript sits in the operator's real "
-        "config home under the no-auth ambient-environment contract, keyed "
-        "identically to the sessions the operator starts by hand, so NO predicate "
-        "available to this project separates a session either seam here spawned "
-        "from one a human started - the only discriminator is inside the file. "
-        "Nor does an exists-check on the keyed directory rescue it: an operator "
-        "who deletes a scratch directory they worked in leaves an orphan of their "
-        "own, indistinguishable from ours. The threshold "
-        "is therefore the operator's to set and not this project's to rely on. "
-        "The lever that would belong here is suppression, not reclamation, and it "
-        "is upstream: the agent SDK exposes persistSession=false, which would stop "
-        "the write outright and costs this lane nothing because no caller resumes "
-        "a persisted session, but the pinned ACP adapter does not thread the "
-        "option and its only persistence-relevant env knob is CLAUDE_CONFIG_DIR, "
-        "whose redirection the no-auth contract forbids"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    ACP_SESSION_TRANSCRIPT_DECLARATION,
-)
-
-
-def _required_session_id(result: JsonObject, *, operation: str) -> str:
-    """Return the session id in one successful ACP response result."""
-    session_id = result.get("sessionId")
-    if not isinstance(session_id, str) or not session_id:
-        raise AcpError(
-            f"ACP {operation} succeeded without a sessionId",
-            code=AcpErrorCode.INTERNAL_ERROR,
-        )
-    return session_id
-
-
-def _raise_prompt_error(
-    response: JsonObject, *, effects_may_have_occurred: bool = False
-) -> Never:
-    """Raise a typed prompt failure from one JSON-RPC error response.
-
-    The adapter attaches a categorical error kind to this frame precisely so a
-    client can dispatch on it rather than pattern-match the message, and this is
-    the one place that kind is still in hand. Resolving it here means the
-    condition travels with the exception to every reporting site, instead of
-    each of them re-deriving it from prose that has already been flattened.
-    """
-    raw_error = response.get("error")
-    error = lenient_json_object(raw_error)
-    code_value = error.get("code")
-    code = (
-        code_value
-        if isinstance(code_value, int) and not isinstance(code_value, bool)
-        else AcpErrorCode.INTERNAL_ERROR
-    )
-    raise AcpPromptError(
-        f"ACP prompt failed: {raw_error}",
-        code=code,
-        data=error.get("data"),
-        condition=condition_from_acp_error(error),
-        effects_may_have_occurred=effects_may_have_occurred,
-    )
-
-
-def _raise_for_prompt_stop_reason(
-    stop_reason: str | None, *, effects_may_have_occurred: bool = False
-) -> None:
-    """Preserve every non-success ACP terminal outcome as a typed result."""
-    if stop_reason == "end_turn":
-        return
-    data = {"acp_stop_reason": stop_reason}
-    if stop_reason == "cancelled":
-        raise AcpPromptCancelledError(
-            "ACP prompt was cancelled by the agent",
-            data=data,
-            effects_may_have_occurred=effects_may_have_occurred,
-        )
-    if stop_reason == "max_turn_requests":
-        raise AcpPromptError(
-            "ACP prompt exhausted its turn-request budget",
-            data=data,
-            condition=ProviderCondition.BUDGET_EXHAUSTED,
-            effects_may_have_occurred=effects_may_have_occurred,
-        )
-    if stop_reason == "max_tokens":
-        raise AcpPromptError(
-            "ACP prompt reached its output token limit",
-            data=data,
-            condition=ProviderCondition.INVALID_REQUEST,
-            effects_may_have_occurred=effects_may_have_occurred,
-        )
-    if stop_reason == "refusal":
-        raise AcpPromptError(
-            "ACP agent refused the prompt",
-            data=data,
-            condition=ProviderCondition.INVALID_REQUEST,
-            effects_may_have_occurred=effects_may_have_occurred,
-        )
-    raise AcpPromptError(
-        f"ACP prompt ended without a supported stop reason: {stop_reason!r}",
-        data=data,
-        effects_may_have_occurred=effects_may_have_occurred,
-    )
 
 
 class AcpChatModel(BaseChatModel):
@@ -370,47 +229,53 @@ class AcpChatModel(BaseChatModel):
     )
     desired_config_options: dict[str, str] = Field(default_factory=dict)
 
-    # --- Runtime state (private, not model fields) ---
-    _config: AcpModelConfig = PrivateAttr()
-    _process: asyncio.subprocess.Process | None = PrivateAttr(default=None)
-    _stdin: asyncio.StreamWriter | None = PrivateAttr(default=None)
-    # Shared lock for _stdin writes — used both by background RPC tasks and
-    # by public methods (fork_session, list_sessions, etc.) to prevent
-    # interleaved JSON-RPC frames (H14 fix).
-    _stdin_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
-    _active_session_id: str | None = PrivateAttr(default=None)
-    _response_futures: AcpResponseFutures | None = PrivateAttr(default=None)
-    _auth_methods: list[JsonObject] = PrivateAttr(default_factory=list)
-    _session_config_options: list[JsonObject] = PrivateAttr(default_factory=list)
-    _session_busy: bool = PrivateAttr(default=False)
+    _state: AcpModelState = PrivateAttr()
+
+    def __getattr__(self, name: str) -> Any:
+        state = model_state_or_none(self)
+        state_field = model_state_path(name)
+        if name == "_state" and state is not None:
+            return state
+        if state is not None and state_field is not None:
+            return read_model_state(state, state_field)
+        raise AttributeError(name)
+
+    @override
+    def __setattr__(self, name: str, value: Any) -> None:
+        state = model_state_or_none(self)
+        state_field = model_state_path(name)
+        if state is not None and state_field is not None:
+            write_model_state(state, state_field, value)
+            return
+        super().__setattr__(name, value)
 
     @override
     def model_post_init(self, __context: object) -> None:
-        """Initialize mutable instance attributes after Pydantic validation."""
-        self._config = AcpModelConfig(
-            agent_config=self.agent_config,
-            permission_callback=self.permission_callback,
-            workspace_root=self.workspace_root,
-            command=self.command,
-            env_vars=dict(self.env_vars),
-            session_id=self.session_id,
-            mcp_servers=list(self.mcp_servers),
-            allowed_tools=list(self.allowed_tools),
-            use_exec=self.use_exec,
-            provider=self.provider,
-            runtime_authority=self.runtime_authority,
-            acp_backend=self.acp_backend,
-            acp_family=self.acp_family,
-            command_origin=self.command_origin,
-            command_kind=self.command_kind,
-            command_executable=self.command_executable,
-            command_target=self.command_target,
-            auth_mode=self.auth_mode,
-            desired_model=self.desired_model,
-            desired_config_options=dict(self.desired_config_options),
+        self._state = AcpModelState.from_config(
+            config=AcpModelConfig(
+                agent_config=self.agent_config,
+                permission_callback=self.permission_callback,
+                workspace_root=self.workspace_root,
+                command=self.command,
+                env_vars=dict(self.env_vars),
+                session_id=self.session_id,
+                mcp_servers=list(self.mcp_servers),
+                allowed_tools=list(self.allowed_tools),
+                use_exec=self.use_exec,
+                provider=self.provider,
+                runtime_authority=self.runtime_authority,
+                acp_backend=self.acp_backend,
+                acp_family=self.acp_family,
+                command_origin=self.command_origin,
+                command_kind=self.command_kind,
+                command_executable=self.command_executable,
+                command_target=self.command_target,
+                auth_mode=self.auth_mode,
+                desired_model=self.desired_model,
+                desired_config_options=dict(self.desired_config_options),
+            ),
+            previous=model_state_or_none(self),
         )
-        self._auth_methods = []
-        self._session_config_options = []
 
     @property
     @override
@@ -463,14 +328,14 @@ class AcpChatModel(BaseChatModel):
         *,
         stop: list[str] | None,
         run_manager: AsyncCallbackManagerForLLMRun | None,
-        native_command: _NativeCommandRequest | None,
+        native_command: NativeCommandRequest | None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Own one provider session and refuse concurrent use explicitly."""
         del stop, kwargs
-        if self._session_busy:
-            raise _AcpSessionBusyError("the provider session is already busy")
-        self._session_busy = True
+        if self._state.session.session_busy:
+            raise AcpSessionBusyError("the provider session is already busy")
+        self._state.session.session_busy = True
         try:
             async for chunk in self._astream_session(
                 messages,
@@ -479,14 +344,126 @@ class AcpChatModel(BaseChatModel):
             ):
                 yield chunk
         finally:
-            self._session_busy = False
+            self._state.session.session_busy = False
+
+    async def _acp_environment(self) -> dict[str, str]:
+        _ws_path = require_workspace_root(
+            self.workspace_root, surface="ACP environment resolution"
+        )
+        env = resolve_env_vars(_ws_path)
+        env.update(self.env_vars)
+        # Bypass the adapter's bundled cli.js — drive the same installed claude
+        # binary an interactive invocation runs, so the lane's behaviour (and
+        # credential resolution) matches the operator's own CLI exactly. Only
+        # for the claude-family adapter; Kimi runs its own CLI.
+        _system_claude = resolve_provider_cli_executable(Provider.CLAUDE)
+        if (
+            _system_claude
+            and self._state.config.acp_family == "claude"
+            and self.command
+        ):
+            env.setdefault("CLAUDE_CODE_EXECUTABLE", _system_claude)
+        env.pop("CLAUDECODE", None)  # Prevent nested session abort
+        # Suppress interactive prompts that
+        # stall non-interactive ACP subprocesses.
+        env["CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"] = "1"
+        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+        # Bridged runs must EAGERLY load their per-run authoring MCP
+        # tools. The pinned CLI defers MCP tool schemas under Tool Search
+        # ("deferred-tool registry"); a stdio bridge's tools are then deferred
+        # and unindexed, so the agent connects to the server but never finds the
+        # tools. ENABLE_TOOL_SEARCH=0 forces "standard" eager loading, landing
+        # the schemas directly in reasoning context. Scoped to bridged runs
+        # (allowed_tools present) so default agents keep Tool Search's context
+        # savings. This is transport-dependent: for HTTP MCP the flag is inert
+        # (that path is not surfaced at all in the pinned CLI); for stdio it is
+        # load-bearing, which is why it is gated on the bridge, not the transport.
+        if self._state.config.allowed_tools:
+            env["ENABLE_TOOL_SEARCH"] = "0"
+
+        # Fail loud: every registry-known harness server this session is about to
+        # advertise must actually serve the read-only tools the registry declares
+        # for it. The declared names ARE the run's allowlist and the surfacing
+        # config's contents, so a server that no longer serves one of them would
+        # leave the agent advertising and auto-permitting a tool it can never call
+        # - grounding silently absent, run still green. The launch spec carries no
+        # version constraint by design; this check, not a pinned version, is what
+        # makes the declaration trustworthy. Probed before any config home or
+        # workspace projection is written, so a refusal leaves nothing to clean up,
+        # and memoized per launch identity so the cost lands once per process.
+        await verify_harness_mcp_contract(self._state.config.mcp_servers, env=env)
+
+        # The CLI runs in the operator's REAL config home (no redirect - the
+        # no-auth contract requires the child to resolve exactly the login an
+        # interactive `claude` resolves). The declared-surface invariant rides
+        # the SESSION itself: setup_session advertises the declared servers in
+        # ``session/new`` and, on the claude family, pins the CLI into strict
+        # MCP mode so the mounted surface is exactly that advertisement - no
+        # ambient user-global, project, plugin, or account-connector server
+        # joins it, and a plain run mounts nothing. Nothing is written into the
+        # run workspace or the config home for MCP surfacing.
+        #
+        # The bridge's env values ride the session spec as ``${NAME}``
+        # placeholder references (the spec is serialized onto the CLI argv);
+        # the real values are hoisted into the spawn env here, the environment
+        # the CLI expands those references from at config parse time.
+        if self._state.config.mcp_servers:
+            _bridge_entry, bridge_env = config_home_authoring_entry(
+                self._state.config.mcp_servers
+            )
+            env.update(bridge_env)
+            # Every OTHER advertised spec's env is projected the same way and
+            # was never hoisted, so a pinned harness server reached the CLI as a
+            # dangling reference and started with its pin unset - looking pinned
+            # while resolving its project from the inherited directory.
+            env.update(
+                harness_spawn_env(
+                    self._state.config.mcp_servers, exclude=AUTHORING_MCP_SERVER_NAME
+                )
+            )
+        return env
+
+    async def _native_prompt_blocks(
+        self,
+        ctx: AcpSessionContext,
+        native_command: NativeCommandRequest | None,
+        prompt_blocks: list[JsonObject],
+        session_id: str,
+    ) -> list[JsonObject]:
+        if native_command is not None:
+            catalog = ctx.native_commands_for(session_id)
+            if not catalog.received:
+                try:
+                    await asyncio.wait_for(
+                        catalog.updated.wait(),
+                        timeout=_COMMAND_ADVERTISEMENT_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    raise NativeCommandUnavailableError(
+                        native_command.name,
+                        NativeCommandDisposition.BLOCKED,
+                        ("the provider did not advertise commands before the deadline"),
+                    ) from None
+            availability = catalog.resolve(native_command.name)
+            if availability.disposition is not NativeCommandDisposition.SUPPORTED:
+                raise NativeCommandUnavailableError(
+                    native_command.name,
+                    availability.disposition,
+                    availability.reason or "native command is unavailable",
+                )
+            text = f"/{native_command.name}"
+            if native_command.arguments:
+                text = f"{text} {native_command.arguments}"
+            prompt_blocks = [{"type": "text", "text": text}]
+            ctx.effects_may_have_occurred = True
+        return prompt_blocks
 
     async def _astream_session(
         self,
         messages: list[BaseMessage],
         *,
         run_manager: AsyncCallbackManagerForLLMRun | None,
-        native_command: _NativeCommandRequest | None,
+        native_command: NativeCommandRequest | None,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Run one ordinary prompt or one negotiated native command."""
         prompt_blocks: list[JsonObject] = []
@@ -505,76 +482,7 @@ class AcpChatModel(BaseChatModel):
         # and strips none. Provider-specific config (e.g. Z.ai's
         # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN retarget) rides self.env_vars
         # as an additive overlay from ProviderFactory.
-        _ws_path = require_workspace_root(
-            self.workspace_root, surface="ACP environment resolution"
-        )
-        env = resolve_env_vars(_ws_path)
-        env.update(self.env_vars)
-        # Bypass the adapter's bundled cli.js — drive the same installed claude
-        # binary an interactive invocation runs, so the lane's behaviour (and
-        # credential resolution) matches the operator's own CLI exactly. Only
-        # for the claude-family adapter; Kimi runs its own CLI.
-        _system_claude = shutil.which("claude")
-        if _system_claude and self._config.acp_family == "claude" and self.command:
-            env.setdefault("CLAUDE_CODE_EXECUTABLE", _system_claude)
-        env.pop("CLAUDECODE", None)  # Prevent nested session abort
-        # Suppress interactive prompts that
-        # stall non-interactive ACP subprocesses.
-        env["CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"] = "1"
-        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-        # Bridged runs must EAGERLY load their per-run authoring MCP
-        # tools. The pinned CLI defers MCP tool schemas under Tool Search
-        # ("deferred-tool registry"); a stdio bridge's tools are then deferred
-        # and unindexed, so the agent connects to the server but never finds the
-        # tools. ENABLE_TOOL_SEARCH=0 forces "standard" eager loading, landing
-        # the schemas directly in reasoning context. Scoped to bridged runs
-        # (allowed_tools present) so default agents keep Tool Search's context
-        # savings. This is transport-dependent: for HTTP MCP the flag is inert
-        # (that path is not surfaced at all in the pinned CLI); for stdio it is
-        # load-bearing, which is why it is gated on the bridge, not the transport.
-        if self._config.allowed_tools:
-            env["ENABLE_TOOL_SEARCH"] = "0"
-
-        # Fail loud: every registry-known harness server this session is about to
-        # advertise must actually serve the read-only tools the registry declares
-        # for it. The declared names ARE the run's allowlist and the surfacing
-        # config's contents, so a server that no longer serves one of them would
-        # leave the agent advertising and auto-permitting a tool it can never call
-        # - grounding silently absent, run still green. The launch spec carries no
-        # version constraint by design; this check, not a pinned version, is what
-        # makes the declaration trustworthy. Probed before any config home or
-        # workspace projection is written, so a refusal leaves nothing to clean up,
-        # and memoized per launch identity so the cost lands once per process.
-        await verify_harness_mcp_contract(self._config.mcp_servers, env=env)
-
-        # The CLI runs in the operator's REAL config home (no redirect - the
-        # no-auth contract requires the child to resolve exactly the login an
-        # interactive `claude` resolves). The declared-surface invariant rides
-        # the SESSION itself: setup_session advertises the declared servers in
-        # ``session/new`` and, on the claude family, pins the CLI into strict
-        # MCP mode so the mounted surface is exactly that advertisement - no
-        # ambient user-global, project, plugin, or account-connector server
-        # joins it, and a plain run mounts nothing. Nothing is written into the
-        # run workspace or the config home for MCP surfacing.
-        #
-        # The bridge's env values ride the session spec as ``${NAME}``
-        # placeholder references (the spec is serialized onto the CLI argv);
-        # the real values are hoisted into the spawn env here, the environment
-        # the CLI expands those references from at config parse time.
-        if self._config.mcp_servers:
-            _bridge_entry, bridge_env = config_home_authoring_entry(
-                self._config.mcp_servers
-            )
-            env.update(bridge_env)
-            # Every OTHER advertised spec's env is projected the same way and
-            # was never hoisted, so a pinned harness server reached the CLI as a
-            # dangling reference and started with its pin unset - looking pinned
-            # while resolving its project from the inherited directory.
-            env.update(
-                harness_spawn_env(
-                    self._config.mcp_servers, exclude=AUTHORING_MCP_SERVER_NAME
-                )
-            )
+        env = await self._acp_environment()
 
         # The spawn and session setup run INSIDE the try so the finally below
         # is the single cleanup path: a spawn-time raise (missing binary,
@@ -596,7 +504,7 @@ class AcpChatModel(BaseChatModel):
                 ),
                 use_exec=self.use_exec,
                 metadata=runtime_log_extra(
-                    self._config,
+                    self._state.config,
                     handshake_step="spawn",
                     timeout_seconds=settings.acp_startup_timeout_seconds,
                 ),
@@ -630,57 +538,31 @@ class AcpChatModel(BaseChatModel):
                 "terminal/release": on_terminal_release,
             }
             stdout_task = asyncio.create_task(
-                process_stdout_loop(ctx, self._config, rpc_map)
+                process_stdout_loop(ctx, self._state.config, rpc_map)
             )
 
-            init_result = await initialize_session(ctx, self._config)
-            self._auth_methods = init_result.auth_methods
+            init_result = await initialize_session(ctx, self._state.config)
+            self._state.session.auth_methods = init_result.auth_methods
             result = await setup_session(
                 ctx,
-                self._config,
+                self._state.config,
                 init_result.agent_capabilities,
                 init_result.auth_methods,
             )
-            self._active_session_id = result.session_id
-            self._session_config_options = result.config_options
-            self._process = ctx.process
-            self._stdin = ctx.stdin
-            self._stdin_lock = ctx.stdin_lock
-            self._response_futures = ctx.response_futures
-            if native_command is not None:
-                catalog = ctx.native_commands_for(self._active_session_id)
-                if not catalog.received:
-                    try:
-                        await asyncio.wait_for(
-                            catalog.updated.wait(),
-                            timeout=_COMMAND_ADVERTISEMENT_TIMEOUT_SECONDS,
-                        )
-                    except TimeoutError:
-                        raise _NativeCommandUnavailableError(
-                            native_command.name,
-                            NativeCommandDisposition.BLOCKED,
-                            (
-                                "the provider did not advertise commands before "
-                                "the deadline"
-                            ),
-                        ) from None
-                availability = catalog.resolve(native_command.name)
-                if availability.disposition is not NativeCommandDisposition.SUPPORTED:
-                    raise _NativeCommandUnavailableError(
-                        native_command.name,
-                        availability.disposition,
-                        availability.reason or "native command is unavailable",
-                    )
-                text = f"/{native_command.name}"
-                if native_command.arguments:
-                    text = f"{text} {native_command.arguments}"
-                prompt_blocks = [{"type": "text", "text": text}]
-                ctx.effects_may_have_occurred = True
+            self._state.session.active_session_id = result.session_id
+            self._state.session.session_config_options = result.config_options
+            self._state.transport.process = ctx.process
+            self._state.transport.stdin = ctx.stdin
+            self._state.transport.stdin_lock = ctx.stdin_lock
+            self._state.session.response_futures = ctx.response_futures
+            prompt_blocks = await self._native_prompt_blocks(
+                ctx, native_command, prompt_blocks, result.session_id
+            )
             prompt_future = await setup_prompt(
                 ctx,
-                self._config,
+                self._state.config,
                 prompt_blocks,
-                self._active_session_id,
+                self._state.session.active_session_id,
             )
 
             async for chunk in self._yield_chunks(ctx, prompt_future, run_manager):
@@ -691,10 +573,8 @@ class AcpChatModel(BaseChatModel):
             # config home, so the session tree is the only thing to release;
             # the CLI's own transcript lives in the operator's real config home
             # (like any interactive session) and is not ours to move. That
-            # states ownership, not lifetime, and reading it as an answer to
-            # both is how the transcript went undeclared: what it accumulates
-            # and what bounds it are recorded in
-            # ACP_SESSION_TRANSCRIPT_DECLARATION.
+            # states ownership, not lifetime: the CLI's own transcript lives in
+            # its operator-owned config tree and this project never cleans it up.
             cleanup_steps: list[CleanupStep] = []
             if ctx is not None:
                 session_ctx, out_task, err_task = ctx, stdout_task, stderr_task
@@ -718,14 +598,7 @@ class AcpChatModel(BaseChatModel):
         self, name: str, arguments: str | None = None
     ) -> NativeCommandResult:
         """Execute one exactly advertised command through ACP prompt syntax."""
-        if (
-            not name
-            or name != name.strip()
-            or not name.isprintable()
-            or any(character.isspace() for character in name)
-            or name.startswith("/")
-            or len(name) > MAX_NATIVE_COMMAND_NAME_LENGTH
-        ):
+        if not _is_executable_native_command_name(name):
             raise ValueError("native command name is not an executable exact identity")
         if arguments is not None and (
             len(arguments) > _MAX_NATIVE_COMMAND_ARGUMENT_LENGTH
@@ -739,48 +612,52 @@ class AcpChatModel(BaseChatModel):
                 [],
                 stop=None,
                 run_manager=None,
-                native_command=_NativeCommandRequest(name, arguments),
+                native_command=NativeCommandRequest(name, arguments),
             ):
                 content = chunk.message.content
                 if isinstance(content, str):
                     output.append(content)
-        except _AcpSessionBusyError as exc:
+        except Exception as exc:
+            return self._native_command_error_result(name, exc)
+        return NativeCommandResult(
+            name=name,
+            outcome=NativeCommandOutcome.COMPLETED,
+            output="".join(output),
+            effects_may_have_occurred=True,
+        )
+
+    @staticmethod
+    def _native_command_error_result(name: str, exc: Exception) -> NativeCommandResult:
+        if isinstance(exc, AcpSessionBusyError):
             return NativeCommandResult(
                 name=name, outcome=NativeCommandOutcome.BUSY, reason=str(exc)
             )
-        except _NativeCommandUnavailableError as exc:
+        if isinstance(exc, NativeCommandUnavailableError):
             outcome = (
                 NativeCommandOutcome.UNSUPPORTED
                 if exc.disposition is NativeCommandDisposition.UNSUPPORTED
                 else NativeCommandOutcome.BLOCKED
             )
             return NativeCommandResult(name=name, outcome=outcome, reason=str(exc))
-        except AcpPromptCancelledError as exc:
+        if isinstance(exc, AcpPromptCancelledError):
             return NativeCommandResult(
                 name=name,
                 outcome=NativeCommandOutcome.CANCELLED,
                 reason=str(exc),
                 effects_may_have_occurred=exc.effects_may_have_occurred,
             )
-        except AcpError as exc:
+        if isinstance(exc, AcpError):
             return NativeCommandResult(
                 name=name,
                 outcome=NativeCommandOutcome.FAILED,
                 reason=str(exc),
                 effects_may_have_occurred=exc.effects_may_have_occurred,
             )
-        except Exception as exc:
-            logger.error("ACP native command failed", exc_info=exc)
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.FAILED,
-                reason=f"provider command failed ({type(exc).__name__})",
-                effects_may_have_occurred=True,
-            )
+        logger.error("ACP native command failed", exc_info=exc)
         return NativeCommandResult(
             name=name,
-            outcome=NativeCommandOutcome.COMPLETED,
-            output="".join(output),
+            outcome=NativeCommandOutcome.FAILED,
+            reason=f"provider command failed ({type(exc).__name__})",
             effects_may_have_occurred=True,
         )
 
@@ -803,7 +680,7 @@ class AcpChatModel(BaseChatModel):
         logger.error(
             "ACP turn exceeded the idle deadline",
             extra=runtime_log_extra(
-                self._config,
+                self._state.config,
                 process=ctx.process,
                 handshake_step="session/prompt",
                 timeout_seconds=idle_limit,
@@ -828,56 +705,18 @@ class AcpChatModel(BaseChatModel):
             try:
                 chunk = await asyncio.wait_for(ctx.chunk_queue.get(), timeout=0.1)
                 if chunk is None:
-                    if ctx.interrupt_exc:
-                        raise ctx.interrupt_exc[0]
-                    if prompt_future.done():
-                        resp = prompt_future.result()
-                        if "error" in resp:
-                            _raise_prompt_error(
-                                resp,
-                                effects_may_have_occurred=(
-                                    ctx.effects_may_have_occurred
-                                ),
-                            )
-                    logger.warning(
-                        "ACP subprocess exited before end_turn",
-                        extra=runtime_log_extra(
-                            self._config,
-                            process=ctx.process,
-                            handshake_step="session/prompt",
-                            stderr_event_count=ctx.stderr_event_count,
-                            exit_code=ctx.process.returncode,
-                        ),
-                    )
-                    raise AcpError(
-                        "ACP subprocess exited before end_turn",
-                        effects_may_have_occurred=ctx.effects_may_have_occurred,
-                    )
-                if run_manager:
-                    token = chunk.message.content
-                    await run_manager.on_llm_new_token(
-                        token if isinstance(token, str) else "", chunk=chunk
-                    )
+                    self._raise_for_early_exit(ctx, prompt_future)
+                await notify_chunk(run_manager, chunk)
                 yield chunk
             except TimeoutError:
-                if prompt_future.done():
-                    resp = prompt_future.result()
-                    if "error" in resp:
-                        _raise_prompt_error(
-                            resp,
-                            effects_may_have_occurred=ctx.effects_may_have_occurred,
-                        )
+                self._raise_if_prompt_future_error(ctx, prompt_future)
                 self._enforce_turn_deadline(ctx)
                 continue
 
         while not ctx.chunk_queue.empty():
             chunk = ctx.chunk_queue.get_nowait()
             if chunk is not None:
-                if run_manager:
-                    token = chunk.message.content
-                    await run_manager.on_llm_new_token(
-                        token if isinstance(token, str) else "", chunk=chunk
-                    )
+                await notify_chunk(run_manager, chunk)
                 yield chunk
 
         # Propagate any interrupt that raced with end_turn
@@ -887,6 +726,38 @@ class AcpChatModel(BaseChatModel):
             ctx.prompt_stop_reason,
             effects_may_have_occurred=ctx.effects_may_have_occurred,
         )
+
+    def _raise_for_early_exit(
+        self, ctx: AcpSessionContext, prompt_future: AcpResponseFuture
+    ) -> Never:
+        if ctx.interrupt_exc:
+            raise ctx.interrupt_exc[0]
+        self._raise_if_prompt_future_error(ctx, prompt_future)
+        logger.warning(
+            "ACP subprocess exited before end_turn",
+            extra=runtime_log_extra(
+                self._state.config,
+                process=ctx.process,
+                handshake_step="session/prompt",
+                stderr_event_count=ctx.stderr_event_count,
+                exit_code=ctx.process.returncode,
+            ),
+        )
+        raise AcpError(
+            "ACP subprocess exited before end_turn",
+            effects_may_have_occurred=ctx.effects_may_have_occurred,
+        )
+
+    @staticmethod
+    def _raise_if_prompt_future_error(
+        ctx: AcpSessionContext, prompt_future: AcpResponseFuture
+    ) -> None:
+        if prompt_future.done():
+            resp = prompt_future.result()
+            if "error" in resp:
+                _raise_prompt_error(
+                    resp, effects_may_have_occurred=ctx.effects_may_have_occurred
+                )
 
     async def _cleanup_session(
         self,
@@ -908,7 +779,7 @@ class AcpChatModel(BaseChatModel):
                     (
                         f"acp-terminal-{terminal_id}",
                         lambda terminal_id=terminal_id: on_terminal_release(
-                            0, {"terminalId": terminal_id}, ctx, self._config
+                            0, {"terminalId": terminal_id}, ctx, self._state.config
                         ),
                     )
                     for terminal_id in tuple(ctx.terminals)
@@ -916,7 +787,9 @@ class AcpChatModel(BaseChatModel):
             )
 
         async def _cancel_session() -> None:
-            if not (self._active_session_id and not ctx.prompt_done.is_set()):
+            if not (
+                self._state.session.active_session_id and not ctx.prompt_done.is_set()
+            ):
                 return
             # session/cancel must be a proper JSON-RPC (with id) and awaited with a
             # 3-second timeout so the subprocess flushes its state before the kill.
@@ -928,7 +801,7 @@ class AcpChatModel(BaseChatModel):
                     stdin_lock=ctx.stdin_lock,
                     rpc_id=rpc_id,
                     method="session/cancel",
-                    params={"sessionId": self._active_session_id},
+                    params={"sessionId": self._state.session.active_session_id},
                 )
                 await await_response(future, timeout=3.0)
 
@@ -945,7 +818,7 @@ class AcpChatModel(BaseChatModel):
             await _kill_process_tree(
                 ctx.process,
                 metadata=runtime_log_extra(
-                    self._config,
+                    self._state.config,
                     process=ctx.process,
                     handshake_step="cleanup",
                     stderr_event_count=ctx.stderr_event_count,
@@ -964,10 +837,10 @@ class AcpChatModel(BaseChatModel):
                 ("acp-process-tree", _kill_process),
             )
         finally:
-            self._process = None
-            self._stdin = None
-            self._response_futures = None
-            self._active_session_id = None
+            self._state.transport.process = None
+            self._state.transport.stdin = None
+            self._state.session.response_futures = None
+            self._state.session.active_session_id = None
             ctx.tool_calls = {}
             ctx.agent_modes = {}
             ctx.last_auth_url = None
@@ -1005,19 +878,22 @@ class AcpChatModel(BaseChatModel):
         return {"command": self.command}
 
     def _require_session(self) -> str:
-        if self._process is None or self._active_session_id is None:
+        if (
+            self._state.transport.process is None
+            or self._state.session.active_session_id is None
+        ):
             raise RuntimeError("No active session.")
-        return self._active_session_id
+        return self._state.session.active_session_id
 
     def _require_stdin(self) -> asyncio.StreamWriter:
-        if self._stdin is None:
+        if self._state.transport.stdin is None:
             raise RuntimeError("No active session stdin.")
-        return self._stdin
+        return self._state.transport.stdin
 
     def _require_response_futures(self) -> AcpResponseFutures:
-        if self._response_futures is None:
+        if self._state.session.response_futures is None:
             raise RuntimeError("No active session response futures.")
-        return self._response_futures
+        return self._state.session.response_futures
 
     async def _read_stderr_loop(self, ctx: AcpSessionContext) -> None:
         if ctx.process.stderr is None:
@@ -1038,7 +914,7 @@ class AcpChatModel(BaseChatModel):
                     "ACP STDERR: %s",
                     text,
                     extra=runtime_log_extra(
-                        self._config,
+                        self._state.config,
                         process=ctx.process,
                         stderr_event_count=ctx.stderr_event_count,
                     ),
@@ -1051,7 +927,7 @@ class AcpChatModel(BaseChatModel):
             logger.info(
                 "ACP browser authentication prompt detected",
                 extra=runtime_log_extra(
-                    self._config,
+                    self._state.config,
                     process=ctx.process,
                     handshake_step="authenticate",
                     stderr_event_count=ctx.stderr_event_count,
@@ -1065,7 +941,7 @@ class AcpChatModel(BaseChatModel):
             logger.info(
                 "ACP browser authentication URL captured",
                 extra=runtime_log_extra(
-                    self._config,
+                    self._state.config,
                     process=ctx.process,
                     handshake_step="authenticate",
                     stderr_event_count=ctx.stderr_event_count,
@@ -1079,7 +955,7 @@ class AcpChatModel(BaseChatModel):
         future = await issue_request(
             self._require_response_futures(),
             stdin=self._require_stdin(),
-            stdin_lock=self._stdin_lock,
+            stdin_lock=self._state.transport.stdin_lock,
             rpc_id=rpc_id,
             method="session/fork",
             params={"sessionId": sid},
@@ -1098,7 +974,7 @@ class AcpChatModel(BaseChatModel):
         future = await issue_request(
             self._require_response_futures(),
             stdin=self._require_stdin(),
-            stdin_lock=self._stdin_lock,
+            stdin_lock=self._state.transport.stdin_lock,
             rpc_id=rpc_id,
             method="session/list",
             params={},
@@ -1115,7 +991,7 @@ class AcpChatModel(BaseChatModel):
         future = await issue_request(
             self._require_response_futures(),
             stdin=self._require_stdin(),
-            stdin_lock=self._stdin_lock,
+            stdin_lock=self._state.transport.stdin_lock,
             rpc_id=rpc_id,
             method="session/set_mode",
             params={"sessionId": sid, "modeId": mode_id},

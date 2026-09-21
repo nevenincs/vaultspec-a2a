@@ -12,15 +12,14 @@ from typing import TYPE_CHECKING
 import psutil
 import pytest
 
+from ...utils import process as process_module
+from ...utils._process_tree import _win_parent_map, kill_pid_tree_async, pid_is_live
+from ...utils._process_tree import win_kernel32 as _win_kernel32
 from ...utils.process import (
     ProcessContainment,
     ProcessContainmentError,
     _posix_group_is_live,
     _ps_group_is_live,
-    _win_kernel32,
-    _win_parent_map,
-    kill_pid_tree_async,
-    pid_is_live,
 )
 
 if TYPE_CHECKING:
@@ -252,6 +251,26 @@ if sys.platform == "win32":
         assert not await containment._terminate_win_job(kill_timeout=0.2)
 
 else:
+
+    @pytest.mark.asyncio
+    async def test_transient_empty_group_probe_does_not_abandon_live_child(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async with _owned_tree(_STUBBORN_CHILD) as (containment, parent, child_pid):
+            parent.kill()
+            parent.wait(timeout=10)
+            real_probe = process_module._posix_group_is_live
+            calls = 0
+
+            def probe(pgid: int) -> bool | None:
+                nonlocal calls
+                calls += 1
+                return False if calls == 1 else real_probe(pgid)
+
+            monkeypatch.setattr(process_module, "_posix_group_is_live", probe)
+            assert await containment.terminate(term_timeout=0.2, kill_timeout=5.0)
+            assert calls >= 2
+            assert not pid_is_live(child_pid)
 
     def test_assignment_rejects_a_process_in_an_unowned_group() -> None:
         containment = ProcessContainment.create()

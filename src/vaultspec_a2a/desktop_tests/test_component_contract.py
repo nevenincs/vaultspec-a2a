@@ -92,6 +92,17 @@ def _run(command: list[str], *, cwd: Path, timeout: int = 300) -> str:
     return result.stdout
 
 
+def _extract_wheel(wheel: Path, extract_root: Path) -> tuple[str, ...]:
+    """Extract a wheel after checking every archive member stays relative."""
+    with zipfile.ZipFile(wheel) as archive:
+        archive_names = tuple(archive.namelist())
+        for name in archive_names:
+            path = PurePosixPath(name)
+            assert not path.is_absolute() and ".." not in path.parts
+        archive.extractall(extract_root)
+    return archive_names
+
+
 @pytest.fixture(scope="module")
 def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> WheelEvidence:
     """Build from an archive of one captured commit, never the dirty checkout."""
@@ -137,12 +148,7 @@ def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> WheelEvidence:
     wheel = wheels[0]
 
     extract_root = sandbox / "unpacked"
-    with zipfile.ZipFile(wheel) as archive:
-        archive_names = tuple(archive.namelist())
-        for name in archive_names:
-            path = PurePosixPath(name)
-            assert not path.is_absolute() and ".." not in path.parts
-        archive.extractall(extract_root)
+    archive_names = _extract_wheel(wheel, extract_root)
 
     dist_infos = tuple(extract_root.glob("*.dist-info"))
     assert len(dist_infos) == 1, dist_infos

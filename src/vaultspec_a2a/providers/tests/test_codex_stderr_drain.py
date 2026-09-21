@@ -16,7 +16,7 @@ from collections import deque
 
 import pytest
 
-from ..codex_chat_model import (
+from .._codex_app_server_client import (
     CLEANUP_TIMEOUT_SECONDS,
     STDERR_TAIL_LINES,
     drain_stderr_into,

@@ -83,7 +83,7 @@ def justfiles() -> list[Path]:
             that forgot would be the hole this closes.
     """
     found = [p for p in ROOT.rglob("*.just") if not PRUNED & set(p.parts)]
-    root_file = ROOT / "justfile"
+    root_file = ROOT / "Justfile"
     if root_file.exists():
         found.append(root_file)
     assert found, (

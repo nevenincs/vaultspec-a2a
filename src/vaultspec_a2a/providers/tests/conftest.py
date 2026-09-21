@@ -3,6 +3,7 @@
 import asyncio
 import sys
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -77,15 +78,34 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.unit)
 
 
-@pytest_asyncio.fixture
-async def acp_session_context() -> AsyncIterator[AcpSessionContext]:
-    """Yield a production context wrapped around genuine subprocess streams.
+@dataclass(frozen=True, slots=True)
+class _AcpChildStreams:
+    """The immutable, module-owned process fields shared by handler tests."""
 
-    Permission, filesystem, and terminal handler tests intentionally call the
-    production handlers directly.  This fixture makes their otherwise-idle
-    context equally real: an actual Python child owns the exact asyncio stream
-    reader/writer pair production receives from an ACP child process.
-    """
+    process: asyncio.subprocess.Process
+    stdin: asyncio.StreamWriter
+    stdout: asyncio.StreamReader
+
+
+def _fresh_acp_session_context(child: _AcpChildStreams) -> AcpSessionContext:
+    """Seat new mutable ACP state around one otherwise-idle real child."""
+
+    return AcpSessionContext(
+        process=child.process,
+        stdin=child.stdin,
+        stdout=child.stdout,
+        response_futures={},
+        chunk_queue=asyncio.Queue(),
+        prompt_done=asyncio.Event(),
+        prompt_id_ref=[],
+        interrupt_exc=[],
+    )
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def _acp_child_streams() -> AsyncIterator[_AcpChildStreams]:
+    """Own one idle ACP-shaped child on the module fixture event loop."""
+
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
@@ -96,22 +116,32 @@ async def acp_session_context() -> AsyncIterator[AcpSessionContext]:
     )
     assert process.stdin is not None
     assert process.stdout is not None
-    context = AcpSessionContext(
-        process=process,
-        stdin=process.stdin,
-        stdout=process.stdout,
-        response_futures={},
-        chunk_queue=asyncio.Queue(),
-        prompt_done=asyncio.Event(),
-        prompt_id_ref=[],
-        interrupt_exc=[],
-    )
     try:
-        yield context
+        yield _AcpChildStreams(
+            process=process,
+            stdin=process.stdin,
+            stdout=process.stdout,
+        )
     finally:
         process.stdin.close()
+        await process.stdin.wait_closed()
         try:
             await asyncio.wait_for(process.wait(), timeout=5.0)
         except TimeoutError:
             process.kill()
             await process.wait()
+
+
+@pytest_asyncio.fixture
+async def acp_session_context(
+    _acp_child_streams: _AcpChildStreams,
+) -> AsyncIterator[AcpSessionContext]:
+    """Yield fresh per-test state over module-owned subprocess streams.
+
+    Permission, filesystem, and terminal handler tests intentionally call the
+    production handlers directly. Their otherwise-idle process fields remain
+    real, but those fields are never read or written by these consumers, so one
+    child can safely serve the module while every mutable session field remains
+    function-scoped and loop-local.
+    """
+    yield _fresh_acp_session_context(_acp_child_streams)

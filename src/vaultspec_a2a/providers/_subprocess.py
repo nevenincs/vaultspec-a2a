@@ -19,8 +19,10 @@ import re
 import subprocess
 import sys
 from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
+from ..control.config import settings
 from ..utils import kill_pid_tree_async
 from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
@@ -135,6 +137,31 @@ def _metadata_extra(metadata: Mapping[str, object] | None) -> dict[str, object]:
     return {key: value for key, value in metadata.items() if value is not None}
 
 
+def _provider_execution_command(command: list[str]) -> list[str]:
+    """Wrap a POSIX provider/tool command in the configured identity boundary."""
+    launcher = settings.provider_identity_launcher
+    uid = settings.provider_agent_uid
+    gid = settings.provider_agent_gid
+    configured = (launcher is not None, uid is not None, gid is not None)
+    if not any(configured):
+        return command
+    if sys.platform == "win32":
+        raise ProcessContainmentError(
+            "provider identity launcher is configured on unsupported Windows"
+        )
+    if not all(configured):
+        raise ProcessContainmentError(
+            "provider identity boundary requires launcher, agent UID, and agent GID"
+        )
+    assert launcher is not None and uid is not None and gid is not None
+    launcher_path = Path(launcher)
+    if not launcher_path.is_file():
+        raise ProcessContainmentError(
+            f"provider identity launcher is unavailable: {launcher_path}"
+        )
+    return [str(launcher_path), str(uid), str(gid), "--", *command]
+
+
 async def spawn_acp_process(
     command: list[str],
     env: dict[str, str],
@@ -210,6 +237,7 @@ async def _spawn_acp_process(
     # branches: releasing in each branch's own handler is the split duty that let
     # the equivalent leak survive elsewhere in this codebase.
     try:
+        command = _provider_execution_command(command)
         if sys.platform == "win32":
             if use_exec:
                 process = await asyncio.create_subprocess_exec(

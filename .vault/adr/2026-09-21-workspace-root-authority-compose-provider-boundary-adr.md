@@ -103,10 +103,17 @@ SETGID capabilities needed to perform that drop; the exec'd tree has none.
 
 Service-state directories and database files are owned by the worker identity
 and are unreadable to the agent identity. The configured workspace root is the
-only mutable data tree shared with the agent group. Shipped profiles provision
-that ownership and mode. Operators adding bind mounts must grant the documented
-agent UID/GID access beneath the configured workspace root; mounts elsewhere are
-not admissible.
+only mutable data tree shared with the agent group. Shipped profiles explicitly
+mark their service-owned named volume for a bounded startup migration: it
+mirrors owner access to the agent group while preserving executable bits, never
+follows symlinks, and refuses hard-linked, special, foreign-owned, or
+concurrently replaced entries. The launcher applies a group-sharing umask only
+after entering the agent identity, while the service keeps its owner-only umask
+and privileged callbacks explicitly create group-shared workspace files and
+directories. Operators adding bind mounts must disable managed migration,
+prepare the documented agent UID/GID access beneath the configured workspace
+root, and pass startup validation; mounts elsewhere are not admissible and host
+content is never silently rewritten.
 
 Worker-side ACP filesystem callbacks remain privileged code, so they continue
 to enforce canonical, symlink-safe containment beneath the admitted run root.

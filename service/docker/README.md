@@ -59,6 +59,22 @@ profiles. The PostgreSQL overlay additionally requires `POSTGRES_PASSWORD`.
 Mutable runtime state belongs to the configured volumes or application runtime
 directories, not the image layers.
 
+The engine-facing gateway bearer is separate from
+`VAULTSPEC_INTERNAL_TOKEN`. The shipped profiles admit only canonical
+descendants of `/app/data/workspaces`. Provider, MCP, and terminal descendants
+are launched as UID/GID 1002 with no supplementary groups, capabilities, or
+privilege-regain path; the service retains UID/GID 1001 for SQLite and runtime
+state. The gateway token handoff and worker discovery state live in distinct,
+service-only volumes. Existing files in shipped named-volume workspaces are
+upgraded at worker startup for shared GID 1002 access without following
+symlinks; hard-linked, special, or foreign-owned files fail startup. Custom
+bind mounts must sit beneath the configured workspace root, set
+`VAULTSPEC_MANAGED_WORKSPACE_PERMISSIONS=false`, and be prepared by the operator
+for group 1002 access. Their contents are not recursively rewritten. Set
+`VAULTSPEC_A2A_GATEWAY_TOKEN` to pin the bearer or read the
+generated `service.token` from the gateway volume. This is a trusted control
+plane and makes no multi-tenant isolation claim.
+
 See the [service overview](../README.md) for startup commands and the
 [operator reference](../../docs/operations.rst) for the Compose ownership
 boundary.

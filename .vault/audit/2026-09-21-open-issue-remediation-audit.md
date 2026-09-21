@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:09b68bc4807ec0382f219a168cac5f2b56630f1f3f99d5e3d45752cca482fddc'
+body_hash: 'sha256:9d78bc08b7a4538fcee81f2d17eb35256d3903598a3d7b6c399395476dfb2c93'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -73,6 +73,55 @@ focused admission suite passed 67 tests, including 14 independent boundary
 cases, and the scoped Ruff and Ty checks passed. The high admission finding is
 resolved and S03 is ready to close; no GitHub issue action is taken in this
 metadata pass, so issue #25 remains an integrated disposition for P02.S09.
+
+### compose-callback-root-anchor | high/security | intermediate run-root replacement bypassed descendant-only anchoring | resolved
+
+P01.S10 review found that descriptor-relative callback traversal began from the
+resolved run-root pathname, leaving intermediate components exposed to a
+resolve-to-open replacement race. The correction opens the configured managed
+workspace boundary first and traverses every admitted run-root and request
+component with no-follow directory handles. The real Linux image proof replaces
+an intermediate run-root directory with a symlink to `/app` between resolution
+and open; the callback refuses it without reading the service-state sentinel.
+
+### compose-workspace-sharing | high/compatibility | distinct identities could not exchange new or upgraded workspace files | resolved
+
+P01.S10 review found that the service umask and top-directory-only ownership
+change made agent-created files unreadable to worker callbacks, callback-created
+files unreadable to the agent, and legacy UID/GID 1001 project content
+non-writable by UID/GID 1002. The shipped worker profiles now explicitly opt
+service-owned named volumes into a bounded no-follow migration that mirrors
+owner access to the agent group and preserves executable bits. The launcher sets
+a group-sharing umask only after dropping identity; callbacks explicitly create
+shared workspace entries. Custom bind mounts receive validation rather than
+recursive mutation. The real image proof starts from legacy ownership, executes
+a migrated tool, performs bidirectional callback/agent reads and writes, and
+confirms hard-linked service state fails closed without mutation.
+
+### compose-provider-boundary-final-review | low | final security review PASS with no remaining finding | PASS
+
+The independent `security_final_review` for P01.S10 found no critical, high, or
+medium finding. The real production image proof passed 3/3; the Compose proof
+suite passed 17/17; and the focused boundary run passed 30 checks, with eight
+Windows-only skips covered by the Linux proof. Ruff, Ty, and configuration
+checks passed. The evidence covered the actual child UID/GID, empty
+supplementary groups, zero capabilities, `no_new_privs`, private environment
+and database state, legacy bidirectional workspace I/O, anchored callback
+traversal, hard-link refusal without mutation, and launcher failure closed.
+The original service-state and callback TOCTOU highs, plus the two resolved
+review highs above, are discharged. S10 is ready to close; GitHub issue action
+remains outside this metadata commit and belongs to integrated P02.S09
+disposition.
+
+### compose-confinement-test-typing | low/quality | os.open race wrappers were too broad for the locked Ty contract | resolved
+
+The S10 integration hook found six Ty diagnostics in the two descriptor-race
+test wrappers: their `object`-typed path, mode, and keyword arguments could not
+be passed safely to `os.open`. The wrappers now mirror the real `os.open`
+signature, preserving the same swap trigger and delegation while making the
+test boundary typed. The confinement file passed its focused run (28 passed,
+three Windows skips), and the full Ty gate passed.
+
 ### staged-hook-isolation | low | shared dirty worktree hid concurrent S03 symbols from staged hooks | resolved
 
 The first shared-worktree S06 commit attempt correctly ran the normal hooks but

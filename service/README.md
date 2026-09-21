@@ -28,6 +28,27 @@ just stack-dev-down
 The gateway is published at <http://localhost:18000>. The worker remains on the
 Compose network and is not published to the host.
 
+Every engine-facing `/v1` request requires the gateway bearer. In the supplied
+Compose profiles, accepted workspaces are canonical descendants of
+`/app/data/workspaces`; foreign, ancestor, and symlink-escaping roots are
+refused before project configuration is read. Provider and tool processes run
+as a separate `agentuser` identity. They can read and write admitted projects,
+but cannot read the service-owned SQLite database or token handoff. Gateway and
+worker discovery state also use separate volumes. The worker safely upgrades
+existing files in shipped named volumes for shared GID 1002 access. Operators
+adding bind mounts must place them beneath the configured workspace root, set
+`VAULTSPEC_MANAGED_WORKSPACE_PERMISSIONS=false`, and prepare their contents for
+group 1002 access; startup validates the root rather than recursively changing
+host files. This remains a trusted single-control-plane profile, not a
+tenant-isolation boundary.
+
+Set `VAULTSPEC_A2A_GATEWAY_TOKEN` in the repository-root `.env` to pin the
+gateway bearer. If it is unset, the gateway generates one and writes it to the
+owner-restricted `service.token` handoff beside `service.json` in the
+gateway-only `VAULTSPEC_A2A_HOME` volume. Send it as
+`Authorization: Bearer <token>`; the separate `VAULTSPEC_INTERNAL_TOKEN` is
+only for gateway-to-worker traffic and is removed from provider environments.
+
 ## Integration stack
 
 ```console

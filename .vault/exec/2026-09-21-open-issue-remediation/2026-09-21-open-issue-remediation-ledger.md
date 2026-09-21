@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:590f710daeb493237002beec64426358335f3049331bf9bc4e43607d17429d94'
+body_hash: 'sha256:9364622e538ec383b1d09ba114d2f11eacdbc1a350321aef4d9acf5f8d05c20d'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -50,6 +50,31 @@ related:
 - `S03` `verify:` `Ruff and Ty focused checks` -> `pass`
 - `S03` `by:` `metadata-integration-coordinator`
 - `S03` `verify:` `P01.S03 focused admission suite (67 tests; 14 independent boundary cases)` -> `pass`
+- `S10` `M` `service/docker/prod.Dockerfile`
+- `S10` `M` `service/docker-compose.dev.yml`
+- `S10` `M` `service/docker-compose.integration.yml`
+- `S10` `M` `service/docker-compose.prod.yml`
+- `S10` `A` `service/docker/service_entrypoint.py`
+- `S10` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S10` `M` `src/vaultspec_a2a/providers/_subprocess.py`
+- `S10` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S10` `A` `src/vaultspec_a2a/providers/tests/test_provider_service_state_isolation.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S10` `A` `src/vaultspec_a2a/service_tests/test_compose_provider_service_state_isolation.py`
+- `S10` `M` `service/README.md`
+- `S10` `M` `service/docker/README.md`
+- `S10` `A` `service/docker/provider_identity_launcher.c`
+- `S10` `M` `src/vaultspec_a2a/workspace/environment.py`
+- `S10` `A` `src/vaultspec_a2a/workspace/tests/test_environment.py`
+- `S10` `M` `.vault/adr/2026-09-21-workspace-root-authority-compose-provider-boundary-adr.md`
+- `S10` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
+- `S10` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
+- `S10` `by:` `metadata-integration-coordinator`
+- `S10` `verify:` `P01.S10 real production image proof (3/3)` -> `pass`
+- `S10` `verify:` `Compose proof suite (17/17)` -> `pass`
+- `S10` `verify:` `P01.S10 focused boundary run (30 checks; 8 Windows skips covered by Linux)` -> `pass`
+- `S10` `verify:` `Ruff and Ty focused checks` -> `pass`
+- `S10` `verify:` `Compose and configuration checks` -> `pass`
 
 ## Notes
 

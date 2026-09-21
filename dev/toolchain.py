@@ -732,6 +732,20 @@ TEST = Verb(
             ),
         ),
         Target(
+            "merge",
+            "Pure unit tests under declaration-derived resource-aware "
+            "distribution for the pull-request merge gate.",
+            (
+                _pytest(
+                    "-m",
+                    "unit",
+                    "-n",
+                    "auto",
+                    "--dist=loadgroup",
+                ),
+            ),
+        ),
+        Target(
             "service",
             "Deterministic service tests against real local services.",
             (_pytest("-m", "service"),),
@@ -966,8 +980,20 @@ HEALTH = Verb(
 
 CI = Verb(
     name="ci",
-    summary="Run the full local gate.",
+    summary="Run a composed local gate.",
     targets=(
+        Target(
+            "merge",
+            "Fast Linux merge gate: dependency coherence, blocking lint, "
+            "Vault integrity, harness guards, and resource-aware unit tests.",
+            (
+                _verb("deps", "check"),
+                _verb("lint", "all"),
+                uv_run("vaultspec-core", "vault", "check", "all"),
+                _verb("test", "harness"),
+                _verb("test", "merge"),
+            ),
+        ),
         Target(
             "all",
             "Locked environment, Node runtime, lint, dependency, vault, and "

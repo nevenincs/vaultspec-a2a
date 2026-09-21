@@ -976,3 +976,8 @@ rag-warmup:
 [group('check')]
 ci:
     uv run --isolated --no-project python -m dev ci all
+
+# Run the fast Linux pull-request merge profile.
+[group('check')]
+ci-merge:
+    uv run --isolated --no-project python -m dev ci merge

@@ -1,9 +1,9 @@
-name: Tests
+name: Certification
 
 on:
   push:
     branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   workflow-lint:
-    name: Workflow lint (actionlint)
+    name: "Check: Workflow contract (Linux)"
     # actionlint is the only thing that reads these files before GitHub itself
     # does. It earns a gate here for one failure class this fleet keeps paying
     # for: a `runs-on:` label that no registered runner carries. That does not
@@ -62,6 +62,7 @@ jobs:
         run: just check-workflow
 
   test:
+    name: "Check: Full CI (Linux)"
     runs-on: [self-hosted, Linux, X64]
     # MEASURED, not guessed, and provisional until a run completes.
     #
@@ -173,7 +174,7 @@ jobs:
         run: just docs-build
 
   desktop-certification:
-    name: Desktop service tests (${{ matrix.target }})
+    name: "Test: Desktop service (${{ matrix.target }})"
     needs: test
     strategy:
       fail-fast: false
@@ -223,7 +224,7 @@ jobs:
           just test-service-path src/vaultspec_a2a/desktop_tests/
 
   provider-prerequisites:
-    name: Provider prerequisite gates
+    name: "Test: Provider prerequisites (Linux)"
     needs: test
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
@@ -272,7 +273,7 @@ jobs:
         run: just test-provider-gates
 
   compose-regression:
-    name: Compose server profile regression
+    name: "Test: Compose server profile (Linux)"
     needs: test
     # The self-hosted Linux runner has no Docker CLI. The hosted Ubuntu image
     # includes Docker Engine and Compose for the live stack certification.

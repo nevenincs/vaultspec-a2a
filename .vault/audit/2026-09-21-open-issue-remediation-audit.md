@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:deab3237eb40b64e93cdbc8db911a6a86e4336dd982df3296b476be8ef587e6e'
+body_hash: 'sha256:e714fc1101f8102b30673fcc3e1ccb270121873c6e0a13595f0a1dd9a31cdff9'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -308,3 +308,7 @@ correct bounded transaction/retry behavior with focused concurrency coverage.
 ### sqlite-terminal-election-contention-rereview | medium/operational-concurrency | bounded bridge retry recovers the exact terminal receipt after SQLite busy | resolved
 
 P01.S13 reproduced the contention with a real file-backed SQLite `BEGIN IMMEDIATE` writer lock and a zero lock-wait budget. The terminal handler raised the underlying `sqlite3.OperationalError("database is locked")` at the election write; after the transient HTTP failure released the lock, the real `WorkerBridge` retried the unchanged event batch and the second attempt settled the exact `terminal-election-receipt`. The regression recorded exactly two attempts, equal serialized batches, and one durable cancellation: the action is applied with its claim cleared, the thread is `cancelled`, and `run_revision` is `1`. The production bridge loop is explicitly bounded by `ipc_max_flush_retries` (default three) with exponential backoff, and the terminal CAS/evidence receipt makes the duplicate delivery idempotent. No production correction is required. Focused event-handler tests passed 22/22, WorkerBridge IPC tests passed 24/24, and Ruff, format, and Ty passed.
+
+### release-preparation-review | low | P01.S04 review PASS; local preparation preserves Dashboard-owned release-set selection | PASS
+
+The integrated release preparation path accepts only an explicit workflow-dispatch prepare operation, produces reviewable version, lockfile, and changelog metadata, and keeps publication restricted to an existing exact tag at checked-out HEAD. Ten isolated fixtures, workflow/actionlint/YAML contracts, Ruff, Ty, and compilation passed. The direct dry-run and expected failing check left all release metadata byte-identical. No critical, high, or medium finding was identified. Issue #26 remains for the coordinator's integrated disposition; this Step made no external issue change.

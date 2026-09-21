@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:a5a8e0bb1ed30046f944a22a73edd09153ffc895308fc7d61f568ba908350e50'
+body_hash: 'sha256:34208b7f9589e8ee370384114011077efe43b94f0e0b504b6147949997c0378a'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -113,6 +113,12 @@ related:
 - `S13` `verify:` `uv run --no-sync ty check src/vaultspec_a2a/control/tests/test_event_handlers.py` -> `pass`
 - `S13` `by:` `vaultspec-standard-executor`
 - `S13` `verify:` `event-handler 22 + WorkerBridge IPC 24 + Ruff + format + Ty` -> `pass`
+- `S04` `M` `.github/workflows/release.yml`
+- `S04` `M` `Justfile`
+- `S04` `A` `CHANGELOG.md`
+- `S04` `A` `scripts/tests/test_prepare_release.py`
+- `S04` `verify:` `10 release fixtures + workflow/actionlint/YAML + Ruff/Ty/pycompile + dry-run/check immutability` -> `pass`
+- `S04` `by:` `release-integration-coordinator`
 
 ## Notes
 

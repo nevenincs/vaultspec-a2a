@@ -44,13 +44,13 @@ from __future__ import annotations
 import contextlib
 import os
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-__all__ = ["REPLACE_RETRY_SECONDS", "atomic_write_text"]
+__all__ = ["atomic_write_text"]
 
 REPLACE_RETRY_SECONDS = 2.0
 """How long to ride out a transient Windows sharing violation on the rename.
@@ -96,15 +96,16 @@ def _open_refusing_a_link(
     return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), mode)
 
 
+class _AtomicWriteOptions(TypedDict, total=False):
+    encoding: str
+    retry_seconds: float
+    mode: int | None
+    harden: Callable[[Path], None] | None
+    newline: str | None
+
+
 def atomic_write_text(
-    path: Path,
-    text: str,
-    *,
-    encoding: str = "utf-8",
-    retry_seconds: float = REPLACE_RETRY_SECONDS,
-    mode: int | None = None,
-    harden: Callable[[Path], None] | None = None,
-    newline: str | None = "",
+    path: Path, text: str, **options: Unpack[_AtomicWriteOptions]
 ) -> None:
     """Publish *text* at *path* atomically, leaving no temporary file behind.
 
@@ -156,6 +157,11 @@ def atomic_write_text(
         OSError: If the temporary path is a link, or the write or the rename
             fails; the temporary file is removed before the error propagates.
     """
+    encoding = options.get("encoding", "utf-8")
+    retry_seconds = options.get("retry_seconds", REPLACE_RETRY_SECONDS)
+    mode = options.get("mode")
+    harden = options.get("harden")
+    newline = options.get("newline", "")
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         if mode is None:

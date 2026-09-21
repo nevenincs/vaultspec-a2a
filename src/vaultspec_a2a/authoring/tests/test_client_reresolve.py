@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing.http_handlers import JsonReplyHandler
+from ...testing.tests._support.http_handlers import JsonReplyHandler
 from .. import AuthoringClient
 from .._envelope import AuthoringResponse
 from .._errors import AuthoringError, AuthoringTransportError

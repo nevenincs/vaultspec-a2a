@@ -29,7 +29,7 @@ from ...graph.nodes.clarification import (
     create_clarification_request_node,
 )
 from ...streaming.transformer import emit_interrupt_events
-from ...testing.sse import read_frame
+from ...testing.tests._support.sse import read_frame
 from ...thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,

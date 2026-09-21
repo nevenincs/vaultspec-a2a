@@ -19,7 +19,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 import click
 import httpx
@@ -275,7 +275,7 @@ def _expected_route_signature() -> list[str]:
     route table off the code on disk.
     """
     from ..api.app import create_app
-    from ..api.routes.gateway import route_signature
+    from ..api.routes._gateway_action_endpoints import route_signature
 
     return route_signature(create_app())
 
@@ -334,6 +334,30 @@ def run() -> None:
     """Start, inspect, and cancel runs via the run-* verbs."""
 
 
+def _selection_from_catalog_record(
+    record: dict[str, Any], provider_id: str, execution_mode: str, entry_id: str
+) -> dict[str, Any]:
+    catalog: dict[str, Any] = record.get("catalog") or {}
+    entries: list[dict[str, Any]] = catalog.get("models") or []
+    for entry in entries:
+        if entry.get("entry_id") == entry_id:
+            return {
+                "schema_version": 1,
+                "provider_id": provider_id,
+                "execution_mode": execution_mode,
+                "catalog_revision": cast(
+                    "dict[str, Any]", catalog.get("state") or {}
+                ).get("revision"),
+                "entry_id": entry_id,
+                "controls": {},
+            }
+    offered = ", ".join(str(e.get("entry_id")) for e in entries) or "(none)"
+    raise click.ClickException(
+        f"provider {provider_id!r} in mode {execution_mode!r} serves no entry "
+        f"{entry_id!r}. It currently offers: {offered}"
+    )
+
+
 def _resolve_catalog_selection(
     base: str,
     *,
@@ -371,24 +395,8 @@ def _resolve_catalog_selection(
             or record.get("execution_mode") != execution_mode
         ):
             continue
-        catalog: dict[str, Any] = record.get("catalog") or {}
-        entries: list[dict[str, Any]] = catalog.get("models") or []
-        for entry in entries:
-            if entry.get("entry_id") == entry_id:
-                return {
-                    "schema_version": 1,
-                    "provider_id": provider_id,
-                    "execution_mode": execution_mode,
-                    "catalog_revision": cast(
-                        "dict[str, Any]", catalog.get("state") or {}
-                    ).get("revision"),
-                    "entry_id": entry_id,
-                    "controls": {},
-                }
-        offered = ", ".join(str(e.get("entry_id")) for e in entries) or "(none)"
-        raise click.ClickException(
-            f"provider {provider_id!r} in mode {execution_mode!r} serves no entry "
-            f"{entry_id!r}. It currently offers: {offered}"
+        return _selection_from_catalog_record(
+            record, provider_id, execution_mode, entry_id
         )
     lanes = ", ".join(
         f"{r.get('provider_id')}/{r.get('execution_mode')}" for r in providers
@@ -397,6 +405,19 @@ def _resolve_catalog_selection(
         f"no served lane {provider_id!r}/{execution_mode!r}. Served lanes are: "
         f"{lanes or '(none)'}. Run `presets` to see what this gateway offers."
     )
+
+
+class _RunStartArgs(TypedDict):
+    preset: str
+    message: str
+    title: str | None
+    provider_id: str
+    execution_mode: str
+    entry_id: str
+    workspace: str | None
+    run_id: str | None
+    autonomous: bool | None
+    url: str | None
 
 
 @run.command("start")
@@ -428,18 +449,7 @@ def _resolve_catalog_selection(
     help="Override the preset's autonomy default.",
 )
 @click.option("--url", default=None, help="Gateway base URL (default: local).")
-def run_start(
-    preset: str,
-    message: str,
-    title: str | None,
-    provider_id: str,
-    execution_mode: str,
-    entry_id: str,
-    workspace: str | None,
-    run_id: str | None,
-    autonomous: bool | None,
-    url: str | None,
-) -> None:
+def run_start(**options: Unpack[_RunStartArgs]) -> None:
     """Start a run via the run-start verb.
 
     The provider, execution mode, and entry are REQUIRED rather than defaulted.
@@ -447,7 +457,16 @@ def run_start(
     repository-side default that could be correct, and picking one silently
     would decide on the operator's behalf what produces their artifacts.
     """
-    base = _base_url(url)
+    preset = options["preset"]
+    message = options["message"]
+    title = options["title"]
+    provider_id = options["provider_id"]
+    execution_mode = options["execution_mode"]
+    entry_id = options["entry_id"]
+    workspace = options["workspace"]
+    run_id = options["run_id"]
+    autonomous = options["autonomous"]
+    base = _base_url(options["url"])
     # ONE workspace value for both the catalog lookup and the run's declared
     # project. What a lane serves is a property of the project the run executes
     # in, so resolving the entry against one root and then running in another
@@ -656,6 +675,19 @@ def procs_reap() -> None:
         click.echo(f"reaped {record.role}-{record.name} (pid {record.pid})")
 
 
+class _ProcsUpArgs(TypedDict):
+    role: str
+    name: str
+    workspace: str
+    repo: str
+    build_repo: str
+    engine_service_json: str
+    internal_token_file: str
+    gateway_url: str
+    worker_url: str
+    log_path: str | None
+
+
 @procs.command("up")
 @click.argument("role")
 @click.argument("name")
@@ -708,18 +740,7 @@ def procs_reap() -> None:
 @click.option(
     "--log", "log_path", default=None, help="Append process output to this file."
 )
-def procs_up(
-    role: str,
-    name: str,
-    workspace: str,
-    repo: str,
-    build_repo: str,
-    engine_service_json: str,
-    internal_token_file: str,
-    gateway_url: str,
-    worker_url: str,
-    log_path: str | None,
-) -> None:
+def procs_up(**options: Unpack[_ProcsUpArgs]) -> None:
     """Allocate a band port, boot the role's serve command, and register it.
 
     The race-free boot verb: reserves a band port, spawns ROLE's serve command
@@ -733,6 +754,17 @@ def procs_up(
     pairing (shared IPC token and target gateway) into the record so both agree.
     """
     from ..lifecycle.manager import endpoint_for, serve_up
+
+    role = options["role"]
+    name = options["name"]
+    workspace = options["workspace"]
+    repo = options["repo"]
+    build_repo = options["build_repo"]
+    engine_service_json = options["engine_service_json"]
+    internal_token_file = options["internal_token_file"]
+    gateway_url = options["gateway_url"]
+    worker_url = options["worker_url"]
+    log_path = options["log_path"]
 
     try:
         record = serve_up(

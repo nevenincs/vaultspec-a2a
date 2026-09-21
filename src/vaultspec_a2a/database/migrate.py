@@ -61,7 +61,9 @@ def migration_script_location() -> Path:
     return script_location
 
 
-def build_migration_config(database_url: str) -> Config:
+def build_migration_config(
+    database_url: str, *, sqlite_busy_timeout_ms: int | None = None
+) -> Config:
     """Build an Alembic ``Config`` bound to the package-owned scripts.
 
     The configuration is assembled programmatically rather than read from a
@@ -73,12 +75,18 @@ def build_migration_config(database_url: str) -> Config:
     Args:
         database_url: Full SQLAlchemy URL, e.g.
             ``sqlite+aiosqlite:///path/to/vaultspec.db``.
+        sqlite_busy_timeout_ms: Optional configured SQLite lock-wait budget for
+            the migration engine. Ignored by non-SQLite backends.
     """
     script_location = migration_script_location()
     cfg = Config()
     cfg.set_main_option("script_location", _alembic_option(str(script_location)))
     cfg.set_main_option("sqlalchemy.url", _alembic_option(database_url))
     cfg.attributes["vaultspec_current_only_head"] = True
+    if sqlite_busy_timeout_ms is not None:
+        if sqlite_busy_timeout_ms < 0:
+            raise ValueError("SQLite busy timeout must not be negative")
+        cfg.attributes["sqlite_busy_timeout_ms"] = sqlite_busy_timeout_ms
     return cfg
 
 
@@ -98,7 +106,11 @@ async def run_migrations(database_url: str) -> None:
     Raises:
         FileNotFoundError: If the packaged migration scripts are not present.
     """
-    cfg = build_migration_config(database_url)
+    from ..control.config import settings
+
+    cfg = build_migration_config(
+        database_url, sqlite_busy_timeout_ms=settings.sqlite_busy_timeout_ms
+    )
 
     logger.info("Running Alembic migrations (upgrade head)...")
     await asyncio.to_thread(_upgrade_to_head, cfg)

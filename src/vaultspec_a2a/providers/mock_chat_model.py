@@ -23,7 +23,8 @@ from langchain_core.messages.tool import ToolCallChunk
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import Field, TypeAdapter, ValidationError
 
-from ..control.config import DEFAULT_MOCK_API_BASE, settings
+from ..control.config import settings
+from ..control.infra_config import DEFAULT_MOCK_API_BASE
 from ..team.team_config import AgentConfig
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 

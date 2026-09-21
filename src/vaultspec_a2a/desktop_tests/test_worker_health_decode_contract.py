@@ -35,11 +35,8 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ..control.worker_management import (
-    LazyWorkerSpawner,
-    WorkerHealthProbe,
-    probe_worker_health,
-)
+from ..control._worker_health import WorkerHealthProbe, probe_worker_health
+from ..control.worker_management import LazyWorkerSpawner
 from ..testing.ports import free_port
 
 if TYPE_CHECKING:

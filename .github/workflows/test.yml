@@ -123,7 +123,7 @@ jobs:
           tool: just@1.38.0
 
       - name: Initialize the worktree
-        run: just init
+        run: just init-full
 
       - name: Run canonical CI
         run: just ci
@@ -226,7 +226,7 @@ jobs:
       - name: Run desktop service gates
         shell: bash
         run: |
-          just test-service src/vaultspec_a2a/desktop_tests/
+          just test-service-path src/vaultspec_a2a/desktop_tests/
 
   provider-prerequisites:
     name: Provider prerequisite gates
@@ -266,14 +266,11 @@ jobs:
           tool: just@1.38.0
 
       - name: Initialize the worktree
-        run: just init
+        run: just init-full
 
-      # These gates were skipif-ed on CLIs no workflow ever installed, so they
-      # skipped on every CI run and had never executed there: a regression in
-      # Codex session handling or the projected MCP config would have merged
-      # green. Neither CLI needs a credential for the gates below.
-      - name: Install the provider CLIs these gates require
-        run: npm install -g @openai/codex @anthropic-ai/claude-code
+      # The selected Codex gates need an installed CLI but no credential.
+      - name: Install the provider CLI these gates require
+        run: npm install -g @openai/codex
 
       # Declares those CLIs present, so a gate that skips anyway fails this job
       # rather than vanishing from the totals.
@@ -283,8 +280,10 @@ jobs:
   compose-regression:
     name: Compose server profile regression
     needs: test
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 30
+    # The self-hosted Linux runner has no Docker CLI. The hosted Ubuntu image
+    # includes Docker Engine and Compose for the live stack certification.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -294,16 +293,6 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          # `false` on purpose, and it is not a de-optimisation. These runners
-          # are self-hosted and persistent, and each one pins UV_CACHE_DIR at a
-          # cache shared by every runner on its host - so the cache is already
-          # warm before the job starts and survives after it ends. `true` adds a
-          # GitHub-cache round trip on top of that, and its post step then tries
-          # to upload the whole shared directory: measured on this branch, the
-          # `Post Set up uv` step ran for 18 minutes and was still going when it
-          # hit the job's 20-minute budget, cancelling a run whose actual work
-          # had finished in 81 seconds. Every sibling repo on this fleet already
-          # calls setup-uv without it.
           enable-cache: false
           version: "0.11.29"
 
@@ -317,5 +306,5 @@ jobs:
 
       - name: Run Compose server profile regression
         run: |
-          just test-service \
+          just test-service-path \
             src/vaultspec_a2a/service_tests/test_compose_profile_regression.py

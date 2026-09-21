@@ -15,6 +15,7 @@ from ..runner import (
     COMPLETION_ENDPOINT_ENV,
     COMPLETION_OWNER_PID_ENV,
     DESCENDANT_TIMEOUT_EXIT,
+    RUN_TIMEOUT_EXIT,
     TEARDOWN_TIMEOUT_EXIT,
 )
 
@@ -132,3 +133,13 @@ def test_runner_reports_progress_before_a_session_result(tmp_path: Path) -> None
     assert "pytest owner started:" in completed.stderr
     assert "phase=awaiting_session_result" in completed.stderr
     assert "pytest owner progress:" in completed.stderr
+
+
+def test_runner_reaps_a_run_without_a_session_result(tmp_path: Path) -> None:
+    probe = Path(__file__).with_name("_runner_progress_probe.py")
+
+    completed = _run_runner(probe, tmp_path, runner_args=("--run-timeout", "0.1"))
+
+    assert completed.returncode == RUN_TIMEOUT_EXIT
+    assert "did not produce a session result" in completed.stderr
+    assert "tree_reaped=true" in completed.stderr

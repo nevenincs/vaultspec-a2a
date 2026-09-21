@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -50,12 +51,11 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import (
@@ -68,6 +68,7 @@ from ...authoring import (
     verdict_from_event,
 )
 from ...conftest import materialize_schema
+from ...control._verdict_subscriber_config import VerdictSubscriberConfig
 from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
@@ -90,6 +91,7 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ...worker.app import create_worker_app
@@ -205,6 +207,55 @@ async def test_live_non_verdict_event_does_not_resume(
 _ENVELOPE_COMMAND = {"approve": "approve", "reject": "reject", "edit": "edit_proposal"}
 
 
+@dataclass(frozen=True, slots=True)
+class _DecisionRequest:
+    """Values carried by one live review decision request."""
+
+    reviewer_token: str
+    info: dict[str, str]
+    wire_decision: str
+    comment: str
+    run_id: str
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ParkedGateSeed:
+    """Durable and checkpoint values used to seed one parked gate."""
+
+    thread_id: str
+    proposal_id: str
+    changeset_id: str
+    status: ThreadStatus = ThreadStatus.INPUT_REQUIRED
+    team_preset: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _VerdictRoundTrip:
+    """Engine events and parked runs used by the full verdict round trip."""
+
+    baseline: int
+    seeds: dict[str, tuple[str, dict[str, str]]]
+    expected: dict[str, tuple[dict[str, str], str, str]]
+
+
+@dataclass(frozen=True, slots=True)
+class _ClobberedRun:
+    """Engine proposal and thread id used by the clobbered-status recovery."""
+
+    info: dict[str, str]
+    thread_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _LiveDatabase:
+    """SQLite resources shared by one live subscriber test."""
+
+    engine: AsyncEngine
+    session_factory: async_sessionmaker[AsyncSession]
+    checkpoints: Path
+
+
 def _whole_document_op(run_id: str, label: str) -> dict[str, Any]:
     return {
         "child_key": f"research/{label}-{run_id}.md",
@@ -250,26 +301,21 @@ async def _submit_proposal(
 
 async def _decide(
     client: AuthoringClient,
-    reviewer_token: str,
-    info: dict[str, str],
-    wire_decision: str,
-    comment: str,
-    run_id: str,
-    label: str,
+    request: _DecisionRequest,
 ) -> None:
     """Submit a human review decision through the real decision endpoint."""
     result = await client.post_command(
-        f"/v1/reviews/{info['approval_id']}/decisions",
-        command=_ENVELOPE_COMMAND[wire_decision],
+        f"/v1/reviews/{request.info['approval_id']}/decisions",
+        command=_ENVELOPE_COMMAND[request.wire_decision],
         payload={
-            "proposal_id": info["proposal_id"],
-            "approval_id": info["approval_id"],
-            "decision": wire_decision,
-            "reviewed_revision": info["reviewed_revision"],
-            "comment": comment,
+            "proposal_id": request.info["proposal_id"],
+            "approval_id": request.info["approval_id"],
+            "decision": request.wire_decision,
+            "reviewed_revision": request.info["reviewed_revision"],
+            "comment": request.comment,
         },
-        idempotency_key=f"idk-dec-{label}-{run_id}",
-        actor_token=reviewer_token,
+        idempotency_key=f"idk-dec-{request.label}-{request.run_id}",
+        actor_token=request.reviewer_token,
     )
     assert isinstance(result, AuthoringResponse)
 
@@ -299,21 +345,10 @@ async def _seed_parked(
         await session.commit()
 
 
-@pytest.mark.service
-@pytest.mark.asyncio
-async def test_live_verdict_round_trip_parks_and_resumes(
-    client: AuthoringClient, tmp_path: Path
-) -> None:
-    """Approve / reject / request_changes each resume the correct parked run.
-
-    Drives three real proposals through submit + human decision, then feeds the
-    real outbox frames through the subscriber: ``approval.requested`` parks (no
-    verdict), and each decision frame yields the pinned verdict + reviewer notes
-    and correlates to the run seeded for that proposal. The subscriber's real
-    resume-dispatch path is exercised end to end against an unreachable worker
-    (genuine failure handling, no double).
-    """
-    # --- engine side: agent proposes, human decides ---
+async def _prepare_verdict_round_trip(
+    client: AuthoringClient,
+) -> _VerdictRoundTrip:
+    """Create the three proposals and publish their human decisions."""
     run_id = f"rt-{uuid.uuid4().hex[:8]}"
     minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
     assert isinstance(minted, AuthoringResponse)
@@ -330,9 +365,105 @@ async def test_live_verdict_round_trip_parks_and_resumes(
     reject = await _submit_proposal(session, run_id, "rej")
     changes = await _submit_proposal(session, run_id, "edit")
 
-    await _decide(client, reviewer_token, approve, "approve", "ship it", run_id, "appr")
-    await _decide(client, reviewer_token, reject, "reject", "not yet", run_id, "rej")
-    await _decide(client, reviewer_token, changes, "edit", "tighten it", run_id, "edit")
+    await _decide(
+        client,
+        _DecisionRequest(reviewer_token, approve, "approve", "ship it", run_id, "appr"),
+    )
+    await _decide(
+        client,
+        _DecisionRequest(reviewer_token, reject, "reject", "not yet", run_id, "rej"),
+    )
+    await _decide(
+        client,
+        _DecisionRequest(reviewer_token, changes, "edit", "tighten it", run_id, "edit"),
+    )
+
+    seeds = {
+        "approved": ("thread-appr", approve),
+        "rejected": ("thread-rej", reject),
+        "request_changes": ("thread-edit", changes),
+    }
+    expected = {
+        "approved": (approve, "ship it", "approval.resolved"),
+        "rejected": (reject, "not yet", "proposal.rejected"),
+        "request_changes": (changes, "tighten it", "approval.resolved"),
+    }
+    return _VerdictRoundTrip(baseline, seeds, expected)
+
+
+async def _seed_verdict_round_trip(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    seeds: dict[str, tuple[str, dict[str, str]]],
+) -> None:
+    for _verdict, (thread_id, info) in seeds.items():
+        await _seed_parked(
+            session_factory,
+            checkpointer,
+            thread_id=thread_id,
+            proposal_id=info["proposal_id"],
+            changeset_id=info["changeset_id"],
+        )
+
+
+async def _assert_verdict_round_trip(
+    client: AuthoringClient,
+    subscriber: VerdictSubscriber,
+    round_trip: _VerdictRoundTrip,
+) -> None:
+    lifecycle = [
+        frame
+        async for frame in client.stream_lifecycle(last_seq=round_trip.baseline)
+        if isinstance(frame, LifecycleEvent)
+    ]
+
+    # (a) submit publishes approval.requested, which never reads as a verdict.
+    requested = [
+        frame for frame in lifecycle if frame.event_kind == "approval.requested"
+    ]
+    assert len(requested) >= 3, "each submit must park via approval.requested"
+    assert all(verdict_from_event(frame) is None for frame in requested)
+
+    # (b) each decision frame carries the pinned verdict + notes, rides its
+    # expected event kind, and correlates to the run seeded for that proposal.
+    matched: dict[str, str] = {}
+    for frame in lifecycle:
+        verdict = verdict_from_event(frame)
+        if verdict is None:
+            continue
+        verdict_kind, notes = verdict
+        info, want_notes, want_kind = round_trip.expected[verdict_kind]
+        assert notes == want_notes, f"{verdict_kind}: notes {notes!r}"
+        assert frame.event_kind == want_kind, (
+            f"{verdict_kind} rode {frame.event_kind}, expected {want_kind}"
+        )
+        assert info["proposal_id"] in frame.correlation_ids()
+        thread_id = await subscriber._find_parked_thread(frame.correlation_ids())
+        assert thread_id is not None
+        assert thread_id == round_trip.seeds[verdict_kind][0]
+        matched[verdict_kind] = thread_id
+        # Full path: correlate + dispatch (unreachable worker, graceful).
+        await subscriber._process_event(frame)
+
+    assert set(matched) == {"approved", "rejected", "request_changes"}
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_live_verdict_round_trip_parks_and_resumes(
+    client: AuthoringClient, tmp_path: Path
+) -> None:
+    """Approve / reject / request_changes each resume the correct parked run.
+
+    Drives three real proposals through submit + human decision, then feeds the
+    real outbox frames through the subscriber: ``approval.requested`` parks (no
+    verdict), and each decision frame yields the pinned verdict + reviewer notes
+    and correlates to the run seeded for that proposal. The subscriber's real
+    resume-dispatch path is exercised end to end against an unreachable worker
+    (genuine failure handling, no double).
+    """
+    # --- engine side: agent proposes, human decides ---
+    round_trip = await _prepare_verdict_round_trip(client)
 
     # --- a2a side: seed a parked run per proposal on a real checkpointer ---
     db_file = tmp_path / "rt.db"
@@ -348,71 +479,24 @@ async def test_live_verdict_round_trip_parks_and_resumes(
         httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
     ):
         await checkpointer.setup()
-        seeds = {
-            "approved": ("thread-appr", approve),
-            "rejected": ("thread-rej", reject),
-            "request_changes": ("thread-edit", changes),
-        }
-        for _verdict, (thread_id, info) in seeds.items():
-            await _seed_parked(
-                session_factory,
-                checkpointer,
-                thread_id=thread_id,
-                proposal_id=info["proposal_id"],
-                changeset_id=info["changeset_id"],
-            )
+        await _seed_verdict_round_trip(session_factory, checkpointer, round_trip.seeds)
 
         subscriber = VerdictSubscriber(
-            session_factory=session_factory,
-            checkpointer=checkpointer,
-            worker_client=worker_client,
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=3, recovery_timeout=30.0
-            ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
-            ),
-            endpoint_provider=lambda: None,
-            recursion_limit=25,
-        )
-
-        frames = [f async for f in client.stream_lifecycle(last_seq=baseline)]
-        lifecycle = [f for f in frames if isinstance(f, LifecycleEvent)]
-
-        # (a) submit publishes approval.requested, which never reads as a verdict.
-        requested = [f for f in lifecycle if f.event_kind == "approval.requested"]
-        assert len(requested) >= 3, "each submit must park via approval.requested"
-        assert all(verdict_from_event(f) is None for f in requested)
-
-        # (b) each decision frame carries the pinned verdict + notes, rides its
-        #     expected event kind, and correlates to the run seeded for that
-        #     proposal. Approve and request-changes both ride approval.resolved
-        #     (decision-field disambiguated); reject rides proposal.rejected.
-        expected = {
-            "approved": (approve, "ship it", "approval.resolved"),
-            "rejected": (reject, "not yet", "proposal.rejected"),
-            "request_changes": (changes, "tighten it", "approval.resolved"),
-        }
-        matched: dict[str, str] = {}
-        for frame in lifecycle:
-            verdict = verdict_from_event(frame)
-            if verdict is None:
-                continue
-            verdict_kind, notes = verdict
-            info, want_notes, want_kind = expected[verdict_kind]
-            assert notes == want_notes, f"{verdict_kind}: notes {notes!r}"
-            assert frame.event_kind == want_kind, (
-                f"{verdict_kind} rode {frame.event_kind}, expected {want_kind}"
+            VerdictSubscriberConfig(
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=LazyWorkerSpawner(
+                    worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
+                ),
+                endpoint_provider=lambda: None,
+                recursion_limit=25,
             )
-            assert info["proposal_id"] in frame.correlation_ids()
-            thread_id = await subscriber._find_parked_thread(frame.correlation_ids())
-            assert thread_id is not None
-            assert thread_id == seeds[verdict_kind][0]
-            matched[verdict_kind] = thread_id
-            # Full path: correlate + dispatch (unreachable worker, graceful).
-            await subscriber._process_event(frame)
-
-        assert set(matched) == {"approved", "rejected", "request_changes"}
+        )
+        await _assert_verdict_round_trip(client, subscriber, round_trip)
 
     await db_engine.dispose()
 
@@ -420,12 +504,7 @@ async def test_live_verdict_round_trip_parks_and_resumes(
 async def _seed_parked_gate(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
-    *,
-    thread_id: str,
-    proposal_id: str,
-    changeset_id: str,
-    status: ThreadStatus = ThreadStatus.INPUT_REQUIRED,
-    team_preset: str | None = None,
+    seed: _ParkedGateSeed,
 ) -> None:
     """Seed a run parked at ``proposal_id``'s gate (with its durable row).
 
@@ -438,15 +517,18 @@ async def _seed_parked_gate(
     left the run mis-statused RUNNING even though its checkpoint is parked at the
     gate - the case the reconcile must still recover by checkpoint truth.
     """
+    thread_id = seed.thread_id
+    proposal_id = seed.proposal_id
+    changeset_id = seed.changeset_id
     workspace = Path.cwd()
     metadata = current_execution_metadata(workspace)
     execution_authority = resolve_execution_authority(metadata)
     definition = (
         freeze_graph_definition(
-            load_team_config(team_preset, workspace_root=workspace),
+            load_team_config(seed.team_preset, workspace_root=workspace),
             workspace_root=workspace,
         )
-        if team_preset is not None
+        if seed.team_preset is not None
         else None
     )
     checkpoint = empty_checkpoint()
@@ -470,16 +552,16 @@ async def _seed_parked_gate(
             session,
             write_authority=authority,
             thread_id=thread_id,
-            team_preset=team_preset,
+            team_preset=seed.team_preset,
             metadata=metadata,
         )
-        if team_preset is not None and definition is not None:
+        if seed.team_preset is not None and definition is not None:
             dispatch = DispatchRequest(
                 dispatch_id=authority.action_receipt_id,
                 action="ingest",
                 thread_id=thread_id,
                 content="seed accepted graph authority",
-                team_preset=team_preset,
+                team_preset=seed.team_preset,
                 graph_definition=definition,
                 workspace_root=str(workspace),
                 recursion_limit=25,
@@ -501,7 +583,7 @@ async def _seed_parked_gate(
                 dispatch_id=authority.action_receipt_id,
             )
             assert receipt is not None
-        await update_thread_status(session, thread_id, status)
+        await update_thread_status(session, thread_id, seed.status)
         await record_permission_request(
             session,
             request_id=f"{thread_id}:adr-gate",
@@ -596,6 +678,47 @@ async def _wait_for_receipt(
             await anyio.sleep(0.01)
 
 
+async def _prepare_missed_reject(
+    client: AuthoringClient, run_id: str
+) -> dict[str, str]:
+    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
+    assert isinstance(minted, AuthoringResponse)
+    client._actor_token = minted.data["raw_token"]
+
+    session = AuthoringSession(client, run_id)
+    await session.create_session(scope="repo", title=run_id)
+    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
+    assert isinstance(reviewer, AuthoringResponse)
+    reviewer_token = reviewer.data["raw_token"]
+
+    info = await _submit_proposal(session, run_id, "adr")
+    await _decide(
+        client,
+        _DecisionRequest(
+            reviewer_token,
+            info,
+            "edit",
+            "tighten the rationale",
+            run_id,
+            "adr",
+        ),
+    )
+
+    # The reject leaves the changeset non-terminal (draft) with a resolved,
+    # non-stale approval decision - the exact recovery signal the reconcile reads.
+    snapshot = await client.recovery_snapshot(last_seq=0)
+    assert isinstance(snapshot.data, dict)
+    snapshot_data = cast("dict[str, Any]", snapshot.data)
+    proposals = snapshot_data["snapshot"]["proposals"]["items"]
+    mine = [p for p in proposals if p.get("changeset_id") == info["changeset_id"]]
+    assert mine, "submitted changeset absent from the recovery snapshot"
+    rejected = mine[0]
+    assert rejected["status"] == "draft"
+    assert rejected["approval"]["decision"] == "request_changes"
+    assert rejected["approval"]["stale"] is False
+    return info
+
+
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_missed_reject_is_recovered_by_parked_reconcile(
@@ -621,33 +744,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
     """
     # --- engine side: agent proposes, human rejects via edit (request_changes) ---
     run_id = f"mr-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    client._actor_token = minted.data["raw_token"]
-
-    session = AuthoringSession(client, run_id)
-    await session.create_session(scope="repo", title=run_id)
-    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
-    assert isinstance(reviewer, AuthoringResponse)
-    reviewer_token = reviewer.data["raw_token"]
-
-    info = await _submit_proposal(session, run_id, "adr")
-    await _decide(
-        client, reviewer_token, info, "edit", "tighten the rationale", run_id, "adr"
-    )
-
-    # The reject leaves the changeset non-terminal (draft) with a resolved,
-    # non-stale approval decision - the exact recovery signal the reconcile reads.
-    snapshot = await client.recovery_snapshot(last_seq=0)
-    assert isinstance(snapshot.data, dict)
-    snapshot_data = cast("dict[str, Any]", snapshot.data)
-    proposals = snapshot_data["snapshot"]["proposals"]["items"]
-    mine = [p for p in proposals if p.get("changeset_id") == info["changeset_id"]]
-    assert mine, "submitted changeset absent from the recovery snapshot"
-    rejected = mine[0]
-    assert rejected["status"] == "draft"
-    assert rejected["approval"]["decision"] == "request_changes"
-    assert rejected["approval"]["stale"] is False
+    info = await _prepare_missed_reject(client, run_id)
 
     # --- a2a side: seed the parked run, NEVER processing the reject event ---
     db_file = tmp_path / "mr.db"
@@ -664,10 +761,12 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
         await _seed_parked_gate(
             session_factory,
             checkpointer,
-            thread_id=thread_id,
-            proposal_id=info["proposal_id"],
-            changeset_id=info["changeset_id"],
-            team_preset="mock-success-single",
+            _ParkedGateSeed(
+                thread_id=thread_id,
+                proposal_id=info["proposal_id"],
+                changeset_id=info["changeset_id"],
+                team_preset="mock-success-single",
+            ),
         )
         async with _worker_runtime(checkpointer, receipt_threads=(thread_id,)) as (
             worker_client,
@@ -675,17 +774,19 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             bridge,
         ):
             subscriber = VerdictSubscriber(
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-                worker_client=worker_client,
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=3, recovery_timeout=30.0
-                ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://worker", worker_port=1, auto_spawn=False
-                ),
-                endpoint_provider=lambda: live_engine,
-                recursion_limit=25,
+                VerdictSubscriberConfig(
+                    session_factory=session_factory,
+                    checkpointer=checkpointer,
+                    worker_client=worker_client,
+                    circuit_breaker=WorkerCircuitBreaker(
+                        failure_threshold=3, recovery_timeout=30.0
+                    ),
+                    worker_spawner=LazyWorkerSpawner(
+                        worker_url="http://worker", worker_port=1, auto_spawn=False
+                    ),
+                    endpoint_provider=lambda: live_engine,
+                    recursion_limit=25,
+                )
             )
 
             await subscriber._reconcile_parked_runs(live_engine)
@@ -731,6 +832,140 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
     await db_engine.dispose()
 
 
+async def _assert_clobbered_snapshot(
+    client: AuthoringClient,
+    changeset_id: str,
+) -> None:
+    snapshot = await client.recovery_snapshot(last_seq=0)
+    assert isinstance(snapshot.data, dict)
+    snapshot_data = cast("dict[str, Any]", snapshot.data)
+    proposals = snapshot_data["snapshot"]["proposals"]["items"]
+    mine = [p for p in proposals if p.get("changeset_id") == changeset_id]
+    assert mine, "submitted changeset absent from the recovery snapshot"
+    assert mine[0]["status"] == "draft"
+    assert mine[0]["approval"]["decision"] == "request_changes"
+    assert mine[0]["approval"]["stale"] is False
+
+
+async def _prepare_clobbered_run(client: AuthoringClient) -> _ClobberedRun:
+    """Submit a request-changes proposal before seeding its clobbered run."""
+    run_id = f"cl-{uuid.uuid4().hex[:8]}"
+    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
+    assert isinstance(minted, AuthoringResponse)
+    client._actor_token = minted.data["raw_token"]
+
+    session = AuthoringSession(client, run_id)
+    await session.create_session(scope="repo", title=run_id)
+    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
+    assert isinstance(reviewer, AuthoringResponse)
+    reviewer_token = reviewer.data["raw_token"]
+
+    info = await _submit_proposal(session, run_id, "adr")
+    await _decide(
+        client,
+        _DecisionRequest(
+            reviewer_token,
+            info,
+            "edit",
+            "tighten the rationale",
+            run_id,
+            "adr",
+        ),
+    )
+    await _assert_clobbered_snapshot(client, info["changeset_id"])
+    return _ClobberedRun(info=info, thread_id=f"thread-{run_id}")
+
+
+def _open_live_database(tmp_path: Path, stem: str) -> _LiveDatabase:
+    db_file = tmp_path / f"{stem}.db"
+    materialize_schema(db_file)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    session_factory = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    return _LiveDatabase(
+        engine=engine,
+        session_factory=session_factory,
+        checkpoints=tmp_path / f"{stem}-cp.db",
+    )
+
+
+async def _run_clobbered_reconcile(
+    database: _LiveDatabase,
+    seed: _ClobberedRun,
+    live_engine: EngineEndpoint,
+) -> None:
+    async with AsyncSqliteSaver.from_conn_string(
+        str(database.checkpoints)
+    ) as checkpointer:
+        await checkpointer.setup()
+        await _seed_parked_gate(
+            database.session_factory,
+            checkpointer,
+            _ParkedGateSeed(
+                thread_id=seed.thread_id,
+                proposal_id=seed.info["proposal_id"],
+                changeset_id=seed.info["changeset_id"],
+                status=ThreadStatus.RUNNING,
+                team_preset="mock-success-single",
+            ),
+        )
+        async with _worker_runtime(checkpointer, receipt_threads=(seed.thread_id,)) as (
+            worker_client,
+            worker_app,
+            bridge,
+        ):
+            subscriber = VerdictSubscriber(
+                VerdictSubscriberConfig(
+                    session_factory=database.session_factory,
+                    checkpointer=checkpointer,
+                    worker_client=worker_client,
+                    circuit_breaker=WorkerCircuitBreaker(
+                        failure_threshold=3, recovery_timeout=30.0
+                    ),
+                    worker_spawner=LazyWorkerSpawner(
+                        worker_url="http://worker", worker_port=1, auto_spawn=False
+                    ),
+                    endpoint_provider=lambda: live_engine,
+                    recursion_limit=25,
+                )
+            )
+
+            await subscriber._reconcile_parked_runs(live_engine)
+
+            assert len(worker_app.state.dispatch_ids) == 1
+            async with database.session_factory() as db:
+                action = await get_control_action_by_idempotency_key(
+                    db,
+                    thread_id=seed.thread_id,
+                    idempotency_key=_verdict_resume_idempotency_key(
+                        seed.info["proposal_id"]
+                    ),
+                )
+            assert action is not None
+            assert action.applied_at is None
+            # A dispatched control action always carries its dispatch id;
+            # the column is nullable for the pre-dispatch row only.
+            assert action.dispatch_id is not None
+            receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
+            await relay_event(
+                seed.thread_id,
+                receipt,
+                session_factory=database.session_factory,
+                checkpointer=checkpointer,
+            )
+            async with database.session_factory() as db:
+                settled = await get_control_action_by_idempotency_key(
+                    db,
+                    thread_id=seed.thread_id,
+                    idempotency_key=_verdict_resume_idempotency_key(
+                        seed.info["proposal_id"]
+                    ),
+                )
+            assert settled is not None
+            assert settled.applied_at is not None
+
+
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcile(
@@ -753,106 +988,7 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
     approval decision) rather than the derived status - must still correlate it and
     re-dispatch exactly one ``resume`` carrying the missed ``request_changes``.
     """
-    run_id = f"cl-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    client._actor_token = minted.data["raw_token"]
-
-    session = AuthoringSession(client, run_id)
-    await session.create_session(scope="repo", title=run_id)
-    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
-    assert isinstance(reviewer, AuthoringResponse)
-    reviewer_token = reviewer.data["raw_token"]
-
-    info = await _submit_proposal(session, run_id, "adr")
-    await _decide(
-        client, reviewer_token, info, "edit", "tighten the rationale", run_id, "adr"
-    )
-
-    # The reject leaves the changeset non-terminal (draft) with a resolved,
-    # non-stale approval decision - the exact recovery signal the reconcile reads.
-    snapshot = await client.recovery_snapshot(last_seq=0)
-    assert isinstance(snapshot.data, dict)
-    snapshot_data = cast("dict[str, Any]", snapshot.data)
-    proposals = snapshot_data["snapshot"]["proposals"]["items"]
-    mine = [p for p in proposals if p.get("changeset_id") == info["changeset_id"]]
-    assert mine, "submitted changeset absent from the recovery snapshot"
-    assert mine[0]["status"] == "draft"
-    assert mine[0]["approval"]["decision"] == "request_changes"
-    assert mine[0]["approval"]["stale"] is False
-
-    db_file = tmp_path / "cl.db"
-    materialize_schema(Path(db_file))
-    db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
-    checkpoints = tmp_path / "cl-cp.db"
-    thread_id = f"thread-{run_id}"
-
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await checkpointer.setup()
-        # The distinguishing seed: parked in the checkpoint, but RUNNING in the DB.
-        await _seed_parked_gate(
-            session_factory,
-            checkpointer,
-            thread_id=thread_id,
-            proposal_id=info["proposal_id"],
-            changeset_id=info["changeset_id"],
-            status=ThreadStatus.RUNNING,
-            team_preset="mock-success-single",
-        )
-        async with _worker_runtime(checkpointer, receipt_threads=(thread_id,)) as (
-            worker_client,
-            worker_app,
-            bridge,
-        ):
-            subscriber = VerdictSubscriber(
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-                worker_client=worker_client,
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=3, recovery_timeout=30.0
-                ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://worker", worker_port=1, auto_spawn=False
-                ),
-                endpoint_provider=lambda: live_engine,
-                recursion_limit=25,
-            )
-
-            await subscriber._reconcile_parked_runs(live_engine)
-
-            assert len(worker_app.state.dispatch_ids) == 1
-            async with session_factory() as db:
-                action = await get_control_action_by_idempotency_key(
-                    db,
-                    thread_id=thread_id,
-                    idempotency_key=_verdict_resume_idempotency_key(
-                        info["proposal_id"]
-                    ),
-                )
-            assert action is not None
-            assert action.applied_at is None
-            # A dispatched control action always carries its dispatch id;
-            # the column is nullable for the pre-dispatch row only.
-            assert action.dispatch_id is not None
-            receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
-            await relay_event(
-                thread_id,
-                receipt,
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-            )
-            async with session_factory() as db:
-                settled = await get_control_action_by_idempotency_key(
-                    db,
-                    thread_id=thread_id,
-                    idempotency_key=_verdict_resume_idempotency_key(
-                        info["proposal_id"]
-                    ),
-                )
-            assert settled is not None
-            assert settled.applied_at is not None
-
-    await db_engine.dispose()
+    seed = await _prepare_clobbered_run(client)
+    database = _open_live_database(tmp_path, "cl")
+    await _run_clobbered_reconcile(database, seed, live_engine)
+    await database.engine.dispose()

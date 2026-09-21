@@ -18,7 +18,7 @@ import pytest
 
 from ...control.config import Settings
 from ...desktop.profile import DesktopProfileError, derive_state_paths
-from ...providers.factory import capsule_acp_entry, capsule_node_executable
+from ...providers._factory_commands import capsule_acp_entry, capsule_node_executable
 from ...testing import armed_environment
 from ..main import _DesktopServePlan, _prepare_desktop_serve
 

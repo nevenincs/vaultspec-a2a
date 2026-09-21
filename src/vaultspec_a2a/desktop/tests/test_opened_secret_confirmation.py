@@ -191,9 +191,10 @@ def test_a_swapped_file_at_the_same_name_is_refused(tmp_path: Path) -> None:
     harden_credential_path(path)
     named = path.lstat()
 
-    path.unlink()
-    path.write_text("f" * 32, encoding="utf-8")
-    harden_credential_path(path)
+    replacement = tmp_path / "replacement.token"
+    replacement.write_text("f" * 32, encoding="utf-8")
+    harden_credential_path(replacement)
+    replacement.replace(path)
 
     descriptor = os.open(path, unfollowed_read_flags())
     try:

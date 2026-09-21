@@ -51,16 +51,14 @@ from .test_pw7_acceptance import (
     _resolve_selection,
 )
 from .test_s20_solo_coder_bridge_live import (
-    _ENGINE_POLL_SECONDS,
     _OBSERVE_DEADLINE_SECONDS,
-    _extract_bridge_tools,
-    _message_content,
-    _parse_event,
-    _run_changeset_ids,
+    _observe_solo_coder_run,
 )
 from .test_tool_cores_floor_live import _snapshot_vault, _vault_write_delta
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..conftest import ExternalPrerequisiteRule
 
 _CODER_ROLE = "vaultspec-coder"
@@ -92,24 +90,10 @@ def _codex_authoring_case(feature: str) -> AcceptanceCase:
     )
 
 
-@pytest.mark.service
-@pytest.mark.resource("loopback-stack")
-@pytest.mark.asyncio
-async def test_codex_authoring_tool_call_reaches_the_engine(
+async def _codex_authoring_harness(
     external_prerequisite: ExternalPrerequisiteRule,
-) -> None:
-    """Live: a Codex-lane run's bridged authoring call lands in the engine.
-
-    Proven by ``cs:<run_id>:*`` appearing in ``GET /authoring/v1/proposals``.
-    Before the Codex permission rung existed this could not happen at all: the
-    approval codex raised for the tool went unanswered as a method-not-found, the
-    call was resolved as rejected, and the run still completed - which is why a
-    turn-completed status and real assistant prose are worth nothing here.
-
-    A before/after document-dir snapshot also asserts zero ``.vault`` writes: the
-    proposal belongs in the engine's review lane, never materialized to disk by
-    the agent.
-    """
+) -> tuple[AcceptanceHarness, Path, str, AcceptanceCase, str, str]:
+    """Resolve the live Codex lane and build its authenticated harness."""
     stack = _reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
@@ -129,6 +113,35 @@ async def test_codex_authoring_tool_call_reaches_the_engine(
         selection=selection,
         overrides=overrides,
     )
+    return harness, vault_root, feature, case, engine_base_url, engine_bearer
+
+
+@pytest.mark.service
+@pytest.mark.resource("loopback-stack")
+@pytest.mark.asyncio
+async def test_codex_authoring_tool_call_reaches_the_engine(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """Live: a Codex-lane run's bridged authoring call lands in the engine.
+
+    Proven by ``cs:<run_id>:*`` appearing in ``GET /authoring/v1/proposals``.
+    Before the Codex permission rung existed this could not happen at all: the
+    approval codex raised for the tool went unanswered as a method-not-found, the
+    call was resolved as rejected, and the run still completed - which is why a
+    turn-completed status and real assistant prose are worth nothing here.
+
+    A before/after document-dir snapshot also asserts zero ``.vault`` writes: the
+    proposal belongs in the engine's review lane, never materialized to disk by
+    the agent.
+    """
+    (
+        harness,
+        vault_root,
+        feature,
+        case,
+        engine_base_url,
+        engine_bearer,
+    ) = await _codex_authoring_harness(external_prerequisite)
 
     before = _snapshot_vault(vault_root)
     output_parts: list[str] = []
@@ -163,46 +176,13 @@ async def test_codex_authoring_tool_call_reaches_the_engine(
                 feature=feature,
                 expect=201,
             )
-            deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
-            last_engine_poll = 0.0
-            try:
-                async with hc.stream(
-                    "GET",
-                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
-                    timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
-                ) as response:
-                    response.raise_for_status()
-                    async for raw_line in response.aiter_lines():
-                        line = raw_line.strip()
-                        terminal = False
-                        if line.startswith("data:"):
-                            payload = _parse_event(line[len("data:") :].strip())
-                            content = _message_content(payload)
-                            if content:
-                                output_parts.append(content)
-                                narrated_bridge_names.update(
-                                    _extract_bridge_tools("".join(output_parts))
-                                )
-                            terminal = payload.get("type") == "thread_terminal"
-                        now = time.monotonic()
-                        # Poll the ENGINE, never the narration.
-                        if now - last_engine_poll >= _ENGINE_POLL_SECONDS:
-                            last_engine_poll = now
-                            run_changesets = await _run_changeset_ids(
-                                ec, harness.run_id
-                            )
-                        if run_changesets or now > deadline:
-                            break
-                        if terminal:
-                            run_changesets = await _run_changeset_ids(
-                                ec, harness.run_id
-                            )
-                            break
-            finally:
-                await hc.post(
-                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
-                    timeout=30.0,
-                )
+            run_changesets = await _observe_solo_coder_run(
+                ec,
+                harness,
+                hc,
+                output_parts,
+                narrated_bridge_names,
+            )
 
     after = _snapshot_vault(vault_root)
     delta = _vault_write_delta(before, after)

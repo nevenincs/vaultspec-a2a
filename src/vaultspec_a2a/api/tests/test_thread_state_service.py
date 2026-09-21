@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
@@ -10,10 +11,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
-from ...control.thread_state_service import build_thread_state
+from ...control.thread_state_service import capture_thread_state
 from ...database import (
     create_thread,
     record_permission_request,
@@ -26,6 +25,27 @@ from ...database.models import (
 )
 from ...graph.events import PermissionRequest
 from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
+
+if TYPE_CHECKING:
+    from ...thread.snapshots import ThreadStateData
+
+
+async def _snapshot(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    aggregator: EventAggregator,
+    checkpointer: AsyncSqliteSaver,
+) -> ThreadStateData | None:
+    """Project the live capture service to the snapshot these tests inspect."""
+    capture = await capture_thread_state(
+        session,
+        thread_id=thread_id,
+        aggregator=aggregator,
+        checkpointer=checkpointer,
+    )
+    return capture.snapshot if capture is not None else None
 
 
 @pytest.mark.asyncio
@@ -59,7 +79,7 @@ async def test_checkpoint_failure_updates_execution_readiness_with_repair_status
         await session.commit()
 
     async with session_factory() as session:
-        snapshot = await build_thread_state(
+        snapshot = await _snapshot(
             session,
             thread_id="thread-closed-checkpointer",
             aggregator=EventAggregator(),
@@ -104,7 +124,7 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(tmp_path: Path) ->
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-missing-checkpoint",
                 aggregator=EventAggregator(),
@@ -166,7 +186,7 @@ async def test_missing_checkpoint_hides_durable_pending_permission_state(
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-missing-checkpoint-permission",
                 aggregator=EventAggregator(),
@@ -232,7 +252,7 @@ async def test_submitted_thread_missing_checkpoint_clears_stale_pending_approval
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-submitted-stale-approval",
                 aggregator=EventAggregator(),
@@ -311,7 +331,7 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-corrupt-state",
                 aggregator=EventAggregator(),
@@ -390,7 +410,7 @@ async def test_stale_execution_state_degrades_snapshot_readiness(
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-stale-state",
                 aggregator=EventAggregator(),
@@ -467,7 +487,7 @@ async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-corrupt-permission",
                 aggregator=EventAggregator(),
@@ -541,7 +561,7 @@ async def test_unreadable_plan_approval_row_does_not_seed_pending_approval(
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-corrupt-plan-approval",
                 aggregator=EventAggregator(),
@@ -616,7 +636,7 @@ async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state(
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-stale-plan-approval",
                 aggregator=EventAggregator(),
@@ -678,7 +698,7 @@ async def test_missing_plan_approval_request_clears_stale_thread_pending_approva
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-stale-pending-approval",
                 aggregator=EventAggregator(),
@@ -748,7 +768,7 @@ async def test_plan_approval_without_tool_call_preserves_pending_approval(
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-plan-no-tool-call",
                 aggregator=EventAggregator(),
@@ -819,7 +839,7 @@ async def test_rejected_thread_approval_is_replaced_by_live_pending_plan_approva
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-rejected-stale-live-plan",
                 aggregator=EventAggregator(),
@@ -881,7 +901,7 @@ async def test_rejected_thread_approval_residue_does_not_surface_without_live_pl
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-rejected-residue",
                 aggregator=EventAggregator(),
@@ -951,7 +971,7 @@ async def test_terminal_thread_excludes_durable_pending_permission_from_thread_s
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-terminal-permission-residue",
                 aggregator=EventAggregator(),
@@ -1032,7 +1052,7 @@ async def test_answered_pending_apply_permission_does_not_surface_in_thread_stat
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-answered-pending-apply",
                 aggregator=EventAggregator(),
@@ -1109,7 +1129,7 @@ async def test_aggregator_only_pending_permission_does_not_surface_in_thread_sta
         )
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-aggregator-only-permission",
                 aggregator=aggregator,
@@ -1193,7 +1213,7 @@ async def test_checkpoint_only_pending_permission_does_not_surface_in_thread_sta
             await session.commit()
 
         async with session_factory() as session:
-            snapshot = await build_thread_state(
+            snapshot = await _snapshot(
                 session,
                 thread_id="thread-checkpoint-only-permission",
                 aggregator=EventAggregator(),

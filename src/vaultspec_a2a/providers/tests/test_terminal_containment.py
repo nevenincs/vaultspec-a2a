@@ -117,7 +117,7 @@ async def test_terminal_child_contained_and_reaped_whole(
         assert not is_pid_alive(grandchild_pid)
     finally:
         if is_pid_alive(grandchild_pid):
-            from ...utils.process import kill_pid_tree_async
+            from ...utils._process_tree import kill_pid_tree_async
 
             await kill_pid_tree_async(grandchild_pid)
 

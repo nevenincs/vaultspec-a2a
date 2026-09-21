@@ -51,7 +51,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..graph.enums import ServerEventType
 from ..providers._json_contract import JsonObject
-from ..testing.payloads import json_object
+from ..testing.tests._support.payloads import json_object
 from .test_pw7_acceptance import (
     _MODE_AUTONOMOUS,
     AcceptanceCase,
@@ -178,6 +178,114 @@ async def _run_changeset_ids(ec: AuthoringClient, run_id: str) -> set[str]:
     return found
 
 
+async def _observe_solo_coder_run(
+    ec: AuthoringClient,
+    harness: AcceptanceHarness,
+    gateway_client: httpx.AsyncClient,
+    output_parts: list[str],
+    narrated_bridge_names: set[str],
+) -> set[str]:
+    """Poll the engine during the run, then cancel the stream unconditionally."""
+    deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
+    last_engine_poll = 0.0
+    run_changesets: set[str] = set()
+    try:
+        async with gateway_client.stream(
+            "GET",
+            f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
+            timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
+        ) as response:
+            response.raise_for_status()
+            async for raw_line in response.aiter_lines():
+                line = raw_line.strip()
+                terminal = False
+                if line.startswith("data:"):
+                    payload = _parse_event(line[len("data:") :].strip())
+                    content = _message_content(payload)
+                    if content:
+                        output_parts.append(content)
+                        narrated_bridge_names.update(
+                            _extract_bridge_tools("".join(output_parts))
+                        )
+                    terminal = payload.get("type") == "thread_terminal"
+                now = time.monotonic()
+                # Poll the engine (not the narration) for this run's changeset.
+                if now - last_engine_poll >= _ENGINE_POLL_SECONDS:
+                    last_engine_poll = now
+                    run_changesets = await _run_changeset_ids(ec, harness.run_id)
+                if run_changesets or now > deadline:
+                    break
+                if terminal:
+                    # Final authoritative check after the run settles.
+                    run_changesets = await _run_changeset_ids(ec, harness.run_id)
+                    break
+    finally:
+        await gateway_client.post(
+            f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
+            timeout=30.0,
+        )
+    return run_changesets
+
+
+async def _run_solo_coder_proof(
+    case: AcceptanceCase,
+    harness: AcceptanceHarness,
+    feature: str,
+) -> tuple[set[str], dict[str, list[str]], set[str]]:
+    before = _snapshot_vault(harness.vault_root)
+    output_parts: list[str] = []
+    # Diagnostic only (NEVER asserted): the bridge tool names that appear in the
+    # agent's narration. Retained to surface prompt-echo vs. real invocation when
+    # reading a failure, but proof rests solely on the engine changeset below.
+    narrated_bridge_names: set[str] = set()
+
+    from .test_pw7_acceptance import _ResilientAuthoringClient
+
+    async with _ResilientAuthoringClient(
+        harness.engine_base_url, harness.engine_bearer
+    ) as ec:
+        # Per-agent_id token minted here and supplied at the gateway seam (pw7
+        # pattern): keyed by the coder's agent_id so the run_start coverage gate
+        # passes without the engine's role-key minting.
+        run_tokens = {
+            role: await harness._mint(ec, f"agent:{harness.run_id}:{role}", "agent")
+            for role in case.roles
+        }
+        # Operation-mode = autonomous BEFORE run-start, so the engine's authoring
+        # eligibility layer AUTO-APPROVES the mutating propose_changeset INTO the
+        # review lane instead of gating it as ``awaiting_permission``. This is the
+        # declared run mode reaching the engine's approval layer, NOT a bypass:
+        # autonomous runs auto-approve mutating ops into the review lane, where the
+        # human apply-gate still lives. Replicates the pw7 acceptance AUTO lane's
+        # device verbatim (``AcceptanceHarness._set_mode`` -> POST /v1/mode
+        # ``set_operation_mode``; see the AUTO gate mechanics in
+        # ``test_pw7_acceptance``). A distinct human principal is the mode-policy
+        # setter (mode-set requires a human/system actor, clearing the
+        # self-approval ban). The mode must be live before the run submits the
+        # gated op.
+        mode_setter = await harness._mint(ec, f"mode-setter:{harness.run_id}", "human")
+        await harness._set_mode(ec, _MODE_AUTONOMOUS, setter_token=mode_setter)
+        async with httpx.AsyncClient() as hc:
+            await harness._run_start(
+                hc,
+                run_id=harness.run_id,
+                tokens=run_tokens,
+                feature=feature,
+                expect=201,
+            )
+            run_changesets = await _observe_solo_coder_run(
+                ec,
+                harness,
+                hc,
+                output_parts,
+                narrated_bridge_names,
+            )
+
+    after = _snapshot_vault(harness.vault_root)
+    delta = _vault_write_delta(before, after)
+    return run_changesets, delta, narrated_bridge_names
+
+
 @pytest.mark.service
 @pytest.mark.resource("loopback-stack")
 @pytest.mark.asyncio
@@ -214,91 +322,9 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
         overrides=overrides,
     )
 
-    before = _snapshot_vault(vault_root)
-    output_parts: list[str] = []
-    run_changesets: set[str] = set()
-    # Diagnostic only (NEVER asserted): the bridge tool names that appear in the
-    # agent's narration. Retained to surface prompt-echo vs. real invocation when
-    # reading a failure, but proof rests solely on the engine changeset below.
-    narrated_bridge_names: set[str] = set()
-
-    from .test_pw7_acceptance import _ResilientAuthoringClient
-
-    async with _ResilientAuthoringClient(engine_base_url, engine_bearer) as ec:
-        # Per-agent_id token minted here and supplied at the gateway seam (pw7
-        # pattern): keyed by the coder's agent_id so the run_start coverage gate
-        # passes without the engine's role-key minting.
-        run_tokens = {
-            role: await harness._mint(ec, f"agent:{harness.run_id}:{role}", "agent")
-            for role in case.roles
-        }
-        # Operation-mode = autonomous BEFORE run-start, so the engine's authoring
-        # eligibility layer AUTO-APPROVES the mutating propose_changeset INTO the
-        # review lane instead of gating it as ``awaiting_permission``. This is the
-        # declared run mode reaching the engine's approval layer, NOT a bypass:
-        # autonomous runs auto-approve mutating ops into the review lane, where the
-        # human apply-gate still lives. Replicates the pw7 acceptance AUTO lane's
-        # device verbatim (``AcceptanceHarness._set_mode`` -> POST /v1/mode
-        # ``set_operation_mode``; see the AUTO gate mechanics in
-        # ``test_pw7_acceptance``). A distinct human principal is the mode-policy
-        # setter (mode-set requires a human/system actor, clearing the
-        # self-approval ban). The mode must be live before the run submits the
-        # gated op.
-        mode_setter = await harness._mint(ec, f"mode-setter:{harness.run_id}", "human")
-        await harness._set_mode(ec, _MODE_AUTONOMOUS, setter_token=mode_setter)
-        async with httpx.AsyncClient() as hc:
-            await harness._run_start(
-                hc,
-                run_id=harness.run_id,
-                tokens=run_tokens,
-                feature=feature,
-                expect=201,
-            )
-            deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
-            last_engine_poll = 0.0
-            try:
-                async with hc.stream(
-                    "GET",
-                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
-                    timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
-                ) as response:
-                    response.raise_for_status()
-                    async for raw_line in response.aiter_lines():
-                        line = raw_line.strip()
-                        terminal = False
-                        if line.startswith("data:"):
-                            payload = _parse_event(line[len("data:") :].strip())
-                            content = _message_content(payload)
-                            if content:
-                                output_parts.append(content)
-                                narrated_bridge_names.update(
-                                    _extract_bridge_tools("".join(output_parts))
-                                )
-                            terminal = payload.get("type") == "thread_terminal"
-                        now = time.monotonic()
-                        # Poll the engine (not the narration) for this run's
-                        # changeset - the unforgeable proof of a real invocation.
-                        if now - last_engine_poll >= _ENGINE_POLL_SECONDS:
-                            last_engine_poll = now
-                            run_changesets = await _run_changeset_ids(
-                                ec, harness.run_id
-                            )
-                        if run_changesets or now > deadline:
-                            break
-                        if terminal:
-                            # Final authoritative check after the run settles.
-                            run_changesets = await _run_changeset_ids(
-                                ec, harness.run_id
-                            )
-                            break
-            finally:
-                await hc.post(
-                    f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
-                    timeout=30.0,
-                )
-
-    after = _snapshot_vault(vault_root)
-    delta = _vault_write_delta(before, after)
+    run_changesets, delta, narrated_bridge_names = await _run_solo_coder_proof(
+        case, harness, feature
+    )
 
     assert run_changesets, (
         "the solo-coder did not create any engine changeset scoped to run "

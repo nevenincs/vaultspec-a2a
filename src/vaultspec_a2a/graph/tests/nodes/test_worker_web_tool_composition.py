@@ -52,7 +52,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ....authoring.contract import DOCUMENT_AUTHORING_ROLES
-from ....providers._acp_mcp import (
+from ....providers._native_read_tools import (
     NATIVE_READ_TOOL_NAMES,
     NATIVE_TOOL_EGRESS,
     NATIVE_WEB_TOOL_BOUNDS,
@@ -63,7 +63,6 @@ from ....providers.lane_admission import (
     PROVEN_TURN_LANES,
     PROVEN_WEB_LANES,
     WebLaneProof,
-    is_lane_admissible,
     web_tool_names_for,
 )
 from ...enums import Provider
@@ -219,7 +218,6 @@ def test_completed_turn_proof_does_not_read_as_completed_retrieval_proof() -> No
         "name a lane deliberately or retire the test with a reason"
     )
     for lane in turn_only:
-        assert is_lane_admissible(lane)
         assert web_tool_names_for(lane) == ()
 
 

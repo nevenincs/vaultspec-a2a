@@ -25,11 +25,12 @@ if TYPE_CHECKING:
 
 from ...graph.enums import Provider
 from ...providers import AcpPromptError, ProviderCondition
-from ...providers.codex_chat_model import _turn_failure
+from ...providers._codex_protocol import _turn_failure
 from ...providers.conditions import condition_from_acp_error, condition_is_retryable
 from ...providers.factory import ProviderFactory, ProviderRuntimeUnavailableError
 from ...team.team_config import (
     TeamConfig,
+    TeamGraphConfig,
     TopologyConfig,
     TopologyType,
     WorkerRef,
@@ -39,14 +40,13 @@ from ...team.team_config import (
 )
 from ...thread.errors import ConfigError, WorkerExecutionError
 from ...thread.state import TeamState
+from .._compiler_research import _make_research_producer
+from .._compiler_retry import _NODE_RETRY_POLICY, _worker_retry_on
 from ..compiler import (
-    _NODE_RETRY_POLICY,
     _build_supervisor_prompt,
     _loop_route,
-    _make_research_producer,
     _parse_catalog_preferences,
     _route_from_supervisor,
-    _worker_retry_on,
     compile_team_graph,
     resolve_model_for_worker,
 )
@@ -84,6 +84,7 @@ def _make_team(
         id=team_id,
         display_name=team_id,
         topology=topology,
+        graph=TeamGraphConfig(step_timeout_seconds=120),
         workers=[WorkerRef(agent_id=aid) for aid in worker_ids],
     )
 
@@ -105,19 +106,17 @@ _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("preset", "topology", "expected_workers", "has_supervisor"),
+    "case",
     _PRESET_CASES,
     ids=[c[0] for c in _PRESET_CASES],
 )
 async def test_compile_graph_structure(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
-    preset: str,
-    topology: str,
-    expected_workers: set[str],
-    has_supervisor: bool,
+    case: tuple[str, str, set[str], bool],
 ) -> None:
     """Compiled graph has the correct node set and empty interrupt_before."""
+    preset, topology, expected_workers, has_supervisor = case
     team = load_team_config(preset)
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     supervisor_cfg = (
@@ -309,6 +308,7 @@ async def test_compile_team_graph_accepts_workspace_root(
         "mount_vaultspec-plan-author",
         "mount_vaultspec-coder",
         "mount_vaultspec-doc-reviewer",
+        "_record_graph_completion",
     } == node_keys
 
 
@@ -444,7 +444,7 @@ async def test_compile_interrupt_before_always_empty(
         "vaultspec-doc-reviewer",
     }
     mount_ids = {f"mount_{wid}" for wid in worker_ids}
-    assert worker_ids | mount_ids == node_keys
+    assert worker_ids | mount_ids | {"_record_graph_completion"} == node_keys
 
 
 # ---------------------------------------------------------------------------
@@ -1128,6 +1128,7 @@ _POLICY_FREE_NODE_NAMES: frozenset[str] = frozenset(
         "adr_gate",
         "plan_submit",
         "plan_gate",
+        "_record_graph_completion",
     }
 )
 

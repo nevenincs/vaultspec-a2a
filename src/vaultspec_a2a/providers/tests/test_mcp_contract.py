@@ -16,11 +16,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...thread.errors import ConfigError, HarnessToolContractError
-from .._acp_mcp import (
-    declared_harness_tools,
-    is_known_harness_server,
-    resolve_harness_mcp_servers,
-)
+from .._acp_mcp import resolve_harness_mcp_servers
+from .._harness_mcp_registry import declared_harness_tools, is_known_harness_server
 from .._mcp_contract import (
     verify_declared_tool_contract,
     verify_harness_mcp_contract,

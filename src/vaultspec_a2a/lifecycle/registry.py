@@ -25,7 +25,6 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..utils.atomic_write import atomic_write_text
 from .discovery import is_pid_alive, port_has_listener
 
@@ -35,10 +34,7 @@ if TYPE_CHECKING:
     from .procs_config import ProcsConfig, RoleConfig
 
 __all__ = [
-    "ARTIFACT_DECLARATIONS",
     "NAME_ENV",
-    "PORT_RESERVATION_MARKER_DECLARATION",
-    "PROCESS_RECORD_DECLARATION",
     "PortReservation",
     "ProcRecord",
     "RegistryOwnershipError",
@@ -81,42 +77,6 @@ _PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
 # never drift.
 NAME_ENV = "VAULTSPEC_PROCS_NAME"
 
-# What this module leaves in the machine-global procs home. Both artifacts are
-# session-scoped in intent, and neither is reclaimed by a clock: the record is
-# removed only when an operator runs a lifecycle verb, and the marker only when a
-# later allocator on the same band happens to look at it. "Reclaimable" is not
-# "reclaimed", and the mechanism text says which one holds.
-PROCESS_RECORD_DECLARATION = ArtifactDeclaration(
-    name="dev-process-record",
-    root="<procs_home>/<role>-<name>.json",
-    owner="lifecycle.registry",
-    disposition=RetentionDisposition.SESSION_SCOPED,
-    mechanism=(
-        "removed by remove_record on the kill/reap/rerun verbs; a crashed process "
-        "leaves a dead-pid record that NOTHING deletes on its own - it is freely "
-        "overwritable by the next claimant of the same (role, name) and is "
-        "otherwise resident until an operator runs reap"
-    ),
-)
-
-PORT_RESERVATION_MARKER_DECLARATION = ArtifactDeclaration(
-    name="dev-port-reservation-marker",
-    root=f"<procs_home>/<role>-<port>{_RESERVATION_SUFFIX}",
-    owner="lifecycle.registry",
-    disposition=RetentionDisposition.SESSION_SCOPED,
-    mechanism=(
-        "cleared by commit_reservation and release_reservation; a marker abandoned "
-        "by a crash is reclaimed opportunistically inside reserve_port once its "
-        f"reserver pid is dead or its mtime passes {RESERVATION_TTL_MS}ms, so a "
-        "band nobody allocates from again keeps its markers indefinitely"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    PROCESS_RECORD_DECLARATION,
-    PORT_RESERVATION_MARKER_DECLARATION,
-)
-
 
 class RegistryOwnershipError(RuntimeError):
     """A mutation was refused: a live process of another owner holds the record."""
@@ -131,7 +91,8 @@ class StalenessState(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class ProcRecord:
+# Flat fields are persisted with asdict and loaded from the registry JSON schema.
+class ProcRecord:  # pylint: disable=too-many-instance-attributes
     """A single managed process. Never carries a credential, token, or env value."""
 
     name: str
@@ -213,8 +174,8 @@ def _coerce_command(value: object) -> list[str]:
     return items
 
 
-def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
-    """Build a :class:`ProcRecord` from a parsed record, or ``None`` if invalid."""
+def _record_identity(data: dict[str, Any]) -> tuple[str, str, int, int] | None:
+    """Read the required process identity fields from a parsed record."""
     name = data.get("name")
     role = data.get("role")
     pid = data.get("pid")
@@ -227,6 +188,15 @@ def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
         return None
     if not isinstance(port, int) or isinstance(port, bool):
         return None
+    return name, role, pid, port
+
+
+def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
+    """Build a :class:`ProcRecord` from a parsed record, or ``None`` if invalid."""
+    identity = _record_identity(data)
+    if identity is None:
+        return None
+    name, role, pid, port = identity
 
     def _opt_str(key: str) -> str:
         v = data.get(key)
@@ -489,6 +459,29 @@ def _live_reservation_ports(home: Path | None) -> set[int]:
     return ports
 
 
+def _try_reserve_candidate(
+    role: str, candidate: int, *, home: Path | None
+) -> PortReservation | None:
+    path = _reservation_path(role, candidate, home=home)
+    if path.exists():
+        # Use a fresh clock because peers may create markers during the band walk.
+        if _reservation_is_live(path, now=now_ms()):
+            return None
+        with contextlib.suppress(OSError):
+            path.unlink()
+    if not _port_is_free(candidate):
+        return None
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        return None
+    try:
+        os.write(fd, str(os.getpid()).encode("ascii"))
+    finally:
+        os.close(fd)
+    return PortReservation(port=candidate, path=path)
+
+
 def reserve_port(
     role: str,
     role_config: RoleConfig,
@@ -515,28 +508,9 @@ def reserve_port(
     for candidate in role_config.band:
         if candidate in claimed or candidate in resident_ports:
             continue
-        path = _reservation_path(role, candidate, home=home)
-        if path.exists():
-            # Fresh clock per candidate: the walk across a band takes long
-            # enough (bind probes) that the loop-entry snapshot would read a
-            # peer's just-created marker as future-dated.
-            if _reservation_is_live(path, now=now_ms()):
-                continue
-            # Stale marker: drop it, then the O_EXCL create below arbitrates the race.
-            with contextlib.suppress(OSError):
-                path.unlink()
-        if not _port_is_free(candidate):
-            continue
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            # Another allocator won this port between our checks and the create.
-            continue
-        try:
-            os.write(fd, str(os.getpid()).encode("ascii"))
-        finally:
-            os.close(fd)
-        return PortReservation(port=candidate, path=path)
+        reservation = _try_reserve_candidate(role, candidate, home=home)
+        if reservation is not None:
+            return reservation
     raise RuntimeError(
         f"role {role!r} band {role_config.band} is exhausted: no free port"
     )

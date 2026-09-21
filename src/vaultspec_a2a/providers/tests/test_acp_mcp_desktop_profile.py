@@ -10,13 +10,13 @@ from types import MappingProxyType
 from ...team.team_config import load_team_config
 from .. import _acp_mcp
 from .._acp_mcp import (
-    HarnessMcpRuntimeProfile,
     codex_mcp_server_specs,
     compose_harness_mcp_servers,
     harness_allowed_tool_names,
     resolve_harness_mcp_capabilities,
     resolve_harness_mcp_servers,
 )
+from .._harness_mcp_registry import _KNOWN_MCP_SERVERS, HarnessMcpRuntimeProfile
 from .._json_contract import FrozenJsonObject, JsonObject, freeze_json
 from ..acp_chat_model import AcpChatModel
 from ..codex_chat_model import CodexChatModel
@@ -77,7 +77,7 @@ def test_desktop_registry_admission_is_explicit_and_fail_closed() -> None:
         )
         is True
     )
-    registry_entry = _acp_mcp._KNOWN_MCP_SERVERS[RAG_SERVER]
+    registry_entry = _KNOWN_MCP_SERVERS[RAG_SERVER]
     assert isinstance(registry_entry, MappingProxyType)
     assert _acp_mcp._desktop_available(registry_entry) is False
 

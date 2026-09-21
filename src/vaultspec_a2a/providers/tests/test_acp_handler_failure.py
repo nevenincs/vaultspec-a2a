@@ -23,7 +23,7 @@ from typing import Any, cast
 
 import pytest
 
-from .._acp_protocol import handle_client_response, handle_server_rpc
+from .._acp_protocol import ServerRpcRequest, handle_client_response, handle_server_rpc
 from .._acp_types import AcpModelConfig, AcpSessionContext
 from ..acp_exceptions import AcpPromptError
 
@@ -52,7 +52,9 @@ async def _dispatch(
     The asyncio primitives the context holds require a running loop at
     construction, so the context cannot be built by the synchronous test body.
     """
-    await handle_server_rpc(method, rpc_id, {}, _context(stdin), _config(), handlers)
+    await handle_server_rpc(
+        ServerRpcRequest(method, rpc_id, {}), _context(stdin), _config(), handlers
+    )
 
 
 def _context(stdin: _CapturingStdin) -> AcpSessionContext:

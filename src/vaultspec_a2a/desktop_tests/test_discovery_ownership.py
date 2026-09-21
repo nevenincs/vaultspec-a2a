@@ -34,7 +34,6 @@ from ..lifecycle.discovery import (
     DesktopDiscoveryState,
     classify_desktop_discovery,
     desktop_record_process_is_live,
-    read_desktop_discovery,
     service_json_path,
 )
 from ..lifecycle.singleton import (
@@ -89,7 +88,6 @@ finally:
 
 
 def _spawn_resident(
-    tmp_path: Path,
     app_home: Path,
     owner: str,
     port: int,
@@ -97,8 +95,8 @@ def _spawn_resident(
     *,
     protocol: tuple[int, int] = (1, 1),
 ) -> _ResidentHandle:
-    ready = tmp_path / f"{tag}.ready"
-    stop = tmp_path / f"{tag}.stop"
+    ready = app_home.parent / f"{tag}.ready"
+    stop = app_home.parent / f"{tag}.stop"
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -138,7 +136,7 @@ def _stop(handle: _ResidentHandle, *, timeout: float = 25.0) -> None:
 def test_foreign_contender_validates_but_never_owns(tmp_path: Path) -> None:
     """A contender validates a live compatible resident yet cannot take ownership."""
     app_home = tmp_path / "app"
-    resident = _spawn_resident(tmp_path, app_home, "owner-a", 8400, "res")
+    resident = _spawn_resident(app_home, "owner-a", 8400, "res")
     try:
         _await(resident["ready"])
         state, record = classify_desktop_discovery(service_json_path(app_home))
@@ -162,12 +160,10 @@ def test_foreign_contender_validates_but_never_owns(tmp_path: Path) -> None:
 def test_live_incompatible_resident_is_immutable_conflict(tmp_path: Path) -> None:
     """An incompatible protocol resident is refused for attach and for ownership."""
     app_home = tmp_path / "app"
-    resident = _spawn_resident(
-        tmp_path, app_home, "owner-a", 8401, "res", protocol=(2, 2)
-    )
+    resident = _spawn_resident(app_home, "owner-a", 8401, "res", protocol=(2, 2))
     try:
         _await(resident["ready"])
-        record = read_desktop_discovery(service_json_path(app_home))
+        record = classify_desktop_discovery(service_json_path(app_home))[1]
         assert record is not None
         # A protocol-1 contender is incompatible: it must not attach.
         assert record.supports_protocol(1) is False
@@ -182,7 +178,7 @@ def test_live_incompatible_resident_is_immutable_conflict(tmp_path: Path) -> Non
 def test_live_malformed_discovery_is_immutable_conflict(tmp_path: Path) -> None:
     """A live resident with a corrupted discovery record is an immutable conflict."""
     app_home = tmp_path / "app"
-    resident = _spawn_resident(tmp_path, app_home, "owner-a", 8402, "res")
+    resident = _spawn_resident(app_home, "owner-a", 8402, "res")
     try:
         _await(resident["ready"])
         # Corrupt the published record while the resident is still live.
@@ -202,7 +198,7 @@ def test_live_malformed_discovery_is_immutable_conflict(tmp_path: Path) -> None:
 def test_stale_discovery_quarantined_only_by_owner(tmp_path: Path) -> None:
     """After the resident dies, only the matching owner may reclaim the home."""
     app_home = tmp_path / "app"
-    resident = _spawn_resident(tmp_path, app_home, "owner-a", 8403, "res")
+    resident = _spawn_resident(app_home, "owner-a", 8403, "res")
     dead_pid = 0
     try:
         dead_pid = cast("dict[str, int]", json.loads(_await(resident["ready"])))["pid"]
@@ -213,7 +209,7 @@ def test_stale_discovery_quarantined_only_by_owner(tmp_path: Path) -> None:
     # The heartbeat is still recent, so the filesystem-only classifier reads
     # FRESH — but the recorded process is provably dead, which the ownership
     # layer detects.
-    record = read_desktop_discovery(service_json_path(app_home))
+    record = classify_desktop_discovery(service_json_path(app_home))[1]
     assert record is not None and record.pid == dead_pid
     assert desktop_record_process_is_live(record) is False
     assert classify_app_home(app_home, owner="owner-a")[0] is SingletonState.STALE

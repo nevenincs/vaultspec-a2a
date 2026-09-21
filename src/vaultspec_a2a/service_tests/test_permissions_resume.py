@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..testing.payloads import (
+from ..testing.tests._support.payloads import (
     json_object,
     json_object_list,
     required_bool,
@@ -212,10 +212,10 @@ def test_invalid_permission_option_is_rejected_without_resuming(
     ) == required_text(request, "request_id", at="pending permission")
 
 
-def test_stale_second_permission_response_is_rejected_after_resume(
+def test_conflicting_second_permission_response_is_rejected_after_resume(
     service_stack: ServiceStack,
 ) -> None:
-    """A second non-idempotent response must not trigger another resume."""
+    """A conflicting response cannot replace the accepted permission verdict."""
     created = service_stack.create_thread(
         initial_message="Request approval and then finish the task.",
         team_preset="mock-human-in-loop",
@@ -241,26 +241,25 @@ def test_stale_second_permission_response_is_rejected_after_resume(
         required_bool(accepted, "accepted", at="accepted permission response") is True
     )
 
-    stale = json_object(
-        service_stack.respond_permission(
-            required_text(request, "request_id", at="pending permission"),
-            thread_id=thread_id,
-            option_id=approved_option_id,
-            idempotency_key="stale-second-response",
-            expected_status=409,
-        ),
-        at="stale permission response",
-    )
-    assert (
-        required_text(stale, "detail", at="stale permission response")
-        == "Permission request is no longer pending"
-    )
-
     completed = wait_for_state(
         service_stack,
         thread_id,
         _is_completed,
     )
+
+    conflicting = json_object(
+        service_stack.respond_permission(
+            required_text(request, "request_id", at="pending permission"),
+            thread_id=thread_id,
+            option_id=select_option_id(request, label="deny"),
+            idempotency_key="conflicting-second-response",
+            expected_status=409,
+        ),
+        at="conflicting permission response",
+    )
+    assert required_text(
+        conflicting, "detail", at="conflicting permission response"
+    ) == ("Permission request already has a different response")
     assistant_messages = [
         message
         for message in _messages(completed)

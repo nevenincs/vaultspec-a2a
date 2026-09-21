@@ -22,36 +22,33 @@ import httpx
 from ..database import (
     ThreadStatusElectionOutcome,
     elect_thread_status,
+    get_control_action_by_dispatch_id,
     get_session_factory,
     list_threads,
     successor_thread_write_authority,
     thread_write_expectation,
 )
-from ..domain_config import domain_config
 from ..ipc.schemas import (
     DispatchRequest,
     DispatchResponse,
-    to_dispatch_action,
 )
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import ThreadStatus
 from ..utils.coercion import coerce_object_mapping
 from ._thread_metadata import workspace_root_from_metadata
+from .accepted_input import AcceptedActionInput, restore_accepted_dispatch
+from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from ..database.models import ThreadModel
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
-    "DispatchError",
-    "DispatchOutcome",
-    "WorkerAtCapacityError",
-    "WorkerCircuitOpenError",
-    "WorkerDispatchRejectedError",
-    "WorkerUnreachableError",
-    "dispatch_to_worker",
     "redispatch_reconciling_threads",
     "safe_dispatch",
 ]
@@ -144,7 +141,6 @@ async def dispatch_to_worker(
     circuit_breaker: WorkerCircuitBreaker,
     spawner: LazyWorkerSpawner,
     *,
-    bypass_circuit_breaker: bool = False,
     trace_headers: dict[str, str] | None = None,
 ) -> DispatchResponse:
     """Dispatch a request to the worker process.
@@ -152,8 +148,7 @@ async def dispatch_to_worker(
     Handles the common dispatch sequence:
 
     1. Ensure the worker is spawned via ``spawner.ensure_worker()``.
-    2. Unless ``bypass_circuit_breaker`` is set, check that the circuit
-       breaker allows the dispatch.
+    2. Check that the circuit breaker allows non-cancel dispatches.
     3. HTTP POST to ``/dispatch`` with the serialised payload and optional
        trace propagation headers.
     4. Record success or failure on the circuit breaker.
@@ -177,11 +172,9 @@ async def dispatch_to_worker(
     # reconciliation. Fire the demand-readiness signal once, only after the worker
     # is genuinely up. The signal is unset on Compose and development, whose boot
     # reconciliation is eager.
-    demand_ready = spawner.demand_ready_event
-    if demand_ready is not None and spawner.spawned and not demand_ready.is_set():
-        demand_ready.set()
+    _signal_worker_demand_ready(spawner)
 
-    if not bypass_circuit_breaker and not circuit_breaker.pre_dispatch():
+    if dispatch.action != "cancel" and not circuit_breaker.pre_dispatch():
         raise WorkerCircuitOpenError(circuit_breaker.rejection_detail)
 
     headers = dict(trace_headers) if trace_headers else {}
@@ -207,6 +200,15 @@ async def dispatch_to_worker(
             cause=exc,
         ) from exc
 
+    return _dispatch_response_or_raise(resp, dispatch, circuit_breaker)
+
+
+def _dispatch_response_or_raise(
+    resp: httpx.Response,
+    dispatch: DispatchRequest,
+    circuit_breaker: WorkerCircuitBreaker,
+) -> DispatchResponse:
+    """Classify the worker's HTTP response and update circuit health."""
     if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
         circuit_breaker.record_failure()
         logger.warning(
@@ -242,11 +244,17 @@ async def dispatch_to_worker(
     )
 
 
+def _signal_worker_demand_ready(spawner: LazyWorkerSpawner) -> None:
+    """Release deferred boot reconciliation after a real worker start."""
+    demand_ready = spawner.demand_ready_event
+    if demand_ready is not None and spawner.spawned and not demand_ready.is_set():
+        demand_ready.set()
+
+
 def _log_redispatch_failure_ladder(
     counts: dict[str, int],
     thread_ids: dict[str, list[str]],
-    category: str,
-    thread_id: str,
+    identity: tuple[str, str],
     message: str,
     *args: object,
 ) -> None:
@@ -263,11 +271,155 @@ def _log_redispatch_failure_ladder(
     batch-end summary can name every stuck thread, keeping per-entity
     diagnosability even while the per-occurrence line is suppressed.
     """
+    category, thread_id = identity
     counts[category] = counts.get(category, 0) + 1
     thread_ids.setdefault(category, []).append(thread_id)
     n = counts[category]
     if n == 1 or n % _REDISPATCH_LOG_EVERY_N == 0:
         logger.warning(message, *args)
+
+
+def _reconciling_metadata(thread: ThreadModel) -> dict[str, object]:
+    """Read one thread's optional metadata without losing the rest of the sweep."""
+    if not thread.thread_metadata:
+        return {}
+    try:
+        raw_metadata: object = json.loads(thread.thread_metadata)
+    except json.JSONDecodeError:
+        logger.debug("Failed to parse thread metadata for %s", thread.id, exc_info=True)
+        return {}
+    return coerce_object_mapping(raw_metadata) or {}
+
+
+async def _refuse_incompatible_authority(
+    db: AsyncSession,
+    thread: ThreadModel,
+    failure_counts: dict[str, int],
+    failure_thread_ids: dict[str, list[str]],
+    exc: ExecutionAuthorityError,
+) -> None:
+    """Fail one incompatible stored run while allowing the sweep to continue."""
+    expectation = thread_write_expectation(thread)
+    election = await elect_thread_status(
+        db,
+        thread.id,
+        expectation=expectation,
+        status=ThreadStatus.FAILED,
+        successor=successor_thread_write_authority(
+            expectation,
+            action_type=expectation.authority.action_type,
+            action_receipt_id=expectation.authority.action_receipt_id,
+        ),
+        failure_reason=(
+            f"stored execution authority is incompatible ({exc.reason.value})"
+        ),
+    )
+    await db.commit()
+    if election.outcome is not ThreadStatusElectionOutcome.WON:
+        logger.warning(
+            "Skipped stale reconciliation refusal for thread %s: %s",
+            thread.id,
+            election.outcome.value,
+        )
+        return
+    _log_redispatch_failure_ladder(
+        failure_counts,
+        failure_thread_ids,
+        ("incompatible_execution_authority", thread.id),
+        "Refusing incompatible execution authority (%s) for thread %s",
+        exc.reason.value,
+        thread.id,
+    )
+
+
+async def _refuse_missing_project(
+    db: AsyncSession,
+    thread: ThreadModel,
+    failure_counts: dict[str, int],
+    failure_thread_ids: dict[str, list[str]],
+) -> None:
+    """Fail one run with no active project and keep healthy runs moving."""
+    expectation = thread_write_expectation(thread)
+    election = await elect_thread_status(
+        db,
+        thread.id,
+        expectation=expectation,
+        status=ThreadStatus.FAILED,
+        successor=successor_thread_write_authority(
+            expectation,
+            action_type=expectation.authority.action_type,
+            action_receipt_id=expectation.authority.action_receipt_id,
+        ),
+        failure_reason=(
+            "run carries no active project: its stored metadata "
+            "names no workspace_root, so it cannot be re-sited"
+        ),
+    )
+    await db.commit()
+    if election.outcome is not ThreadStatusElectionOutcome.WON:
+        logger.warning(
+            "Skipped stale project refusal for thread %s: %s",
+            thread.id,
+            election.outcome.value,
+        )
+        return
+    _log_redispatch_failure_ladder(
+        failure_counts,
+        failure_thread_ids,
+        ("no_active_project", thread.id),
+        "Refusing to re-dispatch thread %s with no active project",
+        thread.id,
+    )
+
+
+async def _restore_reconciling_dispatch(
+    db: AsyncSession,
+    thread: ThreadModel,
+    frozen_map: dict[str, dict[str, object]],
+    workspace_root: str,
+) -> DispatchRequest | None:
+    """Load the accepted action only when it matches stored execution authority."""
+    authority = thread_write_expectation(thread).authority
+    action = await get_control_action_by_dispatch_id(
+        db,
+        thread_id=thread.id,
+        dispatch_id=authority.action_receipt_id,
+    )
+    if action is None or action.payload_json is None:
+        logger.warning("No accepted action for reconciling thread %s", thread.id)
+        return None
+    try:
+        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+        dispatch = restore_accepted_dispatch(
+            accepted, dispatch_id=authority.action_receipt_id
+        )
+        if dispatch.model_assignment != frozen_map or str(
+            dispatch.workspace_root
+        ) != str(workspace_root):
+            raise ValueError(
+                "accepted execution authority differs from thread metadata"
+            )
+        return await bind_graph_action_receipt(db, dispatch)
+    except ValueError as exc:
+        logger.warning("Invalid accepted action for thread %s: %s", thread.id, exc)
+        return None
+
+
+def _log_redispatch_batch_summary(
+    failure_counts: dict[str, int], failure_thread_ids: dict[str, list[str]]
+) -> None:
+    """Summarize repeated failures while retaining every affected thread id."""
+    for category, count in failure_counts.items():
+        if count > 1:
+            logger.info(
+                "Re-dispatch failure ladder for %s: %d occurrences this"
+                " batch (only the 1st and every %dth logged in full);"
+                " threads: %s",
+                category,
+                count,
+                _REDISPATCH_LOG_EVERY_N,
+                ", ".join(failure_thread_ids.get(category, [])),
+            )
 
 
 async def redispatch_reconciling_threads(
@@ -285,7 +437,6 @@ async def redispatch_reconciling_threads(
     lifespan startup to send them to the worker.
     """
     try:
-        await spawner.ensure_worker()
         session_factory = get_session_factory()
         async with session_factory() as db:
             threads, _ = await list_threads(
@@ -293,23 +444,13 @@ async def redispatch_reconciling_threads(
             )
             if not threads:
                 return
+            # Start a worker only for a dispatch that survives stored-authority
+            # validation; dispatch_to_worker owns that demand.
             logger.info("Re-dispatching %d reconciling threads", len(threads))
             failure_counts: dict[str, int] = {}
             failure_thread_ids: dict[str, list[str]] = {}
             for thread in threads:
-                meta: dict[str, object] = {}
-                if thread.thread_metadata:
-                    try:
-                        raw_metadata: object = json.loads(thread.thread_metadata)
-                        parsed_metadata = coerce_object_mapping(raw_metadata)
-                        if parsed_metadata is not None:
-                            meta = parsed_metadata
-                    except json.JSONDecodeError:
-                        logger.debug(
-                            "Failed to parse thread metadata for %s",
-                            thread.id,
-                            exc_info=True,
-                        )
+                meta = _reconciling_metadata(thread)
                 # Reuse the frozen effective assignment on
                 # restart so the run recompiles the exact launched models, never
                 # a re-resolution against possibly-drifted config.
@@ -318,39 +459,8 @@ async def redispatch_reconciling_threads(
                         thread.thread_metadata
                     ).model_assignment
                 except ExecutionAuthorityError as exc:
-                    expectation = thread_write_expectation(thread)
-                    election = await elect_thread_status(
-                        db,
-                        thread.id,
-                        expectation=expectation,
-                        status=ThreadStatus.FAILED,
-                        successor=successor_thread_write_authority(
-                            expectation,
-                            action_type=expectation.authority.action_type,
-                            action_receipt_id=(expectation.authority.action_receipt_id),
-                        ),
-                        failure_reason=(
-                            "stored execution authority is incompatible "
-                            f"({exc.reason.value})"
-                        ),
-                    )
-                    if election.outcome is not ThreadStatusElectionOutcome.WON:
-                        await db.commit()
-                        logger.warning(
-                            "Skipped stale reconciliation refusal for thread %s: %s",
-                            thread.id,
-                            election.outcome.value,
-                        )
-                        continue
-                    await db.commit()
-                    _log_redispatch_failure_ladder(
-                        failure_counts,
-                        failure_thread_ids,
-                        "incompatible_execution_authority",
-                        thread.id,
-                        "Refusing incompatible execution authority (%s) for thread %s",
-                        exc.reason.value,
-                        thread.id,
+                    await _refuse_incompatible_authority(
+                        db, thread, failure_counts, failure_thread_ids, exc
                     )
                     continue
                 # A reconciling thread inherits the active project it was created
@@ -361,48 +471,15 @@ async def redispatch_reconciling_threads(
                 # every healthy one behind it.
                 workspace_root = workspace_root_from_metadata(meta)
                 if workspace_root is None:
-                    expectation = thread_write_expectation(thread)
-                    election = await elect_thread_status(
-                        db,
-                        thread.id,
-                        expectation=expectation,
-                        status=ThreadStatus.FAILED,
-                        successor=successor_thread_write_authority(
-                            expectation,
-                            action_type=expectation.authority.action_type,
-                            action_receipt_id=(expectation.authority.action_receipt_id),
-                        ),
-                        failure_reason=(
-                            "run carries no active project: its stored metadata "
-                            "names no workspace_root, so it cannot be re-sited"
-                        ),
-                    )
-                    if election.outcome is not ThreadStatusElectionOutcome.WON:
-                        await db.commit()
-                        logger.warning(
-                            "Skipped stale project refusal for thread %s: %s",
-                            thread.id,
-                            election.outcome.value,
-                        )
-                        continue
-                    await db.commit()
-                    _log_redispatch_failure_ladder(
-                        failure_counts,
-                        failure_thread_ids,
-                        "no_active_project",
-                        thread.id,
-                        "Refusing to re-dispatch thread %s with no active project",
-                        thread.id,
+                    await _refuse_missing_project(
+                        db, thread, failure_counts, failure_thread_ids
                     )
                     continue
-                dispatch = DispatchRequest(
-                    action=to_dispatch_action(ControlActionType.INGEST),
-                    thread_id=thread.id,
-                    team_preset=thread.team_preset,
-                    workspace_root=workspace_root,
-                    recursion_limit=domain_config.graph_recursion_limit,
-                    model_assignment=frozen_map,
+                dispatch = await _restore_reconciling_dispatch(
+                    db, thread, frozen_map, workspace_root
                 )
+                if dispatch is None:
+                    continue
                 headers = trace_headers_fn() if trace_headers_fn else {}
                 try:
                     await dispatch_to_worker(
@@ -421,13 +498,13 @@ async def redispatch_reconciling_threads(
                     _log_redispatch_failure_ladder(
                         failure_counts,
                         failure_thread_ids,
-                        "circuit_open",
-                        thread.id,
+                        ("circuit_open", thread.id),
                         "Circuit breaker open, skipping re-dispatch for %s",
                         thread.id,
                     )
                     continue
                 except (
+                    IncompatibleDispatchAuthorityError,
                     WorkerAtCapacityError,
                     WorkerDispatchRejectedError,
                     WorkerUnreachableError,
@@ -435,23 +512,12 @@ async def redispatch_reconciling_threads(
                     _log_redispatch_failure_ladder(
                         failure_counts,
                         failure_thread_ids,
-                        "redispatch_error",
-                        thread.id,
+                        ("redispatch_error", thread.id),
                         "Re-dispatch error for thread %s: %s",
                         thread.id,
                         exc,
                     )
-            for category, count in failure_counts.items():
-                if count > 1:
-                    logger.info(
-                        "Re-dispatch failure ladder for %s: %d occurrences this"
-                        " batch (only the 1st and every %dth logged in full);"
-                        " threads: %s",
-                        category,
-                        count,
-                        _REDISPATCH_LOG_EVERY_N,
-                        ", ".join(failure_thread_ids.get(category, [])),
-                    )
+            _log_redispatch_batch_summary(failure_counts, failure_thread_ids)
     except Exception as exc:
         logger.error("Reconciling re-dispatch task failed: %s", exc)
 
@@ -462,7 +528,6 @@ async def safe_dispatch(
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: LazyWorkerSpawner,
     *,
-    bypass_circuit_breaker: bool = False,
     trace_headers: dict[str, str] | None = None,
 ) -> DispatchOutcome:
     """Non-raising wrapper around :func:`dispatch_to_worker`.
@@ -477,7 +542,6 @@ async def safe_dispatch(
             dispatch_request,
             circuit_breaker,
             worker_spawner,
-            bypass_circuit_breaker=bypass_circuit_breaker,
             trace_headers=trace_headers,
         )
         return DispatchOutcome(success=True)

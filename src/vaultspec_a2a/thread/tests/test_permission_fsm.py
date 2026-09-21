@@ -19,7 +19,6 @@ from ...graph.enums import REJECT_OPTION_IDS, REJECT_OPTION_KINDS, is_rejection_
 from ..enums import ApprovalStatus, PermissionRequestStatus
 from ..permission_fsm import (
     compute_permission_resolution_effects,
-    compute_progress_applied_effects,
     response_is_rejection,
 )
 
@@ -91,49 +90,31 @@ def test_plan_rejection_resolves_to_rejected_on_the_primary_path() -> None:
     assert effects.approval_status == ApprovalStatus.REJECTED
 
 
-def test_plan_rejection_resolves_to_rejected_on_the_progress_path() -> None:
-    """Progress inference must reach the same verdict as the primary path."""
-    effects = compute_progress_applied_effects(
-        "reject", "plan_approval_request", _PLAN_OPTIONS
-    )
-    assert effects.target_status == PermissionRequestStatus.REJECTED
-    assert effects.is_plan_approval is True
-    assert effects.approval_status == ApprovalStatus.REJECTED
-
-
-def test_plan_approval_still_resolves_to_applied_on_both_paths() -> None:
-    """The fix must not invert the approving case it was not about."""
-    primary = compute_permission_resolution_effects(
+def test_plan_approval_still_resolves_to_applied() -> None:
+    """Approval still settles as applied."""
+    effects = compute_permission_resolution_effects(
         "approve", "plan_approval_request", _PLAN_OPTIONS
     )
-    progress = compute_progress_applied_effects(
-        "approve", "plan_approval_request", _PLAN_OPTIONS
-    )
-    for effects in (primary, progress):
-        assert effects.target_status == PermissionRequestStatus.APPLIED
-        assert effects.approval_status == ApprovalStatus.APPROVED
+    assert effects.target_status == PermissionRequestStatus.APPLIED
+    assert effects.approval_status == ApprovalStatus.APPROVED
 
 
-def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths() -> None:
+def test_a_kimi_tool_denial_settles_as_rejected() -> None:
     """A tool permission is not a plan approval, but a denial is still a denial.
 
     This is the escalation case: the option id ``"reject"`` is provider-defined and
     is not a ``PermissionOptionKind`` value, so a kind-set matched against the id
-    read this real denial as an approval on both settlement paths.
+    read this real denial as an approval.
     """
-    primary = compute_permission_resolution_effects("reject", "bash", _KIMI_OPTIONS)
-    progress = compute_progress_applied_effects("reject", "bash", _KIMI_OPTIONS)
-    for effects in (primary, progress):
-        assert effects.target_status == PermissionRequestStatus.REJECTED
-        # A tool permission carries no plan approval state to stamp.
-        assert effects.is_plan_approval is False
-        assert effects.approval_status is None
+    effects = compute_permission_resolution_effects("reject", "bash", _KIMI_OPTIONS)
+    assert effects.target_status == PermissionRequestStatus.REJECTED
+    # A tool permission carries no plan approval state to stamp.
+    assert effects.is_plan_approval is False
+    assert effects.approval_status is None
 
 
-def test_an_allowed_tool_call_settles_as_applied_on_both_paths() -> None:
+def test_an_allowed_tool_call_settles_as_applied() -> None:
     """The approving tool-permission case keeps its existing settlement."""
-    primary = compute_permission_resolution_effects("approve", "bash", _KIMI_OPTIONS)
-    progress = compute_progress_applied_effects("approve", "bash", _KIMI_OPTIONS)
-    for effects in (primary, progress):
-        assert effects.target_status == PermissionRequestStatus.APPLIED
-        assert effects.approval_status is None
+    effects = compute_permission_resolution_effects("approve", "bash", _KIMI_OPTIONS)
+    assert effects.target_status == PermissionRequestStatus.APPLIED
+    assert effects.approval_status is None

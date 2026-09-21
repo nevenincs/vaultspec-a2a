@@ -70,6 +70,33 @@ def test_every_prerequisite_names_what_is_missing_and_how_to_supply_it() -> None
         assert prerequisite.probe is None or callable(prerequisite.probe)
 
 
+def test_prerequisite_import_does_not_load_live_catalog_validation() -> None:
+    """Collection-only prerequisite checks do not load provider schema stacks."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys\n"
+                "import vaultspec_a2a.conftest\n"
+                "heavy = {\n"
+                "    'vaultspec_a2a.api.schemas.gateway',\n"
+                "    'vaultspec_a2a.api.schemas.provider_catalog',\n"
+                "    'vaultspec_a2a.providers.provider_catalog',\n"
+                "}\n"
+                "loaded = sorted(heavy.intersection(sys.modules))\n"
+                "assert not loaded, loaded\n"
+            ),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_unknown_declaration_is_a_usage_error() -> None:
     """A typo in a certification job must not silently declare nothing."""
     result = _pytest(
@@ -229,6 +256,16 @@ def test_a_gate_that_skips_despite_its_declaration_fails_the_session(
         '    pytest.skip("codex CLI not on PATH")\n',
         encoding="utf-8",
     )
+    fake_codex = tmp_path / ("codex.cmd" if os.name == "nt" else "codex")
+    if os.name == "nt":
+        fake_codex.write_text("@echo off\r\nexit /b 0\r\n", encoding="utf-8")
+    else:
+        fake_codex.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_codex.chmod(0o755)
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join(
+        part for part in (str(tmp_path), env.get("PATH", "")) if part
+    )
     result = subprocess.run(
         [
             sys.executable,
@@ -241,6 +278,7 @@ def test_a_gate_that_skips_despite_its_declaration_fails_the_session(
             str(target),
         ],
         cwd=tmp_path,
+        env=env,
         capture_output=True,
         text=True,
         timeout=300,

@@ -76,7 +76,6 @@ if TYPE_CHECKING:
 __all__ = [
     "READINESS_TIMEOUT",
     "GatewayBootError",
-    "GatewayLogLevel",
     "armed_gateway_env",
     "await_gateway_ready",
     "clean_subprocess_environment",
@@ -126,19 +125,29 @@ import sys
 
 logging.basicConfig(level=logging.INFO)
 import uvicorn
-from vaultspec_a2a.api.app import create_app
+from vaultspec_a2a.api.app import _bind_server_shutdown_owner, create_app
 
 port = int(sys.argv[1])
-uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="info")
+app = create_app()
+server = uvicorn.Server(
+    uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info")
+)
+_bind_server_shutdown_owner(app, server)
+server.run()
 """
 
 _GATEWAY_SCRIPT_QUIET = """
 import sys
 import uvicorn
-from vaultspec_a2a.api.app import create_app
+from vaultspec_a2a.api.app import _bind_server_shutdown_owner, create_app
 
 port = int(sys.argv[1])
-uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
+app = create_app()
+server = uvicorn.Server(
+    uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+)
+_bind_server_shutdown_owner(app, server)
+server.run()
 """
 
 # Interpreter and package-manager state that would leak the running virtual

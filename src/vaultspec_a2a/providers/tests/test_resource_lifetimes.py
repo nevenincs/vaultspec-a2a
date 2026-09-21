@@ -1,5 +1,7 @@
 """Real subprocess proofs for provider ownership across cancellation and teardown."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import asyncio
@@ -10,15 +12,16 @@ from typing import TYPE_CHECKING
 import psutil
 import pytest
 
-from ...utils.process import kill_pid_tree_async, pid_is_live
+from ...utils._process_tree import kill_pid_tree_async, pid_is_live
 from .._acp_protocol import process_stdout_loop
 from .._acp_rpc_handlers import on_terminal_create, on_terminal_release
 from .._acp_types import AcpSessionContext
 from .._cleanup import cancel_owned_tasks, run_independent_cleanups
+from .._codex_app_server_client import _CodexAppServerClient
 from .._codex_config_home import cleanup_codex_config_home
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..acp_chat_model import AcpChatModel
-from ..codex_chat_model import _CodexAppServerClient
+from .conftest import _AcpChildStreams, _fresh_acp_session_context
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,6 +46,44 @@ def _context(process: asyncio.subprocess.Process) -> AcpSessionContext:
         prompt_id_ref=[],
         interrupt_exc=[],
     )
+
+
+@pytest.mark.asyncio
+async def test_shared_fixture_child_keeps_session_state_function_scoped(
+    acp_session_context: AcpSessionContext,
+) -> None:
+    """Sharing idle streams must not share any mutable ACP session authority."""
+
+    sibling = _fresh_acp_session_context(
+        _AcpChildStreams(
+            process=acp_session_context.process,
+            stdin=acp_session_context.stdin,
+            stdout=acp_session_context.stdout,
+        )
+    )
+    future = asyncio.get_running_loop().create_future()
+    future.set_result({})
+    acp_session_context.response_futures[1] = future
+    acp_session_context.prompt_done.set()
+    acp_session_context.prompt_id_ref.append(7)
+    acp_session_context.interrupt_exc.append(RuntimeError("first context only"))
+    acp_session_context.tool_calls["call"] = {"name": "Read"}
+    acp_session_context.config_options.append({"id": "first"})
+
+    assert sibling.process is acp_session_context.process
+    assert sibling.stdin is acp_session_context.stdin
+    assert sibling.stdout is acp_session_context.stdout
+    assert sibling.response_futures == {}
+    assert sibling.chunk_queue is not acp_session_context.chunk_queue
+    assert not sibling.prompt_done.is_set()
+    assert sibling.prompt_id_ref == []
+    assert sibling.interrupt_exc == []
+    assert sibling.background_tasks == set()
+    assert sibling.terminals == {}
+    assert sibling.tool_calls == {}
+    assert sibling.native_command_catalogs == {}
+    assert sibling.config_options == []
+    assert sibling.stdin_lock is not acp_session_context.stdin_lock
 
 
 @pytest.mark.asyncio

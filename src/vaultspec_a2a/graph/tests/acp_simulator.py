@@ -49,8 +49,7 @@ def _record_config_home(path: str) -> None:
         json.dump(payload, fh)
 
 
-def main() -> None:
-    """Run a minimal ACP protocol simulator for integration tests."""
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ACP Protocol Simulator")
     parser.add_argument(
         "--response", default="FINISH", help="Text to return in agent_message_chunk"
@@ -112,13 +111,133 @@ def main() -> None:
         help="If set, dump the subprocess CLAUDE_CONFIG_DIR/.claude.json and "
         "authoring env to this JSON file on initialize",
     )
-    args = parser.parse_args()
+    return parser
 
+
+def _response_text(args: argparse.Namespace) -> str:
     response_text = args.response
     if args.response_file:
         with open(args.response_file, encoding="utf-8") as fh:
             response_text = fh.read()
+    return response_text
 
+
+def _initialize_response(
+    args: argparse.Namespace, req: dict[str, Any], msg_id: Any
+) -> dict[str, Any]:
+    if args.record_initialize:
+        with open(args.record_initialize, "w", encoding="utf-8") as fh:
+            json.dump(req.get("params", {}), fh)
+    if args.record_config_home:
+        _record_config_home(args.record_config_home)
+    return {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "result": {
+            "protocolVersion": 1,
+            "agentCapabilities": {"streaming": True},
+            "authMethods": [],
+        },
+    }
+
+
+def _session_new_response(
+    args: argparse.Namespace, req: dict[str, Any], msg_id: Any
+) -> dict[str, Any]:
+    if args.record_session_new:
+        with open(args.record_session_new, "w", encoding="utf-8") as fh:
+            json.dump(req.get("params", {}), fh)
+    session_result: dict[str, object] = {"sessionId": args.session_id}
+    if args.advertise_model:
+        # The real adapter's shape: one select whose category is "model",
+        # carrying the ids it will accept. The catalog reads its entries
+        # from exactly this, so the shape is copied rather than invented.
+        session_result["configOptions"] = [
+            {
+                "id": "model",
+                "category": "model",
+                "type": "select",
+                "currentValue": args.advertise_model[0],
+                "options": [
+                    {"value": model_id, "name": model_id}
+                    for model_id in args.advertise_model
+                ],
+            }
+        ]
+    return {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "result": session_result,
+    }
+
+
+def _session_prompt_response(
+    args: argparse.Namespace, req: dict[str, Any], msg_id: Any, response_text: str
+) -> dict[str, Any]:
+    if args.record_session_prompt:
+        with open(args.record_session_prompt, "w", encoding="utf-8") as fh:
+            json.dump(req.get("params", {}), fh)
+    if args.error:
+        error_body: dict[str, Any] = {
+            "code": args.error_code,
+            "message": args.error,
+        }
+        if args.error_kind:
+            error_body["data"] = {"errorKind": args.error_kind}
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "error": error_body,
+        }
+
+    # Send a chunk notification first
+    update = {
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": args.session_id,
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"text": response_text},
+            },
+        },
+    }
+    sys.stdout.write(json.dumps(update) + "\n")
+    sys.stdout.flush()
+
+    # Then the result
+    return {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "result": {"stopReason": "end_turn"},
+    }
+
+
+def _handle_request(
+    args: argparse.Namespace, req: dict[str, Any], response_text: str
+) -> dict[str, Any] | None:
+    method = req.get("method")
+    msg_id = req.get("id")
+
+    if msg_id is None:
+        return None
+    if method == "initialize":
+        return _initialize_response(args, req, msg_id)
+    if method == "session/new":
+        return _session_new_response(args, req, msg_id)
+    if method == "session/prompt":
+        return _session_prompt_response(args, req, msg_id, response_text)
+    return {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "error": {
+            "code": -32601,
+            "message": f"Method {method} not implemented",
+        },
+    }
+
+
+def _serve_requests(args: argparse.Namespace, response_text: str) -> None:
     for line in sys.stdin:
         if not line.strip():
             continue
@@ -126,101 +245,17 @@ def main() -> None:
             req = json.loads(line)
         except json.JSONDecodeError:
             continue
-
-        method = req.get("method")
-        msg_id = req.get("id")
-
-        if msg_id is None:
+        resp = _handle_request(args, req, response_text)
+        if resp is None:
             continue
-
-        resp: dict[str, Any] = {}
-        if method == "initialize":
-            if args.record_initialize:
-                with open(args.record_initialize, "w", encoding="utf-8") as fh:
-                    json.dump(req.get("params", {}), fh)
-            if args.record_config_home:
-                _record_config_home(args.record_config_home)
-            resp = {
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "result": {
-                    "agentCapabilities": {"streaming": True},
-                    "authMethods": [],
-                },
-            }
-        elif method == "session/new":
-            if args.record_session_new:
-                with open(args.record_session_new, "w", encoding="utf-8") as fh:
-                    json.dump(req.get("params", {}), fh)
-            session_result: dict[str, object] = {"sessionId": args.session_id}
-            if args.advertise_model:
-                # The real adapter's shape: one select whose category is "model",
-                # carrying the ids it will accept. The catalog reads its entries
-                # from exactly this, so the shape is copied rather than invented.
-                session_result["configOptions"] = [
-                    {
-                        "id": "model",
-                        "category": "model",
-                        "type": "select",
-                        "currentValue": args.advertise_model[0],
-                        "options": [
-                            {"value": model_id, "name": model_id}
-                            for model_id in args.advertise_model
-                        ],
-                    }
-                ]
-            resp = {
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "result": session_result,
-            }
-        elif method == "session/prompt":
-            if args.record_session_prompt:
-                with open(args.record_session_prompt, "w", encoding="utf-8") as fh:
-                    json.dump(req.get("params", {}), fh)
-            if args.error:
-                error_body = {"code": args.error_code, "message": args.error}
-                if args.error_kind:
-                    error_body["data"] = {"errorKind": args.error_kind}
-                resp = {
-                    "jsonrpc": "2.0",
-                    "id": msg_id,
-                    "error": error_body,
-                }
-            else:
-                # Send a chunk notification first
-                update = {
-                    "jsonrpc": "2.0",
-                    "method": "session/update",
-                    "params": {
-                        "sessionId": args.session_id,
-                        "update": {
-                            "sessionUpdate": "agent_message_chunk",
-                            "content": {"text": response_text},
-                        },
-                    },
-                }
-                sys.stdout.write(json.dumps(update) + "\n")
-                sys.stdout.flush()
-
-                # Then the result
-                resp = {
-                    "jsonrpc": "2.0",
-                    "id": msg_id,
-                    "result": {"stopReason": "end_turn"},
-                }
-        else:
-            resp = {
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "error": {
-                    "code": -32601,
-                    "message": f"Method {method} not implemented",
-                },
-            }
-
         sys.stdout.write(json.dumps(resp) + "\n")
         sys.stdout.flush()
+
+
+def main() -> None:
+    """Run a minimal ACP protocol simulator for integration tests."""
+    args = _build_parser().parse_args()
+    _serve_requests(args, _response_text(args))
 
 
 if __name__ == "__main__":

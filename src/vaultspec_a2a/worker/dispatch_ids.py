@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 
-__all__ = ["DEFAULT_DISPATCH_ID_CAPACITY", "DispatchIdAdmission"]
+__all__ = ["DispatchIdAdmission"]
 
 DEFAULT_DISPATCH_ID_CAPACITY = 10_000
 

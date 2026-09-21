@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...tests.gateway_boot import reap_gateway, spawn_until_ready
-from .._harness import certified_gateway
+from ._harness import certified_gateway
 
 if TYPE_CHECKING:
     from pathlib import Path

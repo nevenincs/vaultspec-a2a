@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from ...control.config import settings
 from ...control.health import assemble_desktop_readiness
 from ...testing import armed_desktop_app_home as _armed_desktop
+from ...testing import settings_override
 from .conftest import make_app
 
 if TYPE_CHECKING:
@@ -161,20 +162,29 @@ async def test_health_reports_live_journal_mode_and_storage_footprint(
     finally:
         conn.close()
 
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    app, _aggregator, _worker, _checkpointer = make_app(factory, checkpointer)
-    app.state.db_engine = engine
-    app.state.db_session_factory = factory
+    database_url = f"sqlite+aiosqlite:///{db_file.as_posix()}"
+    with settings_override(
+        database_backend="sqlite",
+        checkpoint_backend="sqlite",
+        database_url=database_url,
+        checkpoint_database_url=None,
+    ):
+        engine = create_async_engine(database_url)
+        factory = async_sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        app, _aggregator, _worker, _checkpointer = make_app(factory, checkpointer)
+        app.state.db_engine = engine
+        app.state.db_session_factory = factory
 
-    try:
-        async with httpx.AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            response = await client.get("/health")
-    finally:
-        await engine.dispose()
+        try:
+            async with httpx.AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                response = await client.get("/health")
+        finally:
+            await engine.dispose()
 
     assert response.status_code == 200
     body = response.json()

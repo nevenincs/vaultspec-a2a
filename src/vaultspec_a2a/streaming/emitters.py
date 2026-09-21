@@ -9,8 +9,9 @@ import json
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, NotRequired, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from ..domain_config import domain_config
@@ -43,10 +44,95 @@ from .types import SequencedEvent, classify_tool_kind, resolve_acp_option_kind
 logger = logging.getLogger(__name__)
 
 
-class EventEmitters:
+class _ToolCallStartRequired(TypedDict):
+    thread_id: str
+    agent_id: str
+    tool_call_id: str
+    title: str
+
+
+class _ToolCallStartKwargs(_ToolCallStartRequired, total=False):
+    kind: NotRequired[ToolKind]
+    input_args: NotRequired[dict[str, Any] | None]
+
+
+class _ToolCallUpdateRequired(TypedDict):
+    thread_id: str
+    agent_id: str
+    tool_call_id: str
+
+
+class _ToolCallUpdateKwargs(_ToolCallUpdateRequired, total=False):
+    status: NotRequired[ToolCallStatus | None]
+    title: NotRequired[str | None]
+    content: NotRequired[list[dict[str, str | None]] | None]
+    locations: NotRequired[list[dict[str, str | int | None]] | None]
+
+
+class _PermissionRequestRequired(TypedDict):
+    thread_id: str
+    agent_id: str
+    request_id: str
+    description: str
+    options: list[dict[str, str]]
+
+
+class _PermissionRequestKwargs(_PermissionRequestRequired, total=False):
+    tool_call: NotRequired[str | None]
+    tool_kind: NotRequired[ToolKind | None]
+
+
+class _ArtifactUpdateRequired(TypedDict):
+    thread_id: str
+    artifact_id: str
+    filename: str
+    content: str
+
+
+class _ArtifactUpdateKwargs(_ArtifactUpdateRequired, total=False):
+    append: NotRequired[bool]
+    last_chunk: NotRequired[bool]
+
+
+_MISSING_ARGUMENT = object()
+
+
+def _bind_emitter_arguments(
+    args: tuple[object, ...],
+    kwargs: Mapping[str, object],
+    names: tuple[str, ...],
+    defaults: Mapping[str, object],
+) -> dict[str, object]:
+    if len(args) > len(names):
+        raise TypeError(
+            f"expected at most {len(names)} positional arguments, got {len(args)}"
+        )
+    unknown = set(kwargs).difference(names)
+    if unknown:
+        name = sorted(unknown)[0]
+        raise TypeError(f"got an unexpected keyword argument {name!r}")
+
+    bound: dict[str, object] = {}
+    for index, name in enumerate(names):
+        if index < len(args):
+            if name in kwargs:
+                raise TypeError(f"got multiple values for argument {name!r}")
+            bound[name] = args[index]
+        elif name in kwargs:
+            bound[name] = kwargs[name]
+        else:
+            default = defaults.get(name, _MISSING_ARGUMENT)
+            if default is _MISSING_ARGUMENT:
+                raise TypeError(f"missing required argument: {name!r}")
+            bound[name] = default
+    return bound
+
+
+class EventEmitters:  # pylint: disable=too-many-public-methods
     """Event emission + state tracking.
 
-    Manages sequences, permissions, agent states, and tool calls.
+    Manages sequences, permissions, agent states, and tool calls. Each public
+    emitter is a distinct domain event or query used by the event-bus facade.
     """
 
     def __init__(
@@ -317,14 +403,22 @@ class EventEmitters:
 
     async def emit_tool_call_start(
         self,
-        thread_id: str,
-        agent_id: str,
-        tool_call_id: str,
-        title: str,
-        kind: ToolKind = ToolKind.OTHER,
-        input_args: dict[str, Any] | None = None,
+        *args: object,
+        **kwargs: Unpack[_ToolCallStartKwargs],
     ) -> None:
         """Emit a tool invocation start event."""
+        bound = _bind_emitter_arguments(
+            args,
+            kwargs,
+            ("thread_id", "agent_id", "tool_call_id", "title", "kind", "input_args"),
+            {"kind": ToolKind.OTHER, "input_args": None},
+        )
+        thread_id = cast("str", bound["thread_id"])
+        agent_id = cast("str", bound["agent_id"])
+        tool_call_id = cast("str", bound["tool_call_id"])
+        title = cast("str", bound["title"])
+        kind = cast("ToolKind", bound["kind"])
+        input_args = cast("dict[str, Any] | None", bound["input_args"])
         content: list[dict[str, str | None]] = []
         if input_args:
             try:
@@ -355,13 +449,8 @@ class EventEmitters:
 
     async def emit_tool_call_update(
         self,
-        thread_id: str,
-        agent_id: str,
-        tool_call_id: str,
-        status: ToolCallStatus | None = None,
-        title: str | None = None,
-        content: list[dict[str, str | None]] | None = None,
-        locations: list[dict[str, str | int | None]] | None = None,
+        *args: object,
+        **kwargs: Unpack[_ToolCallUpdateKwargs],
     ) -> None:
         """Emit a tool call update event (debounced).
 
@@ -372,22 +461,31 @@ class EventEmitters:
         served empty ``locations`` regardless of what the provider disclosed
         (part of F17).
         """
+        bound = _bind_emitter_arguments(
+            args,
+            kwargs,
+            (
+                "thread_id",
+                "agent_id",
+                "tool_call_id",
+                "status",
+                "title",
+                "content",
+                "locations",
+            ),
+            {"status": None, "title": None, "content": None, "locations": None},
+        )
+        thread_id = cast("str", bound["thread_id"])
+        agent_id = cast("str", bound["agent_id"])
+        tool_call_id = cast("str", bound["tool_call_id"])
+        status = cast("ToolCallStatus | None", bound["status"])
+        title = cast("str | None", bound["title"])
+        content = cast("list[dict[str, str | None]] | None", bound["content"])
+        locations = cast("list[dict[str, str | int | None]] | None", bound["locations"])
         now = time.monotonic()
         key = (thread_id, tool_call_id)
 
-        existing = self._tool_call_states.get(key)
-        if existing is not None:
-            if status is not None:
-                existing["status"] = status.value
-            if title is not None:
-                existing["title"] = title
-        elif status is not None or title is not None:
-            self._tool_call_states[key] = {
-                "title": title or "unknown_tool",
-                "kind": ToolKind.OTHER.value,
-                "status": (status or ToolCallStatus.PENDING).value,
-                "agent_id": agent_id,
-            }
+        self._update_tool_call_state(key, agent_id, status, title)
 
         if status in (ToolCallStatus.COMPLETED, ToolCallStatus.FAILED):
             self._prune_completed_tool_calls(thread_id)
@@ -416,17 +514,54 @@ class EventEmitters:
                     self._buffering.broadcast_debounced_tool_update(key)
                 )
 
+    def _update_tool_call_state(
+        self,
+        key: tuple[str, str],
+        agent_id: str,
+        status: ToolCallStatus | None,
+        title: str | None,
+    ) -> None:
+        existing = self._tool_call_states.get(key)
+        if existing is not None:
+            if status is not None:
+                existing["status"] = status.value
+            if title is not None:
+                existing["title"] = title
+        elif status is not None or title is not None:
+            self._tool_call_states[key] = {
+                "title": title or "unknown_tool",
+                "kind": ToolKind.OTHER.value,
+                "status": (status or ToolCallStatus.PENDING).value,
+                "agent_id": agent_id,
+            }
+
     async def emit_permission_request(
         self,
-        thread_id: str,
-        agent_id: str,
-        request_id: str,
-        description: str,
-        options: list[dict[str, str]],
-        tool_call: str | None = None,
-        tool_kind: ToolKind | None = None,
+        *args: object,
+        **kwargs: Unpack[_PermissionRequestKwargs],
     ) -> None:
         """Emit a permission request event (LangGraph interrupt)."""
+        bound = _bind_emitter_arguments(
+            args,
+            kwargs,
+            (
+                "thread_id",
+                "agent_id",
+                "request_id",
+                "description",
+                "options",
+                "tool_call",
+                "tool_kind",
+            ),
+            {"tool_call": None, "tool_kind": None},
+        )
+        thread_id = cast("str", bound["thread_id"])
+        agent_id = cast("str", bound["agent_id"])
+        request_id = cast("str", bound["request_id"])
+        description = cast("str", bound["description"])
+        options = cast("list[dict[str, str]]", bound["options"])
+        tool_call = cast("str | None", bound["tool_call"])
+        tool_kind = cast("ToolKind | None", bound["tool_kind"])
         parsed_options: list[dict[str, str]] = [
             {
                 "option_id": opt.get("option_id", str(uuid4())),
@@ -490,14 +625,22 @@ class EventEmitters:
 
     async def emit_artifact_update(
         self,
-        thread_id: str,
-        artifact_id: str,
-        filename: str,
-        content: str,
-        append: bool = False,
-        last_chunk: bool = True,
+        *args: object,
+        **kwargs: Unpack[_ArtifactUpdateKwargs],
     ) -> None:
         """Emit an artifact update event."""
+        bound = _bind_emitter_arguments(
+            args,
+            kwargs,
+            ("thread_id", "artifact_id", "filename", "content", "append", "last_chunk"),
+            {"append": False, "last_chunk": True},
+        )
+        thread_id = cast("str", bound["thread_id"])
+        artifact_id = cast("str", bound["artifact_id"])
+        filename = cast("str", bound["filename"])
+        content = cast("str", bound["content"])
+        append = cast("bool", bound["append"])
+        last_chunk = cast("bool", bound["last_chunk"])
         seq = self.next_sequence(thread_id)
         event = ArtifactUpdate(
             thread_id=thread_id,

@@ -35,12 +35,12 @@ import json
 import os
 import random
 import re
+import secrets
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..lifecycle import is_pid_alive, procs_home
 
 if TYPE_CHECKING:
@@ -48,8 +48,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
-    "ARTIFACT_DECLARATIONS",
-    "LEASE_MARKER_DECLARATION",
     "LEASE_TTL_MS",
     "Lease",
     "LeaseAcquisitionTimeoutError",
@@ -74,39 +72,20 @@ _FUTURE_SKEW_TOLERANCE_MS = 10_000
 _EXCLUSIVE_SUFFIX = ".lease"
 _SHARED_SUFFIX = ".shared"
 
-# Shipped test-support that writes into the operator's machine-global home, which
-# is the same class as the service-test runtime directories and is declared for
-# the same reason: it is this project's code leaving state on a real machine.
-#
-# Unusually for this codebase, the enforcement here is genuinely complete, so the
-# declaration records what exists rather than an absence. A marker is unlinked on
-# release, and one abandoned by a crash is reclaimed by ANY later contender for
-# the same key - the reap is inline in the acquire path, not a separate sweeper
-# that could fall out of step with what it is meant to collect.
-LEASE_MARKER_DECLARATION = ArtifactDeclaration(
-    name="test-lease-marker",
-    root=(
-        f"<procs_home>/leases/<key>{_EXCLUSIVE_SUFFIX} and "
-        f"<procs_home>/leases/<key>.<n>{_SHARED_SUFFIX}"
-    ),
-    owner="testing.leases",
-    disposition=RetentionDisposition.SESSION_SCOPED,
-    mechanism=(
-        "Lease.release unlinks the holder's own marker, and _reap_dead_marker "
-        "drops any marker whose holder is provably gone - judged on BOTH pid "
-        f"liveness and an mtime younger than {LEASE_TTL_MS}ms, since a process "
-        "can outlive its own heartbeat writer. The reap runs inline on every "
-        "acquire and every shared-holder scan rather than in a separate sweeper, "
-        "so residue is collected by the next contender for the same key. The one "
-        "gap: a key nobody ever contends again keeps its dead marker, and the "
-        "leases directory itself is never removed"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (LEASE_MARKER_DECLARATION,)
 _KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 # Distinguishes multiple shared holds by one process; see _try_acquire_shared.
 _SHARED_SEQ = itertools.count()
+
+
+class _LeaseOptions(TypedDict, total=False):
+    """Optional keyword settings shared by the lease entry points."""
+
+    shared: bool
+    owner: str
+    home: Path | None
+    acquire_timeout_s: float | None
+    poll_interval_s: float
+    refresh_interval_s: float
 
 
 class LeaseAcquisitionTimeoutError(TimeoutError):
@@ -176,7 +155,12 @@ def _write_marker_excl(path: Path, *, owner: str) -> str | None:
     holder can later prove the marker is still its own before unlinking it.
     """
     payload = json.dumps(
-        {"pid": os.getpid(), "owner": owner, "acquired_at_ms": int(time.time() * 1000)}
+        {
+            "pid": os.getpid(),
+            "owner": owner,
+            "acquired_at_ms": int(time.time() * 1000),
+            "release_token": secrets.token_hex(16),
+        }
     )
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
@@ -338,13 +322,7 @@ def _contention_detail(root: Path, key: str) -> str:
 
 def acquire(
     key: str,
-    *,
-    shared: bool = False,
-    owner: str = "",
-    home: Path | None = None,
-    acquire_timeout_s: float | None = None,
-    poll_interval_s: float = 0.25,
-    refresh_interval_s: float = _REFRESH_INTERVAL_S,
+    **options: Unpack[_LeaseOptions],
 ) -> Lease:
     """Block until the lease for *key* is held, then heartbeat it until release.
 
@@ -354,6 +332,12 @@ def acquire(
     :class:`LeaseAcquisitionTimeoutError` names the live holder so the contention is
     diagnosable rather than a bare clock expiry.
     """
+    shared = options.get("shared", False)
+    owner = options.get("owner", "")
+    home = options.get("home")
+    acquire_timeout_s = options.get("acquire_timeout_s")
+    poll_interval_s = options.get("poll_interval_s", 0.25)
+    refresh_interval_s = options.get("refresh_interval_s", _REFRESH_INTERVAL_S)
     _validate_key(key)
     root = lease_home(home)
     root.mkdir(parents=True, exist_ok=True)
@@ -391,24 +375,10 @@ def acquire(
 @contextlib.contextmanager
 def hold_lease(
     key: str,
-    *,
-    shared: bool = False,
-    owner: str = "",
-    home: Path | None = None,
-    acquire_timeout_s: float | None = None,
-    poll_interval_s: float = 0.25,
-    refresh_interval_s: float = _REFRESH_INTERVAL_S,
+    **options: Unpack[_LeaseOptions],
 ) -> Generator[Lease]:
     """Context-managed :func:`acquire`; releases on exit even under failure."""
-    lease = acquire(
-        key,
-        shared=shared,
-        owner=owner,
-        home=home,
-        acquire_timeout_s=acquire_timeout_s,
-        poll_interval_s=poll_interval_s,
-        refresh_interval_s=refresh_interval_s,
-    )
+    lease = acquire(key, **options)
     try:
         yield lease
     finally:

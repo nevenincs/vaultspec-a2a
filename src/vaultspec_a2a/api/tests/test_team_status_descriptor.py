@@ -23,8 +23,6 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...control.team_service import build_team_status
 from ...database import create_thread
 from ...graph.compiler import compile_team_graph
@@ -39,6 +37,7 @@ from ...team.team_config import (
     WorkerRef,
     load_agent_config,
 )
+from ...tests._write_authority import make_test_write_authority
 from ..event_adapter import domain_to_wire
 from ..schemas.events import TeamStatusEvent
 from .conftest import SessionFactory, make_app

@@ -52,6 +52,42 @@ def should_compact(state: TeamState, max_tokens: int) -> bool:
     return current > int(max_tokens * 0.8)
 
 
+def _split_pinned_messages(
+    messages: list[BaseMessage],
+) -> tuple[list[BaseMessage], BaseMessage | None, list[BaseMessage]]:
+    system_msgs: list[BaseMessage] = []
+    body: list[BaseMessage] = []
+    for msg in messages:
+        if isinstance(msg, SystemMessage) and not body:
+            system_msgs.append(msg)
+        else:
+            body.append(msg)
+
+    pinned_human: BaseMessage | None = None
+    remaining_body: list[BaseMessage] = []
+    for msg in body:
+        if pinned_human is None and isinstance(msg, HumanMessage):
+            pinned_human = msg
+        else:
+            remaining_body.append(msg)
+    return system_msgs, pinned_human, remaining_body
+
+
+def _keep_recent_messages(body: list[BaseMessage], budget: int) -> list[BaseMessage]:
+    kept: list[BaseMessage] = []
+    kept_tokens = 0
+    for msg in reversed(body):
+        msg_tokens = estimate_tokens([msg])
+        if kept_tokens + msg_tokens > budget:
+            # Preserve the latest message even when pinned content fills the budget.
+            if not kept:
+                kept.insert(0, msg)
+            break
+        kept.insert(0, msg)
+        kept_tokens += msg_tokens
+    return kept
+
+
 def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     """Return a copy of *state* with messages trimmed to fit *max_tokens*.
 
@@ -75,26 +111,8 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     # Separate system prefix from conversation body, then pin the first
     # HumanMessage (the original task) so it is never subject to budget
     # truncation.
-    system_msgs: list[BaseMessage] = []
-    body: list[BaseMessage] = []
-    for msg in messages:
-        if isinstance(msg, SystemMessage) and not body:
-            system_msgs.append(msg)
-        else:
-            body.append(msg)
-
-    # Pin the first HumanMessage unconditionally — it is the user's original
-    # task and must survive compaction regardless of budget pressure.
-    pinned_human: BaseMessage | None = None
-    remaining_body: list[BaseMessage] = []
-    for msg in body:
-        if pinned_human is None and isinstance(msg, HumanMessage):
-            pinned_human = msg
-        else:
-            remaining_body.append(msg)
-    # Work over the body without the pinned message so the budget calculation
-    # does not accidentally count it twice.
-    body = remaining_body
+    # Pin the original task and exclude it from the recent-message budget.
+    system_msgs, pinned_human, body = _split_pinned_messages(messages)
 
     # Keep enough recent messages to stay under budget after adding the
     # system prefix + pinned HumanMessage + a summary placeholder.  Clamp to
@@ -105,19 +123,7 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     pinned_tokens = estimate_tokens([pinned_human]) if pinned_human else 0
     budget = max(0, max_tokens - system_tokens - pinned_tokens - summary_overhead)
 
-    kept: list[BaseMessage] = []
-    kept_tokens = 0
-    for msg in reversed(body):
-        msg_tokens = estimate_tokens([msg])
-        if kept_tokens + msg_tokens > budget:
-            # Always preserve at least the most recent message so the agent
-            # knows what was last asked of it, even if the budget is exhausted
-            # by the system prefix alone.
-            if not kept:
-                kept.insert(0, msg)
-            break
-        kept.insert(0, msg)
-        kept_tokens += msg_tokens
+    kept = _keep_recent_messages(body, budget)
 
     # Build the compacted message list
     summary = HumanMessage(

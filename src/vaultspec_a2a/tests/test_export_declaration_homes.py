@@ -97,6 +97,59 @@ def _string_members(value: ast.expr) -> list[str]:
     return []
 
 
+def _record_local_binding(node: ast.stmt, local: set[str]) -> bool:
+    if isinstance(node, ast.TypeAlias):
+        # PEP 695 `type X = ...`; a declaration ast.Assign never sees.
+        local.add(node.name.id)
+        return True
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        local.add(node.name)
+        return True
+    if isinstance(node, ast.Assign):
+        for target_node in node.targets:
+            if isinstance(target_node, ast.Name):
+                local.add(target_node.id)
+        return True
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        local.add(node.target.id)
+        return True
+    return False
+
+
+def _record_import_binding(
+    node: ast.stmt,
+    module: str,
+    is_package: bool,
+    imported: dict[str, str],
+) -> bool:
+    if isinstance(node, ast.Import):
+        for alias in node.names:
+            bound = alias.asname or alias.name.split(".")[0]
+            imported[bound] = f"{alias.name}::{alias.name}"
+        return True
+    if isinstance(node, ast.ImportFrom):
+        target = _absolute_target(module, node, is_package)
+        for alias in node.names:
+            if alias.name != "*":
+                bound = alias.asname or alias.name
+                imported[bound] = f"{target}::{alias.name}"
+        return True
+    return False
+
+
+def _nested_bodies(node: ast.stmt) -> list[list[ast.stmt]]:
+    if isinstance(node, ast.If):
+        return [node.body, node.orelse]
+    if isinstance(node, ast.Try):
+        return [
+            node.body,
+            node.orelse,
+            *(handler.body for handler in node.handlers),
+            node.finalbody,
+        ]
+    return []
+
+
 def _exported_names(tree: ast.Module) -> list[str] | None:
     """Return the literal ``__all__`` members, or None where none is declared."""
     declared = False
@@ -127,35 +180,12 @@ def _bindings(
 
     def visit(body: list[ast.stmt]) -> None:
         for node in body:
-            if isinstance(node, ast.TypeAlias):
-                # PEP 695 `type X = ...`; a declaration ast.Assign never sees.
-                local.add(node.name.id)
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    bound = alias.asname or alias.name.split(".")[0]
-                    imported[bound] = f"{alias.name}::{alias.name}"
-            elif isinstance(node, ast.ImportFrom):
-                target = _absolute_target(module, node, is_package)
-                for alias in node.names:
-                    if alias.name != "*":
-                        bound = alias.asname or alias.name
-                        imported[bound] = f"{target}::{alias.name}"
-            elif isinstance(
-                node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
-            ):
-                local.add(node.name)
-            elif isinstance(node, ast.Assign):
-                for target_node in node.targets:
-                    if isinstance(target_node, ast.Name):
-                        local.add(target_node.id)
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                local.add(node.target.id)
-            elif isinstance(node, ast.If | ast.Try):
-                visit(node.body)
-                visit(getattr(node, "orelse", []))
-                for handler in getattr(node, "handlers", []):
-                    visit(handler.body)
-                visit(getattr(node, "finalbody", []))
+            if _record_local_binding(node, local):
+                continue
+            if _record_import_binding(node, module, is_package, imported):
+                continue
+            for nested in _nested_bodies(node):
+                visit(nested)
 
     visit(tree.body)
     return imported, local

@@ -12,7 +12,7 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -23,13 +23,14 @@ from ..database import get_thread
 from ..graph.enums import ServerEventType
 from ..providers.conditions import ProviderCondition
 from ..streaming.sse_frames import encode_sse_frame
+from ..streaming.types import SequencedEvent
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..thread.errors import EventAggregatorError
 from .event_adapter import sequenced_to_positive_payload
 from .schemas.events import HeartbeatEvent
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +46,51 @@ _UNRECORDED_REASON = "The run failed; no reason was recorded"
 Says what is true of the RECORD rather than inventing an account of the failure,
 so a client is never handed a diagnosis nothing observed.
 """
+
+
+def _queue_progress_payload(item: object) -> dict[str, object] | None:
+    """Decode either producer shape held by the shared subscriber queue."""
+    if isinstance(item, SequencedEvent):
+        return sequenced_to_positive_payload(item)
+    if isinstance(item, dict):
+        return cast("dict[str, object]", item)
+    return None
+
+
+def _terminal_replay_frames(
+    thread_id: str,
+    status: str,
+    failure_reason: str | None,
+    provider_condition: str | None,
+) -> Iterator[bytes]:
+    """Replay the durable error and terminal in the same order as live delivery.
+
+    A condition without a recorded reason gets a truthful fallback message;
+    the already ended run cannot be retried from this frame.
+    """
+    if status == ThreadStatus.FAILED.value and (failure_reason or provider_condition):
+        yield encode_sse_frame(
+            {
+                "type": "error",
+                "event_type": "error",
+                "thread_id": thread_id,
+                "code": provider_condition or ProviderCondition.UNKNOWN.value,
+                "message": failure_reason or _UNRECORDED_REASON,
+                "recoverable": False,
+            },
+            event="error",
+            thread_id=thread_id,
+        )
+    terminal: dict[str, object] = {
+        "type": "thread_terminal",
+        "event_type": "thread_terminal",
+        "thread_id": thread_id,
+        "status": status,
+        "replay": True,
+    }
+    if failure_reason:
+        terminal["error_detail"] = failure_reason
+    yield encode_sse_frame(terminal, event="thread_terminal", thread_id=thread_id)
 
 
 async def _stream_thread_events(
@@ -104,46 +150,10 @@ async def _stream_thread_events(
         aggregator.subscribe(client_id, [thread_id])
 
         if initial_status in TERMINAL_STATUSES:
-            # A run that failed before this client attached gets the same pair of
-            # frames a live client saw, in the same order and shape: the coded
-            # error first, then the terminal carrying the reason. Replaying only
-            # the terminal told a reconnecting client "failed" and nothing else,
-            # while the durable row held both halves of the answer the whole
-            # time. The condition rides the error frame's code exactly as it does
-            # live, rather than widening the terminal frame to carry it twice.
-            if initial_status == ThreadStatus.FAILED.value and (
-                failure_reason or provider_condition
+            for frame in _terminal_replay_frames(
+                thread_id, initial_status, failure_reason, provider_condition
             ):
-                yield encode_sse_frame(
-                    {
-                        "type": "error",
-                        "event_type": "error",
-                        "thread_id": thread_id,
-                        # The floor stands in for a row written before the
-                        # condition column existed; the reason is still true.
-                        "code": provider_condition or ProviderCondition.UNKNOWN.value,
-                        "message": failure_reason or _UNRECORDED_REASON,
-                        # The run is already over, so nothing about it can be
-                        # retried - whatever recoverability meant while it ran.
-                        "recoverable": False,
-                    },
-                    event="error",
-                    thread_id=thread_id,
-                )
-            terminal: dict[str, object] = {
-                "type": "thread_terminal",
-                "event_type": "thread_terminal",
-                "thread_id": thread_id,
-                "status": initial_status,
-                "replay": True,
-            }
-            if failure_reason:
-                terminal["error_detail"] = failure_reason
-            yield encode_sse_frame(
-                terminal,
-                event="thread_terminal",
-                thread_id=thread_id,
-            )
+                yield frame
             return
 
         while True:
@@ -168,7 +178,11 @@ async def _stream_thread_events(
             # allowlist here; relayed worker payloads were already projected
             # at the relay seam. The encode boundary re-applies the allowlist
             # to both, so a forbidden body cannot cross by either path.
-            payload = sequenced_to_positive_payload(item)
+            # Local domain events carry sequence wrappers; worker relay events
+            # have already crossed the positive projection as plain mappings.
+            payload = _queue_progress_payload(item)
+            if payload is None:
+                continue
 
             event_type = payload.get("type")
             yield encode_sse_frame(

@@ -1,17 +1,13 @@
-"""Bounding the startup-repair journal must not cost a single recoverable row.
+"""Repair-journal pruning preserves every recoverable action.
 
-Real SQLite database and a real langgraph checkpointer, no mocks. Startup
-reconciliation appends a ``repair_started``/``repair_finished`` pair per
-non-terminal thread on every boot, under an epoch-seeded idempotency key that
-never repeats - growth driven by restart count rather than by work. The cap
-introduced for that class is only safe because no reader consumes a repair row,
-so these tests assert the negative directly: after many capped boots, every
-non-repair journal row is still present and unchanged, and each production
-reader still resolves the row it resolved before.
+Current graph recovery does not append repair pairs on each boot. Historical
+pairs can still be pruned; the repository primitive must retain a whole pair
+and leave every non-repair action intact.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -25,8 +21,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...conftest import materialize_schema
 from ...database import create_thread
 from ...database.models import ControlActionModel
@@ -38,7 +32,8 @@ from ...database.permission_repository import (
     prune_repair_journal,
 )
 from ...database.reconciliation import reconcile_threads_on_startup
-from ...thread.enums import ControlActionType
+from ...tests._write_authority import make_test_write_authority
+from ...thread.enums import ControlActionResultStatus, ControlActionType
 
 _REPAIR_TYPES = (
     ControlActionType.REPAIR_STARTED.value,
@@ -73,6 +68,7 @@ async def _seed_recoverable_actions(session: AsyncSession, tid: str) -> None:
         idempotency_key=f"cancel:{tid}",
         payload={"reason": "operator"},
         dispatch_id="dispatch-cancel-1",
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     await create_control_action(
         session,
@@ -81,6 +77,7 @@ async def _seed_recoverable_actions(session: AsyncSession, tid: str) -> None:
         idempotency_key=f"followup:{tid}",
         payload={"message": "carry on"},
         dispatch_id="dispatch-followup-1",
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     await create_control_action(
         session,
@@ -90,6 +87,7 @@ async def _seed_recoverable_actions(session: AsyncSession, tid: str) -> None:
         idempotency_key=_PERMISSION_KEY,
         payload={"option_id": "allow_once"},
         dispatch_id="dispatch-permission-1",
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     await create_control_action(
         session,
@@ -99,6 +97,7 @@ async def _seed_recoverable_actions(session: AsyncSession, tid: str) -> None:
         idempotency_key=_CLARIFICATION_KEY,
         payload={"answers": [{"question_id": "q1", "option_id": "a"}]},
         dispatch_id="dispatch-clarification-1",
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )
 
 
@@ -155,8 +154,8 @@ def _database(
 
 
 @pytest.mark.asyncio
-async def test_repair_journal_stops_growing_once_capped(runtime_dir: Path) -> None:
-    """Twelve boots against a two-boot cap leave four rows, not twenty-four."""
+async def test_capped_boots_do_not_create_repair_history(runtime_dir: Path) -> None:
+    """Repeated graph recovery does not append obsolete repair pairs."""
     tid = "thread-repair-capped"
     engine, session_factory = _database(runtime_dir, "repair-retention-capped")
 
@@ -183,18 +182,14 @@ async def test_repair_journal_stops_growing_once_capped(runtime_dir: Path) -> No
         async with session_factory() as session:
             capped = await _repair_row_count(session, tid)
 
-    assert capped == 4
+    assert capped == 0
 
     await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_uncapped_repair_journal_grows_with_every_boot(runtime_dir: Path) -> None:
-    """Zero retention is the prior unbounded behaviour - the defect, pinned.
-
-    Without this the cap could silently become a no-op and the first test would
-    still pass on a journal that never grew in the first place.
-    """
+async def test_uncapped_boots_do_not_create_repair_history(runtime_dir: Path) -> None:
+    """Disabling pruning does not restore obsolete repair writes."""
     tid = "thread-repair-uncapped"
     engine, session_factory = _database(runtime_dir, "repair-retention-uncapped")
 
@@ -221,8 +216,7 @@ async def test_uncapped_repair_journal_grows_with_every_boot(runtime_dir: Path) 
         async with session_factory() as session:
             uncapped = await _repair_row_count(session, tid)
 
-    # A started and a finished row per boot, every boot, forever.
-    assert uncapped == 24
+    assert uncapped == 0
 
     await engine.dispose()
 
@@ -286,10 +280,10 @@ async def test_capped_boots_leave_every_recoverable_row_intact(
                 session, thread_id=tid, idempotency_key=_CLARIFICATION_KEY
             )
 
-    # Four seeded rows, and the prune reclaimed real repair history around them.
+    # Four seeded actions remain intact through repeated startup passes.
     assert len(before) == 4
     assert after == before
-    assert repair_rows == 2
+    assert repair_rows == 0
 
     assert cancel is not None
     assert cancel.applied_at is None
@@ -331,12 +325,23 @@ async def test_current_pass_pair_survives_a_cap_below_the_pair(
             )
             await session.commit()
 
-        for _ in range(3):
-            async with session_factory() as session:
-                await reconcile_threads_on_startup(
-                    session, checkpointer, retain_repair_boots=0
+        async with session_factory() as session:
+            for epoch in range(1, 4):
+                await create_control_action(
+                    session,
+                    thread_id=tid,
+                    action_type=ControlActionType.REPAIR_STARTED,
+                    idempotency_key=f"startup-repair:{tid}:{epoch}",
+                    result_status=ControlActionResultStatus.APPLIED,
                 )
-                await session.commit()
+                await create_control_action(
+                    session,
+                    thread_id=tid,
+                    action_type=ControlActionType.REPAIR_FINISHED,
+                    idempotency_key=f"startup-repair-finished:{tid}:{epoch - 1}",
+                    result_status=ControlActionResultStatus.APPLIED,
+                )
+            await session.commit()
 
         async with session_factory() as session:
             hoarded = await _repair_row_count(session, tid)
@@ -354,7 +359,7 @@ async def test_current_pass_pair_survives_a_cap_below_the_pair(
                 idempotency_key=f"startup-repair-finished:{tid}:2",
             )
 
-    # Three uncapped boots, then a cap of one row raised to a whole pair.
+    # Three historical pairs, then a cap of one row raised to a whole pair.
     assert hoarded == 6
     assert deleted == 4
     assert surviving == 2

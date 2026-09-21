@@ -22,14 +22,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
-
 from ....control.cleanup import (
     build_cleanup_manifest,
     execute_cleanup_manifest,
     resolve_contained_artifact_path,
 )
 from ....database.models import ArtifactModel, ThreadModel
+from ....tests._write_authority import make_test_thread_authority_columns
 
 if TYPE_CHECKING:
     from ....control.repositories import CleanupItemResult

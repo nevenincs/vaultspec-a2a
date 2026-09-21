@@ -139,12 +139,15 @@ class TestCreateThreadWithMetadata:
             assert data["nickname"] is not None
 
     def test_create_thread_invalid_workspace_422(
-        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+        self,
+        session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
+        tmp_path: Path,
     ) -> None:
         """Non-existent workspace_root returns 422."""
         app, _agg = _make_app(session_factory, checkpointer)
         metadata = {
-            "workspace_root": "Y:/nonexistent/path/that/does/not/exist",
+            "workspace_root": str(tmp_path / "nonexistent/path/that/does/not/exist"),
         }
 
         with TestClient(app, raise_server_exceptions=True) as client:

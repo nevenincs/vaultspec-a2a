@@ -29,6 +29,7 @@ log or invent logging for the five that never asked for it.
 import asyncio
 import json
 from collections.abc import Callable
+from typing import TypedDict, Unpack
 
 from ._acp_types import AcpResponseFuture, AcpResponseFutures
 from ._json_contract import JsonObject
@@ -36,14 +37,17 @@ from ._json_contract import JsonObject
 __all__: list[str] = []
 
 
+class _IssueRequestArgs(TypedDict):
+    stdin: asyncio.StreamWriter
+    stdin_lock: asyncio.Lock
+    rpc_id: int
+    method: str
+    params: JsonObject
+
+
 async def issue_request(
     futures: AcpResponseFutures,
-    *,
-    stdin: asyncio.StreamWriter,
-    stdin_lock: asyncio.Lock,
-    rpc_id: int,
-    method: str,
-    params: JsonObject,
+    **kwargs: Unpack[_IssueRequestArgs],
 ) -> AcpResponseFuture:
     """Register *rpc_id*'s future and write its JSON-RPC frame under the lock.
 
@@ -51,16 +55,16 @@ async def issue_request(
     ahead of ``drain()`` returning always finds a future waiting for it.
     """
     future: AcpResponseFuture = asyncio.get_running_loop().create_future()
-    futures[rpc_id] = future
+    futures[kwargs["rpc_id"]] = future
     request: JsonObject = {
         "jsonrpc": "2.0",
-        "id": rpc_id,
-        "method": method,
-        "params": params,
+        "id": kwargs["rpc_id"],
+        "method": kwargs["method"],
+        "params": kwargs["params"],
     }
-    async with stdin_lock:
-        stdin.write(json.dumps(request).encode("utf-8") + b"\n")
-        await stdin.drain()
+    async with kwargs["stdin_lock"]:
+        kwargs["stdin"].write(json.dumps(request).encode("utf-8") + b"\n")
+        await kwargs["stdin"].drain()
     return future
 
 

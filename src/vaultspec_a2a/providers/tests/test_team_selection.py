@@ -20,6 +20,7 @@ from ..provider_catalog import (
     NativeControlOption,
     ProviderCatalog,
     ProviderCatalogKey,
+    ProviderHealthAxes,
     ProviderRecord,
     SelectionReference,
     StructuredProviderHealth,
@@ -74,11 +75,13 @@ def _record() -> ProviderRecord:
         ),
     )
     health = StructuredProviderHealth.derive(
-        configured=HealthState.AVAILABLE,
-        transport=HealthState.AVAILABLE,
-        authentication=AuthenticationState.AUTHENTICATED,
-        catalog=CatalogStatus.AVAILABLE,
-        admission=AdmissionState.ADMITTED,
+        axes=ProviderHealthAxes(
+            configured=HealthState.AVAILABLE,
+            transport=HealthState.AVAILABLE,
+            authentication=AuthenticationState.AUTHENTICATED,
+            catalog=CatalogStatus.AVAILABLE,
+            admission=AdmissionState.ADMITTED,
+        ),
         checked_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     return ProviderRecord(

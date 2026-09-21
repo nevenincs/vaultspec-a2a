@@ -144,6 +144,51 @@ def _declared_expectation() -> ProviderCondition | None:
         )
 
 
+def _selection_from_provider_record(
+    record: dict[str, object],
+) -> ProviderCatalogSelection | None:
+    """Build a selection when one served provider record is usable."""
+    raw_health: object = record.get("health")
+    raw_lane: object = record.get("catalog")
+    if not isinstance(raw_health, dict) or not isinstance(raw_lane, dict):
+        return None
+    health = cast("dict[str, object]", raw_health)
+    lane = cast("dict[str, object]", raw_lane)
+    if health.get("selectable") is not True:
+        return None
+    raw_state: object = lane.get("state")
+    raw_models: object = lane.get("models")
+    if (
+        not isinstance(raw_state, dict)
+        or not isinstance(raw_models, list)
+        or not raw_models
+    ):
+        return None
+    state = cast("dict[str, object]", raw_state)
+    models = cast("list[object]", raw_models)
+    revision = state.get("revision")
+    raw_entry = models[0]
+    if not isinstance(revision, str) or not isinstance(raw_entry, dict):
+        return None
+    entry = cast("dict[str, object]", raw_entry)
+    entry_id = entry.get("entry_id")
+    provider_id = record.get("provider_id")
+    execution_mode = record.get("execution_mode")
+    if not (
+        isinstance(entry_id, str)
+        and isinstance(provider_id, str)
+        and isinstance(execution_mode, str)
+    ):
+        return None
+    return ProviderCatalogSelection(
+        schema_version=1,
+        provider_id=provider_id,
+        execution_mode=execution_mode,
+        catalog_revision=revision,
+        entry_id=entry_id,
+    )
+
+
 def _selection_from_catalog(catalog: JsonObject) -> ProviderCatalogSelection | None:
     """Build a schema-valid selection from the first selectable served lane.
 
@@ -159,46 +204,11 @@ def _selection_from_catalog(catalog: JsonObject) -> ProviderCatalogSelection | N
     for raw_record in providers:
         if not isinstance(raw_record, dict):
             continue
-        record = cast("dict[str, object]", raw_record)
-        raw_health: object = record.get("health")
-        raw_lane: object = record.get("catalog")
-        if not isinstance(raw_health, dict) or not isinstance(raw_lane, dict):
-            continue
-        health = cast("dict[str, object]", raw_health)
-        lane = cast("dict[str, object]", raw_lane)
-        if health.get("selectable") is not True:
-            continue
-        raw_state: object = lane.get("state")
-        raw_models: object = lane.get("models")
-        if (
-            not isinstance(raw_state, dict)
-            or not isinstance(raw_models, list)
-            or not raw_models
-        ):
-            continue
-        state = cast("dict[str, object]", raw_state)
-        models = cast("list[object]", raw_models)
-        revision = state.get("revision")
-        raw_entry = models[0]
-        if not isinstance(revision, str) or not isinstance(raw_entry, dict):
-            continue
-        entry = cast("dict[str, object]", raw_entry)
-        entry_id = entry.get("entry_id")
-        provider_id = record.get("provider_id")
-        execution_mode = record.get("execution_mode")
-        if not (
-            isinstance(entry_id, str)
-            and isinstance(provider_id, str)
-            and isinstance(execution_mode, str)
-        ):
-            continue
-        return ProviderCatalogSelection(
-            schema_version=1,
-            provider_id=provider_id,
-            execution_mode=execution_mode,
-            catalog_revision=revision,
-            entry_id=entry_id,
+        selection = _selection_from_provider_record(
+            cast("dict[str, object]", raw_record)
         )
+        if selection is not None:
+            return selection
     return None
 
 

@@ -84,13 +84,6 @@ SSE_FRAME_VERSION = "v1"
 MAX_SSE_FRAME_BYTES = 1024 * 1024
 
 
-# Worst-case encoded bytes per source character. :func:`_encode` serializes with
-# ``ensure_ascii=True``, under which a non-BMP character leaves as an escaped
-# surrogate pair (``\\udXXX\\udYYY``) - twelve bytes for one character, the most
-# any single character can cost. Every other character is cheaper.
-_MAX_JSON_BYTES_PER_CHAR = 12
-
-
 # Per-frame character cap for the permitted message/thought token stream. The
 # progress channel relays bounded token deltas: a single content-bearing frame's
 # text is truncated to this cap so a buggy or hostile producer cannot stream an

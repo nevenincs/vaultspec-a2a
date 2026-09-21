@@ -35,6 +35,9 @@ import textwrap
 # sees neither a notification nor EOF for the whole observation window.
 _SILENT_AGENT = "import time; time.sleep(600)"
 
+_SHORT_LIMIT_SECONDS = 0.75
+_OBSERVE_SECONDS = 3.0
+
 # Drives the real turn consumer against that agent and reports how it ended.
 # "deadline" only when the production wait actually expired; "still_waiting"
 # when the turn was still parked when the observation window closed.
@@ -123,7 +126,11 @@ def test_silent_turn_is_bounded_by_the_acp_idle_knob() -> None:
     still parked when the window closed and reported ``still_waiting``. Only a
     wait armed from ``acp_turn_idle_timeout_seconds`` expires here.
     """
-    probe = _run_probe(idle_limit="2", call_budget=120.0, observe_seconds=15.0)
+    probe = _run_probe(
+        idle_limit=str(_SHORT_LIMIT_SECONDS),
+        call_budget=120.0,
+        observe_seconds=_OBSERVE_SECONDS,
+    )
 
     assert probe["outcome"] == "deadline", (
         "a turn silent past the ACP idle deadline must end; "
@@ -139,7 +146,11 @@ def test_long_idle_knob_outlives_a_short_call_budget() -> None:
     and the idle knob is far longer, so the pre-fix wiring expired at the budget
     and reported ``deadline``. A correctly wired turn is still waiting.
     """
-    probe = _run_probe(idle_limit="600", call_budget=2.0, observe_seconds=15.0)
+    probe = _run_probe(
+        idle_limit="600",
+        call_budget=_SHORT_LIMIT_SECONDS,
+        observe_seconds=_OBSERVE_SECONDS,
+    )
 
     assert probe["outcome"] == "still_waiting", (
         "a quiet turn inside the ACP idle deadline must survive; "

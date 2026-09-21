@@ -91,7 +91,7 @@ from .in_process_catalog import IN_PROCESS_EXECUTION_MODES
 from .provider_catalog import ProviderCatalogKey
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Mapping
 
 __all__ = [
     "IN_PROCESS_CATALOG_LANES",
@@ -103,10 +103,7 @@ __all__ = [
     "WebLaneProof",
     "catalog_lane_admission_reason",
     "is_catalog_lane_admissible",
-    "is_lane_admissible",
     "is_web_lane_proven",
-    "lane_admission_reason",
-    "unproven_lanes_in",
     "web_tool_names_for",
 ]
 
@@ -338,16 +335,6 @@ def _lane_of(provider: Provider | str | None) -> Provider | None:
         return None
 
 
-def is_lane_admissible(provider: Provider) -> bool:
-    """Return whether *provider* may be named by a served model profile.
-
-    True for a lane with recorded completed-turn proof and for the in-process
-    lanes. False for everything else, including any provider this module has
-    never heard of - deny is the default.
-    """
-    return provider in PROVEN_TURN_LANES or provider in IN_PROCESS_LANES
-
-
 def is_catalog_lane_admissible(key: ProviderCatalogKey) -> bool:
     """Return whether this exact execution lane may be served as selectable.
 
@@ -367,41 +354,6 @@ def catalog_lane_admission_reason(key: ProviderCatalogKey) -> str | None:
         f"provider lane {key.provider_id}/{key.execution_mode} has no exact "
         "completed-turn proof; evidence from another execution mode is not inherited"
     )
-
-
-def lane_admission_reason(provider: Provider) -> str | None:
-    """Return why *provider* may not be served, or ``None`` when it is admissible.
-
-    The reason names the provider and states the standard it failed, so a refusal
-    served to the composer or raised at launch is self-explaining. Safe by
-    construction: it carries no credential, path, or environment value.
-    """
-    if is_lane_admissible(provider):
-        return None
-    return (
-        f"provider {provider.value} has no completed-turn proof; a served profile "
-        "may name a lane only after a live test completes a real turn on it "
-        "(a handshake, a resolved credential, or a constructed client is not a turn)"
-    )
-
-
-def unproven_lanes_in(providers: Iterable[Provider]) -> list[Provider]:
-    """Return the inadmissible lanes among *providers*, order-preserving and deduped.
-
-    Takes any iterable of provider values - a role's primary plus its declared
-    fallbacks, a whole profile's lanes - and reports every one that fails
-    admission, so a caller can name all of them at once rather than refusing on
-    the first and hiding the rest.
-    """
-    seen: set[Provider] = set()
-    unproven: list[Provider] = []
-    for provider in providers:
-        if provider in seen:
-            continue
-        seen.add(provider)
-        if not is_lane_admissible(provider):
-            unproven.append(provider)
-    return unproven
 
 
 def is_web_lane_proven(provider: Provider | str | None) -> bool:

@@ -720,15 +720,14 @@ def _resolve_preset_path(
     candidate exists; the caller raises its own typed not-found error, since
     that type differs per config kind.
     """
-    candidates: list[Path] = []
+    candidates: list[tuple[Path, Path]] = []
     if workspace_root is not None:
-        candidates.append(
-            workspace_root / ".vaultspec" / subdir / f"{filename_id}.toml"
-        )
-    candidates.append(preset_dir / f"{filename_id}.toml")
+        override_dir = workspace_root / ".vaultspec" / subdir
+        candidates.append((override_dir, override_dir / f"{filename_id}.toml"))
+    candidates.append((preset_dir, preset_dir / f"{filename_id}.toml"))
 
-    for path in candidates:
-        if path.is_file():
+    for directory, path in candidates:
+        if path.resolve().is_relative_to(directory.resolve()) and path.is_file():
             return path
     return None
 

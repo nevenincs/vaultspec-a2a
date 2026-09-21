@@ -66,6 +66,60 @@ def test_a_module_no_entry_point_imports_is_unreachable(tmp_path: Path) -> None:
     assert result.modules[0].reach is ModuleReach.UNREACHABLE
 
 
+def test_root_conftest_pytest_hooks_are_framework_consumers(tmp_path: Path) -> None:
+    """Only registered plugin hooks are exempt from unused-symbol findings."""
+    spec = _tree(
+        tmp_path,
+        {
+            "__init__.py": "",
+            "cli.py": "def main():\n    return 1\n",
+            "plugin.py": (
+                "def pytest_report_header(config):\n    return 'ready'\n"
+                "def unused_helper():\n    return 2\n"
+            ),
+        },
+    )
+    (tmp_path / "conftest.py").write_text(
+        "pytest_plugins = ('sample.plugin',)\n", encoding="utf-8"
+    )
+
+    result = scan_unreachable_code(spec)
+    findings = {(item.module, item.name) for item in result.symbols}
+    assert ("sample.plugin", "pytest_report_header") not in findings
+    assert ("sample.plugin", "unused_helper") in findings
+
+
+def test_main_guard_and_configured_script_imports_are_entry_points(
+    tmp_path: Path,
+) -> None:
+    """Direct module commands and configured scripts reach their package code."""
+    spec = _tree(
+        tmp_path,
+        {
+            "__init__.py": "",
+            "cli.py": "def main():\n    return 1\n",
+            "admin.py": (
+                "def main():\n    return 0\n"
+                "if __name__ == '__main__':\n    raise SystemExit(main())\n"
+            ),
+            "engine.py": "def run():\n    return 1\n",
+        },
+    )
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "engine_serve.py").write_text(
+        "from sample.engine import run\n", encoding="utf-8"
+    )
+    (tmp_path / "procs.toml").write_text(
+        'serve = ["{python}", "scripts/engine_serve.py"]\n', encoding="utf-8"
+    )
+
+    result = scan_unreachable_code(spec)
+    unreachable = {item.module for item in result.modules}
+    assert "sample.admin" not in unreachable
+    assert "sample.engine" not in unreachable
+
+
 def test_a_type_checking_only_import_does_not_make_a_module_runtime(
     tmp_path: Path,
 ) -> None:

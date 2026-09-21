@@ -18,7 +18,6 @@ Ref = runner.Ref
 AUDIT = toolchain.AUDIT
 CI = toolchain.CI
 LINT = toolchain.LINT
-PYTHON_PATHS = toolchain.PYTHON_PATHS
 find_verb = toolchain.find_verb
 
 # The dimensions still carried as advisory sentinels. A dimension leaves this
@@ -35,7 +34,6 @@ STRICT_SENTINELS = (
     "nesting",
     "size",
 )
-PLATFORMS = ("linux", "darwin", "win32")
 
 
 def _ci_recipe_lines() -> list[str]:
@@ -103,10 +101,12 @@ def test_ci_contract() -> None:
     sentinel_runs = [
         run
         for step in steps
-        if isinstance(run := step.get("run"), str) and run.startswith("just lint ")
+        if isinstance(run := step.get("run"), str)
+        and run.startswith("just check-")
+        and run.removeprefix("just check-") in STRICT_SENTINELS
     ]
     assert (
-        tuple(run.removeprefix("just lint ") for run in sentinel_runs)
+        tuple(run.removeprefix("just check-") for run in sentinel_runs)
         == STRICT_SENTINELS
     )
 
@@ -120,7 +120,7 @@ def test_ci_contract() -> None:
         target = lint.find(name)
         assert target is not None
         assert not target.advisory
-        workflow_steps = _run_steps(steps, f"just lint {name}")
+        workflow_steps = _run_steps(steps, f"just check-{name}")
         assert len(workflow_steps) == 1
         workflow_step = workflow_steps[0]
         assert workflow_step.get("if") == "${{ !cancelled() }}"
@@ -128,7 +128,7 @@ def test_ci_contract() -> None:
 
     duplication = audit.find("duplication")
     assert duplication is not None
-    assert duplication.advisory
+    assert not duplication.advisory
     assert "duplication" not in lint_all_targets
     duplication_steps = _run_steps(steps, "just audit-duplication")
     assert len(duplication_steps) == 1
@@ -137,34 +137,17 @@ def test_ci_contract() -> None:
 
     type_platforms = lint.find("type-platforms")
     assert type_platforms is not None
-    assert type_platforms.keep_going
-    assert len(type_platforms.steps) == len(PLATFORMS)
-    # Filter-then-compare-length rather than ``all(isinstance(...))``: it asserts
-    # the identical property, and unlike the all() form it NARROWS, so every
-    # ``.argv`` below is read off Cmd instead of the step union.
-    cmd_steps = [step for step in type_platforms.steps if isinstance(step, Cmd)]
-    assert len(cmd_steps) == len(type_platforms.steps)
-    assert (
-        tuple(step.argv[step.argv.index("--python-platform") + 1] for step in cmd_steps)
-        == PLATFORMS
+    assert not type_platforms.keep_going
+    assert len(type_platforms.steps) == 1
+    platform_step = type_platforms.steps[0]
+    assert isinstance(platform_step, Cmd)
+    assert platform_step.argv[-5:] == (
+        "python",
+        "-m",
+        "dev.quality.types",
+        "--no-strict",
+        "--platforms",
     )
-    assert all(step.argv[-len(PYTHON_PATHS) :] == PYTHON_PATHS for step in cmd_steps)
-    for platform, step in zip(PLATFORMS, cmd_steps, strict=True):
-        assert step.argv[:13] == (
-            "uv",
-            "run",
-            "--no-sync",
-            "--frozen",
-            "--no-default-groups",
-            "--group",
-            "tooling",
-            "python",
-            "-m",
-            "ty",
-            "check",
-            "--python-platform",
-            platform,
-        )
 
     ci_all = ci.find("all")
     assert ci_all is not None

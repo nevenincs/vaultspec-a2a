@@ -85,22 +85,6 @@ _ALWAYS_EXCLUDED: frozenset[str] = frozenset({"stage", "reservation_id"})
 # the prepare it binds to.
 _PREPARE_EXCLUDED: frozenset[str] = frozenset({"message", "actor_tokens"})
 
-# Additionally excluded from a PLAIN-START REPLAY fingerprint. Credential VALUES
-# authorize a request instance rather than describe the work, which is the same
-# classification the always-excluded fields carry. A replay returns the ORIGINAL
-# run, so a retry's presented bundle is never the bundle that run uses, and
-# short-lived credentials are expected to rotate across a retry: fingerprinting
-# them would refuse precisely the lost-acknowledgement recovery that a
-# client-supplied run id exists to serve. The engine bearer is covered here
-# because it lives inside this bundle rather than beside it.
-#
-# Credential COVERAGE is a different question and is enforced where it belongs:
-# admission evaluates role coverage at first start and refuses an uncovering
-# bundle outright. The staged COMMIT binding is deliberately stricter and keeps
-# the credential-sensitive digest, so this exclusion is scoped to the replay
-# rule and never widened to ``request_digest``.
-_REPLAY_CREDENTIAL_EXCLUDED: frozenset[str] = frozenset({"actor_tokens"})
-
 
 class ReplayDigestRule(StrEnum):
     """The field-exclusion rule a persisted replay fingerprint was computed under.

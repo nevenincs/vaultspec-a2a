@@ -11,6 +11,7 @@ circular imports — this module does NOT import from ``_acp_rpc_handlers``.
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
@@ -60,6 +61,13 @@ _EFFECTFUL_SERVER_METHODS = frozenset(
 _MAX_COMMAND_DESCRIPTION_LENGTH = 1024
 _MAX_COMMAND_INPUT_HINT_LENGTH = 512
 _MAX_AVAILABLE_COMMANDS = 256
+
+
+@dataclass(frozen=True, slots=True)
+class ServerRpcRequest:
+    method: str
+    rpc_id: AcpRpcId
+    params: JsonObject
 
 
 def _json_string(value: JsonValue | None, *, default: str = "") -> str:
@@ -161,27 +169,7 @@ async def process_stdout_loop(
             ctx.mark_activity()
             if not line.strip():
                 continue
-            try:
-                parsed = _JSON_VALUE.validate_json(line)
-            except (ValidationError, UnicodeDecodeError) as exc:
-                logger.warning(
-                    "ACP stdout: malformed line skipped: %s | raw=%r",
-                    exc,
-                    line[:200],
-                    extra=runtime_log_extra(
-                        config,
-                        process=ctx.process,
-                        stderr_event_count=ctx.stderr_event_count,
-                    ),
-                )
-                continue
-            # Handle batch JSON-RPC (array of messages)
-            if isinstance(parsed, list):
-                for item in parsed:
-                    if isinstance(item, dict):
-                        await dispatch_packet(item, ctx, config, rpc_handler_map)
-            elif isinstance(parsed, dict):
-                await dispatch_packet(parsed, ctx, config, rpc_handler_map)
+            await _dispatch_stdout_line(line, ctx, config, rpc_handler_map)
     finally:
         for fut in ctx.response_futures.values():
             if not fut.done():
@@ -193,6 +181,34 @@ async def process_stdout_loop(
                 logger.warning(
                     "Chunk queue full — dropping EOF sentinel; consumer may hang"
                 )
+
+
+async def _dispatch_stdout_line(
+    line: bytes,
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
+    rpc_handler_map: RpcHandlerMap,
+) -> None:
+    try:
+        parsed = _JSON_VALUE.validate_json(line)
+    except (ValidationError, UnicodeDecodeError) as exc:
+        logger.warning(
+            "ACP stdout: malformed line skipped: %s | raw=%r",
+            exc,
+            line[:200],
+            extra=runtime_log_extra(
+                config,
+                process=ctx.process,
+                stderr_event_count=ctx.stderr_event_count,
+            ),
+        )
+        return
+    if isinstance(parsed, list):
+        for item in parsed:
+            if isinstance(item, dict):
+                await dispatch_packet(item, ctx, config, rpc_handler_map)
+    elif isinstance(parsed, dict):
+        await dispatch_packet(parsed, ctx, config, rpc_handler_map)
 
 
 async def dispatch_packet(
@@ -212,7 +228,9 @@ async def dispatch_packet(
 
     if rpc_id is not None and method:
         t = asyncio.create_task(
-            handle_server_rpc(method, rpc_id, params, ctx, config, rpc_handler_map)
+            handle_server_rpc(
+                ServerRpcRequest(method, rpc_id, params), ctx, config, rpc_handler_map
+            )
         )
         ctx.background_tasks.add(t)
         t.add_done_callback(ctx.background_tasks.discard)
@@ -223,11 +241,8 @@ async def dispatch_packet(
         await handle_session_update(params, ctx)
 
 
-async def handle_client_response(
-    data: JsonObject,
-    ctx: AcpSessionContext,
-) -> None:
-    """Resolve response futures, detect end_turn, enqueue error sentinels."""
+def _resolve_response_future(data: JsonObject, ctx: AcpSessionContext) -> int | None:
+    """Settle the matching JSON-RPC future and return its numeric request id."""
     raw_id = data.get("id")
     rid = raw_id if isinstance(raw_id, int) and not isinstance(raw_id, bool) else None
     if rid in ctx.response_futures:
@@ -241,6 +256,15 @@ async def handle_client_response(
                 logger.debug(
                     "Response for rpc_id=%r arrived after timeout; discarding", rid
                 )
+    return rid
+
+
+async def handle_client_response(
+    data: JsonObject,
+    ctx: AcpSessionContext,
+) -> None:
+    """Resolve response futures, detect end_turn, enqueue error sentinels."""
+    rid = _resolve_response_future(data, ctx)
 
     is_prompt_response = bool(ctx.prompt_id_ref) and rid == ctx.prompt_id_ref[0]
     if is_prompt_response and ctx.prompt_done.is_set():
@@ -254,6 +278,11 @@ async def handle_client_response(
         return
     if not is_prompt_response or "result" not in data:
         return
+    _finish_prompt_response(data, ctx)
+
+
+def _finish_prompt_response(data: JsonObject, ctx: AcpSessionContext) -> None:
+    """Validate a terminal prompt result and settle its stop reason."""
     result = data.get("result")
     if not isinstance(result, dict):
         ctx.interrupt_exc.append(
@@ -280,14 +309,15 @@ async def handle_client_response(
 
 
 async def handle_server_rpc(
-    method: str,
-    rpc_id: AcpRpcId,
-    params: JsonObject,
+    request: ServerRpcRequest,
     ctx: AcpSessionContext,
     config: AcpModelConfig,
     rpc_handler_map: RpcHandlerMap,
 ) -> None:
     """Capability check + dispatch to handler function via the map."""
+    method = request.method
+    rpc_id = request.rpc_id
+    params = request.params
     # Defense-in-depth capability check at dispatch time.
     # The ACP subprocess was told our capabilities at initialize time, but
     # this guard ensures a misbehaving or confused subprocess cannot invoke
@@ -357,6 +387,68 @@ async def handle_server_rpc(
         await ctx.stdin.drain()
 
 
+def _update_native_commands(
+    params: JsonObject, update: JsonObject, ctx: AcpSessionContext
+) -> None:
+    session_id = params.get("sessionId")
+    if (
+        not isinstance(session_id, str)
+        or not session_id
+        or session_id != session_id.strip()
+        or not session_id.isprintable()
+        or len(session_id) > MAX_ACP_SESSION_ID_LENGTH
+    ):
+        logger.warning("ACP command advertisement omitted a valid sessionId")
+        return
+    try:
+        catalog = ctx.native_commands_for(session_id)
+    except ValueError as exc:
+        logger.warning("ACP command advertisement blocked: %s", exc)
+        return
+    try:
+        snapshot = _native_command_snapshot(update)
+    except ValueError as exc:
+        reason = str(exc)
+        catalog.replace({}, blocked_reason=reason)
+        logger.warning("ACP command advertisement blocked: %s", reason)
+    else:
+        catalog.replace(snapshot)
+
+
+def _enqueue_tool_call_chunk(update: JsonObject, ctx: AcpSessionContext) -> None:
+    """Relay one incremental tool argument chunk to the graph stream."""
+    tid = _json_string(update.get("toolCallId"))
+    args_delta = _json_string(update.get("inputDelta"))
+    if tid and args_delta:
+        try:
+            ctx.chunk_queue.put_nowait(
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="",
+                        tool_call_chunks=[
+                            {"id": tid, "name": "", "args": args_delta, "index": 0}
+                        ],
+                    )
+                )
+            )
+        except asyncio.QueueFull:
+            logger.warning(
+                "Chunk queue full — dropping tool_call_chunk to prevent deadlock"
+            )
+
+
+def _enqueue_message_chunk(update: JsonObject, ctx: AcpSessionContext) -> None:
+    text = _json_string(lenient_json_object(update.get("content")).get("text"))
+    if not text:
+        return
+    try:
+        ctx.chunk_queue.put_nowait(
+            ChatGenerationChunk(message=AIMessageChunk(content=text))
+        )
+    except asyncio.QueueFull:
+        logger.warning("Chunk queue full — dropping chunk to prevent deadlock")
+
+
 async def handle_session_update(
     params: JsonObject,
     ctx: AcpSessionContext,
@@ -366,75 +458,30 @@ async def handle_session_update(
     u_type = _json_string(update.get("sessionUpdate"))
 
     if u_type in ("agent_message_chunk", "agent_thought_chunk"):
-        text = _json_string(lenient_json_object(update.get("content")).get("text"))
-        if text:
-            try:
-                ctx.chunk_queue.put_nowait(
-                    ChatGenerationChunk(message=AIMessageChunk(content=text))
-                )
-            except asyncio.QueueFull:
-                logger.warning("Chunk queue full — dropping chunk to prevent deadlock")
-    elif u_type == "tool_call_chunk":
+        _enqueue_message_chunk(update, ctx)
+        return
+    if u_type == "tool_call_chunk":
         # M20: handle incremental tool call argument streaming.
         # ACP agents stream partial JSON args via tool_call_chunk before the
         # final tool_call event.  Forwarded as a streaming ToolCallChunk so
         # LangGraph can accumulate args progressively.
-        tid = _json_string(update.get("toolCallId"))
-        args_delta = _json_string(update.get("inputDelta"))
-        if tid and args_delta:
-            try:
-                ctx.chunk_queue.put_nowait(
-                    ChatGenerationChunk(
-                        message=AIMessageChunk(
-                            content="",
-                            tool_call_chunks=[
-                                {
-                                    "id": tid,
-                                    "name": "",
-                                    "args": args_delta,
-                                    "index": 0,
-                                }
-                            ],
-                        )
-                    )
-                )
-            except asyncio.QueueFull:
-                logger.warning(
-                    "Chunk queue full — dropping tool_call_chunk to prevent deadlock"
-                )
-    elif u_type == "tool_call":
+        _enqueue_tool_call_chunk(update, ctx)
+        return
+    if u_type == "tool_call":
         ctx.effects_may_have_occurred = True
         await on_tool_call(update, ctx)
-    elif u_type == "tool_call_update":
+        return
+    if u_type == "tool_call_update":
         ctx.effects_may_have_occurred = True
         await on_tool_call_update(update, ctx)
-    elif u_type == "current_mode_update":
+        return
+    if u_type == "current_mode_update":
         ctx.agent_modes["currentModeId"] = update.get("currentModeId")
-    elif u_type == "available_commands_update":
-        session_id = params.get("sessionId")
-        if (
-            not isinstance(session_id, str)
-            or not session_id
-            or session_id != session_id.strip()
-            or not session_id.isprintable()
-            or len(session_id) > MAX_ACP_SESSION_ID_LENGTH
-        ):
-            logger.warning("ACP command advertisement omitted a valid sessionId")
-            return
-        try:
-            catalog = ctx.native_commands_for(session_id)
-        except ValueError as exc:
-            logger.warning("ACP command advertisement blocked: %s", exc)
-            return
-        try:
-            snapshot = _native_command_snapshot(update)
-        except ValueError as exc:
-            reason = str(exc)
-            catalog.replace({}, blocked_reason=reason)
-            logger.warning("ACP command advertisement blocked: %s", reason)
-        else:
-            catalog.replace(snapshot)
-    elif u_type == "plan":
+        return
+    if u_type == "available_commands_update":
+        _update_native_commands(params, update, ctx)
+        return
+    if u_type == "plan":
         # Plan updates are metadata; log receipt and let graph-level plan
         # handling in the supervisor/aggregator layer process them.
         plan_entries = update.get("entries")

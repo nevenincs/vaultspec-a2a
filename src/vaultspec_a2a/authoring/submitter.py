@@ -455,6 +455,16 @@ def _split_frontmatter_body(text: str) -> tuple[str, str]:
     return text[: match.end()], text[match.end() :]
 
 
+def _web_url_from_locator(locator: object) -> str | None:
+    if not isinstance(locator, dict):
+        return None
+    locator = cast("dict[str, Any]", locator)
+    if locator.get("kind") != WEB_LOCATOR_KIND:
+        return None
+    url = locator.get("url")
+    return url if isinstance(url, str) and url else None
+
+
 def _web_locator_urls(state: TeamState) -> list[str]:
     """Distinct web-locator URLs across the run's accumulated research findings.
 
@@ -483,16 +493,38 @@ def _web_locator_urls(state: TeamState) -> list[str]:
             continue
         locators = cast("list[object]", locators)
         for locator in locators:
-            if not isinstance(locator, dict):
-                continue
-            locator = cast("dict[str, Any]", locator)
-            if locator.get("kind") != WEB_LOCATOR_KIND:
-                continue
-            url = locator.get("url")
-            if isinstance(url, str) and url and url not in seen:
+            url = _web_url_from_locator(locator)
+            if url is not None and url not in seen:
                 seen.add(url)
                 urls.append(url)
     return urls
+
+
+def _body_link_notes(prose: str) -> list[str]:
+    notes: list[str] = []
+    for match in _WIKI_LINK_RE.finditer(prose):
+        notes.append(
+            f"wiki-link in body text: [[{match.group(1)}]] - move to related: "
+            "frontmatter or use a backtick code span"
+        )
+    for match in _MD_LINK_RE.finditer(prose):
+        notes.append(
+            f"markdown link in body text: [{match.group(1)}]({match.group(2)}) - "
+            "use a backtick code span for file references"
+        )
+    return notes
+
+
+def _undisclosed_web_source_notes(
+    prose_region: str, web_urls: Sequence[str]
+) -> list[str]:
+    return [
+        f"undisclosed web source: {url} - this run retrieved it, so the "
+        "document must cite it inline and list it in its Sources section "
+        "as a bare URL with the retrieval date (never in `related:`)"
+        for url in web_urls
+        if url not in prose_region
+    ]
 
 
 def _conformance_notes(
@@ -547,16 +579,7 @@ def _conformance_notes(
     prose = _INLINE_CODE_RE.sub(
         "", _HTML_COMMENT_RE.sub("", _CODE_FENCE_RE.sub("", prose_region))
     )
-    for match in _WIKI_LINK_RE.finditer(prose):
-        notes.append(
-            f"wiki-link in body text: [[{match.group(1)}]] - move to related: "
-            "frontmatter or use a backtick code span"
-        )
-    for match in _MD_LINK_RE.finditer(prose):
-        notes.append(
-            f"markdown link in body text: [{match.group(1)}]({match.group(2)}) - "
-            "use a backtick code span for file references"
-        )
+    notes.extend(_body_link_notes(prose))
     # Web-source disclosure, RESEARCH ONLY. The vault's document boundary gives
     # each fact one home: the research document grounds, and every later document
     # cites it by stem without restating its evidence. A URL is evidence, so its
@@ -573,14 +596,34 @@ def _conformance_notes(
     # would corrupt the vault link graph and must not satisfy the obligation by
     # committing a different violation.
     if doc_type == "research":
-        for url in web_urls:
-            if url not in prose_region:
-                notes.append(
-                    f"undisclosed web source: {url} - this run retrieved it, so the "
-                    "document must cite it inline and list it in its Sources section "
-                    "as a bare URL with the retrieval date (never in `related:`)"
-                )
+        notes.extend(_undisclosed_web_source_notes(prose_region, web_urls))
     return notes
+
+
+def _recovery_proposal_items(snapshot_data: object) -> list[object]:
+    data = (
+        cast("dict[str, Any]", snapshot_data) if isinstance(snapshot_data, dict) else {}
+    )
+    snapshot_block = data.get("snapshot")
+    if not isinstance(snapshot_block, dict):
+        return []
+    snapshot_block = cast("dict[str, Any]", snapshot_block)
+    proposals_block = snapshot_block.get("proposals")
+    if not isinstance(proposals_block, dict):
+        return []
+    proposals_block = cast("dict[str, Any]", proposals_block)
+    items = proposals_block.get("items")
+    return cast("list[object]", items) if isinstance(items, list) else []
+
+
+@dataclass(frozen=True, slots=True)
+class _ProposalContext:
+    thread_id: str
+    feature: str
+    phase: str
+    spec: PhaseAuthoringSpec
+    body: str
+    revision_cycle: int
 
 
 class DocumentProposalSubmitter:
@@ -668,12 +711,14 @@ class DocumentProposalSubmitter:
             state, spec.writer_message_name, spec.completion_sentinel, spec.doc_type
         )
         return await self._propose_and_submit(
-            thread_id=thread_id,
-            feature=feature,
-            phase=phase,
-            spec=spec,
-            body=body,
-            revision_cycle=revision_cycle,
+            context=_ProposalContext(
+                thread_id=thread_id,
+                feature=feature,
+                phase=phase,
+                spec=spec,
+                body=body,
+                revision_cycle=revision_cycle,
+            ),
             bearer=bearer,
             actor_token=actor_token,
         )
@@ -681,15 +726,14 @@ class DocumentProposalSubmitter:
     async def _propose_and_submit(
         self,
         *,
-        thread_id: str,
-        feature: str,
-        phase: str,
-        spec: PhaseAuthoringSpec,
-        body: str,
-        revision_cycle: int,
+        context: _ProposalContext,
         bearer: str,
         actor_token: str,
     ) -> str:
+        thread_id = context.thread_id
+        feature = context.feature
+        phase = context.phase
+        revision_cycle = context.revision_cycle
         rev = str(revision_cycle)
         async with AuthoringClient(
             self._engine_base_url,
@@ -735,11 +779,7 @@ class DocumentProposalSubmitter:
             created = await session.create_proposal(
                 changeset_id=changeset_id,
                 summary=f"{feature} {phase} document (r{rev})",
-                operations=[
-                    self._whole_document_op(
-                        thread_id, feature, phase, rev, spec, body, related
-                    )
-                ],
+                operations=[self._whole_document_op(context, related)],
                 idempotency_key=derive_idempotency_key(
                     thread_id, phase, "create_proposal", rev
                 ),
@@ -758,12 +798,7 @@ class DocumentProposalSubmitter:
 
     def _whole_document_op(
         self,
-        thread_id: str,
-        feature: str,
-        phase: str,
-        rev: str,
-        spec: PhaseAuthoringSpec,
-        body: str,
+        context: _ProposalContext,
         related: list[str],
     ) -> dict[str, Any]:
         """Build the engine-proven whole-document create operation.
@@ -778,19 +813,23 @@ class DocumentProposalSubmitter:
         """
         document: dict[str, Any] = {
             "kind": "provisional_create",
-            "provisional_doc_id": f"prov:{thread_id}:{phase}:r{rev}",
-            "doc_type": spec.doc_type,
-            "feature": feature,
-            "title": f"{feature} {phase}",
+            "provisional_doc_id": (
+                f"prov:{context.thread_id}:{context.phase}:r{context.revision_cycle}"
+            ),
+            "doc_type": context.spec.doc_type,
+            "feature": context.feature,
+            "title": f"{context.feature} {context.phase}",
             "collision_status": "available",
         }
         if related:
             document["related"] = related
         return {
-            "child_key": f"{spec.doc_type}/{feature}-{phase}.md",
+            "child_key": (
+                f"{context.spec.doc_type}/{context.feature}-{context.phase}.md"
+            ),
             "operation": "create_document",
             "target": {"document": document},
-            "draft": {"mode": "whole_document", "body": body},
+            "draft": {"mode": "whole_document", "body": context.body},
         }
 
     async def _resolve_grounding_related(
@@ -820,21 +859,7 @@ class DocumentProposalSubmitter:
             snapshot = await client.recovery_snapshot(last_seq=0)
         except AuthoringError:
             return []
-        data: dict[str, Any] = (
-            cast("dict[str, Any]", snapshot.data)
-            if isinstance(snapshot.data, dict)
-            else {}
-        )
-        snapshot_block = data.get("snapshot")
-        proposals: list[object] = []
-        if isinstance(snapshot_block, dict):
-            snapshot_block = cast("dict[str, Any]", snapshot_block)
-            proposals_block = snapshot_block.get("proposals")
-            if isinstance(proposals_block, dict):
-                proposals_block = cast("dict[str, Any]", proposals_block)
-                items = proposals_block.get("items")
-                if isinstance(items, list):
-                    proposals = cast("list[object]", items)
+        proposals = _recovery_proposal_items(snapshot.data)
         stems: set[str] = set()
         for item in proposals:
             if not isinstance(item, dict):

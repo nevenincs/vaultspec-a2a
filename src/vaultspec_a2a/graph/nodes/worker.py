@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast, override
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, override
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     # import (it eagerly probes for transformers); the node receives already
     # constructed models and never instantiates one.
     from langchain_core.language_models import BaseChatModel
+    from langchain_core.messages import ToolCall
     from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import BaseTool
 
@@ -95,6 +96,25 @@ class RoutingNode(Protocol):
         ...
 
 
+def _worker_rule_message(
+    state: TeamState, workspace_root: Path | None, role: str | None
+) -> SystemMessage | None:
+    """Compile the workspace rules visible to this worker role."""
+    effective_workspace_root = workspace_root or state.get("workspace_root")
+    if not effective_workspace_root:
+        return None
+    is_document_role = is_document_authoring_role(role)
+    compile_role = role if is_document_role else None
+    bundled_dir = DEFAULT_BUNDLED_RULES_DIR if is_document_role else None
+    rules = RuleManager(
+        Path(effective_workspace_root),
+        bundled_rules_dir=bundled_dir,
+    ).compile(compile_role)
+    if not rules:
+        return None
+    return SystemMessage(content=f"## Project Coding Rules & Guidelines\n\n{rules}")
+
+
 def _build_worker_messages(
     *,
     state: TeamState,
@@ -119,21 +139,9 @@ def _build_worker_messages(
     )
     anchoring = build_anchoring_context(state)
     messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
-    effective_workspace_root = workspace_root or state.get("workspace_root")
-    if effective_workspace_root:
-        is_document_role = is_document_authoring_role(role)
-        compile_role = role if is_document_role else None
-        bundled_dir = DEFAULT_BUNDLED_RULES_DIR if is_document_role else None
-        rules = RuleManager(
-            Path(effective_workspace_root),
-            bundled_rules_dir=bundled_dir,
-        ).compile(compile_role)
-        if rules:
-            messages.append(
-                SystemMessage(
-                    content=f"## Project Coding Rules & Guidelines\n\n{rules}"
-                )
-            )
+    rule_message = _worker_rule_message(state, workspace_root, role)
+    if rule_message is not None:
+        messages.append(rule_message)
     if anchoring:
         messages.append(SystemMessage(content=anchoring))
     mounted = state.get("mounted_context")
@@ -344,20 +352,29 @@ async def _collect_queue_tool_results(
     tool_messages: list[ToolMessage] = []
     for tool_call in queue_calls:
         command = await queue_tool.ainvoke(tool_call)
-        if not isinstance(command, Command):
-            raise RuntimeError(
-                "mark_task_complete must return a Command(update=...); got "
-                f"{type(command).__name__}"
-            )
-        update = cast("dict[str, Any]", command.update or {})
-        for message in update.get("messages", []):
-            if isinstance(message, ToolMessage):
-                tool_messages.append(message)
-        for key, value in update.items():
-            if key != "messages":
-                state_patch[key] = value
+        _merge_queue_command(command, tool_messages, state_patch)
 
     return tool_messages, state_patch
+
+
+def _merge_queue_command(
+    command: object,
+    tool_messages: list[ToolMessage],
+    state_patch: dict[str, Any],
+) -> None:
+    """Validate and merge one queue tool Command into worker results."""
+    if not isinstance(command, Command):
+        raise RuntimeError(
+            "mark_task_complete must return a Command(update=...); got "
+            f"{type(command).__name__}"
+        )
+    update = cast("dict[str, Any]", command.update or {})
+    for message in update.get("messages", []):
+        if isinstance(message, ToolMessage):
+            tool_messages.append(message)
+    for key, value in update.items():
+        if key != "messages":
+            state_patch[key] = value
 
 
 async def _collect_mock_permission_result(
@@ -387,22 +404,7 @@ async def _collect_mock_permission_result(
     for tool_call in response.tool_calls:
         if tool_call.get("name") != "session_request_permission":
             continue
-        raw_tool_input = cast("object", tool_call.get("args", {}))
-        tool_input = (
-            cast("dict[str, Any]", raw_tool_input)
-            if isinstance(raw_tool_input, dict)
-            else {}
-        )
-        raw_options = cast("object", tool_input.get("options", []))
-        options: list[dict[str, Any]] = (
-            [
-                cast("dict[str, Any]", o)
-                for o in cast("list[object]", raw_options)
-                if isinstance(o, dict)
-            ]
-            if isinstance(raw_options, list)
-            else []
-        )
+        tool_input, options = _parse_mock_permission_call(tool_call)
         selected_option = await _interrupt_permission_callback(
             "session_request_permission",
             tool_input,
@@ -423,14 +425,40 @@ async def _collect_mock_permission_result(
     return []
 
 
+def _parse_mock_permission_call(
+    tool_call: ToolCall,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Extract the permissive input and option shape used by mock tool calls."""
+    raw_tool_input = cast("object", tool_call.get("args", {}))
+    tool_input = (
+        cast("dict[str, Any]", raw_tool_input)
+        if isinstance(raw_tool_input, dict)
+        else {}
+    )
+    raw_options = cast("object", tool_input.get("options", []))
+    options: list[dict[str, Any]] = (
+        [
+            cast("dict[str, Any]", option)
+            for option in cast("list[object]", raw_options)
+            if isinstance(option, dict)
+        ]
+        if isinstance(raw_options, list)
+        else []
+    )
+    return tool_input, options
+
+
+class _WorkerToolCallOptions(TypedDict):
+    messages: list[BaseMessage]
+    response: BaseMessage
+    queue_tool: BaseTool | None
+    model: BaseChatModel
+    autonomous: bool
+    config: RunnableConfig | None
+
+
 async def _resolve_worker_tool_calls(
-    *,
-    messages: list[BaseMessage],
-    response: BaseMessage,
-    queue_tool: BaseTool | None,
-    model: BaseChatModel,
-    autonomous: bool,
-    config: RunnableConfig | None,
+    **options: Unpack[_WorkerToolCallOptions],
 ) -> tuple[BaseMessage, dict[str, Any]]:
     """Resolve every node-owned tool call in one response, in one follow-up turn.
 
@@ -445,6 +473,12 @@ async def _resolve_worker_tool_calls(
     Returns ``(final_response, state_patch)``, passing the response through
     untouched with an empty patch when neither lane produced a result.
     """
+    messages = options["messages"]
+    response = options["response"]
+    queue_tool = options["queue_tool"]
+    model = options["model"]
+    autonomous = options["autonomous"]
+    config = options["config"]
     permission_results = await _collect_mock_permission_result(
         response=response, model=model, autonomous=autonomous
     )
@@ -678,19 +712,129 @@ def _attach_authoring_tools(
     return attach_authoring_tools(model, binding, autonomous=autonomous)
 
 
+def _queue_tool_for_state(
+    state: TeamState,
+    task_queue_port: TaskQueuePort | None,
+    feature_tag: str | None,
+) -> BaseTool | None:
+    if task_queue_port is None or feature_tag is None:
+        return None
+    thread_id = state.get("thread_id")
+    return (
+        create_mark_task_complete_tool(task_queue_port, thread_id)
+        if thread_id
+        else None
+    )
+
+
+async def _feedback_for_state(
+    state: TeamState, feedback_reader: FeedbackContextReader | None
+) -> str | None:
+    if feedback_reader is None:
+        return None
+    batch_id = state.get("feedback_batch_id")
+    thread_id = state.get("thread_id")
+    if batch_id and thread_id:
+        return await feedback_reader.read(thread_id, batch_id)
+    return None
+
+
+async def _authoring_binding_for_state(
+    state: TeamState,
+    name: str,
+    provider: AuthoringBindingProvider | None,
+) -> AuthoringToolBinding | None:
+    if provider is None:
+        return None
+    thread_id = state.get("thread_id")
+    return await provider.binding_for(thread_id, name) if thread_id else None
+
+
+def _compose_worker_harness(
+    model: BaseChatModel,
+    names: list[str] | None,
+    autonomous: bool,
+    workspace_root: Path | None,
+) -> BaseChatModel:
+    if not names:
+        return model
+    from ...providers._acp_mcp import (
+        compose_harness_mcp_servers,
+        harness_allowed_tool_names,
+    )
+
+    lane = getattr(model, "provider", None)
+    allowed = harness_allowed_tool_names(names, lane=lane) if autonomous else None
+    return compose_harness_mcp_servers(
+        model,
+        names,
+        allowed_tools=allowed,
+        project_root=str(workspace_root) if workspace_root else None,
+        lane=lane,
+    )
+
+
+class _WorkerNodeOptions(TypedDict, total=False):
+    autonomous: bool
+    workspace_root: Path | None
+    feature_tag: str | None
+    task_queue_port: TaskQueuePort | None
+    authoring_binding_provider: AuthoringBindingProvider | None
+    role: str | None
+    harness_mcp_servers: list[str] | None
+    feedback_reader: FeedbackContextReader | None
+    cost_port: CostPort | None
+
+
+class _WorkerNodeSettings(TypedDict):
+    autonomous: bool
+    workspace_root: Path | None
+    feature_tag: str | None
+    task_queue_port: TaskQueuePort | None
+    authoring_binding_provider: AuthoringBindingProvider | None
+    role: str | None
+    harness_mcp_servers: list[str] | None
+    feedback_reader: FeedbackContextReader | None
+    cost_port: CostPort | None
+
+
+def _bind_worker_node_settings(
+    args: tuple[object, ...], options: _WorkerNodeOptions
+) -> _WorkerNodeSettings:
+    names = tuple(_WorkerNodeSettings.__annotations__)
+    if len(args) > len(names):
+        raise TypeError("create_worker_node() received too many positional arguments")
+    bound: dict[str, object] = {
+        "autonomous": False,
+        "workspace_root": None,
+        "feature_tag": None,
+        "task_queue_port": None,
+        "authoring_binding_provider": None,
+        "role": None,
+        "harness_mcp_servers": None,
+        "feedback_reader": None,
+        "cost_port": None,
+    }
+    for index, value in enumerate(args):
+        name = names[index]
+        if name in options:
+            raise TypeError(f"create_worker_node() got multiple values for {name!r}")
+        bound[name] = value
+    unknown = set(options).difference(names)
+    if unknown:
+        raise TypeError(
+            f"create_worker_node() got an unexpected keyword {min(unknown)!r}"
+        )
+    bound.update(options)
+    return cast("_WorkerNodeSettings", bound)
+
+
 def create_worker_node(
     model: BaseChatModel,
     system_prompt: str,
     name: str,
-    autonomous: bool = False,
-    workspace_root: Path | None = None,
-    feature_tag: str | None = None,
-    task_queue_port: TaskQueuePort | None = None,
-    authoring_binding_provider: AuthoringBindingProvider | None = None,
-    role: str | None = None,
-    harness_mcp_servers: list[str] | None = None,
-    feedback_reader: FeedbackContextReader | None = None,
-    cost_port: CostPort | None = None,
+    *args: object,
+    **options: Unpack[_WorkerNodeOptions],
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
@@ -724,6 +868,8 @@ def create_worker_node(
         An async function that conforms to the LangGraph node signature.
     """
 
+    settings = _bind_worker_node_settings(args, options)
+
     async def worker_node(
         state: TeamState, config: RunnableConfig | None = None
     ) -> dict[str, Any]:
@@ -733,86 +879,42 @@ def create_worker_node(
         # compiled graph is shared across threads and cannot close over it. The
         # tool returns a Command (revised contract); its update is propagated
         # through this node's return, not a side-channel drain.
-        queue_tool: BaseTool | None = None
-        if task_queue_port is not None and feature_tag is not None:
-            thread_id = state.get("thread_id")
-            if thread_id:
-                queue_tool = create_mark_task_complete_tool(task_queue_port, thread_id)
-
-        # Feedback-loop grounding: a revision run carries an opaque
-        # feedback_batch_id in state; retrieve the reviewer's comments by id from
-        # the engine and ground the writer on them. Best-effort and read-path-only:
-        # an unavailable batch degrades to no grounding rather than failing the
-        # turn. Absent id or reader = no grounding, zero behaviour change.
-        feedback_grounding: str | None = None
-        if feedback_reader is not None:
-            batch_id = state.get("feedback_batch_id")
-            thread_id = state.get("thread_id")
-            if batch_id and thread_id:
-                feedback_grounding = await feedback_reader.read(thread_id, batch_id)
+        queue_tool = _queue_tool_for_state(
+            state, settings["task_queue_port"], settings["feature_tag"]
+        )
+        feedback_grounding = await _feedback_for_state(
+            state, settings["feedback_reader"]
+        )
 
         messages = _build_worker_messages(
             state=state,
             system_prompt=system_prompt,
-            workspace_root=workspace_root,
-            role=role,
+            workspace_root=settings["workspace_root"],
+            role=settings["role"],
             feedback_grounding=feedback_grounding,
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
         effective_model = _resolve_effective_worker_model(
             model=model,
-            autonomous=autonomous,
+            autonomous=settings["autonomous"],
         )
         # Build this role's authoring binding per invoke from the run's thread_id
         # and this worker's agent_id (``name``) - never closed over, so the shared
         # compiled graph holds no run-scoped tokens (R7). Absent provider or
         # coverage yields no binding, leaving the session's MCP surface unchanged.
-        authoring_binding = None
-        if authoring_binding_provider is not None:
-            thread_id = state.get("thread_id")
-            if thread_id:
-                authoring_binding = await authoring_binding_provider.binding_for(
-                    thread_id, name
-                )
-        effective_model = _attach_authoring_tools(
-            effective_model, authoring_binding, autonomous=autonomous
+        authoring_binding = await _authoring_binding_for_state(
+            state, name, settings["authoring_binding_provider"]
         )
-        if harness_mcp_servers:
-            from ...providers._acp_mcp import (
-                compose_harness_mcp_servers,
-                harness_allowed_tool_names,
-            )
-
-            # Headless only: auto-permit exactly the composed servers' read tools
-            # so a surfaced rag tool is not blocked by a permission prompt. Unioned
-            # (in compose) with the authoring names the attach step already set;
-            # supervised runs keep their prompts. Parallel to the authoring-attach
-            # allowlist above.
-            # The lane is passed on BOTH calls, not just the composition: the
-            # allowlist is what auto-permits the composed servers' tools in an
-            # autonomous run, so naming a tool here that composition then refuses
-            # would leave the two halves disagreeing about what this role may
-            # reach.
-            harness_lane = getattr(effective_model, "provider", None)
-            harness_allowed = (
-                harness_allowed_tool_names(harness_mcp_servers, lane=harness_lane)
-                if autonomous
-                else None
-            )
-            # The run's project pins every harness server it surfaces. Without
-            # it a composed grounding server resolves its own project from the
-            # directory it inherits, which is the undeclared inheritance the pin
-            # replaces. Absent, composition stays unpinned rather than inventing
-            # a root - a default here would be that same inheritance, spelled
-            # invisibly.
-            effective_model = compose_harness_mcp_servers(
-                effective_model,
-                harness_mcp_servers,
-                allowed_tools=harness_allowed,
-                project_root=str(workspace_root) if workspace_root else None,
-                lane=harness_lane,
-            )
-        from ...providers._acp_mcp import compose_native_read_tools
+        effective_model = _attach_authoring_tools(
+            effective_model, authoring_binding, autonomous=settings["autonomous"]
+        )
+        effective_model = _compose_worker_harness(
+            effective_model,
+            settings["harness_mcp_servers"],
+            settings["autonomous"],
+            settings["workspace_root"],
+        )
+        from ...providers._native_read_tools import compose_native_read_tools
         from ...providers.lane_admission import web_tool_names_for
 
         # Web grounding rides the read floor but is gated one axis further: the
@@ -824,8 +926,8 @@ def create_worker_node(
         # a branch that has never run.
         effective_model = compose_native_read_tools(
             effective_model,
-            autonomous=autonomous,
-            role=role,
+            autonomous=settings["autonomous"],
+            role=settings["role"],
             extra_tool_names=web_tool_names_for(
                 getattr(effective_model, "provider", None)
             ),
@@ -838,7 +940,7 @@ def create_worker_node(
             model_label,
             len(messages),
             compacted,
-            autonomous,
+            settings["autonomous"],
         )
         # Scoped to this attempt: a retry constructs a new one, so the flag can
         # never carry a previous attempt's output into the next decision.
@@ -851,7 +953,7 @@ def create_worker_node(
                 response=response,
                 queue_tool=queue_tool,
                 model=effective_model,
-                autonomous=autonomous,
+                autonomous=settings["autonomous"],
                 config=attempt_config,
             )
         except GraphBubbleUp:
@@ -873,7 +975,7 @@ def create_worker_node(
         usage = _turn_token_usage(response)
         if usage is not None:
             await _record_turn_usage(
-                cost_port=cost_port,
+                cost_port=settings["cost_port"],
                 thread_id=state.get("thread_id"),
                 worker_name=name,
                 model=effective_model,

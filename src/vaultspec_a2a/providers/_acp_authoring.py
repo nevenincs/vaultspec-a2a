@@ -74,13 +74,11 @@ if TYPE_CHECKING:
 __all__ = [
     "AUTHORING_MCP_SERVER_NAME",
     "AUTHORING_STDIO_MODULE",
-    "LOOPBACK_HOSTS",
     "AuthoringToolBinding",
     "attach_authoring_tools",
     "authoring_allowed_tool_names",
     "build_authoring_mcp_servers",
     "build_authoring_stdio_mcp_servers",
-    "codex_authoring_mcp_server_spec",
     "config_home_authoring_entry",
     "is_write_tool_name",
 ]
@@ -227,6 +225,22 @@ class AuthoringToolBinding:
     run_id: str | None = None
 
     def __post_init__(self) -> None:
+        self._validate_transport()
+        if not self.bearer_token:
+            raise ValueError("authoring binding requires a machine bearer token")
+        if not self.actor_token:
+            raise ValueError("authoring binding requires a per-actor token")
+        offenders = [
+            name for name in self.snapshot.tool_names() if is_write_tool_name(name)
+        ]
+        if offenders:
+            raise ValueError(
+                f"authoring catalog surfaced filesystem-write tools {offenders!r}; "
+                f"agents get no vault-write path (R2)"
+            )
+
+    def _validate_transport(self) -> None:
+        """Require a loopback HTTP or complete stdio transport."""
         if self.server_url is not None and not _is_loopback(self.server_url):
             raise ValueError(
                 f"authoring MCP server_url {self.server_url!r} is not a loopback "
@@ -243,18 +257,6 @@ class AuthoringToolBinding:
             raise ValueError(
                 "authoring binding requires an HTTP transport (server_url) or a "
                 "stdio transport (engine_base_url + run_id); neither was supplied"
-            )
-        if not self.bearer_token:
-            raise ValueError("authoring binding requires a machine bearer token")
-        if not self.actor_token:
-            raise ValueError("authoring binding requires a per-actor token")
-        offenders = [
-            name for name in self.snapshot.tool_names() if is_write_tool_name(name)
-        ]
-        if offenders:
-            raise ValueError(
-                f"authoring catalog surfaced filesystem-write tools {offenders!r}; "
-                f"agents get no vault-write path (R2)"
             )
 
     @property

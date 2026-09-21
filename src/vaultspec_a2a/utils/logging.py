@@ -29,8 +29,6 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, override
 from opentelemetry import trace
 from opentelemetry.trace.span import format_span_id, format_trace_id
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -39,12 +37,9 @@ if TYPE_CHECKING:
 type _ExcInfo = tuple[type[BaseException], BaseException, TracebackType | None]
 
 __all__ = [
-    "ARTIFACT_DECLARATIONS",
-    "SERVICE_LOG_FILE_DECLARATION",
     "JSONFormatter",
     "LivenessPollFilter",
     "OTelCorrelationFilter",
-    "ProcessKind",
     "configure_logging",
     "reconfigure_console_utf8",
 ]
@@ -55,25 +50,6 @@ ProcessKind = Literal["service", "cli", "protocol", "library"]
 # long-lived service process never grows an unbounded log.
 _FILE_MAX_BYTES = 10 * 1024 * 1024
 _FILE_BACKUP_COUNT = 5
-
-# The one durable artifact this module creates. The cap is real and enforced by
-# the handler itself rather than by a sweeper, which is why this seam is bounded
-# where the sibling redirect logs are not: rotation happens inside the writer.
-SERVICE_LOG_FILE_DECLARATION = ArtifactDeclaration(
-    name="service-log-file",
-    root="<a2a_home>/runtime/<service_name>.log (plus .1-.5 rotation siblings)",
-    owner="utils.logging",
-    disposition=RetentionDisposition.BOUNDED_BY_SIZE,
-    mechanism=(
-        f"RotatingFileHandler caps each file at {_FILE_MAX_BYTES} bytes and keeps "
-        f"{_FILE_BACKUP_COUNT} backups, so one service name holds at most "
-        f"{_FILE_MAX_BYTES * (_FILE_BACKUP_COUNT + 1)} bytes; nothing deletes the "
-        "files when the service stops, so a service name that is never run again "
-        "leaves its last generation on disk indefinitely"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (SERVICE_LOG_FILE_DECLARATION,)
 
 
 class _LoggingSettings(Protocol):
@@ -165,13 +141,13 @@ class LivenessPollFilter(logging.Filter):
             return True
         if path.split("?", 1)[0] not in _LIVENESS_POLL_PATHS:
             return True
-        if not isinstance(status, int | str):
-            # An unrecognised status is not a proven-boring poll; keep it.
-            return True
-        try:
-            return not 200 <= int(status) < 300
-        except ValueError:
-            return True
+        if isinstance(status, int | str):
+            try:
+                return not 200 <= int(status) < 300
+            except ValueError:
+                pass
+        # An unrecognised status is not a proven-boring poll; keep it.
+        return True
 
 
 class OTelCorrelationFilter(logging.Filter):

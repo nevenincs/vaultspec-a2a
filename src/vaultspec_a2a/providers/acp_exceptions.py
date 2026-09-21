@@ -4,6 +4,7 @@ Derived from Agent Client Protocol and JSON-RPC specifications.
 """
 
 from enum import IntEnum
+from typing import TypedDict, Unpack
 
 from .conditions import ProviderCondition
 
@@ -34,6 +35,11 @@ class AcpErrorCode(IntEnum):
     UNAUTHENTICATED = -32000
 
 
+class _AcpErrorOptions(TypedDict, total=False):
+    condition: ProviderCondition
+    effects_may_have_occurred: bool
+
+
 class AcpError(Exception):
     """Base exception for all ACP-related errors."""
 
@@ -52,9 +58,7 @@ class AcpError(Exception):
         code: int = AcpErrorCode.INTERNAL_ERROR,
         data: object = None,
         request_id: str | int | None = None,
-        *,
-        condition: ProviderCondition = ProviderCondition.UNKNOWN,
-        effects_may_have_occurred: bool = False,
+        **kwargs: Unpack[_AcpErrorOptions],
     ) -> None:
         """Initialize the ACP error.
 
@@ -75,8 +79,8 @@ class AcpError(Exception):
         self.code = code
         self.data = data
         self.request_id = request_id
-        self.condition = condition
-        self.effects_may_have_occurred = effects_may_have_occurred
+        self.condition = kwargs.get("condition", ProviderCondition.UNKNOWN)
+        self.effects_may_have_occurred = kwargs.get("effects_may_have_occurred", False)
         super().__init__(self._format_message())
 
     def _format_message(self) -> str:

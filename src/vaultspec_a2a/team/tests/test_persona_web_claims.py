@@ -29,12 +29,12 @@ from __future__ import annotations
 
 import pytest
 
-from ...providers._acp_mcp import (
+from ...providers._harness_mcp_registry import (
     _KNOWN_MCP_SERVERS,
-    NATIVE_TOOL_EGRESS,
     declared_harness_tools,
     harness_server_egresses,
 )
+from ...providers._native_read_tools import NATIVE_TOOL_EGRESS
 from ...providers.lane_admission import PROVEN_WEB_LANES
 from ..team_config import (
     _PRESET_AGENTS_DIR,

@@ -17,6 +17,7 @@ from alembic.script import ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy import inspect, pool, text
 from sqlalchemy.engine import Connection
+from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Alembic loads this file by SCRIPT LOCATION rather than importing it as a
@@ -127,108 +128,119 @@ def run_migrations_offline() -> None:
 # -- Online mode (async) ------------------------------------------------------
 
 
+def _authority_was_installed(connection: Connection, tables: set[str]) -> bool:
+    current_revision = None
+    if "alembic_version" in tables:
+        current_revision = connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one_or_none()
+    if current_revision is None:
+        return False
+    revisions = ScriptDirectory.from_config(config).iterate_revisions(
+        str(current_revision), "base"
+    )
+    return any(candidate.revision == "0017" for candidate in revisions)
+
+
+def _has_current_write_authority_structure(
+    connection: Connection, inspector: Inspector
+) -> bool:
+    expected = {
+        name: (column_type, False, None)
+        for name, column_type in WRITE_AUTHORITY_COLUMNS.items()
+    }
+    actual = {
+        str(column["name"]): (
+            str(column["type"]).upper(),
+            bool(column["nullable"]),
+            column["default"],
+        )
+        for column in inspector.get_columns("threads")
+    }
+    has_structure = all(actual.get(name) == shape for name, shape in expected.items())
+    if connection.dialect.name == "sqlite":
+        create_table_sql = connection.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'"
+        ).scalar_one_or_none()
+        checks = (
+            extract_named_check_predicates(str(create_table_sql))
+            if create_table_sql is not None
+            else {}
+        )
+    else:
+        checks = {
+            str(check["name"]): str(check["sqltext"])
+            for check in inspector.get_check_constraints("threads")
+            if check.get("name") is not None
+        }
+    return (
+        has_structure
+        and write_authority_receipt_index_matches(inspector.get_indexes("threads"))
+        and write_authority_checks_match(checks, dialect=connection.dialect.name)
+    )
+
+
+def _validate_populated_write_authority(
+    connection: Connection, tables: set[str]
+) -> None:
+    invalid = connection.execute(
+        text(
+            f"""SELECT id FROM threads
+                 WHERE run_revision < 0
+                    OR writer_generation < 1
+                    OR writer_action_type NOT IN ({WRITE_ACTION_SQL_VALUES})
+                    OR length(trim(writer_action_receipt_id)) < 1
+                    OR length(writer_action_receipt_id) > 64
+                 LIMIT 1"""
+        )
+    ).first()
+    has_actions = "control_actions" in tables
+    incoherent = None
+    if has_actions:
+        incoherent = connection.execute(
+            text(
+                """SELECT t.id FROM threads AS t
+                   LEFT JOIN control_actions AS a
+                     ON a.thread_id = t.id
+                    AND a.dispatch_id = t.writer_action_receipt_id
+                    AND a.action_type = t.writer_action_type
+                   WHERE a.id IS NULL
+                   LIMIT 1"""
+            )
+        ).first()
+    if invalid is not None or not has_actions or incoherent is not None:
+        connection.rollback()
+        raise CommandError(
+            "cannot migrate a populated store with invalid or unknown "
+            "write authority; create a fresh current application home"
+        )
+
+
+def _validate_current_only_head(connection: Connection) -> None:
+    inspector = inspect(connection)
+    tables = set(inspector.get_table_names())
+    populated = (
+        "threads" in tables
+        and connection.exec_driver_sql("SELECT 1 FROM threads LIMIT 1").first()
+        is not None
+    )
+    authority_installed = _authority_was_installed(connection, tables)
+    if populated or authority_installed:
+        if not _has_current_write_authority_structure(connection, inspector):
+            connection.rollback()
+            raise CommandError(
+                "cannot migrate a store without complete current "
+                "write authority; create a fresh current application home"
+            )
+        if populated:
+            _validate_populated_write_authority(connection, tables)
+    connection.rollback()
+
+
 def do_run_migrations(connection: Connection) -> None:
     """Sync migration runner called inside ``run_sync``."""
     if config.attributes.get("vaultspec_current_only_head"):
-        inspector = inspect(connection)
-        tables = set(inspector.get_table_names())
-        populated = (
-            "threads" in tables
-            and connection.exec_driver_sql("SELECT 1 FROM threads LIMIT 1").first()
-            is not None
-        )
-        current_revision = None
-        if "alembic_version" in tables:
-            current_revision = connection.exec_driver_sql(
-                "SELECT version_num FROM alembic_version"
-            ).scalar_one_or_none()
-        authority_installed = False
-        if current_revision is not None:
-            revisions = ScriptDirectory.from_config(config).iterate_revisions(
-                str(current_revision), "base"
-            )
-            authority_installed = any(
-                candidate.revision == "0017" for candidate in revisions
-            )
-        if populated or authority_installed:
-            expected = {
-                name: (column_type, False, None)
-                for name, column_type in WRITE_AUTHORITY_COLUMNS.items()
-            }
-            actual = {
-                str(column["name"]): (
-                    str(column["type"]).upper(),
-                    bool(column["nullable"]),
-                    column["default"],
-                )
-                for column in inspector.get_columns("threads")
-            }
-            has_structure = all(
-                actual.get(name) == shape for name, shape in expected.items()
-            )
-            if connection.dialect.name == "sqlite":
-                create_table_sql = connection.exec_driver_sql(
-                    "SELECT sql FROM sqlite_master "
-                    "WHERE type = 'table' AND name = 'threads'"
-                ).scalar_one_or_none()
-                checks = (
-                    extract_named_check_predicates(str(create_table_sql))
-                    if create_table_sql is not None
-                    else {}
-                )
-            else:
-                checks = {
-                    str(check["name"]): str(check["sqltext"])
-                    for check in inspector.get_check_constraints("threads")
-                    if check.get("name") is not None
-                }
-            if (
-                not has_structure
-                or not write_authority_receipt_index_matches(
-                    inspector.get_indexes("threads")
-                )
-                or not write_authority_checks_match(
-                    checks, dialect=connection.dialect.name
-                )
-            ):
-                connection.rollback()
-                raise CommandError(
-                    "cannot migrate a store without complete current "
-                    "write authority; create a fresh current application home"
-                )
-            if populated:
-                invalid = connection.execute(
-                    text(
-                        f"""SELECT id FROM threads
-                             WHERE run_revision < 0
-                                OR writer_generation < 1
-                                OR writer_action_type NOT IN ({WRITE_ACTION_SQL_VALUES})
-                                OR length(trim(writer_action_receipt_id)) < 1
-                                OR length(writer_action_receipt_id) > 64
-                             LIMIT 1"""
-                    )
-                ).first()
-                has_actions = "control_actions" in tables
-                incoherent = None
-                if has_actions:
-                    incoherent = connection.execute(
-                        text(
-                            """SELECT t.id FROM threads AS t
-                               LEFT JOIN control_actions AS a
-                                 ON a.thread_id = t.id
-                                AND a.dispatch_id = t.writer_action_receipt_id
-                                AND a.action_type = t.writer_action_type
-                               WHERE a.id IS NULL
-                               LIMIT 1"""
-                        )
-                    ).first()
-                if invalid is not None or not has_actions or incoherent is not None:
-                    connection.rollback()
-                    raise CommandError(
-                        "cannot migrate a populated store with invalid or unknown "
-                        "write authority; create a fresh current application home"
-                    )
-        connection.rollback()
+        _validate_current_only_head(connection)
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -243,10 +255,17 @@ async def run_async_migrations() -> None:
     """Create an async engine and bridge to sync Alembic context."""
     settings = dict(config.get_section(config.config_ini_section, {}))
     settings["sqlalchemy.url"] = resolve_database_url()
+    engine_options: dict[str, object] = {}
+    busy_timeout_ms = config.attributes.get("sqlite_busy_timeout_ms")
+    if settings["sqlalchemy.url"].startswith("sqlite") and isinstance(
+        busy_timeout_ms, int
+    ):
+        engine_options["connect_args"] = {"timeout": busy_timeout_ms / 1000}
     connectable = async_engine_from_config(
         settings,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        **engine_options,
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

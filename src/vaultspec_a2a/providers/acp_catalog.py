@@ -13,9 +13,7 @@ import hashlib
 import json
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Final
-
-from pydantic import TypeAdapter
+from typing import TYPE_CHECKING, Final, TypedDict, Unpack
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -48,7 +46,6 @@ from .provider_catalog import (
 )
 
 __all__ = [
-    "AcpCatalogDiscovery",
     "AcpCatalogProtocolError",
     "catalog_from_session_result",
     "discover_acp_catalog",
@@ -58,7 +55,6 @@ _MAX_FRAME_BYTES: Final = 1_048_576
 _MAX_FRAMES: Final = 64
 _CATALOG_TTL: Final = timedelta(minutes=5)
 _SUPPORTED_CONTROL_CATEGORIES: Final = frozenset({"thought_level", "model_config"})
-_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
 
 class AcpCatalogProtocolError(AcpSessionError):
@@ -200,17 +196,13 @@ def _models_from_options(
     return tuple(models)
 
 
-def _control_from_option(
-    option: JsonObject, *, category: str, namespace: str
-) -> NativeControl | None:
-    if option.get("type") != "select":
-        return None
-    config_id = optional_text(option.get("configId")) or optional_text(option.get("id"))
-    if config_id is None:
-        raise AcpCatalogProtocolError(
-            f"ACP {category} option has no config identifier",
-            code=AcpErrorCode.INTERNAL_ERROR,
-        )
+def _control_options(
+    option: JsonObject,
+    *,
+    category: str,
+    namespace: str,
+    config_id: str,
+) -> tuple[NativeControlOption, ...]:
     choices: list[NativeControlOption] = []
     for choice in _flatten_options(
         option.get("options"), field=f"{config_id}.options", limit=MAX_OPTIONS
@@ -231,6 +223,26 @@ def _control_from_option(
                 description=optional_description(choice.get("description")),
             )
         )
+    return tuple(choices)
+
+
+def _control_from_option(
+    option: JsonObject, *, category: str, namespace: str
+) -> NativeControl | None:
+    if option.get("type") != "select":
+        return None
+    config_id = optional_text(option.get("configId")) or optional_text(option.get("id"))
+    if config_id is None:
+        raise AcpCatalogProtocolError(
+            f"ACP {category} option has no config identifier",
+            code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    choices = _control_options(
+        option,
+        category=category,
+        namespace=namespace,
+        config_id=config_id,
+    )
     current = option.get("currentValue")
     current_value = current if isinstance(current, str) else None
     default_option_id = (
@@ -380,15 +392,23 @@ async def _read_response(
     )
 
 
+class _RequestOptions(TypedDict):
+    request_id: int
+    method: str
+    params: JsonObject
+    timeout: float
+    output_budget: OutputBudget
+
+
 async def _request(
     process: asyncio.subprocess.Process,
-    *,
-    request_id: int,
-    method: str,
-    params: JsonObject,
-    timeout: float,
-    output_budget: OutputBudget,
+    **options: Unpack[_RequestOptions],
 ) -> JsonObject:
+    request_id = options["request_id"]
+    method = options["method"]
+    params = options["params"]
+    timeout = options["timeout"]
+    output_budget = options["output_budget"]
     if process.stdin is None or process.stdout is None:
         raise AcpCatalogProtocolError("ACP discovery stdio is unavailable")
     request: JsonObject = {
@@ -414,17 +434,29 @@ async def _request(
     return result
 
 
+class _DiscoverAcpCatalogRequired(TypedDict):
+    env: Mapping[str, str]
+    cwd: str
+    key: ProviderCatalogKey
+
+
+class _DiscoverAcpCatalogOptions(_DiscoverAcpCatalogRequired, total=False):
+    use_exec: bool
+    timeout: float
+    metadata: Mapping[str, object] | None
+
+
 async def discover_acp_catalog(
     command: tuple[str, ...],
-    *,
-    env: Mapping[str, str],
-    cwd: str,
-    key: ProviderCatalogKey,
-    use_exec: bool = False,
-    timeout: float = 30.0,
-    metadata: Mapping[str, object] | None = None,
+    **options: Unpack[_DiscoverAcpCatalogOptions],
 ) -> AcpCatalogDiscovery:
     """Discover a provider catalog without sending a completion-bearing prompt."""
+    env = options["env"]
+    cwd = options["cwd"]
+    key = options["key"]
+    use_exec = options.get("use_exec", False)
+    timeout = options.get("timeout", 30.0)
+    metadata = options.get("metadata")
     if not command:
         raise ValueError("command must not be empty")
     process = await spawn_acp_process(
@@ -486,6 +518,14 @@ async def discover_acp_catalog(
         ]
     )
     cleanup_failures = await run_independent_cleanups(*cleanup_steps)
+    return _catalog_outcome_or_raise(outcome, failure, cleanup_failures)
+
+
+def _catalog_outcome_or_raise(
+    outcome: AcpCatalogDiscovery | None,
+    failure: BaseException | None,
+    cleanup_failures: list[tuple[str, Exception]],
+) -> AcpCatalogDiscovery:
     if failure is not None:
         if cleanup_failures:
             failure.add_note(

@@ -248,7 +248,7 @@ def test_production_seam_carries_every_domain_field_to_the_wire() -> None:
     """
     # Imported inside the test: ``routes.gateway`` imports this schema module,
     # so a module-level import would close a cycle at collection time.
-    from ...routes.gateway import snapshot_to_wire
+    from ...routes._gateway_read_endpoints import snapshot_to_wire
 
     data = _populated_thread_state()
     snapshot = snapshot_to_wire(data)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
@@ -32,6 +32,46 @@ _logger = logging.getLogger(__name__)
 
 
 __all__ = ["create_plan_approval_node", "create_supervisor_node"]
+
+
+class _SupervisorOptions(TypedDict, total=False):
+    worker_phase_map: dict[str, str] | None
+    autonomous: bool
+    workspace_root: Path | None
+
+
+def _bind_supervisor_options(
+    args: tuple[object, ...], options: _SupervisorOptions
+) -> tuple[dict[str, str] | None, bool, Path | None]:
+    names = ("worker_phase_map", "autonomous", "workspace_root")
+    if len(args) > len(names):
+        raise TypeError(
+            f"create_supervisor_node() takes at most {len(names) + 3} "
+            f"positional arguments ({len(args) + 3} given)"
+        )
+    unknown = set(options).difference(names)
+    if unknown:
+        name = sorted(unknown)[0]
+        raise TypeError(
+            f"create_supervisor_node() got an unexpected keyword argument {name!r}"
+        )
+    bound: list[object] = []
+    defaults: tuple[object, ...] = (None, False, None)
+    for index, name in enumerate(names):
+        if index < len(args):
+            if name in options:
+                raise TypeError(
+                    f"create_supervisor_node() got multiple values for argument "
+                    f"{name!r}"
+                )
+            bound.append(args[index])
+        else:
+            bound.append(options.get(name, defaults[index]))
+    return (
+        cast("dict[str, str] | None", bound[0]),
+        cast("bool", bound[1]),
+        cast("Path | None", bound[2]),
+    )
 
 
 def _active_agent_for_route(route: str) -> str:
@@ -197,6 +237,70 @@ def _check_phase_prerequisites(
     return _GateResult(blocked=False, warning=True, message=msg)
 
 
+def _phase_gate_decision(
+    state: TeamState,
+    vault_index: dict[str, list[str]],
+    next_route: str,
+    inferred_phase: str,
+    worker_phase_map: dict[str, str] | None,
+) -> _SupervisorDecision | None:
+    if not worker_phase_map or not state.get("active_feature"):
+        return None
+    target_phase = worker_phase_map.get(next_route)
+    if not target_phase:
+        return None
+    gate_result = _check_phase_prerequisites(target_phase, vault_index)
+    if not (gate_result.blocked or gate_result.warning):
+        return None
+    _logger.warning(
+        "supervisor phase gate %s: %s",
+        "blocked" if gate_result.blocked else "warning",
+        gate_result.message,
+    )
+    return _SupervisorDecision(
+        next_route=next_route,
+        inferred_phase=_phase_for_route(
+            next_route,
+            fallback_phase=inferred_phase,
+            worker_phase_map=worker_phase_map,
+        ),
+        routing_error=gate_result.message,
+    )
+
+
+def _plan_approval_decision(
+    state: TeamState,
+    vault_index: dict[str, list[str]],
+    next_route: str,
+    worker_phase_map: dict[str, str] | None,
+    *,
+    autonomous: bool,
+) -> _SupervisorDecision | None:
+    approval_granted = state.get("approval_status") == ApprovalStatus.APPROVED
+    exec_route = bool(worker_phase_map) and (
+        worker_phase_map.get(next_route) == PipelinePhase.EXEC
+    )
+    plan_ready = bool(state.get("active_feature") and vault_index.get("plan"))
+    if autonomous or not exec_route or not plan_ready or approval_granted:
+        return None
+    payload = {
+        "type": "plan_approval_request",
+        "feature": state.get("active_feature"),
+        "plan_paths": vault_index.get("plan", []),
+        "exec_worker": next_route,
+    }
+    _logger.info(
+        "supervisor plan approval interrupt: feature=%r exec_worker=%r",
+        state.get("active_feature"),
+        next_route,
+    )
+    return _SupervisorDecision(
+        next_route=next_route,
+        inferred_phase=infer_phase_from_vault_index(vault_index),
+        plan_approval_request=payload,
+    )
+
+
 def _evaluate_supervisor_response(
     *,
     state: TeamState,
@@ -242,51 +346,20 @@ def _evaluate_supervisor_response(
                 routing_error=cast("str", blocked["routing_error"]),
             )
 
-    if worker_phase_map and state.get("active_feature"):
-        target_phase = worker_phase_map.get(next_route)
-        if target_phase:
-            gate_result = _check_phase_prerequisites(target_phase, vault_index)
-            if gate_result.blocked or gate_result.warning:
-                _logger.warning(
-                    "supervisor phase gate %s: %s",
-                    "blocked" if gate_result.blocked else "warning",
-                    gate_result.message,
-                )
-                return _SupervisorDecision(
-                    next_route=next_route,
-                    inferred_phase=_phase_for_route(
-                        next_route,
-                        fallback_phase=inferred_phase,
-                        worker_phase_map=worker_phase_map,
-                    ),
-                    routing_error=gate_result.message,
-                )
-
-    approval_granted = state.get("approval_status") == ApprovalStatus.APPROVED
-    if (
-        not autonomous
-        and worker_phase_map
-        and worker_phase_map.get(next_route) == PipelinePhase.EXEC
-        and state.get("active_feature")
-        and vault_index.get("plan")
-        and not approval_granted
-    ):
-        payload = {
-            "type": "plan_approval_request",
-            "feature": state.get("active_feature"),
-            "plan_paths": vault_index.get("plan", []),
-            "exec_worker": next_route,
-        }
-        _logger.info(
-            "supervisor plan approval interrupt: feature=%r exec_worker=%r",
-            state.get("active_feature"),
-            next_route,
-        )
-        return _SupervisorDecision(
-            next_route=next_route,
-            inferred_phase=inferred_phase,
-            plan_approval_request=payload,
-        )
+    gate_decision = _phase_gate_decision(
+        state, vault_index, next_route, inferred_phase, worker_phase_map
+    )
+    if gate_decision is not None:
+        return gate_decision
+    approval_decision = _plan_approval_decision(
+        state,
+        vault_index,
+        next_route,
+        worker_phase_map,
+        autonomous=autonomous,
+    )
+    if approval_decision is not None:
+        return approval_decision
 
     _logger.debug("supervisor routed to %r (raw=%r)", next_route, response_text[:80])
     return _SupervisorDecision(
@@ -417,9 +490,8 @@ def create_supervisor_node(
     model: BaseChatModel,
     system_prompt: str,
     workers: list[str],
-    worker_phase_map: dict[str, str] | None = None,
-    autonomous: bool = False,
-    workspace_root: Path | None = None,
+    *args: object,
+    **options: Unpack[_SupervisorOptions],
 ) -> SupervisorNode:
     """Create a LangGraph supervisor node for routing.
 
@@ -437,13 +509,16 @@ def create_supervisor_node(
     Returns:
         An async function that conforms to the LangGraph node signature.
     """
-    options = [*workers, "FINISH"]
+    worker_phase_map, autonomous, workspace_root = _bind_supervisor_options(
+        args, options
+    )
+    route_options = [*workers, "FINISH"]
 
     # Append routing instructions to ensure structured text output
     routing_instructions = (
         f"\n\nBased on the conversation, who should act next? "
         f"If the request is complete, select FINISH. "
-        f"Respond EXACTLY with one of the following words: {', '.join(options)}."
+        f"Respond EXACTLY with one of the following words: {', '.join(route_options)}."
     )
     full_prompt = system_prompt + routing_instructions
 
@@ -459,7 +534,7 @@ def create_supervisor_node(
             "supervisor invoking model=%s messages=%d options=%s",
             model_type,
             len(messages),
-            options,
+            route_options,
         )
         routing_model = model.with_config({"tags": [TAG_NOSTREAM]})
         try:

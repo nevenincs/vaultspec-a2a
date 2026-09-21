@@ -19,7 +19,7 @@ import re
 import subprocess
 import sys
 from contextlib import suppress
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 from ..utils import kill_pid_tree_async
 from ..utils.async_cleanup import complete_cleanup
@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
-    "attach_process_containment",
     "kill_process_tree",
     "process_containment",
     "redact_secrets",
@@ -37,6 +36,16 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+class _SpawnRequired(TypedDict):
+    use_exec: bool
+    metadata: Mapping[str, object] | None
+
+
+class _SpawnOptions(_SpawnRequired, total=False):
+    containment: ProcessContainment | None
+
 
 _SECRET_PATTERN = re.compile(
     r"(?i)((?:[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*)"
@@ -158,10 +167,7 @@ async def _spawn_acp_process(
     command: list[str],
     env: dict[str, str],
     cwd: str,
-    *,
-    use_exec: bool,
-    metadata: Mapping[str, object] | None,
-    containment: ProcessContainment | None = None,
+    **options: Unpack[_SpawnOptions],
 ) -> asyncio.subprocess.Process:
     """Spawn an ACP subprocess with platform-appropriate isolation.
 
@@ -183,7 +189,9 @@ async def _spawn_acp_process(
     # the CLI, its node/grandchildren, and the MCP bridges it launches - is reaped
     # as one on run terminal, without a parent-pid walk. The containment rides on
     # the returned Process for the shared reaper to reach.
-    containment = containment or ProcessContainment.create()
+    use_exec = options["use_exec"]
+    metadata = options["metadata"]
+    containment = options.get("containment") or ProcessContainment.create()
     spawn_mode = "exec" if sys.platform != "win32" or use_exec else "shell"
     log_extra = _metadata_extra(metadata)
     log_extra.update(

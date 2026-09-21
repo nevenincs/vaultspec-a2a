@@ -42,8 +42,6 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.schema import CreateTable
 
-from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
-
 from ...graph.compiler import compile_team_graph
 from ...graph.nodes.worker import (
     _describe_worker_model,
@@ -53,9 +51,11 @@ from ...graph.nodes.worker import (
     create_worker_node,
 )
 from ...graph.protocols import CostPort
+from ...providers._codex_app_server_client import _CodexAppServerClient
 from ...providers._subprocess import spawn_acp_process
-from ...providers.codex_chat_model import CodexChatModel, _CodexAppServerClient
+from ...providers.codex_chat_model import CodexChatModel
 from ...providers.deterministic_chat_model import DeterministicResearchAdrChatModel
+from ...tests._write_authority import make_test_thread_authority_columns
 from ...thread.models import TokenUsageEntry
 from ...thread.state import merge_token_usage
 from ...worker.cost_port import SqlCostPort
@@ -815,12 +815,18 @@ class TestTheWritersAreActuallyInjected:
         )
 
     def test_the_worker_node_accepts_the_port(self) -> None:
-        """The node factory must expose the parameter the compiler passes."""
-        assert "cost_port" in inspect.signature(create_worker_node).parameters
+        """The node factory's typed keyword contract must accept the port."""
+        options = inspect.signature(create_worker_node).parameters["options"]
+        assert options.annotation == "Unpack[_WorkerNodeOptions]"
+        contract = create_worker_node.__globals__["_WorkerNodeOptions"]
+        assert "cost_port" in contract.__annotations__
 
     def test_the_compile_entrypoint_accepts_the_port(self) -> None:
-        """The graph entrypoint the lifecycle calls must accept the port."""
-        assert "cost_port" in inspect.signature(compile_team_graph).parameters
+        """The graph entrypoint's typed keyword contract accepts the port."""
+        options = inspect.signature(compile_team_graph).parameters["options"]
+        assert options.annotation == "Unpack[_CompileTeamOptions]"
+        contract = compile_team_graph.__globals__["_CompileTeamOptions"]
+        assert "cost_port" in contract.__annotations__
 
     def test_the_process_root_constructs_and_passes_a_real_port(self) -> None:
         """The lifecycle must build a concrete port and hand it to the compiler.

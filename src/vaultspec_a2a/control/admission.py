@@ -40,7 +40,7 @@ from ..thread.actor_tokens import MAX_ROLES_PER_RUN
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from ..api.schemas.gateway import (
+    from ..api.schemas.gateway_readiness import (
         ProviderEligibility,
         RunAdmission,
         WorkerLifecycleState,
@@ -49,8 +49,6 @@ if TYPE_CHECKING:
 __all__ = [
     "AdmissionBroker",
     "AdmissionReadiness",
-    "CommitOutcome",
-    "PrepareOutcome",
     "ReservationState",
 ]
 
@@ -152,7 +150,6 @@ class _Reservation:
     required_roles: tuple[str, ...]
     binding_digest: str
     expires_monotonic: float
-    expires_at_iso: str
     # The exact client-visible prepare body, kept separately because commit may
     # bind a server-normalized form (for example, advertised catalog defaults).
     release_digest: str | None = None
@@ -265,7 +262,6 @@ class AdmissionBroker:
                 required_roles=roles,
                 binding_digest=binding_digest,
                 expires_monotonic=now + self._ttl,
-                expires_at_iso=expires_at_iso,
                 release_digest=release_digest,
             )
         return PrepareOutcome(

@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-09-20'
-body_hash: 'sha256:9bbc1ae98922f7b3dc2e6176017110871c43ca97e55c97cdf68ca46f5e11a1d2'
+modified: '2026-09-21'
+body_hash: 'sha256:d2107047c1fa85ced1f74bfb9fa7e34f881cc322e2a1300e80fd2edc44a3eda7'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -2861,6 +2861,1480 @@ Whole-tree lint and type gates clean. The full package passes 2,784 tests with n
 over twenty minutes of real processes and stores, taken while no other writer was touching
 the tree - which is what makes the real-process suites trustworthy here rather than
 contended. The consuming product passes 376 native and 281 interface tests.
+### 2026-09-19 dead-code measurement pass | low | three private constants removed; reachability leads queued
+
+Type: maintenance. Status: three confirmed removals closed; broader scan open for triage. The repository's Vulture scan measured 525 findings over 794 offered Python modules (8 high-confidence heuristic hits). The entry-point reachability scan measured 8 unreachable modules, 52 unused top-level symbols, and 2 orphaned tests over 302 shipped modules. Manual reference checks confirmed `_STALE_MS` in `authoring/discovery.py` and `_JSON_OBJECT` in both `providers/acp_catalog.py` and `providers/codex_catalog.py` had no consumers. After removal, the unused-symbol count is 49. Ruff and ty pass on the touched files.
+
+Follow-up queue: classify the remaining 49 symbols and 8 modules against installed entry points, dynamic registration, tests, and dev harness consumers before deleting any. In particular, `providers/lane_admission.py` exports `lane_admission_reason` and `unproven_lanes_in` with no current in-tree callers; public exports need compatibility review. The 2 catalog-selection orphaned tests need ownership review. Vulture's highest-confidence import hits are type-annotation imports and its two variable hits are protocol/framework parameters, so they are false positives for deletion. The supplied `Scripts/github-audit` tool measures GitHub security settings, workflows, and secrets rather than dead code. The root Node manifest is an ACP dependency host with no application JavaScript source or Knip enrollment; no Node dead-code denominator exists here.
+
+Review result: PASS for the focused three-constant removal. Type: follow-up investigation; severity low; status open for the remaining reachability leads. No behavioral interface changed by this pass.
+### 2026-09-19 test-only dead-code burndown review | medium | scan reaches zero after entry-point corrections
+
+Result: PASS for the dead-code removal and signal correction; observed environment and contract test failures remain queued below. Type: implementation review. The entry-point reachability signal began at 8 unreachable modules, 49 unused symbols, and 2 orphaned tests (59 total) over 302 shipped modules. The `just audit-dead-code-burndown` command prints the integer and fails on scan error. The current signal is 0 after removals and corrected root modeling. Vulture's advisory count moved from 525 to 493; its eight high-confidence hits remain annotation imports and required callback/protocol parameters, not removal evidence. The root Node manifest is an ACP dependency host with no application JavaScript to run Knip against. The supplied `Scripts/github-audit` tool measures GitHub settings, workflows, and secrets, not dead code.
+
+#### scanner-missed-public-entry-points | high | type: measurement correctness | closed
+
+`database.admin` is a documented `python -m vaultspec_a2a.database.admin` CLI, referenced from `alembic.ini`; `lifecycle.engine_serve` is imported by `scripts/engine_serve.py`, which `procs.toml` launches. Both were initially reported unreachable. Their modules and behavior tests were preserved. `dev/audit/unreachable_code.py` now treats modules with a main guard and imports from configured Python scripts as runtime roots, with real-tree regression tests. Pytest hooks in the configured root plugin are also recognized as framework calls, while an ordinary unused helper in that plugin remains a finding.
+
+#### test-support-placement | medium | type: packaging | resolved by user direction
+
+Five shared helpers under `testing/` were imported by many live-behavior tests. Deleting them broke 54 type-check imports. The user chose moving them into the excluded test tree; their consumers were repointed and the live behavior tests remain. `acceptance/_harness.py` is moving beside its tests for the same reason. The test-only `artifacts` declaration package and its declaration-only tests were removed; two independent ACP ownership checks were retained under provider tests.
+
+#### artifact-declaration-proposal-drift | medium | type: decision/code conflict | open
+
+The `2026-07-21-ecosystem-artifact-lifecycle-adr` is **proposed**, not accepted. Its proposed requirement for declaration objects beside artifact creators conflicts with their removal under the user's test-only-code rule. Runtime artifact creation and cleanup paths remain. This proposed decision needs reconciliation before acceptance; the removed declarations cannot be cited as implemented evidence.
+
+#### external-api-compatibility | low | type: public surface | open
+
+Some deleted helpers were listed in `__all__` but had no production or development callers found by the scan. An external consumer could have imported them. No external consumer inventory is available in this pass; the change is a deliberate removal under the user's rule, and release review should treat it as an API change.
+
+#### existing-verification-failures | medium | type: test/contract | open
+
+A focused real-install provision test fails because the installed workspace lacks required `exec-step` and `exec-summary` templates, though those templates exist in this checkout. Admin/migration focused tests had one database `pause` check-constraint failure, and WAL tests had two write-authority rejection failures. A graph web-composition test reached an ACP `initialize` response with a missing or malformed `protocolVersion`; its 12 downstream cases failed. A provider live test requiring `vaultspec-rag` found no CUDA/MPS backend. These failures are recorded as observed, not attributed to this dead-code change without a baseline comparison. The focused tests that passed are reported in the execution summary when the integrated pass closes.
+#### integrated-verification | low | type: validation | closed
+
+The integrated pass reports 0 scanner findings. Ruff lint and format, ty, reachability, unused-symbol coverage, and 270 governed import-load probes pass. Focused test groups passed across the scanner, testing support, authoring, provider, service, control, API, desktop, and lifecycle scopes. Pytest collected 4,757 of 4,759 tests (two live proofs withheld by configured prerequisites); the collection recipe returned exit 4 despite listing the tree, so its harness exit behavior remains a medium open validation issue. The real-install, database authority, graph ACP, and GPU failures remain open as listed above. The review found no unqueued new issue from the merged cleanup.
+
+### 2026-09-19 relative-import gate review | low | absolute package imports removed
+
+Type: import discipline. Status: RESOLVED. The package-relative import gate
+found 85 absolute self-imports, chiefly in test support modules. All were
+converted to equivalent relative imports. Ruff, formatting, just check-all,
+and pytest collection pass; selected database and test-support tests pass.
+The conversion preserves imported symbols and leaves runtime modules unchanged.
+
+### 2026-09-19 strict-type packaging review | medium | LangGraph namespace typing repaired
+
+Type: dependency typing. Status: RESOLVED. Basedpyright reported 19 missing
+type-stub diagnostics for langgraph.graph and langgraph.graph.message
+despite the installed namespace root carrying py.typed. A local typing
+overlay under typings/langgraph/graph declares the same public graph exports,
+message reducer, and message-state shape as the locked runtime package.
+just check-type-strict now reports zero diagnostics.
+
+### 2026-09-19 shared normalizer export review | low | read seam export made explicit
+
+Type: typing boundary. Status: RESOLVED. The workspace-identity parity test
+consumes the exact normalizer object exposed by control/run_discovery_service.py.
+An explicit re-export preserves that identity and removes the private-local-
+import diagnostic. The targeted database test passes.
+
+### 2026-09-19 strict structural gates | high | complexity and shape debt remains
+
+Type: maintainability. Status: OPEN. The strict aggregate remains red after
+typing and import cleanup. The 2026-09-19 health census counts 162 functions
+over the cyclomatic limit, 13 modules over the length limit, 27 functions over
+the statement limit, 119 callables over the parameter limit, and 9 functions
+over the nesting limit. just check-strict also reports cognitive-complexity
+and pylint design findings; Ruff reports 324 shape and complexity errors
+and 35 nesting errors in the same strict run. Repository-tooling-hardening
+plan W07.P13 and
+W07.P14 own decomposition; W08 promotion remains blocked until each sentinel
+has zero findings. No threshold, exclusion, or suppression was changed.
+
+### 2026-09-19 strict export gate | medium | unconsumed public names remain
+
+Type: API surface. Status: OPEN. just check-exports reports 111 unconsumed
+published names across 1,220 names. Each export needs a consumer check before
+removal; some may be intentional external API. The strict gate cannot graduate
+while the count is nonzero. Follow-up belongs in the repository tooling
+hardening queue before W08 closure.
+
+### 2026-09-19 default-suite follow-up behavior | high | dispatch receipt does not settle applied action
+
+Type: behavior. Status: OPEN. A non-service suite run after the import changes
+reached api/tests/test_endpoints.py::TestSendMessage::test_followup_dispatch_marks_message_followup_as_applied;
+it fails with last_applied_action == "ingest" after a follow-up receipt, where
+the test expects message_followup_applied. This is a real state-transition
+finding, independent of import spelling. Record it for control-action
+investigation and real-behavior regression proof.
+
+### 2026-09-19 accepted-dispatch recovery | high | unauthorized test dispatch leaves run status running
+
+Type: acceptance contract and failure settlement. Status: OPEN. The full
+non-service suite stops at
+api/tests/test_acceptance_five_verb.py::test_multirole_run_status_recovery_and_zero_vault_writes.
+Its direct DispatchRequest omits graph_definition, graph_action_receipt, and
+model_assignment, which are now mandatory accepted execution authority. The
+worker correctly rejects the missing definition, but the rejection path calls
+emit_terminal_status(FAILED) without GraphFailureEvidence because
+_failure_evidence returns None for a request without a receipt. The state
+projector rejects that terminal, a second exception is logged, and run-status
+still reports RUNNING with no checkpoint. The acceptance fixture must exercise
+a real accepted dispatch; the receipt-less rejection path also needs an
+authority-consistent terminal policy so it does not double-fault. Do not mint
+a fake receipt or weaken the state-projector invariant.
+
+### 2026-09-19 startup re-dispatch accepted authority | high | fixed in implementation
+
+Type: production recovery contract. Review found that `redispatch_reconciling_threads` rebuilt an ingest request from thread metadata and omitted the accepted graph definition and receipt. A real production gateway restart stayed RECONCILING because worker admission rejected the request. The dispatch now restores the exact accepted input by durable action receipt ID, verifies its model assignment and workspace against the thread metadata, and binds the committed graph receipt before delivery. Missing or incompatible evidence is classified per thread so one bad row does not abort the sweep. The production restart proof and 12 adjacent re-dispatch cases pass. The accepted-dispatch fixture and terminal-evidence fixtures were also updated to exercise current authority; the separate receipt-less worker double-fault from the earlier high finding remains OPEN and still requires a production fix.
+### 2026-09-19 clarification recovery fixture | medium | fixed in implementation
+
+Type: test contract drift. The API sweep found the clarification restart proof created a RUNNING thread without its initial accepted graph action and receipt. After that was seeded, the resume fixture also lacked a valid accepted-input payload, a recovery deadline, an exact write expectation, and a committed lease. The fixture now persists both accepted actions and the test passes against the real checkpointer and worker. Review found no production behavior change in this pass. The full API and repository suites remain in progress, so this closure applies only to the focused regression.
+### 2026-09-19 follow-up application receipt correction | medium | fixed in implementation
+
+Type: audit correction and test contract drift. The earlier note near the accepted-dispatch finding classified `test_followup_dispatch_marks_message_followup_as_applied` as a possible production state-transition defect. Review of `_handle_progress_event` showed that production requires both the exact graph-action receipt and a named checkpoint incorporating it before settlement. The test sent neither, so `last_applied_action` correctly remained `ingest`. The test now records the matching checkpoint and relays both evidence fields; its focused run passes. The earlier production-defect inference is superseded by this evidence.
+
+### 2026-09-19 team status liveness fixture | low | fixed in implementation
+
+Type: test contract drift. Team status includes node metadata only for active threads, and an aggregator event by itself does not make a thread active. The node-summary route test now registers and subscribes a live reader before requesting team status. The focused test passes; review found no production defect in this path.
+
+### 2026-09-19 permission rejection deadline | high | fixed in implementation
+
+Type: production journal invariant. Rejected and duplicate permission-response actions used `create_control_action` without the recovery deadline required for that action type by the current database schema. Invalid responses raised `ValueError` instead of returning their typed conflict. Both non-executing journal writes now carry a finite deadline; the malformed-row test fixture does too. All 11 permission-response endpoint tests pass. The deadline is required by the persisted action-type invariant even though these terminal results are not redriven.
+
+### 2026-09-19 terminal deletion fixture authority | medium | fixed in implementation
+
+Type: test contract drift. Two deletion tests created terminal threads with writer receipt columns but no matching control action, so the deletion election correctly refused them. The fixtures now seed matching journal rows and both focused deletion tests pass.
+
+### 2026-09-19 API batch follow-up | high | open
+
+Type: gate burndown. A broader API run stopped after 20 failures at 212 passing tests. Beyond the resolved permission-response and deletion clusters, remaining groups include cancel non-delivery state expectations, terminal checkpoint proof in gateway-drain tests, gateway live stream fixtures, and harness template discovery. These are queued for implementation and review; the repository-wide green gate has not been reached.
+
+### 2026-09-19 live stream queue shape | high | fixed in implementation
+
+Type: production streaming contract. `EventAggregator.relay_payload` queues a positive-projected dictionary for worker events, while `_stream_thread_events` passed every queue item to `sequenced_to_positive_payload`, which requires a `SequencedEvent`. A live stream crashed with `AttributeError` after a relayed progress event. The stream now distinguishes sequenced in-process events from already-projected worker dictionaries and applies the existing SSE encode boundary to both. Three focused live stream tests pass. The live gateway fixture also now seeds accepted graph authority, and the reconnect-cursor test records real completion evidence before asserting the terminal cursor.
+
+### 2026-09-19 cancel and drain recovery expectations | medium | fixed in implementation
+
+Type: test contract drift. The cancellation and drain tests expected an unreachable worker or a capacity refusal to restore pre-dispatch status or fail an accepted run. The current durable recovery contract preserves accepted work for redrive and requires matching terminal evidence before releasing admission. Updated tests assert the live recovery state and seed the required checkpoint/cancellation proof. All 8 gateway-drain and 11 endpoint delete/cancel tests pass.
+
+### 2026-09-19 installed harness template drift | high | fixed in implementation
+
+Type: installed dependency contract. The pinned `vaultspec-core install` provides `exec-ledger.md` but no `exec-step.md` or `exec-summary.md`, so `provision_workspace` always reported a newly provisioned authoring workspace as unready. The verifier now requires the installed ledger template. The bundled coder prompt was also updated from an obsolete per-Step document instruction to Core's `vault exec log` command and ledger template. All 18 gateway and harness tests pass. Review confirms this is a served authoring-path repair, not a test-only relaxation.
+
+### 2026-09-19 missing-transcript proof fixture | medium | fixed in implementation
+
+Type: test contract drift. Two history tests tried to settle COMPLETED without the graph completion checkpoint now required by production. They now complete with exact accepted evidence, delete the checkpoint, and verify that the wide read reports the resulting transcript loss. All 5 history transcript availability tests pass. The test retains its original failure-mode proof while following the current terminal contract.
+
+### 2026-09-19 served degradation vocabulary | medium | fixed in implementation
+
+Type: public contract drift. The snapshot producer emits `invalid_agent_descriptors` and `incompatible_execution_authority`, but neither token was declared in `DegradedReason`. Both members are now declared, the containment sweep passes (21 tests), and the committed OpenAPI artifact was regenerated from the live schema (6 tests pass).
+
+### 2026-09-19 deletion saga endpoint authority | medium | fixed in implementation
+
+Type: test contract drift. Eight endpoint saga tests seeded thread writer receipts without matching control actions. The deletion election correctly refused terminal seeds. A shared helper now seeds a matching journal row; all 8 endpoint saga cases pass.
+
+### 2026-09-19 internal relay evidence backlog | high | open
+
+Type: test and worker contract drift. The second API batch reached 446 passing tests before 20 failures; after resolving OpenAPI, history transcript, vocabulary, and deletion fixtures, the remaining dominant cluster is `api/tests/test_internal.py`. Its terminal tests relay COMPLETED with no checkpoint or FAILED with no exact action evidence, which current production correctly refuses. The worker-rejection case also exposes the previously recorded high receipt-less double-fault. These require current accepted-action fixtures and evidence-aware assertions, plus a production rejection fix.
+
+### 2026-09-19 subscriber queue annotation | medium | open
+
+Type: typing contract. Review of the SSE fix found `SubscriberManager` annotates subscriber queues as containing only `SequencedEvent`, while `relay_payload` inserts projected dictionaries and can pass through other objects for malformed input. The stream reader now decodes both runtime shapes through an explicit `object` boundary and strict typing passes. The queue's producer/consumer type should be reconciled across the aggregator, WebSocket readers, fanout, and tests so the shared annotation itself is truthful; a broad queue-type change currently surfaces many downstream assumptions. This is queued separately from the fixed live stream crash.
+
+### 2026-09-19 internal relay evidence and receipt-less worker review | high | fixed in implementation
+
+Type: production terminal authority and test contract drift. Review traced the internal relay tests through the accepted action, graph receipt, and checkpoint imports. Forty-four relay tests now pass with exact accepted dispatch evidence, including valid failure evidence and completed checkpoint proof. Malformed failure details and unknown provider conditions are refused without changing durable status. A direct receipt-less Executor rejection previously tried to project FAILED without GraphFailureEvidence, then entered a second unhandled-failure path; both paths now skip unproven terminal settlement. The worker still emits a condition for observability and releases its local slot. API suite: 525 passed; strict typing: green. Remaining queue: subscriber queue type mismatch, structural strict gate, export gate, repository-wide tests, and the unraisable Windows transport warning observed during API tests.
+
+### 2026-09-19 full unit gate first failure batch | high | partial fixes, queue open
+
+Type: gate burndown and production concurrency. The resource-aware parallel unit run reached 1,096 passing tests before stopping after 26 failures. Review classified 19 deletion-saga failures as a fixture missing the current ingest recovery deadline (fixed; 19 focused cases pass), five graph-input failures and adjacent cache cases as missing accepted frozen definitions or outdated bound-authority messages (fixed; 48 focused cases pass), and one Core parity assertion as stale after Core changed active-plan rules (fixed; two focused cases pass). Startup reconciliation was spawning a worker before checking whether a reconciling row exists; the worker spawn now follows the empty-row check. The desktop lazy-worker test then exposed a separate high production issue: four concurrent run starts produce three SQLite `database is locked` 500 responses while one succeeds. The first writer holds the database long enough for other request inserts to fail. This remains OPEN for transaction-boundary/concurrency repair; a journal-mode read experiment did not resolve it and was reverted. The failure batch also contains desktop ownership/admission failures that remain OPEN pending focused review. Structural strict and export gates remain OPEN.
+
+### 2026-09-19 desktop gate follow-up review | high | fixed in implementation
+
+Type: production admission and lifecycle harness. The high concurrent SQLite start finding above is closed by retrying a transient SQLite lock on a fresh transaction, resolving a committed same-ID winner as a replay or conflict, and bounding attempts. The real four-request lazy-worker test returns four 201 responses and confirms a single worker spawn. Thirty live gateway tests, including same-ID insert races and different-body conflicts, pass. Review risk: a sustained SQLite lock beyond four attempts still propagates an error and merits a typed busy response in a later pass. The lifecycle owner in the gateway boot helper now binds its Uvicorn server, allowing the receipt-owned shutdown route to perform a real graceful stop; the process-tree shutdown test passes. The terminal child context fixture gained the session closing field; its real process-tree test passes. Focused run-admission desktop suite: nine passed, while two owner-tree tests were subsequently repaired. No open finding remains from these focused desktop failures. The wider unit gate and structural/export gates remain OPEN.
+
+### 2026-09-19 unit control authority review | medium | fixed in implementation
+
+Type: test contract drift. The next non-service run reached 1,255 passes before a control-test cluster stopped the bounded run. Actual review traced each failure to the accepted-action imports and current durable schema: follow-up and permission fixtures needed the initial frozen graph action under `thread-create:<id>`; receipt, event-handler, recovery, and verdict fixtures needed recovery deadlines; discovery needed a frozen graph definition; completed terminal-sequence tests needed the exact graph action and checkpoint completion proof; deletion tests needed a matching journal row before election. These fixtures now use the current contracts, and their focused groups pass. The vanished-workspace expectation was updated to the current dispatch refusal. Remaining queue: full control and non-service reruns, structural strict findings, export findings, and subscriber queue typing. No new production failure was established by these control clusters.
+
+### 2026-09-19 full control-suite review | medium | fixed in implementation
+
+Type: test contract drift. The full control test package now reports 502 passed and six marker-deselected after the receipt, deadline, initial-authority, checkpoint, deletion-journal, and vanished-workspace fixture updates. Review confirmed the tests still exercise their original state transitions and refusal behavior through current durable authority. No new production issue appeared in the full control run. The repository-wide non-service suite and strict structural/export gate remain queued.
+
+### 2026-09-19 database gate review pass
+
+The database package exposed stale fixtures after current write-authority and graph-recovery contracts became mandatory. This pass supplied complete authority columns and matching accepted action receipts, required recovery deadlines, and current execution metadata; it also changed reboot and retention assertions to the current checkpoint recovery behavior. Focused affected tests pass, and the package was reduced from ten immediate failures to three later fixture failures. The final three have been corrected and focused tests pass; a complete package rerun remains in the queue.
+
+Review findings and queue:
+
+- **Medium, test contract:** The full database package and repository suite must be rerun after the last fixture corrections; a focused pass cannot prove the whole gate. Open until both are green.
+- **Medium, test maintainability:** Database reconciliation tests import `_seed_accepted_initial_action` from a control test module. Move the shared authority seeding helper into a neutral test support module if this dependency causes fixture drift or import-order issues. Open.
+- **High, quality gate:** `just check-strict` still has outstanding Ruff, nesting, Pylint, and export findings. Burn down the complete strict output; open.
+
+### 2026-09-19 graph compiler and compile probe review pass
+
+Review of the implemented fixtures confirms that inline graph teams now carry the required positive step timeout, node assertions include the structural completion recorder, and the cold compile probe supplies the exact frozen graph definition required by the worker. The graph package passed 365 tests (2 deselected); the focused cold compile responsiveness test passed. Ruff and formatting passed. These are medium-severity test contract drift findings, resolved in this pass.
+
+Remaining queue: the full repository suite is not yet green. A broad parallel run exposed more failures and stalled in accelerator-dependent provider harness startup (`service_env_no_gpu`); the first isolated provider compile failure and graph compiler failures are resolved, but the rest of the suite requires separate inventory runs. The strict gate remains high-severity open with 323 Ruff findings, 33 nesting findings, Pylint shape findings, and 110 unconsumed exports. The service harness accelerator requirement is a medium-severity environment/test-portability finding and remains open.
+
+### 2026-09-19 worker authority fixture review pass
+
+Review of the worker changes confirms that dispatch ID concurrency tests now send graph definitions and matching action receipts with model selections for their actual mock role; held-checkpoint tests reuse an accepted ingest fixture; graph-input projection tests supply a frozen program; receiptless rejection tests assert the current warning and do not invent terminal settlement. Focused dispatch ID, held-checkpoint, graph-input, and receiptless tests pass. These were medium-severity test contract drift issues, resolved here.
+
+Open review findings: nine `worker/tests/test_executor.py` tests still fail in settle ordering and pre-run refusal coverage. The settle fixtures use synthetic preset and cache digests without accepted graph definitions, while refusal fixtures still expect terminal evidence from receiptless dispatches. This is high-severity test contract drift because the suite cannot verify terminal behavior until those requests carry valid authority. The full nonservice suite remains open; a timed broad run was interrupted after the worker cluster. The strict gate findings remain open as recorded above.
+
+### 2026-09-19 worker resume and executor review pass
+
+The executor file passed all 59 tests after accepted graph receipts and exact cache digests were supplied to settle and refusal fixtures. Review found a high-severity production bug: a resume with no durable checkpoint could compile a new graph and continue. The worker graph lifecycle now reads checkpoint authority on every resume and returns the existing missing-graph refusal when absent; a normal gated resume and the no-checkpoint refusal both pass. This is a behavior fix, not only a fixture update. The full worker package then reported 139 passing and four failing actor-token lifecycle tests.
+
+Open queue: convert the four actor-token lifecycle tests from synthetic preset/cache digests and receiptless graph dispatches to accepted graph authority, then rerun the worker package and broad nonservice suite. Review risk: the extra checkpoint read on resume may increase read latency; preserve the existing deadline and verify checkpoint lock/capacity tests in the package rerun. The strict gate and accelerator-dependent harness findings remain open.
+
+### 2026-09-19 actor-token lifecycle review pass
+
+The four remaining worker failures were synthetic fixture drift: token tests registered injected graphs under fake preset and definition digests, then sent receiptless ingest/resume requests. This pass froze the current mock graph program, minted exact action receipts, and keyed the injected graphs from those requests. Review confirms the tests still assert token isolation, interrupt retention, terminal disposal, durable checkpoint secrecy, and log secrecy. The focused lifecycle file passed 5 tests; the full worker package passed 143 tests (2 deselected); Ruff and strict typing passed. These medium-severity test contract findings are resolved.
+
+Open queue: rerun the full nonservice inventory without the accelerator-dependent harness, then address any remaining failures. `just check-strict` structural, Pylint, and export findings and the service harness accelerator prerequisite remain open.
+
+### 2026-09-19 TeamState schema review pass
+
+The late thread, utils, and workspace serial inventory found one medium-severity test contract drift: `TestTeamStateStructure` asserted an exact field set without the current agent descriptor, model assignment digest, graph definition digest, and three graph receipt fields. The expectation now includes those six fields; the focused test passes. The earlier late inventory had 403 passing and one failing test, so rerun that inventory and the full nonservice suite to close it. Review found no production change in this pass; the exact schema assertion remains useful for detecting future drift.
+
+Open queue: a broad xdist run still reported one other late failure before active workers stalled, but it yielded no named summary. Run the full nonservice inventory serially to identify it. The service harness and strict structural/export findings remain open.
+
+### 2026-09-19 bound resume compatibility and duplicate test review pass
+
+Review of the resume guard against live clarification tests found a medium-severity compatibility regression: an accepted parked graph can be registered with a real checkpoint that predates the two digest fields. The bound resume path now checks checkpoint presence under the existing deadline and trusts the exact registered cache binding; the cold recompile path still requires and validates both digests. Current clarification fixtures supply both digests when representing current checkpoints, while the older accepted case remains undigested. All four live clarification tests, the no-checkpoint worker refusal, and the normal gated resume pass. The full lifecycle package passed 146 tests under four workers.
+
+The structural-duplication gate found identical interrupt graph helpers in executor and token tests. The token tests now import the existing helper; five token tests and the structural gate pass. These are resolved medium-severity test contract findings. The broad xdist lifecycle failure did not reproduce in the isolated package and remains a medium-severity concurrency/flakiness finding for a complete repository rerun. `just check-all` passed. The strict structural/export gate and accelerator-dependent service harness remain open.
+
+### 2026-09-19 complete nonservice repository run
+
+A four-worker `pytest -m "not service"` run, excluding the accelerator-dependent provider harness file, completed with 4,535 passed, 1 skipped, and 2 Windows Proactor transport warnings in 375.57 seconds. No test failed. This closes the previously open unnamed broad-suite and lifecycle concurrency failures at the four-worker cadence. The skip is the acceptance proof requiring a reachable loopback authoring engine; the two warnings are unclosed transport finalizers on Windows. They remain medium-severity environment/test-cleanup findings rather than being counted as passing quality work. The strict structural, Pylint, and export gate findings and accelerator-dependent harness remain high-priority open queue items.
+
+### 2026-09-19 strict gate baseline after nonservice test recovery
+
+`just check-strict` remains red on the current pushed branch. Its current output reports 323 Ruff complexity/shape errors (137 excessive arguments, 77 complexity, 39 statements, 37 branches, 33 returns), 33 nested-block errors, 60 Pylint shape findings, and 110 unconsumed exports. All are open findings; the passing `just check-all` and 4,535 passing nonservice tests do not close this stricter gate. The queue is to refactor or justify each reported interface and structure, then rerun the complete strict recipe to zero. No thresholds were raised and no diagnostics were suppressed in this pass.
+
+### 2026-09-19 harness CI contract review pass
+
+`just test-harness` found one medium-severity test contract drift in `dev/tests/test_ci_contract.py`: it still looked for `just lint` workflow sentinel commands, treated duplication as a harness-level advisory target, and expected separate Ty platform commands. The current workflow uses `just check-*` sentinels; the duplication runner owns its advisory result, and platform typing is one `dev.quality.types --no-strict --platforms` command. The test now checks those current artifacts. Focused CI contract and the full harness suite pass (119 tests). Review found no workflow or runner behavior change. The service and strict gates remain open.
+
+### 2026-09-19 service gate review pass
+
+`just test-service` completed with 115 passed, 68 skipped, one failed test, and five Compose setup errors. The five errors shared a high-severity image-build defect: the locked Starlette Git dependency requires a Git executable, absent from the production Python base image. The image now installs Git before `uv sync`; the gateway image builds successfully. The single failure was medium-severity test contract drift: a repeated identical permission verdict is accepted and deduplicated by the service, while the test expected rejection. The service test now submits a conflicting verdict after completion and expects the documented conflict response. Focused test verification and the complete service gate rerun remain in the queue until they finish. Existing service skips require live external prerequisites; the strict structural, Pylint, and export findings remain open.
+
+### 2026-09-19 production import closure review pass
+
+The service rerun resolved the permission conflict test but found a second high-severity Compose defect: the worker image crashed at import because `control.worker_management` imports `psutil` while the production dependency set declared it only in the tooling group. `psutil` is now a direct base dependency, the tooling duplicate and its DEP004 exception are removed, and the lockfile is updated. The complete Compose regression module passes all 17 tests, including gateway and worker health. `just check-all` and a full service rerun remain required before closing the gate. The strict structural, Pylint, and export queue remains open.
+
+### 2026-09-19 cancellation lock collision review pass
+
+The next full service run passed the Compose and permission cases but surfaced one medium-severity concurrency defect: a running thread's cancel request returned HTTP 500 when its SQLite control-action insert collided with a concurrent event write (`sqlite3.OperationalError: database is locked`). The cancel service now rolls back and retries only this specific SQLite lock error at the pre-dispatch claim boundary, with four bounded retries and a fresh durable authority read each time. A direct control lease test injects the collision once and proves one worker dispatch; the focused live cancel test and the direct lease package pass. Review found the retry boundary precedes the accepted action and external dispatch, so the failed attempt cannot duplicate worker work. It also found low-severity module documentation drift: the header denied commits although this service commits durable transitions; the header now states the actual contract. The complete service rerun and strict findings remain open until their gates finish.
+
+### 2026-09-19 complete service gate result
+
+The full `just test-service` gate now exits successfully: 121 passed, 68 skipped, 4,574 deselected, and one warning in 182.76 seconds. The declared skips require live engine/provider credentials or a separately served mock backend; none is a failing test. The production Compose image, worker startup, permission conflict, and cancellation cases all pass in this run. This closes the high-severity image/import defects and the medium-severity cancellation lock collision at the service-gate cadence. The strict complexity, nested-block, Pylint shape, and unconsumed-export findings remain open and prevent completion of the requested zero-issue quality pass.
+
+### 2026-09-19 private export review pass
+
+The strict unconsumed-export audit reported 110 published names with no consumers. Review of private desktop and provider modules found 15 low-severity API-surface findings: 14 internal symbols were unnecessarily listed in `__all__`, and the `thaw_json` helper had no consumer at all. The internal symbols remain available to their owning modules, while their unused exports are removed; `thaw_json` is deleted along with its stale module description. No wildcard import of these private modules exists in the repository. The export audit now reports 95 findings across 1,205 published names. These 95 findings, the 323 Ruff structure errors, 33 nested-block errors, and Pylint shape findings remain open; the strict gate is not yet green.
+
+### 2026-09-19 unconsumed export zero review pass
+
+The remaining 95 unconsumed published names were reviewed against repository imports. They were symbols retained for their owning modules or directly importable by name, but had no repository consumer of their `__all__` publication; no wildcard import of these modules exists. Their unused `__all__` entries were removed without changing the symbol definitions or direct imports. The former sole `database.admin.main` list was removed because the command entry point is invoked directly. The export audit now reports zero findings across 1,110 published names, and `just check-all` passes. This closes the low-severity export-surface queue. A downstream wildcard importer would see a narrower set; explicit imports remain available. The 323 Ruff structure errors, 33 nested-block errors, and Pylint shape findings remain open; `just check-strict` is still red.
+
+### 2026-09-19 strict argument shape review pass
+
+The strict Ruff pass found a low-severity excessive-argument issue in the deterministic completion review-bundle helper: six pieces of one run-bound evidence record crossed its call boundary separately. They now travel as a frozen typed `_ReviewBundleInput`, with the same fields and one unchanged call site. The focused Ruff shape and format checks and Ty pass; the acceptance test itself still requires its declared live engine and durable evidence directory. The strict Ruff structure count falls from 323 to 322. The remaining 322 structure errors, 33 nested-block errors, and Pylint shape findings remain open.
+
+### 2026-09-19 gateway auth case-shape review pass
+
+Two low-severity strict argument-shape findings came from gateway auth tests unpacking one parameterized route case into four pytest arguments alongside fixtures. The route case now crosses each test boundary as one typed tuple and is unpacked inside the test; all 25 gateway auth cases pass, and focused Ruff and format checks pass. The strict Ruff structure count falls from 322 to 320. The remaining 320 structure errors, 33 nested-block errors, and 60 Pylint shape findings remain open.
+
+### 2026-09-19 harness and authoring seed shape review pass
+
+Two low-severity strict argument-shape findings in test helpers were resolved. Harness corpus provisioning now uses one explicit agent-state choice (`complete`, `empty`, or `missing`) and a separate MCP-corpus step; this removes conflicting boolean combinations. The authoring completion tests now pass one typed thread seed holding the run identity, preset, authoring IDs, and status. All 11 harness and four authoring completion tests pass, and focused Ruff checks pass. The strict Ruff structure count falls from 320 to 318. The remaining 318 structure errors, 33 nested-block errors, and 60 Pylint shape findings remain open. A full four-worker nonservice run on the combined branch is in progress.
+
+### 2026-09-19 parameterized compiler and permission audit review pass
+
+Two low-severity strict argument-shape findings were resolved in tests. The compiler structure test now receives its preset/topology/worker expectation as one parameterized case; the permission audit seed helper receives an explicit pause specification instead of three loosely related fields. The focused compiler test and all five durable permission-audit tests pass; Ruff's focused argument rule passes for both files. The strict Ruff structure count falls from 318 to 316. The remaining 316 structure errors, 33 nested-block errors, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 complete combined-branch nonservice result
+
+The four-worker nonservice repository suite completed after the resource-aware test changes and strict test-shape edits: 4,536 passed, one declared live-engine skip, and two Windows Proactor transport warnings in 402.43 seconds. No test failed. This closes the prior need for a combined-branch nonservice rerun. The warnings and live-engine prerequisite remain recorded environment/test-cleanup items; the strict structure, nesting, and Pylint findings remain open.
+
+### 2026-09-20 startup redispatch structure review pass
+
+The strict gate found three medium-severity structure findings and one nested-block finding in the startup reconciliation sweep. The sweep now delegates metadata parsing, incompatible-authority refusal, missing-project refusal, accepted-action restoration, and batch failure summarization to focused helpers. Review checked that each refusal still commits before continuing, malformed metadata remains local to its thread, accepted dispatch remains bound to the stored authority, and each failure ladder category retains all thread IDs. Thirteen real redispatch tests pass, including fresh-worker restart, stale authority, missing project, and repeated circuit-open behavior. `just check-all`, `just check-type-strict`, and complexipy for the module pass. Strict Ruff structure falls from 316 to 313 and nested-block findings fall from 33 to 32.
+
+Strict typing also exposed one low-severity test import-boundary finding from the earlier cancellation retry proof: it read a non-exported claim helper through `cancel_service`. The test now imports that helper from its owning `action_lease` module; its focused test and the full strict type gate pass. The remaining 313 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 Codex catalog structure review pass
+
+The Codex catalog discovery module had five medium-severity strict Ruff structure findings and one complexipy finding across its control construction, RPC exchange, pagination, and normalization paths. Native-control fields now travel as a typed specification; process, timeout, and output budget are bound in one RPC session; pagination returns ordered pages with the next request id; and a typed catalog builder owns model/control accumulation. Review checked that page and control ceilings, duplicate-model and cursor rejection, request-id order, shared output budget, and process cleanup retain their prior behavior. All 13 catalog tests pass, including the service-marked real process and failure cases. `just check-all`, `just check-type-strict`, and the module complexipy check pass. Strict Ruff structure falls from 313 to 308. The public discovery function still has one excessive-argument finding; changing its published call contract needs a separate decision. The remaining 308 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 streaming transformer structure review pass
+
+The streaming transformer had seven medium-severity Ruff structure findings in tool-event projection and its event entry point: five excessive-argument signatures, one complex tool completion path, and one excessive-return path. Tool-event identity and emitters now travel as one typed emission context; stable stream services travel as one typed dependency context; file artifact projection has a focused helper; and the redundant node-boundary return is removed. Review checked that tool start, end, error, completed-action, and artifact updates preserve their IDs, ordering, status, payload limits, and node filtering. The 81 focused streaming and aggregator tests pass; `just check-all`, `just check-type-strict`, and focused Ruff pass. Strict Ruff structure falls from 308 to 301. No new review findings were surfaced. The remaining 301 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 event adapter structure review pass
+
+The domain-to-wire adapter had three medium-severity strict structure findings from an eleven-case conversion function. The message, tool-start, tool-update, control, and state mappings now live in focused functions, with one dispatcher preserving the same event classes, field conversion, sequence, and timestamp. Review found no dropped event case or changed fallback error. Five focused API tests, `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 301 to 298. No new review findings were surfaced. The remaining 298 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 MCP schema normalization structure review pass
+
+Four medium-severity strict structure findings in recursive injected-field removal and older-engine oneOf translation were resolved by extracting property, child, discriminator, and branch-guidance operations. Review checked that nested property/required removal, oneOf/anyOf/allOf traversal, discriminator order and deduplication, opaque payload/alias handling, and required-set intersection retain their behavior. All 20 schema-normalization tests pass, including the real MCP serving case; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 298 to 294. No new review findings were surfaced. The remaining 294 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 write-authority SQL parser structure review pass
+
+Four medium-severity strict structure findings in the named-CHECK parser were resolved by extracting SQL token advancement, named-CHECK header parsing, and balanced predicate scanning. Review checked that comments and quoted content remain ignored, malformed quotes/comments/parentheses still reject the whole parse, duplicate names still reject, and the original predicate slice is preserved. All 16 schema parser tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 294 to 290. No new review findings were surfaced. The remaining 290 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 internal event relay shape review pass
+
+The internal worker-event relay had one low-severity strict argument-count finding: the aggregator, durable store, checkpointer, drain gate, and transport traveled separately through three ingress paths. They now travel as one frozen relay context. Review checked that WebSocket transport attribution, HTTP relay readiness, batch ordering, projection bypass for dispatch receipts, and durable relay arguments retain their values. All 44 focused internal API tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 290 to 289. No new review findings were surfaced. The remaining 289 Ruff structure, 32 nested-block, and 60 Pylint shape findings remain open.
+
+### 2026-09-20 anchoring context structure review pass
+
+One medium-severity cyclomatic finding in contextual anchoring came from rendering vault-index entries within the same function as feature-state summary fields. A focused helper now renders document labels, capped paths, and remainder counts. Review checked that field ordering, empty-index omission, path cap, and validation-error placement stay the same. All 14 anchoring tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 289 to 288. No new review findings were surfaced.
+
+The latest complete `just check-strict` run remains red and confirms the broader open gate: 155 radon cyclomatic findings, 13 module-length findings, 24 function-length findings, 109 parameter-count findings, six code-health nesting findings, plus strict Ruff, nested-block, and Pylint shape findings. These are still in the audit queue; passing the regular gate and strict type checker does not close them.
+
+### 2026-09-20 stream ingest structure review pass
+
+The graph ingest path had four medium-severity strict Ruff findings: excessive argument count, cyclomatic complexity, branch count, and statement count. The internal ingest request now carries its run inputs as one typed value; graph-stream failure classification delegates bounded graph failures and provider failures to focused reporters. Review checked the original precedence of provider cancellation, graph interrupt, recursion limit, ingest stall, step timeout, and provider condition; the durable failure reason/condition writes and emitted codes remain tied to those branches. The 81 focused aggregator and transformer tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 288 to 284. The pre-existing overlong `ingest` function remains one medium-severity code-health finding; the extraction did not add another overlong function. No new review findings were surfaced. The remaining 284 Ruff structure, 32 nested-block, and Pylint/health findings remain open.
+
+### 2026-09-20 ACP protocol dispatch structure review pass
+
+Four medium-severity strict Ruff structure findings in ACP stdout dispatch, server-RPC argument shape, and session-update branching were resolved. One parsed stdout line now has a focused dispatch helper; server-RPC method/id/params travel as a typed request; native-command advertisement and streamed tool-argument chunks have focused handlers. Review checked that activity is still stamped before parsing, malformed frames and queue overflow remain local, batch packet order remains intact, capability refusals still answer the agent, and command advertisements still validate session identity before replacing the catalog. Fifty-seven focused protocol and process-lifetime tests pass; `just check-all`, `just check-type-strict`, and focused Ruff pass. Strict Ruff structure falls from 284 to 280. The pre-existing medium-severity cognitive-complexity finding in `handle_client_response` remains open; this pass did not change that function. No new review findings were surfaced. The remaining 280 Ruff structure, 32 nested-block, and Pylint/health findings remain open.
+
+### 2026-09-20 ACP response complexity review pass
+
+The ACP response handler had one medium-severity cognitive-complexity finding after the dispatch cleanup. Future settlement and terminal prompt-result validation now have focused helpers, preserving duplicate-terminal refusal, late-future handling, error sentinel behavior, and stop-reason validation order. Thirty-four focused response and process-lifetime tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. No new review findings were surfaced. The module has no remaining complexipy offender; the repository-wide strict backlog remains open.
+
+### 2026-09-20 discovery credential and desktop parsing review pass
+
+Six medium-severity strict Ruff structure findings in lifecycle discovery were resolved. The desktop record parser combines equivalent invalidity checks; credential reading and private publication now use focused helpers for leased reads, source claims, existing-file refusal, POSIX identity verification, and platform publication. Review checked that the credential remains owner-restricted, link-like paths and changed identities remain refused, source cleanup still runs after publication failure, Windows ACL hardening still follows publication, and malformed desktop records still fail closed. Twenty-five lifecycle and desktop ownership tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 280 to 274. The two public discovery writer signatures still have low-severity excessive-argument findings; their call contracts remain in the open queue. No new review findings were surfaced. The remaining 274 Ruff structure, 32 nested-block, and Pylint/health findings remain open.
+
+### 2026-09-20 worker management structure review pass
+
+Twelve medium-severity strict Ruff findings across worker spawn admission, readiness polling, exact-tree reaping, shutdown, and watchdog reconciliation were resolved. Desktop and shared-port pairing decisions now have separate predicates; retained process signaling is shared by exact-tree and descendant cleanup; cooperative shutdown and live-descendant capture are focused helpers; readiness inputs travel as one typed specification; and the watchdog separates probe reconciliation from restart. Review checked that only an owned worker is adopted or restarted, an unauthorized or unidentifiable occupant is never evicted, a failed eviction refuses spawn, containment cleanup still runs in nested finally blocks, and restart cooldown still stamps failed attempts. Forty-one focused spawn, provenance, and watchdog tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 274 to 262; worker-management has no remaining Ruff or complexipy findings. The latest code-health gate reports 23 function-length, 104 parameter-count, and four nesting findings (from 24, 109, and six at the prior complete strict run), while the module-length finding for this 1,746-line file remains open. Radon complexity is 145 over the threshold across the repository, down from 155 at the prior complete strict run. No new review findings were surfaced. The remaining 262 Ruff structure, 31 nested-block, and Pylint/health findings remain open.
+
+### 2026-09-20 terminal and application event structure review pass
+
+Seven medium-severity strict Ruff complexity, branch, return, and statement findings in terminal and dispatch-application handling were resolved. Completion, cancellation, and failure terminals now have separate proof checks; the terminal handler releases the drain gate and prunes aggregator state only after one proof accepts. Dispatch application now validates the private receipt, proves checkpoint incorporation, then reloads the current action under row locks before settlement. Review checked that sequence capture still precedes pruning, mismatched or stale evidence still refuses settlement, the intermediate database commit still precedes checkpoint inspection, and permission response resolution still returns its request id to the aggregator. Sixty-four focused control and API tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 262 to 255; code-health function-length findings fall from 23 to 21 and radon findings from 145 to 144. No new review findings were surfaced. Three excessive-argument signatures and the module-length finding remain open in this module; the remaining 255 Ruff structure, 31 nested-block, and Pylint/health findings remain open.
+
+### 2026-09-20 clarification dispatch structure review pass
+
+Three low-severity strict argument-count and medium-severity cyclomatic findings were resolved. The response and restart recovery paths now pass their worker dependencies in one typed runtime; dispatch after a successful claim is a focused helper. Review checked that the claim is finalized before dispatch, the graph receipt is bound before sending, definite non-delivery still records a repair reason, ambiguous delivery retains the lease, and only a matching checkpoint receipt proves application. Ten focused clarification and dispatch-failure tests pass, as do the regular Ruff gate and diff check. Strict Ruff structure falls from 255 to 252. Four pre-existing medium-severity structure findings remain in this service: the main responder has excessive complexity, returns, and branches, and the result builder has excessive parameters. These and the repository-wide strict backlog remain in the audit queue. No new review findings were surfaced.
+
+### 2026-09-20 clarification replay and claim structure review pass
+
+Four medium-severity strict Ruff findings remaining in the clarification service were resolved. Existing-action replay, claim preparation, post-claim state decisions, and worker dispatch now have bounded functions; error details travel as one typed value. Review checked that an existing matching receipt settles before any new claim, conflicting accepted input still returns 409, expired ORM state is not read after a losing claim rollback, non-active and no-longer-parked paths roll back, and only a checkpoint receipt marks application. Ten focused clarification and dispatch-failure tests pass; `just check-all`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 252 to 248, and the clarification service has no remaining strict Ruff or complexipy findings. No new review findings were surfaced. The remaining 248 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 permission response structure review pass
+
+Seven medium-severity strict Ruff findings in the permission-response service were resolved. A typed response and worker runtime now carry the service inputs; rejection journaling, idempotency replay, pending-state authorization, option validation, and failed dispatch have focused helpers. The unused aggregator argument was removed because application is proved by the exact receipt path. Review checked rejection-journal durability, retry replay before pending-status rejection, accepted-body conflict handling, claim election, audit-log placement before dispatch, and definite versus ambiguous dispatch failure compensation. Review surfaced one medium-severity behavior-drift risk: an extracted helper initially used the permission row's thread id, which could differ from the resolved fallback id. It was fixed before commit by using the loaded thread record's id in all three extracted helpers. Fifty-one focused control, database, and live gateway tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 248 to 241; code-health function-length findings fall from 21 to 19 and parameter-count findings from 104 to 97. The permission service has no remaining strict Ruff or complexipy findings. The remaining 241 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 verdict subscriber structure review pass
+
+Six medium-severity strict Ruff findings in verdict subscriber setup, parked-run reconciliation, verdict resume, and recovery-proposal parsing were resolved. The subscriber now receives one typed configuration; candidate selection, decided-verdict mapping, current-gate dispatch setup, and proposal parsing have focused functions. Review checked that INPUT_REQUIRED and mis-statused RUNNING candidates are still deduplicated in order, the current gate alone authorizes a resume, the accepted graph and write expectation are read before claim election, a fresh claim is finalized before worker dispatch, and HTTP acknowledgement still does not mark the action applied. Twenty-two focused tests pass; the six service-marked cases were deselected by the default profile and explicitly run with `-m service`, where all six skipped because a healthy loopback engine plus gateway and worker were unavailable. `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 241 to 235; code-health function-length findings fall from 19 to 18 and parameter-count findings from 97 to 96. No new review findings were surfaced. The remaining 235 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 cancellation control structure review pass
+
+Five medium-severity strict Ruff findings in the cancel workflow were resolved. Worker dependencies now travel as one typed runtime; preflight deadline and eligibility checks, existing-claim replay, thread-authority election, and dispatch settlement are separate functions. Review checked that a caller retry label is still echoed while the thread owns one durable cancellation key, the accepted recovery deadline is captured before claim rollback can expire ORM state, the SQLite busy retry retains its bounded backoff, and ambiguous delivery preserves the lease and CANCELLING projection while definite non-delivery records the repair reason. Thirty-nine focused control and live gateway tests pass; `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 235 to 230; code-health function-length findings fall from 18 to 17 and parameter-count findings from 96 to 95. No new review findings were surfaced. The remaining 230 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 ACP session and chunk structure review pass
+
+Five medium-severity strict Ruff complexity, branch, and statement findings in the ACP chat model were resolved. Environment preparation and harness contract probing now have a focused method; native-command advertisement and prompt construction have a focused method; early subprocess exit and completed prompt-error checks have focused helpers. Review checked that the environment is still prepared before spawn, all session and reader cleanup remains in the same finally path, native commands are refused before prompting when not advertised, interrupt errors retain precedence over prompt errors on early exit, and timeout polling still enforces the turn deadline. One extracted helper initially lost the session-id type narrowing; the review fixed it by passing the exact initialized session id. One hundred nine focused provider tests pass. Two service-marked strict-MCP tests were run separately and skipped because no current live provider lane was selected. `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 230 to 225; code-health function-length findings fall from 17 to 16. No unresolved new review findings were surfaced. The remaining 225 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 Codex provider turn structure review pass
+
+Five medium-severity strict Ruff return, complexity, branch, and statement findings in Codex app-server response routing, native-control admission, and turn streaming were resolved. The turn now keeps deferred retry evidence, cumulative token usage, and side-effect evidence in one state object; notification wait, item projection, retry errors, and terminal settlement have focused functions. Review checked that only the exact thread's item, usage, and terminal frames are honored, retry errors remain deferred until final failure/EOF/idle timeout, a supervised permission interrupt still escapes before frame projection, cumulative usage is emitted once, and terminal status is stamped before a failed-turn exception. Review surfaced one low-severity malformed-frame risk: set membership on an untrusted JSON method could raise for a list or object. It was fixed before commit by using safe tuple comparisons. Eighty-three focused provider tests pass. The one service-marked live Codex turn was attempted and skipped because no current provider lane was selected. `just check-all`, `just check-type-strict`, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 225 to 220; code-health function-length findings fall from 16 to 15 and worst nesting depth from eight to seven. No unresolved new review findings were surfaced. The remaining 220 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 thread admission and archive structure review pass
+
+Four medium-severity strict Ruff argument, complexity, and return findings in thread creation and archive election were resolved. Initial worker dependencies now travel as one typed runtime; failed dispatch settlement and archive-election rechecks have focused helpers. Review checked that the thread and graph action remain durable before worker dispatch, the recovery deadline and receipt authority are preserved, a concurrent terminal writer can still win while dispatch is in flight, missing rows still report their typed outcome, and archive election failure rolls back before re-reading current state. Sixty-three focused creation, deletion-saga, drain, and live gateway tests pass; `just check-all`, `just check-type-strict`, and focused Ruff pass. Strict Ruff structure falls from 220 to 216; code-health parameter-count findings fall from 95 to 94. No new review findings were surfaced. The pre-existing medium-severity cognitive-complexity finding in `list_threads_service` remains open in this module. The remaining 216 Ruff structure, 31 nested-block, and Pylint/health findings stay open in the audit queue.
+
+### 2026-09-20 thread-list summary complexity review pass
+
+One medium-severity cognitive-complexity finding in `list_threads_service` was resolved by extracting checkpoint state, live plan approval, and summary projection. Review checked that missing and uncertain checkpoint probes still degrade readiness and hide approvals, recovery-epoch and checkpoint-id mismatches still degrade stale execution state, terminal threads still hide approvals, and only the latest pending plan permission with valid options is exposed. Eighty-three focused control and API tests pass; `just check-all`, `just check-type-strict`, focused Ruff and Ty, and module complexipy pass. The module now has no cognitive-complexity finding. No new review findings were surfaced. Strict Ruff structure remains at 216; code health remains at 13 module-length, 15 function-length, 94 parameter-count, and four nesting findings. These and the remaining nested-block and Pylint findings stay open in the audit queue.
+
+### 2026-09-20 graph receipt predicate review pass
+
+One low-severity Pylint R0916 boolean-expression finding in graph receipt persistence was resolved by separating exact action identity from original dispatch evidence. Review checked that all seven original comparisons remain, including the upper bound on stored revision after a state-only election; invalid or mismatched receipts still return no persisted witness. Eleven focused receipt and dispatch tests pass; focused Ruff, Ty, and Pylint pass, as does `just check-all`. No new review findings were surfaced. The remaining strict Ruff, nested-block, cyclomatic, module/function/parameter/nesting, and Pylint findings stay open in the audit queue.
+
+### 2026-09-20 dispatch and selection predicate review pass
+
+Three low-severity Pylint R0916 boolean-expression findings were resolved in supervisor plan-approval routing, IPC graph receipt admission, and persisted team-selection validation. Review checked that execution routing still requires a plan and active feature without existing approval, ingest and resume retain their exact allowed action types while cancel remains refused, and role/fallback validation still rejects empty, duplicate, invalid, or excessive inputs. Fifty-six focused graph, provider, and receipt tests pass; focused Ruff, Ty, and Pylint pass. The first `just check-all` run exposed only an IPC formatting change, which was applied before rerunning the gate. No new review findings were surfaced. All remaining strict findings stay open in the audit queue.
+
+### 2026-09-20 team selection normalization review pass
+
+One medium-severity strict Ruff C901 finding and two medium-severity cognitive-complexity findings in team selection normalization were resolved. Catalog selectability, native-control defaulting and freezing, and persisted replay-control decoding now have focused functions. Review checked that provider lane lookup, catalog revision/expiry, model entry, attached controls, option ids, exact replay identity, and stored default controls retain the same validation order and errors. Twenty-two focused selection and persisted-authority tests pass; `just check-all`, focused strict Ruff and Ty, and module complexipy pass. Radon cyclomatic findings fall from 139 to 138. No new review findings were surfaced. The remaining strict Ruff, cyclomatic, nesting, shape, and Pylint findings stay open in the audit queue.
+
+### 2026-09-20 provider factory admission decomposition review pass
+
+The high-severity maintainability cluster in `ProviderFactory.create` remains open while its admission logic is decomposed. Frozen execution-mode validation, native-control validation, and option extraction now have focused helpers; the factory cyclomatic score falls from 53 to 41 without changing the repository-wide 138-offender count. Review checked that timeout, execution mode, and native controls are popped from the same mutable kwargs before model admission, frozen ACP backend conflicts still refuse construction, native control types and provider support still fail before construction, and the existing provider-specific paths receive the same values. Eighty-seven focused factory, in-process catalog, and Z.ai tests pass; `just check-all`, focused Ty, and diff check pass. No new review findings were surfaced. The remaining five strict Ruff findings and cognitive-complexity finding in this module stay open alongside the repository-wide strict backlog.
+
+### 2026-09-20 provider factory construction review pass
+
+Five medium-severity strict Ruff complexity, branch, statement, return, and parameter findings in provider construction were resolved. Codex, Claude, Z.ai, Kimi, in-process, and OpenAI-compatible constructors now have focused functions; Kimi's independent home variable is composed after temporary-model validation. Review checked the frozen model and backend authority, exact native controls, lazy model imports, ambient Claude auth, Z.ai token injection, Kimi command and temporary-provider values, and OpenAI/Zhipu credential precedence. Review surfaced two low-severity private-helper risks: permissive fallback to another provider, fixed by exact provider refusals; the first full check also caught an unused import, removed before the final run. One hundred thirty-five focused provider tests pass, with three deselected by the project marker policy; 46 focused factory tests pass after the review fix. `just check-all`, `just check-type-strict`, strict Ruff for the module, complexipy, and diff check pass. Repository strict Ruff structure falls from 215 after the prior team-selection pass to 210; radon findings fall from 138 to 136; code-health function-length falls from 15 to 14 and parameter-count from 94 to 93. No unresolved new review findings were surfaced. The factory still has a medium-severity module-length finding; the remaining 210 Ruff structure and other strict backlog stay open in the audit queue.
+
+### 2026-09-20 snapshot projection structure review pass
+
+Three medium-severity strict Ruff complexity, branch, and statement findings and one medium-severity cognitive-complexity finding in snapshot enrichment were resolved. Message projection, checkpoint-owned agent descriptors, checkpoint and live tool-call projection now have focused functions. Review checked that checkpoint descriptors retain priority over aggregator state, invalid descriptors still degrade the snapshot, provider action status and ToolMessage correlation remain distinct, and live tool calls do not duplicate checkpoint calls. Review surfaced one low-severity malformed tool-args risk in the extracted projector; an absent args mapping now safely takes the pending/completed correlation path. Strict basedpyright also exposed an imprecise extracted `ToolCall` type, corrected before final verification. One hundred one focused snapshot and API tests pass, followed by 26 focused snapshot and thread-state tests after the final type correction. `just check-all`, `just check-type-strict`, focused strict Ruff and Ty, module complexipy, and diff check pass. Repository strict Ruff structure falls from 210 to 207; radon findings from 136 to 135; code-health function-length findings from 14 to 13. No unresolved new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 checkpoint evidence classification review pass
+
+Three medium-severity strict Ruff complexity, return, and branch findings and one cognitive-complexity finding in durable checkpoint evidence interpretation were resolved. Checkpoint schema, active action, completion receipt, and pending write classification now have focused functions. Review checked that unavailable and absent reads remain distinct, requested checkpoint ids are exact, malformed durable values and receipts remain incompatible, an older writer generation is reported as prior action only after incorporated evidence is verified, a valid completion still outranks pending writes, and error/interrupt channels retain their precedence and incorporation flag. Twenty-three focused recovery-authority and event-handler tests pass; `just check-all`, `just check-type-strict`, focused Ruff/Ty/basedpyright, module complexipy, and diff check pass. Repository strict Ruff structure falls from 207 to 204; radon findings from 135 to 134; code-health function-length findings from 13 to 12. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 direct-control recovery redrive review pass
+
+Three medium-severity strict Ruff complexity, branch, and statement findings and one cognitive-complexity finding in direct-control redrive were resolved. One due recovery claim now passes through focused missing-row quarantine, durable action claim, dispatch preparation, refusal settlement, delivery-failure settlement, and delivery-success functions; an outcome enum counts the same dispatched, deferred, conflicted, and refused cases while applied actions remain uncounted. Review checked that each early branch commits or rolls back before returning, an authority loss defers only after its deadline, payload mismatch and reconstruction refusal quarantine exact authority, definite non-delivery releases the action lease, ambiguous delivery retains it, and successful delivery schedules an application receipt without minting a new dispatch id. During extraction, a generated patch briefly left a literal plus and an invalid trace-header keyword; both were fixed before verification. Ten focused accepted-input and current-redrive tests pass; `just check-all`, `just check-type-strict`, focused Ruff/Ty/basedpyright, module complexipy, and diff check pass. Repository strict Ruff structure falls from 204 to 201; radon findings from 134 to 133; code-health function-length findings from 12 to 11. No unresolved new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 gateway run admission and commit review pass
+
+Ten medium-severity strict Ruff argument-count, complexity, branch, and statement findings in the gateway run-start and commit path were resolved. Private dispatch dependencies now travel as one typed runtime; replay-safe metadata admission, SQLite creation retries, nickname/integrity-race resolution, exact commit replay, execution eligibility, and failed-commit durability classification have focused functions. Review checked that the request replay digest is stamped before drain admission, a durable insert winner keeps its gate admission even when the losing body conflicts, nickname and winnerless errors release unused admission, a terminal dispatch failure releases it, a commit replay verifies the persisted reservation and digest before repairing the broker, and a failed commit aborts only when an authoritative read proves the run absent. Seventy-seven focused gateway, digest, catalog, drain, and desktop admission tests pass; `just check-all`, `just check-type-strict`, focused Ruff/Ty/basedpyright, module complexipy, and diff check pass. Repository strict Ruff structure falls from 201 to 191; radon findings from 133 to 132; code-health function-length findings from 11 to nine and parameter-count findings from 93 to 89. No new review findings were surfaced. The gateway module-length finding remains open and its measured length rose from 2,578 to 2,619 lines during extraction; the remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 frozen catalog preference parser review pass
+
+Two medium-severity strict Ruff complexity and branch findings in frozen catalog preference parsing were resolved. Assignment shape, one native-control entry, and the bounded native-control list now have focused validators. Review checked that primary and fallback field sets remain exact, schema version and provider errors retain their order, model and execution-mode strings remain required, native-control records still refuse unknown keys, blank ids/values, duplicates, and lists over 32, and provenance remains checked after controls. Eighty-nine focused compiler and persisted-selection tests pass; `just check-all`, `just check-type-strict`, focused strict Ruff/Ty, and diff check pass. Repository strict Ruff structure falls from 191 to 189 and radon findings from 132 to 131. No new review findings were surfaced. The compiler still has two cognitive-complexity and nine strict Ruff findings, plus its module-length finding; these and the remaining repository strict backlog stay open in the audit queue.
+
+### 2026-09-20 graph topology complexity review pass
+
+Two medium-severity cognitive-complexity findings in star and pipeline graph compilation were resolved. Supervisor prompt and metadata construction, and pipeline order validation now have focused helpers. Review checked the configured and fallback supervisor presentations, assignment metadata, worker resolution, and the existing empty-order and duplicate-order errors before node wiring. Sixty-seven focused compiler tests, routine quality gates, strict Ty, module complexipy, and diff review pass. The cyclomatic gate now reports 130 findings, down from 131. No new review findings were surfaced. Nine strict Ruff findings and the compiler module-length finding remain open; the remaining repository strict backlog stays open in the audit queue.
+
+### 2026-09-20 durable snapshot projection complexity review pass
+
+Two medium-severity strict Ruff cyclomatic-complexity findings in durable snapshot enrichment were resolved. Permission projection and execution-projection failure marking now have focused helpers. Review checked terminal permission clearing still takes precedence, valid siblings survive malformed permission rows, unreadable plan approval still clears its request id and demands repair, absent execution rows only degrade when a checkpoint exists, and unreadable execution rows still require operator intervention. Seventeen focused projection tests, focused strict Ruff and Ty, and module complexipy pass. The cyclomatic health gate falls from 130 to 129 findings. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 authoring SSE and IPC event serialization review pass
+
+Three medium-severity strict Ruff complexity findings in authoring SSE line reassembly and IPC event-type selection were resolved. Buffered SSE dispatch now has one helper shared by blank-line and end-of-stream flushing; the closed IPC domain-event mapping is a typed ordered registry. Review checked that empty/comment lines do not emit, undecodable frames still drop, each supported event maps to its prior wire type, unknown events still have no type, and the existing IPC coverage test continues to detect unlisted event subclasses. A new test proves blank-line and EOF flushing. Thirty-four focused authoring and IPC tests, focused strict Ruff and Ty, and module complexipy pass. Repository strict Ruff structure falls from 187 to 184 and cyclomatic findings from 129 to 127. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 desktop gateway credential review pass
+
+Two medium-severity strict Ruff complexity and return-count findings in desktop attach credential selection were resolved. The discovery-origin and credential-reference checks now have focused helpers. Review checked that fresh discovery, supported protocol, live process, exact HTTP host/port, matching resolved credential reference, and credential loading still occur in the same order; malformed ports and path resolution errors still fail closed. Four focused operator credential tests, routine gates, strict Ty, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 184 to 182 and cyclomatic findings from 127 to 126. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 provider readiness and OpenAI catalog review pass
+
+Four medium-severity strict Ruff complexity and return-count findings were resolved. Provider readiness now delegates API-key, Z.ai, and Kimi checks; OpenAI-compatible model-list validation and bounded HTTP response handling have focused helpers. Review checked Claude/Codex command-only readiness, exact OpenAI/Zhipu/Z.ai missing-credential reasons, Kimi's partial temporary-definition refusal, 401/403 authentication mapping, pagination refusal, one-MiB response bound, model-field and duplicate validation, and stream cleanup under cancellation. Strict basedpyright exposed an imprecise extracted JSON value type; the helper now takes the exact recursive JsonValue shape. Sixty-seven focused OpenAI catalog tests, three installed Kimi middleware readiness tests, and one Codex readiness test pass. Routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 182 to 178 and cyclomatic findings from 126 to 125. No unresolved new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 IPC assignment schema review pass
+
+One medium-severity strict Ruff complexity finding in dispatch model-assignment validation was resolved. Fallback and selected-control field validation now use focused helpers with the same closed required/optional field sets. Review checked that primary lanes and provenance remain exact, malformed fallback lists and records retain their refusal messages, fallback display fields remain optional, and selected controls still reject missing or unknown fields. Nine focused IPC schema tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 178 to 177 and cyclomatic findings from 125 to 124. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 worker IPC flush review pass
+
+One medium-severity strict Ruff cyclomatic finding and one cognitive-complexity finding in buffered worker event relay were resolved. One batch POST, cancellation requeue, bounded retry wait, and exhausted-batch requeue now have focused methods. Review checked successful HTTP 200 acknowledgement, non-200 and network-error warning details, deadline-limited request timeout and backoff, cancellation requeue before a POST or during backoff, exhausted error logging, and buffer-cap preservation. Twenty-four focused worker IPC tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 177 to 176 and cyclomatic findings from 124 to 123. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 worker startup and dispatch review pass
+
+Three medium-severity strict Ruff statement and cyclomatic findings in worker startup and dispatch admission were resolved. Startup gateway probing and dispatch receipt, duplicate-response, and scheduling logic now have focused functions. Review checked non-fatal gateway probe logs, invalid graph-receipt refusal before admission, exact duplicate replay before and after capacity wait, 429 for a different request on a busy thread, capacity release when synchronous admission or scheduling fails, and the no-await boundary between admitting a dispatch ID and scheduling its task. Seventeen focused worker app and dispatch-id tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 176 to 173; the cyclomatic health count remains 123. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 worker terminal evidence review pass
+
+Two medium-severity strict Ruff argument-count and cyclomatic findings in terminal event emission were resolved. One typed evidence value now carries either cancellation or graph-failure proof, and a focused validator checks outcome compatibility and the failure's exact thread, detail fingerprint, and provider condition. Review checked that nonterminal outcomes still emit nothing, failed outcomes retain the UNKNOWN floor, completed terminals carry no failure condition, cancelled outcomes require cancellation proof, and the executor keeps the same evidence for each settlement path. A first executor expression selected evidence by truthiness; review replaced it with an explicit None check so even a false-valued evidence object would be retained. Eleven focused state-projection tests, 21 focused executor settlement tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Three new test cases verify mismatched thread, detail, and condition refusal. Strict Ruff structure falls from 173 to 171; cyclomatic health stays at 123. No unresolved new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 completed checkpoint preflight review pass
+
+One medium-severity strict Ruff statement-count finding in executor ingest admission was resolved. Completed-checkpoint settlement now has a focused method. Review checked that the checkpoint result is inspected before graph compilation, the span and log identify preflight completion, the terminal event is emitted before graph and metadata release, and any held dispatch capacity is released before returning without rerunning the graph. Thirteen focused executor checkpoint and terminal tests, routine gates, strict Ty/basedpyright, focused Ruff, and module complexipy pass. Strict Ruff structure falls from 171 to 170; cyclomatic health remains at 123. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 desktop readiness ladder review pass
+
+Two medium-severity strict Ruff complexity and branch findings in desktop readiness assembly were resolved. Worker lifecycle selection, pending-worker evidence, and run-admission classification now have focused helpers. Review checked that an unspawned worker needs both a successful live probe and adoption provenance before promotion, a pending worker accepts a heartbeat only when the live probe has no verdict, an explicit failed probe takes precedence, down/restarting workers stay unavailable, and database or recovery-owner failure blocks admission. The first extraction introduced a second radon offender; focused pending-worker and admission helpers resolved it before commit. Eleven desktop readiness/admission and health tests passed during implementation; five focused worker-state and database-health tests pass after the final extraction. Routine gates, strict Ty/basedpyright, focused Ruff, and diff check pass. Strict Ruff structure falls from 170 to 168 and cyclomatic findings from 123 to 122. The existing cognitive-complexity findings in assemble_health_status and build_full_health remain open, alongside the remaining strict backlog. No unresolved new review findings were surfaced.
+
+### 2026-09-20 shared and full health projection review pass
+
+One medium-severity strict Ruff parameter-count finding, two cognitive-complexity findings, and two cyclomatic findings in shared and full health assembly were resolved. Worker status/restart projection and database, checkpointer, and worker probes now have focused helpers. A typed FullHealthRuntime carries the three live probe dependencies into both authenticated service-state and unarmed health callers. Review checked worker observation order, default restart fields, live database and informational journal verdicts, checkpoint timeout/failure details, exact worker HTTP 200 authority, pairing identity only when explicitly requested by the authenticated caller, and the existing overall readiness predicate. Thirty live gateway tests and five focused health/readiness tests pass; routine gates, strict Ty/basedpyright, module complexipy, focused Ruff, and diff check pass. Focused Pylint reports only two existing gateway-module findings. Strict Ruff structure falls from 168 to 167 and cyclomatic findings from 122 to 120. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue. A mistyped audit body-file command briefly displaced the earlier corpus; the committed body was restored through the vault CLI and the final diff checked before commit.
+
+### 2026-09-20 persisted run lease binding shape review pass
+
+One medium-severity Pylint boolean-expression finding in durable staged-commit lease binding validation was resolved. The binding now reuses the existing typed string-field reader for lease id, reservation id, and commit digest, then rejects any blank or absent value before constructing a binding. Review checked that non-string, blank, and missing fields still refuse replay; no durable metadata or digest authority changed. Thirty live gateway tests, routine gates, strict Ty/basedpyright, focused Ruff/Pylint, and diff check pass. Pylint now reports 58 findings, including the gateway module-length finding and six remaining boolean-expression findings. No new review findings were surfaced. The remaining strict backlog stays open in the audit queue.
+
+### 2026-09-20 receipt authority predicate review pass
+
+- Implementation: extracted the persisted graph receipt's writer identity and authority comparisons into a focused predicate. The comparisons and rejection behavior are unchanged.
+- Review: inspected the actual diff and checked the receipt tests (5 passed), routine gate, strict type gate, focused Pylint, and focused strict Ruff. No new correctness issue surfaced. Severity: none for this change; type: no contract drift.
+- Queue: the pre-existing `prepare_graph_action_receipt` return-count finding remains open in the strict Ruff queue. The repository still has other strict Ruff, Pylint, and code-health findings; this pass does not close them.
+
+### 2026-09-20 native command name validation review pass
+
+- Implementation: extracted the exact native command name predicate and preserved validation order and the existing error path.
+- Review: inspected the diff; 8 focused native command tests, routine quality gate, strict type gate, and focused strict Ruff passed. Pylint's boolean-expression finding in this function is cleared. Severity: none for the change; type: no contract drift found.
+- Queue: pre-existing Pylint `too-many-lines` and `too-many-instance-attributes` findings in `acp_chat_model.py` remain open. The remaining repository-wide strict gate findings remain open.
+
+### 2026-09-20 thread summary checkpoint review pass
+
+- Implementation: removed redundant checkpointer and tuple conditions from the stale execution-state comparison. `checkpoint_id` is assigned only when both conditions hold, so the comparison's behavior is unchanged.
+- Review: inspected the diff; 9 focused thread listing/checkpoint tests, routine quality gate, strict type gate, focused Pylint, and focused strict Ruff passed. Severity: none for this change; type: no contract drift found.
+- Queue: pre-existing Pylint instance-attribute findings in `thread_service.py` remain open. A trial split of the discovery record guard exposed a new strict Ruff return-count finding, so that trial was reverted; the existing discovery boolean-expression finding remains open.
+
+### 2026-09-20 cancellation evidence guard review pass
+
+- Implementation: split missing-record rejection from the exact cancellation authority comparison; both paths still roll back and return false.
+- Review: inspected the diff; 31 event/cancellation tests, routine quality gate, strict type gate, focused Pylint, and focused strict Ruff passed. Severity: none for this change; type: no contract drift found.
+- Queue: pre-existing `event_handlers.py` module-length and three strict Ruff parameter-count findings remain open. Other repository strict findings remain open.
+
+### 2026-09-20 checkpoint permission-clear predicate review pass
+
+- Implementation: extracted the permission-clear decision into a focused predicate, retaining the existing checkpoint and snapshot conditions.
+- Review: inspected the diff; 14 snapshot tests and 21 capture/authoring tests passed, as did routine checks and strict type checking. Focused Pylint is clear. Severity: none for this change; type: no contract drift found.
+- Queue: `capture_thread_state` still has strict Ruff C901 (13 > 10) and PLR0915 (69 > 50). Its checkpoint projection block requires a larger extraction. Other repository strict findings remain open.
+
+### 2026-09-20 checkpoint projection extraction review pass
+
+- Implementation: moved the existing checkpoint tuple read, history projection, and failure handling into `_read_projected_checkpoint`. A typed result carries the snapshot, checkpoint flags, and captured tuple back to the orchestration function. The statements and exception behavior are unchanged.
+- Review: inspected the moved block and return wiring; 35 focused snapshot/capture tests, routine checks, strict type checking, focused Ruff/Pylint, and complexipy passed. The module has no radon functions above 10. Severity: none for this change; type: no contract drift found.
+- Queue: the prior C901 and PLR0915 findings for `capture_thread_state` are closed. Repository-wide cyclomatic complexity still has 117 offenders, and other strict Ruff/Pylint findings remain open.
+
+### 2026-09-20 graph receipt preparation review pass
+
+- Implementation: extracted accepted action parsing and dispatch/receipt matching from the receipt orchestration. The same validation and exception paths remain in place.
+- Review: inspected the diff; 35 receipt and live gateway tests, routine checks, strict type checking, focused Ruff/Pylint passed. The receipt module has no radon function above 10. Severity: none for this change; type: no contract drift found.
+- Queue: the prior PLR0911 finding for `prepare_graph_action_receipt` and two radon offenders in this module are closed. The repository-wide cyclomatic gate still has 115 offenders, with other strict Ruff/Pylint findings open.
+
+### 2026-09-20 team selection authority review pass
+
+- Implementation: extracted focused helpers for control defaults, replay identity and defaults, persisted control records, and role validation. These preserve the existing error conditions and keep the execution-lane import at its original local boundary.
+- Review: inspected the diff and corrected new helper annotations to the repository `JsonObject`/`JsonValue` contract. Thirty-one provider tests, routine checks, strict type checks, focused Ruff/Pylint passed. This module has no radon function above 10. Severity: none for the final change; type: no contract drift found. The transient type diagnostics from overbroad `object` annotations were fixed before commit.
+- Queue: four prior radon offenders in `team_selection.py` are closed. The repository-wide cyclomatic gate still has 111 offenders; other strict findings remain open.
+
+### 2026-09-20 gateway projection and failure review pass
+
+- Implementation: extracted request-metadata copying, legacy lease-id validation, follow-up dispatch failure mapping, and service degradation reasons into focused helpers. Existing admission, lease, error-status, and health behavior remains in the same order.
+- Review: inspected the diff; 65 gateway/digest/drain tests, routine checks, strict type checking, focused Ruff/Pylint passed. The gateway module has no radon function above 10. Severity: none for this change; type: no contract drift found.
+- Queue: four prior radon offenders in `api/routes/gateway.py` are closed. Existing Pylint module-length and five strict Ruff endpoint parameter-count findings remain open. Repository-wide cyclomatic gate still has 107 offenders.
+
+### 2026-09-20 ACP MCP composition review pass
+
+- Implementation: extracted per-entry registry validation, attached desktop capability resolution, Codex/ACP composition projections, and native tool declaration. Grouped resolved projection inputs for the private projection function. Existing validation order, lane propagation, allowlist union, and local import conventions remain intact.
+- Review: inspected the moved branches; 81 ACP MCP composition tests, 31 pinning tests without real-service startup, 12 contract/surface tests, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for the code change; type: no contract drift found.
+- Verification finding (environment dependency, severity medium): four real-service pinning tests failed because the installed service interpreter reports `service_env_no_gpu` (CUDA and MPS unavailable). They remain queued for execution on a supported accelerator host or a supported service configuration; 112 other tests in that run passed. This is not evidence that the four tests are green.
+- Queue: four prior radon offenders and one private PLR0913 finding in `_acp_mcp.py` are closed. Its public composition parameter-count finding and Pylint module-length finding remain open. Repository-wide cyclomatic gate still has 103 offenders, with other strict findings open.
+
+### 2026-09-20 authoring submitter review pass
+
+- Implementation: extracted locator URL, body-link, web-disclosure, and recovery-snapshot parsing helpers. Grouped the run's document proposal fields in an immutable context while keeping bearer and actor token as separate transient arguments. The operation's deterministic IDs and body are unchanged.
+- Review: inspected the diff; 56 submitter tests, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for the final change; type: no contract drift found. An initial pass found two unused locals introduced by the grouping; both were removed and the gates rerun green.
+- Verification limitation (environment dependency, severity medium): four service-marked live submitter tests were deselected because this run has no live engine endpoint; engine-backed proposal replay remains unverified here.
+- Queue: three prior radon offenders and three strict Ruff findings in `authoring/submitter.py` are closed. The repository-wide cyclomatic gate still has 100 offenders; other strict findings remain open.
+
+### 2026-09-20 OpenAI-compatible catalog review pass
+
+- Implementation: extracted URL-origin validation, complete model-list shape checks, and timeout validation into focused helpers. The same fail-closed checks run in their previous order before model normalization or the HTTP request.
+- Review: inspected the diff; 26 catalog tests including real HTTP contract cases, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for this change; type: no contract drift found.
+- Queue: three prior radon offenders in `providers/openai_catalog.py` are closed. Repository-wide cyclomatic gate still has 97 offenders and other strict findings remain open.
+
+### 2026-09-20 checkpoint snapshot projection review pass
+
+- Implementation: extracted clarification question/options decoding, repeated checkpoint object coercion, and pending interrupt projection. Existing malformed-input handling, degraded reasons, and generated interrupt identifiers retain their order and values.
+- Review: inspected the diff; 108 snapshot/clarification tests, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for this change; type: no contract drift found.
+- Queue: three prior radon offenders and the C901 finding in `thread/snapshots.py` are closed. Five pre-existing Pylint instance-attribute findings in this module remain open. Repository-wide cyclomatic gate still has 94 offenders.
+
+### 2026-09-20 permission response authorization review pass
+
+- Implementation: extracted document-approval refusal, active permission request selection, and failed dispatch error mapping into focused helpers. Journal, commit, and response behavior remains in the same order.
+- Review: inspected the diff; 18 permission rejection/options/lease tests, routine checks, strict type checking, focused Ruff/Pylint passed. The module has no radon function above 10. Severity: none for the final change; type: no contract drift found. An initial import-order finding from the new type-only `Sequence` import was fixed and checks rerun.
+- Queue: three prior radon offenders in `control/permission_service.py` are closed. Its Pylint module-length and instance-attribute findings remain open. Repository-wide cyclomatic gate still has 91 offenders.
+
+### 2026-09-20 graph compiler complexity and retry review pass
+
+Implementation: extracted the wrapped worker retry decision, topology validation, star worker context, plan approval route, and pipeline-loop duplicate scan from graph compilation. Review of the actual diff found no new behavior defect. The retry ordering, clarification rejection, and duplicate diagnostics remain intact. Verification: 67 graph compiler tests passed; strict Ty, routine checks, and `git diff --check` passed. The cyclomatic gate still reports 88 offenders (down from 91), and focused strict Ruff reports eight remaining compiler parameter-count findings (down from nine). These are open quality findings, severity medium, type maintainability; continue the existing codebase-health queue until all strict gates pass. No new functional issue was surfaced by this review.
+
+### 2026-09-20 ACP terminal creation complexity review pass
+
+Implementation: extracted terminal command allowlist and token checks, cwd containment, and environment override validation from `on_terminal_create` into focused helpers. Review of the actual diff found no new functional defect: validation order, sandbox refusal, audit logging, process cleanup, and JSON-RPC envelopes remain in the same order. The dict environment helper checks the same name and string-value contract. Verification: 63 focused tests passed (one service test deselected), routine checks passed, focused Ty and Basedpyright passed, and the cyclomatic gate fell from 88 to 87 offenders. Focused strict Ruff structure diagnostics for this module fell from three to zero. Remaining repository cyclomatic and strict structure findings are open, severity medium, type maintainability, in the existing codebase-health queue. No new behavioral issue was surfaced.
+
+### 2026-09-20 pytest process owner review pass
+
+Implementation: separated child creation, containment assignment, root and session timeout decisions, and progress reporting in the bounded pytest owner. Added a process probe test for a run that never produces a session result. Actual diff review found no new functional defect: the same timeout precedence, exit codes, diagnostic messages, containment cleanup, and assignment failure cleanup are preserved. Verification: five runner tests passed, including teardown, descendant, progress, and run timeouts; routine checks, strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 87 to 86 offenders; this module has zero focused strict Ruff structure findings (down from three) and zero radon offenders (down from one). Remaining repository findings are open, severity medium, type maintainability, in the existing codebase-health queue.
+
+### 2026-09-20 control action lease review pass
+
+Implementation: separated recovery deadline validation, reservation lease acquisition, and failed-dispatch authority checks into typed helpers. Review of the actual diff found no new behavioral defect: deadline refusal order, rollback-before-projection behavior, token matching, and failure disposition precedence remain intact. Verification: 21 focused control tests passed; routine checks, strict Ty and Basedpyright, Ruff, and diff checks passed. The cyclomatic gate fell from 86 to 84 offenders; this module has zero radon offenders, down from two, and its return-count Ruff finding is cleared. The public `prepare_control_action_claim` parameter-count finding remains open alongside the repository strict structure queue, severity medium, type maintainability; it requires a coordinated call-site change. No new functional issue was surfaced.
+
+### 2026-09-20 control action claim request review pass
+
+Implementation: grouped the durable claim identity, timing, recovery authority, and receipt expectation into a typed `ControlActionClaimRequest` and converted all ten production/test call sites. Review compared each call site against its previous AST and confirmed keyword names, order, and expressions were unchanged; no unconverted calls remain. The claim function forwards the same request fields to reservation, lease, and receipt. Verification: 23 focused control tests passed; full strict Ty/Basedpyright, routine checks, Ruff, and diff checks passed. The module has zero focused strict Ruff structure findings (down from one); repository cyclomatic count remains 84. Remaining strict structure and health findings remain open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 completed action detail projection review pass
+
+Implementation: separated command text, file-change locations, MCP tool text, and shared content wrapping from `action_detail_projection`. Actual diff review found no new behavior defect; each variant retains the same required-field checks, empty output behavior, text shape, and file path locations. Verification: 119 streaming/provider tests passed (one service test deselected), full strict Ty/Basedpyright and routine checks passed, and `git diff --check` passed. The repository cyclomatic gate fell from 84 to 83 offenders; this module now has zero radon offenders. Remaining code-health and strict structure findings remain open, severity medium, type maintainability, in the existing audit queue. No new functional issue was surfaced.
+
+### 2026-09-20 gateway and worker pairing review pass
+
+Implementation: shared band lookup between gateway dispatch and worker heartbeat pairing, isolated the explicit/learned gateway decision, and parsed reported generations in a focused helper. Actual diff review found no new behavior defect: missing configuration and roles still pass through, live band records still govern refusal and learning, diagnostic messages remain unchanged, and malformed worker generations still fail closed. Verification: 17 pairing tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 83 to 81 offenders; this module has zero radon offenders (down from two) and zero focused strict Ruff structure findings (down from two). Remaining repository findings stay open, severity medium, type maintainability, in the existing codebase-health queue.
+
+### 2026-09-20 provider catalog cache and model validation review pass
+
+Implementation: separated advertised-control validation, cache freshness and suppression checks, loader failure fencing, and catalog storage from the provider catalog cache read path. Actual diff review found no new behavior defect: the cache still checks freshness before suppression on ordinary reads, bypasses suppression on forced refreshes, rechecks under the lane lock, records only fence-clean loader failures, and fences storage after invalidation. Verification: 24 focused catalog/selection tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 81 to 79 offenders; this module has zero radon offenders (down from two) and two fewer focused strict Ruff structure findings. The remaining `StructuredProviderHealth.derive` parameter-count finding and other repository findings remain open, severity medium, type maintainability, in the existing codebase-health queue.
+
+### 2026-09-20 provider health axes review pass
+
+Implementation: grouped the five independent provider health observations in `ProviderHealthAxes` and updated all ten derivation call sites. Actual diff review used AST comparison to confirm every previous axis expression, reason, and timestamp is preserved; derived selectability still reads the same five axes and `StructuredProviderHealth` still validates the result. Verification: 57 provider, route, and redispatch tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The focused strict Ruff structure count for `provider_catalog.py` is zero (down from one); repository cyclomatic count remains 79. Remaining strict structure and health findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 checkpoint recovery authority review pass
+
+Implementation: separated incomplete and completed checkpoint elections, grouped the reconciliation trigger, timeout, sequence, and thread into a typed `RecoveryRequest`, and converted all eight production/test call sites. Actual diff review confirmed the original early refusal order, checkpoint transaction release, election effects, and final observation fields. AST comparison confirmed all eight call arguments were preserved. Review finding: the discovery projection test double still accepted the former positional thread ID; severity low, type test contract drift. It was updated to read the typed request, and the failed test passed on rerun. Verification: 11 recovery/reconciliation tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 79 to 78 offenders; this module has zero radon and focused strict Ruff structure findings. Remaining repository findings stay open, severity medium, type maintainability, in the existing codebase-health queue.
+
+### 2026-09-20 team status projection review pass
+
+Implementation: separated durable pending-thread eligibility sets and active agent descriptors from `build_team_status`. Actual diff review found no new behavior defect: path-safe known-thread filtering, terminal and checkpoint-unavailable exclusion, pending permission truth, active thread ordering, and descriptor fallback state remain unchanged. Verification: nine focused team status tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 78 to 77 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 authoring feedback rendering review pass
+
+Implementation: separated individual feedback item rendering from the batch read-shape validation and instruction assembly. Actual diff review found no new behavior defect: malformed items and empty bodies still drop out, heading paths retain their ordering and string conversion, and empty batches still return no grounding block. Verification: five feedback reader tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 77 to 76 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 worker terminal evidence review pass
+
+Implementation: separated terminal outcome/evidence-kind validation from failure fingerprint and provider-condition matching. Actual diff review found no new behavior defect: cancellation and failure evidence are still required for their matching outcomes, mismatched kinds retain the same exceptions, and missing or mismatched failure payloads still fail closed. Verification: 12 worker projection tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 76 to 75 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 Kimi capability normalization review pass
+
+Implementation: extracted one capability token's ASCII, length, leading-character, and remaining-character checks from the settings validator. Actual diff review found no new behavior defect: blank token refusal still occurs before token validation, deduplication order is unchanged, and the new `all` condition is the complement of the previous invalid-character `any` check. Verification: 16 provider settings tests passed; routine checks, full strict Ty/Basedpyright, Ruff, and diff checks passed. The repository cyclomatic gate fell from 75 to 74 offenders; this module now has zero radon offenders. Remaining repository quality findings stay open, severity medium, type maintainability, in the existing codebase-health queue. No new functional issue was surfaced.
+
+### 2026-09-20 terminal event review pass
+
+- Implementation: extracted terminal status and evidence compatibility validation from `_handle_terminal_event`, preserving the sequence capture, durable election, drain release, and aggregator cleanup order.
+- Review: inspected the actual diff and terminal tests. No new correctness findings surfaced (severity: none; type: implementation review). Focused terminal and event handler tests: 20 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 74 to 73 over limit; `_persist_permission_request` remains at 15 in this file. The repository-wide Ruff structural scan reports 146 findings across C901/PLR0911/PLR0912/PLR0913/PLR0915. Both are existing quality debt (severity: moderate; type: code health), still queued for reduction to zero. Full strict gate remains open.
+
+### 2026-09-20 permission request journal review pass
+
+- Implementation: normalized request metadata in a focused helper and isolated the current receipt identity check. The original ordering of option validation after thread lookup is preserved.
+- Review: inspected the diff. A low-severity behavioral ordering issue (type: validation timing) surfaced during review and was fixed before commit: option validation had moved before the absent-thread guard. No unresolved new findings remain. Permission/event tests: 33 passed; `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 73 to 72 over limit; this module now has no functions above 10. Repository-wide Ruff structural findings remain 146 (severity: moderate; type: code health). Full strict gate remains open, and these existing findings remain queued for zero.
+
+### 2026-09-20 accepted graph and recovery window review pass
+
+- Implementation: isolated immutable graph receipt matching and recovery window validation while preserving the original check order and error messages.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Recovery authority and attempt repository tests: 13 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 72 to 70 over limit. Ruff structural findings remain 146 (severity: moderate; type: code health). These existing findings remain open until zero, as does the full strict gate.
+
+### 2026-09-20 database authority validation review pass
+
+- Implementation: extracted runtime integer identity checks for run write authority and the balanced predicate reader for named SQLite CHECK constraints. Existing validation order and errors are retained.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Database authority/schema tests: 31 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 70 to 67 over limit. Ruff structural findings remain 146 (severity: moderate; type: code health). These existing findings remain open until zero, as does the full strict gate.
+
+### 2026-09-20 runtime singleton review pass
+
+- Implementation: separated owner-record parsing, contended-lock classification, and foreign-record rejection from singleton acquisition. The same conflict states, error messages, and lock release sequence remain.
+- Review: inspected the actual diff and lock ownership paths. No new correctness findings surfaced (severity: none; type: implementation review). Lifecycle, desktop, and CLI singleton tests: 11 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 67 to 65 over limit; Ruff structural findings fell from 146 to 145. Both are remaining moderate code-health debt; the full strict gate remains open until all findings reach zero.
+
+### 2026-09-20 gateway and ACP authentication review pass
+
+- Implementation: isolated fresh resident-token lookup and collected optional ACP telemetry fields before the existing None filter. Explicit gateway token precedence and loopback constraints remain unchanged.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Gateway and ACP auth/session tests: 51 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 65 to 63 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.
+
+### 2026-09-20 executable graph and run-stage validation review pass
+
+- Implementation: separated complete executable graph checks by team, agent roster, and supervisor authority; separated prepare and release run-stage checks. Validation order and exact errors are preserved.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Focused graph/accepted-input and run-selection/digest tests: 90 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 63 to 60 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.
+
+### 2026-09-20 desktop discovery and port reservation review pass
+
+- Implementation: isolated numeric and identity validation for desktop discovery records and the per-candidate atomic reservation attempt. Record rejection and exclusive marker arbitration retain their prior order.
+- Review: inspected both diffs and concurrency path. No new correctness findings surfaced (severity: none; type: implementation review). Discovery tests: 25 passed; registry/concurrency tests: 20 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 60 to 58 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.
+
+### 2026-09-20 terminal stream replay and authoring discovery review pass
+
+- Implementation: isolated durable terminal replay frames from live SSE subscription and split versioned versus legacy authoring discovery parsing. Failure code/message fallback and record-shape precedence are preserved.
+- Review: inspected both diffs and replay/record branches. No new correctness findings surfaced (severity: none; type: implementation review). Stream tests: 11 passed; authoring discovery tests: 15 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 58 to 56 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.
+
+### 2026-09-20 context compaction and CLI selection review pass
+
+- Implementation: isolated pinned-message partitioning and recent-message budgeting, plus exact catalog-entry selection from the served lane. The original objective and latest-message preservation rules and explicit catalog choice remain unchanged.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Context and live CLI tests: 45 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 56 to 54 over limit; Ruff structural findings remain 145. Both remain moderate code-health debt and the full strict gate remains open until zero.
+
+### 2026-09-20 full strict gate inventory and parser review pass
+
+- Strict inventory: `just check-strict` ran through every target. Remaining red dimensions included 54 cyclomatic offenders; shape: 13 module-length, 4 function-length, 81 parameter-count, 3 nesting-depth; Ruff function limits: 141; preview nesting: 31; Pylint size/design: 51 (13 module-length, 37 instance-attribute, 1 boolean-expression). Cognitive complexity also remained red. Strict Ty, reachability, unused symbols, exports, import loadability, and the ordinary `check-all` targets were green.
+- Implementation: separated the protocol-bound check in desktop discovery numeric validation and extracted one `/proc/net/tcp` line parser. The latter removes one preview nesting finding without changing the first matching inode or malformed-line behavior.
+- Review: inspected both diffs. No new correctness findings surfaced (severity: none; type: implementation review). Process and discovery tests: 28 passed. `just check-all` and `just check-type-strict` passed; focused Pylint no longer reports the boolean-expression issue in discovery. Preview nesting fell from 31 to 30.
+- Queue: after this pass, 54 cyclomatic, 141 Ruff function-limit, 30 preview nesting, 50 Pylint size/design, and the listed shape and cognitive findings remain (severity: moderate; type: code health). Full strict gate stays open until all reach zero.
+
+### 2026-09-20 follow-up dispatch and process group review pass
+
+- Implementation: isolated follow-up claim rejection and failed-dispatch settlement while preserving durable non-delivery and lease rules; separated Linux process-group membership scan from probe selection.
+- Review: inspected both diffs and dispatch ordering. No new correctness findings surfaced (severity: none; type: implementation review). Follow-up/control and process tests passed (36, then 15 after final dispatch edit). `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 54 to 52 over limit and Ruff function-limit findings from 141 to 139. The follow-up service still has a parameter-count finding, and all remaining strict findings remain queued (severity: moderate; type: code health).
+
+### 2026-09-20 database compatibility validator review pass
+
+- Implementation: isolated current write-authority column validation and receipt-index reflection from the read-only compatibility check, preserving their order and exact rejection messages.
+- Review: inspected the diff and database-open failure paths. No new correctness findings surfaced (severity: none; type: implementation review). Compatibility and authority-schema tests: 36 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 52 to 51 over limit. Ruff function-limit findings remain 139; other strict findings remain open (severity: moderate; type: code health).
+
+### 2026-09-20 Alembic current-only guard review pass
+
+- Implementation: separated revision ancestry, schema/index/check validation, and populated-row/receipt validation while keeping the migration transaction and rollback boundary. The guard still refuses incomplete current authority before migrations run.
+- Review: inspected the actual refactor. A low-severity validation-order issue (type: revision read timing) surfaced: a short-circuit initially skipped the Alembic revision read for populated stores. This was fixed before commit. No unresolved new correctness findings remain. Migration, authority, and compatibility tests: 51 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 51 to 50 over limit. Ruff function-limit findings remain 139; all other strict findings remain open (severity: moderate; type: code health).
+
+### 2026-09-20 gateway lifespan review pass
+
+- Implementation: isolated database startup, discovery publication/pairing/heartbeat registration, and observability shutdown from gateway lifespan. Startup publication and pairing checks, the discovery registration boundary, and shutdown order are retained.
+- Review: inspected the actual diff and startup/teardown order. No new correctness findings surfaced (severity: none; type: implementation review). App/shutdown tests: 18 passed; live gateway and desktop readiness/credential tests: 32 passed. `just check-all` and `just check-type-strict` passed.
+- Queue: cyclomatic complexity fell from 50 to 49 over limit, Ruff function-limit findings from 139 to 138, and code-health nesting depth from 3 to 2. `_lifespan` still has Ruff C901 and PLR0915 findings, and the file still contributes function-length debt (severity: moderate; type: code health). Remaining strict findings stay open until zero.
+
+### 2026-09-20 gateway worker and recovery lifecycle review pass
+
+- Implementation: moved worker resource initialization, startup reconciliation, authoring subscriber creation, recovery tasks, and ordered gateway shutdown into focused helpers. Shutdown retains admission drain, task cancellation, discovery cleanup, worker/resource closing, and telemetry shutdown in the same order.
+- Review: inspected startup/teardown dependencies and the changed call boundaries. No new correctness findings surfaced (severity: none; type: implementation review). Live gateway, restart, app, and desktop tests: 45 passed. `just check-all`, `just check-type-strict`, and focused Pylint passed.
+- Queue: Ruff function-limit findings fell from 138 to 136, removing the lifespan C901 and PLR0915 findings. Code-health function-length findings fell from 4 to 3. Cyclomatic findings remain 49 and all other strict findings remain open (severity: moderate; type: code health).
+
+### 2026-09-20 filesystem authority complexity review pass
+
+- Implementation: split Windows and POSIX private-file creation and no-replace publication into platform helpers. Public entry points retain name validation, authority validation, and platform dispatch. Cyclomatic findings fell from 49 to 47; selected Ruff design findings fell from 136 to 134.
+- Review finding (moderate, cross-platform type correctness; fixed): moving Windows calls out of a platform branch initially exposed `ctypes.get_last_error` and `msvcrt` functions to Linux and Darwin type checking. Explicit platform guards in both Windows helpers restore narrowing; strict type and platform checks pass.
+- Review finding (moderate, code health; queued): 47 cyclomatic findings and 134 selected Ruff design findings remain after this pass. Continue import-following refactors until all strict gates pass. The highest cyclomatic findings now include provider ACP session setup (18), supervisor response evaluation (17), and worker graph compilation (17).
+- Verification: desktop filesystem authority tests (7 passed) and credential/discovery/singleton integration tests (7 passed) before the platform guard; `just check-all`, `just check-type-strict`, Ruff selected design scan, Radon cyclomatic gate, and `git diff --check` after the guard. The Radon gate remains red because 47 findings remain.
+
+### 2026-09-20 ACP session setup review pass
+
+- Implementation: extracted the session setup request/authentication retry exchange and mode decoding from `setup_session`, preserving the existing request parameters, error handling, and session state writes. Removed an unused `resolve_env_vars` calculation and its imports after tracing that its result was never consumed. Cyclomatic findings fell from 47 to 46; selected Ruff design findings fell from 134 to 132.
+- Review finding (low, dead code; fixed): `setup_session` computed and updated an environment mapping which no request, process spawn, or return value read. The call performed only redundant local filesystem probing and environment preparation.
+- Review finding (moderate, code health; queued): 46 cyclomatic and 132 selected Ruff design findings remain. ACP initialization still measures 15 paths; supervisor response and graph compilation measure 17 each.
+- Verification: 27 ACP model selection, Kimi conditioning, and strict MCP tests passed (two live tests deselected); `just check-all` and `just check-type-strict` passed before the final unused-import removal; focused Ruff and Linux Ty passed after it, as did `git diff --check`. The cyclomatic gate remains red at 46 findings.
+
+### 2026-09-20 ACP initialization review pass
+
+- Implementation: extracted initialization result and authentication-method validation from `initialize_session`. Validation order, error codes, messages, and resume capability requirement remain the same. Cyclomatic findings fell from 46 to 45; selected Ruff design findings remain 132.
+- Review finding (moderate, code health; queued): 45 cyclomatic findings remain, led by supervisor response evaluation and worker graph compilation (17 each). The ACP initialization finding is closed.
+- Verification: 27 ACP model selection, Kimi conditioning, and strict MCP tests passed (two live tests deselected); `just check-all`, `just check-type-strict`, and `git diff --check` passed. Radon gate remains red at 45 findings.
+
+### 2026-09-20 Antigravity command resolution review pass
+
+- Implementation: extracted explicit-home normalization from the Antigravity executable resolver. Override, PATH, and installer-location precedence remains unchanged. Cyclomatic findings fell from 45 to 44.
+- Review finding (moderate, code health; queued): 44 cyclomatic findings remain; the resolver finding is closed. Selected Ruff design findings remain 132.
+- Verification: four Antigravity catalog cleanup tests, focused Ruff and Linux Ty, and `git diff --check` passed. The cyclomatic gate remains red at 44 findings.
+
+### 2026-09-20 supervisor routing review pass
+
+- Implementation: separated phase-prerequisite and plan-approval decisions from supervisor response routing. Decision ordering, warnings, routing errors, and approval payload remain the same. The original routing function fell from 17 to 7 paths; both helpers measure 7. Cyclomatic findings fell from 44 to 43.
+- Review finding (moderate, code health; queued): 43 cyclomatic findings and 132 selected Ruff design findings remain. The highest remaining cyclomatic function is worker graph compilation at 17 paths. The strict aggregate gate remains red.
+- Verification: 29 supervisor tests, `just check-all`, `just check-type-strict`, focused Ty, Ruff, and `git diff --check` passed. Full `just check-strict` before this edit returned nonzero from remaining strict dimensions.
+
+### 2026-09-20 worker graph authority review pass
+
+- Implementation: extracted resume checkpoint presence and compilation-digest binding from locked graph lookup. The digest, durable checkpoint, and cached graph checks run in their original order. The former 17-path function measures 7; cyclomatic findings fell from 43 to 42, with worst value 15.
+- Review finding (moderate, code health; queued): 42 cyclomatic findings and 132 selected Ruff design findings remain. Kimi catalog discovery is now the highest cyclomatic finding at 15.
+- Verification: four frozen graph authority tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 42 findings.
+
+### 2026-09-20 Kimi catalog cleanup review pass
+
+- Implementation: extracted process cleanup sequencing and outcome/error precedence from Kimi catalog discovery. Cleanup order, output-budget error precedence, exception notes, and return behavior remain unchanged. The original 15-path discovery function measures 5, with helpers at 2 and 10. Cyclomatic findings fell from 42 to 41 and selected Ruff design findings from 132 to 131.
+- Review finding (moderate, code health; queued): 41 cyclomatic and 131 selected Ruff design findings remain. Worst cyclomatic value is now 14.
+- Verification: seven Kimi catalog unit tests and three real subprocess output/timeout/cleanup tests passed; `just check-all`, `just check-type-strict`, focused Linux Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 41 findings.
+
+### 2026-09-20 MCP tool schema normalization review pass
+
+- Implementation: extracted DSL bounds and unknown-key guidance assembly from tool input schema normalization. Guidance order and schema closure behavior remain unchanged. The original 14-path function measures 7 and its helper measures 8; cyclomatic findings fell from 41 to 40.
+- Review finding (moderate, code health; queued): 40 cyclomatic and 131 selected Ruff design findings remain. The schema-normalization finding is closed.
+- Verification: 20 schema normalization tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 40 findings.
+
+### 2026-09-20 Codex catalog cleanup review pass
+
+- Implementation: extracted Codex catalog process cleanup, stderr protocol failure selection, and outcome/error resolution. Cleanup order, stderr error precedence, exception notes, and return behavior remain unchanged. The former 14-path function and all helpers are within the cyclomatic limit; findings fell from 40 to 39.
+- Review finding (low, formatting; fixed): the first `just check-all` run found one Ruff formatting change after extraction. Formatted the file and reran the full standard gate successfully.
+- Review finding (moderate, code health; queued): 39 cyclomatic and 131 selected Ruff design findings remain.
+- Verification: eight catalog unit tests and three subprocess error/reap tests passed; `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 39 findings.
+
+### 2026-09-20 provider catalog health review pass
+
+- Implementation: extracted ordered health-reason construction from provider catalog axis normalization. Configured and transport overrides still precede reason generation, and reason de-duplication preserves first occurrence. The original 14-path function and helper measure 7 and 8; cyclomatic findings fell from 39 to 38.
+- Review finding (low, formatting; fixed): the first standard gate found a Ruff formatting change. Formatted the module and reran `just check-all` successfully.
+- Review finding (moderate, code health; queued): 38 cyclomatic and 131 selected Ruff design findings remain.
+- Verification: 41 in-process catalog tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 38 findings.
+
+### 2026-09-20 worker dispatch admission review pass
+
+- Implementation: extracted capacity reservation/replay and synchronous task-group scheduling from the worker dispatcher. Reservation still precedes dispatch-ID admission, and scheduling still occurs without a suspension after admission. The dispatcher measures 9 paths; cyclomatic findings fell from 38 to 37.
+- Review finding (moderate, code health; queued): 37 cyclomatic and 131 selected Ruff design findings remain. Worker-management shutdown is now the sole 14-path function.
+- Verification: six dispatch-ID tests including duplicate and capacity races, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 37 findings.
+
+### 2026-09-20 worker shutdown cleanup review pass
+
+- Implementation: extracted the nested process-tree and retained-descendant cleanup from worker shutdown into one method. The same nested `finally` order still clears process state and closes retained/transient containment after cleanup attempts. Shutdown now measures 9 paths and its helper 6; cyclomatic findings fell from 37 to 36, worst value 13.
+- Review finding (low, formatting; fixed): the first standard gate found a Ruff formatting change. Formatted the module and reran `just check-all` successfully.
+- Review finding (moderate, code health; queued): 36 cyclomatic and 131 selected Ruff design findings remain.
+- Verification: 11 worker reaping tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 36 findings.
+
+### 2026-09-20 storage diagnostics review pass
+
+- Implementation: extracted SQLite store usage and path fallback from live storage diagnostics. Database remains the preferred volume anchor, with checkpoint used only when no measurable database path exists. The function now measures 9 paths and its helper 3; cyclomatic findings fell from 36 to 35.
+- Review finding (moderate, code health; queued): 35 cyclomatic and 131 selected Ruff design findings remain. The storage-diagnostics finding is closed.
+- Verification: four storage diagnostics tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The cyclomatic gate remains red at 35 findings.
+
+### 2026-09-20 authoring dispatcher function-length review pass
+
+- Implementation: moved dispatcher-owned argument sanitation into a module helper. Sanitization still strips model-supplied run identifiers before injecting the engine-owned values. Function-length findings fell from two to one.
+- Review finding (moderate, code health; queued): `create_mount_node` remains at 72 statements. The broader strict backlog includes 35 cyclomatic findings and 131 selected Ruff design findings.
+- Verification: the proposal lifecycle injection test, `just check-all`, `just check-type-strict`, focused Ty and Ruff, and `git diff --check` passed. The function-length gate remains red with one finding.
+
+### 2026-09-20 vault mount factory function-length review pass
+
+- Implementation: moved database queue rendering and mtime-cached vault document reading into module helpers, passing the graph-scoped cache and queue port explicitly. The factory still creates one cache per compiled graph; queue failure degrades to no block as before. Function-length findings reached zero, and selected Ruff design findings fell from 131 to 130.
+- Review finding (moderate, code health; queued): other strict dimensions remain red, including 35 cyclomatic findings and 130 selected Ruff design findings. The function-length gate is now green.
+- Verification: nine vault reader tests, `just check-all`, `just check-type-strict`, focused Ty and Ruff, `git diff --check`, and the function-length gate passed.
+
+### 2026-09-20 provider stream nesting review pass
+
+- Implementation: extracted ACP message-chunk enqueueing and flattened the mutually exclusive ACP and Codex notification branches with explicit exits. Message handling order, queue-full warnings, streamed chunks, usage updates, and terminal completion remain unchanged. Nesting-depth findings fell from two to zero.
+- Review finding (moderate, code health; queued): other strict dimensions remain red, including 35 cyclomatic and 130 selected Ruff design findings. The nesting-depth shape gate is now green.
+- Verification: 22 ACP command/stop tests and 61 Codex model/idle/condition tests passed (one deselected); `just check-all`, `just check-type-strict`, focused Ty and Ruff, `git diff --check`, and the nesting-depth gate passed.
+
+### 2026-09-20 full strict gate reconciliation
+
+- Full `just check-strict` completed after the provider stream nesting pass. Standard checks, strict Ty, reachability, unused-symbol and export coverage, imports, dependencies, workflow, and shell gates passed. Function length and shape nesting are at zero.
+- Review finding (moderate, code health; queued): cyclomatic complexity has 34 findings (the preceding review entry quoted the pre-refactor value 35), module length 13, parameter count 81, Ruff function limits 130, Ruff preview nesting 30, and Pylint size/design 53 (C0302 13; R0902 37; R0904 3). The Pylint count is from the full run, not an earlier partial estimate. The current health report also ranks 9 modules below the maintainability threshold; this report is advisory but remains part of the audit backlog.
+- Remaining work: reduce each measured strict dimension to zero, rerun the full strict recipe, and only then treat the draft PR as ready.
+
+### 2026-09-20 gateway schema module review pass
+
+- Implementation: moved liveness/readiness enums and models into `api/schemas/gateway_readiness.py`, with `gateway.py` retaining its existing imports and exports. The API version constant now has one home in the new module. `gateway.py` fell to 953 lines, reducing module-length findings from 13 to 12.
+- Review finding (moderate, strict type; fixed): the first split imported a private version constant across modules and basedpyright reported `reportPrivateUsage`. Made the shared constant public in its home and kept the gateway-local alias.
+- Review finding (low, lint/format; fixed): Ruff required a separate aliased import and formatting after the split. Both standard checks pass after correction.
+- Review finding (moderate, code health; queued): 12 long modules and the other full strict findings remain.
+- Verification: 49 schema/vocabulary tests, import loadability of 271 governed modules, unused-symbol and unconsumed-export coverage, `just check-all`, `just check-type-strict`, focused Ty/Ruff, and `git diff --check` passed.
+
+### 2026-09-20 ACP prompt outcome module review pass
+
+- Implementation: moved prompt/session outcome validation and native-command name validation from `acp_chat_model.py` into `_acp_prompt_outcomes.py`. Existing model behavior and the private local call names remain the same; the model module fell to 999 lines, reducing module-length findings from 12 to 11.
+- Review finding (moderate, strict type; fixed): a test still imported the moved private helper from the model module, producing basedpyright `reportPrivateLocalImportUsage`. Updated the test to import the public function from its new owner.
+- Review finding (low, lint; fixed): sorted the test import after the owner change.
+- Review finding (moderate, code health; queued): 11 long modules and the other strict findings remain.
+- Verification: 28 ACP command/condition/stop tests before the test import update and 21 focused tests after it, import loadability of 272 governed modules, unused-symbol and export coverage, `just check-all`, `just check-type-strict`, focused Ty/Ruff, and `git diff --check` passed.
+
+### 2026-09-20 permission response contract extraction review
+
+- Implementation: moved response identity, verdict, rejection payload validation, and immutable transition records from `control/permission_service.py` into `control/_permission_response_contract.py`. The service now has 971 lines; the module-length gate decreased from 11 to 10 offenders.
+- Review: inspected imports and callers after extraction. The response helper and state definitions retain their original behavior; the service re-exports its existing public API. Severity/type: no new defect found in this pass. Existing high-volume strict shape, complexity, and Ruff findings remain open in this audit queue.
+- Verification: Ruff check and format, strict Ty, focused permission lease tests, and module-length gate. `just check-all` run for repository-wide validation.
+
+### 2026-09-20 Windows ACL complexity review
+
+- Implementation: extracted native ACE inspection into `_restricted_dacl_principals` in `desktop/_platform_acl.py`. The public check retains descriptor ownership and exact principal-set comparison.
+- Review: inspected allocation and release paths, invalid ACE handling, and return semantics. Severity/type: no new defect found. Windows-specific ACL behavior remains dependent on native Windows integration tests; this host ran the desktop profile tests successfully. Existing strict complexity findings remain open in this audit queue.
+- Verification: selected Ruff complexity and full Ruff checks for the file, Ruff format, strict Ty, 12 desktop profile tests, and the cyclomatic gate. Cyclomatic findings decreased from 34 to 33.
+
+### 2026-09-20 authoring binding validation review
+
+- Implementation: separated transport validation from token and catalog checks in `AuthoringToolBinding.__post_init__` without changing their order or failure messages.
+- Review: inspected the complete validation path and test coverage for HTTP and stdio transport, tokens, and write-tool refusal. Severity/type: no new defect found. Remaining strict complexity findings are retained in this audit queue.
+- Verification: Ruff selected complexity, full Ruff check and format, strict Ty, 51 focused authoring tests, and the cyclomatic gate. Cyclomatic findings decreased from 33 to 32.
+
+### 2026-09-20 event application and clarification review
+
+- Implementation: moved permission resolution and dispatch application receipt settlement from `control/event_handlers.py` to `control/_event_application.py`, following their direct imports and callers. `event_handlers.py` is now 938 lines; the module-length gate decreased from 10 to 9 offenders. Extracted clarification answer validation from `respond_to_clarification`, reducing cyclomatic findings further.
+- Review finding, medium/type regression, fixed: the prior Windows ACL helper lacked its own platform guard, so cross-platform Ty found eight Windows-only `ctypes` member errors on Linux and Darwin. The helper now checks `os.name` before using Windows APIs. Cross-platform Ty checks pass.
+- Review of event and clarification changes: inspected call sites, direct imports, durable receipt path, and validation order. No additional defect found; remaining strict shape and complexity findings remain open in this audit queue.
+- Verification: strict Ty, `just check-all`, 20 event handler/terminal tests, 10 clarification/live tests, file-specific Ruff checks and format, module-length and cyclomatic gates. The final cyclomatic count is assessed after concurrent scoped changes finish.
+
+### 2026-09-20 execution-state projection review
+
+- Implementation: extracted projection freshness classification and stale diagnostic merging from `enrich_snapshot_from_execution_state` in `control/projection.py`.
+- Review: inspected the combined recovery-epoch, checkpoint-availability, and checkpoint-id predicate against the original ordering. Severity/type: no defect found. Remaining complexity findings stay open.
+- Verification: Ruff selected and full checks, format, strict Ty and basedpyright, 17 API projection tests, and `git diff --check`.
+
+### 2026-09-20 active-run discovery review
+
+- Implementation: extracted selector validation, workspace normalization, candidate reconciliation, and public projection from `discover_active_runs` in `control/run_discovery_service.py`.
+- Review: inspected validation order, deadline, commit/requery, filtering, and truncation in the resulting flow. Severity/type: no new defect found. Remaining strict findings stay open in this audit queue.
+- Verification: selected and full Ruff checks, Ruff format, source Ty, 10 focused tests and one performance test. The discovered function's radon complexity decreased from 12 to 1.
+
+### 2026-09-20 worker dispatch response review
+
+- Implementation: extracted HTTP response classification and deferred-demand readiness signaling from `dispatch_to_worker` in `control/dispatch.py`.
+- Review: inspected call order, failure accounting, exact raised exception types, and successful response shape. Severity/type: no new defect found. The function-specific radon over-limit finding is removed; its separate parameter-count finding remains queued.
+- Verification: file-specific Ruff, format, radon API, strict Ty for the dispatch file, and 19 dispatch/readiness/reconciliation tests. A concurrent full strict Ty run found diagnostics in an independently edited worker file; that owner is correcting them.
+
+### 2026-09-20 registration and ACP authentication review
+
+- Implementation: extracted role/port config eligibility from `register_serve` and authentication response classification from `authenticate_rpc`.
+- Review: inspected validation order and resolved config reuse for registration, and the complete error-result mapping for ACP authenticate. Severity/type: no new defect found. Registration's pre-existing parameter-count finding remains medium/type shape and stays queued.
+- Verification: eight focused registration tests, 24 ACP exception tests, file-specific Ruff/format, targeted Ty, and function-level Radon. Both functions now meet the cyclomatic threshold.
+
+### 2026-09-20 orphan config-home sweep review
+
+- Implementation: extracted old-directory eligibility from `sweep_orphan_homes` in `providers/_config_home_roots.py`.
+- Review: checked keep-path exclusion, freshness cutoff, concurrent removal handling, and post-delete existence check against prior behavior. Severity/type: no new defect found; other complexity findings remain queued.
+- Verification: file Ruff and format, function-level Radon, and two focused orphan-sweep tests. The sweep function now meets the cyclomatic threshold.
+
+### 2026-09-20 mock permission normalization review
+
+- Implementation: moved mock permission tool-call payload normalization from `_collect_mock_permission_result` to `_parse_mock_permission_call` in `graph/nodes/worker.py`.
+- Review: inspected the malformed input fallback, dict option filtering, and callback arguments. Severity/type: no new defect found; remaining worker-node complexity findings stay open in this audit queue.
+- Verification: strict Ty, full Ruff and target format, 22 focused worker tests, `git diff --check`, and cyclomatic gate. The target function no longer exceeds the cyclomatic threshold.
+
+### 2026-09-20 cancel dispatch signature review
+
+- Implementation: removed the redundant `bypass_circuit_breaker` argument from `dispatch_to_worker` and `safe_dispatch`; cancel action now carries its circuit-bypass rule directly. Updated both cancel call sites and added an open-circuit cancel transport test.
+- Review: traced all production call sites and verified that only cancel paths had passed the bypass flag. Checked non-cancel receipt validation and circuit admission order. Severity/type: no new defect found. Other parameter-count findings remain queued.
+- Verification: strict Ty, Ruff check/format, 28 cancel/recovery/dispatch tests plus the new open-circuit transport test, and the parameter-count gate. Parameter-count findings decreased from 81 to 79.
+
+### 2026-09-20 worker message and ACP catalog review
+
+- Implementation: extracted role-scoped workspace rule compilation from `_build_worker_messages` and option normalization from ACP `_control_from_option`.
+- Review: compared role selection, bundled rule gating, message order, ACP option ordering, defaults, identifiers, and error paths with the prior code. Severity/type: no new defect found; other worker and catalog strict findings stay open.
+- Verification: 16 worker-node tests, 62 ACP catalog/bounds tests, Ruff check/format, file-scoped Ty and strict basedpyright. Both target functions now meet the cyclomatic threshold. Full strict Ty is pending a concurrent MCP contract edit.
+
+### 2026-09-20 queue-tool Command merge review
+
+- Implementation: extracted queue-tool Command validation and state-patch merge from `_collect_queue_tool_results` into `_merge_queue_command` in `graph/nodes/worker.py`.
+- Review: checked invalid result failure, ToolMessage filtering, patch key precedence, and sequential merge order. Severity/type: no new defect found; other worker-node strict findings remain queued.
+- Verification: file Ruff and format, function Radon, 16 worker-node tests and six worker integration tests including graph queue dispatch. Target function complexity decreased from 13 to 7.
+
+### 2026-09-20 MCP tool contract review
+
+- Implementation: extracted declared-versus-served tool differences from `verify_declared_tool_contract` in `providers/_mcp_contract.py`.
+- Review: inspected missing and undeclared selection under exact-surface mode, plus unchanged refusal messages. Severity/type: no new defect found. The pre-existing seven-parameter `PLR0913` finding is medium/type shape and remains queued.
+- Verification: 25 focused MCP/registry tests, strict Ty, file Ruff and format, `git diff --check`, and Radon. Target function complexity decreased from 12 to 7.
+
+### 2026-09-20 permission dispatch error ownership review
+
+- Implementation: moved protocol-facing failed-dispatch error translation from `permission_service.py` to the existing `permission_dispatch.py` helper module and followed its import back into the service. The service is now 998 lines; module-length findings decreased from 10 to 9 after permission replay changes.
+- Review: compared error details, HTTP status mapping, and call sites with the original function. Severity/type: no new defect found. Other module-length and parameter findings stay open in this audit queue.
+- Verification: Ruff and format checks for both files, eight permission lease/dispatch transition tests, and the module-length gate. Strict Ty is running for the combined tree.
+
+### 2026-09-20 checkpoint interrupt projection review
+
+- Implementation: extracted checkpoint interrupt merging from `apply_checkpoint_projection` into `_merge_checkpoint_interrupts` in `control/projection.py`.
+- Review: inspected duplicate permission suppression, first parked clarification selection, and unchanged projection order. Severity/type: no new defect found; other projection findings remain queued.
+- Verification: Ruff/format, 17 API projection tests, and function-level Radon. The target function complexity decreased from 11 to 4, with the helper at 8.
+
+### 2026-09-20 cancellation election and public catalog review
+
+- Implementation: extracted cancel writer-ownership and lost-election classification from `_elect_cancel_authority`; extracted public identifier collection from `validate_public_catalog_bounds`.
+- Review: checked cancellation election outcomes, refreshed thread eligibility, public identifier ordering, revision inclusion, and unchanged validation errors. Severity/type: no new defect found; other complexity and parameter findings remain open.
+- Verification: nine direct-control lease tests, 22 catalog tests, targeted Ruff/format and Ty. Radon complexity decreased from 11 to 7 for cancellation election and 12 to 8 for catalog bounds.
+
+### 2026-09-20 Kimi catalog model-reference review
+
+- Implementation: extracted provider/model reference validation from `catalog_from_provider_list` into `_validated_model_reference`.
+- Review: checked validation order, exact error messages, returned provider reference, revision row construction, and model metadata. Severity/type: no new defect found. The pre-existing six-parameter `discover_kimi_catalog` shape finding remains queued.
+- Verification: 59 focused Kimi catalog tests, Ruff and format, targeted Ty, and Radon. Target function complexity decreased from 12 to 9.
+
+### 2026-09-20 process tree and containment split review
+
+- Implementation: moved process-table probes, listener ownership, descendant walking, and tree-kill primitives from `utils/process.py` into `utils/_process_tree.py`. The existing `process` import surface re-exports its public API and exercised private test seams; OS-owned `ProcessContainment` stays in the facade. The files now have 703 and 889 lines, reducing module-length findings from 9 to 8.
+- Review: inspected cross-module imports, native Windows handle loader ownership, probe constants, public and test imports, and absence of a new import cycle. Severity/type: no new defect found. Remaining long modules stay queued.
+- Verification: Ruff check/format, strict Ty, import-load probe for all 275 governed modules, `git diff --check`, and 34 real-process/containment tests. The module-length gate reports eight remaining offenders.
+
+### 2026-09-20 desktop entrypoint complexity review
+
+- Implementation: extracted rooted path detection into `_is_rooted_command_segment` while retaining validation order and error wording in `ComponentEntrypoint._segments_non_empty`.
+- Verification: 80 desktop contract tests passed; Ruff, format, Ty, and `git diff --check` passed. The cyclomatic gate fell from 15 to 13 offenders in the shared worktree, with concurrent changes contributing to that total.
+- Review finding (medium, code health): the repository cyclomatic gate remains red at 13 offenders; continue the existing complexity burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 streaming and checkpoint complexity review
+
+- Implementation: extracted tool-call state update logic and checkpoint digest validation into focused helpers. The original call ordering, validation, and error text remain intact.
+- Verification: 73 streaming aggregation tests passed. The checkpoint lane passed its focused 52 tests and strict Ty. Targeted Ruff, format, Ty, and diff checks passed. The shared cyclomatic count is 12 at review time.
+- Review finding (medium, code health): 12 cyclomatic offenders remain in the strict gate; continue the existing complexity burn-down queue. No new functional defect was found in these two changes.
+
+### 2026-09-20 telemetry and test placement complexity review
+
+- Implementation: extracted telemetry SDK setup and test item placement into helpers while preserving their call order and effects.
+- Verification: 44 combined telemetry and plugin tests passed. Targeted Ruff, format, Ty, and diff checks passed. The shared cyclomatic gate reports 11 remaining offenders.
+- Review finding (medium, code health): the cyclomatic gate remains red at 11 offenders; continue the existing complexity burn-down queue. No new functional defect was found in these two changes.
+
+### 2026-09-20 clarification complexity review
+
+- Implementation: extracted clarification answer normalization and per-question answer validation into helpers. The validation ordering, error wording, and payload shape are preserved.
+- Verification: 44 clarification tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 11 to 9 offenders.
+- Review finding (medium, code health): 9 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 verdict checkpoint correlation complexity review
+
+- Implementation: extracted checkpoint authoring-id collection from the verdict subscriber method. Timeout and read-failure handling remain in the caller; checkpoint value traversal preserves its prior order and filtering.
+- Verification: 22 verdict subscriber tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 9 to 8 offenders.
+- Review finding (medium, code health): 8 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 ACP chunk callback complexity review
+
+- Implementation: extracted repeated chunk callback invocation from active and drained ACP queue paths into `_notify_chunk`; callback timing and exception propagation remain within their original loops.
+- Verification: 11 focused ACP stop and deadline tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 8 to 7 offenders.
+- Review finding (medium, code health): 7 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 event filter complexity review
+
+- Implementation: moved filtered-event telemetry and debug logging into `_record_filtered_event`. Its call remains after recognized event translation, preserving which events are counted and logged.
+- Verification: 13 focused LangGraph event tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate fell from 7 to 6 offenders.
+- Review finding (medium, code health): 6 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 ACP catalog outcome complexity review
+
+- Implementation: extracted catalog outcome and cleanup failure arbitration into `_catalog_outcome_or_raise`. The cleanup sequence and failure precedence remain unchanged.
+- Verification: 10 focused ACP catalog tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate reports 5 remaining offenders with this and the event projection change present.
+- Review finding (medium, code health): 5 cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 ACP chunk module-length review
+
+- Implementation: moved the existing ACP chunk callback delivery helper into `_acp_chunks.py`, keeping the call sites and callback timing unchanged.
+- Verification: 7 ACP stop-outcome tests passed; target Ruff, Ty, formatting, and diff checks passed. The module-length gate fell from 9 to 8 offenders.
+- Review finding (medium, code health): 8 modules remain over the 1000-line limit; continue the existing module-length burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 ACP native-command complexity review
+
+- Implementation: moved exception-to-result classification into `_native_command_error_result`, retaining the original exception order, logging, outcome, and effects flag.
+- Verification: 8 native-command tests passed; target Ruff, Ty, formatting, and diff checks passed. The cyclomatic gate no longer reports `execute_native_command`.
+- Review finding (medium, code health): other cyclomatic offenders remain; continue the existing strict-gate burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 lifecycle reservation release complexity review
+
+- Implementation: extracted held port-reservation release into `_release_held_reservations`. The `finally` path still releases every held reservation in the same order.
+- Verification: 39 lifecycle manager tests passed; target Ruff, Ty, formatting, and diff checks passed. The shared worktree cyclomatic gate currently reports zero findings after concurrent bounded fixes.
+- Review finding (medium, code health): the strict suite still has non-cyclomatic findings; continue the existing burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 Codex dispatch complexity review
+
+- Implementation: extracted Codex server-request and notification routing from `_dispatch`. Request classification, observation ordering, and refusal payload remain unchanged.
+- Verification: the delegated lane reports 46 focused tests passed, with Ruff, Ty, formatting, and diff checks passing. `_dispatch` Radon complexity fell from 13 to 10.
+- Review finding (medium, code health): strict non-cyclomatic findings remain; continue the existing queue. No new functional defect was found in this pass.
+
+### 2026-09-20 thread election and execution-state complexity review
+
+- Implementation: extracted election input validation and degraded-only projection classification. Review caught that the first predicate helper introduced a new 9-parameter finding; its inputs were grouped before commit. The parameter-count gate remains at 79 offenders, and the cyclomatic gate is green with zero offenders.
+- Verification: 16 focused thread-status and execution-state projection tests passed. Target Ruff, Ty, formatting, and diff checks passed.
+- Review finding (medium, code health): the existing parameter-count and other strict findings remain; continue the queue. No new functional defect was found in this pass.
+
+### 2026-09-20 worker executor module-length review
+
+- Implementation: moved dispatch guard and reservation definitions, checkpoint-backed dispatch receipt emission, and best-effort authoring close into focused worker modules. Executor call ordering and the original logger category are preserved.
+- Verification: 80 executor, dispatch-id, token lifecycle, and authoring binding tests passed. Target Ruff, Ty, formatting, and diff checks passed. The module-length gate fell from 8 to 7 offenders; `executor.py` is below 1000 lines.
+- Review finding (medium, code health): the review caught a logging-category change in the moved functions and restored the original executor logger name before commit. Seven oversized modules and other strict findings remain in the audit queue.
+
+### 2026-09-20 desktop execution-resource review
+
+- Implementation: declared the desktop real-process tier as a shared `desktop-processes` resource at collection time. This removes the undeclared-live serial catch-all while preserving machine-global admission, per-test timeout backstops, isolated application homes, and dynamic port allocation.
+- Verification: the resource/plugin contract suite passed 71 tests; Ruff and BasedPyright passed. A two-worker proof placed two real desktop tests on distinct workers and completed in 10.12 seconds. A representative 12-test admission/provenance subset completed in 57.61 seconds on four workers versus about 186 seconds of cumulative test time.
+- Review finding (low, performance/environment): a saturated Windows host can erase the wall-clock benefit for the complete desktop directory (288.10 seconds on four workers versus 286.24 seconds serial) despite confirmed distribution and focused parallel speedup. This is host/process contention, not residual scheduler serialization; session admission remains the capacity backstop. No new correctness defect was found.
+
+### 2026-09-20 executor split follow-up review
+
+- Review finding (high, type regression): the executor split initially left moved private dispatch symbols unavailable to existing typed importers. Explicit exports and a moved failure-evidence helper fixed all 12 strict type diagnostics while keeping `executor.py` below 1000 lines. The affected executor failure/settle tests passed.
+- Review finding (medium, export hygiene): `DetachedSpawnFlags` was published from `utils.process` without a consumer. Removed that redundant facade export; the unconsumed-export guard and governed import-load probe now report zero findings.
+- Remaining work: the module-length gate has 7 oversized modules, and strict shape, Ruff, preview nesting, and Pylint findings remain in the queue.
+
+### 2026-09-20 provider factory module-length review
+
+- Implementation: moved provider command resolution, capsule asset paths, and explicit subprocess environment builders into `_factory_commands.py`; the factory re-exports its established import surface. Both modules remain below 1000 lines, and command resolution still reads the shared settings instance.
+- Verification: 56 focused factory, capsule resolution, and catalog registration tests passed. Target Ruff, Ty, basedpyright, formatting, and diff checks passed. Import loadability and unconsumed-export coverage report zero findings. The module-length gate fell from 7 to 6 offenders.
+- Review finding (medium, code health): six oversized modules and the other strict findings remain; continue the existing burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 private RAG service-control lane review
+
+- Implementation: the four tests that boot and control a private `vaultspec-rag` data-plane service now carry the `service` marker and an exclusive `rag-service-control` resource declaration. The deterministic unit lane retains the module's 31 pure contract tests and deselects the four live proofs.
+- Verification: focused collection selected 31 of 35 tests under `-m "not service"`; Ruff passed. The resource suite reached 69 passes before an unrelated concurrent `InfraConfig` `NameError` prevented an isolated subprocess from loading the repository plugin.
+- Review finding (medium, test isolation): RESOLVED. Private service startup had been reachable from the unit lane, consumed up to 120 seconds per proof, and attempted accelerator-backed RAG startup on machines that cannot provide it. No RAG process is now required or started by the unit lane.
+
+### 2026-09-20 infrastructure settings module-length review
+
+- Implementation: moved infrastructure settings fields, endpoint constants, and path/URL helpers into `control/infra_config.py`. `Settings` still composes that class with domain settings in `control/config.py`, and the consumed config constants remain explicitly re-exported.
+- Verification: 47 focused configuration and desktop profile tests passed. Target Ruff, Ty, basedpyright, formatting, diff, import-load, and unconsumed-export checks passed. The module-length gate fell from 6 to 5 offenders.
+- Review finding (medium, code health): five oversized modules and other strict findings remain; continue the existing burn-down queue. No new functional defect was found in this pass.
+
+### 2026-09-20 test helper parameter review
+
+- Medium / maintainability: `api/tests/test_gateway_drain.py` relay helper exceeded the strict Ruff parameter limit. Grouped its three fixture dependencies into a frozen `_RelayContext`; focused drain tests (8), Ruff, formatter, and targeted Ty pass. Review found no behavioral issue.
+- Medium / maintainability: `control/tests/test_event_handlers.py` action-seeding and answered-rejection helpers exceeded the strict Ruff parameter limit. Grouped fixture input into frozen `_SeedActionSpec` and `_RejectionSpec`; focused handler tests (17), Ruff, formatter, and targeted Ty pass. Review found no behavioral issue.
+- Remaining queue: repository strict findings in production modules and functions remain open and must be reduced to zero before this audit closes.
+- Medium / type integration: commit-hook Ty exposed two transcript-availability tests calling the old relay helper signature. Updated both to pass `_RelayContext`; repository Ty and all five transcript tests now pass. This finding is resolved in the same pass.
+
+### 2026-09-20 Codex model split review
+
+- High / maintainability: `providers/codex_chat_model.py` exceeded the 1000-line strict limit. Extracted pure protocol projections into `_codex_protocol.py` and the subprocess JSON-RPC client into `_codex_app_server_client.py`; the model is now 768 lines. Preserved the existing import surface and logger category. Strict Ty, 59 focused Codex tests, import loadability (284 modules), and unconsumed exports (zero findings) pass. Review found no behavioral issue.
+- Medium / integration: moving private test imports first surfaced strict type and export diagnostics. Explicit exports and reexports resolved these before commit.
+- Remaining queue from full strict run: 4 oversized modules, 79 parameter-count findings, 124 selected Ruff findings, 30 preview nesting findings, and remaining Pylint design findings. Cyclomatic complexity and function length remain green. These findings remain open.
+
+### 2026-09-20 unit catalog and Windows transport review
+
+- Implementation: the shared API unit fixture now filters the real `ProviderFactory` registrations to the production in-process lanes before discovery, so it no longer launches external provider CLIs merely to select the deterministic lane. The explicit service-marked all-provider route remains the live discovery proof. The real production-gateway fixture now drains subprocess stdout and reaps the child together with `communicate()` on the owning event loop, including its kill fallback.
+- Verification: the deterministic catalog and restart path passed three focused warning-as-error tests in 2.68 seconds; the exact production-gateway leak sequence passed five warning-as-error tests; the complete API suite passed 524 tests with one honest skip and one service deselection in 103.29 seconds with `PytestUnraisableExceptionWarning` promoted to error. Ruff and BasedPyright passed.
+- Review finding (medium, test isolation): RESOLVED. The unit fixture's six-hour cache still paid one prompt-free external-provider subprocess discovery per pytest process; it now exposes only real in-process registrations and performs no external I/O.
+- Review finding (low, Windows process cleanup): RESOLVED. Awaiting `Process.wait()` reaped the gateway child but left Proactor pipe EOF/closure asynchronous; `communicate()` now owns drain, reap, and transport closure on the creating loop. No new defect was found.
+
+### 2026-09-20 MCP composition split review
+
+- High / maintainability: `providers/_acp_mcp.py` exceeded the 1000-line strict limit. Extracted immutable harness registry declarations to `_harness_mcp_registry.py` and native read-tool bounds to `_native_read_tools.py`; facade is now 925 lines. Review verified the reexport surface and the registry's immutable construction remained intact. Strict Ty, 125 focused MCP tests, import loadability (286 modules), Ruff, formatter, and zero unconsumed exports pass. No behavioral finding remains from this split.
+- Medium / integration: first extraction surfaced missing registry constants and helper reexports in downstream tests and capability resolution. Explicit imports and exports resolved the type errors. Five unused helper exports found by the export guard were removed.
+- Remaining queue: 3 oversized modules plus strict parameter, Ruff, preview nesting, and Pylint findings remain open.
+
+### 2026-09-20 RAG CLI acquisition lane review
+
+- Implementation: the remaining proof that executes the externally acquired `vaultspec-search-mcp --help` command now carries `service` and the exclusive `rag-service-control` resource marker. Its 34 deterministic registry/composition neighbours remain in the unit lane.
+- Verification: focused non-service collection selected 34 of 35 tests; all 34 passed in 1.22 seconds and Ruff passed.
+- Review finding (low, test isolation): RESOLVED. The invocation did not start the RAG daemon, but it still crossed the external package/CLI boundary from the unit lane and contradicted the operator's instruction to ignore RAG.
+
+### 2026-09-20 desktop heartbeat parameter review
+
+- Medium / maintainability: `api/app.py` desktop discovery heartbeat exceeded the strict five-parameter limit. Grouped its immutable inputs in a frozen slotted `_DesktopDiscoveryHeartbeatConfig`; the write call and log path still read the same values. Review found no behavior change. Ruff, formatter, Ty, and 11 focused API tests pass; the app file has zero PLR0913 findings.
+- Remaining queue: other strict parameter-count findings remain open.
+
+### 2026-09-20 worker management split review
+
+- High / maintainability: `control/worker_management.py` exceeded the 1000-line strict limit. Extracted worker health and liveness, process shutdown, and readiness admission into three modules; the spawner/watchdog facade is now 874 lines. Review checked logger category, lifetime identity, retained-process cleanup, and import compatibility. Strict Ty, 73 focused worker lifecycle tests, import loadability (289 modules), Ruff, formatter, and zero unconsumed exports pass. No behavior finding remains from this pass.
+- Medium / integration: moved private helpers initially broke strict imports and export diagnostics. Explicit reexports restored the existing test and gateway surface. Removed two orphaned module constants left by extraction.
+- Remaining queue: 2 oversized modules and strict parameter, Ruff, preview nesting, and Pylint findings remain open.
+
+### 2026-09-20 registry cognitive complexity review
+
+- Medium / maintainability: `_record_from_dict` scored 16 against the cognitive-complexity limit of 15. Moved required identity validation into `_record_identity`, preserving all invalid-record rejections. Review found no changed output path. The function now passes complexity; all 19 focused registry tests, Ruff, and formatter pass.
+- Remaining queue: cognitive complexity has six offenders (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`, `_foreign_project_argument`, `CodexChatModel._consume_turn`, `_await_pytest_exit`).
+
+### 2026-09-20 ACP project argument complexity review
+
+- High / security maintainability: `_foreign_project_argument` scored 25 cognitive complexity within the permission boundary. Split its depth-bound recursive scan into field, mapping, and value helpers while preserving first-match order, project binding, and depth cutoff. Review found no scope change. Strict Ty, Ruff, 27 focused project-confinement tests pass; the function now passes complexity.
+- Remaining queue: five cognitive-complexity offenders remain (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`, `CodexChatModel._consume_turn`, `_await_pytest_exit`).
+
+### 2026-09-20 authoring client parameter review
+
+- Medium / maintainability: `AuthoringClient.__init__` exceeded five parameters. A typed keyword-options shape retains `timeout` and `bearer_resolver` call compatibility while clearing the Ruff parameter gate. Review checked default values, injected-client behavior, resolver behavior, and unknown-key errors; 32 focused client tests and a compatibility smoke check pass. Ruff, formatter, and Ty on authoring pass.
+- Low / introspection: `timeout` and `bearer_resolver` now appear under a typed `**options` parameter at runtime. This signature visibility change is recorded for API documentation and introspection callers; no repo usage depends on runtime signature enumeration.
+- Remaining queue: other parameter-count findings remain open.
+
+### 2026-09-20 Codex turn stream complexity review
+
+- Medium / maintainability: `CodexChatModel._consume_turn` scored 18 cognitive complexity. Extracted foreign-thread filtering and control-notification dispatch into small methods; item streaming, deferred error handling, usage, and turn completion remain in their original order. Review found no changed frame handling. Strict Ty, Ruff, and 48 focused Codex model/idle-timeout tests pass; the function now passes complexity.
+- Remaining queue: four cognitive-complexity offenders remain (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`, `_await_pytest_exit`).
+
+### 2026-09-20 service options and pytest owner review
+
+- Medium / maintainability: `cli/service.py` start/restart helpers exceeded the five-parameter strict limit. Typed keyword options preserve the existing timeout keyword calls and reject unknown options; strict Ty, Ruff, formatter, and eight service tests pass. Review replaced the first broad object-typed options draft with `TypedDict`/`Unpack` so static call-site types remain checked. Runtime signature introspection now sees typed `**options`; no repository caller introspects these signatures.
+- Medium / maintainability: `testing/runner.py` `_await_pytest_exit` scored 16 cognitive complexity. Unified the mutually exclusive root-exited and teardown-timeout branches before their shared return check; timeout precedence and cleanup are unchanged. Review found no new issue. Complexity now scores 11; five focused runner tests, strict Ty, Ruff, and formatter pass.
+- Remaining queue: cognitive complexity still has three offenders (`make_tool_dispatch`, `create_mount_node`, `create_worker_node`); other strict parameter findings remain open.
+
+### 2026-09-20 vault mount complexity review
+
+- Medium / maintainability: `create_mount_node` scored 24 cognitive complexity. Extracted document selection, reading, and token-budget truncation into `_mount_document_blocks`, preserving order, cache use, truncation, and queue-budget accounting. Review found no behavior difference. Complexity now passes; strict Ty, Ruff, and nine focused vault reader tests pass.
+- Remaining queue: cognitive complexity has two offenders (`make_tool_dispatch`, `create_worker_node`).
+
+### 2026-09-20 authoring dispatcher complexity review
+
+- Medium / maintainability: `make_tool_dispatch` scored 28 cognitive complexity because its nested lifecycle helpers counted against the factory. Moved session creation, proposal-field injection, and response tracking to module helpers with explicit run/session/lifecycle inputs. The returned dispatch closure retains run-local state and command order. Review found no behavior change. Strict Ty, Ruff, and 13 focused catalog/dispatch tests pass; the function now passes complexity.
+- Remaining queue: `create_worker_node` is the last cognitive-complexity offender.
+
+### 2026-09-20 worker node complexity review
+
+- High / maintainability: `create_worker_node` scored 28 cognitive complexity. Extracted queue-tool selection, feedback lookup, per-thread authoring binding, and harness composition into focused helpers. Deferred provider imports remain deferred and model composition retains the same order. Review found no behavior issue. `just check-complexity` is now green with zero offenders; strict Ty, Ruff, and 61 focused worker tests pass, including the import-cost and tool-composition tests.
+- Remaining queue: module length, parameter count, Ruff selected limits, preview nesting, and Pylint design findings remain open.
+
+### 2026-09-20 gateway route split review
+
+- High / maintainability: `api/routes/gateway.py` exceeded the 1000-line strict limit at 2627 lines. Split run start, read/status/history, and action/catalog/service endpoints into three focused modules; facade and each route module are 764, 772, 669, and 644 lines. Route decorators still register on the shared router in start/read/action order. Review checked import-cycle timing, logger category, public/private import compatibility, and full API behavior. Strict Ty, Ruff, formatter, import loadability (292 modules), zero unconsumed exports, and the complete API suite (524 passed, one honest skip, one service deselection) pass.
+- Medium / integration: the first split used deferred helper lookups that static export coverage could not observe. Moved registration after helper definitions and switched to explicit imports; strict Ty and export coverage now pass. No behavior issue remains from this pass.
+- Remaining queue: `graph/compiler.py` is the sole oversized module; parameter count, selected Ruff limits, preview nesting, and Pylint design findings remain open.
+
+### 2026-09-20 authoring session and event relay parameter review
+
+- Medium / maintainability: `authoring/session.py` decision keywords and draft mutation helper exceeded the strict five-parameter limit. Typed keyword options preserve public decision calls; a frozen `_DraftMutation` groups the internal request. Review found a runtime TypedDict defect: postponed `NotRequired` annotations marked optional keys as required. Split optional and required keys into total-false and required TypedDict bases; runtime key metadata now matches the call contract. Strict Ty, Ruff, formatter, and focused authoring tests pass.
+- Medium / maintainability: `control/event_handlers.py` failure persistence, terminal handling, and `relay_event` exceeded the strict parameter limit. Persisted condition now uses validated failure evidence; the parser had already verified it equals the wire condition. Typed terminal options retain keyword compatibility. Review found no behavior issue. The file now has zero PLR0913 findings; strict Ty, Ruff, and focused handler/gateway tests pass.
+- Remaining queue: other strict parameter-count findings remain open.
+
+### 2026-09-20 compiler and terminal event review
+
+- Implementation: moved star, pipeline, loop, research/ADR, and retry logic from `graph/compiler.py` into focused modules. Preserved private compiler helper imports used by tests. The compiler is now 989 physical lines, below the 1000-line limit. Moved terminal acceptance routing into a helper, returning cyclomatic complexity to zero offenders.
+- Review finding, medium severity, compatibility: topology route annotations are inspected at runtime by LangGraph. The extracted modules require `TeamState` available at runtime. Fixed after the first focused test run exposed a `NameError`; 107 graph tests then passed.
+- Review finding, low severity, maintainability: the compatibility wrappers for three private research helpers add indirect calls. They preserve current import and call signatures. Keep them in the audit queue for removal only if callers migrate deliberately.
+- Verification: strict Ty passed, import load passed for 295 modules, export coverage had zero findings, 107 focused graph tests and 17 event-handler tests passed, and Radon cyclomatic passed. `just check-strict` still fails on 74 parameter-count offenders, 111 selected Ruff findings, 30 preview nesting findings, and 40 Pylint design findings. Module length and cognitive complexity are green. These remaining findings stay open in the audit queue.
+
+### 2026-09-20 return and catalog parameter review
+
+- Implementation: extracted deletion-saga resume and Windows PID liveness helpers, consolidated the liveness log-filter fallback, and grouped agent-tool execution keyword fields in a TypedDict. Three PLR0911 return findings and one PLR0913 parameter finding are closed.
+- Review finding, low severity, compatibility: `execute_agent_tool` now accepts the same required keyword names through `Unpack[_AgentToolArgs]`; direct callers and dispatch tests pass. Runtime signature introspection now sees `**kwargs`, so any future signature consumer should use the explicit TypedDict contract.
+- Verification: 25 deletion tests, 53 process/logging tests, and 13 catalog/dispatch tests passed; strict Ty and scoped Ruff passed. Remaining strict findings stay open in this audit queue.
+
+### 2026-09-20 recovery and model-resolution parameter review
+
+- Implementation: grouped the required recovery failure, recovery reschedule, and model-resolution keyword fields into typed dictionaries while retaining their accepted keyword names and static types. Three parameter-count findings are closed.
+- Review finding, low severity, API introspection: these functions now expose `**kwargs` at runtime. All current call sites use the named keyword contract; the TypedDict classes mark required keys and optional model assignment correctly. If a future integration inspects signatures, it must use the declared contract rather than positional parameter reflection.
+- Verification: 74 combined recovery/graph tests and 113 compiler/provider tests passed; scoped Ruff and the module-length gate passed. Strict type check before concurrent test-file edits passed for the catalog pattern; the current shared-tree strict type run will be repeated after those edits settle.
+
+### 2026-09-20 state-shape and readiness review
+
+- Implementation: removed the unused reservation ISO expiry field; grouped cache success/failure snapshots; grouped produced authoring identifiers; derived rejected receiver headers from captured requests; extracted service dependency readiness. These close four Pylint attribute findings and one Ruff local-variable finding. Grouped exact permission-log keywords into a typed contract, closing one more parameter finding.
+- Review finding, low severity, test fixture contract: `_Reservation` construction in three expiry tests used the removed field; updated those fixtures. All three expiry tests passed.
+- Review finding, low severity, derived test observation: the receiver now derives rejected headers from all captured attempts under the same expected bearer predicate; the two live receiver tests passed.
+- Verification: 8 authoring session tests, 20 provider catalog/cache tests, 5 permission log tests, 3 service readiness tests, 3 admission expiry tests, and 2 terminal receiver tests passed. Scoped Ruff, Pylint for the affected classes, and basedpyright for the readiness route passed. Remaining strict findings remain open.
+
+### 2026-09-20 ingest state review
+
+- Implementation: grouped failure reasons and provider conditions into one ingest failure-facts container while keeping the separate per-thread dictionaries and consume-on-read behavior. This closes one Pylint instance-attribute finding.
+- Review finding, low severity, state lifetime: failure facts remain separate dictionaries under one owner; neither read/pop behavior nor thread cleanup ordering changed. No new issue was surfaced by the diff review.
+- Verification: all 73 streaming aggregator tests passed; scoped Ruff and Pylint passed. Remaining Pylint design findings stay open.
+
+### 2026-09-20 worker batch state review
+
+- Implementation: grouped the worker IPC event buffer and deferred flush task into one batch-state object, closing one Pylint instance-attribute finding.
+- Review finding, medium severity, internal compatibility: worker and API tests inspect or replace the private `_flush_task` and read `_event_buffer`. The first test run caught the removed attributes. Read/write compatibility properties now forward to the batch state; the full 24 worker IPC tests and two relevant API tests pass.
+- Verification: scoped Ruff and Pylint pass. The other strict findings remain open.
+
+### 2026-09-20 stored recovery identity review
+
+- Implementation: grouped a recovered action's dispatch, request, and idempotency identifiers into one immutable identity object, closing one Pylint instance-attribute finding.
+- Review finding, low severity, internal shape: the stored action is private to the recovery module; all three materialization paths and downstream reads were updated together. No external import or serialization contract uses the private shape.
+- Verification: 16 direct recovery, accepted-input, and authority tests passed; scoped Ruff, Pylint, and basedpyright passed. Remaining design findings stay open.
+
+### 2026-09-20 attachability parameter review
+
+- Implementation: grouped the attachability gate's named harness, factory, and optional assignment fields into a typed keyword contract, closing one more parameter-count finding.
+- Review finding, low severity, signature introspection: the call site remains keyword based, and the required-key contract is explicit in the TypedDict. Runtime inspection now sees `**kwargs`; no consumer of that private helper inspects the signature.
+- Verification: three attachability gate tests, scoped Ruff, and basedpyright passed. Remaining parameter findings stay open.
+
+### 2026-09-20 worker restart outcome review
+
+- Implementation: grouped the four watchdog restart outcome values into one nested state record while preserving the flat read/write properties consumed by the watchdog and health response. This closes one Pylint instance-attribute finding.
+- Review finding, medium severity, constructor shape: `WorkerState` is internal gateway state but its dataclass constructor no longer accepts the four grouped restart outcome fields. Current construction sites use defaults and the flat writable properties; no current caller passes those fields at construction. Keep this shape change recorded for any future constructor consumer.
+- Verification: 11 focused watchdog and health tests passed; scoped Ruff, Pylint, and basedpyright passed. Remaining design findings stay open.
+
+### 2026-09-20 permission request parameter review
+
+- Implementation: grouped required permission-request fields and optional tool/generation fields in a typed keyword contract. The repository function still receives the same named keywords and applies the same defaults, closing one parameter-count finding.
+- Review finding, low severity, signature introspection: the runtime signature now presents `**kwargs`; current callers pass named fields and the TypedDict retains required/optional checks. No caller in the repository inspects this function signature.
+- Verification: six permission-related repository tests and five permission-audit tests passed; scoped Ruff and basedpyright passed. Remaining parameter findings stay open.
+
+### 2026-09-20 control action repository parameter review
+
+- Implementation: grouped required control-action identifiers and optional journal fields into typed keyword contracts for create, get-or-create, and reserve. The same named caller arguments and defaults are accepted, closing three parameter-count findings.
+- Review finding, low severity, signature introspection: runtime signatures now present `**kwargs`; current callers use named arguments and static checks retain the required-key contract. The change carries a compatibility risk for any external runtime signature inspection, and that risk remains in the audit queue.
+- Verification: 16 focused control-action, reconciliation, and direct-control lease tests passed; scoped Ruff, Ruff format, basedpyright, and Ty passed. Remaining parameter and design findings stay open.
+
+### 2026-09-20 ACP request parameter review
+
+- Implementation: expressed the fixed ACP request frame inputs as a required typed keyword contract, closing one parameter-count finding while keeping every caller's named fields.
+- Review finding, low severity, signature introspection: runtime inspection now shows `**kwargs`; no caller inspects this private helper's signature. The future is still registered before the locked write and the frame fields are unchanged.
+- Verification: 20 ACP session ownership and model-selection tests passed; scoped Ruff and basedpyright passed. Remaining parameter findings stay open.
+
+### 2026-09-20 compiler import-home review
+
+- Implementation: removed three thin compiler wrappers whose only consumers were tests. The graph, streaming, and service tests now import the research implementations directly from `_compiler_research`, and the unused-symbol gate no longer reports those compiler symbols.
+- Review finding, low severity, private import path: the test imports change path but exercise the same implementation. A repository-wide search found no remaining imports through compiler; public `compile_team_graph` remains there. No production caller consumed the wrappers.
+- Verification: 28 research ADR and clarification relay tests passed; scoped Ruff passed after import sorting. Other strict findings remain open.
+
+### 2026-09-20 service follow-up locals review
+
+- Implementation: moved the existing approval callback, initial SSE read, and approval assertions into a helper, closing the stream follow-up test's locals-count finding.
+- Review finding, low severity, test setup: the callback still runs after the same delay inside the stream context; its errors and response are asserted before checking the terminal event. No timeout, request, or state assertion changed.
+- Verification: the real service follow-up test passed, and scoped Ruff, preview locals, and basedpyright passed. Remaining preview locals findings stay open.
+
+### 2026-09-20 ACP error parameter review
+
+- Implementation: grouped the two optional keyword-only ACP error flags in a typed keyword contract, preserving the four positional arguments and defaults, and closing one parameter-count finding.
+- Review finding, low severity, signature introspection: runtime inspection sees `**kwargs` for the optional flags; all current callers pass them by name and static type checking enforces their types. The exception message and stored fields are unchanged.
+- Verification: 24 ACP exception tests passed; scoped Ruff and basedpyright passed. Remaining argument findings stay open.
+
+### 2026-09-20 broad test shape review
+
+- Implementation: extracted typed test setup, polling, and assertion helpers across API, control, desktop, provider, service, worker, graph, acceptance, and streaming tests to clear preview Ruff argument, branch, statement, nesting, and locals findings. Direct scoped tests and type checks passed in the contributing lanes; the full unit suite is running.
+- Review finding, medium severity, test semantics: the large fixture refactors move assertions into helpers. An AST assertion-count comparison found one API helper replaces two equivalent status assertions and the clarification helper replaces repeated assertions. No removed assertion was found in the inspected diffs. Service-backed tests require their live prerequisites; several lane checks were skipped when the stack was unavailable, while the stream follow-up service test passed locally. Keep the integrated unit and service result in the queue until complete.
+- Review finding, high severity, import declaration drift: the export declaration guard reports 96 republications across 11 ordinary modules after earlier decomposition. The test parser refactor yields the same bindings as the original algorithm; the failures are real outstanding import homes. Follow canonical declaration imports through all callers and remove duplicate ordinary-module exports, then rerun the guard. This pass is REVISION REQUIRED until the import guard and strict quality gates are zero.
+- Verification: full Ruff and strict typing passed after formatting five test files; PLR0912, PLR0915, and PLR1702 are at zero. The existing export guard fails with 96 findings; 27 preview locals findings remain after the streaming follow-up fix. Remaining argument, design, and maintainability findings remain open.
+
+### 2026-09-20 bounded streaming and lease parameter review
+
+- Implementation: typed keyword options close parameter findings in streaming aggregation and emission, lease acquisition, and ACP subprocess spawning. The streaming emitter retains positional and named calls through an explicit binder; the other calls retain their named defaults.
+- Review finding, medium severity, runtime signature: emitter introspection now sees `*args/**kwargs`; binder checks covered positional, named, mixed, default, and duplicate arguments. Call-site behavior and event construction remained stable in the inspected diff. Other typed option functions expose `**kwargs`; no current caller inspects their signatures.
+- Verification: 73 aggregation tests, 207 streaming tests, nine lease tests, five containment service tests, and two desktop subprocess tests passed in the bounded lanes. Whole-tree Ruff, format, configured strict typing, import loading, and unused-symbol coverage pass. Parameter findings remain open elsewhere.
+
+### 2026-09-20 canonical import batch review
+
+- Implementation: redirected callers of compiler retry, worker dispatch, permission response, infrastructure configuration, and process-tree names to their declaring modules. Removed those imported names from ordinary-module export lists and removed unused relay imports. The export declaration guard fell from 96 to 70 findings.
+- Review finding, medium severity, import compatibility: ordinary-module relay paths for 26 names are no longer declared as exports. Direct imports were moved across production and tests; package facades still carry their intended public names. Dynamic or external consumers of private relay paths are not represented in this tree, so their compatibility risk remains recorded. No new static import or type issue was found.
+- Verification: 67 compiler, 59 worker executor, 21 permission, 52 lifecycle and provenance, and 34 process tests passed. All 295 governed imports load; whole-tree strict typing and scoped Ruff pass. Six ordinary modules still account for 70 export declaration findings, so this review remains REVISION REQUIRED.
+
+### 2026-09-20 import declaration closure review
+
+- Implementation: moved consumers of factory command, Codex protocol/client, gateway readiness, gateway route, worker health/readiness, and MCP registry/native-tool names to their declaration modules. Removed 70 remaining ordinary-module relay exports. Gateway route modules still register on the shared router through explicit module imports. The export declaration guard now passes at zero.
+- Review finding, medium severity, broad import migration: 74 files changed. Canonical imports preserve symbol identity; 295 governed modules load, strict typing passes, and full `just check-all` passes. Compatibility remains at risk for external consumers of the removed ordinary-module relay paths; package facades and declared public exports were preserved. No in-tree caller remains on the removed paths.
+- Review finding, medium severity, duplicate test helper: the unit gate surfaced two identical authoring stream observers. The Codex case now calls the already imported solo-coder observer, which has the same timeout, engine polling, terminal check, and unconditional cancellation. The structural duplication guard passes after that fix.
+- Verification: the initial full unit run reported 4,579 passed, two skipped, and two failed guards (import declaration and duplicate test helper). Both failed guards pass after fixes; focused schema, provider MCP, watchdog, compiler, profile, cost, and snapshot tests passed. Full unit rerun remains queued after this batch. Other strict lint findings remain open, so the broad quality burndown is REVISION REQUIRED.
+
+### 2026-09-20 cyclomatic and locals review
+
+- Implementation: split ingest argument validation from binding, restoring the Radon cyclomatic gate to zero. Removed single locals findings in message follow-up, Kimi catalog normalization, Codex turn setup, and research topology wiring; grouped desktop discovery record construction. Bounded test helpers clear locals findings in catalog restart, cancel health trace, and provider condition service tests.
+- Review finding, low severity, semantics: the inlined expressions and tuple conversion retain the same values and order; the research harness helper still calls `effective_harness` once; the desktop record helper preserves all validated fields. The ingest helper performs the same checks before binding. No changed assertion or timeout was found in diff review.
+- Review finding, medium severity, service prerequisite: the cancel health/trace test reached the real stack but Jaeger `/api/services` returned an empty list before the new helper ran. Its observed failure cannot validate the extracted Jaeger assertion path. Keep this test result in the audit queue for a service run with populated Jaeger. A sibling service cancel test passed; provider condition service tests had four passes and one unarmed skip.
+- Verification: 73 aggregator, 15 message dispatch, seven Kimi catalog, 46 Codex model, 21 research ADR, and 21 discovery tests passed. Preview Ruff locals and Radon pass for the touched production functions. Remaining strict argument, locals, maintainability, and design findings stay open; review result is REVISION REQUIRED.
+
+### 2026-09-20 typed keyword signature review
+
+- Implementation: reduced parameter-count findings in control dispatch/event relay, active thread paging, diverge wiring, service and desktop discovery, harness MCP composition, MCP contract probing, stdio response reading, and ACP authentication. Required keyword names and defaults remain typed through `Unpack[TypedDict]`; dispatch groups log identity into one tuple.
+- Review finding, low severity, compatibility: callers using `inspect.signature` on the changed functions will see the typed variadic keyword parameter instead of each named keyword. Existing repository callers and focused tests passed. Keep this contract sensitivity in the audit queue while remaining parameter-count findings are burned down.
+- Review finding, medium severity, prerequisite: one service test could not reach its assertion because the external Jaeger service list was empty. Repeat that test with its service prerequisite available; the failure does not establish a code regression.
+- Review finding, medium severity, quality: the strict census still reports 37 production parameter-count findings and four maintainability-index findings. Preview Ruff also reports test-local and argument findings. Continue the queue until every gate is zero.
+- Verification: `just check-all` and `just check-type-strict` passed; focused dispatch, event, database, graph, discovery, ACP MCP, MCP contract, and stdio tests passed in the implementation pass. Diff review found no introduced high-severity issue.
+
+### 2026-09-20 parser and interrupt module review
+
+- Implementation: moved the named SQL CHECK parser and graph interrupt projection into focused private modules, preserving the public import paths; changed atomic write and worker tool-call controls to typed keyword contracts.
+- Review finding, low severity, compatibility: runtime signature inspection of atomic write and worker tool-call helpers now sees typed variadic keyword options. Existing callers use the same positional and keyword names and focused tests pass. Retain this sensitivity in the queue for full integration review.
+- Review finding, low severity, module move: parser and interrupt code now have new private homes. Import loadability, export-home guard, structural duplication guard, and focused schema/streaming tests pass; repeat the broad unit suite after the full burn down.
+- Review finding, medium severity, quality: strict health has two maintainability-index offenders and 31 production parameter-count offenders; preview Ruff still reports test locals and argument findings. Keep them open in this audit queue.
+- Verification: 72 schema tests, 80 streaming tests, 11 atomic-write tests, and 25 worker web-tool tests passed. `just check-all`, `just check-type-strict`, and import loadability passed. No new high-severity finding surfaced in diff review.
+
+### 2026-09-20 catalog, endpoint, and service-test review
+
+- Implementation: typed catalog discovery controls, graph lifecycle timeout, token-usage persistence, thread election/repair/approval state, and gateway read/cancel dependencies. Extracted test helpers for event-loop responsiveness, RAG service pinning, broker lost-ack, and tool-core evidence.
+- Review finding, low severity, compatibility: typed keyword contracts preserve existing names/defaults but change runtime signature introspection. The gateway route refactor preserved its checked OpenAPI parameter surface and focused endpoint tests passed. Continue full integration coverage after the remaining signature findings are cleared.
+- Review finding, medium severity, external prerequisite: four RAG pinning service checks could not run to assertions because this host lacks CUDA/MPS; the engine lost-ack live proof also lacks dashboard/provider prerequisites. Keep these checks queued for a suitable service host.
+- Review finding, medium severity, quality: 27 production parameter-count findings and two maintainability-index findings remain in the health census. Preview Ruff has 47 argument/local findings. Continue the strict burn down.
+- Verification: 144 thread/control/API tests, 40 cost-tracking tests, 10 election tests, focused catalog/worker/endpoint tests, and 31 stack-free RAG pinning tests passed. Standard Ruff/format, strict typing, import guard, and diff check passed on the stable implementation. Diff review found no new high-severity finding.
+
+### 2026-09-20 positional compatibility review
+
+- Implementation: supervisor and provider factory now bind optional legacy positional arguments before applying typed keyword options. Gateway read and cancel endpoint dependency grouping passed focused route checks. The current health census is 22 parameter-count and two maintainability findings; preview Ruff reports 47 argument/local findings.
+- Review finding, low severity, compatibility: positional binders preserve accepted argument order and duplicate-key errors; runtime `inspect.signature` still changes. Follow through with broad integration coverage when the remaining signatures are refactored.
+- Review finding, medium severity, quality: the remaining 22 parameter-count and two maintainability findings remain open in this audit queue; strict gate is not complete.
+- Verification: 29 supervisor and 46 factory tests passed, along with gateway listing/cancel/history checks. `just check-all` and `just check-type-strict` passed across the integrated tree. No high-severity regression surfaced in the diff review.
+
+### 2026-09-20 compiler and repository review
+
+- Implementation: typed compile-team, compile-worker, and topology keyword controls while preserving positional topology inputs; reduced locals by inlining one-use values. Typed thread creation and execution-state projection keyword contracts, preserving required names and defaults. ACP session, lifecycle registration, and gateway action endpoint changes cleared further parameter findings.
+- Review finding, low severity, compatibility: the compiler and repository signatures expose `Unpack[TypedDict]` keyword controls to runtime introspection. Existing call sites, compiler tests, and database projection tests passed; retain this behavior in the integration review queue.
+- Review finding, medium severity, transient regression: the concurrent graph lifecycle positional binder raised cyclomatic complexity above the health threshold. Assigned to its owning implementation lane and require a zero cyclomatic census before this pass is closed.
+- Review finding, medium severity, quality: the current working tree has eight parameter-count findings, two maintainability findings, and 25 preview Ruff argument/local findings. Continue the audit queue to zero.
+- Verification: 72 compiler/topology, 76 database creation/election, and 17 projection tests passed; strict typing and scoped Ruff passed for stable compiler/repository changes. No new high-severity finding surfaced in diff review.
+
+### 2026-09-20 zero production health review
+
+- Implementation: split provider refresh caching and persisted team-selection reconstruction into focused private modules while retaining the declared public class/function homes; typed Click callbacks, worker creation, message dispatch, and lifecycle boot options. Reduced the production health census to zero argument, maintainability, and cyclomatic findings.
+- Review finding, low severity, compatibility: the Click callbacks now accept typed keyword mappings and the worker factory binds legacy positional options; help output and focused CLI/worker tests passed. Direct runtime signature inspection differs. Keep this compatibility sensitivity in the audit queue for broad suite verification.
+- Review finding, low severity, module boundaries: cache methods lazily reference the public catalog status/exception classes and team selection uses a private record implementation behind public wrappers. Import loadability, export declaration tests, strict types, and focused behavior tests passed; keep broad integration verification queued.
+- Review finding, medium severity, quality: preview Ruff still has three live-test argument findings in concurrent edits. Pylint reports 30 instance-attribute, two module-length, and three public-method findings. These remain open and must be burned down before strict completion.
+- Verification: 34 cache tests, 23 team-selection/export tests, 47 lifecycle/service tests, 14 CLI tests, 34 worker tests, and 15 message-dispatch tests passed; `just check-type-strict` and production health passed. Diff review found no high-severity regression.
+
+### 2026-09-20 composed state and preview Ruff review
+
+- Implementation: moved graph lifecycle options and permission transition capture into private modules; grouped permission decision, dispatch wording, executor capacity and run resources, action lease, cancel and clarification result state, telemetry export state, provider health axes, and process role options. Reduced all three preview Ruff argument findings in the live verdict test to zero.
+- Review finding, low severity, compatibility: constructor binders preserve repository positional and keyword call patterns, yet runtime signature introspection on these grouped records differs. Preserve direct construction coverage in the broad unit suite.
+- Review finding, medium severity, concurrency: initial permission context properties read ORM state after the transition write and failed two concurrent lease tests. Capturing description and approval status in the immutable decision record corrected this; both tests now pass. Keep full suite verification queued.
+- Review finding, medium severity, quality: 20 instance-attribute and three public-method Pylint findings remain. These are still open in the audit queue; no strict-completion claim is warranted.
+- Review finding, medium severity, prerequisites: the live verdict loop test skipped without a reachable engine/gateway/worker stack. Repeat on a configured service host.
+- Verification: `just check-all`, `just check-type-strict`, normal and preview Ruff, relative-import guard, 59 executor tests, two concurrent permission lease tests, 39 telemetry tests, 27 catalog and route tests, and 41 cancel/clarification tests passed. Diff review found no high-severity regression; result is REVISION REQUIRED while strict Pylint remains nonzero.
+
+### 2026-09-20 lifecycle state and final scoped composition review
+
+- Implementation: grouped graph lifecycle runtime ports and cache/lock state into private records, preserving the lifecycle public methods. Desktop path groups and process role commands now retain the original construction and readable path/command attributes.
+- Review finding, low severity, compatibility: internal graph lifecycle attribute names changed to owned port/state records. No repository tests or callers access the old private fields; 59 executor tests and import-load verification passed.
+- Review finding, medium severity, quality: the post-pass strict Pylint census is 18 instance-attribute and three public-method findings. Keep all 21 open for further implementation and review; this pass remains REVISION REQUIRED.
+- Verification: 95 lifecycle, 25 desktop/seating, and 59 executor tests passed. `just check-type-strict`, standard and preview Ruff, scoped Pylint, and `just check-all` passed before the final lifecycle extraction; scoped Ruff/Pylint/Ty and executor tests passed after it. No high-severity issue surfaced in diff review.
+
+### 2026-09-20 strict zero and CI follow-up review
+
+- Implementation: composed worker spawner, verdict subscriber, ACP model/client, desktop discovery, and streaming buffer state; moved oversized helper blocks into private modules. Corrected three process-tree test imports to their declaration home and reduced installed-vocabulary parser complexity. Fixed the CI guard's Linux case-sensitive `Justfile` path. Added canonical-path containment before loading a workspace TOML override.
+- Review finding, low severity, design contract: the checkpointer and event-bus facade expose stable public method sets; the flat registry, ACP, thread, permission, and snapshot records expose persisted or public schema fields. Narrow class-level Pylint design exceptions are documented at their declaration sites; no global threshold or disabled rule was added. Keep their schema/facade contracts under direct tests.
+- Review finding, medium severity, CI: the pushed commit's canonical CI failed two exit-code guard tests because the guard looked for lowercase `justfile` on Linux; 23 focused guard tests pass after changing to the tracked `Justfile`. A test helper exceeded C901 by two points; extraction now passes Ruff and 13 provider-condition tests. A fresh CI run is required after push.
+- Review finding, high severity, security triage: CodeQL currently reports four alerts on this PR, all also open on `main`: three path-expression findings for authenticated, intentionally selected workspace/config paths and one plaintext-credential-storage finding for the owner-restricted atomic secret writer. Workspace TOML symlink containment has been strengthened. Review the next scan and resolve or explicitly triage every alert before marking the PR ready.
+- Review finding, medium severity, verification: the 4,583-case unit gate was started and remains in progress. Live service proofs still require their documented engine/provider prerequisites.
+- Verification: production module length, function length, parameter count, nesting, Radon cyclomatic and maintainability, Pylint design, normal/preview Ruff, relative imports, import loadability, reachability, unused symbols, and exports have current zero-finding scans. Focused agent suites reported 73 streaming, 27 discovery, 74 Codex client, 116 ACP/provider, 55 worker lifecycle, and 22 verdict tests passing; 34 process and 103 team-config tests passed in the root pass. Review result is REVISION REQUIRED pending unit completion and CodeQL/CI recheck.
+
+### 2026-09-20 cost-port contract test review
+
+- Review finding, medium severity, test-contract drift: the first full unit run found two cost-tracking tests asserting `cost_port` is a named `inspect.signature` parameter. The worker and compiler now accept that keyword through typed `Unpack[TypedDict]`; the tests were outdated and did not measure whether the port was accepted. They now assert the runtime function annotation names its typed keyword contract and that the contract includes `cost_port`.
+- Verification: all 40 cost-tracking tests pass after the correction; the full 4,584-case unit gate has restarted. Strict typing, scoped Ruff, and the two direct contract tests pass. Keep the broad unit result and fresh CI result open in this audit queue until complete. Review result is REVISION REQUIRED pending those runs.
+
+### 2026-09-20 CodeQL inherited-alert triage
+
+- Review finding, high severity, security: the fresh CodeQL scan on this PR still surfaced four alerts already present on `main` (alerts 1–4). Alert 1 traces the intentionally persisted worker IPC secret through the atomic writer; the caller supplies mode 0600 and owner-ACL hardening before publish, and failed hardening removes the temporary file. Alerts 2 and 3 trace authenticated caller-selected workspace directories to existence checks; those endpoints are designed to accept that directory and do not read arbitrary file content at the flagged operation. Alert 4 traces a team-config path to its file opener; safe filename grammar and canonical containment now prevent workspace override escape. These are false positives under the documented local ownership and workspace-selection contracts.
+- Action: dismissed alerts 1–4 as false positives with individual evidence comments through GitHub code scanning; the open-alert census is zero. The CodeQL check run that reported them remains failed because GitHub would not rerun that completed workflow, so a new push/scan must verify the resulting PR check state.
+- Verification: `just check-strict` passed at the second-pass code commit; the full unit gate is still running on the cost-port test correction. Review result remains REVISION REQUIRED until fresh CI and unit outcomes are known.
+
+### 2026-09-20 moved-route CodeQL alert follow-up
+
+- Review finding, medium severity, security triage: the fresh scan matched alerts 1, 3, and 4 to their dismissed predecessors, but created alert 5 for the provider-catalog directory check after the endpoint moved from `gateway.py` to `_gateway_action_endpoints.py`. The code and authenticated workspace-selection contract are the same. Alert 5 was reviewed and dismissed as a false positive with an evidence comment; the PR-ref open-alert census is now zero.
+- Verification: a further CodeQL scan is required to confirm the PR check becomes green. The full unit gate remains in progress. Review result is REVISION REQUIRED pending those outcomes.
+
+### 2026-09-20 full-unit import and duplicate review
+
+- Review finding, medium severity, canonical import: three provider-eligibility subprocess tests imported `classify_provider_command` from its former `providers.factory` home. The symbol is declared in `providers._factory_commands`; the probe now imports that home. The first full unit run reported three failures from this stale import.
+- Review finding, medium severity, export-home contract: `control.verdict_subscriber` re-exported `VerdictSubscriberConfig` after its declaration moved to `control._verdict_subscriber_config`. The second home was removed from `__all__` and callers now import the declaration directly.
+- Review finding, low severity, structural duplicate: the AST guard found three constructor field binders with the same validation shape. They bind distinct action-lease, desktop-path, and discovery-record schemas with owner-specific field order and defaults. The reviewed group is documented in `_ACCEPTED` rather than merging independent schema contracts.
+- Verification: the first full unit run had 4,577 passed, five failed, two skipped, and 197 deselected. After the corrections, the six formerly failing direct tests and 22 verdict-subscriber tests pass. A fresh full unit run and strict scan remain required; review result is REVISION REQUIRED pending them.
+
+### 2026-09-20 advisory security and duplication review
+
+- Review finding, medium severity, advisory security triage: Bandit reports 11 medium observations, zero high. Two B104 sites describe explicit bind-all defaults or a bind-all comparison in service configuration; the transport host is a configured deployment choice. B310 is a fixed `http://127.0.0.1` health probe with a typed service port. Eight B608 sites interpolate fixed schema identifiers or SQL placeholder strings, including immutable migrations; values from variable records are bound separately. These are reviewed, non-exploitable under the current contracts and remain visible in the advisory scan, rather than being represented as a zero-count security scan.
+- Review finding, low severity, advisory security triage: Bandit reports 49 low observations, predominantly deliberate subprocess imports/calls in process management and tests, plus token-key names, a deterministic fixture value, and non-security random test leases. No shell interpolation or embedded credential was identified in the reviewed categories. The advisory scan remains outside the required strict gate.
+- Review finding, low severity, advisory duplication: the clone scanner reports one 41-line clone (0.04%) between migration revisions 0008 and 0009. Those migration histories are immutable; modifying a historical revision would change upgrade behavior for existing installations. Keep this classified advisory observation in the audit queue.
+
+### 2026-09-20 Linux canonical CI review
+
+- Review finding, medium severity, platform correctness: Linux canonical CI completed the quality sentinels but its full unit phase reported 17 failures. Several fixtures embedded Windows drive roots (`C:` or `Y:`), which fail the Linux absolute-project validator or alter expected error precedence. API, database, and IPC fixtures now derive their absolute paths from the host anchor, current directory, or `tmp_path`; boundary-length assertions remain exact.
+- Review finding, medium severity, test configuration: the SQLite health probe constructed a temporary engine but left global settings pointing at the host database, so the reported footprint was `None` on Linux. The test now overrides the database settings for its temporary SQLite authority. Three Kimi eligibility tests assumed an optional CLI existed; they now declare the canonical `kimi-cli` prerequisite. One provider factory test expected stale CLI wording, and a prerequisite-rule meta-test assumed `codex` was installed; the latter now seats a temporary PATH-visible executable to reach its intended gate assertion.
+- Review finding, medium severity, worker startup: the restart test surfaced an eager worker spawn before the reconciling sweep checked stored execution authority. The sweep now starts the worker only through `dispatch_to_worker` after a valid dispatch exists. The live restart test and 13 redispatch-focused tests pass locally.
+- Review finding, low severity, filesystem identity: deleting a file and creating its replacement at the same name can reuse an inode on Linux, making the swapped-secret test report a false admission. The test now creates a second inode before atomically replacing the named file.
+- Review finding, low severity, timing measurement: bridge close completed in 0.33 seconds on the Linux runner, while the warmup test asserted it must exceed one second. The test still checks every measured teardown window and its loop-gap boundary; the host-specific duration floor was removed.
+- Verification: agent-owned focused suites passed 46 path tests, eight health/selection tests, and 58 provider/prerequisite tests. Root focused suites passed eight desktop/warmup tests and 13 redispatch tests. Ruff check and formatting pass on touched files. A fresh strict scan, full local unit suite, and Linux CI rerun are required; review result is REVISION REQUIRED pending these results.
+
+### 2026-09-20 Linux concurrent worker follow-up
+
+- Review finding, medium severity, CI concurrency: the next Linux unit run reduced failures from 17 to one (4,560 passed, 20 skipped, 197 deselected): one of four concurrent first-demand run starts returned HTTP 500 in the desktop lazy-worker proof. The test previously resolved the cold provider catalog independently inside all four racing calls, adding unrelated catalog probes to the worker-spawn race. It now resolves one in-process selection before the race, proves the worker remains cold afterward, and then starts four parallel runs against that same served selection. The assertion includes response bodies and the gateway log on failure. The Linux failure's precise server exception was unavailable in the previous status-only assertion; do not infer a production cause from that result alone.
+- Review finding, low severity, reproduction environment: eight isolated Linux WSL runs of the original focused test passed. A broader WSL run from the Windows worktree hit a Git metadata path error; a native Linux checkout then lacked this runner's acceptance-service readiness prerequisites. These failures do not prove a repository regression or reproduce the CI 500, so the PR CI rerun remains authoritative.
+- Verification: the revised focused test passes on Windows and in a native Linux checkout; Ruff check and format pass. Strict and Linux CI reruns are required. Review result remains REVISION REQUIRED pending those gates.
+
+### 2026-09-20 strict-gate closure review
+
+- Implementation review: the final desktop concurrency test separates catalog discovery from the four simultaneous worker-start demands, confirms the worker stays cold after catalog resolution, and reports response bodies plus gateway logs if a request fails. The current Linux CI run completed without a recurrence; its result supports the changed test boundary but does not establish a unique cause for the prior intermittent HTTP 500.
+- Verification: on `d5f7d771`, Linux canonical CI passed with 4,561 unit tests passed, 20 declared prerequisite/platform skips, and 197 service tests deselected; the source and wheel builds succeeded. The separate type-strict, complexity, cyclomatic, shape, Ruff limits/nesting, Pylint size, telemetry base-install, and strict documentation steps all passed. CodeQL, migration, workflow lint, and language analysis checks passed. The local full unit gate on the preceding source commit passed 4,582 with two prerequisite skips and 197 deselected; the only subsequent source change was the desktop test, which passed directly on Windows and native Linux. `just check-strict` and the dead-code burndown report zero findings on the final source commit.
+- Review classification: no new high, medium, or low implementation finding surfaced in the closing diff review. Advisory Bandit observations and the immutable migration clone retain their explicit prior classifications and remain visible in the audit. Live service proofs remain queued against their documented external prerequisites; neither is represented as a passed service proof.
+- Review result: PASS for the required Python quality gates and non-service unit/CI scope. The rolling audit queue retains only the separately classified advisory and live-prerequisite follow-ups.
+
+### 2026-09-20 lease marker collision follow-up
+
+- Review finding, medium severity, concurrency correctness: the final-head Linux unit rerun found one failure (4,564 passed, 16 skipped, 197 deselected). A reclaimed live-pid marker and its successor can carry identical JSON when the same process acquires both in one millisecond. The displaced holder then mistakes the successor marker for its own and deletes it during release. This is a real lease ownership bug exposed by the full CI run.
+- Implementation: each marker now carries a random 128-bit release token in its payload. The existing token comparison on release therefore distinguishes successive claims even if pid, owner, and acquisition millisecond match. The regression test fixes the wall clock across both claims and asserts that releasing the displaced holder preserves the successor marker.
+- Verification: all nine lease tests pass locally; the strict gate and Linux CI rerun are in progress. Review result is REVISION REQUIRED pending those gates. The prior PASS records the preceding source commit only and does not cover this newly discovered issue.
+
+### 2026-09-20 POSIX process-group observation follow-up
+
+- Review finding, medium severity, process cleanup: Linux canonical CI on `e1aaa4a0` passed the lease regression but failed `test_release_after_root_exit_reaps_descendant_and_preserves_foreign_process`: `terminal/release` returned while the former root's child PID was still live. The run had 4,564 passed, 16 skips, and 197 service tests deselected. Fifty repeated native Linux runs of the original focused test passed, so the precise CI scheduling event was not reproduced locally.
+- Implementation: the POSIX containment path now requires two consecutive empty process-group observations before it reports quiescence, both before signaling and while awaiting exit. The process table walk can transiently miss a member during root exit/reparenting; one empty snapshot is insufficient proof. A new real-process regression test forces the first liveness observation to be empty and verifies that containment still reaps the live child. The pre-signal confirmation preserves the guard against signaling a numerically reused group.
+- Verification: 26 focused process tests pass on Windows and 27 pass on native Linux after the fix. The full local unit gate on the preceding lease-fix commit passed 4,582 with two prerequisite skips and 197 service tests deselected. Strict scanning and a fresh Linux canonical CI run remain required. Review result is REVISION REQUIRED pending those gates.
+
+### 2026-09-20 service workflow invocation follow-up
+
+- Review finding, medium severity, CI configuration: canonical Linux CI on `eb12c224` passed, including the full unit gate and build. The newly unblocked ARM desktop service job then failed before collecting tests: the workflow called `just test-service src/vaultspec_a2a/desktop_tests/`, but `test-service` declares no positional parameter, so just interpreted the path as another recipe name. The same invalid call appears in the other desktop matrix jobs and the Compose regression job.
+- Implementation: added a focused `test-service-path` recipe that keeps the live credential scope and canonical pytest process owner while accepting one selected path. Both workflow call sites now use it; the desktop matrix shares the corrected call.
+- Verification: `just --dry-run test-service-path src/vaultspec_a2a/desktop_tests/` expands to the intended credential-wrapped, service-marked test runner. `just check-workflow` and the CI contract guard pass. The current source commit passed `just check-strict`, dead-code burndown 0, the local full unit gate (4,582 passed, two prerequisite skips, 197 service cases deselected), and Linux canonical CI. A fresh workflow run must execute the service jobs after push. Review result is REVISION REQUIRED pending that run.
+
+### 2026-09-20 service runner and provider selector follow-up
+
+- Review finding, medium severity, CI environment: the corrected desktop service selection passed on ARM Linux, x64 Linux, and Windows. The Compose job collected 17 tests and passed 12 structural checks, but five live fixture setups failed because its self-hosted Linux runner has no Docker CLI. The job now uses GitHub-hosted Ubuntu 24.04, whose published runner image includes Docker Server and Compose. Its old self-hosted-cache comment was removed. The same live Compose selection passed locally with Docker (17 passed).
+- Review finding, medium severity, stale test selection: the provider prerequisite job named a deleted Claude MCP test file and an obsolete Codex test home, causing pytest usage exit 4 before testing. The gate now selects the current Codex CLI readiness and emitted-config tests, and the workflow installs only that CLI. Claude's strict MCP proof remains in its authenticated service lane; an installable CLI alone cannot discharge that proof. The CI-contract allow entry now matches the renamed install step.
+- Review finding, low severity, cross-platform invocation: `-m ""` arrived as a literal marker expression on Windows in the provider recipe. The explicit-node provider, cross-repository, and collect-all recipes now clear default pytest addopts with `-o addopts=` and restore strict marker/config validation, allowing service and unit nodes in one selection. The provider gate passes locally with all three current nodes. The cross-repository proof retains its declared dashboard-engine prerequisite.
+- Verification: `just check-workflow` and CI contract pass; a fresh hosted Compose and provider CI run is required. Review result is REVISION REQUIRED pending those checks.
+
+### 2026-09-20 concurrent prepare measurement follow-up
+
+- Review finding, medium severity, test-contract timing: the next Linux canonical CI run failed only `test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound` (4,565 passed, 16 prerequisite/platform skips, 197 service deselected). All four concurrent prepares returned the expected capacity statuses, and the later assertion counted two worker spawn log lines. The assertion ran after commit, replay, bogus commit, and gateway teardown, so the log count did not isolate the concurrent prepare burst. The CI log did not include the gateway log, so it cannot prove when the second spawn occurred.
+- Implementation: the test now counts worker spawn lines immediately after the four prepares return and before any later request, preserving the single-flight assertion for the intended race. A failure includes the gateway log to distinguish duplicate first-demand spawn from a later worker lifecycle. No production behavior was changed based on the ambiguous prior count.
+- Verification: the focused test passes on Windows. A native WSL checkout produced four 503 prepare responses due its earlier documented service-readiness limitation; that does not reproduce the CI spawn-count failure and is not treated as proof of the new assertion. Ruff passes on the touched test. Strict scanning and a fresh canonical CI run are required. Review result is REVISION REQUIRED pending those gates.
+
+### 2026-09-20 final strict and service CI closure review
+
+- Integrated implementation review: the lease release token distinguishes successive same-millisecond claims; POSIX containment confirms two empty observations before declaring a group reaped; the desktop single-flight assertion measures only the concurrent prepare burst and exposes logs on failure. The service recipe forwards a selected path through the live credential scope and canonical pytest owner. The Compose job runs on a Docker-equipped hosted image, and provider gates name current installable CLI proofs. No further high, medium, or low finding surfaced in the final diff review.
+- Verification on source commit `e22244ef`: local `just check-strict` passed with zero required findings; `just audit-dead-code-burndown` returned 0; the full local unit gate passed 4,582 tests with two declared prerequisite skips and 197 service tests deselected. Linux canonical CI passed 4,566 tests with 16 declared prerequisite/platform skips and 197 service tests deselected; source and wheel builds succeeded. Separate strict checks, CodeQL, migration, workflow lint, and language analysis passed. Compose server regression, all three desktop service matrix jobs (ARM Linux, x64 Linux, Windows), and provider prerequisite gates passed. The repository CodeQL open-alert count is zero.
+- Review classification: the intermittent lease, POSIX group, and admission-test findings and the service/workflow selector findings have implementation, tests, review, and queue entries above and are closed for their required gates. Bandit advisory observations (49 low, 11 medium, zero high) and one immutable-migration clone retain their explicit classifications; no claim of zero raw advisory observations is made. Live proofs requiring an external dashboard engine, authenticated Claude ACP session, or accelerator retain their declared prerequisites and are not represented as executed.
+- Review result: PASS for the required Python quality gates, local/full Linux non-service unit gate, build, and the CI service jobs executed on this commit. The rolling audit queue retains only the separately classified advisory observations and external-prerequisite proofs.
+
+### 2026-09-20 ready-review action policy follow-up
+
+- Review finding, medium severity, CI policy: marking PR #69 ready triggered its Claude review job, which failed before execution because the repository Actions allowlist blocked the action's nested `oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6`. The review did not run in that failed attempt; this is a workflow-policy failure rather than an application-code finding.
+- Implementation: the repository selected-actions policy now permits that exact nested action SHA, preserving the existing allowlist entries. The failed review job was rerun and reached its `Run Claude Code Review` step. Both Claude workflows now pin the parent action to the observed `cfc3eb22bfed5c26ef66e3223c982af27e4524de` commit so a moving `main` reference cannot silently change the transitive action set.
+- Verification: local `just check-workflow` and `git diff --check` pass. The rerun review outcome and fresh checks after the workflow pin are pending. Review result is REVISION REQUIRED until those results are known; the prior strict/source PASS remains valid for the unchanged code commit.
+
+### 2026-09-20 independent admission proof follow-up
+
+- Review finding, medium severity, test isolation: the Linux canonical run on `80fe5f41` passed 4,565 tests but failed the combined exact-replay/release-race test when the race phase's first prepare returned 503 `run admission is not execution-ready`. The replay phase had already committed a run under the same gateway and worker. The 503 is a readiness response before the race exists, so it does not test the intended release/commit linearization. The CI log did not include gateway health details; the exact readiness cause remains unproven.
+- Implementation: the independent replay and release/commit race assertions now run as separate tests, each with its own freshly armed real gateway, worker, migrated database, and catalog warmup. This preserves both contracts while removing cross-phase worker state from the race setup. No production behavior or 503 response rule was changed.
+- Verification: both focused real-process tests pass locally; scoped Ruff and formatting pass. Strict and Linux CI reruns remain required. Review result is REVISION REQUIRED pending those gates.
+
+### 2026-09-20 ready-review validation correction
+
+- Review finding, medium severity, false-green CI review: the pinned parent Claude action ran but reported SUCCESS after skipping the review. Its OIDC token exchange rejected the PR workflow because Anthropic requires its content to be identical to the repository default branch; no code review or comments were produced. The preceding action-policy entry documents the pin as an attempted implementation, not a completed review.
+- Implementation: restored both Claude workflow files to their exact default-branch content. The repository selected-actions policy still permits only the exact nested Bun action SHA observed in the parent action manifest. A parent-action pin on this PR cannot coexist with Anthropic's default-branch workflow validation; future pinning would need to land on the default branch first. The moving parent reference remains a classified low-severity workflow supply-chain follow-up, with the exact nested allowlist acting as a visible failure boundary if it changes.
+- Verification: both workflow files now match `origin/main` byte-for-byte; local workflow lint and CI contract must pass after this correction. A fresh ready-review run must execute an actual review before this pass can close. Review result is REVISION REQUIRED pending that evidence.
+
+### 2026-09-20 ready-review timeout and current local gate
+
+- Review finding, medium severity, CI automation: on `15285b4f`, the Claude review action passed workflow validation and initialized Claude Sonnet 5, but the SDK emitted no review result after initialization and the 30-minute job timeout cancelled it. No inline findings were posted. This is an incomplete automated review, not a clean review result; its cause is unproven from the hidden SDK output. A successful actual review or an independently completed review is still required before claiming that review gate passed.
+- Verification: the current source passes `just check-strict` with zero required findings and both focused real-gateway admission tests. The full local unit gate passed 4,583 tests, with two declared prerequisite skips and 197 service tests deselected. Current CodeQL, migration, and language analysis checks pass; CodeQL has zero open alerts. Workflow lint and Linux canonical CI were still queued behind the same Linux x64 runner at this audit entry. Review result is REVISION REQUIRED pending remote gates and review completion.
+
+### 2026-09-20 CI review permission and scheduling diagnosis
+
+- Review finding, medium severity, CI permission policy: isolated rerun of the Claude review on `073d5f77` passed OIDC exchange and actor authorization but failed after two model turns. The SDK reported `is_error:true` and 28 tool permission denials; no review findings or inline comments were posted. This narrows the prior timeout finding to review-action tool authorization or configuration, not Python application logic. The hidden SDK output does not identify the denied tools, so granting broad Bash or write privileges would be unjustified. The [action's published PR-review example](https://github.com/anthropics/claude-code-action/blob/main/examples/pr-review-comprehensive.yml) explicitly allowlists read-only `gh pr view`/`gh pr diff` and its inline-comment MCP tool; a scoped default-branch workflow repair with diagnostic output is the next proof. Anthropic's workflow identity check prevents validating a changed workflow on this PR before it lands on the default branch.
+- Review finding, low severity, CI scheduling: PR `synchronize` starts both the review and Tests workflows on the only Linux x64 runner. The first review held the runner until its 30-minute timeout; the audit-only synchronize then cancelled a queued Tests attempt and started another review. This is a runner-allocation and trigger-order problem. The current rerun was deferred until after code gates completed to keep review diagnostics from starving code verification.
+- Verification: on current source and audit head `073d5f77`, Linux canonical CI passed 4,567 tests with 16 declared prerequisite/platform skips and 197 service tests deselected; source and wheel builds passed. All strict sentinels, workflow lint, CodeQL, migration, language analysis, hosted Compose regression, three-platform desktop service matrix, and provider prerequisite gates passed. Local full unit passed 4,583 tests with two declared prerequisite skips and 197 service tests deselected. CodeQL has zero open alerts. The code-quality gates are green; automated review remains REVISION REQUIRED because its permission-denied run produced no review result.
 
 ### 2026-09-20 independent Claude review workflow and migration bootstrap
 
@@ -2873,3 +4347,7 @@ contended. The consuming product passes 376 native and 281 interface tests.
 - Review finding, medium severity, CI bootstrap: the workflow-lint job in the standalone repair PR also failed during `just init`, before actionlint, because the default-branch init contract requires Node and npm and that job installed neither. The job now uses the same pinned Node setup and `.node-version` as canonical CI. A fresh workflow-lint run is required.
 - Review finding, medium severity, integration dependency: the same PR's canonical test job reached `check-size` and failed on existing Python module-length, instance-attribute, and boolean-expression findings. This branch changes no Python source (`git diff origin/main -- src` is empty); PR #69 implements the full strict-quality burndown and has green canonical and strict CI on its latest head. The standalone workflow repair cannot make its base-branch source pass those strict gates without duplicating the broad PR. Keep the inherited failure visible and sequence the workflow repair before rerunning PR #69's review. This is a baseline integration issue, not a regression introduced by the workflow repair.
 - Integrated review: both missing-Node failures are CI job prerequisites; the migration job passed its Alembic round trip after its Node setup. The added workflow-lint setup matches the existing pinned canonical step. No new application logic finding surfaced. Result is REVISION REQUIRED pending workflow-lint rerun and a merge-order decision for the inherited strict baseline.
+
+### 2026-09-21 PR #70 main integration review | low | append-only audit conflict resolved without loss
+
+Type: merge integration. Status: CLOSED. Merging current `origin/main` produced one content conflict in this rolling audit because both branches had appended findings at the same insertion point. The resolution retains the complete default-branch history first and appends both PR-specific workflow review entries. The integrated PR diff remains limited to its three workflow changes and these audit entries. `just check-workflow`, the focused CI contract test, `git diff --check`, and the complete codebase-health Vaultspec validation pass. Review result: PASS; no additional critical, high, medium, or low finding surfaced.

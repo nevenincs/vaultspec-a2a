@@ -31,7 +31,6 @@ import pytest
 from ...api.run_admission import (
     _ALWAYS_EXCLUDED,
     _PREPARE_EXCLUDED,
-    _REPLAY_CREDENTIAL_EXCLUDED,
     CURRENT_REPLAY_DIGEST_RULE,
     ReplayDigestRule,
     replay_digest,
@@ -207,7 +206,7 @@ def test_the_current_rule_digests_exactly_what_its_specification_says() -> None:
 def test_every_excluded_field_exists_on_the_request_schema() -> None:
     """A renamed field would silently stop being excluded."""
     schema_fields = set(RunStartRequest.model_fields)
-    named = _ALWAYS_EXCLUDED | _PREPARE_EXCLUDED | _REPLAY_CREDENTIAL_EXCLUDED
+    named = _ALWAYS_EXCLUDED | _PREPARE_EXCLUDED
 
     missing = sorted(f for f in named if f not in schema_fields)
 

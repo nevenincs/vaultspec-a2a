@@ -27,9 +27,10 @@ from __future__ import annotations
 import json
 import threading
 import time
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, BinaryIO, override
 
 import httpx
 
@@ -79,8 +80,34 @@ class _ReceiverState:
         self.attempts: list[tuple[str | None, str]] = []  # (auth header, raw body)
         self.accepted: list[dict[str, Any]] = []
         self.revoked_leases: list[str] = []
-        self.rejected_auth: list[str | None] = []
         self._attempts_by_run: dict[str, int] = {}
+
+    @property
+    def rejected_auth(self) -> list[str | None]:
+        """Headers refused by the receiver, derived from the captured attempts."""
+        expected = f"Bearer {self.attach_secret}"
+        return [auth for auth, _raw in self.attempts if auth != expected]
+
+
+@dataclass(frozen=True, slots=True)
+class _SettlementHarness:
+    """Resources needed by the armed gateway and its settlement receiver."""
+
+    app_home: Path
+    server: ThreadingHTTPServer
+    receiver_port: int
+    state: _ReceiverState
+    log_path: Path
+    log_handle: BinaryIO
+    auth: str
+
+
+@dataclass(frozen=True, slots=True)
+class _GatewayProcess:
+    """The armed gateway process and its base URL."""
+
+    process: subprocess.Popen[bytes]
+    base_url: str
 
 
 def _make_handler(state: _ReceiverState) -> type[BaseHTTPRequestHandler]:
@@ -100,7 +127,6 @@ def _make_handler(state: _ReceiverState) -> type[BaseHTTPRequestHandler]:
                 state.attempts.append((auth, raw))
                 # The dashboard authenticates settlement with attach-control only.
                 if auth != f"Bearer {state.attach_secret}":
-                    state.rejected_auth.append(auth)
                     self._respond(401)
                     return
                 body = json.loads(raw)
@@ -133,6 +159,125 @@ def _start_receiver(
     server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, server.server_address[1], state
+
+
+def _prepare_settlement_harness(tmp_path: Path) -> _SettlementHarness:
+    app_home = tmp_path / "app-home"
+    app_home.mkdir()
+    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
+
+    server, receiver_port, state = _start_receiver(_ATTACH, fail_first=True)
+    log_path = tmp_path / "gateway.log"
+    log_handle = log_path.open("wb")
+    return _SettlementHarness(
+        app_home=app_home,
+        server=server,
+        receiver_port=receiver_port,
+        state=state,
+        log_path=log_path,
+        log_handle=log_handle,
+        auth=f"Bearer {_ATTACH}",
+    )
+
+
+def _start_armed_gateway(harness: _SettlementHarness) -> _GatewayProcess:
+    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
+        return spawn_gateway(
+            script=_GATEWAY,
+            gateway_port=gateway_port,
+            env=armed_gateway_env(
+                harness.app_home,
+                gateway_port=gateway_port,
+                worker_port=worker_port,
+                extra={
+                    "VAULTSPEC_DESKTOP_SETTLEMENT_URL": (
+                        f"http://127.0.0.1:{harness.receiver_port}/settle"
+                    ),
+                    # This module admits runs against the in-process mock lane
+                    # (see ``_catalog.py``); the gateway must serve one to select.
+                    "VAULTSPEC_SERVE_IN_PROCESS_LANES": "true",
+                },
+            ),
+            log_handle=harness.log_handle,
+        )
+
+    proc, _gateway_port, _worker_port, base = spawn_until_ready(
+        _spawn, log_path=harness.log_path
+    )
+    return _GatewayProcess(process=proc, base_url=base)
+
+
+def _assert_settlement_state(
+    state: _ReceiverState,
+    run_id: str,
+    lease_id: str,
+    worker_ipc: str,
+) -> None:
+    # The mock run completes on its own; poll the receiver until it accepts the
+    # settlement for this run (retry included).
+    deadline = time.monotonic() + 60.0
+    while time.monotonic() < deadline:
+        with state.lock:
+            accepted = [b for b in state.accepted if b.get("run_id") == run_id]
+        if accepted:
+            break
+        time.sleep(0.5)
+
+    with state.lock:
+        accepted = [b for b in state.accepted if b.get("run_id") == run_id]
+        attempts = list(state.attempts)
+        revoked = list(state.revoked_leases)
+    assert accepted, "settlement was never delivered to the dashboard receiver"
+    settlement = accepted[0]
+
+    # --- Authenticated with attach-control, never worker IPC. ---
+    settle_attempts = [
+        (auth, raw) for auth, raw in attempts if json_run_id(raw) == run_id
+    ]
+    assert settle_attempts, attempts
+    for auth, _raw in settle_attempts:
+        assert auth == f"Bearer {_ATTACH}", auth
+        assert auth != f"Bearer {worker_ipc}", auth
+
+    # --- Body carries only non-secret identities, no raw actor token. ---
+    assert set(settlement) == {
+        "api_version",
+        "run_id",
+        "lease_id",
+        "terminal_status",
+    }, settlement
+    assert settlement["run_id"] == run_id
+    assert settlement["lease_id"] == lease_id
+    assert settlement["terminal_status"] in TERMINAL_STATUS_VALUES
+    for _auth, raw in settle_attempts:
+        assert _ACTOR_TOKEN not in raw, "settlement must not leak an actor token"
+
+    # --- Retried: at least two attempts, and exactly one lease revoked. ---
+    assert len(settle_attempts) >= 2, settle_attempts
+    assert revoked.count(lease_id) == 1, revoked
+    assert set(revoked) == {lease_id}, revoked
+
+
+def _assert_terminal_settlement(
+    harness: _SettlementHarness,
+    gateway: _GatewayProcess,
+) -> None:
+    commit = _prepare_and_commit(gateway.base_url, harness.auth)
+    run_id = commit["run_id"]
+    lease_id = commit["lease_id"]
+
+    # The worker-IPC secret the gateway minted at boot: settlement must never
+    # authenticate with it, so it is read here to prove the callback does not.
+    worker_ipc = (
+        (
+            derive_state_paths(harness.app_home).credentials_dir
+            / WORKER_IPC_CREDENTIAL_NAME
+        )
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+    _assert_settlement_state(harness.state, run_id, lease_id, worker_ipc)
 
 
 # ---------------------------------------------------------------------------
@@ -190,100 +335,14 @@ def test_terminal_settlement_authenticates_with_attach_retries_and_revokes_once(
     tmp_path: Path,
 ) -> None:
     """A completed run settles with attach-control, retries, and revokes one lease."""
-    app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
-
-    server, receiver_port, state = _start_receiver(_ATTACH, fail_first=True)
-
-    log_path = tmp_path / "gateway.log"
-    auth = f"Bearer {_ATTACH}"
-    log_handle = log_path.open("wb")
-
-    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        return spawn_gateway(
-            script=_GATEWAY,
-            gateway_port=gateway_port,
-            env=armed_gateway_env(
-                app_home,
-                gateway_port=gateway_port,
-                worker_port=worker_port,
-                extra={
-                    "VAULTSPEC_DESKTOP_SETTLEMENT_URL": (
-                        f"http://127.0.0.1:{receiver_port}/settle"
-                    ),
-                    # This module admits runs against the in-process mock lane
-                    # (see ``_catalog.py``); the gateway must serve one to select.
-                    "VAULTSPEC_SERVE_IN_PROCESS_LANES": "true",
-                },
-            ),
-            log_handle=log_handle,
-        )
-
-    proc, _gateway_port, _worker_port, base = spawn_until_ready(
-        _spawn, log_path=log_path
-    )
+    harness = _prepare_settlement_harness(tmp_path)
+    gateway = _start_armed_gateway(harness)
     try:
-        commit = _prepare_and_commit(base, auth)
-        run_id = commit["run_id"]
-        lease_id = commit["lease_id"]
-
-        # The worker-IPC secret the gateway minted at boot: settlement must never
-        # authenticate with it, so it is read here to prove the callback does not.
-        worker_ipc = (
-            (derive_state_paths(app_home).credentials_dir / WORKER_IPC_CREDENTIAL_NAME)
-            .read_text(encoding="utf-8")
-            .strip()
-        )
-
-        # The mock run completes on its own; poll the receiver until it accepts the
-        # settlement for this run (retry included).
-        deadline = time.monotonic() + 60.0
-        while time.monotonic() < deadline:
-            with state.lock:
-                accepted = [b for b in state.accepted if b.get("run_id") == run_id]
-            if accepted:
-                break
-            time.sleep(0.5)
-
-        with state.lock:
-            accepted = [b for b in state.accepted if b.get("run_id") == run_id]
-            attempts = list(state.attempts)
-            revoked = list(state.revoked_leases)
-        assert accepted, "settlement was never delivered to the dashboard receiver"
-        settlement = accepted[0]
-
-        # --- Authenticated with attach-control, never worker IPC. ---
-        settle_attempts = [
-            (a, raw) for (a, raw) in attempts if json_run_id(raw) == run_id
-        ]
-        assert settle_attempts, attempts
-        for a, _raw in settle_attempts:
-            assert a == f"Bearer {_ATTACH}", a
-            assert a != f"Bearer {worker_ipc}", a
-
-        # --- Body carries only non-secret identities, no raw actor token. ---
-        assert set(settlement) == {
-            "api_version",
-            "run_id",
-            "lease_id",
-            "terminal_status",
-        }, settlement
-        assert settlement["run_id"] == run_id
-        assert settlement["lease_id"] == lease_id
-        assert settlement["terminal_status"] in TERMINAL_STATUS_VALUES
-        for _a, raw in settle_attempts:
-            assert _ACTOR_TOKEN not in raw, "settlement must not leak an actor token"
-
-        # --- Retried: at least two attempts, and exactly one lease revoked. ---
-        assert len(settle_attempts) >= 2, settle_attempts
-        assert revoked.count(lease_id) == 1, revoked
-        assert set(revoked) == {lease_id}, revoked
+        _assert_terminal_settlement(harness, gateway)
     finally:
-        server.shutdown()
-        reap_gateway(proc)
-        log_handle.close()
+        harness.server.shutdown()
+        reap_gateway(gateway.process)
+        harness.log_handle.close()
 
 
 def json_run_id(raw: str) -> str | None:

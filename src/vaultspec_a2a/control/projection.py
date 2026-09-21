@@ -14,6 +14,8 @@ from ..database import (
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database import (
@@ -334,6 +336,28 @@ def _permission_data_from_interrupt(
     return None
 
 
+def _merge_checkpoint_interrupts(
+    snapshot: ThreadStateData, projection: CheckpointProjection
+) -> None:
+    """Add checkpoint permissions and the first parked clarification."""
+    existing = {permission.request_id for permission in snapshot.pending_permissions}
+    for interrupt in projection.pending_interrupts:
+        permission = _permission_data_from_interrupt(interrupt)
+        if permission is None or permission.request_id in existing:
+            continue
+        snapshot.pending_permissions.append(permission)
+        existing.add(permission.request_id)
+
+    # Mid-run clarification: checkpoint-truth disclosure only. A parked
+    # clarification is read from this projection on every reload.
+    if snapshot.pending_clarification is None:
+        for interrupt in projection.pending_interrupts:
+            clarification = clarification_data_from_interrupt(interrupt)
+            if clarification is not None:
+                snapshot.pending_clarification = clarification
+                break
+
+
 def apply_checkpoint_projection(
     snapshot: ThreadStateData,
     projection: CheckpointProjection,
@@ -351,24 +375,7 @@ def apply_checkpoint_projection(
     if snapshot.pause_cause is None:
         snapshot.pause_cause = projection.pause_cause
 
-    existing = {permission.request_id for permission in snapshot.pending_permissions}
-    for interrupt in projection.pending_interrupts:
-        permission = _permission_data_from_interrupt(interrupt)
-        if permission is None or permission.request_id in existing:
-            continue
-        snapshot.pending_permissions.append(permission)
-        existing.add(permission.request_id)
-
-    # Mid-run clarification: checkpoint-truth
-    # disclosure only — no durable-row cross-check, unlike pending_permissions
-    # above. A parked clarification survives a reload because it is read from
-    # this same checkpoint projection every time, never cached in memory.
-    if snapshot.pending_clarification is None:
-        for interrupt in projection.pending_interrupts:
-            clarification = clarification_data_from_interrupt(interrupt)
-            if clarification is not None:
-                snapshot.pending_clarification = clarification
-                break
+    _merge_checkpoint_interrupts(snapshot, projection)
 
     for reason in projection.degraded_reasons:
         if reason not in snapshot.degraded_reasons:
@@ -495,6 +502,35 @@ def apply_execution_state_projection(
     return snapshot
 
 
+def _merge_durable_permissions(
+    snapshot: ThreadStateData, durable_permissions: Sequence[PermissionRequestModel]
+) -> bool:
+    corrupted_plan_approval = False
+    if durable_permissions and snapshot.pause_cause is None:
+        snapshot.pause_cause = durable_permissions[0].pause_reason_type
+    existing = {permission.request_id for permission in snapshot.pending_permissions}
+    for permission in durable_permissions:
+        if permission.request_id in existing:
+            continue
+        try:
+            projected = _permission_data_from_model(permission)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            snapshot.snapshot_complete = False
+            if "permission_projection_unreadable" not in snapshot.degraded_reasons:
+                snapshot.degraded_reasons.append("permission_projection_unreadable")
+            snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+            snapshot.execution_readiness = (
+                RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+            )
+            if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+                snapshot.approval_status = None
+                snapshot.approval_request_id = None
+                corrupted_plan_approval = True
+            continue
+        snapshot.pending_permissions.append(projected)
+    return corrupted_plan_approval
+
+
 async def enrich_snapshot_from_durable_state(
     session: AsyncSession,
     *,
@@ -522,34 +558,7 @@ async def enrich_snapshot_from_durable_state(
         snapshot.approval_request_id = None
         return snapshot
 
-    corrupted_plan_approval = False
-    if durable_permissions:
-        if snapshot.pause_cause is None:
-            snapshot.pause_cause = durable_permissions[0].pause_reason_type
-        existing = {
-            permission.request_id for permission in snapshot.pending_permissions
-        }
-        for permission in durable_permissions:
-            if permission.request_id in existing:
-                continue
-            try:
-                projected = _permission_data_from_model(permission)
-            except (TypeError, ValueError, json.JSONDecodeError):
-                snapshot.snapshot_complete = False
-                if "permission_projection_unreadable" not in snapshot.degraded_reasons:
-                    snapshot.degraded_reasons.append("permission_projection_unreadable")
-                snapshot.repair_status = (
-                    RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
-                )
-                snapshot.execution_readiness = (
-                    RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
-                )
-                if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
-                    snapshot.approval_status = None
-                    snapshot.approval_request_id = None
-                    corrupted_plan_approval = True
-                continue
-            snapshot.pending_permissions.append(projected)
+    corrupted_plan_approval = _merge_durable_permissions(snapshot, durable_permissions)
     projected_plan_approvals = [
         permission
         for permission in snapshot.pending_permissions
@@ -569,6 +578,41 @@ async def enrich_snapshot_from_durable_state(
     return snapshot
 
 
+def _mark_execution_projection_unavailable(
+    snapshot: ThreadStateData, reason: str, *, repair_required: bool = False
+) -> None:
+    snapshot.snapshot_complete = False
+    if reason not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append(reason)
+    if repair_required:
+        snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+        snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+
+
+def _execution_state_projection_is_stale(
+    row: ThreadExecutionStateModel,
+    thread: ThreadModel,
+    *,
+    checkpoint_present: bool,
+    checkpoint_id: str | None,
+) -> bool:
+    """Return whether durable execution state can be joined to the snapshot."""
+    if not checkpoint_present or row.recovery_epoch != thread.recovery_epoch:
+        return True
+    return checkpoint_id is not None and row.checkpoint_id != checkpoint_id
+
+
+def _mark_stale_execution_state(
+    snapshot: ThreadStateData,
+    projection: ExecutionStateProjection,
+) -> None:
+    """Carry projection diagnostics forward before marking its lineage stale."""
+    for reason in projection.degraded_reasons:
+        if reason not in snapshot.degraded_reasons:
+            snapshot.degraded_reasons.append(reason)
+    _mark_execution_state_stale(snapshot)
+
+
 async def enrich_snapshot_from_execution_state(
     session: AsyncSession,
     *,
@@ -581,19 +625,17 @@ async def enrich_snapshot_from_execution_state(
     row = await get_thread_execution_state(session, thread.id)
     if row is None:
         if checkpoint_present:
-            snapshot.snapshot_complete = False
-            if "execution_state_projection_missing" not in snapshot.degraded_reasons:
-                snapshot.degraded_reasons.append("execution_state_projection_missing")
+            _mark_execution_projection_unavailable(
+                snapshot, "execution_state_projection_missing"
+            )
         return snapshot
 
     try:
         projection = project_execution_state_model(row)
     except ValueError:
-        snapshot.snapshot_complete = False
-        if "execution_state_projection_unreadable" not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append("execution_state_projection_unreadable")
-        snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
-        snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+        _mark_execution_projection_unavailable(
+            snapshot, "execution_state_projection_unreadable", repair_required=True
+        )
         return snapshot
 
     # Terminal threads should not merge execution state —
@@ -602,23 +644,13 @@ async def enrich_snapshot_from_execution_state(
     if is_terminal:
         return snapshot
 
-    is_stale = row.recovery_epoch != thread.recovery_epoch or (
-        checkpoint_present
-        and checkpoint_id is not None
-        and row.checkpoint_id != checkpoint_id
-    )
-    # When checkpoint is unavailable, the execution state row
-    # is unverifiable — fail closed instead of merging stale metadata.
-    if not checkpoint_present:
-        is_stale = True
-    if is_stale:
-        # Carry forward the projection's own degraded_reasons (e.g.
-        # "execution_state_projection_unavailable") before adding the
-        # staleness marker — both conditions are independently true.
-        for reason in projection.degraded_reasons:
-            if reason not in snapshot.degraded_reasons:
-                snapshot.degraded_reasons.append(reason)
-        _mark_execution_state_stale(snapshot)
+    if _execution_state_projection_is_stale(
+        row,
+        thread,
+        checkpoint_present=checkpoint_present,
+        checkpoint_id=checkpoint_id,
+    ):
+        _mark_stale_execution_state(snapshot, projection)
         return snapshot
 
     return apply_execution_state_projection(snapshot, projection)

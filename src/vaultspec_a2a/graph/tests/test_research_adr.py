@@ -33,7 +33,8 @@ from ...team.team_config import (
     load_team_config,
 )
 from ...thread.errors import ConfigError
-from ..compiler import _doc_review_router, compile_team_graph
+from .._compiler_research import _doc_review_router
+from ..compiler import compile_team_graph
 from .conftest import deterministic_model_assignment
 
 

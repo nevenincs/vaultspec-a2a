@@ -144,6 +144,8 @@ class DegradedReason(StrEnum):
     EXECUTION_STATE_PROJECTION_MISSING = "execution_state_projection_missing"
     EXECUTION_STATE_PROJECTION_STALE = "execution_state_projection_stale"
     EXECUTION_STATE_PROJECTION_UNREADABLE = "execution_state_projection_unreadable"
+    INCOMPATIBLE_EXECUTION_AUTHORITY = "incompatible_execution_authority"
+    INVALID_AGENT_DESCRIPTORS = "invalid_agent_descriptors"
     INTERRUPT_PAYLOAD_UNREADABLE = "interrupt_payload_unreadable"
     INTERRUPT_PAYLOAD_UNTYPED = "interrupt_payload_untyped"
     PENDING_PERMISSION_WITHOUT_CHECKPOINT_TRUTH = (

@@ -12,10 +12,18 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest
+from ...team.team_config import load_team_config
+from ...thread.action_receipts import (
+    GraphActionReceipt,
+    control_action_payload_fingerprint,
+)
+from ...thread.enums import ControlActionType
+from ...thread.executable_graph import freeze_graph_definition
 from ..app import create_worker_app
 from ..dispatch_ids import DispatchIdAdmission
 from ..executor import Executor
@@ -25,6 +33,39 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from fastapi import FastAPI
+
+
+def _accepted_graph_dispatch(
+    request: DispatchRequest, workspace: Path
+) -> DispatchRequest:
+    definition = freeze_graph_definition(
+        load_team_config("mock-success-single", workspace_root=workspace),
+        workspace_root=workspace,
+    )
+    request = request.model_copy(
+        update={"team_preset": "mock-success-single", "graph_definition": definition}
+    )
+    intent: dict[str, object] = (
+        {"content": request.content}
+        if request.action == "ingest"
+        else {"option_id": request.option_id}
+    )
+    accepted = freeze_accepted_input(request, intent=intent)
+    receipt = GraphActionReceipt(
+        schema_version="graph-action-v1",
+        thread_id=request.thread_id,
+        action_id=f"action-{request.dispatch_id}",
+        action_type=(
+            ControlActionType.INGEST
+            if request.action == "ingest"
+            else ControlActionType.RESUME
+        ),
+        payload_fingerprint=control_action_payload_fingerprint(accepted),
+        dispatch_id=request.dispatch_id,
+        run_revision=0,
+        writer_generation=1,
+    )
+    return request.model_copy(update={"graph_action_receipt": receipt})
 
 
 def test_dispatch_id_admission_is_fifo_bounded() -> None:
@@ -111,16 +152,21 @@ def test_concurrent_identical_capacity_dispatches_replay_one_acceptance(
             await bridge.close()
 
     app = create_worker_app(lifespan=worker_lifespan)
-    authority = resolve_execution_authority(current_execution_metadata(tmp_path))
-    dispatch = DispatchRequest(
-        dispatch_id=f"concurrent-identical-{action}",
-        action=cast("Any", action),
-        thread_id=f"concurrent-{action}-thread",
-        workspace_root=str(tmp_path),
-        content="run once" if action == "ingest" else None,
-        option_id="allow_once" if action == "resume" else None,
-        recursion_limit=25,
-        model_assignment=authority.model_assignment,
+    authority = resolve_execution_authority(
+        current_execution_metadata(tmp_path, required_roles=("mock-coder-success",))
+    )
+    dispatch = _accepted_graph_dispatch(
+        DispatchRequest(
+            dispatch_id=f"concurrent-identical-{action}",
+            action=cast("Any", action),
+            thread_id=f"concurrent-{action}-thread",
+            workspace_root=str(tmp_path),
+            content="run once" if action == "ingest" else None,
+            option_id="allow_once" if action == "resume" else None,
+            recursion_limit=25,
+            model_assignment=authority.model_assignment,
+        ),
+        tmp_path,
     )
     payload = dispatch.model_dump(mode="json")
 
@@ -193,18 +239,23 @@ def test_concurrent_distinct_same_thread_dispatch_retains_capacity_refusal(
             await bridge.close()
 
     app = create_worker_app(lifespan=worker_lifespan)
-    authority = resolve_execution_authority(current_execution_metadata(tmp_path))
+    authority = resolve_execution_authority(
+        current_execution_metadata(tmp_path, required_roles=("mock-coder-success",))
+    )
 
     def request(dispatch_id: str) -> DispatchRequest:
-        return DispatchRequest(
-            dispatch_id=dispatch_id,
-            action="ingest",
-            thread_id="concurrent-distinct-thread",
-            team_preset="mock-success-single",
-            workspace_root=str(tmp_path),
-            content="only one ID may enter",
-            recursion_limit=25,
-            model_assignment=authority.model_assignment,
+        return _accepted_graph_dispatch(
+            DispatchRequest(
+                dispatch_id=dispatch_id,
+                action="ingest",
+                thread_id="concurrent-distinct-thread",
+                team_preset="mock-success-single",
+                workspace_root=str(tmp_path),
+                content="only one ID may enter",
+                recursion_limit=25,
+                model_assignment=authority.model_assignment,
+            ),
+            tmp_path,
         )
 
     with TestClient(app) as client:
@@ -269,15 +320,20 @@ def test_dispatch_reserves_capacity_before_scheduling_or_checkpoint_read(
             await bridge.close()
 
     app = create_worker_app(lifespan=worker_lifespan)
-    authority = resolve_execution_authority(current_execution_metadata(tmp_path))
-    dispatch = DispatchRequest(
-        dispatch_id="capacity-refused-before-schedule",
-        action="ingest",
-        thread_id="over-capacity",
-        team_preset="mock-success-single",
-        workspace_root=str(tmp_path),
-        recursion_limit=25,
-        model_assignment=authority.model_assignment,
+    authority = resolve_execution_authority(
+        current_execution_metadata(tmp_path, required_roles=("mock-coder-success",))
+    )
+    dispatch = _accepted_graph_dispatch(
+        DispatchRequest(
+            dispatch_id="capacity-refused-before-schedule",
+            action="ingest",
+            thread_id="over-capacity",
+            team_preset="mock-success-single",
+            workspace_root=str(tmp_path),
+            recursion_limit=25,
+            model_assignment=authority.model_assignment,
+        ),
+        tmp_path,
     )
     with TestClient(app) as client:
         response = client.post("/dispatch", json=dispatch.model_dump(mode="json"))

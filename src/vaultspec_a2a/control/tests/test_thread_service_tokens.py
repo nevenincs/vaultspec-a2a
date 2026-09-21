@@ -11,6 +11,7 @@ no mock transport — and the database is a real file-backed SQLite engine.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,8 +29,8 @@ from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.thread_service import (
     ThreadCreationRequest,
+    ThreadDispatchRuntime,
     create_and_dispatch_thread,
-    generate_thread_id,
 )
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
@@ -101,7 +102,7 @@ def _capturing_worker(
 async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    thread_id = generate_thread_id()
+    thread_id = "invalid-initial-dispatch"
     captured: dict[str, Any] = {}
     async with (
         httpx.AsyncClient(
@@ -124,15 +125,17 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
                     metadata_json=None,
                     workspace_root=Path("relative-project"),
                 ),
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
+                runtime=ThreadDispatchRuntime(
+                    circuit_breaker=WorkerCircuitBreaker(
+                        failure_threshold=1, recovery_timeout=1.0
+                    ),
+                    worker_spawner=LazyWorkerSpawner(
+                        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+                    ),
+                    worker_client=client,
+                    recursion_limit=20,
+                    trace_headers=None,
                 ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-                ),
-                worker_client=client,
-                recursion_limit=20,
-                trace_headers=None,
             )
         await session.commit()
     async with session_factory() as session:
@@ -221,6 +224,7 @@ def _cancelling_capacity_worker(
                 action_type=ControlActionType.CANCEL,
                 idempotency_key=f"review-cancel:{thread.id}",
                 payload={"cancel": True},
+                recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
             )
             assert cancel.dispatch_id is not None
             expectation = thread_write_expectation(thread)
@@ -257,7 +261,7 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
         tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
         engine_bearer=_BEARER,
     )
-    thread_id = generate_thread_id()
+    thread_id = "token-run"
 
     async with (
         httpx.AsyncClient(
@@ -280,11 +284,13 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
                 workspace_root=tmp_path,
                 actor_tokens=bundle,
             ),
-            circuit_breaker=circuit_breaker,
-            worker_spawner=spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=None,
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=circuit_breaker,
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
+            ),
         )
 
     assert result.dispatched is True
@@ -331,7 +337,7 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
     spawner.replace_process(None)
-    thread_id = generate_thread_id()
+    thread_id = "early-terminal"
     async with (
         httpx.AsyncClient(
             transport=ASGITransport(
@@ -354,13 +360,15 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=1, recovery_timeout=1.0
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=1, recovery_timeout=1.0
+                ),
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
             ),
-            worker_spawner=spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=None,
         )
     assert result.dispatched is True
     assert result.status == ThreadStatus.COMPLETED.value
@@ -382,7 +390,7 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
     spawner.replace_process(None)
-    thread_id = generate_thread_id()
+    thread_id = "deleted-before-ack"
     async with (
         httpx.AsyncClient(
             transport=ASGITransport(app=_deleting_worker(session_factory)),
@@ -403,13 +411,15 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=1, recovery_timeout=1.0
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=1, recovery_timeout=1.0
+                ),
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
             ),
-            worker_spawner=spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=None,
         )
     assert result.dispatched is True
     assert result.status == ""
@@ -426,7 +436,7 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
     spawner.replace_process(None)
-    thread_id = generate_thread_id()
+    thread_id = "terminal-before-lost-ack"
     async with (
         httpx.AsyncClient(
             transport=ASGITransport(
@@ -453,13 +463,15 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=1, recovery_timeout=1.0
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=1, recovery_timeout=1.0
+                ),
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
             ),
-            worker_spawner=spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=None,
         )
     assert result.status == ThreadStatus.COMPLETED.value
     assert result.dispatched is True
@@ -476,7 +488,7 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
     spawner.replace_process(None)
-    thread_id = generate_thread_id()
+    thread_id = "cancel-wins-before-capacity-response"
     async with (
         httpx.AsyncClient(
             transport=ASGITransport(app=_cancelling_capacity_worker(session_factory)),
@@ -497,13 +509,15 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            circuit_breaker=WorkerCircuitBreaker(
-                failure_threshold=1, recovery_timeout=1.0
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=1, recovery_timeout=1.0
+                ),
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
             ),
-            worker_spawner=spawner,
-            worker_client=worker_client,
-            recursion_limit=domain_config.graph_recursion_limit,
-            trace_headers=None,
         )
 
     assert result.status == ThreadStatus.CANCELLING.value

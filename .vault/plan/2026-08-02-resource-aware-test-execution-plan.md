@@ -3,14 +3,19 @@ tags:
   - '#plan'
   - '#resource-aware-test-execution'
 date: '2026-08-02'
-modified: '2026-08-02'
-body_hash: 'sha256:8df5e4bece65c77948cd86756fa7a2aab735fb112fcbbe632dfa4e974af4a8c2'
 tier: L1
 related:
   - '[[2026-07-15-dev-process-registry-adr]]'
   - '[[2026-08-02-resource-aware-test-execution-adr]]'
   - '[[2026-08-02-resource-aware-test-execution-audit]]'
+  - '[[2026-08-02-control-action-leases-adr]]'
+  - '[[2026-07-18-desktop-product-profile-adr]]'
+  - '[[2026-08-02-provider-model-catalog-adr]]'
+  - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
+modified: '2026-09-20'
+body_hash: 'sha256:2f8edb7edf81868226127468260da408b0aa63c3dfaab78b4d6bbfe8662068e4'
 ---
+
 # `resource-aware-test-execution` plan
 
 Deliver the two-layer test execution framework decided in
@@ -20,6 +25,8 @@ throughput layer, registry-backed service resolution, and progress-based
 deadlines in place of one arbitrary global timeout.
 
 ## Description
+
+Approved 2026-09-20 from the owner's explicit request to action every queued test-suite finding. This follow-on reopens the completed plan for S22-S28. Existing accepted lease, desktop, provider-catalog, context-provider, process-registry, and resource-aware-test decisions cover the requested corrections; no new costly decision is introduced.
 
 Executes `2026-08-02-resource-aware-test-execution-adr`. A new `testing`
 subpackage carries the resource vocabulary, the lease primitive (same `O_EXCL`
@@ -54,6 +61,16 @@ resolution, closing the audited harness-registry gap.
 - [x] `S19` - Compose capacity limits by minimum, bound lease waits under the item clock, and make shared markers unique per acquisition; `src/vaultspec_a2a/testing/`.
 - [x] `S20` - Tighten the proofs against fallback passes and isolated-home binds; `src/vaultspec_a2a/testing/tests/`.
 - [x] `S21` - Add the parallel toolchain lane for declaration-derived distribution; `dev/toolchain.py`.
+- [x] `S22` - Repair permission-response lease replay so concurrent identical retries share one durable action; `src/vaultspec_a2a/control/action_lease.py, src/vaultspec_a2a/control/permission_service.py, src/vaultspec_a2a/control/tests/test_permission_leases.py`.
+- [x] `S23` - Stabilize desktop run-admission readiness through release and commit races; `src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/control/admission.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/control/tests/test_worker_health_probe.py, src/vaultspec_a2a/desktop_tests/test_run_admission.py`.
+- [x] `S24` - Move prompt-free external provider discovery behind an explicit non-unit resource lane; `src/vaultspec_a2a/testing/resources.py, src/vaultspec_a2a/api/tests/test_provider_catalog_route.py, src/vaultspec_a2a/testing/tests`.
+- [x] `S25` - Prove ACP session isolation and safely amortize child-process setup where loop and mutable state allow; `src/vaultspec_a2a/providers/tests/conftest.py, src/vaultspec_a2a/providers/tests`.
+- [x] `S26` - Replace raw test binary guards with canonical platform-aware provider resolvers; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/providers`.
+- [x] `S27` - Close Windows injected-client transport ownership warnings on their owning TestClient loop; `src/vaultspec_a2a/api/tests/test_endpoints.py`.
+- [x] `S28` - Reduce the serialized desktop test tail without weakening real-process coverage; `src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/testing`.
+- [x] `S29` - Exclude private RAG service-control proofs from the unit lane and declare their live resource; `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py, src/vaultspec_a2a/testing/resources.py`.
+- [x] `S30` - Close the residual Windows Proactor transports exposed by the full lane; `src/vaultspec_a2a/api/tests, src/vaultspec_a2a/desktop/tests`.
+- [x] `S31` - Exclude the remaining external RAG CLI acquisition proof from the unit lane; `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`.
 
 ## Parallelization
 

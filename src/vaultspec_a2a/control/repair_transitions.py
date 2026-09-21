@@ -138,21 +138,6 @@ async def mark_permission_response_requested(
     )
 
 
-async def mark_permission_response_applied(
-    db: AsyncSession, thread_id: str
-) -> ThreadModel | None:
-    transition = repair_state_for_action(
-        ControlActionType.PERMISSION_RESPONSE_SUBMITTED, "applied"
-    )
-    return await set_thread_repair_state(
-        db,
-        thread_id,
-        repair_status=transition.repair_status,
-        execution_readiness=transition.execution_readiness,
-        last_applied_action=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-    )
-
-
 async def mark_message_followup_requested(
     db: AsyncSession, thread_id: str
 ) -> ThreadModel | None:

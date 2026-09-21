@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from langchain_core.messages import AIMessageChunk, BaseMessageChunk
 
 from ...graph.enums import ToolCallStatus
-from ...providers.codex_chat_model import _completed_action_chunk
+from ...providers._codex_protocol import _completed_action_chunk
 from ...thread.snapshots import ThreadStateData
 from ..snapshot import MinimalState, enrich_snapshot_from_state
 

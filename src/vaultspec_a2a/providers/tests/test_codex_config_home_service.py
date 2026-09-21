@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
 
+from ...graph.enums import Provider
 from ...utils.enums import CodexWebSearchMode
 from .._acp_mcp import codex_mcp_server_specs
 from .._codex_config_home import (
@@ -16,6 +16,7 @@ from .._codex_config_home import (
     cleanup_codex_config_home,
     render_codex_config_toml,
 )
+from ..cli_resolution import resolve_provider_cli_executable
 
 pytestmark = pytest.mark.service
 
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 
 
 def _codex_cli() -> str:
-    executable = shutil.which("codex")
+    executable = resolve_provider_cli_executable(Provider.CODEX)
     if executable is None:
         pytest.fail("Codex CLI is required for the explicit service probe")
     return executable

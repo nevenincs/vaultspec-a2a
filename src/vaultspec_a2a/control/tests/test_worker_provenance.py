@@ -20,12 +20,10 @@ from typing import TYPE_CHECKING, TypedDict, override
 
 import pytest
 
-from ...control.config import INTERNAL_TOKEN_ENV, settings
-from ...control.worker_management import (
-    LazyWorkerSpawner,
-    WorkerHealthProbe,
-    probe_worker_health,
-)
+from ...control._worker_health import WorkerHealthProbe, probe_worker_health
+from ...control.config import settings
+from ...control.infra_config import INTERNAL_TOKEN_ENV
+from ...control.worker_management import LazyWorkerSpawner
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -249,11 +247,11 @@ def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
             f"""
             import asyncio
 
-            from vaultspec_a2a.control.worker_management import (
-                LazyWorkerSpawner,
+            from vaultspec_a2a.control._worker_health import (
                 WorkerHealthProbe,
                 probe_worker_health,
             )
+            from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
 
 
             async def main() -> None:

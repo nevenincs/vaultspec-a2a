@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import Any
 
 import anyio
@@ -26,6 +27,12 @@ from ..telemetry import inject_trace_context
 __all__ = ["WorkerBridge"]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _BatchState:
+    events: list[dict[str, Any]] = field(default_factory=list)
+    flush_task: asyncio.Task[None] | None = None
 
 
 class WorkerBridge:
@@ -67,11 +74,22 @@ class WorkerBridge:
         self._start_time = time.monotonic()  # track uptime
 
         # Event batching state
-        self._event_buffer: list[dict[str, Any]] = []
-        self._flush_task: asyncio.Task[None] | None = None
+        self._batch = _BatchState()
 
         # Consecutive heartbeat failure tracking for escalating logs.
         self._consecutive_hb_failures: int = 0
+
+    @property
+    def _event_buffer(self) -> list[dict[str, Any]]:
+        return self._batch.events
+
+    @property
+    def _flush_task(self) -> asyncio.Task[None] | None:
+        return self._batch.flush_task
+
+    @_flush_task.setter
+    def _flush_task(self, task: asyncio.Task[None] | None) -> None:
+        self._batch.flush_task = task
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -85,7 +103,7 @@ class WorkerBridge:
         fresh client timeout on every retry or keep the worker alive after its
         owner has moved to forced process-tree cleanup.
         """
-        pending = self._flush_task
+        pending = self._batch.flush_task
         pending_joined = True
         if pending is not None and not pending.done():
             pending.cancel()
@@ -97,7 +115,7 @@ class WorkerBridge:
                 pending_joined = pending in done
             else:
                 pending_joined = False
-        self._flush_task = None
+        self._batch.flush_task = None
 
         flush_deadline = deadline
         if deadline is not None:
@@ -172,7 +190,7 @@ class WorkerBridge:
         is called explicitly.
         """
         # Cap buffer to prevent unbounded memory growth.
-        if len(self._event_buffer) >= settings.ipc_max_event_buffer:
+        if len(self._batch.events) >= settings.ipc_max_event_buffer:
             logger.warning(
                 "Event buffer full (%d events), dropping oldest event",
                 settings.ipc_max_event_buffer,
@@ -180,13 +198,13 @@ class WorkerBridge:
                     "worker_id": self._worker_id,
                     "thread_id": thread_id,
                     "action": "buffer_drop_oldest",
-                    "event_buffer_size": len(self._event_buffer),
+                    "event_buffer_size": len(self._batch.events),
                     "event_buffer_limit": settings.ipc_max_event_buffer,
                 },
             )
-            self._event_buffer.pop(0)
+            self._batch.events.pop(0)
 
-        self._event_buffer.append(
+        self._batch.events.append(
             {
                 "thread_id": thread_id,
                 "payload": jsonable_encoder(payload),
@@ -194,13 +212,90 @@ class WorkerBridge:
             }
         )
         # Schedule a flush if one isn't already pending.
-        if self._flush_task is None or self._flush_task.done():
-            self._flush_task = asyncio.create_task(self._deferred_flush())
+        if self._batch.flush_task is None or self._batch.flush_task.done():
+            self._batch.flush_task = asyncio.create_task(self._deferred_flush())
 
     async def _deferred_flush(self) -> None:
         """Wait for the flush interval then send accumulated events."""
         await asyncio.sleep(settings.ipc_flush_interval_seconds)
         await self.flush_events()
+
+    async def _post_event_batch(
+        self,
+        batch: list[dict[str, Any]],
+        *,
+        attempt: int,
+        request_timeout: httpx.Timeout | float | None,
+    ) -> bool:
+        try:
+            resp = await self._client.post(
+                "/internal/events/batch",
+                json={"events": batch},
+                headers=self._trace_headers(),
+                timeout=request_timeout,
+            )
+            if resp.status_code == 200:
+                return True
+            logger.warning(
+                "Batch event relay failed (HTTP %d), attempt %d/%d",
+                resp.status_code,
+                attempt + 1,
+                settings.ipc_max_flush_retries,
+                extra={
+                    "worker_id": self._worker_id,
+                    "action": "flush_events",
+                    "batch_size": len(batch),
+                    "flush_attempt": attempt + 1,
+                    "flush_attempt_limit": settings.ipc_max_flush_retries,
+                    "http_status_code": resp.status_code,
+                },
+            )
+        except httpx.HTTPError:
+            logger.warning(
+                "Failed to send %d events (attempt %d/%d)",
+                len(batch),
+                attempt + 1,
+                settings.ipc_max_flush_retries,
+                extra={
+                    "worker_id": self._worker_id,
+                    "action": "flush_events",
+                    "batch_size": len(batch),
+                    "flush_attempt": attempt + 1,
+                    "flush_attempt_limit": settings.ipc_max_flush_retries,
+                },
+                exc_info=True,
+            )
+        return False
+
+    async def _send_batch_once(
+        self, batch: list[dict[str, Any]], *, attempt: int, remaining: float | None
+    ) -> bool:
+        request_timeout: httpx.Timeout | float | None = (
+            self._client.timeout if remaining is None else remaining
+        )
+        try:
+            return await self._post_event_batch(
+                batch, attempt=attempt, request_timeout=request_timeout
+            )
+        except asyncio.CancelledError:
+            self._batch.events[0:0] = batch
+            raise
+
+    async def _wait_for_flush_retry(
+        self, batch: list[dict[str, Any]], *, attempt: int, deadline: float | None
+    ) -> bool:
+        delay = settings.ipc_retry_backoff_base_seconds * (2**attempt)
+        remaining = self._remaining(deadline)
+        if remaining is not None:
+            delay = min(delay, remaining)
+        if delay <= 0:
+            return False
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            self._batch.events[0:0] = batch
+            raise
+        return True
 
     async def flush_events(self, *, deadline: float | None = None) -> bool:
         """Immediately send all buffered events as a single batch POST.
@@ -212,78 +307,32 @@ class WorkerBridge:
         Failures are logged at WARNING level but never raised -- the worker
         must not crash because the gateway is temporarily unavailable.
         """
-        if not self._event_buffer:
+        if not self._batch.events:
             return True
 
-        batch = self._event_buffer[:]
-        self._event_buffer.clear()
+        batch = self._batch.events[:]
+        self._batch.events.clear()
 
         for attempt in range(settings.ipc_max_flush_retries):
             remaining = self._remaining(deadline)
             if remaining is not None and remaining <= 0:
                 break
-            try:
-                request_timeout: httpx.Timeout | float | None = (
-                    self._client.timeout if remaining is None else remaining
-                )
-                try:
-                    resp = await self._client.post(
-                        "/internal/events/batch",
-                        json={"events": batch},
-                        headers=self._trace_headers(),
-                        timeout=request_timeout,
-                    )
-                except asyncio.CancelledError:
-                    self._event_buffer[0:0] = batch
-                    raise
-                if resp.status_code == 200:
-                    return True
-                logger.warning(
-                    "Batch event relay failed (HTTP %d), attempt %d/%d",
-                    resp.status_code,
-                    attempt + 1,
-                    settings.ipc_max_flush_retries,
-                    extra={
-                        "worker_id": self._worker_id,
-                        "action": "flush_events",
-                        "batch_size": len(batch),
-                        "flush_attempt": attempt + 1,
-                        "flush_attempt_limit": settings.ipc_max_flush_retries,
-                        "http_status_code": resp.status_code,
-                    },
-                )
-            except httpx.HTTPError:
-                logger.warning(
-                    "Failed to send %d events (attempt %d/%d)",
-                    len(batch),
-                    attempt + 1,
-                    settings.ipc_max_flush_retries,
-                    extra={
-                        "worker_id": self._worker_id,
-                        "action": "flush_events",
-                        "batch_size": len(batch),
-                        "flush_attempt": attempt + 1,
-                        "flush_attempt_limit": settings.ipc_max_flush_retries,
-                    },
-                    exc_info=True,
-                )
+            if await self._send_batch_once(batch, attempt=attempt, remaining=remaining):
+                return True
 
             # Exponential backoff before retry.
-            if attempt < settings.ipc_max_flush_retries - 1:
-                delay = settings.ipc_retry_backoff_base_seconds * (2**attempt)
-                remaining = self._remaining(deadline)
-                if remaining is not None:
-                    delay = min(delay, remaining)
-                if delay <= 0:
-                    break
-                try:
-                    await asyncio.sleep(delay)
-                except asyncio.CancelledError:
-                    self._event_buffer[0:0] = batch
-                    raise
+            if attempt < settings.ipc_max_flush_retries - 1 and not (
+                await self._wait_for_flush_retry(
+                    batch, attempt=attempt, deadline=deadline
+                )
+            ):
+                break
 
-        # All retries exhausted — events could not reach the gateway.
-        # Escalate to ERROR so operators notice IPC breakdown.
+        self._requeue_failed_batch(batch)
+        return False
+
+    def _requeue_failed_batch(self, batch: list[dict[str, Any]]) -> None:
+        """Report exhausted delivery and preserve the buffered events that fit."""
         logger.error(
             "Event flush to gateway FAILED after %d attempts"
             " (gateway_url=%s, batch_size=%d) — permission and status"
@@ -301,9 +350,9 @@ class WorkerBridge:
         )
 
         # Re-queue events (respecting buffer cap).
-        space = settings.ipc_max_event_buffer - len(self._event_buffer)
+        space = settings.ipc_max_event_buffer - len(self._batch.events)
         if space > 0:
-            self._event_buffer[:0] = batch[:space]
+            self._batch.events[:0] = batch[:space]
         dropped = len(batch) - max(space, 0)
         if dropped > 0:
             logger.error(
@@ -315,10 +364,9 @@ class WorkerBridge:
                     "action": "flush_events_drop",
                     "dropped_events": dropped,
                     "flush_attempt_limit": settings.ipc_max_flush_retries,
-                    "event_buffer_size": len(self._event_buffer),
+                    "event_buffer_size": len(self._batch.events),
                 },
             )
-        return False
 
     # ------------------------------------------------------------------
     # Heartbeat

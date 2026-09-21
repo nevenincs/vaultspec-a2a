@@ -393,50 +393,47 @@ def _validate_relative_name(value: str) -> bytes:
     return os.fsencode(value)
 
 
-def create_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
-    """Atomically claim one private regular-file slot beneath *authority*.
+def _create_windows_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
+    if os.name != "nt":
+        raise OSError(errno.ENOSYS, "Windows file creation is unavailable")
+    import msvcrt
 
-    The Windows handle is created with delete authority so the exact live file
-    object can later be renamed without reopening its pathname.
-    """
-    _validate_relative_name(name)
-    assert_directory_authority(authority)
-    if os.name == "nt":
-        import msvcrt
-
-        if authority.native_handle is None or authority.dir_fd is not None:
-            raise OSError(errno.EBADF, "Windows file authority is not leased")
-        library = _windows_library()
-        create_file = _create_file_w(library)
-        handle_value = create_file(
-            str(authority.path / name),
-            _FILE_GENERIC_READ | _FILE_GENERIC_WRITE | _DELETE,
-            _FILE_SHARE_READ | _FILE_SHARE_WRITE,
-            None,
-            _CREATE_NEW,
-            _FILE_ATTRIBUTE_NORMAL,
-            None,
+    if authority.native_handle is None or authority.dir_fd is not None:
+        raise OSError(errno.EBADF, "Windows file authority is not leased")
+    library = _windows_library()
+    create_file = _create_file_w(library)
+    handle_value = create_file(
+        str(authority.path / name),
+        _FILE_GENERIC_READ | _FILE_GENERIC_WRITE | _DELETE,
+        _FILE_SHARE_READ | _FILE_SHARE_WRITE,
+        None,
+        _CREATE_NEW,
+        _FILE_ATTRIBUTE_NORMAL,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle_value in {None, invalid_handle}:
+        error = int(ctypes.get_last_error())
+        if error in {80, 183}:
+            raise FileExistsError(errno.EEXIST, "private file slot exists", name)
+        raise _last_windows_error(authority.path / name)
+    handle = cast("int", handle_value)
+    try:
+        descriptor = msvcrt.open_osfhandle(
+            handle,
+            os.O_RDWR | getattr(os, "O_BINARY", 0),
         )
-        invalid_handle = ctypes.c_void_p(-1).value
-        if handle_value in {None, invalid_handle}:
-            error = int(ctypes.get_last_error())
-            if error in {80, 183}:
-                raise FileExistsError(errno.EEXIST, "private file slot exists", name)
-            raise _last_windows_error(authority.path / name)
-        handle = cast("int", handle_value)
-        try:
-            descriptor = msvcrt.open_osfhandle(
-                handle,
-                os.O_RDWR | getattr(os, "O_BINARY", 0),
-            )
-        except BaseException:
-            _close_handle(library)(handle)
-            raise
-        try:
-            return os.fdopen(descriptor, "w+b", buffering=0, closefd=True)
-        except BaseException:
-            os.close(descriptor)
-            raise
+    except BaseException:
+        _close_handle(library)(handle)
+        raise
+    try:
+        return os.fdopen(descriptor, "w+b", buffering=0, closefd=True)
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _create_posix_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
     if authority.dir_fd is None or authority.native_handle is not None:
         raise OSError(errno.EBADF, "POSIX file authority is not leased")
     if not hasattr(os, "O_NOFOLLOW"):
@@ -456,6 +453,19 @@ def create_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
     except BaseException:
         os.close(descriptor)
         raise
+
+
+def create_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
+    """Atomically claim one private regular-file slot beneath *authority*.
+
+    The Windows handle is created with delete authority so the exact live file
+    object can later be renamed without reopening its pathname.
+    """
+    _validate_relative_name(name)
+    assert_directory_authority(authority)
+    if os.name == "nt":
+        return _create_windows_private_file(authority, name)
+    return _create_posix_private_file(authority, name)
 
 
 def open_shared_read_descriptor(path: Path) -> int:
@@ -645,6 +655,60 @@ def _posix_link_fd_no_replace(
     )
 
 
+def _publish_windows_no_replace(
+    authority: DirectoryAuthority,
+    destination_name: str,
+    source_fd: int | None,
+    source_authority: DirectoryAuthority | None,
+) -> None:
+    if os.name != "nt":
+        raise OSError(errno.ENOSYS, "Windows file publication is unavailable")
+    if authority.native_handle is None or authority.dir_fd is not None:
+        raise OSError(errno.EBADF, "Windows publication authority is not leased")
+    if source_fd is not None:
+        import msvcrt
+
+        opened = os.fstat(source_fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise OSError(errno.EINVAL, "file publication source is not regular")
+        source_handle = msvcrt.get_osfhandle(source_fd)
+    else:
+        assert source_authority is not None
+        assert_directory_authority(source_authority)
+        if source_authority.native_handle is None:
+            raise OSError(errno.EBADF, "Windows source authority is not leased")
+        source_handle = source_authority.native_handle
+    _windows_publish_handle(authority, source_handle, destination_name)
+
+
+def _publish_posix_no_replace(
+    authority: DirectoryAuthority,
+    destination_bytes: bytes,
+    source_fd: int | None,
+    source_authority: DirectoryAuthority | None,
+) -> None:
+    if authority.dir_fd is None or authority.native_handle is not None:
+        raise OSError(errno.EBADF, "POSIX publication authority is not leased")
+    if source_fd is not None:
+        opened = os.fstat(source_fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise OSError(errno.EINVAL, "file publication source is not regular")
+        if opened.st_nlink == 0:
+            _posix_link_fd_no_replace(authority, source_fd, destination_bytes)
+            return
+        raise OSError(
+            errno.ENOSYS, "named POSIX file publication is not identity-bound"
+        )
+    assert source_authority is not None
+    assert_directory_authority(source_authority)
+    if source_authority.dir_fd is None or source_authority.native_handle is not None:
+        raise OSError(errno.EBADF, "POSIX source authority is not leased")
+    opened = os.fstat(source_authority.dir_fd)
+    if not stat.S_ISDIR(opened.st_mode):
+        raise OSError(errno.EINVAL, "directory publication source is not a directory")
+    raise OSError(errno.ENOSYS, "POSIX directory publication is not identity-bound")
+
+
 def publish_no_replace(
     authority: DirectoryAuthority,
     source_name: str,
@@ -668,44 +732,10 @@ def publish_no_replace(
         raise ValueError("publication requires exactly one live source authority")
     assert_directory_authority(authority)
     if os.name == "nt":
-        if authority.native_handle is None or authority.dir_fd is not None:
-            raise OSError(errno.EBADF, "Windows publication authority is not leased")
-        if source_fd is not None:
-            import msvcrt
-
-            opened = os.fstat(source_fd)
-            if not stat.S_ISREG(opened.st_mode):
-                raise OSError(errno.EINVAL, "file publication source is not regular")
-            source_handle = msvcrt.get_osfhandle(source_fd)
-        else:
-            assert source_authority is not None
-            assert_directory_authority(source_authority)
-            if source_authority.native_handle is None:
-                raise OSError(errno.EBADF, "Windows source authority is not leased")
-            source_handle = source_authority.native_handle
-        _windows_publish_handle(authority, source_handle, destination_name)
-        return
-    if authority.dir_fd is None or authority.native_handle is not None:
-        raise OSError(errno.EBADF, "POSIX publication authority is not leased")
-    if source_fd is not None:
-        opened = os.fstat(source_fd)
-        if not stat.S_ISREG(opened.st_mode):
-            raise OSError(errno.EINVAL, "file publication source is not regular")
-        if opened.st_nlink == 0:
-            _posix_link_fd_no_replace(authority, source_fd, destination_bytes)
-            return
-        raise OSError(
-            errno.ENOSYS,
-            "named POSIX file publication is not identity-bound",
+        _publish_windows_no_replace(
+            authority, destination_name, source_fd, source_authority
         )
-    assert source_authority is not None
-    assert_directory_authority(source_authority)
-    if source_authority.dir_fd is None or source_authority.native_handle is not None:
-        raise OSError(errno.EBADF, "POSIX source authority is not leased")
-    opened = os.fstat(source_authority.dir_fd)
-    if not stat.S_ISDIR(opened.st_mode):
-        raise OSError(errno.EINVAL, "directory publication source is not a directory")
-    raise OSError(
-        errno.ENOSYS,
-        "POSIX directory publication is not identity-bound",
-    )
+    else:
+        _publish_posix_no_replace(
+            authority, destination_bytes, source_fd, source_authority
+        )

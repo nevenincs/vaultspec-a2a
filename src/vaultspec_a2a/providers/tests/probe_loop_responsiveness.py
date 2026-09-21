@@ -32,8 +32,13 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 TICK_SECONDS = 0.01
+
+if TYPE_CHECKING:
+    from ...database.checkpoints import Checkpointer
+    from ...worker.ipc import WorkerBridge
 
 
 class _Heartbeat:
@@ -68,6 +73,68 @@ class _Heartbeat:
         self._stop = True
 
 
+async def _compile_measured_graph(
+    workspace: Path,
+    heartbeat: _Heartbeat,
+    checkpointer: Checkpointer,
+    bridge: WorkerBridge,
+) -> tuple[float, float]:
+    """Compile the bundled graph and return its duration and loop gap."""
+    from uuid import uuid4
+
+    from ...ipc.schemas import DispatchRequest
+    from ...streaming.aggregator import EventAggregator
+    from ...team.team_config import load_team_config
+    from ...thread.executable_graph import freeze_graph_definition
+    from ...worker.catalog_store import RunCatalogStore
+    from ...worker.graph_lifecycle import GraphLifecycleManager
+    from ...worker.token_store import RunTokenStore
+
+    lifecycle = GraphLifecycleManager(
+        checkpointer=checkpointer,
+        bridge=bridge,
+        aggregator=EventAggregator(),
+        token_store=RunTokenStore(),
+        catalog_store=RunCatalogStore(),
+    )
+    await asyncio.sleep(0.1)
+    started = heartbeat.begin_window()
+    graph = await lifecycle.get_or_compile_graph(
+        DispatchRequest(
+            action="ingest",
+            thread_id=f"loop-responsiveness-{uuid4().hex[:8]}",
+            agent_id="mock-coder-success",
+            content="probe",
+            team_preset="mock-success-single",
+            graph_definition=freeze_graph_definition(
+                load_team_config("mock-success-single", workspace_root=workspace),
+                workspace_root=workspace,
+            ),
+            workspace_root=str(workspace),
+            recursion_limit=10,
+            model_assignment={
+                "mock-coder-success": {
+                    "schema_version": 1,
+                    "provider": "mock",
+                    "execution_mode": "in-process-mock",
+                    "catalog_revision": "test-revision",
+                    "entry_id": "mock-high",
+                    "model_name": "mock-high",
+                    "controls": [],
+                    "fallbacks": [],
+                    "provenance": {"selection_source": "team_selection"},
+                }
+            },
+        )
+    )
+    compile_finished = time.monotonic()
+    compile_seconds = compile_finished - started
+    compile_gap = heartbeat.finish_window(compile_finished)
+    if graph is None:
+        raise RuntimeError("preset compiled to no graph")
+    return compile_seconds, compile_gap
+
+
 async def _run_compile(
     workspace: Path, heartbeat: _Heartbeat
 ) -> dict[str, float | str]:
@@ -81,56 +148,16 @@ async def _run_compile(
     from uuid import uuid4
 
     from ...database.checkpoints import open_checkpointer
-    from ...ipc.schemas import DispatchRequest
-    from ...streaming.aggregator import EventAggregator
-    from ...worker.catalog_store import RunCatalogStore
-    from ...worker.graph_lifecycle import GraphLifecycleManager
     from ...worker.ipc import WorkerBridge
-    from ...worker.token_store import RunTokenStore
 
     checkpointer_context = open_checkpointer()
     checkpointer = await checkpointer_context.__aenter__()
     bridge = WorkerBridge("http://127.0.0.1:9", uuid4().hex[:8], None)
     try:
         try:
-            lifecycle = GraphLifecycleManager(
-                checkpointer=checkpointer,
-                bridge=bridge,
-                aggregator=EventAggregator(),
-                token_store=RunTokenStore(),
-                catalog_store=RunCatalogStore(),
+            compile_seconds, compile_gap = await _compile_measured_graph(
+                workspace, heartbeat, checkpointer, bridge
             )
-            await asyncio.sleep(0.1)
-            started = heartbeat.begin_window()
-            graph = await lifecycle.get_or_compile_graph(
-                DispatchRequest(
-                    action="ingest",
-                    thread_id=f"loop-responsiveness-{uuid4().hex[:8]}",
-                    agent_id="mock-coder-success",
-                    content="probe",
-                    team_preset="mock-success-single",
-                    workspace_root=str(workspace),
-                    recursion_limit=10,
-                    model_assignment={
-                        "mock-coder-success": {
-                            "schema_version": 1,
-                            "provider": "mock",
-                            "execution_mode": "in-process-mock",
-                            "catalog_revision": "test-revision",
-                            "entry_id": "mock-high",
-                            "model_name": "mock-high",
-                            "controls": [],
-                            "fallbacks": [],
-                            "provenance": {"selection_source": "team_selection"},
-                        }
-                    },
-                )
-            )
-            compile_finished = time.monotonic()
-            compile_seconds = compile_finished - started
-            compile_gap = heartbeat.finish_window(compile_finished)
-            if graph is None:
-                raise RuntimeError("preset compiled to no graph")
         finally:
             started = heartbeat.begin_window()
             await bridge.close()

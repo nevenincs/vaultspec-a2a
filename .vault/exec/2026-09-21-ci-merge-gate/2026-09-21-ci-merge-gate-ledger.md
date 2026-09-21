@@ -27,4 +27,3 @@ related:
 - `S02` `M` `.github/ci-contract-allow.txt`
 - `S02` `verify:` `just check-workflow` -> `pass`
 - `S02` `by:` `vaultspec-high-executor`
-

@@ -6,8 +6,9 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:24d8067eaea8f2d5ebe9f0b27066c8df96bca663b5ccbc11b4f516de518960fb'
+body_hash: 'sha256:709fa6a6923414e412146602e3f19fd633fb98fffaa25cf756ce9affa96a5be8'
 related:
+  - '[[2026-09-21-ci-merge-gate-audit]]'
   - '[[2026-09-21-ci-merge-gate-ledger]]'
   - '[[2026-09-21-ci-merge-gate-plan]]'
   - '[[2026-09-21-ci-merge-gate-reference]]'
@@ -18,6 +19,10 @@ related:
 Auto-generated index of all documents tagged with `#ci-merge-gate`.
 
 ## Documents
+
+### audit
+
+- `2026-09-21-ci-merge-gate-audit` - `ci-merge-gate` audit: `integrated implementation review`
 
 ### exec
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:1a8e08f89f07c7a7a7b6ac2c6afb06a2f80edf6af5fdb77a9bc633429ffc4333'
+body_hash: 'sha256:3e0231bd62ed013f8e6a3898a87bae7168341b459f5b6de46d73c08b8b822458'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -137,6 +137,13 @@ related:
 - `S15` `verify:` `Ruff format/check` -> `pass`
 - `S15` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
 - `S15` `verify:` `focused pytest target repeated 3 times: 6/6 passed` -> `pass`
+- `S16` `M` `src/vaultspec_a2a/testing/__init__.py`
+- `S16` `M` `src/vaultspec_a2a/testing/runner_child.py`
+- `S16` `M` `src/vaultspec_a2a/testing/tests/test_runner.py`
+- `S16` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
+- `S16` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
+- `S16` `verify:` `Ruff format/check and Ty focused S16 files` -> `pass`
+- `S16` `by:` `serial-bootstrap-fix`
 
 ## Notes
 
@@ -156,3 +163,4 @@ related:
 - `S15` Root cause classified as test-infrastructure ordering: same-thread terminal arbitration leaves one ingest-lock waiter; no production defect. Durable output retained at ignored tmp/s15-dispatch_ids-full.log; exact process tree cleanup completed.
 - `S15` Existing evidence retained: exact parametrized target passed 3 consecutive repetitions (6/6); full src/vaultspec_a2a/worker/tests/test_dispatch_ids.py passed 6/6 in 21.93s with durable tmp/s15-dispatch_ids-full.log; Ruff format/check and Ty passed. Repeated verify flags may collapse in this CLI, so this note is the authoritative evidence summary.
 - `S15` Traceability correction only; source-inclusive S15 commit 1f794eaa already contains implementation and existing full-file evidence.
+- `S16` Review classified the former HIGH bootstrap finding resolved; S17 IPC lifecycle finding remains open.

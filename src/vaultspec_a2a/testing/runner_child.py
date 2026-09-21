@@ -11,8 +11,16 @@ from .runner import COMPLETION_OWNER_PID_ENV
 
 
 def main() -> int:
+    previous_environment = os.environ.get("VAULTSPEC_ENVIRONMENT")
+    os.environ.setdefault("VAULTSPEC_ENVIRONMENT", "development")
     os.environ[COMPLETION_OWNER_PID_ENV] = str(os.getpid())
-    return pytest.main(sys.argv[1:])
+    try:
+        return pytest.main(sys.argv[1:])
+    finally:
+        if previous_environment is None:
+            os.environ.pop("VAULTSPEC_ENVIRONMENT", None)
+        else:
+            os.environ["VAULTSPEC_ENVIRONMENT"] = previous_environment
 
 
 if __name__ == "__main__":

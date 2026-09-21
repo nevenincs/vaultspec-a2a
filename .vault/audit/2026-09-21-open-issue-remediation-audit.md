@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:a40aa23ff3513002a3d1189fbc949b83c94a98106af25531a7b6a5b64b5802fc'
+body_hash: 'sha256:1db70e0251ffe89d36628d904a18122d63ac9520d82ad1e06afd8dd80966ba73'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -335,3 +335,14 @@ Two canonical runs recorded 40 failure marks across five API files, while 136/13
 ### canonical-dispatch-id-concurrency-deadlock-rereview | low/review | PASS
 
 P01.S15 review found the stall was test-infrastructure ordering, not a production capacity defect: same-thread duplicate requests serialize at terminal arbitration, leaving one request on the held ingest lock and the other behind the arbitration lock. The corrected real TestClient/ThreadPoolExecutor tests await two arbitration users and one ingest waiter, release the held lock in finally, and assert identical replay or distinct-ID refusal. No critical or high finding remains in the changed path. Full dispatch-ID coverage passed 6/6; Ruff format/check and Ty passed. The ignored durable run log is `tmp/s15-dispatch_ids-full.log`.
+### canonical-api-cluster-isolation-bootstrap | high/CI-blocking | eager testing package import preempts canonical environment bootstrap | resolved
+
+The captured canonical runner evidence identifies the first shared failure: `testing/__init__.py:21-25` eagerly imports environment/settings before root `conftest.py` sets `VAULTSPEC_ENVIRONMENT=development`. The canonical serial runner consequently constructs `Settings` with the environment undeclared; `/internal/events` returns HTTP 500 and 40 API tests fail. The xdist subset inherits the later declaration and passes, explaining the cluster isolation split. This is a test runner/bootstrap isolation defect, not permission to relax fail-closed production policy or leak a global environment variable. P01.S16 owns the correction in testing bootstrap/runner files and focused tests, with a fresh `-x` canonical prefix and durable cleanup evidence required.
+
+The canonical log recorded 41 failure headings over 24m03.356 total and exited 124 at the 10s post-session reporter deadline. Its exact timing record is: unit owner >=1351.4s, harness 25.25s, total 1443.356s; no `--durations` block flushed. This exit is a runner measurement issue separate from the IPC finding and does not prove a leaked descendant. No additional performance metric is inferred.
+
+P01.S16 resolution and review (2026-09-21): The canonical child now imports `vaultspec_a2a.testing` through a lazy PEP 562 facade, so importing `runner_child` cannot import settings before the child declares its test environment. `runner_child.main()` sets `VAULTSPEC_ENVIRONMENT=development` only for the child execution and restores the prior value in a `finally` block. The focused subprocess regression contrasts this path with an external undeclared process and preserves the production `misconfigured` verdict. The five-file canonical serial API subset passed 64/64, including the `/internal/events` missing-auth 401 negative; the testing suite passed 71/71. Ruff format/check and Ty passed. Review classification: the former HIGH CI-blocking bootstrap finding is resolved; no new critical/high/medium finding was found. The remaining timing record is retained as historical runner evidence, and P01.S17 remains open for IPC lifecycle cleanup.
+
+### worker-ipc-close-deadline | medium/lifecycle | exhausted flush budget can skip IPC client close | open
+
+Review of `src/vaultspec_a2a/worker/tests/test_ipc.py:483` against `src/vaultspec_a2a/worker/ipc.py:127-145` found that when the flush deadline is exhausted, the path can return `delivered=false` without calling `client.aclose`. P01.S17 owns a bounded cleanup correction: close is always attempted after flush exhaustion but itself cannot wait indefinitely; focused timeout/close tests must prove this while preserving bounded flush semantics. This lifecycle finding is separate from the canonical API bootstrap failure and is not evidence of a leaked descendant. No performance metric is inferred.

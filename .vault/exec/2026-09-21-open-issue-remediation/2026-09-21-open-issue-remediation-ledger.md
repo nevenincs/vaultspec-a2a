@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:3e0231bd62ed013f8e6a3898a87bae7168341b459f5b6de46d73c08b8b822458'
+body_hash: 'sha256:7ea3c54ae67f6216335a4c2222d924747f05af3ac20f5336552fbadc58a5ff06'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -144,6 +144,10 @@ related:
 - `S16` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
 - `S16` `verify:` `Ruff format/check and Ty focused S16 files` -> `pass`
 - `S16` `by:` `serial-bootstrap-fix`
+- `S17` `M` `src/vaultspec_a2a/worker/ipc.py`
+- `S17` `M` `src/vaultspec_a2a/worker/tests/test_ipc.py`
+- `S17` `verify:` `uv run --locked ty check on the two owned paths` -> `pass`
+- `S17` `by:` `worker-ipc-close-fix`
 
 ## Notes
 

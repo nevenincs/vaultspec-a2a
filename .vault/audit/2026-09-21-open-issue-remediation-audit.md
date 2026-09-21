@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:1db70e0251ffe89d36628d904a18122d63ac9520d82ad1e06afd8dd80966ba73'
+body_hash: 'sha256:4603903719e3d2a248d3117ac11331c8207bfa9fbd18b988aa82301e75e35612'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -346,3 +346,6 @@ P01.S16 resolution and review (2026-09-21): The canonical child now imports `vau
 ### worker-ipc-close-deadline | medium/lifecycle | exhausted flush budget can skip IPC client close | open
 
 Review of `src/vaultspec_a2a/worker/tests/test_ipc.py:483` against `src/vaultspec_a2a/worker/ipc.py:127-145` found that when the flush deadline is exhausted, the path can return `delivered=false` without calling `client.aclose`. P01.S17 owns a bounded cleanup correction: close is always attempted after flush exhaustion but itself cannot wait indefinitely; focused timeout/close tests must prove this while preserving bounded flush semantics. This lifecycle finding is separate from the canonical API bootstrap failure and is not evidence of a leaked descendant. No performance metric is inferred.
+### worker-ipc-close-deadline | medium/lifecycle | bounded client close after exhausted flush | resolved
+
+P01.S17 corrected WorkerBridge.close() so transport cleanup is always attempted after event delivery consumes the shared deadline. client.aclose() now runs under the named 0.1-second independent allowance (or the larger remaining shared budget), and timeout reports delivered=false without a second batch send. The focused real-ASGI regression proves one exhausted-flush report, retained buffered delivery state, closed client, and completion under 0.2 seconds. The worker IPC suite passed 25/25 in 11.65 seconds; the exact accepted-socket deadline case passed 1/1 in 0.55 seconds; Ruff check/format and Ty passed. Review classification: PASS; no critical, high, or new medium finding. No performance metric is inferred beyond these focused timings.

@@ -28,6 +28,11 @@ __all__ = ["WorkerBridge"]
 
 logger = logging.getLogger(__name__)
 
+# Closing an HTTP client is independent cleanup from event delivery.  Keep a
+# small allowance for that cleanup even when the shared delivery deadline has
+# already elapsed, while still preventing an unbounded transport teardown.
+_CLIENT_CLOSE_ALLOWANCE_SECONDS = 0.1
+
 
 @dataclass(slots=True)
 class _BatchState:
@@ -101,7 +106,9 @@ class WorkerBridge:
         The deadline is an absolute event-loop timestamp shared with the worker's
         other shutdown phases.  An unreachable gateway therefore cannot spend a
         fresh client timeout on every retry or keep the worker alive after its
-        owner has moved to forced process-tree cleanup.
+        owner has moved to forced process-tree cleanup.  Client transport close
+        retains a small independent allowance when delivery has consumed the
+        shared deadline.
         """
         pending = self._batch.flush_task
         pending_joined = True
@@ -121,26 +128,24 @@ class WorkerBridge:
         if deadline is not None:
             flush_deadline = max(
                 asyncio.get_running_loop().time(),
-                deadline - 0.1,
+                deadline - _CLIENT_CLOSE_ALLOWANCE_SECONDS,
             )
         delivered = pending_joined and await self.flush_events(deadline=flush_deadline)
         remaining = self._remaining(deadline)
-        if remaining is None:
-            await self._client.aclose()
-        elif remaining > 0:
-            try:
-                async with asyncio.timeout(remaining):
-                    await self._client.aclose()
-            except TimeoutError:
-                logger.error(
-                    "Worker bridge client close exceeded the shared shutdown deadline",
-                    extra={
-                        "worker_id": self._worker_id,
-                        "action": "bridge_close_timeout",
-                    },
-                )
-                delivered = False
-        else:
+        close_budget = _CLIENT_CLOSE_ALLOWANCE_SECONDS
+        if remaining is not None:
+            close_budget = max(remaining, close_budget)
+        try:
+            async with asyncio.timeout(close_budget):
+                await self._client.aclose()
+        except TimeoutError:
+            logger.error(
+                "Worker bridge client close exceeded its bounded allowance",
+                extra={
+                    "worker_id": self._worker_id,
+                    "action": "bridge_close_timeout",
+                },
+            )
             delivered = False
         return delivered
 

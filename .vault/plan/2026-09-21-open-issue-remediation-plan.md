@@ -18,7 +18,7 @@ related:
   - '[[2026-09-21-workspace-root-authority-compose-provider-boundary-adr]]'
 modified: '2026-09-21'
 body_schema: body-v2
-body_hash: 'sha256:5cc896f98aef0deda44fa3e4d1dfc768500cb1276d1a673dbcfd8b641e98c7ba'
+body_hash: 'sha256:bf2f96e7d7dc7aa7a82199d2347c6eec4cde4c7a9c7461f41ae5b803b2507daa'
 ---
 
 # `open-issue-remediation` plan
@@ -58,7 +58,7 @@ open until both pass.
 
 Settle and implement each issue lane against its current governing contracts, with disjoint ownership and lane-local review evidence.
 
-- [ ] `P01.S01` - Certify and close issue #18 by settling HTTP readiness for procs up, proving the live trace path, and removing superseded lifecycle acceptance; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/lifecycle/tests/, src/vaultspec_a2a/service_tests/test_cancel_health_trace.py, GitHub issue #18`.
+- [x] `P01.S01` - Certify and close issue #18 by settling HTTP readiness for procs up, proving the live trace path, and removing superseded lifecycle acceptance; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/lifecycle/tests/, src/vaultspec_a2a/service_tests/test_cancel_health_trace.py, GitHub issue #18`.
 - [x] `P01.S02` - Close issues #30 and #31 as satisfied by current replay and memory bounds, close #33 #34 and #40 as superseded, and record the verified Dashboard contract evidence; `vaultspec-dashboard/engine/crates/vaultspec-api/src/routes/ops/a2a_stream.rs, vaultspec-dashboard/frontend/src/stores/server/agent/a2aTeam.ts, vaultspec-dashboard/frontend/src/stores/server/agent/liveAdapters/a2aRelay.ts, focused Dashboard tests, GitHub issues #30 #31 #33 #34 #40`.
 - [x] `P01.S03` - Apply the Compose-only canonical workspace admission contract, preserve arbitrary authenticated desktop roots, and keep issue #25 open pending execution-boundary proof; `.vault/adr/2026-09-21-workspace-root-authority-compose-provider-boundary-adr.md, src/vaultspec_a2a/api/workspace.py, src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py, src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/tests/test_workspace_root_authority.py, src/vaultspec_a2a/api/tests/test_active_run_discovery_live.py, src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/control/tests/test_active_project_identity.py`.
 - [ ] `P01.S04` - Re-scope issue #26 to the Dashboard-owned release-set contract and implement only the missing A2A version and changelog preparation guarantees; `.github/workflows/release.yml, pyproject.toml, CHANGELOG.md, scripts/, GitHub issue #26`.

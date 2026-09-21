@@ -14,6 +14,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ from ..registry import (
     now_ms,
     read_record,
     record_path,
+    remove_record,
     write_record,
 )
 
@@ -477,6 +479,35 @@ _BIND_SERVE = (
     "time.sleep(60)"
 )
 
+_SLEEP_SERVE = "import time; time.sleep(60)"
+
+
+_GATEWAY_HEALTH_SERVE = """\
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+ready = sys.argv[2] == "ready"
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != "/health":
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = json.dumps({"service": "gateway", "ready": ready}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, _format, *_args):
+        return
+
+HTTPServer(("127.0.0.1", int(sys.argv[1])), HealthHandler).serve_forever()
+"""
+
 
 def _serve_config(serve: list[str], band: tuple[int, int]) -> ProcsConfig:
     role = RoleConfig(
@@ -488,6 +519,20 @@ def _serve_config(serve: list[str], band: tuple[int, int]) -> ProcsConfig:
         serve=serve,
     )
     return ProcsConfig(resident={}, roles={"scratch": role})
+
+
+def _gateway_config(serve: list[str], band: tuple[int, int]) -> ProcsConfig:
+    """Build a gateway-shaped role whose HTTP readiness manager must prove."""
+    role = RoleConfig(
+        name="gateway-dev",
+        band=PortBand(*band),
+        heartbeat=True,
+        staleness_ms=120000,
+        build=[],
+        serve=serve,
+        env={"VAULTSPEC_PORT": "{port}"},
+    )
+    return ProcsConfig(resident={}, roles={"gateway-dev": role})
 
 
 _LIVE_SOCKET_BAND = pytest.mark.resource("scratch-registry-socket-band")
@@ -542,6 +587,142 @@ def test_serve_up_boots_registers_and_picks_distinct_ports(tmp_path: Path) -> No
     finally:
         tree_kill(first.pid)
         tree_kill(second.pid)
+
+
+@_LIVE_SOCKET_BAND
+def test_gateway_serve_up_requires_http_readiness_before_registration(
+    tmp_path: Path,
+) -> None:
+    """A bound A2A port is insufficient until its real health body is ready."""
+    port = _available_band(1)[0]
+    not_ready = _gateway_config(
+        [sys.executable, "-c", _GATEWAY_HEALTH_SERVE, "{port}", "not-ready"],
+        band=(port, port),
+    )
+    with pytest.raises(LifecycleError, match="no band port yielded a live listener"):
+        serve_up(
+            "gateway-dev",
+            "not-ready",
+            home=tmp_path,
+            config=not_ready,
+            ready_timeout=1.0,
+        )
+    assert list_records(tmp_path) == []
+    assert not list(tmp_path.glob("*.reserved"))
+
+    ready = _gateway_config(
+        [sys.executable, "-c", _GATEWAY_HEALTH_SERVE, "{port}", "ready"],
+        band=(port, port),
+    )
+    record = serve_up(
+        "gateway-dev", "ready", home=tmp_path, config=ready, ready_timeout=5.0
+    )
+    try:
+        assert is_pid_alive(record.pid)
+        assert read_record(record_path("gateway-dev", "ready", home=tmp_path)) == record
+    finally:
+        tree_kill(record.pid)
+
+
+@_LIVE_SOCKET_BAND
+def test_worker_serve_up_rejects_a_foreign_listener_without_probe_or_record(
+    tmp_path: Path,
+) -> None:
+    """A foreign worker-shaped listener cannot receive the pairing bearer."""
+    port = _available_band(1)[0]
+    token_file = tmp_path / "worker-token"
+    token_file.write_text("worker-secret\n", encoding="utf-8")
+    role = RoleConfig(
+        name="worker-dev",
+        band=PortBand(port, port),
+        heartbeat=False,
+        staleness_ms=120000,
+        build=[],
+        serve=[sys.executable, "-c", _SLEEP_SERVE],
+        env={"VAULTSPEC_WORKER_PORT": "{port}"},
+    )
+    config = ProcsConfig(resident={}, roles={"worker-dev": role})
+    capture = tmp_path / "foreign-request.bin"
+    ready = threading.Event()
+    stop = threading.Event()
+    errors: list[BaseException] = []
+
+    def foreign_listener() -> None:
+        listener: socket.socket | None = None
+        try:
+            deadline = time.monotonic() + 10.0
+            marker: Path | None = None
+            while time.monotonic() < deadline:
+                markers = list(tmp_path.glob("worker-dev-*.reserved"))
+                if markers:
+                    marker = markers[0]
+                    break
+                time.sleep(0.01)
+            if marker is None:
+                raise AssertionError("serve_up did not create a worker reservation")
+            foreign_port = int(marker.stem.rsplit("-", 1)[1])
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.bind(("127.0.0.1", foreign_port))
+            listener.listen()
+            listener.settimeout(0.05)
+            ready.set()
+            body = b'{"service":"worker","status":"ok"}'
+            response = (
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: application/json\r\n"
+                + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+                + body
+            )
+            while not stop.is_set():
+                try:
+                    connection, _ = listener.accept()
+                except TimeoutError:
+                    continue
+                with connection:
+                    connection.settimeout(1.0)
+                    request = connection.recv(64 * 1024)
+                    if request:
+                        capture.write_bytes(request)
+                    connection.sendall(response)
+        except BaseException as exc:
+            errors.append(exc)
+            ready.set()
+        finally:
+            if listener is not None:
+                listener.close()
+
+    listener_thread = threading.Thread(target=foreign_listener)
+    listener_thread.start()
+    record: ProcRecord | None = None
+    failure: LifecycleError | None = None
+    try:
+        try:
+            record = serve_up(
+                "worker-dev",
+                "foreign",
+                home=tmp_path,
+                config=config,
+                internal_token_file=str(token_file),
+                ready_timeout=3.0,
+            )
+        except LifecycleError as exc:
+            failure = exc
+    finally:
+        stop.set()
+        listener_thread.join(timeout=5.0)
+        if record is not None:
+            tree_kill(record.pid)
+            remove_record(record.role, record.name, home=tmp_path)
+
+    if errors:
+        raise errors[0]
+    assert not listener_thread.is_alive()
+    assert ready.is_set()
+    assert failure is not None
+    assert "no band port yielded a live listener" in str(failure)
+    assert not capture.exists(), "foreign listener received a worker health probe"
+    assert list_records(tmp_path) == []
+    assert not list(tmp_path.glob("*.reserved"))
 
 
 @_LIVE_SOCKET_BAND

@@ -132,7 +132,6 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
 
 def test_health_and_trace_surface_are_observable(
     service_stack: ServiceStack,
-    service_started_at: float,
 ) -> None:
     """The stack reports health and exports a real Jaeger trace."""
     health = json_object(service_stack.health(), at="health response")
@@ -147,10 +146,7 @@ def test_health_and_trace_surface_are_observable(
     sqlite_fallback = json_object(health.get("sqlite_fallback"), at="sqlite fallback")
     assert required_bool(sqlite_fallback, "active", at="sqlite fallback") is True
 
-    services = json_object(service_stack.jaeger_services(), at="Jaeger services")
-    service_names = set(_text_list(services.get("data"), at="Jaeger services.data"))
-    assert "vaultspec-a2a" in service_names
-
+    trace_started_at = time.time()
     created = service_stack.create_thread(
         initial_message="Run a short task so worker IPC generates traceable traffic.",
         team_preset="mock-success-single",
@@ -167,5 +163,9 @@ def test_health_and_trace_surface_are_observable(
     )
     service_stack.record(f"trace-probe:{thread_id}", traced_thread)
 
-    start_us = int(service_started_at * 1_000_000)
+    start_us = int(trace_started_at * 1_000_000)
     _assert_worker_ipc_trace(service_stack, start_us)
+
+    services = json_object(service_stack.jaeger_services(), at="Jaeger services")
+    service_names = set(_text_list(services.get("data"), at="Jaeger services.data"))
+    assert "vaultspec-a2a" in service_names

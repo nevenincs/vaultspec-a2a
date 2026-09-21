@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:9364622e538ec383b1d09ba114d2f11eacdbc1a350321aef4d9acf5f8d05c20d'
+body_hash: 'sha256:d161bdd1fbaf02b241ea33e7a1eece2f1a4c849d5c8b89a28b050768871a2e24'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -75,6 +75,16 @@ related:
 - `S10` `verify:` `P01.S10 focused boundary run (30 checks; 8 Windows skips covered by Linux)` -> `pass`
 - `S10` `verify:` `Ruff and Ty focused checks` -> `pass`
 - `S10` `verify:` `Compose and configuration checks` -> `pass`
+- `S01` `M` `src/vaultspec_a2a/lifecycle/manager.py`
+- `S01` `M` `src/vaultspec_a2a/lifecycle/tests/test_manager.py`
+- `S01` `M` `src/vaultspec_a2a/service_tests/test_cancel_health_trace.py`
+- `S01` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
+- `S01` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
+- `S01` `by:` `metadata-integration-coordinator`
+- `S01` `verify:` `P01.S01 lifecycle-manager token/readiness tests (2)` -> `pass`
+- `S01` `verify:` `P01.S01 live Jaeger trace test (1)` -> `pass`
+- `S01` `verify:` `P01.S01 unresolved-listener path code review` -> `pass`
+- `S01` `verify:` `P01.S01 isolated live Jaeger trace target` -> `pass`
 
 ## Notes
 
@@ -89,3 +99,4 @@ related:
 - `S05` Independent review PASS: CI provisions the pinned kimi-cli 1.49.0 and the provider gate requires kimi-cli; all six intended Codex/Kimi cases ran with zero skips. The separate served-provider completed-turn eligibility lane remains unchanged; no paid live provider turn was used.
 - `S05` Commit isolation constraint recorded: the shared worktree's normal staged hook isolation could not see concurrent S03 symbols, so the exact S06/S05 snapshots were validated and committed in a clean sibling worktree without bypassing hooks or staging other workers' files. Main integration remains coordinator-owned.
 - `S03` Independent Terra review PASS recorded: canonicalize-before-validation fix at gateway.py:277; managed foreign/ancestor/symlink cases cover both stages; test_workspace_root_authority passed 14/14 with clean diff; Sol full review passed 67 tests plus Ruff/Ty. S03 remains open until its source commit is coordinated; issue #25 remains open for S10.
+- `S01` The complete two-test service-file run had one known recovery_owner SQLite lock after the cancellation test; the isolated health/Jaeger target passed, and the cancellation interaction is successor-owned by P01.S12. No S01 source correction was made.

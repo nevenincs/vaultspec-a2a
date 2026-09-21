@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:9d78bc08b7a4538fcee81f2d17eb35256d3903598a3d7b6c399395476dfb2c93'
+body_hash: 'sha256:247c9ea9787506d87062e3d914f27981f5f9c4751cd0e5a57a9455af27e745b6'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -121,6 +121,15 @@ be passed safely to `os.open`. The wrappers now mirror the real `os.open`
 signature, preserving the same swap trigger and delegation while making the
 test boundary typed. The confinement file passed its focused run (28 passed,
 three Windows skips), and the full Ty gate passed.
+
+### lifecycle-readiness-final-review | high/security | unresolved-listener credential probe is discharged | resolved
+
+The independent final P01.S01 review passed two real lifecycle-manager
+token/readiness tests and one live Jaeger trace test. The unresolved listener
+path was code-reviewed: HTTP readiness is withheld, and the credentialed
+worker probe is skipped, until listener ownership is confirmed. No remaining
+S01 finding was identified. S01 is ready to close; issue #18 disposition is
+recorded here without external GitHub action.
 
 ### staged-hook-isolation | low | shared dirty worktree hid concurrent S03 symbols from staged hooks | resolved
 

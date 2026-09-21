@@ -5,9 +5,20 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:4603903719e3d2a248d3117ac11331c8207bfa9fbd18b988aa82301e75e35612'
+body_hash: 'sha256:405dcaf37312b19fd1639dc5cf4357c27d7ce1fea369c78f55a8228f2c5e08f5'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
+---
+---
+tags:
+  - '#audit'
+  - '#open-issue-remediation'
+date: '2026-09-21'
+modified: '2026-09-21'
+body_schema: 'body-v2'
+body_hash: 'sha256:4603903719e3d2a248d3117ac11331c8207bfa9fbd18b988aa82301e75e35612'
+related:
+  - "`2026-09-21-open-issue-remediation-plan`"
 ---
 # `open-issue-remediation` audit: `rolling backlog implementation review`
 
@@ -349,3 +360,23 @@ Review of `src/vaultspec_a2a/worker/tests/test_ipc.py:483` against `src/vaultspe
 ### worker-ipc-close-deadline | medium/lifecycle | bounded client close after exhausted flush | resolved
 
 P01.S17 corrected WorkerBridge.close() so transport cleanup is always attempted after event delivery consumes the shared deadline. client.aclose() now runs under the named 0.1-second independent allowance (or the larger remaining shared budget), and timeout reports delivered=false without a second batch send. The focused real-ASGI regression proves one exhausted-flush report, retained buffered delivery state, closed client, and completion under 0.2 seconds. The worker IPC suite passed 25/25 in 11.65 seconds; the exact accepted-socket deadline case passed 1/1 in 0.55 seconds; Ruff check/format and Ty passed. Review classification: PASS; no critical, high, or new medium finding. No performance metric is inferred beyond these focused timings.
+
+### desktop-readiness-liveness-crash | high/desktop-lifecycle | canonical CI proves authenticated health can hang after public liveness succeeds and the gateway exits | open
+
+The clean integration canonical run at `c1380b0bc3f0e213c672a96953ca5635103b0c1e` failed `src/vaultspec_a2a/desktop_tests/test_readiness_model.py:138`: public `/health` returned 200, then authenticated `/health` timed out while the gateway `Popen` exited with code 1; the per-test `gateway.log` was empty. This is a real readiness/liveness crash and an observability gap, not an assertion to relax. P01.S18 owns preserving this proof, instrumenting gateway stderr, exit code, lifespan, and per-test log capture, finding the actual crash, and correcting it. No source fix or issue closure is claimed; P01.S08 and P02.S09 remain open.
+
+### runner-descendant-lifecycle-classification | medium/lifecycle | descendant linger is misreported as a root teardown timeout | resolved
+
+The same canonical run failed `src/vaultspec_a2a/testing/tests/test_runner.py:185`: the descendant-linger case expected exit 126 (`DESCENDANT_TIMEOUT_EXIT`) but returned 124 (`TEARDOWN_TIMEOUT_EXIT`), even though the runner reported `tree_reaped=true`. P01.S19 owns preserving process-tree reaping while distinguishing an exited root from a lingering descendant; exit 124 must remain reserved for a genuine root/process timeout. No source fix or issue closure is claimed; P01.S19 remains open.
+
+### runner-post-receipt-lifecycle-classification | high/CI-blocking | a successful post-receipt root exit is misreported as teardown timeout | resolved
+
+The same canonical run failed `src/vaultspec_a2a/testing/tests/test_runner.py:200`: the post-receipt root-exit case expected 0 but returned 124, after pytest had produced a session result and the runner reported `tree_reaped=true`. This false timeout classification blocks the canonical gate. P01.S19 owns the root-versus-descendant classification and must retain 124 only for a genuine root/process timeout; no source fix or issue closure is claimed.
+
+P01.S19 resolution and review (2026-09-22): The completion receipt is now deferred until `pytest.main()` returns, after pytest unconfigure and lease cleanup, so the owner cannot classify a still-shutting-down root from an early session-finish receipt. The outer runner re-samples the root after receipt observation before applying the teardown deadline, retaining `TEARDOWN_TIMEOUT_EXIT` (124) for a genuine still-running root and `DESCENDANT_TIMEOUT_EXIT` (126) for an exited root with live descendants. The exact two canonical regressions passed 2/2 in 4.97s; complete runner coverage passed 6/6 in 9.69s; the full testing suite passed 71/71 in 64.92s; Ruff format/check and Ty passed. Review classification: both the medium descendant-classification and high post-receipt classification findings are resolved; no new critical, high, or medium finding was found. P01.S18 remains open for the desktop readiness/liveness crash.
+
+### canonical-ci-performance-facts | low/measurement | full canonical timing and slowest-node facts recorded without causal attribution | recorded
+
+The authoritative full-run log is `C:\Users\hello\AppData\Local\Temp\vaultspec-a2a-canonical-ci-2d82a0431b4a40c5a1f4d61228289d42.log`. Measured stage facts are total `2210.699s`, harness outer `56.933s` with `122 passed`, unit outer `2199.596s`, and pytest `2196.57s`. The unit pytest collected `4838` items, selected `4634` after `204 deselected`, and finished with `4621 passed`, `10 skipped`, and `3 failed`.
+
+The six slowest unit nodes were: `140.43s` `src/vaultspec_a2a/desktop_tests/test_run_admission.py::test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound`; `59.95s` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py::test_desktop_readiness_liveness_minimal_and_readiness_authenticated`; `49.60s` `src/vaultspec_a2a/providers/tests/test_model_stack_warmup.py::test_repeated_cold_compiles_keep_serving_under_five_slot_cpu_load`; `37.65s` `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py::test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one`; `34.31s` `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py::test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown`; and `31.12s` `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py::test_two_gateways_one_worker_authenticated_pairing`. These are descriptive measurements only: they do not establish that any slow node caused a failure or attribute total wall time to P01.S18/P01.S19; isolated reruns are required for causal analysis.

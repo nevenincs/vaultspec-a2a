@@ -244,6 +244,12 @@ def _await_pytest_exit(
             returncode = process.poll()
             now = time.monotonic()
             completion_seen = _completion_time(listener, token, completion_seen, now)
+            # A root may terminate between the first poll and receipt
+            # observation. Re-sample before applying the post-receipt timeout;
+            # otherwise a scheduling boundary can misclassify a root exit as a
+            # teardown timeout and never reach descendant classification.
+            if returncode is None and completion_seen is not None:
+                returncode = process.poll()
             if returncode is not None:
                 status, root_exit_seen = _root_exit_status(
                     process, containment, root_exit_seen, now, limits.exit_timeout_s

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:7ea3c54ae67f6216335a4c2222d924747f05af3ac20f5336552fbadc58a5ff06'
+body_hash: 'sha256:2beef28eb02d83a24172770714ddcb799a9e92a316ef53b52e48ff190dcdaac4'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -148,6 +148,13 @@ related:
 - `S17` `M` `src/vaultspec_a2a/worker/tests/test_ipc.py`
 - `S17` `verify:` `uv run --locked ty check on the two owned paths` -> `pass`
 - `S17` `by:` `worker-ipc-close-fix`
+- `S19` `M` `src/vaultspec_a2a/testing/runner.py`
+- `S19` `M` `src/vaultspec_a2a/testing/runner_child.py`
+- `S19` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
+- `S19` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
+- `S19` `M` `.vault/exec/2026-09-21-open-issue-remediation/2026-09-21-open-issue-remediation-ledger.md`
+- `S19` `verify:` `Ruff format/check and Ty focused runner paths` -> `pass`
+- `S19` `by:` `serial-bootstrap-fix`
 
 ## Notes
 
@@ -168,3 +175,4 @@ related:
 - `S15` Existing evidence retained: exact parametrized target passed 3 consecutive repetitions (6/6); full src/vaultspec_a2a/worker/tests/test_dispatch_ids.py passed 6/6 in 21.93s with durable tmp/s15-dispatch_ids-full.log; Ruff format/check and Ty passed. Repeated verify flags may collapse in this CLI, so this note is the authoritative evidence summary.
 - `S15` Traceability correction only; source-inclusive S15 commit 1f794eaa already contains implementation and existing full-file evidence.
 - `S16` Review classified the former HIGH bootstrap finding resolved; S17 IPC lifecycle finding remains open.
+- `S19` Review resolved the medium descendant-classification and high post-receipt classification findings; S18 readiness remains open.

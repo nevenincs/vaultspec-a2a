@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:4d3cdab85bd7020ead5b1c6e95536501c06d043266541ef8948d6148aaafb1ee'
+body_hash: 'sha256:50b4b56f7c2c1febc70f2029aefe3f74fae3c5e564013a75aa4788a34fd36cac'
 related:
   - "[[2026-09-21-ci-merge-gate-plan]]"
 ---
@@ -50,6 +50,27 @@ but commits `e8064b28` and `31baa996` remain local because no push was
 authorized. This fails closed: pull requests cannot merge until these commits
 are published and the new workflow reports its first verdict.
 
+### runner-topology-ownership | medium | fleet and CI-runner tests removed from the project
+
+Type: ownership boundary. Status: fixed and verified. The repository owner
+ruled that fleet registration, runner labels, and hosted-versus-self-hosted
+placement are infrastructure concerns outside this coding project's scope.
+`dev/tests/test_ci_contract.py` no longer parses `merge-gate.yml` or asserts
+`runs-on` values, exact runner platforms, or job placement. The custom
+`.github/actionlint.yaml` runner-label registry is deleted. Workflow syntax and
+the code-owned declarative recipe contract remain tested without claiming
+authority over infrastructure.
+
+### runner-ownership-rereview | low | PASS with no critical or high findings
+
+Type: focused implementation review. Status: verified. The cleanup deletes the
+only test that parsed CI runner placement, removes the repository's custom
+runner-label registry, and disables only actionlint's unknown-runner-label
+diagnostic. Workflow parsing, action pin validation, recipe delegation, and the
+declarative merge profile remain enforced. A repository-wide search of test
+modules finds no runner selector, availability, registration, or topology
+assertion.
+
 ## Recommendations
 
 - Reclassify or restructure the provider factory test so the `unit` marker no
@@ -58,3 +79,6 @@ are published and the new workflow reports its first verdict.
 - Publish the two implementation commits before expecting existing pull
   requests to become mergeable; do not weaken or remove the required context
   during that interval.
+- Keep future CI tests limited to repository-owned commands and behavior. Do
+  not add runner availability, label registration, fleet topology, or runner
+  placement assertions back to this codebase.

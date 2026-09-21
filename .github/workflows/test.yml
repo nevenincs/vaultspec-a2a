@@ -15,23 +15,9 @@ concurrency:
 jobs:
   workflow-lint:
     name: "Check: Workflow contract (Linux)"
-    # actionlint is the only thing that reads these files before GitHub itself
-    # does. It earns a gate here for one failure class this fleet keeps paying
-    # for: a `runs-on:` label that no registered runner carries. That does not
-    # fail at dispatch - it QUEUES, unbounded, producing no logs and no failure,
-    # which is the most expensive way this pipeline can break, because it is
-    # indistinguishable from a busy fleet while it happens.
-    #
-    # Not hypothetical here. `bootstrap-branch.yml` targets
-    # `[self-hosted, dev-runner]`, and for as long as no runner carried that
-    # label every one of its historical runs was cancelled by hand rather than
-    # completing. One does now, as does a runner for each of the four label sets
-    # every other job in this repository asks for.
-    #
-    # The labels this repository is permitted to schedule onto are enumerated in
-    # .github/actionlint.yaml, which actionlint reads automatically. Adding a new
-    # runner label means declaring it there, which is the point: the declaration
-    # is what makes a typo detectable.
+    # Validate workflow syntax and the repository-owned recipe contract. Runner
+    # registration and fleet topology are infrastructure concerns outside this
+    # codebase's test contract.
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 10
     steps:
@@ -59,11 +45,7 @@ jobs:
       - name: Initialize the worktree
         run: just init
 
-      # actionlint AND the CI/justfile contract, both through the recipe. The
-      # `docker://` step this replaces made a required check depend on the
-      # runner account reaching the docker socket - a fleet capability this
-      # repository cannot see or assert, and one that has failed elsewhere in
-      # the fleet before linting a single workflow.
+      # actionlint and the CI/justfile contract, both through the recipe.
       - name: Workflow lint and CI contract (just check-workflow)
         run: just check-workflow
 

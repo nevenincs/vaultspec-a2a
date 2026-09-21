@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:9315b6a7065260361185e5d18cd88c07d4f2719646766d168eb0587d447e7370'
+body_hash: 'sha256:58ddfc8d461afc157edb25238477d1cfdd2d85a7d864233169fb651e8c5cc4c7'
 related:
   - "[[2026-07-19-repository-tooling-hardening-adr]]"
 ---
@@ -52,13 +52,14 @@ command logic into YAML. Desktop, provider, Compose, migration, release, and
 advisory lanes remain visible but do not belong to the minimal required
 aggregate.
 
-### A real-artifact guard must bind the pattern
+### Local guards stop at the code ownership boundary
 
 Core validates trigger behavior, exact job names, dependencies, and aggregate
 semantics in `dev/guards/test_ci_check_shape.py:57` and
 `dev/guards/test_ci_check_shape.py:364`. RAG validates naming and lane
 aggregation in `dev/guards/test_ci_job_names.py:229` and
-`dev/guards/test_ci_lanes.py:118`. The local guard should parse the committed
-workflow, verify exact stable names and Linux selectors, prove the gate depends
-on every required measuring job, and prove the workflow invokes the
-declarative merge facade exactly once.
+`dev/guards/test_ci_lanes.py:118`. Those repositories demonstrate the pattern,
+but this project does not own fleet topology or runner registration. Its local
+guard therefore binds only code-owned recipe composition and command routing;
+it does not parse workflows to assert runner labels, runner platforms, or
+hosted-versus-self-hosted placement.

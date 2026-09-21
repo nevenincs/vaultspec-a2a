@@ -221,7 +221,18 @@ def main(argv: list[str] | None = None) -> int:
     # whether a runner happens to carry them. actionlint silently skips a
     # missing external linter, so leaving them implicit means the gate checks
     # a different set of things on every machine and nobody can tell which.
-    command = [str(binary), "-no-color", "-shellcheck=", "-pyflakes=", *args]
+    # Runner labels are provisioned by infrastructure outside this codebase.
+    # Keep actionlint's workflow parsing and all code-owned checks without
+    # turning this project into a registry for fleet topology.
+    command = [
+        str(binary),
+        "-no-color",
+        "-shellcheck=",
+        "-pyflakes=",
+        "-ignore",
+        'label ".+" is unknown',
+        *args,
+    ]
     return subprocess.call(command)
 
 

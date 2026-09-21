@@ -9,7 +9,7 @@ related:
   - '[[2026-09-21-ci-merge-gate-reference]]'
 modified: '2026-09-21'
 body_schema: body-v2
-body_hash: 'sha256:99079afba5aa9ffc89ab1147f35e9fdd4a57ae21d5634736de919c54e8236f0a'
+body_hash: 'sha256:27b75271c80c1a85cdaa2e256caf848fc45a504095e9a380c7e4b5fdbdfe72aa'
 ---
 
 # `ci-merge-gate` plan
@@ -33,6 +33,7 @@ real-code blueprint. No uncovered costly decision remains.
 
 - [x] `S01` - Define the Linux merge profile and standardized workflow jobs; `CI workflow and declarative harness surfaces`.
 - [x] `S02` - Bind and verify the merge-gate contract with real-artifact guards; `CI contract guard and audit surfaces`.
+- [x] `S03` - Remove fleet and CI-runner topology tests from project ownership; `CI contract tests and actionlint runner registry`.
 
 ## Parallelization
 

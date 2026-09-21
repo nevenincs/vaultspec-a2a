@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from ...api.routes.gateway import _active_role
+from ...api.routes._gateway_read_endpoints import _active_role
 from ...api.schemas.gateway import TopologyPosition
 
 

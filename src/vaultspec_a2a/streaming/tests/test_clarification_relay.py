@@ -24,7 +24,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from ...graph.compiler import _clarification_request_id
+from ...graph._compiler_research import _clarification_request_id
 from ...graph.enums import AgentLifecycleState
 from ...graph.events import AgentStatus, ClarificationPending
 from ...graph.nodes.clarification import (

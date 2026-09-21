@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ...providers.factory import capsule_acp_entry, capsule_node_executable
+from ...providers._factory_commands import capsule_acp_entry, capsule_node_executable
 from .._platform_acl import windows_file_is_restricted
 from ..profile import (
     DesktopProfile,

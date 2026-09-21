@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
@@ -24,7 +24,7 @@ from ._catalog_fields import (
     local_id,
     model_list_revision,
 )
-from ._json_contract import JsonObject
+from ._json_contract import JsonObject, JsonValue
 from .provider_catalog import (
     MAX_MODELS,
     AuthenticationState,
@@ -35,8 +35,10 @@ from .provider_catalog import (
     ProviderCatalogKey,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 __all__ = [
-    "OpenAICompatibleCatalogDiscovery",
     "OpenAICompatibleCatalogError",
     "catalog_from_model_list",
     "discover_openai_compatible_catalog",
@@ -73,13 +75,7 @@ def _protocol_error(message: str) -> OpenAICompatibleCatalogError:
 _FIELDS: Final = CatalogFieldReader(_protocol_error)
 
 
-def _models_url(base_url: str) -> str:
-    if not base_url or base_url != base_url.strip():
-        raise ValueError("base_url must be a normalized non-blank string")
-    try:
-        parsed = httpx.URL(base_url)
-    except httpx.InvalidURL:
-        raise ValueError("base_url must be an absolute HTTP(S) URL") from None
+def _validate_models_origin(parsed: httpx.URL) -> None:
     if (
         parsed.scheme not in {"http", "https"}
         or not parsed.host
@@ -93,6 +89,16 @@ def _models_url(base_url: str) -> str:
         )
     if parsed.scheme == "http" and parsed.host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("base_url must use HTTPS unless it is loopback")
+
+
+def _models_url(base_url: str) -> str:
+    if not base_url or base_url != base_url.strip():
+        raise ValueError("base_url must be a normalized non-blank string")
+    try:
+        parsed = httpx.URL(base_url)
+    except httpx.InvalidURL:
+        raise ValueError("base_url must be an absolute HTTP(S) URL") from None
+    _validate_models_origin(parsed)
     path = parsed.path.rstrip("/")
     return str(parsed.copy_with(path=f"{path}/models" if path else "/models"))
 
@@ -135,39 +141,7 @@ def _has_next_page(link_header: str | None) -> bool:
     )
 
 
-def catalog_from_model_list(
-    result: JsonObject,
-    *,
-    key: ProviderCatalogKey,
-    checked_at: datetime | None = None,
-) -> ProviderCatalog:
-    """Normalize only opaque model IDs from one complete model-list response."""
-    has_more = result.get("has_more")
-    if has_more is not None and not isinstance(has_more, bool):
-        raise OpenAICompatibleCatalogError(
-            "OpenAI-compatible model-list has_more must be a boolean when present"
-        )
-    if has_more:
-        raise OpenAICompatibleCatalogError(
-            "OpenAI-compatible model-list pagination cannot be exhausted"
-        )
-    if any(result.get(field) is not None for field in _NEXT_FIELDS):
-        raise OpenAICompatibleCatalogError(
-            "OpenAI-compatible model-list pagination cannot be exhausted"
-        )
-    if result.get("object") != "list":
-        raise OpenAICompatibleCatalogError(
-            "OpenAI-compatible model-list has an invalid object type"
-        )
-    raw_models = result.get("data")
-    if not isinstance(raw_models, list):
-        raise OpenAICompatibleCatalogError(
-            "OpenAI-compatible model-list data must be a list"
-        )
-    if len(raw_models) > MAX_MODELS:
-        raise OpenAICompatibleCatalogError(
-            f"OpenAI-compatible model-list exceeds {MAX_MODELS} models"
-        )
+def _validated_model_values(raw_models: Sequence[JsonValue]) -> set[str]:
     model_values: set[str] = set()
     for index, raw_model in enumerate(raw_models):
         if not isinstance(raw_model, dict):
@@ -195,6 +169,48 @@ def catalog_from_model_list(
                 "OpenAI-compatible model-list contains duplicate identifiers"
             )
         model_values.add(model_value)
+    return model_values
+
+
+def _validated_model_list_items(result: JsonObject) -> list[JsonValue]:
+    has_more = result.get("has_more")
+    if has_more is not None and not isinstance(has_more, bool):
+        raise OpenAICompatibleCatalogError(
+            "OpenAI-compatible model-list has_more must be a boolean when present"
+        )
+    if has_more:
+        raise OpenAICompatibleCatalogError(
+            "OpenAI-compatible model-list pagination cannot be exhausted"
+        )
+    if any(result.get(field) is not None for field in _NEXT_FIELDS):
+        raise OpenAICompatibleCatalogError(
+            "OpenAI-compatible model-list pagination cannot be exhausted"
+        )
+    if result.get("object") != "list":
+        raise OpenAICompatibleCatalogError(
+            "OpenAI-compatible model-list has an invalid object type"
+        )
+    raw_models = result.get("data")
+    if not isinstance(raw_models, list):
+        raise OpenAICompatibleCatalogError(
+            "OpenAI-compatible model-list data must be a list"
+        )
+    if len(raw_models) > MAX_MODELS:
+        raise OpenAICompatibleCatalogError(
+            f"OpenAI-compatible model-list exceeds {MAX_MODELS} models"
+        )
+    return raw_models
+
+
+def catalog_from_model_list(
+    result: JsonObject,
+    *,
+    key: ProviderCatalogKey,
+    checked_at: datetime | None = None,
+) -> ProviderCatalog:
+    """Normalize only opaque model IDs from one complete model-list response."""
+    raw_models = _validated_model_list_items(result)
+    model_values = _validated_model_values(raw_models)
     now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     if not model_values:
         return _unavailable_catalog(
@@ -222,6 +238,46 @@ def catalog_from_model_list(
     )
 
 
+async def _read_model_list_response(
+    response: httpx.Response, key: ProviderCatalogKey
+) -> bytes | OpenAICompatibleCatalogDiscovery:
+    if response.status_code == 401:
+        return OpenAICompatibleCatalogDiscovery(
+            catalog=_unavailable_catalog(
+                key, reason="provider model-list authentication failed"
+            ),
+            authentication=AuthenticationState.UNAUTHENTICATED,
+        )
+    if response.status_code == 403:
+        return OpenAICompatibleCatalogDiscovery(
+            catalog=_unavailable_catalog(
+                key, reason="provider model-list request was forbidden"
+            ),
+            authentication=AuthenticationState.UNKNOWN,
+        )
+    if response.status_code != 200:
+        raise OpenAICompatibleCatalogError(
+            "OpenAI-compatible model-list request failed"
+        )
+    if _has_next_page(response.headers.get("Link")):
+        raise OpenAICompatibleCatalogError(
+            "OpenAI-compatible model-list pagination cannot be exhausted"
+        )
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        if len(body) + len(chunk) > _MAX_RESPONSE_BYTES:
+            raise OpenAICompatibleCatalogError(
+                "OpenAI-compatible model-list response exceeds one MiB"
+            )
+        body.extend(chunk)
+    return bytes(body)
+
+
+def _validate_discovery_timeout(timeout: float) -> None:
+    if isinstance(timeout, bool) or not isfinite(float(timeout)) or timeout <= 0:
+        raise ValueError("timeout must be positive")
+
+
 async def discover_openai_compatible_catalog(
     *,
     base_url: str,
@@ -240,8 +296,7 @@ async def discover_openai_compatible_catalog(
             authentication=AuthenticationState.UNAUTHENTICATED,
         )
     bearer = _api_key(api_key)
-    if isinstance(timeout, bool) or not isfinite(float(timeout)) or timeout <= 0:
-        raise ValueError("timeout must be positive")
+    _validate_discovery_timeout(timeout)
     try:
         async with (
             asyncio.timeout(float(timeout)),
@@ -259,37 +314,7 @@ async def discover_openai_compatible_catalog(
                 },
             ) as response,
         ):
-            if response.status_code == 401:
-                return OpenAICompatibleCatalogDiscovery(
-                    catalog=_unavailable_catalog(
-                        key,
-                        reason="provider model-list authentication failed",
-                    ),
-                    authentication=AuthenticationState.UNAUTHENTICATED,
-                )
-            if response.status_code == 403:
-                return OpenAICompatibleCatalogDiscovery(
-                    catalog=_unavailable_catalog(
-                        key,
-                        reason="provider model-list request was forbidden",
-                    ),
-                    authentication=AuthenticationState.UNKNOWN,
-                )
-            if response.status_code != 200:
-                raise OpenAICompatibleCatalogError(
-                    "OpenAI-compatible model-list request failed"
-                )
-            if _has_next_page(response.headers.get("Link")):
-                raise OpenAICompatibleCatalogError(
-                    "OpenAI-compatible model-list pagination cannot be exhausted"
-                )
-            body = bytearray()
-            async for chunk in response.aiter_bytes():
-                if len(body) + len(chunk) > _MAX_RESPONSE_BYTES:
-                    raise OpenAICompatibleCatalogError(
-                        "OpenAI-compatible model-list response exceeds one MiB"
-                    )
-                body.extend(chunk)
+            body_or_discovery = await _read_model_list_response(response, key)
     except (TimeoutError, httpx.TimeoutException):
         raise OpenAICompatibleCatalogError(
             "OpenAI-compatible model-list request timed out"
@@ -298,8 +323,10 @@ async def discover_openai_compatible_catalog(
         raise OpenAICompatibleCatalogError(
             "OpenAI-compatible model-list request failed"
         ) from None
+    if isinstance(body_or_discovery, OpenAICompatibleCatalogDiscovery):
+        return body_or_discovery
     try:
-        result = _JSON_OBJECT.validate_json(bytes(body))
+        result = _JSON_OBJECT.validate_json(body_or_discovery)
     except (ValidationError, UnicodeDecodeError):
         raise OpenAICompatibleCatalogError(
             "OpenAI-compatible model-list returned malformed JSON"

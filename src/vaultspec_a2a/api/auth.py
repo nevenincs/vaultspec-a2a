@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..utils.ipc_auth import BearerVerdict
 
-__all__ = ["authenticate_request", "gateway_bearer_scheme", "verify_attach_bearer"]
+__all__ = ["authenticate_request", "verify_attach_bearer"]
 
 #: Declares the bearer requirement in the generated OpenAPI document.
 #:

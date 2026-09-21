@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 import httpx
 import pytest
@@ -40,8 +40,10 @@ from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner
+from ...providers.factory import ProviderCatalogRegistration, ProviderFactory
+from ...providers.in_process_catalog import served_in_process_lanes
 from ...streaming.aggregator import EventAggregator
-from ...testing.catalog_selection import in_process_selection
+from ...testing.tests._support.catalog_selection import in_process_selection
 from ..app import create_app
 
 if TYPE_CHECKING:
@@ -244,6 +246,29 @@ type AppFixture = tuple[FastAPI, EventAggregator, _InProcessWorker, AsyncSqliteS
 _session_catalog_service_cache: ProviderCatalogService | None = None
 
 
+class _InProcessCatalogFactory(ProviderFactory):
+    """Use production registrations without probing external provider CLIs."""
+
+    @override
+    def catalog_registrations(
+        self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None
+    ) -> tuple[ProviderCatalogRegistration, ...]:
+        registrations = super().catalog_registrations(
+            workspace_root, serve_in_process_lanes=serve_in_process_lanes
+        )
+        in_process = set(
+            served_in_process_lanes(
+                armed=bool(serve_in_process_lanes),
+                mock_api_base=settings.mock_api_base,
+            )
+        )
+        return tuple(
+            registration
+            for registration in registrations
+            if registration.key in in_process
+        )
+
+
 def _session_catalog_service() -> ProviderCatalogService:
     """Return the process-wide provider catalog service, serving in-process lanes.
 
@@ -269,7 +294,9 @@ def _session_catalog_service() -> ProviderCatalogService:
         from ...providers.provider_catalog_service import ProviderCatalogService
 
         _session_catalog_service_cache = ProviderCatalogService(
-            ttl=timedelta(hours=6), serve_in_process_lanes=True
+            factory=_InProcessCatalogFactory(),
+            ttl=timedelta(hours=6),
+            serve_in_process_lanes=True,
         )
     return _session_catalog_service_cache
 

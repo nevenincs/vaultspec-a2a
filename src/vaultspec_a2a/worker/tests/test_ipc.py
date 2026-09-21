@@ -96,6 +96,49 @@ def _make_unreachable_bridge(*, worker_id: str = "test-worker-001") -> WorkerBri
     return bridge
 
 
+async def _prepare_stalled_event_bridge() -> tuple[
+    WorkerBridge,
+    asyncio.Event,
+    asyncio.Event,
+    set[asyncio.Task[None]],
+    asyncio.Server,
+]:
+    accepted = asyncio.Event()
+    release = asyncio.Event()
+    handlers: set[asyncio.Task[None]] = set()
+
+    async def stall(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        handlers.add(task)
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            accepted.set()
+            await release.wait()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+            handlers.discard(task)
+
+    server = await asyncio.start_server(stall, "127.0.0.1", 0)
+    address = server.sockets[0].getsockname()
+    bridge = WorkerBridge(
+        api_url=f"http://127.0.0.1:{address[1]}", worker_id="deadline"
+    )
+    await bridge.send_event("run-buffered", {"type": "thread_terminal"})
+    deferred = bridge._flush_task
+    assert deferred is not None
+    deferred.cancel()
+    await asyncio.gather(deferred, return_exceptions=True)
+
+    async def _flush_now() -> None:
+        await bridge.flush_events()
+
+    bridge._flush_task = asyncio.create_task(_flush_now())
+    await asyncio.wait_for(accepted.wait(), timeout=1.0)
+    return bridge, accepted, release, handlers, server
+
+
 # ---------------------------------------------------------------------------
 # Thread tracking
 # ---------------------------------------------------------------------------
@@ -402,41 +445,13 @@ class TestClose:
         self,
     ) -> None:
         """A real accepted socket that never responds cannot multiply close time."""
-        accepted = asyncio.Event()
-        release = asyncio.Event()
-        handlers: set[asyncio.Task[None]] = set()
-
-        async def stall(
-            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-        ) -> None:
-            task = asyncio.current_task()
-            assert task is not None
-            handlers.add(task)
-            try:
-                await reader.readuntil(b"\r\n\r\n")
-                accepted.set()
-                await release.wait()
-            finally:
-                writer.close()
-                await writer.wait_closed()
-                handlers.discard(task)
-
-        server = await asyncio.start_server(stall, "127.0.0.1", 0)
-        address = server.sockets[0].getsockname()
-        bridge = WorkerBridge(
-            api_url=f"http://127.0.0.1:{address[1]}", worker_id="deadline"
-        )
-        await bridge.send_event("run-buffered", {"type": "thread_terminal"})
-        deferred = bridge._flush_task
-        assert deferred is not None
-        deferred.cancel()
-        await asyncio.gather(deferred, return_exceptions=True)
-
-        async def _flush_now() -> None:
-            await bridge.flush_events()
-
-        bridge._flush_task = asyncio.create_task(_flush_now())
-        await asyncio.wait_for(accepted.wait(), timeout=1.0)
+        (
+            bridge,
+            accepted,
+            release,
+            handlers,
+            server,
+        ) = await _prepare_stalled_event_bridge()
 
         loop = asyncio.get_running_loop()
         ticks: list[float] = [loop.time()]

@@ -22,12 +22,11 @@ from typing import TYPE_CHECKING, cast
 import httpx
 import pytest
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ...control.config import settings
 from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
-from ...testing.sse import read_frame
+from ...testing.tests._support.sse import read_frame
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from .conftest import AppFixture, SessionFactory, _live_server, make_app
 
@@ -73,6 +72,20 @@ async def _await_subscriber(agg: EventAggregator) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError("stream subscriber never registered")
+
+
+def _assert_team_status_frame(frame: dict[str, object], raw: str, run_id: str) -> None:
+    """Assert the permitted team roster fields and the closed raw payload."""
+    team_agents_raw = frame.get("agents")
+    assert isinstance(team_agents_raw, list)
+    team_agents = cast("list[object]", team_agents_raw)
+    first_agent = team_agents[0]
+    assert isinstance(first_agent, dict)
+    first_agent_payload = cast("dict[str, object]", first_agent)
+    assert first_agent_payload["agent_id"] == "researcher_00"
+    assert first_agent_payload["state"] == "working"
+    assert frame["active_thread_ids"] == [run_id]
+    assert _METADATA_BODY not in raw
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -302,16 +315,7 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
     assert "metadata" not in status_frame
     assert _METADATA_BODY not in status_raw
 
-    team_agents_raw = team_frame.get("agents")
-    assert isinstance(team_agents_raw, list)
-    team_agents = cast("list[object]", team_agents_raw)
-    first_agent = team_agents[0]
-    assert isinstance(first_agent, dict)
-    first_agent_payload = cast("dict[str, object]", first_agent)
-    assert first_agent_payload["agent_id"] == "researcher_00"
-    assert first_agent_payload["state"] == "working"
-    assert team_frame["active_thread_ids"] == [run_id]
-    assert _METADATA_BODY not in team_raw
+    _assert_team_status_frame(team_frame, team_raw, run_id)
 
     assert error_frame["message"] == "provider returned 502"
     assert error_frame["code"] == "worker_failed"

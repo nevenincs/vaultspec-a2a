@@ -48,7 +48,8 @@ from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
     from ...conftest import ExternalPrerequisiteRule
-from ..factory import _CLAUDE_ACP_JS, ProviderFactory, _classify_acp_command
+from .._factory_commands import _CLAUDE_ACP_JS, _classify_acp_command
+from ..factory import ProviderFactory
 
 _RAG = "vaultspec-rag"
 _CANARY = "leak-canary"

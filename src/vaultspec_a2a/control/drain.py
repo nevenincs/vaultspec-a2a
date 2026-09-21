@@ -26,10 +26,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 __all__ = [
-    "AdmissionResult",
     "AdmissionState",
     "DrainGate",
-    "DrainResult",
 ]
 
 

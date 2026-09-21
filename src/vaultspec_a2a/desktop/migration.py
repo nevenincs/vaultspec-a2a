@@ -40,12 +40,8 @@ if TYPE_CHECKING:
     from .contract import MigrationRange
 
 __all__ = [
-    "MigrationGraphError",
-    "MigrationResult",
     "MigrationStage",
-    "StoreLockedError",
     "StoreName",
-    "StoreOutcome",
     "StoreStatus",
     "initialize_fresh_stores",
     "migrate_stores",

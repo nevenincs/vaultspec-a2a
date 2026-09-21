@@ -7,7 +7,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from ..testing.payloads import (
+from ..testing.tests._support.payloads import (
     json_object,
     json_object_list,
     required_bool,
@@ -118,19 +118,9 @@ def _trigger_after(
     return thread
 
 
-def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
-    """Consume SSE for a real run, then verify terminal replay semantics."""
-    created = service_stack.create_thread(
-        initial_message="Request approval and then continue with a follow-up.",
-        team_preset="mock-human-in-loop",
-        title="service stream follow-up",
-    )
-    created_body = json_object(created, at="created thread")
-    thread_id = required_text(created_body, "run_id", at="created thread")
-
-    paused = _wait_for_pending_permission(service_stack, thread_id)
-    service_stack.record(f"sse-paused:{thread_id}", paused)
-
+def _approve_during_initial_stream(
+    service_stack: ServiceStack, thread_id: str, paused: JsonObject
+) -> list[JsonObject]:
     pending_permissions = json_object_list(
         paused.get("pending_permissions"), at="paused thread pending permissions"
     )
@@ -174,6 +164,23 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         == "accepted_not_applied"
     )
     assert required_bool(approved, "applied", at="permission response") is False
+    return initial_events
+
+
+def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
+    """Consume SSE for a real run, then verify terminal replay semantics."""
+    created = service_stack.create_thread(
+        initial_message="Request approval and then continue with a follow-up.",
+        team_preset="mock-human-in-loop",
+        title="service stream follow-up",
+    )
+    created_body = json_object(created, at="created thread")
+    thread_id = required_text(created_body, "run_id", at="created thread")
+
+    paused = _wait_for_pending_permission(service_stack, thread_id)
+    service_stack.record(f"sse-paused:{thread_id}", paused)
+
+    initial_events = _approve_during_initial_stream(service_stack, thread_id, paused)
     assert any(event.get("type") == "thread_terminal" for event in initial_events)
     assert any(event.get("status") == "completed" for event in initial_events)
     service_stack.record(f"sse-initial:{thread_id}", initial_events)

@@ -33,11 +33,9 @@ __all__ = [
     "DESKTOP_RECORD_VERSION",
     "HEARTBEAT_STALE_MS",
     "SERVICE_JSON_ENV",
-    "DiscoveryRecordView",
     "EngineEndpoint",
     "heartbeat_is_fresh",
     "parse_discovery_record",
-    "read_discovery_record",
     "read_service_json",
     "resolve_engine",
     "resolve_engine_with_retry",
@@ -57,7 +55,6 @@ _DESKTOP_PROFILE = "desktop"
 # Consumer staleness window: a heartbeat older than this is treated as a crash,
 # not as an available service (mirrors the engine's HEARTBEAT_STALE_MS).
 HEARTBEAT_STALE_MS = 120_000
-_STALE_MS = HEARTBEAT_STALE_MS
 
 
 def read_service_json(path: Path) -> dict[str, object] | None:
@@ -153,37 +150,27 @@ def _coerce_port(value: object) -> int | None:
     return value
 
 
-def parse_discovery_record(info: Mapping[str, object]) -> DiscoveryRecordView | None:
-    """Parse a discovery record dict into a view, preferring the versioned shape.
+def _parse_versioned_record(info: Mapping[str, object]) -> DiscoveryRecordView | None:
+    endpoint = coerce_object_mapping(info.get("endpoint"))
+    if endpoint is None:
+        return None
+    port = _coerce_port(endpoint.get("port"))
+    if port is None:
+        return None
+    host = endpoint.get("host")
+    reference = info.get("credential_reference")
+    return DiscoveryRecordView(
+        port=port,
+        host=host if isinstance(host, str) and host else "127.0.0.1",
+        versioned=True,
+        bearer_token=None,
+        credential_reference=(
+            reference if isinstance(reference, str) and reference else None
+        ),
+    )
 
-    A record carrying the known desktop ``version`` and ``desktop`` profile is
-    read as versioned (secret-free, endpoint nested under ``endpoint``); anything
-    else is read as the legacy R8 record (top-level ``port`` and inline
-    ``service_token``). Fail-closed: a record without a valid integer port yields
-    ``None`` rather than a partially trusted view.
-    """
-    if (
-        info.get("version") == DESKTOP_RECORD_VERSION
-        and info.get("profile") == _DESKTOP_PROFILE
-    ):
-        endpoint_value = info.get("endpoint")
-        endpoint = coerce_object_mapping(endpoint_value)
-        if endpoint is None:
-            return None
-        port = _coerce_port(endpoint.get("port"))
-        if port is None:
-            return None
-        host = endpoint.get("host")
-        reference = info.get("credential_reference")
-        return DiscoveryRecordView(
-            port=port,
-            host=host if isinstance(host, str) and host else "127.0.0.1",
-            versioned=True,
-            bearer_token=None,
-            credential_reference=(
-                reference if isinstance(reference, str) and reference else None
-            ),
-        )
+
+def _parse_legacy_record(info: Mapping[str, object]) -> DiscoveryRecordView | None:
     port = _coerce_port(info.get("port"))
     if port is None:
         return None
@@ -200,12 +187,21 @@ def parse_discovery_record(info: Mapping[str, object]) -> DiscoveryRecordView | 
     )
 
 
-def read_discovery_record(path: Path) -> DiscoveryRecordView | None:
-    """Read and parse a discovery file into a shape-agnostic view, or ``None``."""
-    info = read_service_json(path)
-    if info is None:
-        return None
-    return parse_discovery_record(info)
+def parse_discovery_record(info: Mapping[str, object]) -> DiscoveryRecordView | None:
+    """Parse a discovery record dict into a view, preferring the versioned shape.
+
+    A record carrying the known desktop ``version`` and ``desktop`` profile is
+    read as versioned (secret-free, endpoint nested under ``endpoint``); anything
+    else is read as the legacy R8 record (top-level ``port`` and inline
+    ``service_token``). Fail-closed: a record without a valid integer port yields
+    ``None`` rather than a partially trusted view.
+    """
+    if (
+        info.get("version") == DESKTOP_RECORD_VERSION
+        and info.get("profile") == _DESKTOP_PROFILE
+    ):
+        return _parse_versioned_record(info)
+    return _parse_legacy_record(info)
 
 
 @dataclass(frozen=True, slots=True)

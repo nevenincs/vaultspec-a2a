@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from ....authoring.catalog import AgentTool, CatalogSnapshot
 
 __all__ = [
-    "McpToolSpec",
     "build_authoring_mcp_server",
     "build_tool_specs",
 ]

@@ -29,8 +29,7 @@ Pydantic models.
 from __future__ import annotations
 
 import json
-import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -49,11 +48,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import (
-    make_test_thread_authority_columns,
-    make_test_write_authority,
-)
-
 from ...api.schemas.events import (
     MAX_TOOL_CALL_CHARS,
     PermissionRequestEvent,
@@ -66,6 +60,10 @@ from ...api.schemas.gateway import (
 )
 from ...control.run_discovery_service import discover_active_runs
 from ...graph.enums import ServerEventType
+from ...tests._write_authority import (
+    make_test_thread_authority_columns,
+    make_test_write_authority,
+)
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, RepairStatus, ThreadStatus
 from ..migrate import build_migration_config
@@ -317,6 +315,7 @@ class TestStatusDefaultsComeFromEnums:
                 action_type="ingest",
                 idempotency_key="ingest:1",
                 requested_at=datetime.now(UTC),
+                recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             )
         )
         await session.flush()
@@ -420,7 +419,7 @@ class TestWorkspaceRootBoundIsTheColumn:
     @staticmethod
     def _root_of_length(length: int) -> str:
         """Build an absolute workspace root of exactly ``length`` characters."""
-        prefix = f"C:{os.sep}"
+        prefix = Path.cwd().anchor
         root = prefix + "w" * (length - len(prefix))
         assert len(root) == length
         return root
@@ -537,7 +536,7 @@ class TestFeatureTagBoundIsTheColumn:
             session,
             write_authority=make_test_write_authority(),
             metadata=json.dumps(
-                {"workspace_root": f"C:{os.sep}workspace", "feature_tag": tag}
+                {"workspace_root": str(Path.cwd() / "workspace"), "feature_tag": tag}
             ),
         )
         await session.commit()
@@ -564,7 +563,7 @@ class TestFeatureTagBoundIsTheColumn:
             write_authority=make_test_write_authority(),
             metadata=json.dumps(
                 {
-                    "workspace_root": f"C:{os.sep}workspace",
+                    "workspace_root": str(Path.cwd() / "workspace"),
                     "feature_tag": "f" * (width + 1),
                 }
             ),

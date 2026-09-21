@@ -34,8 +34,8 @@ _SILENT_AGENT = "import time; time.sleep(600)"
 # in its log rather than over the protocol.
 _STDERR_CHATTY_AGENT = (
     "import sys, time\n"
-    "for _ in range(2000):\n"
-    "    sys.stderr.write('working\\n'); sys.stderr.flush(); time.sleep(0.3)\n"
+    "for _ in range(6000):\n"
+    "    sys.stderr.write('working\\n'); sys.stderr.flush(); time.sleep(0.1)\n"
 )
 
 # Drives the real model against that agent and reports how the turn ended.
@@ -108,8 +108,8 @@ _TURN_PROBE_SCRIPT = textwrap.dedent(
     """
 ).strip()
 
-_IDLE_LIMIT_SECONDS = 1.5
-_OBSERVE_SECONDS = 6.0
+_IDLE_LIMIT_SECONDS = 0.75
+_OBSERVE_SECONDS = 3.0
 
 
 def _run_turn_probe(

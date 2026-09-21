@@ -4,14 +4,15 @@ tags:
   - '#index'
   - '#resource-aware-test-execution'
 date: '2026-08-02'
-modified: '2026-09-03'
+modified: '2026-09-19'
 body_schema: 'body-v2'
-body_hash: 'sha256:34c991f1fbc5e671fede1a7f382c6d39d9e9712c14992636aa549e9339736a62'
+body_hash: 'sha256:b3940955ba87fdc333b5e646c03dcd938f15a99ff4d34f60e733b754c1c45d03'
 related:
   - '[[2026-08-02-resource-aware-test-execution-adr]]'
   - '[[2026-08-02-resource-aware-test-execution-audit]]'
   - '[[2026-08-02-resource-aware-test-execution-ledger]]'
   - '[[2026-08-02-resource-aware-test-execution-plan]]'
+  - '[[2026-09-19-resource-aware-test-execution-test-suite-hotspots-reference]]'
 ---
 
 # `resource-aware-test-execution` feature index
@@ -35,3 +36,7 @@ Auto-generated index of all documents tagged with `#resource-aware-test-executio
 ### plan
 
 - `2026-08-02-resource-aware-test-execution-plan` - `resource-aware-test-execution` plan
+
+### reference
+
+- `2026-09-19-resource-aware-test-execution-test-suite-hotspots-reference` - `resource-aware-test-execution` reference: `test suite collection and runtime hotspots`

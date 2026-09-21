@@ -15,7 +15,6 @@ from .enums import ControlActionType, RepairStatus
 
 __all__ = [
     "DISPATCH_FAILED_TRANSITION",
-    "RepairTransition",
     "repair_state_for_action",
 ]
 

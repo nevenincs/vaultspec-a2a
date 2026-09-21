@@ -20,8 +20,6 @@ import pytest_asyncio
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ....conftest import materialize_schema
 from ....control.repositories import (
     CleanupItem,
@@ -40,6 +38,7 @@ from ....control.repositories import (
 from ....control.thread_service import archive_thread
 from ....database import create_control_action, create_thread, get_thread
 from ....database.models import ThreadDeletionSagaModel
+from ....tests._write_authority import make_test_write_authority
 from ....thread.enums import CleanupKind, ThreadStatus
 
 
@@ -92,6 +91,7 @@ async def _seed_terminal_thread(
             action_type=authority.action_type,
             dispatch_id=authority.action_receipt_id,
             idempotency_key=f"seed:{thread_id}",
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         await session.commit()
     return thread_id

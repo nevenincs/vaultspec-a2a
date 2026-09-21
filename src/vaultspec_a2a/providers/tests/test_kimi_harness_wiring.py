@@ -11,8 +11,8 @@ NO Codex-style config path.
 from __future__ import annotations
 
 from .._acp_mcp import compose_harness_mcp_servers, harness_allowed_tool_names
+from .._factory_commands import _build_kimi_env, _classify_kimi_command
 from ..acp_chat_model import AcpChatModel
-from ..factory import _build_kimi_env, _classify_kimi_command
 
 
 def _kimi_model() -> AcpChatModel:

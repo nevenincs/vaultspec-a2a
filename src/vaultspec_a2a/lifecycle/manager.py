@@ -25,12 +25,11 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
-from ..control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
-from ..utils.process import detached_spawn_kwargs, kill_pid_tree_async
+from ..control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
+from ..utils._process_tree import detached_spawn_kwargs, kill_pid_tree_async
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
     NAME_ENV,
@@ -58,8 +57,6 @@ if TYPE_CHECKING:
     from .procs_config import RoleConfig
 
 __all__ = [
-    "ARTIFACT_DECLARATIONS",
-    "SPAWN_REDIRECT_LOG_DECLARATION",
     "LifecycleError",
     "ProcVerdict",
     "attach",
@@ -85,36 +82,7 @@ _OWNER_ENV = "VAULTSPEC_PROCS_OWNER"
 # own declared second phase rather than left implicit in the async default.
 _KILL_ESCALATION_WAIT = 5.0
 
-# A spawned process's redirect file is a raw append-mode file, not a Python
-# logging handler, so it cannot rotate on its own — a long-lived dev instance
-# (gateway-dev/worker-dev/engine-dev, restarted many times via resume/rerun onto
-# the SAME log_path) would otherwise grow it forever. Checked once at spawn time
-# (research: lifecycle/manager.py:200-241 appends unbounded); 10 MiB is generous
-# headroom for a single boot's worth of stdout+stderr while still bounding the
-# pathological case.
 SPAWN_LOG_CAP_BYTES = 10 * 1024 * 1024
-
-# The redirect file is durable and its location is chosen by whoever invokes the
-# spawn, so the declaration has to name the caller's path rather than a fixed
-# root. The two bounds below are genuinely different in kind: the size cap always
-# applies, while deletion applies only when a lifecycle verb runs.
-SPAWN_REDIRECT_LOG_DECLARATION = ArtifactDeclaration(
-    name="spawned-process-redirect-log",
-    root="<caller-supplied log_path> (plus its <log_path>.1 rotation sibling)",
-    owner="lifecycle.manager",
-    disposition=RetentionDisposition.BOUNDED_BY_SIZE,
-    mechanism=(
-        f"_rotate_log_if_over_cap moves the file to a single .1 sibling once it "
-        f"reaches {SPAWN_LOG_CAP_BYTES} bytes, capping the pair at roughly "
-        f"{SPAWN_LOG_CAP_BYTES * 2} bytes, and kill/reap delete the record's "
-        "log_path; the .1 sibling is NOT deleted by kill/reap, and a spawn whose "
-        "process is never killed or reaped through these verbs leaves both files"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    SPAWN_REDIRECT_LOG_DECLARATION,
-)
 
 
 class LifecycleError(RuntimeError):
@@ -581,17 +549,22 @@ def _read_internal_token(token_file: str, *, label: str) -> str:
     return token
 
 
+class _ServeEnvOptional(TypedDict, total=False):
+    engine_service_json: str
+    internal_token_file: str
+    gateway_url: str
+    worker_url: str
+
+
+class _ServeEnvArgs(_ServeEnvOptional):
+    port: int
+    workspace: str
+    name: str
+    owner: str
+
+
 def _serve_env(
-    role_cfg: RoleConfig,
-    *,
-    port: int,
-    workspace: str,
-    name: str,
-    owner: str,
-    engine_service_json: str = "",
-    internal_token_file: str = "",
-    gateway_url: str = "",
-    worker_url: str = "",
+    role_cfg: RoleConfig, **options: Unpack[_ServeEnvArgs]
 ) -> dict[str, str]:
     """The env overlay for a boot: the role's rendered port/config vars plus identity.
 
@@ -609,6 +582,14 @@ def _serve_env(
     and worker-dev agree on all of them instead of leaning on shell state. Empty
     values inject nothing, matching the prior behaviour for records predating them.
     """
+    port = options["port"]
+    workspace = options["workspace"]
+    name = options["name"]
+    owner = options["owner"]
+    engine_service_json = options.get("engine_service_json", "")
+    internal_token_file = options.get("internal_token_file", "")
+    gateway_url = options.get("gateway_url", "")
+    worker_url = options.get("worker_url", "")
     env = render_env(role_cfg.env, port=port, workspace=workspace)
     env[NAME_ENV] = name
     env[_OWNER_ENV] = owner
@@ -625,22 +606,35 @@ def _serve_env(
     return env
 
 
+class _ServeUpOptions(TypedDict, total=False):
+    workspace: str
+    repo: str
+    build_repo: str
+    engine_service_json: str
+    internal_token_file: str
+    gateway_url: str
+    worker_url: str
+    owner: str | None
+    log_path: str | None
+    ready_timeout: float
+    home: Path | None
+    config: ProcsConfig | None
+
+
+def _serve_config(options: _ServeUpOptions) -> ProcsConfig:
+    configured = options.get("config")
+    return configured if configured is not None else load_procs_config()
+
+
+def _serve_owner(options: _ServeUpOptions) -> str:
+    owner = options.get("owner")
+    return owner if owner is not None else default_procs_owner()
+
+
 def serve_up(
     role: str,
     name: str,
-    *,
-    workspace: str = "",
-    repo: str = "",
-    build_repo: str = "",
-    engine_service_json: str = "",
-    internal_token_file: str = "",
-    gateway_url: str = "",
-    worker_url: str = "",
-    owner: str | None = None,
-    log_path: str | None = None,
-    ready_timeout: float = 20.0,
-    home: Path | None = None,
-    config: ProcsConfig | None = None,
+    **options: Unpack[_ServeUpOptions],
 ) -> ProcRecord:
     """Boot a role's serve command on a freshly-allocated band port and register it.
 
@@ -656,62 +650,70 @@ def serve_up(
     """
     from pathlib import Path as _Path
 
-    resolved_config = config if config is not None else load_procs_config()
+    resolved_config = _serve_config(options)
     role_cfg = resolved_config.role(role)
     if not role_cfg.serve:
         raise LifecycleError(f"role {role!r} declares no serve command in procs.toml")
-    _ensure_explicit_repo(role_cfg, repo, f"{role}-{name}")
-    owner_label = owner if owner is not None else default_procs_owner()
-    cwd = _Path(repo) if repo else _default_repo()
+    _ensure_explicit_repo(role_cfg, options.get("repo", ""), f"{role}-{name}")
+    owner_label = _serve_owner(options)
+    cwd = _Path(options.get("repo", "")) if options.get("repo", "") else _default_repo()
     # The build tree captured for rebuild/rerun; the boot build_sha reflects it, not
     # the serve tree, when a role's build and serve repos differ (engine-dev).
-    build_cwd = _Path(build_repo) if build_repo else cwd
+    build_cwd = (
+        _Path(options.get("build_repo", "")) if options.get("build_repo", "") else cwd
+    )
     max_attempts = role_cfg.band.end - role_cfg.band.start + 1
     held: list[PortReservation] = []
     try:
         for _ in range(max_attempts):
             reservation = reserve_port(
-                role, role_cfg, home=home, config=resolved_config
+                role, role_cfg, home=options.get("home"), config=resolved_config
             )
             held.append(reservation)
             command = render_command(
-                role_cfg.serve, port=reservation.port, workspace=workspace
+                role_cfg.serve,
+                port=reservation.port,
+                workspace=options.get("workspace", ""),
             )
             child_env = _serve_env(
                 role_cfg,
                 port=reservation.port,
-                workspace=workspace,
+                workspace=options.get("workspace", ""),
                 name=name,
                 owner=owner_label,
-                engine_service_json=engine_service_json,
-                internal_token_file=internal_token_file,
-                gateway_url=gateway_url,
-                worker_url=worker_url,
+                engine_service_json=options.get("engine_service_json", ""),
+                internal_token_file=options.get("internal_token_file", ""),
+                gateway_url=options.get("gateway_url", ""),
+                worker_url=options.get("worker_url", ""),
             )
-            process = spawn(command, cwd=cwd, log_path=log_path, env=child_env)
-            if _await_listener(reservation.port, process, timeout=ready_timeout):
+            process = spawn(
+                command, cwd=cwd, log_path=options.get("log_path"), env=child_env
+            )
+            if _await_listener(
+                reservation.port, process, timeout=options.get("ready_timeout", 20.0)
+            ):
                 stamp = now_ms()
                 record = ProcRecord(
                     name=name,
                     role=role,
                     pid=process.pid,
                     port=reservation.port,
-                    repo=str(cwd) if repo else "",
-                    build_repo=build_repo,
-                    workspace=workspace,
+                    repo=str(cwd) if options.get("repo", "") else "",
+                    build_repo=options.get("build_repo", ""),
+                    workspace=options.get("workspace", ""),
                     build_sha=_build_sha(build_cwd),
                     command=command,
                     started_at_ms=stamp,
                     last_seen_ms=stamp,
-                    log_path=log_path,
+                    log_path=options.get("log_path"),
                     owner=owner_label,
-                    engine_service_json=engine_service_json,
-                    internal_token_file=internal_token_file,
-                    gateway_url=gateway_url,
-                    worker_url=worker_url,
+                    engine_service_json=options.get("engine_service_json", ""),
+                    internal_token_file=options.get("internal_token_file", ""),
+                    gateway_url=options.get("gateway_url", ""),
+                    worker_url=options.get("worker_url", ""),
                 )
                 try:
-                    commit_reservation(reservation, record, home=home)
+                    commit_reservation(reservation, record, home=options.get("home"))
                 except BaseException:
                     # The process is up and ready and OWNED by us, but committing
                     # its claiming record failed - reap the complete owned tree
@@ -737,7 +739,7 @@ def serve_up(
                     "proc_name": name,
                     "port": reservation.port,
                     "child_pid": process.pid,
-                    "ready_timeout_s": ready_timeout,
+                    "ready_timeout_s": options.get("ready_timeout", 20.0),
                 },
             )
             tree_kill(process.pid)
@@ -758,8 +760,12 @@ def serve_up(
         )
         raise LifecycleError(detail)
     finally:
-        for reservation in held:
-            release_reservation(reservation)
+        _release_held_reservations(held)
+
+
+def _release_held_reservations(held: list[PortReservation]) -> None:
+    for reservation in held:
+        release_reservation(reservation)
 
 
 def _await_listener(
@@ -776,7 +782,7 @@ def _await_listener(
     fails safe: when the listening pid cannot be resolved it degrades to the bare
     bound-port signal rather than stalling a legitimate boot.
     """
-    from ..utils.process import ListenerOwnership, classify_listener_ownership
+    from ..utils._process_tree import ListenerOwnership, classify_listener_ownership
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

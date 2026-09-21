@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
+from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -69,6 +69,7 @@ async def test_concurrent_sessions_elect_exactly_one_fresh_lease(
             request_id="req-1",
             payload={"prompt": "continue with your judgement"},
             dispatch_id="dispatch-stable",
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         await session.commit()
         action_id = reservation.action.id
@@ -123,6 +124,7 @@ async def test_lease_release_expiry_and_settlement_are_token_conditional(
             action_type=ControlActionType.CANCEL,
             idempotency_key="cancel:1",
             payload={"reason": "operator"},
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         assert reserved.created is True
         assert reserved.payload_matches is True
@@ -193,6 +195,7 @@ async def test_competing_replay_and_thread_deletion_preserve_lifecycle(
             action_type=ControlActionType.RESUME,
             idempotency_key="same-key",
             payload={"answers": {"q": "yes"}},
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         await session.commit()
     async with sessions() as session:
@@ -202,6 +205,7 @@ async def test_competing_replay_and_thread_deletion_preserve_lifecycle(
             action_type=ControlActionType.RESUME,
             idempotency_key="same-key",
             payload={"answers": {"q": "no"}},
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         assert competing.action.id == winner.action.id
         assert competing.created is False
@@ -241,6 +245,7 @@ async def test_dispatch_id_is_globally_unique_and_exactly_lookupable(
             action_type=ControlActionType.RESUME,
             idempotency_key="resume-a",
             dispatch_id=dispatch_id,
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         await session.commit()
 
@@ -267,6 +272,7 @@ async def test_dispatch_id_is_globally_unique_and_exactly_lookupable(
                 action_type=ControlActionType.RESUME,
                 idempotency_key="resume-b",
                 dispatch_id=dispatch_id,
+                recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             )
         await session.rollback()
 

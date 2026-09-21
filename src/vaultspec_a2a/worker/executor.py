@@ -9,29 +9,34 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextvars import ContextVar
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from langgraph.types import Command
 
 from ..domain_config import domain_config
-from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..ipc.serializers import sequenced_to_dict
-from ..providers import ProviderCondition
 from ..providers.team_selection import model_assignment_digest
-from ..streaming.aggregator import EventAggregator
 from ..streaming.node_metadata import node_metadata_from_graph
 from ..telemetry import ws_span
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
 from ..thread.errors import describe_exception_chain
-from ..thread.failure_evidence import (
-    GraphFailureEvidence,
-    failure_detail_fingerprint,
+from ._authoring_close import close_authoring_session_best_effort
+from ._dispatch_contract import (
+    _CAPACITY_ACCEPTED,
+    _CAPACITY_FULL,
+    _CAPACITY_THREAD_ACTIVE,
+    _EXECUTOR_CONDITION,
+    _INGEST_GUARDS,
+    _RESUME_GUARDS,
+    _SLOT_OWNING_ACTIONS,
+    DispatchCapacityReservation,
+    _GuardWording,
+    failure_evidence,
 )
-from .catalog_store import RunCatalogStore
+from ._dispatch_receipts import emit_dispatch_application_receipt
+from ._executor_state import DispatchCapacityState, RunResources
 from .graph_lifecycle import (
     GraphCacheKey,
     GraphCompilationError,
@@ -39,116 +44,31 @@ from .graph_lifecycle import (
     RegisteredCompiledGraph,
 )
 from .state_projection import StateProjector
-from .token_store import RunTokenStore
 
 if TYPE_CHECKING:
+    from contextvars import ContextVar
+
     from opentelemetry.trace import Span
 
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
+    from ..streaming.aggregator import EventAggregator
     from ..streaming.types import SequencedEvent, StreamableGraph
+    from .catalog_store import RunCatalogStore
     from .ipc import WorkerBridge
+    from .token_store import RunTokenStore
 
 # ``GraphCompilationError`` is imported to be CAUGHT here, not re-published:
 # ``graph_lifecycle`` raises it and is where every handler imports it from.
-__all__ = ["ConcurrentCapError", "Executor"]
-
-# The document-authoring role whose actor token closes the run's engine session.
-# It is the session's owner: the submitter's constant create_session key opens the
-# session once, in the research phase, under this role. The benign close is
-# dual-auth (ResolvedCommand principal), so the owner token is the right principal.
-_CLOSE_SESSION_ROLE = "vaultspec-synthesist"
-
-
-@dataclass(frozen=True, slots=True)
-class _GuardWording:
-    """Per-runtime-mode wording for the arms ingest and resume share.
-
-    The pre-run guards (compile failure, missing graph, ingest slot already held)
-    and the execution catch-all are one behaviour each, reached from two dispatch
-    modes. Only the operator-facing wording and the log actions differ between
-    the modes, so they are data here and each arm has a single implementation.
-
-    The ``*_detail`` fields are the client's wording, the rest the operator's.
-    The operator's carry the run identifier; the client's deliberately do not -
-    the run they describe is the one the reader is already looking at, and
-    repeating the identifier spends a capped reason on what the frame carries.
-    """
-
-    runtime_mode: str
-    compile_failure: str
-    graph_missing: str
-    graph_missing_detail: str
-    slot_held: str
-    slot_held_action: str
-    execution_failure: str
-    execution_failure_action: str
-    execution_failure_detail: str
-
-
-_INGEST_GUARDS = _GuardWording(
-    runtime_mode="ingest",
-    compile_failure="Graph compilation failed for thread %s: %s",
-    graph_missing="No graph for thread %s -- no team preset provided",
-    graph_missing_detail="No graph to run: the dispatch named no team preset",
-    slot_held="Ingest already active for thread %s -- dropping",
-    slot_held_action="ingest_rejected_active",
-    execution_failure="Ingest failed for thread %s",
-    execution_failure_action="ingest_failed",
-    execution_failure_detail="Graph execution failed unexpectedly",
-)
-
-_RESUME_GUARDS = _GuardWording(
-    runtime_mode="resume",
-    compile_failure="Graph recompile failed for thread %s: %s",
-    graph_missing="No graph for thread %s -- cannot resume",
-    graph_missing_detail="No graph to resume: the run has no compiled graph",
-    slot_held="Ingest already active for thread %s -- cannot resume",
-    slot_held_action="resume_rejected_active",
-    execution_failure="Resume failed for thread %s",
-    execution_failure_action="resume_failed",
-    execution_failure_detail="Graph resume failed unexpectedly",
-)
-
-# The provider condition every executor-side rejection resolves to, and it is a
-# decision rather than an omission: a graph that refused to compile, a dispatch
-# that named no preset, and a fault in the executor's own machinery all failed
-# BEFORE any provider was engaged, so there is no provider condition to report
-# and claiming one would send the reader after a remedy the run never needed.
-# The floor is what keeps such a run from carrying no condition at all.
-_EXECUTOR_CONDITION = ProviderCondition.UNKNOWN
-
-# The two dispatch actions that take the thread's ingest slot. A failure in
-# either is that dispatch's own to settle; a cancel or an unrecognised action
-# never held the slot, so a held slot there belongs to a concurrent run.
-_SLOT_OWNING_ACTIONS = frozenset({ControlActionType.INGEST, ControlActionType.RESUME})
-_CAPACITY_ACCEPTED = "accepted"
-_CAPACITY_THREAD_ACTIVE = "thread_active"
-_CAPACITY_FULL = "capacity_full"
-
-
-class ConcurrentCapError(RuntimeError):
-    """Raised when the worker concurrent thread cap is reached."""
-
-
-@dataclass(frozen=True, slots=True)
-class DispatchCapacityReservation:
-    """Opaque ownership proof for one admitted ingest or resume dispatch."""
-
-    thread_id: str
-    generation: int
-
+__all__ = [
+    "Executor",
+]
 
 logger = logging.getLogger(__name__)
 
 
 class Executor:
-    """Dispatch orchestrator for LangGraph graph runs.
-
-    Delegates graph compilation/caching to ``GraphLifecycleManager`` and
-    checkpoint inspection/terminal events to ``StateProjector``.  Owns
-    the ``EventAggregator`` and concurrency gating (``_active_ingests``).
-    """
+    """Orchestrate graph runs, projections, events, and dispatch capacity."""
 
     def __init__(
         self,
@@ -164,17 +84,15 @@ class Executor:
             else domain_config.aget_state_timeout_seconds
         )
         self._bridge = bridge
-        self._aggregator = EventAggregator()
+        self._resources = RunResources()
 
         # Worker-scoped holder of per-run actor tokens. Registered when a
         # run's active window opens and dropped when it closes, so tokens live
         # only inside the owning worker for the run and never touch a checkpoint.
-        self._token_store = RunTokenStore()
 
         # Worker-scoped cache of per-run engine catalog snapshots, dropped on the
         # same terminal boundary as the token store so a snapshot never outlives a
         # run. Shared with the graph lifecycle's authoring-bridge provider.
-        self._catalog_store = RunCatalogStore()
 
         # Delegates
         self._graph_lifecycle = GraphLifecycleManager(
@@ -202,13 +120,39 @@ class Executor:
 
         self._aggregator.add_broadcast_hook(_relay_event)
 
-        self._active_ingests: dict[str, DispatchCapacityReservation] = {}
-        self._pending_cancellations: dict[str, str] = {}
-        self._ingest_lock = asyncio.Lock()
-        self._next_capacity_generation = 0
-        self._dispatch_reservation: ContextVar[DispatchCapacityReservation | None] = (
-            ContextVar("dispatch_capacity_reservation", default=None)
-        )
+        self._capacity = DispatchCapacityState()
+
+    @property
+    def _aggregator(self) -> EventAggregator:
+        return self._resources.aggregator
+
+    @property
+    def _token_store(self) -> RunTokenStore:
+        return self._resources.token_store
+
+    @property
+    def _catalog_store(self) -> RunCatalogStore:
+        return self._resources.catalog_store
+
+    @property
+    def _active_ingests(self) -> dict[str, DispatchCapacityReservation]:
+        return self._capacity.active_ingests
+
+    @property
+    def _pending_cancellations(self) -> dict[str, str]:
+        return self._capacity.pending_cancellations
+
+    @property
+    def _ingest_lock(self) -> asyncio.Lock:
+        return self._capacity.lock
+
+    @property
+    def _next_capacity_generation(self) -> int:
+        return self._capacity.next_generation
+
+    @property
+    def _dispatch_reservation(self) -> ContextVar[DispatchCapacityReservation | None]:
+        return self._capacity.reservation
 
     @property
     def aggregator(self) -> EventAggregator:
@@ -285,68 +229,14 @@ class Executor:
             outcome=outcome,
         )
 
-    @staticmethod
-    def _failure_evidence(
-        req: DispatchRequest,
-        *,
-        detail: str | None,
-        condition: ProviderCondition,
-    ) -> GraphFailureEvidence | None:
-        """Bind one classified worker failure to its accepted graph action."""
-        receipt = req.graph_action_receipt
-        if receipt is None or not detail:
-            return None
-        return GraphFailureEvidence(
-            schema_version="graph-failure-v1",
-            action=receipt,
-            outcome="failed",
-            detail_fingerprint=failure_detail_fingerprint(detail),
-            provider_condition=condition.value,
-        )
-
     async def _emit_dispatch_application_receipt(self, req: DispatchRequest) -> None:
-        """Report incorporation only after reading its committed checkpoint proof."""
-        if req.action != "ingest" and req.action != "resume":
-            return
-        try:
-            receipt = req.require_graph_action_receipt()
-            checkpoint = await asyncio.wait_for(
-                self._checkpointer.aget_tuple(
-                    {"configurable": {"thread_id": req.thread_id}}
-                ),
-                timeout=self._checkpoint_read_timeout_seconds,
-            )
-            if checkpoint is None or checkpoint.metadata.get("source") != "loop":
-                return
-            values = checkpoint.checkpoint.get("channel_values", {})
-            receipts: object = values.get("graph_action_receipts")
-            if not isinstance(receipts, dict):
-                return
-            if cast("dict[str, object]", receipts).get(
-                req.dispatch_id
-            ) != receipt.model_dump(mode="json"):
-                return
-            await self._bridge.send_event(
-                req.thread_id,
-                DispatchApplicationReceiptPayload(
-                    dispatch_id=req.dispatch_id,
-                    action=req.action,
-                    graph_action_receipt=receipt,
-                    checkpoint_id=checkpoint.checkpoint["id"],
-                ).model_dump(mode="json"),
-            )
-        except Exception:
-            # The journal lease and worker dispatch-ID admission retain recovery
-            # authority. Receipt transport must never abort graph execution after
-            # the graph already began.
-            logger.warning(
-                "Could not queue dispatch application receipt",
-                exc_info=True,
-                extra=self._dispatch_log_extra(
-                    req,
-                    action="dispatch_application_receipt_failed",
-                ),
-            )
+        await emit_dispatch_application_receipt(
+            req,
+            self._checkpointer,
+            self._bridge,
+            self._checkpoint_read_timeout_seconds,
+            self._dispatch_log_extra,
+        )
 
     async def reserve_dispatch_capacity(
         self, thread_id: str
@@ -364,10 +254,10 @@ class Executor:
                 return None, _CAPACITY_THREAD_ACTIVE
             if len(self._active_ingests) >= domain_config.max_concurrent_threads:
                 return None, _CAPACITY_FULL
-            self._next_capacity_generation += 1
+            self._capacity.next_generation += 1
             reservation = DispatchCapacityReservation(
                 thread_id=thread_id,
-                generation=self._next_capacity_generation,
+                generation=self._capacity.next_generation,
             )
             self._active_ingests[thread_id] = reservation
             return reservation, _CAPACITY_ACCEPTED
@@ -419,73 +309,9 @@ class Executor:
     async def _close_authoring_session_best_effort(
         self, thread_id: str, graph: StreamableGraph, config: dict[str, Any]
     ) -> None:
-        """Close the run's engine authoring session on a SUCCESSFUL settle.
-
-        An a2a document-authoring run opens an engine session (``create_session``
-        -> Active) and never closes it: it proposes directly and never starts a
-        run, so the engine's run lifecycle never reaps the session. On the run's
-        terminal SUCCESS this closes it benignly (``session.closed``). Called AFTER
-        the run's own terminal status has landed, so a slow or failing close can
-        neither delay nor contaminate the run's settle.
-
-        Best-effort by contract: a missing session id (non-authoring run), missing
-        credentials, an unreachable engine, or a close fault all degrade to a
-        logged no-op - a completion-time housekeeping call must NEVER fail an
-        already-succeeded run. Idempotent per the route; the route's active-run
-        guard never fires because a2a-driven work creates no engine run. Runs the
-        state read before the token store is dropped (this is invoked ahead of
-        ``_mark_ingest_done``), so the session owner's actor token is still held.
-        """
-        from ..authoring import (
-            AuthoringClient,
-            close_authoring_session,
-            resolve_engine,
+        await close_authoring_session_best_effort(
+            thread_id, graph, config, self._token_store
         )
-        from ..authoring._ids import derive_idempotency_key
-
-        try:
-            snapshot = await asyncio.wait_for(
-                graph.aget_state(config),
-                timeout=domain_config.aget_state_timeout_seconds,
-            )
-            values: object = getattr(snapshot, "values", None)
-            session_id: object = (
-                cast("dict[str, object]", values).get("authoring_session_id")
-                if isinstance(values, dict)
-                else None
-            )
-            if not isinstance(session_id, str) or not session_id:
-                return  # non-authoring run — no engine session to close
-            actor_token = self._token_store.actor_token(thread_id, _CLOSE_SESSION_ROLE)
-            engine = resolve_engine()
-            if not actor_token or engine is None:
-                return  # no credentials or no reachable engine — degrade silently
-            # The run's own bearer when the dispatch carried one, else the bearer
-            # the SAME resolution paired with ``engine.base_url`` below. Falling
-            # back is sound only here: origin and bearer arrive from one
-            # ``resolve_engine()`` call, so the credential can never be aimed at
-            # an origin it was not minted for.
-            bearer = self._token_store.engine_bearer(thread_id) or engine.bearer_token
-            async with AuthoringClient(
-                engine.base_url,
-                bearer,
-                actor_token=actor_token,
-                bearer_resolver=resolve_engine,
-            ) as client:
-                await close_authoring_session(
-                    client,
-                    session_id,
-                    idempotency_key=derive_idempotency_key(thread_id, "close_session"),
-                )
-        except Exception:
-            # Best-effort housekeeping AFTER a successful settle: never propagate.
-            # A benign session close is not run-lifecycle-critical (the engine's
-            # session retention is the backstop), so any fault degrades to a log.
-            logger.warning(
-                "best-effort close of the authoring session for run %s failed",
-                thread_id,
-                exc_info=True,
-            )
 
     async def _reject_compile_failure(
         self,
@@ -538,15 +364,22 @@ class Executor:
             reason,
             recoverable=False,
         )
-        await self._state_projector.emit_terminal_status(
-            req.thread_id,
-            ThreadStatus.FAILED,
-            error_detail=reason,
-            provider_condition=_EXECUTOR_CONDITION,
-            failure_evidence=self._failure_evidence(
-                req, detail=reason, condition=_EXECUTOR_CONDITION
-            ),
-        )
+        evidence = failure_evidence(req, detail=reason, condition=_EXECUTOR_CONDITION)
+        if evidence is not None:
+            await self._state_projector.emit_terminal_status(
+                req.thread_id,
+                ThreadStatus.FAILED,
+                error_detail=reason,
+                provider_condition=_EXECUTOR_CONDITION,
+                evidence=evidence,
+            )
+        else:
+            logger.warning(
+                "Refusing terminal settlement without accepted graph authority",
+                extra=self._dispatch_log_extra(
+                    req, action="dispatch_rejected_without_authority"
+                ),
+            )
         self._graph_lifecycle.release_thread(req.thread_id)
         self._aggregator.remove_node_metadata(req.thread_id)
         reservation = self._dispatch_reservation.get()
@@ -675,9 +508,10 @@ class Executor:
             # persists. Left as None when ingest resolved nothing, so a completed
             # or cancelled run is never stamped with a condition it never had.
             provider_condition=failure_condition,
-            cancellation_evidence=cancellation_evidence,
-            failure_evidence=(
-                self._failure_evidence(
+            evidence=cancellation_evidence
+            if cancellation_evidence is not None
+            else (
+                failure_evidence(
                     req,
                     detail=failure_reason,
                     condition=failure_condition or _EXECUTOR_CONDITION,
@@ -774,7 +608,7 @@ class Executor:
                             await self._state_projector.emit_terminal_status(
                                 req.thread_id,
                                 ThreadStatus.CANCELLED,
-                                cancellation_evidence=self._take_cancellation_evidence(
+                                evidence=self._take_cancellation_evidence(
                                     req.thread_id, outcome="no_active_work"
                                 ),
                             )
@@ -878,15 +712,15 @@ class Executor:
                 reason,
                 recoverable=False,
             )
-            await self._state_projector.emit_terminal_status(
-                req.thread_id,
-                ThreadStatus.FAILED,
-                error_detail=reason,
-                provider_condition=condition,
-                failure_evidence=self._failure_evidence(
-                    req, detail=reason, condition=condition
-                ),
-            )
+            evidence = failure_evidence(req, detail=reason, condition=condition)
+            if evidence is not None:
+                await self._state_projector.emit_terminal_status(
+                    req.thread_id,
+                    ThreadStatus.FAILED,
+                    error_detail=reason,
+                    provider_condition=condition,
+                    evidence=evidence,
+                )
             if owns_slot:
                 await self._mark_ingest_done(
                     req.thread_id, ThreadStatus.FAILED, reservation
@@ -903,6 +737,29 @@ class Executor:
                     action="dispatch_unhandled_settle_failed",
                 ),
             )
+
+    async def _settle_completed_preflight(
+        self, req: DispatchRequest, span: Span
+    ) -> None:
+        logger.info(
+            "Thread %s checkpoint shows completion before crash"
+            " — emitting completed without re-running",
+            req.thread_id,
+            extra=self._dispatch_log_extra(
+                req,
+                action="checkpoint_preflight_terminal",
+                outcome=ThreadStatus.COMPLETED,
+            ),
+        )
+        span.set_attribute("pre_flight", "completed")
+        await self._state_projector.emit_terminal_status(
+            req.thread_id, ThreadStatus.COMPLETED
+        )
+        self._graph_lifecycle.release_thread(req.thread_id)
+        self._aggregator.remove_node_metadata(req.thread_id)
+        reservation = self._dispatch_reservation.get()
+        if reservation is not None:
+            await self.release_dispatch_capacity(reservation)
 
     async def _handle_ingest(self, req: DispatchRequest) -> None:
         """Compile graph on first use and execute a new user turn."""
@@ -931,25 +788,7 @@ class Executor:
                 ),
             )
             if pre_flight_outcome == ThreadStatus.COMPLETED:
-                logger.info(
-                    "Thread %s checkpoint shows completion before crash"
-                    " — emitting completed without re-running",
-                    req.thread_id,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action="checkpoint_preflight_terminal",
-                        outcome=ThreadStatus.COMPLETED,
-                    ),
-                )
-                span.set_attribute("pre_flight", "completed")
-                await self._state_projector.emit_terminal_status(
-                    req.thread_id, ThreadStatus.COMPLETED
-                )
-                self._graph_lifecycle.release_thread(req.thread_id)
-                self._aggregator.remove_node_metadata(req.thread_id)
-                reservation = self._dispatch_reservation.get()
-                if reservation is not None:
-                    await self.release_dispatch_capacity(reservation)
+                await self._settle_completed_preflight(req, span)
                 return
             if pre_flight_outcome == ThreadStatus.FAILED:
                 logger.warning(

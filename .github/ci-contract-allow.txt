@@ -16,11 +16,10 @@ bootstrap-branch.yml:Bootstrap local worktree
 # conditional.
 
 # --- pending ----------------------------------------------------------------
-# Installs the provider CLIs the prerequisite gates spawn, UNPINNED and
-# globally: `npm install -g @openai/codex @anthropic-ai/claude-code`. Two
-# unpinned global installs decide what a gate is testing. Recipe needed:
-# `init-tools` should provision them, which is what that phase is for.
-test.yml:Install the provider CLIs these gates require
+# Installs the Codex CLI the prerequisite gates spawn, UNPINNED and globally:
+# `npm install -g @openai/codex`. An unpinned global install decides what a
+# gate is testing. Recipe needed: `init-tools` should provision it.
+test.yml:Install the provider CLI these gates require
 
 # Three `alembic` invocations that walk a migration to head, back to base, and
 # to head again. A real gate with no recipe, so nobody can run it before

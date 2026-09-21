@@ -9,6 +9,7 @@ include :mod:`vaultspec_a2a.api`, :mod:`vaultspec_a2a.control`,
 :mod:`vaultspec_a2a.providers`, and :mod:`vaultspec_a2a.worker`.
 """
 
+from ._process_tree import kill_pid_tree_async as kill_pid_tree_async
 from .enums import AcpRequestId as AcpRequestId
 from .enums import Environment as Environment
 from .enums import LogLevel as LogLevel
@@ -16,7 +17,6 @@ from .ipc_auth import BearerVerdict as BearerVerdict
 from .ipc_auth import verify_internal_bearer as verify_internal_bearer
 from .logging import configure_logging as configure_logging
 from .logging import reconfigure_console_utf8 as reconfigure_console_utf8
-from .process import kill_pid_tree_async as kill_pid_tree_async
 from .version import package_version as package_version
 
 __all__ = [

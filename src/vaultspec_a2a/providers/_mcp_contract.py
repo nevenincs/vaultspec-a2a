@@ -38,13 +38,13 @@ import asyncio
 import io
 import tempfile
 import unicodedata
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, TextIO, TypedDict, Unpack
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from ..thread.errors import HarnessToolContractError
-from ._acp_mcp import (
+from ._harness_mcp_registry import (
     declared_harness_tools,
     harness_server_exact_surface,
     is_known_harness_server,
@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     from ._json_contract import JsonValue
 
 __all__ = [
-    "CONTRACT_PROBE_TIMEOUT_SECONDS",
     "verify_declared_tool_contract",
     "verify_harness_mcp_contract",
 ]
@@ -184,15 +183,37 @@ async def _served_tool_names(
             return frozenset(tool.name for tool in listed.tools)
 
 
-async def verify_declared_tool_contract(
+def _tool_contract_differences(
     *,
-    name: str,
-    command: str,
-    args: Sequence[str],
     declared: Sequence[str],
-    exact_surface: bool = False,
-    env: Mapping[str, str] | None = None,
-    timeout: float = CONTRACT_PROBE_TIMEOUT_SECONDS,
+    served: frozenset[str],
+    exact_surface: bool,
+) -> tuple[list[str], list[str]]:
+    """Return missing and, when requested, undeclared served tool names."""
+    missing = [tool for tool in declared if tool not in served]
+    undeclared = (
+        [tool for tool in served if tool not in declared] if exact_surface else []
+    )
+    return missing, undeclared
+
+
+class _VerifyDeclaredToolContractRequired(TypedDict):
+    name: str
+    command: str
+    args: Sequence[str]
+    declared: Sequence[str]
+
+
+class _VerifyDeclaredToolContractOptions(
+    _VerifyDeclaredToolContractRequired, total=False
+):
+    exact_surface: bool
+    env: Mapping[str, str] | None
+    timeout: float
+
+
+async def verify_declared_tool_contract(
+    **options: Unpack[_VerifyDeclaredToolContractOptions],
 ) -> None:
     """Fail loud unless the launched server serves every tool in *declared*.
 
@@ -215,6 +236,13 @@ async def verify_declared_tool_contract(
         HarnessToolContractError: If a declared tool is not served, or the probe
             could not be completed.
     """
+    name = options["name"]
+    command = options["command"]
+    args = options["args"]
+    declared = options["declared"]
+    exact_surface = options.get("exact_surface", False)
+    env = options.get("env")
+    timeout = options.get("timeout", CONTRACT_PROBE_TIMEOUT_SECONDS)
     key = (command, tuple(args), tuple(declared))
     if key in _verified:
         return
@@ -255,7 +283,11 @@ async def verify_declared_tool_contract(
                     f"{_stderr_tail(captured_stderr)}"
                 ) from exc
 
-            missing = [tool for tool in declared if tool not in served]
+            missing, undeclared = _tool_contract_differences(
+                declared=declared,
+                served=served,
+                exact_surface=exact_surface,
+            )
             if missing:
                 offered = ", ".join(sorted(served)) if served else "no tools at all"
                 raise HarnessToolContractError(
@@ -278,11 +310,6 @@ async def verify_declared_tool_contract(
             # strict session surface mounts exactly what a server offers, so what
             # the run may CALL is bounded by the permission layer while what it is
             # HANDED is bounded only here.
-            undeclared = (
-                [tool for tool in served if tool not in declared]
-                if exact_surface
-                else []
-            )
             if undeclared:
                 raise HarnessToolContractError(
                     f"harness MCP server {name!r} serves tool(s) it does not "

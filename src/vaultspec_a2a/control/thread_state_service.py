@@ -24,7 +24,11 @@ from ..control.projection import (
     enrich_snapshot_from_execution_state,
     reconcile_checkpoint_permissions_with_durable_state,
 )
-from ..control.recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
+from ..control.recovery_authority import (
+    RecoveryRequest,
+    RecoveryTrigger,
+    reconcile_run_checkpoint,
+)
 from ..control.snapshot import (
     MinimalState,
     enrich_snapshot_from_state,
@@ -58,9 +62,6 @@ if TYPE_CHECKING:
     from ..streaming.aggregator import EventAggregator
 
 __all__ = [
-    "SemanticContext",
-    "ThreadStateCapture",
-    "build_thread_state",
     "capture_thread_state",
     "project_semantic_phase",
 ]
@@ -269,82 +270,23 @@ def derive_run_semantic_context(
     )
 
 
-async def capture_thread_state(
-    db: AsyncSession,
-    *,
-    thread_id: str,
-    aggregator: EventAggregator,
+@dataclass(frozen=True, slots=True)
+class _CheckpointSnapshotRead:
+    snapshot: ThreadStateData
+    loaded: bool
+    present: bool
+    error: bool
+    captured_tuple: CheckpointTuple | None
+
+
+async def _read_projected_checkpoint(
     checkpointer: Checkpointer,
-) -> ThreadStateCapture | None:
-    """Capture a coherent thread snapshot and its successfully projected tuple.
-
-    A single durable thread/permission read is reconciled against exactly one
-    checkpoint tuple.  The tuple is exposed only after its projection succeeds,
-    so consumers cannot combine a partial snapshot with untrusted checkpoint
-    fields.  Does **not** raise ``HTTPException`` — the route handler owns HTTP
-    response mapping.
-    """
-    thread = await get_thread(db, thread_id)
-    if thread is None or thread.status == ThreadStatus.DELETING.value:
-        # A thread under deletion is a cross-store cleanup subject, not a run.
-        # Product run lookups must not surface it; the cleanup coordinator reads
-        # it directly instead. Report it as absent so the route answers 404.
-        return None
-    await reconcile_run_checkpoint(
-        db,
-        checkpointer,
-        thread_id,
-        checkpoint_timeout_seconds=domain_config.aget_state_timeout_seconds,
-        trigger=RecoveryTrigger.READ,
-    )
-    await db.commit()
-    thread = await db.get(ThreadModel, thread_id, populate_existing=True)
-    if thread is None or thread.status == ThreadStatus.DELETING.value:
-        return None
-    # The durable column wins once it exists (captured at terminal settle,
-    # control/event_handlers.py::_handle_terminal_event, before the aggregator
-    # prunes its in-memory copy - F19). The live aggregator read is the
-    # fallback for a run that has not settled yet, where nothing has been
-    # captured because there is nothing terminal to capture: the run is still
-    # active and the aggregator's own counter is the current truth. A settled
-    # run whose row predates this column (last_sequence IS NULL forever, no
-    # captured value ever existed for it) falls back to the same pruned
-    # default 0 it always answered - a known limitation for rows written
-    # before the fix, not a regression this introduces.
-    last_seq = (
-        thread.last_sequence
-        if thread.last_sequence is not None
-        else aggregator.get_sequence(thread_id)
-    )
-
-    snapshot = ThreadStateData(
-        thread_id=thread_id,
-        status=thread.status,
-        last_sequence=last_seq,
-        repair_status=thread.repair_status,
-        execution_readiness=thread.execution_readiness,
-        approval_status=thread.approval_status,
-        approval_request_id=thread.approval_request_id,
-        failure_reason=thread.failure_reason,
-        provider_condition=thread.provider_condition,
-        repair_reason=thread.repair_reason,
-    )
-    snapshot = await enrich_snapshot_from_durable_state(
-        db, thread=thread, snapshot=snapshot
-    )
-    try:
-        expected_assignment_digest = resolve_execution_authority(
-            thread.thread_metadata
-        ).model_assignment_digest
-    except ExecutionAuthorityError as exc:
-        expected_assignment_digest = None
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append(
-            f"incompatible_execution_authority_{exc.reason.value}"
-        )
-    durable_permission_ids = {
-        permission.request_id for permission in snapshot.pending_permissions
-    }
+    snapshot: ThreadStateData,
+    aggregator: EventAggregator,
+    expected_assignment_digest: str | None,
+    durable_permission_ids: set[str],
+) -> _CheckpointSnapshotRead:
+    thread_id = snapshot.thread_id
     checkpoint_loaded = False
     checkpoint_present = False
     checkpoint_error = False
@@ -420,16 +362,129 @@ async def capture_thread_state(
         snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
 
-    if (
-        not checkpoint_loaded
-        and not checkpoint_present
-        and (
-            thread.status != "submitted"
-            or snapshot.pending_permissions
-            or snapshot.approval_status is not None
-            or snapshot.approval_request_id is not None
-            or snapshot.pause_cause is not None
+    return _CheckpointSnapshotRead(
+        snapshot=snapshot,
+        loaded=checkpoint_loaded,
+        present=checkpoint_present,
+        error=checkpoint_error,
+        captured_tuple=captured_tuple,
+    )
+
+
+def _should_clear_permissions_without_checkpoint(
+    thread: ThreadModel,
+    snapshot: ThreadStateData,
+    *,
+    checkpoint_loaded: bool,
+    checkpoint_present: bool,
+) -> bool:
+    if checkpoint_loaded or checkpoint_present:
+        return False
+    return bool(
+        thread.status != "submitted"
+        or snapshot.pending_permissions
+        or snapshot.approval_status is not None
+        or snapshot.approval_request_id is not None
+        or snapshot.pause_cause is not None
+    )
+
+
+async def capture_thread_state(
+    db: AsyncSession,
+    *,
+    thread_id: str,
+    aggregator: EventAggregator,
+    checkpointer: Checkpointer,
+) -> ThreadStateCapture | None:
+    """Capture a coherent thread snapshot and its successfully projected tuple.
+
+    A single durable thread/permission read is reconciled against exactly one
+    checkpoint tuple.  The tuple is exposed only after its projection succeeds,
+    so consumers cannot combine a partial snapshot with untrusted checkpoint
+    fields.  Does **not** raise ``HTTPException`` — the route handler owns HTTP
+    response mapping.
+    """
+    thread = await get_thread(db, thread_id)
+    if thread is None or thread.status == ThreadStatus.DELETING.value:
+        # A thread under deletion is a cross-store cleanup subject, not a run.
+        # Product run lookups must not surface it; the cleanup coordinator reads
+        # it directly instead. Report it as absent so the route answers 404.
+        return None
+    await reconcile_run_checkpoint(
+        db,
+        checkpointer,
+        RecoveryRequest(
+            thread_id=thread_id,
+            checkpoint_timeout_seconds=domain_config.aget_state_timeout_seconds,
+            trigger=RecoveryTrigger.READ,
+        ),
+    )
+    await db.commit()
+    thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+    if thread is None or thread.status == ThreadStatus.DELETING.value:
+        return None
+    # The durable column wins once it exists (captured at terminal settle,
+    # control/event_handlers.py::_handle_terminal_event, before the aggregator
+    # prunes its in-memory copy - F19). The live aggregator read is the
+    # fallback for a run that has not settled yet, where nothing has been
+    # captured because there is nothing terminal to capture: the run is still
+    # active and the aggregator's own counter is the current truth. A settled
+    # run whose row predates this column (last_sequence IS NULL forever, no
+    # captured value ever existed for it) falls back to the same pruned
+    # default 0 it always answered - a known limitation for rows written
+    # before the fix, not a regression this introduces.
+    last_seq = (
+        thread.last_sequence
+        if thread.last_sequence is not None
+        else aggregator.get_sequence(thread_id)
+    )
+
+    snapshot = ThreadStateData(
+        thread_id=thread_id,
+        status=thread.status,
+        last_sequence=last_seq,
+        repair_status=thread.repair_status,
+        execution_readiness=thread.execution_readiness,
+        approval_status=thread.approval_status,
+        approval_request_id=thread.approval_request_id,
+        failure_reason=thread.failure_reason,
+        provider_condition=thread.provider_condition,
+        repair_reason=thread.repair_reason,
+    )
+    snapshot = await enrich_snapshot_from_durable_state(
+        db, thread=thread, snapshot=snapshot
+    )
+    try:
+        expected_assignment_digest = resolve_execution_authority(
+            thread.thread_metadata
+        ).model_assignment_digest
+    except ExecutionAuthorityError as exc:
+        expected_assignment_digest = None
+        snapshot.snapshot_complete = False
+        snapshot.degraded_reasons.append(
+            f"incompatible_execution_authority_{exc.reason.value}"
         )
+    durable_permission_ids = {
+        permission.request_id for permission in snapshot.pending_permissions
+    }
+    checkpoint_read = await _read_projected_checkpoint(
+        checkpointer,
+        snapshot,
+        aggregator,
+        expected_assignment_digest,
+        durable_permission_ids,
+    )
+    snapshot = checkpoint_read.snapshot
+    checkpoint_loaded = checkpoint_read.loaded
+    checkpoint_present = checkpoint_read.present
+    checkpoint_error = checkpoint_read.error
+    captured_tuple = checkpoint_read.captured_tuple
+
+    if _should_clear_permissions_without_checkpoint(
+        thread,
+        snapshot,
+        checkpoint_loaded=checkpoint_loaded,
+        checkpoint_present=checkpoint_present,
     ):
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
 
@@ -476,20 +531,3 @@ async def capture_thread_state(
             thread_status=thread.status,
         ),
     )
-
-
-async def build_thread_state(
-    db: AsyncSession,
-    *,
-    thread_id: str,
-    aggregator: EventAggregator,
-    checkpointer: Checkpointer,
-) -> ThreadStateData | None:
-    """Return the snapshot portion of :func:`capture_thread_state`."""
-    capture = await capture_thread_state(
-        db,
-        thread_id=thread_id,
-        aggregator=aggregator,
-        checkpointer=checkpointer,
-    )
-    return capture.snapshot if capture is not None else None

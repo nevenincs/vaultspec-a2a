@@ -13,18 +13,20 @@ from ...graph.compiler import resolve_model_for_worker
 from ...graph.enums import Provider
 from ...team.team_config import load_agent_config, load_team_config
 from ...thread.errors import ConfigError
-from ..acp_chat_model import AcpChatModel
-from ..codex_chat_model import CodexChatModel
-from ..factory import (
+from .._factory_commands import (
     _BIN_PATH,
     _CLAUDE_ACP_JS,
-    ProviderFactory,
     _build_kimi_env,
     _build_zai_env,
     _classify_acp_command,
+    _kimi_home_env,
     classify_provider_command,
     kimi_temporary_model_configuration_reason,
 )
+from ..acp_chat_model import AcpChatModel
+from ..cli_resolution import resolve_provider_cli_executable
+from ..codex_chat_model import CodexChatModel
+from ..factory import ProviderFactory
 from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatalogKey
 
 # The exact model values a run freezes into its role assignment for each external
@@ -273,11 +275,9 @@ def test_provider_factory_zai_injects_configured_token() -> None:
 
 def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
     """Kimi builds an AcpChatModel on the `kimi acp` command with the kimi family."""
-    import shutil
-
-    if shutil.which("kimi") is None:
-        with pytest.raises(ValueError, match="Kimi CLI not resolvable"):
-            from ..factory import classify_provider_command
+    if resolve_provider_cli_executable(Provider.KIMI) is None:
+        with pytest.raises(ValueError, match="Kimi Code CLI not resolvable"):
+            from .._factory_commands import classify_provider_command
 
             classify_provider_command(Provider.KIMI)
         return
@@ -303,12 +303,12 @@ def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
         assert model.auth_mode == "persisted_config"
     assert "KIMI_API_KEY" not in model.env_vars
     assert "KIMI_BASE_URL" not in model.env_vars
+    if settings.kimi_code_home and settings.kimi_code_home.strip():
+        assert model.env_vars["KIMI_CODE_HOME"] == settings.kimi_code_home.strip()
 
 
 def test_kimi_persisted_configuration_injects_no_temporary_definition() -> None:
-    assert _build_kimi_env(kimi_code_home="C:/kimi-home") == {
-        "KIMI_CODE_HOME": "C:/kimi-home"
-    }
+    assert _kimi_home_env("C:/kimi-home") == {"KIMI_CODE_HOME": "C:/kimi-home"}
 
 
 def test_complete_kimi_temporary_definition_uses_current_names() -> None:
@@ -370,9 +370,7 @@ def test_every_partial_kimi_temporary_definition_fails_closed(
 
 def test_classify_provider_command_kimi_resolves_or_hints_install() -> None:
     """Kimi classifies to the installed Kimi Code ACP executable."""
-    import shutil
-
-    if shutil.which("kimi") is None:
+    if resolve_provider_cli_executable(Provider.KIMI) is None:
         with pytest.raises(ValueError, match="Kimi Code CLI not resolvable"):
             classify_provider_command(Provider.KIMI)
         return

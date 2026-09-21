@@ -185,7 +185,8 @@ def canonical_project_root(value: str | Path) -> str:
 
 
 @dataclass(frozen=True)
-class AcpModelConfig:
+# Frozen ACP configuration is passed unchanged through provider helpers.
+class AcpModelConfig:  # pylint: disable=too-many-instance-attributes
     """Frozen snapshot of read-only ACP model configuration.
 
     Built once in ``AcpChatModel.model_post_init`` and threaded through
@@ -271,7 +272,8 @@ class AcpModelConfig:
 
 
 @dataclass
-class AcpSessionContext:
+# Session context mirrors the ACP lifecycle contract consumed by helpers.
+class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
     """Consolidated state for an active ACP session."""
 
     process: asyncio.subprocess.Process

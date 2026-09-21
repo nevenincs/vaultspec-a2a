@@ -48,7 +48,6 @@ from typing import Any, cast
 
 __all__ = [
     "IN_PROCESS_PROVIDER_IDS",
-    "SELECTION_SCHEMA_VERSION",
     "NoSelectableLaneError",
     "in_process_selection",
     "named_lane_selection",

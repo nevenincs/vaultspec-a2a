@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from sqlalchemy import exists, or_, select, update
@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
-    "RecoveryAttemptClaim",
     "RecoveryAuthorityLostError",
     "acquire_due_recovery_attempts",
     "record_recovery_deadline",
@@ -60,26 +59,47 @@ def _bounded_detail(detail: str | None) -> str | None:
     return detail.replace("\r", " ").replace("\n", " ")[:_MAX_DETAIL_CHARS]
 
 
-async def record_recovery_failure(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    authority: RunWriteAuthority,
-    condition: RecoveryCondition,
+def _validate_recovery_window(
     observed_at: datetime,
     next_eligible_at: datetime,
     deadline_at: datetime,
-    detail: str | None,
-) -> RecoveryAttemptModel:
-    """Create or advance the sole retry record for an exact run writer."""
+    action_type: ControlActionType,
+) -> None:
     if next_eligible_at < observed_at:
         raise ValueError("next_eligible_at cannot precede observed_at")
     if deadline_at <= observed_at:
         raise ValueError("deadline_at must be later than observed_at")
     if next_eligible_at > deadline_at:
         raise ValueError("next_eligible_at cannot exceed deadline_at")
-    if authority.action_type not in RECOVERY_ACTION_TYPES:
+    if action_type not in RECOVERY_ACTION_TYPES:
         raise ValueError("action type is not recoverable")
+
+
+class _RecoveryFailureArgs(TypedDict):
+    thread_id: str
+    authority: RunWriteAuthority
+    condition: RecoveryCondition
+    observed_at: datetime
+    next_eligible_at: datetime
+    deadline_at: datetime
+    detail: str | None
+
+
+async def record_recovery_failure(
+    session: AsyncSession,
+    **kwargs: Unpack[_RecoveryFailureArgs],
+) -> RecoveryAttemptModel:
+    """Create or advance the sole retry record for an exact run writer."""
+    thread_id = kwargs["thread_id"]
+    authority = kwargs["authority"]
+    condition = kwargs["condition"]
+    observed_at = kwargs["observed_at"]
+    next_eligible_at = kwargs["next_eligible_at"]
+    deadline_at = kwargs["deadline_at"]
+    detail = kwargs["detail"]
+    _validate_recovery_window(
+        observed_at, next_eligible_at, deadline_at, authority.action_type
+    )
 
     owns_thread = await session.scalar(
         select(ThreadModel.id)
@@ -397,16 +417,23 @@ async def release_recovery_attempt(
     return result.rowcount == 1
 
 
+class _RescheduleArgs(TypedDict):
+    condition: RecoveryCondition
+    observed_at: datetime
+    next_eligible_at: datetime
+    detail: str | None
+
+
 async def reschedule_recovery_attempt(
     session: AsyncSession,
     claim: RecoveryAttemptClaim,
-    *,
-    condition: RecoveryCondition,
-    observed_at: datetime,
-    next_eligible_at: datetime,
-    detail: str | None,
+    **kwargs: Unpack[_RescheduleArgs],
 ) -> bool:
     """Advance one claimed retry after another classified failure."""
+    condition = kwargs["condition"]
+    observed_at = kwargs["observed_at"]
+    next_eligible_at = kwargs["next_eligible_at"]
+    detail = kwargs["detail"]
     if next_eligible_at < observed_at or next_eligible_at > claim.deadline_at:
         raise ValueError("next eligibility must fall between observation and deadline")
     result = cast(

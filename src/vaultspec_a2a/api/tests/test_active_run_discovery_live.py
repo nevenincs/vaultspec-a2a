@@ -16,14 +16,13 @@ import pytest
 from sqlalchemy import String
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import (
-    make_test_thread_authority_columns,
-    make_test_write_authority,
-)
-
 from ...database.models import ThreadModel
 from ...database.thread_repository import create_thread
 from ...testing.ports import free_port
+from ...tests._write_authority import (
+    make_test_thread_authority_columns,
+    make_test_write_authority,
+)
 from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
@@ -123,11 +122,55 @@ async def _production_gateway(
     finally:
         if process.returncode is None:
             process.terminate()
-            try:
-                await asyncio.wait_for(process.wait(), timeout=10.0)
-            except TimeoutError:
-                process.kill()
-                await process.wait()
+        try:
+            # ``wait()`` reaps the child but does not guarantee that Windows'
+            # Proactor pipe transports have consumed EOF and closed.  Draining
+            # through ``communicate()`` owns both operations on this loop.
+            await asyncio.wait_for(process.communicate(), timeout=10.0)
+        except TimeoutError:
+            process.kill()
+            await process.communicate()
+
+
+async def _assert_unauthenticated_routes(anonymous: httpx.AsyncClient) -> None:
+    route_classes = (
+        ("GET", "/v1/runs"),
+        ("POST", "/v1/runs"),
+        ("GET", "/v1/runs/no-such-run"),
+        ("GET", "/v1/runs/no-such-run/stream"),
+        ("POST", "/v1/runs/no-such-run/cancel"),
+        ("GET", "/v1/presets"),
+        ("GET", "/v1/service"),
+    )
+    for method, target in route_classes:
+        missing = await anonymous.request(method, target)
+        wrong = await anonymous.request(
+            method,
+            target,
+            headers={"Authorization": "Bearer wrong-service-token"},
+        )
+        worker_credential = await anonymous.request(
+            method,
+            target,
+            headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
+        )
+        assert missing.status_code == 401, (target, missing.text)
+        assert wrong.status_code == 401, (target, wrong.text)
+        assert worker_credential.status_code == 401, (
+            target,
+            worker_credential.text,
+        )
+    gateway_on_worker_boundary = await anonymous.get(
+        "/internal/health",
+        headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+    )
+    worker_on_worker_boundary = await anonymous.get(
+        "/internal/health",
+        headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
+    )
+    assert gateway_on_worker_boundary.status_code == 401
+    assert worker_on_worker_boundary.status_code == 200
+    assert (await anonymous.get("/health")).status_code == 200
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -150,44 +193,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
         ) as client,
     ):
         async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as anonymous:
-            route_classes = (
-                ("GET", "/v1/runs"),
-                ("POST", "/v1/runs"),
-                ("GET", "/v1/runs/no-such-run"),
-                ("GET", "/v1/runs/no-such-run/stream"),
-                ("POST", "/v1/runs/no-such-run/cancel"),
-                ("GET", "/v1/presets"),
-                ("GET", "/v1/service"),
-            )
-            for method, target in route_classes:
-                missing = await anonymous.request(method, target)
-                wrong = await anonymous.request(
-                    method,
-                    target,
-                    headers={"Authorization": "Bearer wrong-service-token"},
-                )
-                worker_credential = await anonymous.request(
-                    method,
-                    target,
-                    headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
-                )
-                assert missing.status_code == 401, (target, missing.text)
-                assert wrong.status_code == 401, (target, wrong.text)
-                assert worker_credential.status_code == 401, (
-                    target,
-                    worker_credential.text,
-                )
-            gateway_on_worker_boundary = await anonymous.get(
-                "/internal/health",
-                headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
-            )
-            worker_on_worker_boundary = await anonymous.get(
-                "/internal/health",
-                headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
-            )
-            assert gateway_on_worker_boundary.status_code == 401
-            assert worker_on_worker_boundary.status_code == 200
-            assert (await anonymous.get("/health")).status_code == 200
+            await _assert_unauthenticated_routes(anonymous)
 
         discovery = json.loads(
             (tmp_path / "a2a-home" / "service.json").read_text(encoding="utf-8")
@@ -450,7 +456,7 @@ async def test_active_run_discovery_rejects_unbounded_selectors(
         assert isinstance(workspace_root_type, String)
         column_width = workspace_root_type.length
         assert isinstance(column_width, int)
-        prefix = f"C:{os.sep}"
+        prefix = tmp_path.anchor
         widest = prefix + "w" * (column_width - len(prefix))
 
         admitted = await client.get("/v1/runs", params={"workspace_root": widest})

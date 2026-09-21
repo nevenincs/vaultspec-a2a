@@ -11,36 +11,147 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from langgraph.checkpoint.base import empty_checkpoint
 from sqlalchemy import select
 from starlette.testclient import TestClient
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
-from ...control.worker_management import WorkerLiveness
+from ...control._worker_health import WorkerLiveness
+from ...control.accepted_input import freeze_accepted_input
+from ...control.dispatch_receipts import prepare_graph_action_receipt
+from ...control.execution_authority import resolve_execution_authority
+from ...control.tests._catalog_authority import current_execution_metadata
 from ...database import (
+    create_control_action,
     create_thread,
     get_permission_request,
     get_thread_execution_state,
     set_thread_repair_state,
 )
 from ...database.models import ThreadExecutionStateModel
+from ...ipc.schemas import DispatchRequest
+from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
+from ...team.team_config import load_team_config
+from ...tests._write_authority import make_test_write_authority
+from ...thread.action_receipts import GraphCompletionReceipt
+from ...thread.executable_graph import freeze_graph_definition
+from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ...thread.action_receipts import GraphActionReceipt
     from .conftest import SessionFactory
 
 # Every dispatch names an active project, as a real one does. This package's own
 # directory is real, absolute, and present on either platform.
 _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
+
+
+async def _seed_accepted_thread(
+    session: AsyncSession,
+    *,
+    thread_id: str | None = None,
+    status: str = "running",
+) -> tuple[str, GraphActionReceipt]:
+    """Seed one current accepted graph action for relay-contract tests."""
+    workspace = pathlib.Path(_WORKSPACE)
+    metadata = current_execution_metadata(workspace)
+    authority = make_test_write_authority()
+    thread = await create_thread(
+        session,
+        write_authority=authority,
+        thread_id=thread_id,
+        status=status,
+        team_preset="mock-success-single",
+        metadata=metadata,
+    )
+    dispatch = DispatchRequest(
+        action="ingest",
+        thread_id=thread.id,
+        content="relay fixture",
+        workspace_root=_WORKSPACE,
+        recursion_limit=25,
+        team_preset="mock-success-single",
+        graph_definition=freeze_graph_definition(
+            load_team_config("mock-success-single", workspace_root=workspace),
+            workspace_root=workspace,
+        ),
+        model_assignment=resolve_execution_authority(metadata).model_assignment,
+    )
+    await create_control_action(
+        session,
+        thread_id=thread.id,
+        action_type=authority.action_type,
+        idempotency_key=f"thread-create:{thread.id}",
+        dispatch_id=authority.action_receipt_id,
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+        payload=freeze_accepted_input(dispatch, intent={"content": "relay fixture"}),
+    )
+    receipt = await prepare_graph_action_receipt(
+        session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
+    )
+    assert receipt is not None
+    return thread.id, receipt
+
+
+async def _record_completed_checkpoint(
+    checkpointer: AsyncSqliteSaver, receipt: GraphActionReceipt
+) -> None:
+    checkpoint = empty_checkpoint()
+    checkpoint["id"] = f"cp-{receipt.thread_id}"
+    checkpoint["channel_values"] = {
+        "active_graph_action_receipt": receipt.model_dump(mode="json"),
+        "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
+        "graph_completion_receipts": {
+            receipt.dispatch_id: GraphCompletionReceipt(
+                schema_version="graph-completion-v1",
+                action=receipt,
+                outcome="completed",
+            ).model_dump(mode="json")
+        },
+    }
+    checkpoint["channel_versions"] = {
+        "active_graph_action_receipt": 1,
+        "graph_action_receipts": 1,
+        "graph_completion_receipts": 1,
+    }
+    await checkpointer.aput(
+        {"configurable": {"thread_id": receipt.thread_id, "checkpoint_ns": ""}},
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        checkpoint["channel_versions"],
+    )
+
+
+def _failed_payload(
+    receipt: GraphActionReceipt,
+    detail: str,
+    condition: ProviderCondition = ProviderCondition.UNKNOWN,
+) -> dict[str, object]:
+    return {
+        "event_type": "thread_terminal",
+        "status": "failed",
+        "error_detail": detail,
+        "provider_condition": condition.value,
+        "failure_evidence": GraphFailureEvidence(
+            schema_version="graph-failure-v1",
+            action=receipt,
+            outcome="failed",
+            detail_fingerprint=failure_detail_fingerprint(detail),
+            provider_condition=condition.value,
+        ).model_dump(mode="json"),
+    }
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -249,7 +360,7 @@ class TestInternalHeartbeat:
                     },
                 )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         record = next(
             rec for rec in caplog.records if "Worker heartbeat (HTTP)" in rec.message
         )
@@ -487,14 +598,10 @@ class TestInternalEvents:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                title="Relay plan approval",
-            )
+            thread_id, _receipt = await _seed_accepted_thread(session)
             await session.commit()
 
-        request_id = f"{thread.id}:plan-approval"
+        request_id = f"{thread_id}:plan-approval"
         async with AsyncClient(
             transport=ASGITransport(app=app),
             base_url="http://test",
@@ -503,7 +610,7 @@ class TestInternalEvents:
                 "/internal/events",
                 json={
                     "type": "event",
-                    "thread_id": thread.id,
+                    "thread_id": thread_id,
                     "payload": {
                         "type": "plan_approval_request",
                         "request_id": request_id,
@@ -535,11 +642,11 @@ class TestInternalEvents:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                f"/v1/runs/{thread.id}/permissions/{request_id}/respond",
+                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "approve"},
             )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         assert len(worker.dispatches) == 1
         assert worker.dispatches[0]["option_id"] == {
             "verdict": "approved",
@@ -924,6 +1031,7 @@ class TestAggregatorGCOnTerminal:
     async def test_terminal_event_prunes_thread_from_aggregator_sequences(
         self,
         session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """_handle_terminal_event removes the terminated thread from
         aggregator _sequences.
@@ -934,30 +1042,28 @@ class TestAggregatorGCOnTerminal:
         aggregator._emitters._sequences["t-pruned"] = 5
         aggregator._emitters._sequences["t-active"] = 3
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-pruned",
-            )
+            _, receipt = await _seed_accepted_thread(session, thread_id="t-pruned")
             await session.commit()
+        await _record_completed_checkpoint(checkpointer, receipt)
 
         await _handle_terminal_event(
             "t-pruned",
             {"event_type": "thread_terminal", "status": "completed"},
             aggregator=aggregator,
             session_factory=session_factory,
+            checkpointer=checkpointer,
         )
 
         assert "t-pruned" not in aggregator._emitters._sequences
         assert "t-active" in aggregator._emitters._sequences
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_terminal_event_log_includes_runtime_fields(
+    async def test_unproven_completion_log_includes_runtime_fields(
         self,
         session_factory: SessionFactory,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Terminal update logs should carry thread/status/event metadata."""
+        """A refused completion identifies the thread and evidence failure."""
         from ...control.event_handlers import _handle_terminal_event
         from ...database import update_thread_status
         from ...thread.enums import ThreadStatus
@@ -983,53 +1089,45 @@ class TestAggregatorGCOnTerminal:
             )
 
         record = next(
-            rec for rec in caplog.records if "status updated to" in rec.message
+            rec for rec in caplog.records if "Refusing completion" in rec.message
         )
         assert record.__dict__["thread_id"] == "t-logged"
-        assert record.__dict__["status"] == "completed"
-        assert record.__dict__["event_type"] == "thread_terminal"
-        assert record.__dict__["action"] == "thread_terminal_status_updated"
+        assert record.__dict__["action"] == "completion_proof_unavailable"
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_terminal_transition_skip_log_includes_runtime_fields(
+    async def test_repeated_proven_terminal_keeps_aggregator_pruned(
         self,
         session_factory: SessionFactory,
-        caplog: pytest.LogCaptureFixture,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
-        """Repeated terminal updates should log a structured skip record."""
+        """Repeated proven terminal delivery is idempotent for the live set."""
         from ...control.event_handlers import _handle_terminal_event
 
         aggregator = EventAggregator()
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-terminal-skip",
+            _, receipt = await _seed_accepted_thread(
+                session, thread_id="t-terminal-skip"
             )
             await session.commit()
+        await _record_completed_checkpoint(checkpointer, receipt)
+        aggregator._emitters._sequences["t-terminal-skip"] = 4
 
         await _handle_terminal_event(
             "t-terminal-skip",
             {"event_type": "thread_terminal", "status": "completed"},
             aggregator=aggregator,
             session_factory=session_factory,
+            checkpointer=checkpointer,
         )
-
-        with caplog.at_level(
-            logging.INFO, logger="vaultspec_a2a.control.event_handlers"
-        ):
-            await _handle_terminal_event(
-                "t-terminal-skip",
-                {"event_type": "thread_terminal", "status": "completed"},
-                aggregator=aggregator,
-                session_factory=session_factory,
-            )
-
-        record = next(rec for rec in caplog.records if "transition to" in rec.message)
-        assert record.__dict__["thread_id"] == "t-terminal-skip"
-        assert record.__dict__["status"] == "completed"
-        assert record.__dict__["event_type"] == "thread_terminal"
-        assert record.__dict__["action"] == "thread_terminal_status_skipped"
+        assert aggregator.get_sequence("t-terminal-skip") == 0
+        await _handle_terminal_event(
+            "t-terminal-skip",
+            {"event_type": "thread_terminal", "status": "completed"},
+            aggregator=aggregator,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        )
+        assert aggregator.get_sequence("t-terminal-skip") == 0
 
 
 class TestTerminalEventFailureReasonPersistence:
@@ -1049,21 +1147,16 @@ class TestTerminalEventFailureReasonPersistence:
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-failed-with-reason",
+            _, receipt = await _seed_accepted_thread(
+                session, thread_id="t-failed-with-reason"
             )
             await session.commit()
-            assert thread.failure_reason is None
 
         await _handle_terminal_event(
             "t-failed-with-reason",
-            {
-                "event_type": "thread_terminal",
-                "status": "failed",
-                "error_detail": "Ingest stalled: no event from the graph for over 90s",
-            },
+            _failed_payload(
+                receipt, "Ingest stalled: no event from the graph for over 90s"
+            ),
             session_factory=session_factory,
         )
 
@@ -1080,29 +1173,24 @@ class TestTerminalEventFailureReasonPersistence:
     async def test_a_completed_terminal_event_leaves_failure_reason_untouched(
         self,
         session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """No error_detail on completed/cancelled — the column stays None."""
         from ...control.event_handlers import _handle_terminal_event
-        from ...database import update_thread_status
         from ...database.models import ThreadModel
-        from ...thread.enums import ThreadStatus
 
         async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-completed-no-reason",
+            _, receipt = await _seed_accepted_thread(
+                session, thread_id="t-completed-no-reason"
             )
-            # submitted -> completed directly is not a valid transition (mirrors
-            # test_terminal_event_log_includes_runtime_fields above); route
-            # through running first, matching a real dispatched run.
-            await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
             await session.commit()
+        await _record_completed_checkpoint(checkpointer, receipt)
 
         await _handle_terminal_event(
             "t-completed-no-reason",
             {"event_type": "thread_terminal", "status": "completed"},
             session_factory=session_factory,
+            checkpointer=checkpointer,
         )
 
         async with session_factory() as session:
@@ -1112,7 +1200,7 @@ class TestTerminalEventFailureReasonPersistence:
             assert row.failure_reason is None
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_a_non_string_error_detail_is_ignored_not_persisted(
+    async def test_a_non_string_error_detail_is_refused_not_persisted(
         self,
         session_factory: SessionFactory,
     ) -> None:
@@ -1123,23 +1211,23 @@ class TestTerminalEventFailureReasonPersistence:
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-malformed-detail",
+            _, receipt = await _seed_accepted_thread(
+                session, thread_id="t-malformed-detail"
             )
             await session.commit()
 
+        payload = _failed_payload(receipt, "real failure detail")
+        payload["error_detail"] = 42
         await _handle_terminal_event(
             "t-malformed-detail",
-            {"event_type": "thread_terminal", "status": "failed", "error_detail": 42},
+            payload,
             session_factory=session_factory,
         )
 
         async with session_factory() as session:
             row = await session.get(ThreadModel, "t-malformed-detail")
             assert row is not None
-            assert row.status == "failed"
+            assert row.status == "running"
             assert row.failure_reason is None
 
 
@@ -1162,21 +1250,16 @@ class TestTerminalEventProviderConditionPersistence:
         from ...providers import ProviderCondition
 
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-failed-throttled",
+            _, receipt = await _seed_accepted_thread(
+                session, thread_id="t-failed-throttled"
             )
             await session.commit()
 
         await _handle_terminal_event(
             "t-failed-throttled",
-            {
-                "event_type": "thread_terminal",
-                "status": "failed",
-                "error_detail": "the provider refused for rate",
-                "provider_condition": ProviderCondition.THROTTLED.value,
-            },
+            _failed_payload(
+                receipt, "the provider refused for rate", ProviderCondition.THROTTLED
+            ),
             session_factory=session_factory,
         )
 
@@ -1188,7 +1271,7 @@ class TestTerminalEventProviderConditionPersistence:
             assert row.failure_reason == "the provider refused for rate"
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_a_failed_terminal_with_no_condition_records_the_floor(
+    async def test_a_failed_terminal_with_explicit_unknown_records_the_floor(
         self,
         session_factory: SessionFactory,
     ) -> None:
@@ -1203,16 +1286,16 @@ class TestTerminalEventProviderConditionPersistence:
         from ...providers import ProviderCondition
 
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-failed-unclassified",
+            _, receipt = await _seed_accepted_thread(
+                session, thread_id="t-failed-unclassified"
             )
             await session.commit()
 
         await _handle_terminal_event(
             "t-failed-unclassified",
-            {"event_type": "thread_terminal", "status": "failed"},
+            _failed_payload(
+                receipt, "unclassified provider failure", ProviderCondition.UNKNOWN
+            ),
             session_factory=session_factory,
         )
 
@@ -1235,50 +1318,43 @@ class TestTerminalEventProviderConditionPersistence:
         """
         from ...control.event_handlers import _handle_terminal_event
         from ...database.models import ThreadModel
-        from ...providers import ProviderCondition
 
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-failed-bogus-condition",
+            _, receipt = await _seed_accepted_thread(
+                session, thread_id="t-failed-bogus-condition"
             )
             await session.commit()
 
+        payload = _failed_payload(receipt, "unclassified provider failure")
+        payload["provider_condition"] = "teapot_overheated"
         await _handle_terminal_event(
             "t-failed-bogus-condition",
-            {
-                "event_type": "thread_terminal",
-                "status": "failed",
-                "provider_condition": "teapot_overheated",
-            },
+            payload,
             session_factory=session_factory,
         )
 
         async with session_factory() as session:
             row = await session.get(ThreadModel, "t-failed-bogus-condition")
             assert row is not None
-            assert row.provider_condition == ProviderCondition.UNKNOWN.value
+            assert row.status == "running"
+            assert row.provider_condition is None
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_completed_terminal_records_no_condition(
         self,
         session_factory: SessionFactory,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """A run that did not fail has no provider failure to classify."""
         from ...control.event_handlers import _handle_terminal_event
-        from ...database import update_thread_status
         from ...database.models import ThreadModel
-        from ...thread.enums import ThreadStatus
 
         async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-completed-condition",
+            _, receipt = await _seed_accepted_thread(
+                session, thread_id="t-completed-condition"
             )
-            await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
             await session.commit()
+        await _record_completed_checkpoint(checkpointer, receipt)
 
         await _handle_terminal_event(
             "t-completed-condition",
@@ -1288,6 +1364,7 @@ class TestTerminalEventProviderConditionPersistence:
                 "provider_condition": "throttled",
             },
             session_factory=session_factory,
+            checkpointer=checkpointer,
         )
 
         async with session_factory() as session:
@@ -1321,10 +1398,8 @@ class TestConditionSurvivesAReload:
             session_factory, checkpointer
         )
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-reload-condition",
+            _, receipt = await _seed_accepted_thread(
+                session, thread_id="t-reload-condition"
             )
             await session.commit()
 
@@ -1334,17 +1409,12 @@ class TestConditionSurvivesAReload:
                 "/internal/events",
                 json={
                     "thread_id": "t-reload-condition",
-                    "payload": {
-                        "event_type": "thread_terminal",
-                        "status": "failed",
-                        "error_detail": (
-                            "Graph event stream failed unexpectedly: "
-                            "AcpPromptError: credit balance too low"
-                        ),
-                        "provider_condition": (
-                            ProviderCondition.CREDITS_EXHAUSTED.value
-                        ),
-                    },
+                    "payload": _failed_payload(
+                        receipt,
+                        "Graph event stream failed unexpectedly: "
+                        "AcpPromptError: credit balance too low",
+                        ProviderCondition.CREDITS_EXHAUSTED,
+                    ),
                 },
             )
             assert relayed.status_code == 200
@@ -1467,18 +1537,13 @@ class TestNoFailedRunPersistsWithoutACondition:
     """
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_a_worker_rejection_persists_a_condition(
+    async def test_a_receiptless_worker_rejection_refuses_unproven_terminal(
         self,
         session_factory: SessionFactory,
         checkpointer: AsyncSqliteSaver,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """A dispatch the worker refuses reaches the column with a condition.
-
-        Driven through the real executor and the real relay: the rejection is
-        emitted as a terminal by the worker, crosses HTTP into the gateway, and
-        is read back from the durable row. Nothing about the condition is
-        asserted at the worker - only what survived the whole hop.
-        """
+        """A malformed direct dispatch cannot emit a terminal without authority."""
         from ...database.models import ThreadModel
         from ...ipc.schemas import DispatchRequest
         from ...worker.executor import Executor
@@ -1500,28 +1565,34 @@ class TestNoFailedRunPersistsWithoutACondition:
         # No graph is registered for this thread and the dispatch names no
         # preset, which is the worker's missing-graph refusal - a real run that
         # fails before any provider is engaged.
-        await executor.handle_dispatch(
-            DispatchRequest(
-                action="ingest",
-                workspace_root=_WORKSPACE,
-                thread_id="t-worker-rejection",
-                content="do the thing",
-                recursion_limit=25,
+        with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.worker.executor"):
+            await executor.handle_dispatch(
+                DispatchRequest(
+                    action="ingest",
+                    workspace_root=_WORKSPACE,
+                    thread_id="t-worker-rejection",
+                    content="do the thing",
+                    recursion_limit=25,
+                )
             )
-        )
         await bridge.flush_events()
 
         async with session_factory() as session:
             row = await session.get(ThreadModel, "t-worker-rejection")
             assert row is not None
-            assert row.status == "failed"
-            # The invariant. The specific member is the floor here and that is
-            # correct - nothing reached a provider - but what this asserts is
-            # that SOMETHING was recorded, because a null here is the failure
-            # mode, not a particular value.
-            assert row.provider_condition is not None
-            # A condition with no account beside it is only half an answer.
-            assert row.failure_reason
+            assert row.status == "submitted"
+            assert row.provider_condition is None
+            assert row.failure_reason is None
+        assert any(
+            "Refusing terminal settlement without accepted graph authority"
+            in record.getMessage()
+            for record in caplog.records
+        )
+        assert not any(
+            "Could not settle a run whose dispatch failed unexpectedly"
+            in record.getMessage()
+            for record in caplog.records
+        )
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_dispatch_failure_persists_a_condition(

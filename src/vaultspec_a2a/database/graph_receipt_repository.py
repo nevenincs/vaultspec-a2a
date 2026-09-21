@@ -16,6 +16,26 @@ if TYPE_CHECKING:
     from .thread_repository import ThreadWriteExpectation
 
 
+def _matches_original_receipt(
+    stored: GraphActionReceipt,
+    receipt: GraphActionReceipt,
+    expectation: ThreadWriteExpectation,
+) -> bool:
+    authority = expectation.authority
+    identity_matches = (
+        stored.thread_id == receipt.thread_id
+        and stored.action_id == receipt.action_id
+        and stored.action_type == receipt.action_type
+        and stored.dispatch_id == receipt.dispatch_id
+    )
+    evidence_matches = (
+        stored.payload_fingerprint == receipt.payload_fingerprint
+        and stored.writer_generation == authority.writer_generation
+        and stored.run_revision <= authority.run_revision
+    )
+    return identity_matches and evidence_matches
+
+
 async def persist_graph_action_receipt(
     session: AsyncSession,
     *,
@@ -68,14 +88,6 @@ async def persist_graph_action_receipt(
         return None
     # State-only elections may advance revision while this action remains the
     # writer. They cannot change the original dispatch or its graph evidence.
-    if (
-        stored.thread_id != receipt.thread_id
-        or stored.action_id != receipt.action_id
-        or stored.action_type != receipt.action_type
-        or stored.dispatch_id != receipt.dispatch_id
-        or stored.payload_fingerprint != receipt.payload_fingerprint
-        or stored.writer_generation != authority.writer_generation
-        or stored.run_revision > authority.run_revision
-    ):
+    if not _matches_original_receipt(stored, receipt, expectation):
         return None
     return stored

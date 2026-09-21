@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,8 +11,10 @@ from typing import TYPE_CHECKING
 import psutil
 import pytest
 
+from ...graph.enums import Provider
 from ...workspace.environment import resolve_env_vars
 from .._stdio_rpc import OutputBudget
+from ..cli_resolution import resolve_provider_cli_executable
 from ..kimi_catalog import (
     KimiCatalogProtocolError,
     _protocol_error,
@@ -181,7 +182,7 @@ def test_stdout_and_stderr_share_one_aggregate_output_budget() -> None:
 
 
 def _installed_kimi() -> str:
-    executable = shutil.which("kimi")
+    executable = resolve_provider_cli_executable(Provider.KIMI)
     if executable is None:
         pytest.fail("Kimi CLI is not installed")
     return executable

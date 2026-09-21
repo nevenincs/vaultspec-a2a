@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import asyncio
 
-from ...control.worker_management import (
+from ...control._worker_health import (
     GATEWAY_LIFETIME_ENV,
     GATEWAY_LIFETIME_ID,
     WORKER_GENERATION_ENV,
-    LazyWorkerSpawner,
 )
+from ...control.worker_management import LazyWorkerSpawner
 
 
 def _spawner() -> LazyWorkerSpawner:
@@ -34,9 +34,9 @@ def test_the_lifetime_identity_is_a_stable_non_empty_value() -> None:
     assert GATEWAY_LIFETIME_ID
     assert len(GATEWAY_LIFETIME_ID) == 32
 
-    from .. import worker_management
+    from .. import _worker_health
 
-    assert worker_management.GATEWAY_LIFETIME_ID == GATEWAY_LIFETIME_ID
+    assert _worker_health.GATEWAY_LIFETIME_ID == GATEWAY_LIFETIME_ID
 
 
 def test_the_env_names_are_distinct_and_namespaced() -> None:

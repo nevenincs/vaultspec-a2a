@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -77,14 +77,20 @@ async def get_artifacts_by_thread(
     return (await session.execute(stmt)).scalars().all()
 
 
+class _PermissionLogOptional(TypedDict, total=False):
+    option_id: str | None
+
+
+class _PermissionLogArgs(_PermissionLogOptional):
+    thread_id: str
+    agent_id: str | None
+    tool_name: str
+    action: str
+
+
 async def append_permission_log(
     session: AsyncSession,
-    *,
-    thread_id: str,
-    agent_id: str | None,
-    tool_name: str,
-    action: str,
-    option_id: str | None = None,
+    **kwargs: Unpack[_PermissionLogArgs],
 ) -> PermissionLogModel:
     """Append one permission decision to the durable audit log.
 
@@ -99,11 +105,11 @@ async def append_permission_log(
     """
     log_entry = PermissionLogModel(
         id=uuid4().hex,
-        thread_id=thread_id,
-        agent_id=agent_id,
-        tool_name=tool_name,
-        action=action,
-        option_id=option_id,
+        thread_id=kwargs["thread_id"],
+        agent_id=kwargs["agent_id"],
+        tool_name=kwargs["tool_name"],
+        action=kwargs["action"],
+        option_id=kwargs.get("option_id"),
     )
     return await save_model(session, log_entry)
 

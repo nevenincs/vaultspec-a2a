@@ -181,7 +181,7 @@ class TestTerminalConditionCarriage:
             ThreadStatus.FAILED,
             error_detail=detail,
             provider_condition=ProviderCondition.THROTTLED,
-            failure_evidence=_failure_evidence(
+            evidence=_failure_evidence(
                 "thread-throttled", detail, ProviderCondition.THROTTLED
             ),
         )
@@ -208,7 +208,7 @@ class TestTerminalConditionCarriage:
             "thread-unclassified",
             ThreadStatus.FAILED,
             error_detail=detail,
-            failure_evidence=_failure_evidence(
+            evidence=_failure_evidence(
                 "thread-unclassified", detail, ProviderCondition.UNKNOWN
             ),
         )
@@ -247,7 +247,7 @@ class TestTerminalConditionCarriage:
         await projector.emit_terminal_status(
             "thread-cancelled",
             ThreadStatus.CANCELLED,
-            cancellation_evidence=evidence,
+            evidence=evidence,
         )
 
         assert len(relayed) == 1
@@ -268,5 +268,30 @@ class TestTerminalConditionCarriage:
             await projector.emit_terminal_status(
                 "thread-completed",
                 ThreadStatus.COMPLETED,
-                cancellation_evidence=evidence,
+                evidence=evidence,
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("thread_id", "detail", "condition"),
+        (
+            ("another-thread", "failure detail", ProviderCondition.THROTTLED),
+            ("thread-failed", "different detail", ProviderCondition.THROTTLED),
+            ("thread-failed", "failure detail", ProviderCondition.UNKNOWN),
+        ),
+    )
+    async def test_failed_terminal_refuses_mismatched_evidence(
+        self, thread_id: str, detail: str, condition: ProviderCondition
+    ) -> None:
+        projector = _relayed_terminal_projector([])
+        evidence = _failure_evidence(
+            "thread-failed", "failure detail", ProviderCondition.THROTTLED
+        )
+        with pytest.raises(ValueError, match="does not match terminal payload"):
+            await projector.emit_terminal_status(
+                thread_id,
+                ThreadStatus.FAILED,
+                error_detail=detail,
+                provider_condition=condition,
+                evidence=evidence,
             )

@@ -29,7 +29,6 @@ __all__ = [
     "install_checkpoint_schema_identity",
     "open_checkpoint_read_only",
     "validate_checkpoint_schema_connection",
-    "validate_checkpoint_schema_identity",
 ]
 
 CHECKPOINT_SCHEMA_VERSION: Final = "1.0.0"
@@ -332,16 +331,3 @@ def validate_checkpoint_schema_connection(connection: sqlite3.Connection) -> Non
             f"expected semantic version {CHECKPOINT_SCHEMA_VERSION} and digest "
             f"{CHECKPOINT_SCHEMA_DIGEST}"
         )
-
-
-def validate_checkpoint_schema_identity(checkpoint_path: Path) -> None:
-    """Read and validate the exact checkpoint schema without mutating the store."""
-    connection = open_checkpoint_read_only(checkpoint_path)
-    try:
-        validate_checkpoint_schema_connection(connection)
-    except sqlite3.Error as exc:
-        raise CheckpointSchemaError(
-            f"checkpoint schema identity is unreadable at {checkpoint_path}"
-        ) from exc
-    finally:
-        connection.close()

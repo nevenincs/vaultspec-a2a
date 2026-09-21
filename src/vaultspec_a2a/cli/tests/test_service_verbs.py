@@ -198,7 +198,10 @@ def test_start_failure_fells_the_spawn_and_raises(tmp_path: Path) -> None:
                 home,
                 port=held_port,
                 log_path=str(tmp_path / "gateway.log"),
-                ready_timeout=25.0,
+                # The occupied port makes readiness impossible. Keep this a real
+                # detached-process cleanup proof without idling for the production
+                # startup budget.
+                ready_timeout=3.0,
             )
         _, info = read_resident_service(home)
         assert info is None or not is_pid_alive(info.pid)

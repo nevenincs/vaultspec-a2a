@@ -13,12 +13,12 @@ every table through the real models, and assert on what survives.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, inspect, text
 
-from vaultspec_a2a.tests._write_authority import make_test_thread_authority_columns
-
+from ...tests._write_authority import make_test_thread_authority_columns
 from ..admin import _CHECKPOINT_TABLES, _CLEAR_ORDER, _administrative_engine
 from ..models import (
     ArtifactModel,
@@ -76,8 +76,9 @@ def test_every_table_is_emptied_against_a_real_database(tmp_path: Path) -> None:
             ControlActionModel(
                 id="c1",
                 thread_id="t1",
-                action_type="pause",
+                action_type="cancel",
                 idempotency_key="k1",
+                recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             )
         )
         session.commit()

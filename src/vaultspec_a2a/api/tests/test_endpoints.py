@@ -15,7 +15,7 @@ helper in `conftest.py` so tests never touch the production `vaultspec.db`.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -27,10 +27,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
+from ...control._permission_response_contract import permission_response_action_key
 from ...control.config import settings
-from ...control.permission_service import permission_response_action_key
 from ...database import (
     append_permission_log,
     create_artifact,
@@ -47,12 +45,23 @@ from ...database.models import (
     ThreadModel,
 )
 from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from .conftest import catalog_run_fields, make_app
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonValue = str | int | float | bool | list[JsonValue] | JsonObject | None
 type JsonObject = dict[str, JsonValue]
+
+
+def _close_on_testclient_loop(
+    client: TestClient, async_client: httpx.AsyncClient
+) -> None:
+    """Close an injected client on the loop that opened its Windows transport."""
+
+    portal = client.portal
+    assert portal is not None
+    portal.call(async_client.aclose)
 
 
 def _checkpoint_config(
@@ -62,6 +71,36 @@ def _checkpoint_config(
     if checkpoint_ns is not None:
         configurable["checkpoint_ns"] = checkpoint_ns
     return {"configurable": configurable}
+
+
+def _assert_resume_dispatch_log(
+    caplog: pytest.LogCaptureFixture,
+    *,
+    thread_id: str,
+    request_id: str,
+    dispatch_id: object,
+) -> None:
+    """Assert the structured log fields emitted for a permission resume."""
+    record = next(
+        rec
+        for rec in caplog.records
+        if "Dispatching resume dispatch_id=" in rec.message
+    )
+    record_thread_id = getattr(record, "thread_id", None)
+    record_request_id = getattr(record, "request_id", None)
+    record_dispatch_id = getattr(record, "dispatch_id", None)
+    record_action = getattr(record, "action", None)
+    record_option_id = getattr(record, "option_id", None)
+    assert isinstance(record_thread_id, str)
+    assert isinstance(record_request_id, str)
+    assert isinstance(record_dispatch_id, str)
+    assert isinstance(record_action, str)
+    assert isinstance(record_option_id, str)
+    assert record_thread_id == thread_id
+    assert record_request_id == request_id
+    assert record_dispatch_id == dispatch_id
+    assert record_action == "resume"
+    assert record_option_id == "allow_once"
 
 
 # ---------------------------------------------------------------------------
@@ -1471,6 +1510,36 @@ class TestSendMessage:
             assert before_applied != ControlActionType.MESSAGE_FOLLOWUP_APPLIED.value
             assert before_stamp is None
 
+            # The application event is proof only when its named checkpoint
+            # incorporates the same durable graph action receipt.
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            graph_receipt = cast(
+                "dict[str, object]", worker.dispatches[0]["graph_action_receipt"]
+            )
+            assert isinstance(graph_receipt, dict)
+            checkpoint_id = "cp-followup-applied"
+
+            async def _record_applied_checkpoint() -> None:
+                checkpoint = empty_checkpoint()
+                checkpoint["id"] = checkpoint_id
+                checkpoint["channel_values"] = {
+                    "active_graph_action_receipt": graph_receipt,
+                    "graph_action_receipts": {dispatch_id: graph_receipt},
+                }
+                checkpoint["channel_versions"] = {
+                    "active_graph_action_receipt": 1,
+                    "graph_action_receipts": 1,
+                }
+                await checkpointer.aput(
+                    _checkpoint_config(thread_id, ""),
+                    checkpoint,
+                    {"source": "loop", "step": 1, "parents": {}},
+                    checkpoint["channel_versions"],
+                )
+
+            asyncio.run(_record_applied_checkpoint())
+
             receipt = client.post(
                 "/internal/events",
                 json={
@@ -1479,6 +1548,8 @@ class TestSendMessage:
                         "type": "dispatch_applied",
                         "dispatch_id": dispatch_id,
                         "action": "ingest",
+                        "graph_action_receipt": graph_receipt,
+                        "checkpoint_id": checkpoint_id,
                     },
                 },
             )
@@ -1904,6 +1975,8 @@ class TestTeamStatus:
                 },
             },
         )
+        agg.add_subscriber("team-status-reader")
+        agg.subscribe("team-status-reader", ["team-status-node-metadata"])
 
         app, _agg, _worker, _cp = make_app(
             session_factory, checkpointer, aggregator=agg
@@ -2083,26 +2156,12 @@ class TestPermissionRespond:
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
         assert dispatch["option_id"] == "allow_once"
-        record = next(
-            rec
-            for rec in caplog.records
-            if "Dispatching resume dispatch_id=" in rec.message
+        _assert_resume_dispatch_log(
+            caplog,
+            thread_id=thread_id,
+            request_id=request_id,
+            dispatch_id=dispatch["dispatch_id"],
         )
-        record_thread_id = getattr(record, "thread_id", None)
-        record_request_id = getattr(record, "request_id", None)
-        record_dispatch_id = getattr(record, "dispatch_id", None)
-        record_action = getattr(record, "action", None)
-        record_option_id = getattr(record, "option_id", None)
-        assert isinstance(record_thread_id, str)
-        assert isinstance(record_request_id, str)
-        assert isinstance(record_dispatch_id, str)
-        assert isinstance(record_action, str)
-        assert isinstance(record_option_id, str)
-        assert record_thread_id == thread_id
-        assert record_request_id == request_id
-        assert record_dispatch_id == dispatch["dispatch_id"]
-        assert record_action == "resume"
-        assert record_option_id == "allow_once"
 
     def test_respond_success_marks_permission_response_submitted_as_applied(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -2391,6 +2450,7 @@ class TestPermissionRespond:
                     idempotency_key="same-invalid-response",
                     payload={"option_id": "hostile-option"},
                     result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
+                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )
                 stored = await session.get(ControlActionModel, action.id)
                 assert stored is not None
@@ -2761,11 +2821,20 @@ class TestDeleteThread:
                 {},
             )
             async with session_factory() as session:
+                authority = make_test_write_authority()
                 await create_thread(
                     session,
-                    write_authority=make_test_write_authority(),
+                    write_authority=authority,
                     thread_id="thread-delete-terminal",
                     status="completed",
+                )
+                await create_control_action(
+                    session,
+                    thread_id="thread-delete-terminal",
+                    action_type=authority.action_type,
+                    idempotency_key="thread-create:thread-delete-terminal",
+                    dispatch_id=authority.action_receipt_id,
+                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )
                 await session.commit()
 
@@ -2810,9 +2879,10 @@ class TestDeleteThread:
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_text("artifact body", encoding="utf-8")
             async with session_factory() as session:
+                authority = make_test_write_authority()
                 await create_thread(
                     session,
-                    write_authority=make_test_write_authority(),
+                    write_authority=authority,
                     thread_id="thread-delete-artifacts",
                     status="completed",
                     metadata=(
@@ -2826,6 +2896,14 @@ class TestDeleteThread:
                     thread_id="thread-delete-artifacts",
                     artifact_type="file",
                     path="outputs/report.md",
+                )
+                await create_control_action(
+                    session,
+                    thread_id="thread-delete-artifacts",
+                    action_type=authority.action_type,
+                    idempotency_key="thread-create:thread-delete-artifacts",
+                    dispatch_id=authority.action_receipt_id,
+                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )
                 await session.commit()
 
@@ -3119,10 +3197,14 @@ class TestDeleteThread:
 
             worker.dispatches.clear()
             app.state.worker_client = failing_client
-            first = client.post(
-                f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
-                json={"option_id": "allow_once"},
-            )
+            try:
+                first = client.post(
+                    f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
+                    json={"option_id": "allow_once"},
+                )
+            finally:
+                app.state.worker_client = original_client
+                _close_on_testclient_loop(client, failing_client)
             assert first.status_code == 502
 
             async def _assert_retained() -> None:
@@ -3144,13 +3226,10 @@ class TestDeleteThread:
 
             # The worker is reachable again, yet the identical retry must still
             # not produce a second resume for the same accepted answer.
-            app.state.worker_client = original_client
             second = client.post(
                 f"/v1/runs/{thread_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
-
-        asyncio.run(failing_client.aclose())
 
         assert second.status_code == 200
         assert second.json()["accepted"] is True
@@ -3368,17 +3447,10 @@ class TestCreateThreadAutonomous:
 class TestCancelThread:
     """Tests for POST /v1/runs/{thread_id}/cancel."""
 
-    def test_failed_cancel_dispatch_restores_repair_state(
+    def test_failed_cancel_dispatch_preserves_redrivable_state(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """A definitely-undelivered cancel must not leave a ghost cancel_pending state.
-
-        A saturated worker answers the cancel with its real 429, which is a
-        DEFINITE non-delivery: the dispatch was received and refused outright, so
-        the run is provably still whatever it was. Only that certainty licenses
-        rolling the cancel-requested repair state back; the ambiguous case is the
-        sibling test below.
-        """
+        """A 429 releases the lease while preserving cancellation for redrive."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -3394,33 +3466,29 @@ class TestCancelThread:
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
 
-            async def _status_before() -> str:
+            async def _assert_initial_action() -> None:
                 async with session_factory() as session:
                     thread = await session.get(ThreadModel, thread_id)
                     assert thread is not None
                     assert thread.last_requested_action == "ingest"
-                    return thread.status
 
-            # Captured rather than hardcoded: the property under test is that a
-            # failed cancel RESTORES the status the run held, not that the run
-            # holds any particular one.
-            status_before = asyncio.run(_status_before())
+            asyncio.run(_assert_initial_action())
 
             worker.dispatches.clear()
             worker.refuse_at_capacity()
             cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
 
-            async def _assert_reset() -> None:
+            async def _assert_redrivable() -> None:
                 async with session_factory() as session:
                     thread = await session.get(ThreadModel, thread_id)
                     assert thread is not None
-                    assert thread.status == status_before
-                    assert thread.repair_status == "healthy"
-                    assert thread.execution_readiness == "healthy"
-                    assert thread.repair_reason is None
-                    assert thread.last_requested_action == "ingest"
+                    assert thread.status == ThreadStatus.CANCELLING.value
+                    assert (
+                        thread.last_requested_action == ControlActionType.CANCEL.value
+                    )
+                    assert thread.repair_reason is not None
 
-            asyncio.run(_assert_reset())
+            asyncio.run(_assert_redrivable())
 
         # The refusal really crossed the wire; this is not a pre-flight rejection.
         assert len(worker.dispatches) == 1
@@ -3441,6 +3509,7 @@ class TestCancelThread:
         """
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
         failing_client = httpx.AsyncClient(base_url="http://127.0.0.1:9")
+        original_client = app.state.worker_client
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -3456,7 +3525,11 @@ class TestCancelThread:
             thread_id = create_resp.json()["run_id"]
 
             app.state.worker_client = failing_client
-            cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
+            try:
+                cancel_resp = client.post(f"/v1/runs/{thread_id}/cancel")
+            finally:
+                app.state.worker_client = original_client
+                _close_on_testclient_loop(client, failing_client)
 
             async def _assert_cancelling() -> None:
                 async with session_factory() as session:
@@ -3465,8 +3538,6 @@ class TestCancelThread:
                     assert thread.status == ThreadStatus.CANCELLING.value
 
             asyncio.run(_assert_cancelling())
-
-        asyncio.run(failing_client.aclose())
 
         assert cancel_resp.status_code == 200
         assert cancel_resp.json()["status"] == ThreadStatus.CANCELLING.value

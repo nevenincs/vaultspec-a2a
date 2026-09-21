@@ -22,7 +22,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from ..control.config import GATEWAY_URL_ENV, WORKER_URL_ENV
+from ..control.infra_config import GATEWAY_URL_ENV, WORKER_URL_ENV
 from .discovery import is_pid_alive
 from .procs_config import ProcsConfigError, load_procs_config
 from .registry import list_records
@@ -30,7 +30,8 @@ from .registry import list_records
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .procs_config import ProcsConfig
+    from .procs_config import PortBand, ProcsConfig
+    from .registry import ProcRecord
 
 __all__ = [
     "DispatchPairingStatus",
@@ -80,21 +81,11 @@ def verify_dispatch_pairing(
     ``UNPAIRED`` when a band gateway targets outside the band and no live band worker
     is running (plausible dev intent - warn only). The message is operator-actionable.
     """
-    resolved_config = config
-    if resolved_config is None:
-        try:
-            resolved_config = load_procs_config()
-        except ProcsConfigError:
-            return DispatchPairingStatus.OK, ""
-    gateway_role = resolved_config.roles.get(_GATEWAY_ROLE)
-    if gateway_role is None or gateway_port not in gateway_role.band:
-        return DispatchPairingStatus.OK, ""
-    worker_role = resolved_config.roles.get(_WORKER_ROLE)
-    if worker_role is None:
+    band = _pairing_target_band(config, _GATEWAY_ROLE, gateway_port, _WORKER_ROLE)
+    if band is None:
         return DispatchPairingStatus.OK, ""
 
     port = _worker_port(worker_url)
-    band = worker_role.band
     if port is None or port in band:
         return DispatchPairingStatus.OK, ""
 
@@ -132,65 +123,12 @@ def _gateway_port(gateway_url: str) -> int | None:
         return None
 
 
-def resolve_worker_gateway_target(
+def _band_gateway_target(
     gateway_url: str,
-    *,
     gateway_url_explicit: bool,
-    worker_port: int,
-    home: Path | None = None,
-    config: ProcsConfig | None = None,
+    band_range: str,
+    band_gateways: list[ProcRecord],
 ) -> tuple[str, DispatchPairingStatus, str]:
-    """Resolve the gateway URL a band worker should heartbeat to.
-
-    Mirrors :func:`verify_dispatch_pairing` for the worker -> gateway direction,
-    plus the one behaviour the gateway side never needed: an unconfigured band
-    worker LEARNS a live band gateway instead of running forever against the
-    auto-derived resident default (the reported bug - a worker started against
-    a live dev gateway on 18100 kept heartbeating the resident 18000).
-
-    Returns ``(effective_gateway_url, status, message)``:
-
-    - Not a worker-dev band port, no ``gateway-dev`` role declared, or the target
-      already resolves inside the gateway-dev band: ``OK`` pass-through, the input
-      URL unchanged, no message.
-    - Not explicitly configured (the auto-derived resident default) and exactly one
-      live band gateway is registered: ``OK`` with the LEARNED URL and an
-      informational message - the worker adopts the band gateway instead of the
-      resident default.
-    - Not explicitly configured and zero live band gateways are registered: the
-      input URL unchanged, ``UNPAIRED`` (warn-only) - a worker legitimately started
-      before its gateway has nothing to pair to yet.
-    - Explicitly configured (operator or spawning gateway intent) but resolves
-      outside the band while a DIFFERENT live band gateway is registered, or the
-      auto-derived default cannot be resolved unambiguously (more than one live
-      band gateway): the input URL unchanged, ``MISPAIRED`` - refuse to boot rather
-      than silently heartbeat a dead or foreign gateway.
-    """
-    resolved_config = config
-    if resolved_config is None:
-        try:
-            resolved_config = load_procs_config()
-        except ProcsConfigError:
-            return gateway_url, DispatchPairingStatus.OK, ""
-    worker_role = resolved_config.roles.get(_WORKER_ROLE)
-    if worker_role is None or worker_port not in worker_role.band:
-        return gateway_url, DispatchPairingStatus.OK, ""
-    gateway_role = resolved_config.roles.get(_GATEWAY_ROLE)
-    if gateway_role is None:
-        return gateway_url, DispatchPairingStatus.OK, ""
-
-    port = _gateway_port(gateway_url)
-    band = gateway_role.band
-    if port is None or port in band:
-        return gateway_url, DispatchPairingStatus.OK, ""
-
-    band_range = f"[{band.start}, {band.end}]"
-    band_gateways = [
-        rec
-        for rec in list_records(home)
-        if rec.role == _GATEWAY_ROLE and rec.port in band and is_pid_alive(rec.pid)
-    ]
-
     if gateway_url_explicit:
         if band_gateways:
             rec = band_gateways[0]
@@ -239,6 +177,79 @@ def resolve_worker_gateway_target(
     return gateway_url, DispatchPairingStatus.UNPAIRED, message
 
 
+def _pairing_target_band(
+    config: ProcsConfig | None,
+    active_role: str,
+    active_port: int,
+    target_role: str,
+) -> PortBand | None:
+    resolved_config = config
+    if resolved_config is None:
+        try:
+            resolved_config = load_procs_config()
+        except ProcsConfigError:
+            return None
+    active = resolved_config.roles.get(active_role)
+    if active is None or active_port not in active.band:
+        return None
+    target = resolved_config.roles.get(target_role)
+    return target.band if target is not None else None
+
+
+def resolve_worker_gateway_target(
+    gateway_url: str,
+    *,
+    gateway_url_explicit: bool,
+    worker_port: int,
+    home: Path | None = None,
+    config: ProcsConfig | None = None,
+) -> tuple[str, DispatchPairingStatus, str]:
+    """Resolve the gateway URL a band worker should heartbeat to.
+
+    Mirrors :func:`verify_dispatch_pairing` for the worker -> gateway direction,
+    plus the one behaviour the gateway side never needed: an unconfigured band
+    worker LEARNS a live band gateway instead of running forever against the
+    auto-derived resident default (the reported bug - a worker started against
+    a live dev gateway on 18100 kept heartbeating the resident 18000).
+
+    Returns ``(effective_gateway_url, status, message)``:
+
+    - Not a worker-dev band port, no ``gateway-dev`` role declared, or the target
+      already resolves inside the gateway-dev band: ``OK`` pass-through, the input
+      URL unchanged, no message.
+    - Not explicitly configured (the auto-derived resident default) and exactly one
+      live band gateway is registered: ``OK`` with the LEARNED URL and an
+      informational message - the worker adopts the band gateway instead of the
+      resident default.
+    - Not explicitly configured and zero live band gateways are registered: the
+      input URL unchanged, ``UNPAIRED`` (warn-only) - a worker legitimately started
+      before its gateway has nothing to pair to yet.
+    - Explicitly configured (operator or spawning gateway intent) but resolves
+      outside the band while a DIFFERENT live band gateway is registered, or the
+      auto-derived default cannot be resolved unambiguously (more than one live
+      band gateway): the input URL unchanged, ``MISPAIRED`` - refuse to boot rather
+      than silently heartbeat a dead or foreign gateway.
+    """
+    band = _pairing_target_band(config, _WORKER_ROLE, worker_port, _GATEWAY_ROLE)
+    if band is None:
+        return gateway_url, DispatchPairingStatus.OK, ""
+
+    port = _gateway_port(gateway_url)
+    if port is None or port in band:
+        return gateway_url, DispatchPairingStatus.OK, ""
+
+    band_range = f"[{band.start}, {band.end}]"
+    band_gateways = [
+        rec
+        for rec in list_records(home)
+        if rec.role == _GATEWAY_ROLE and rec.port in band and is_pid_alive(rec.pid)
+    ]
+
+    return _band_gateway_target(
+        gateway_url, gateway_url_explicit, band_range, band_gateways
+    )
+
+
 class WorkerPairingVerdict(StrEnum):
     """What a worker's reported identity licenses this gateway to do."""
 
@@ -253,6 +264,15 @@ class WorkerPairingVerdict(StrEnum):
 
     UNIDENTIFIED = "unidentified"
     """No usable pairing evidence: never adopt, never evict."""
+
+
+def _reported_generation(value: str | None) -> int | None:
+    if value is None or not value.strip():
+        return None
+    try:
+        return int(value.strip())
+    except ValueError:
+        return None
 
 
 def classify_worker_pairing(
@@ -288,11 +308,8 @@ def classify_worker_pairing(
         return WorkerPairingVerdict.UNIDENTIFIED
     if reported_lifetime.strip() != gateway_lifetime:
         return WorkerPairingVerdict.FOREIGN
-    if reported_generation is None or not reported_generation.strip():
-        return WorkerPairingVerdict.UNIDENTIFIED
-    try:
-        generation = int(reported_generation.strip())
-    except ValueError:
+    generation = _reported_generation(reported_generation)
+    if generation is None:
         return WorkerPairingVerdict.UNIDENTIFIED
     if generation <= 0 or generation > current_generation:
         return WorkerPairingVerdict.UNIDENTIFIED

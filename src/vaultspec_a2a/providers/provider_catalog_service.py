@@ -29,6 +29,7 @@ from .provider_catalog import (
     HealthState,
     ProviderCatalog,
     ProviderCatalogKey,
+    ProviderHealthAxes,
     ProviderRecord,
     StructuredProviderHealth,
 )
@@ -247,6 +248,33 @@ class ProviderCatalogService:
         )
 
 
+def _health_reasons(
+    key: ProviderCatalogKey,
+    catalog: ProviderCatalog,
+    authentication: AuthenticationState,
+    configured: HealthState,
+    transport: HealthState,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if configured is not HealthState.AVAILABLE:
+        reasons.append("provider configuration has not been verified")
+    if transport is HealthState.UNAVAILABLE:
+        reasons.append("provider transport is unavailable")
+    elif transport is HealthState.UNKNOWN:
+        reasons.append("provider transport has not been verified")
+    if authentication not in {
+        AuthenticationState.AUTHENTICATED,
+        AuthenticationState.NOT_APPLICABLE,
+    }:
+        reasons.append("provider authentication is not established")
+    if catalog.state.status is not CatalogStatus.AVAILABLE:
+        reasons.append(catalog.state.reason or "provider catalog is not available")
+    admission_reason = catalog_lane_admission_reason(key)
+    if admission_reason is not None:
+        reasons.append(admission_reason)
+    return tuple(dict.fromkeys(reasons))
+
+
 def _health_for(
     key: ProviderCatalogKey,
     catalog: ProviderCatalog,
@@ -270,31 +298,17 @@ def _health_for(
 
     admitted = is_catalog_lane_admissible(key)
     admission = AdmissionState.ADMITTED if admitted else AdmissionState.NOT_ADMITTED
-    reasons: list[str] = []
-    if configured is not HealthState.AVAILABLE:
-        reasons.append("provider configuration has not been verified")
-    if transport is HealthState.UNAVAILABLE:
-        reasons.append("provider transport is unavailable")
-    elif transport is HealthState.UNKNOWN:
-        reasons.append("provider transport has not been verified")
-    if authentication not in {
-        AuthenticationState.AUTHENTICATED,
-        AuthenticationState.NOT_APPLICABLE,
-    }:
-        reasons.append("provider authentication is not established")
-    if catalog.state.status is not CatalogStatus.AVAILABLE:
-        reasons.append(catalog.state.reason or "provider catalog is not available")
-    admission_reason = catalog_lane_admission_reason(key)
-    if admission_reason is not None:
-        reasons.append(admission_reason)
+    reasons = _health_reasons(key, catalog, authentication, configured, transport)
 
     return StructuredProviderHealth.derive(
-        configured=configured,
-        transport=transport,
-        authentication=authentication,
-        catalog=catalog.state.status,
-        admission=admission,
-        reasons=tuple(dict.fromkeys(reasons)),
+        axes=ProviderHealthAxes(
+            configured=configured,
+            transport=transport,
+            authentication=authentication,
+            catalog=catalog.state.status,
+            admission=admission,
+        ),
+        reasons=reasons,
         checked_at=datetime.now(UTC),
     )
 
@@ -305,8 +319,7 @@ def _valid_public_id(value: str, *, max_length: int) -> bool:
     )
 
 
-def validate_public_catalog_bounds(catalog: ProviderCatalog) -> None:
-    """Reject one unsafe lane before it can poison the whole public response."""
+def _catalog_public_ids(catalog: ProviderCatalog) -> tuple[str, ...]:
     public_ids = (
         catalog.key.provider_id,
         catalog.key.execution_mode,
@@ -319,6 +332,12 @@ def validate_public_catalog_bounds(catalog: ProviderCatalog) -> None:
     )
     if catalog.state.revision is not None:
         public_ids = (*public_ids, catalog.state.revision)
+    return public_ids
+
+
+def validate_public_catalog_bounds(catalog: ProviderCatalog) -> None:
+    """Reject one unsafe lane before it can poison the whole public response."""
+    public_ids = _catalog_public_ids(catalog)
     if not all(_valid_public_id(value, max_length=512) for value in public_ids):
         raise ValueError("catalog contains an invalid public identifier")
     control_ids = (

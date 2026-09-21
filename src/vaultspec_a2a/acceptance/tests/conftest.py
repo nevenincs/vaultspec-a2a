@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from ...thread.enums import TERMINAL_STATUS_VALUES
-from .. import CertifiedGateway, certified_gateway
+from ._harness import CertifiedGateway, certified_gateway
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator

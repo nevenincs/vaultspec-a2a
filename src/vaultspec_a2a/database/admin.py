@@ -30,13 +30,9 @@ clear --yes
 
 from __future__ import annotations
 
-__all__ = ["ARTIFACT_DECLARATIONS", "SNAPSHOT_DECLARATION", "main"]
-
 import argparse
 import sys
 from typing import TYPE_CHECKING
-
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 
 if TYPE_CHECKING:
     import sqlite3
@@ -44,40 +40,6 @@ if TYPE_CHECKING:
 
     from alembic.config import Config as AlembicConfig
     from sqlalchemy.engine import Engine
-
-
-# Every ``snapshot`` invocation adds one full copy of the database beside it, and
-# no verb in this project removes one. That is a real unbounded growth surface,
-# recorded rather than papered over - but the disposition is still permanence,
-# because these are operator-taken restore points and a service that deletes an
-# operator's backup on a timer is worse than one that accumulates files. The
-# choice is the reviewable part; the mechanism says plainly that nothing enforces
-# a bound.
-SNAPSHOT_DECLARATION = ArtifactDeclaration(
-    name="database-snapshot",
-    # ``with_suffix`` REPLACES the database's own suffix rather than appending,
-    # so the snapshot is a sibling named ``<stem>.snapshot.<ts>`` - e.g. a
-    # ``vaultspec.db`` yields ``vaultspec.snapshot.20260803-213400``, not
-    # ``vaultspec.db.snapshot....``. Naming it wrongly here would send an
-    # uninstall or an operator's glob looking for files that do not exist.
-    root="<database_path parent>/<database stem>.snapshot.<utc-timestamp>",
-    owner="database.admin",
-    disposition=RetentionDisposition.PERMANENT,
-    reason=(
-        "a snapshot exists because an operator deliberately asked for a restore "
-        "point before a risky change; automatically reclaiming it would destroy "
-        "the one artifact whose entire purpose is to still be there later"
-    ),
-    mechanism=(
-        "NOTHING removes a snapshot. Each `snapshot` invocation writes another "
-        "full copy of the database into the same directory, `snapshot list` only "
-        "enumerates them, and `restore` reads one without consuming it, so the "
-        "directory grows by the live database's size on every invocation until an "
-        "operator deletes files by hand"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (SNAPSHOT_DECLARATION,)
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +58,12 @@ def _alembic_cfg(database_url: str) -> AlembicConfig:
     the script location it names is relative to the working directory rather
     than to the installed package.
     """
+    from ..control.config import settings
     from .migrate import build_migration_config
 
-    return build_migration_config(database_url)
+    return build_migration_config(
+        database_url, sqlite_busy_timeout_ms=settings.sqlite_busy_timeout_ms
+    )
 
 
 def _migrate_to_head(database_url: str) -> None:
@@ -188,6 +153,7 @@ def _action_migrate(fix: bool) -> None:
 
     conn = sqlite3.connect(str(db_path))
     try:
+        _apply_sqlite_pragmas(conn, None)
         result = checkpoint_wal(conn)
         if result.blocked:
             # VACUUM needs a lock the same reader is denying, so attempting it

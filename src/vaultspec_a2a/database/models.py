@@ -249,6 +249,10 @@ class Base(DeclarativeBase):
 _MAX_ACTION_RECEIPT_ID_LENGTH = 64
 
 
+def _is_integer_at_least(value: object, minimum: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
+
+
 @dataclass(frozen=True, slots=True)
 class RunWriteAuthority:
     """Complete identity required to elect one durable run-state writer.
@@ -269,21 +273,11 @@ class RunWriteAuthority:
 
     def __post_init__(self) -> None:
         """Reject incomplete or structurally invalid current authority."""
-        # These fields carry static types, but the checks defend against callers
-        # that construct this value from untrusted/deserialized data and bypass
-        # the type checker entirely; `cast(object, ...)` only changes what the
-        # checker infers, not what runs.
-        if (
-            isinstance(self.run_revision, bool)
-            or not isinstance(cast("object", self.run_revision), int)
-            or self.run_revision < 0
-        ):
+        # Runtime checks also defend against deserialized values that bypass
+        # the static types; bool is not a valid revision or generation.
+        if not _is_integer_at_least(self.run_revision, 0):
             raise ValueError("run_revision must be a non-negative integer")
-        if (
-            isinstance(self.writer_generation, bool)
-            or not isinstance(cast("object", self.writer_generation), int)
-            or self.writer_generation < 1
-        ):
+        if not _is_integer_at_least(self.writer_generation, 1):
             raise ValueError("writer_generation must be a positive integer")
         if not isinstance(cast("object", self.action_type), ControlActionType):
             raise TypeError("action_type must be a ControlActionType")

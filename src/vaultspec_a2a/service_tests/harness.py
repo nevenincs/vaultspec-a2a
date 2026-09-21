@@ -12,20 +12,19 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 import httpx
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
-from ..testing.catalog_selection import (
+from ..testing.ports import free_port
+from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
 )
-from ..testing.ports import free_port
 from ..tests.gateway_boot import GatewayBootError
-from ..utils.process import detached_spawn_kwargs
+from ..utils._process_tree import detached_spawn_kwargs
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -33,6 +32,15 @@ if TYPE_CHECKING:
 # A process this harness owns, its label, and the log it writes: enough to fail
 # a readiness wait with the exit code and the tail that explain the death.
 _WatchedProcess = tuple[str, "subprocess.Popen[str]", Path]
+
+
+class _PermissionResponseOptions(TypedDict, total=False):
+    """Optional wire values accepted by :meth:`ServiceStack.respond_permission`."""
+
+    kind: str | None
+    idempotency_key: str | None
+    expected_status: int
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "service" / "docker-compose.integration.yml"
@@ -214,25 +222,6 @@ summary the harness writes precisely so a failed run can be diagnosed after the
 fact. Bounding the count keeps recent post-mortems available while stopping the
 unbounded accumulation in the operator's machine-global home.
 """
-
-# The bound here is on the COUNT of directories, not on any one directory's size,
-# and it is applied by the harness itself at the moment it first writes. That
-# ordering is the enforcement: a stack constructed but never started leaves
-# nothing behind, because the sweep and the mkdir share one call site.
-RUNTIME_DIR_DECLARATION = ArtifactDeclaration(
-    name="service-test-runtime-dir",
-    root="<a2a_home>/runtime/service-tests/<compose_project_name>/",
-    owner="service_tests.harness",
-    disposition=RetentionDisposition.BOUNDED_BY_SIZE,
-    mechanism=(
-        f"sweep_stale_runtime_dirs keeps the {RETAINED_RUNTIME_DIRS} most recently "
-        "modified directories and removes the rest, run from _ensure_runtime_dir "
-        "at the point something first writes; no bound applies to any single "
-        "directory's contents, so one run's compose logs can be arbitrarily large"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (RUNTIME_DIR_DECLARATION,)
 
 
 def sweep_stale_runtime_dirs(
@@ -899,10 +888,11 @@ class ServiceStack:
         *,
         thread_id: str,
         option_id: str,
-        kind: str | None = None,
-        idempotency_key: str | None = None,
-        expected_status: int = 200,
+        **options: Unpack[_PermissionResponseOptions],
     ) -> dict[str, Any]:
+        kind = options.get("kind")
+        idempotency_key = options.get("idempotency_key")
+        expected_status = options.get("expected_status", 200)
         body: dict[str, Any] = {"option_id": option_id}
         if kind is not None:
             body["kind"] = kind

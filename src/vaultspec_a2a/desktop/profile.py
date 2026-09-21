@@ -28,12 +28,12 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
-    "APP_HOME_STATE_TREE_DECLARATION",
-    "ARTIFACT_DECLARATIONS",
     "DesktopProfile",
     "DesktopProfileError",
     "DesktopStatePaths",
@@ -62,7 +62,97 @@ class DesktopProfileError(ValueError):
     """
 
 
+_MISSING_DESKTOP_STATE_PATH = object()
+_DESKTOP_STATE_PATH_FIELDS = (
+    "app_home",
+    "database_path",
+    "checkpoint_path",
+    "logs_dir",
+    "discovery_path",
+    "workspaces_root",
+    "credentials_dir",
+    "receipts_dir",
+    "temp_homes_dir",
+    "snapshots_dir",
+)
+_DESKTOP_STATE_PATH_DEFAULTS = (_MISSING_DESKTOP_STATE_PATH,) * len(
+    _DESKTOP_STATE_PATH_FIELDS
+)
+
+
+def _bind_desktop_state_paths(
+    args: tuple[object, ...],
+    options: Mapping[str, object],
+) -> tuple[object, ...]:
+    """Bind the original public field order for state-path construction."""
+    if len(args) > len(_DESKTOP_STATE_PATH_FIELDS):
+        raise TypeError(
+            "expected at most "
+            f"{len(_DESKTOP_STATE_PATH_FIELDS)} positional arguments, "
+            f"got {len(args)}"
+        )
+    unknown = next(
+        (name for name in options if name not in _DESKTOP_STATE_PATH_FIELDS),
+        None,
+    )
+    if unknown is not None:
+        raise TypeError(f"unexpected keyword argument {unknown!r}")
+    duplicate = next(
+        (name for name in _DESKTOP_STATE_PATH_FIELDS[: len(args)] if name in options),
+        None,
+    )
+    if duplicate is not None:
+        raise TypeError(f"multiple values for argument {duplicate!r}")
+    return tuple(
+        args[index]
+        if index < len(args)
+        else options.get(name, _DESKTOP_STATE_PATH_DEFAULTS[index])
+        for index, name in enumerate(_DESKTOP_STATE_PATH_FIELDS)
+    )
+
+
+def _required_desktop_state_path(name: str, value: object) -> Path:
+    if value is _MISSING_DESKTOP_STATE_PATH:
+        raise TypeError(f"missing required argument {name!r}")
+    return cast("Path", value)
+
+
 @dataclass(frozen=True, slots=True)
+class _DesktopSeatedPaths:
+    """Mutable paths with an active runtime consumer."""
+
+    app_home: Path
+    database_path: Path
+    checkpoint_path: Path
+    logs_dir: Path
+    discovery_path: Path
+    workspaces_root: Path
+
+
+@dataclass(frozen=True, slots=True)
+class _DesktopReservedPaths:
+    """Mutable paths reserved for consumers that have not landed yet."""
+
+    credentials_dir: Path
+    receipts_dir: Path
+    temp_homes_dir: Path
+    snapshots_dir: Path
+
+
+class _DesktopStatePathsOptions(TypedDict, total=False):
+    app_home: Path
+    database_path: Path
+    checkpoint_path: Path
+    logs_dir: Path
+    discovery_path: Path
+    workspaces_root: Path
+    credentials_dir: Path
+    receipts_dir: Path
+    temp_homes_dir: Path
+    snapshots_dir: Path
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class DesktopStatePaths:
     """The explicit mutable-state sub-paths derived from an application home.
 
@@ -84,16 +174,87 @@ class DesktopStatePaths:
     :meth:`DesktopProfile.ensure`.
     """
 
-    app_home: Path
-    database_path: Path
-    checkpoint_path: Path
-    logs_dir: Path
-    discovery_path: Path
-    workspaces_root: Path
-    credentials_dir: Path
-    receipts_dir: Path
-    temp_homes_dir: Path
-    snapshots_dir: Path
+    _seated: _DesktopSeatedPaths
+    _reserved: _DesktopReservedPaths
+
+    def __init__(
+        self,
+        *args: object,
+        **options: Unpack[_DesktopStatePathsOptions],
+    ) -> None:
+        values = _bind_desktop_state_paths(args, options)
+        object.__setattr__(
+            self,
+            "_seated",
+            _DesktopSeatedPaths(
+                app_home=_required_desktop_state_path("app_home", values[0]),
+                database_path=_required_desktop_state_path("database_path", values[1]),
+                checkpoint_path=_required_desktop_state_path(
+                    "checkpoint_path", values[2]
+                ),
+                logs_dir=_required_desktop_state_path("logs_dir", values[3]),
+                discovery_path=_required_desktop_state_path(
+                    "discovery_path", values[4]
+                ),
+                workspaces_root=_required_desktop_state_path(
+                    "workspaces_root", values[5]
+                ),
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_reserved",
+            _DesktopReservedPaths(
+                credentials_dir=_required_desktop_state_path(
+                    "credentials_dir", values[6]
+                ),
+                receipts_dir=_required_desktop_state_path("receipts_dir", values[7]),
+                temp_homes_dir=_required_desktop_state_path(
+                    "temp_homes_dir", values[8]
+                ),
+                snapshots_dir=_required_desktop_state_path("snapshots_dir", values[9]),
+            ),
+        )
+
+    @property
+    def app_home(self) -> Path:
+        return self._seated.app_home
+
+    @property
+    def database_path(self) -> Path:
+        return self._seated.database_path
+
+    @property
+    def checkpoint_path(self) -> Path:
+        return self._seated.checkpoint_path
+
+    @property
+    def logs_dir(self) -> Path:
+        return self._seated.logs_dir
+
+    @property
+    def discovery_path(self) -> Path:
+        return self._seated.discovery_path
+
+    @property
+    def workspaces_root(self) -> Path:
+        return self._seated.workspaces_root
+
+    @property
+    def credentials_dir(self) -> Path:
+        return self._reserved.credentials_dir
+
+    @property
+    def receipts_dir(self) -> Path:
+        return self._reserved.receipts_dir
+
+    @property
+    def temp_homes_dir(self) -> Path:
+        return self._reserved.temp_homes_dir
+
+    @property
+    def snapshots_dir(self) -> Path:
+        return self._reserved.snapshots_dir
 
     @property
     def provisioned_directories(self) -> tuple[Path, ...]:
@@ -104,60 +265,12 @@ class DesktopStatePaths:
         the reserved directories are omitted until their phases consume them.
         """
         return (
-            self.app_home,
-            self.database_path.parent,
-            self.checkpoint_path.parent,
-            self.logs_dir,
-            self.workspaces_root,
+            self._seated.app_home,
+            self._seated.database_path.parent,
+            self._seated.checkpoint_path.parent,
+            self._seated.logs_dir,
+            self._seated.workspaces_root,
         )
-
-
-# Declared on the layout AUTHORITY rather than on any one creator, because three
-# call sites materialise this tree and a declaration beside any single one would
-# describe a third of the artifact: ``DesktopProfile.ensure`` (the armed path),
-# ``cli.service`` (the non-armed serve path, which seats the same layout through
-# this same function), and ``desktop.migration``, which creates the database
-# parent during a staged migration. Naming the authority keeps one declaration
-# true for all three.
-#
-# That three-creator split is worth stating plainly as a finding rather than
-# hiding behind the declaration: the artifact-lifecycle contract wants root
-# selection owned by a resolver so a caller cannot invent a location. The
-# derivation IS centralised here, but the mkdir is not, so a fourth creator could
-# appear without anything noticing. Consolidating the creation is a boot-path
-# change and deliberately NOT done as part of declaring.
-#
-# The import above is leaf-only by necessity: this module is reached from the
-# settings model validator while ``control.config`` is still constructing, so a
-# declaration that dragged in the lifecycle or HTTP stack would close the import
-# cycle the discovery-filename constant already exists to avoid. The retention
-# vocabulary imports nothing but ``dataclasses`` and ``enum``, which is what makes
-# it safe to declare here at all.
-APP_HOME_STATE_TREE_DECLARATION = ArtifactDeclaration(
-    name="desktop-application-state-tree",
-    root="<app_home>/{,state/,runtime/,workspaces/}",
-    owner="desktop.profile",
-    disposition=RetentionDisposition.PERMANENT,
-    reason=(
-        "the application home is the mutable-state root that deliberately "
-        "SURVIVES immutable runtime replacement - it holds the databases, the "
-        "checkpoint store, and the credential and discovery planes, so an "
-        "upgrade that replaced the capsule and reclaimed this tree would discard "
-        "every run the install has ever recorded"
-    ),
-    mechanism=(
-        "nothing removes the tree, and no uninstall verb exists in this repository "
-        "to remove it. The directories are created owner-restricted and idempotently "
-        "(an existing one is left untouched), so the tree itself neither grows nor "
-        "multiplies - what grows is the individually declared artifacts inside it. "
-        "Note that workspaces_root is materialised on the armed path but has no "
-        "production writer, so it is currently created empty and stays empty"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    APP_HOME_STATE_TREE_DECLARATION,
-)
 
 
 def _discovery_path(app_home: Path) -> Path:
@@ -214,7 +327,7 @@ def _capsule_asset_paths(capsule_root: Path) -> tuple[Path, Path]:
     for the manifest contract without pulling the provider/langchain stack, and
     the asset layout has exactly one definition.
     """
-    from ..providers.factory import capsule_acp_entry, capsule_node_executable
+    from ..providers._factory_commands import capsule_acp_entry, capsule_node_executable
 
     return capsule_node_executable(capsule_root), capsule_acp_entry(capsule_root)
 

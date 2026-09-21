@@ -9,6 +9,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Coroutine
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,6 +20,31 @@ from .subscribers import SubscriberManager
 from .types import SequencedEvent, evict_oldest
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _ChunkBufferState:
+    """Per-thread token chunks and their scheduled flushes."""
+
+    chunk_buffers: defaultdict[str, list[str]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    chunk_buffer_meta: dict[str, dict[str, str]] = field(default_factory=dict)
+    chunk_flush_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class _DebounceState:
+    """Debounce timestamps, pending events, and cleanup coordination."""
+
+    tool_update_last_emit: dict[tuple[str, str], float] = field(default_factory=dict)
+    plan_update_last_emit: dict[str, float] = field(default_factory=dict)
+    tool_update_pending: dict[tuple[str, str], SequencedEvent] = field(
+        default_factory=dict
+    )
+    plan_update_pending: dict[str, SequencedEvent] = field(default_factory=dict)
+    debounce_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class BufferingManager:
@@ -33,26 +59,8 @@ class BufferingManager:
         self._subscribers = subscribers
         self._telemetry = telemetry
         self._next_sequence = next_sequence
-
-        # Per-thread token chunk buffers for batching (research §1.3).
-        self._chunk_buffers: dict[str, list[str]] = defaultdict(list)
-        self._chunk_buffer_meta: dict[str, dict[str, str]] = {}
-        self._chunk_flush_tasks: dict[str, asyncio.Task[None]] = {}
-
-        # Debounce state: (thread_id, tool_call_id) -> last_emit_time
-        self._tool_update_last_emit: dict[tuple[str, str], float] = {}
-        # Debounce state: thread_id -> last_emit_time for plan updates
-        self._plan_update_last_emit: dict[str, float] = {}
-
-        # Pending debounced events
-        self._tool_update_pending: dict[tuple[str, str], SequencedEvent] = {}
-        self._plan_update_pending: dict[str, SequencedEvent] = {}
-
-        # Debounce flush tasks
-        self._debounce_tasks: set[asyncio.Task[None]] = set()
-
-        # Lock for debounce pending maps
-        self._lock = asyncio.Lock()
+        self._chunk_state = _ChunkBufferState()
+        self._debounce_state = _DebounceState()
 
     # ------------------------------------------------------------------
     # Debounced broadcasting
@@ -64,8 +72,8 @@ class BufferingManager:
     ) -> None:
         """Flush a pending debounced tool call update after the interval."""
         await asyncio.sleep(domain_config.tool_call_debounce_seconds)
-        async with self._lock:
-            event = self._tool_update_pending.pop(key, None)
+        async with self._debounce_state.lock:
+            event = self._debounce_state.tool_update_pending.pop(key, None)
         if event is not None:
             await self._subscribers.broadcast(event)
 
@@ -75,8 +83,8 @@ class BufferingManager:
     ) -> None:
         """Flush a pending debounced plan update after the interval."""
         await asyncio.sleep(domain_config.plan_update_debounce_seconds)
-        async with self._lock:
-            event = self._plan_update_pending.pop(thread_id, None)
+        async with self._debounce_state.lock:
+            event = self._debounce_state.plan_update_pending.pop(thread_id, None)
         if event is not None:
             await self._subscribers.broadcast(event)
 
@@ -86,8 +94,8 @@ class BufferingManager:
     ) -> None:
         """Schedule a debounce flush task and track it for cleanup."""
         task = asyncio.create_task(coro)
-        self._debounce_tasks.add(task)
-        task.add_done_callback(self._debounce_tasks.discard)
+        self._debounce_state.debounce_tasks.add(task)
+        task.add_done_callback(self._debounce_state.debounce_tasks.discard)
 
     # ------------------------------------------------------------------
     # Tool update debounce helpers (used by emitters)
@@ -95,38 +103,38 @@ class BufferingManager:
 
     def get_tool_update_last_emit(self, key: tuple[str, str]) -> float:
         """Return the last emit timestamp for a tool update debounce key."""
-        return self._tool_update_last_emit.get(key, 0.0)
+        return self._debounce_state.tool_update_last_emit.get(key, 0.0)
 
     def set_tool_update_last_emit(self, key: tuple[str, str], ts: float) -> None:
         """Set the last emit timestamp for a tool update debounce key."""
-        self._tool_update_last_emit[key] = ts
+        self._debounce_state.tool_update_last_emit[key] = ts
         max_entries = domain_config.debounce_map_max_entries
-        if len(self._tool_update_last_emit) > max_entries:
-            evict_oldest(self._tool_update_last_emit, max_entries)
+        if len(self._debounce_state.tool_update_last_emit) > max_entries:
+            evict_oldest(self._debounce_state.tool_update_last_emit, max_entries)
 
     def get_plan_update_last_emit(self, thread_id: str) -> float:
         """Return the last emit timestamp for a plan update debounce key."""
-        return self._plan_update_last_emit.get(thread_id, 0.0)
+        return self._debounce_state.plan_update_last_emit.get(thread_id, 0.0)
 
     def set_plan_update_last_emit(self, thread_id: str, ts: float) -> None:
         """Set the last emit timestamp for a plan update debounce key."""
-        self._plan_update_last_emit[thread_id] = ts
+        self._debounce_state.plan_update_last_emit[thread_id] = ts
 
     async def store_pending_tool_update(
         self, key: tuple[str, str], sequenced: SequencedEvent
     ) -> bool:
         """Store a pending tool update; return True if it was NOT already pending."""
-        async with self._lock:
-            already_pending = key in self._tool_update_pending
-            self._tool_update_pending[key] = sequenced
+        async with self._debounce_state.lock:
+            already_pending = key in self._debounce_state.tool_update_pending
+            self._debounce_state.tool_update_pending[key] = sequenced
         return not already_pending
 
     async def store_pending_plan_update(
         self, thread_id: str, sequenced: SequencedEvent
     ) -> None:
         """Store a pending plan update."""
-        async with self._lock:
-            self._plan_update_pending[thread_id] = sequenced
+        async with self._debounce_state.lock:
+            self._debounce_state.plan_update_pending[thread_id] = sequenced
 
     # ------------------------------------------------------------------
     # Token chunk batching (research §1.3)
@@ -134,9 +142,9 @@ class BufferingManager:
 
     async def flush_chunk_buffer(self, thread_id: str) -> None:
         """Flush accumulated token chunks as a single MessageChunk."""
-        chunks = self._chunk_buffers.pop(thread_id, [])
-        meta = self._chunk_buffer_meta.pop(thread_id, None)
-        self._chunk_flush_tasks.pop(thread_id, None)
+        chunks = self._chunk_state.chunk_buffers.pop(thread_id, [])
+        meta = self._chunk_state.chunk_buffer_meta.pop(thread_id, None)
+        self._chunk_state.chunk_flush_tasks.pop(thread_id, None)
         if chunks and meta:
             with self._telemetry.start_span(
                 "aggregator.flush_chunks",
@@ -169,15 +177,15 @@ class BufferingManager:
         message_id: str,
     ) -> None:
         """Buffer a token chunk and flush on 50ms timeout or 4KB threshold."""
-        existing_meta = self._chunk_buffer_meta.get(thread_id)
+        existing_meta = self._chunk_state.chunk_buffer_meta.get(thread_id)
         if existing_meta and existing_meta["message_id"] != message_id:
-            existing_task = self._chunk_flush_tasks.pop(thread_id, None)
+            existing_task = self._chunk_state.chunk_flush_tasks.pop(thread_id, None)
             if existing_task is not None:
                 existing_task.cancel()
             await self.flush_chunk_buffer(thread_id)
 
-        self._chunk_buffers[thread_id].append(content)
-        self._chunk_buffer_meta[thread_id] = {
+        self._chunk_state.chunk_buffers[thread_id].append(content)
+        self._chunk_state.chunk_buffer_meta[thread_id] = {
             "agent_id": agent_id,
             "message_id": message_id,
         }
@@ -185,18 +193,18 @@ class BufferingManager:
             "aggregator.chunks_batched", 1, thread_id=thread_id
         )
 
-        buffer_size = sum(len(c) for c in self._chunk_buffers[thread_id])
+        buffer_size = sum(len(c) for c in self._chunk_state.chunk_buffers[thread_id])
 
         if buffer_size >= domain_config.chunk_buffer_max_bytes:
-            existing_task = self._chunk_flush_tasks.pop(thread_id, None)
+            existing_task = self._chunk_state.chunk_flush_tasks.pop(thread_id, None)
             if existing_task is not None:
                 existing_task.cancel()
             await self.flush_chunk_buffer(thread_id)
-        elif thread_id not in self._chunk_flush_tasks:
+        elif thread_id not in self._chunk_state.chunk_flush_tasks:
             task = asyncio.create_task(self._scheduled_chunk_flush(thread_id))
-            self._chunk_flush_tasks[thread_id] = task
-            self._debounce_tasks.add(task)
-            task.add_done_callback(self._debounce_tasks.discard)
+            self._chunk_state.chunk_flush_tasks[thread_id] = task
+            self._debounce_state.debounce_tasks.add(task)
+            task.add_done_callback(self._debounce_state.debounce_tasks.discard)
 
     # ------------------------------------------------------------------
     # Cleanup helpers (used by ingest finalisation)
@@ -204,24 +212,28 @@ class BufferingManager:
 
     def prune_tool_debounce(self, thread_id: str) -> None:
         """Remove debounce timestamps for a completed thread."""
-        stale_tool_keys = [k for k in self._tool_update_last_emit if k[0] == thread_id]
+        stale_tool_keys = [
+            k for k in self._debounce_state.tool_update_last_emit if k[0] == thread_id
+        ]
         for k in stale_tool_keys:
-            del self._tool_update_last_emit[k]
-        self._plan_update_last_emit.pop(thread_id, None)
+            del self._debounce_state.tool_update_last_emit[k]
+        self._debounce_state.plan_update_last_emit.pop(thread_id, None)
 
     def clear_thread_state(self, thread_id: str) -> None:
         """Purge all buffered and debounced state scoped to ``thread_id``."""
-        task = self._chunk_flush_tasks.pop(thread_id, None)
+        task = self._chunk_state.chunk_flush_tasks.pop(thread_id, None)
         if task is not None:
             task.cancel()
-            self._debounce_tasks.discard(task)
-        self._chunk_buffers.pop(thread_id, None)
-        self._chunk_buffer_meta.pop(thread_id, None)
+            self._debounce_state.debounce_tasks.discard(task)
+        self._chunk_state.chunk_buffers.pop(thread_id, None)
+        self._chunk_state.chunk_buffer_meta.pop(thread_id, None)
         self.prune_tool_debounce(thread_id)
-        stale_tool_pending = [k for k in self._tool_update_pending if k[0] == thread_id]
+        stale_tool_pending = [
+            k for k in self._debounce_state.tool_update_pending if k[0] == thread_id
+        ]
         for key in stale_tool_pending:
-            self._tool_update_pending.pop(key, None)
-        self._plan_update_pending.pop(thread_id, None)
+            self._debounce_state.tool_update_pending.pop(key, None)
+        self._debounce_state.plan_update_pending.pop(thread_id, None)
 
     # ------------------------------------------------------------------
     # Shutdown
@@ -229,20 +241,22 @@ class BufferingManager:
 
     async def shutdown(self) -> None:
         """Cancel all debounce and chunk flush tasks and clear state."""
-        for task in list(self._debounce_tasks):
+        for task in list(self._debounce_state.debounce_tasks):
             task.cancel()
-        if self._debounce_tasks:
-            await asyncio.gather(*self._debounce_tasks, return_exceptions=True)
-        self._debounce_tasks.clear()
+        if self._debounce_state.debounce_tasks:
+            await asyncio.gather(
+                *self._debounce_state.debounce_tasks, return_exceptions=True
+            )
+        self._debounce_state.debounce_tasks.clear()
 
-        chunk_flush_tasks = list(self._chunk_flush_tasks.values())
+        chunk_flush_tasks = list(self._chunk_state.chunk_flush_tasks.values())
         for task in chunk_flush_tasks:
             task.cancel()
         if chunk_flush_tasks:
             await asyncio.gather(*chunk_flush_tasks, return_exceptions=True)
-        self._chunk_flush_tasks.clear()
+        self._chunk_state.chunk_flush_tasks.clear()
 
-        self._chunk_buffers.clear()
-        self._chunk_buffer_meta.clear()
-        self._tool_update_last_emit.clear()
-        self._plan_update_last_emit.clear()
+        self._chunk_state.chunk_buffers.clear()
+        self._chunk_state.chunk_buffer_meta.clear()
+        self._debounce_state.tool_update_last_emit.clear()
+        self._debounce_state.plan_update_last_emit.clear()

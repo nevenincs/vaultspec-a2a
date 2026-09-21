@@ -11,25 +11,30 @@ which provider a command resolves to no longer loads a model stack to answer.
 from __future__ import annotations
 
 import logging
-import os
-import shutil
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+    from pathlib import Path
 
     from langchain_core.language_models import BaseChatModel
 
     from ..team.team_config import AgentConfig
 
-from ..artifacts import ArtifactDeclaration, RetentionDisposition
 from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from ..workspace.environment import resolve_env_vars
+from ._factory_commands import (
+    _build_kimi_env,
+    _build_zai_env,
+    _classify_acp_command,
+    _classify_codex_command,
+    _classify_kimi_command,
+    _kimi_home_env,
+)
 from .acp_catalog import discover_acp_catalog
 from .antigravity_catalog import discover_antigravity_catalog
 from .antigravity_cli import resolve_antigravity_command
@@ -52,16 +57,11 @@ from .provider_catalog import (
 )
 
 __all__ = [
-    "ANTIGRAVITY_CLI_STATE_DECLARATION",
-    "ARTIFACT_DECLARATIONS",
-    "KIMI_SESSION_STORE_DECLARATION",
     "ProviderCatalogDiscovery",
     "ProviderCatalogRegistration",
     "ProviderFactory",
     "ProviderRuntimeUnavailableError",
     "UnsupportedExecutionLaneError",
-    "classify_provider_command",
-    "kimi_temporary_model_configuration_reason",
     "validate_current_execution_lane",
     "validate_current_native_controls",
 ]
@@ -127,444 +127,6 @@ def validate_current_native_controls(
 
 
 logger = logging.getLogger(__name__)
-
-
-ANTIGRAVITY_CLI_STATE_DECLARATION = ArtifactDeclaration(
-    name="antigravity-cli-state",
-    root="<ANTIGRAVITY_CLI_HOME, else operator ~/.gemini/antigravity-cli>/",
-    owner="providers.factory",
-    disposition=RetentionDisposition.PERMANENT,
-    reason=(
-        "the home belongs to the operator's Antigravity CLI and holds their own "
-        "interactive state - a conversation-summary database, an onboarding "
-        "cache - beside anything a spawn here produced, so nothing in it can be "
-        "reclaimed without deleting work this project never created. What makes "
-        "this lane especially costly is the key: other stores mint "
-        "one entry per distinct workspace, so a repeated discovery against the "
-        "same directory reuses an entry, while this CLI writes a fresh "
-        "TIMESTAMPED log per INVOCATION. Catalog discovery is an invocation, so "
-        "growth here tracks how often the catalog is read rather than how many "
-        "projects exist, and nothing in the name identifies the read that "
-        "produced it"
-    ),
-    mechanism=(
-        "NOTHING bounds it. Each run appends `log/cli-<timestamp>.log`, and a "
-        "failed run additionally leaves `crashes/crash_<pid>_<uuid>.log`; a bare "
-        "`agy models` was observed writing both while still exiting zero. "
-        "Measured on one developer host: 80 log files totalling 82 MB. No sweep "
-        "here reaches the home and no age gate applies, so an operator deletes "
-        "it by hand. Suppression is the lever, as on the other CLI lanes: "
-        "spawning fewer discoveries mints fewer entries"
-    ),
-)
-
-KIMI_SESSION_STORE_DECLARATION = ArtifactDeclaration(
-    name="kimi-code-session-store",
-    root="<KIMI_CODE_HOME, else operator ~/.kimi-code>/<per-workspace partition>/",
-    owner="providers.factory",
-    disposition=RetentionDisposition.PERMANENT,
-    reason=(
-        "the store is the operator's, and on this lane orphanhood cannot even be "
-        "ESTABLISHED: the partition key is a one-way truncated digest of the "
-        "full working-directory path, so a key cannot be decoded back into the "
-        "directory it names and no reader here can ask whether that directory "
-        "still exists. A reclaim predicate needs a question this key cannot "
-        "answer, which is the strongest form of the argument that declaring, "
-        "not reaping, is the only mechanism that covers every lane"
-    ),
-    mechanism=(
-        "NOTHING bounds it, and nothing here can: see the reason above. Measured "
-        "volume is currently negligible - a single certification window - but "
-        "that is a fact about how rarely the lane is exercised, not a bound"
-    ),
-)
-
-ARTIFACT_DECLARATIONS: tuple[ArtifactDeclaration, ...] = (
-    ANTIGRAVITY_CLI_STATE_DECLARATION,
-    KIMI_SESSION_STORE_DECLARATION,
-)
-
-# Resolve the claude-agent-acp entry point from the project-level node_modules.
-# VAULTSPEC_PROJECT_ROOT controls the base; see Settings.project_root.
-# project_root resolves THIS SERVICE's own installed assets here, never a place
-# to put data and never a directory an agent runs in - the two roles the
-# storage-anchor gate exists to separate.
-_CLAUDE_ACP_JS = (
-    settings.project_root  # storage-anchor-ok
-    / "node_modules"
-    / "@agentclientprotocol"
-    / "claude-agent-acp"
-    / "dist"
-    / "index.js"
-)
-
-# Resolve the precompiled Bun binary from the package-local bin/ directory.
-# Node backend is the default; binary mode is experimental and requires a
-# deliberate decision to adopt.
-_BIN_DIR = Path(__file__).resolve().parent.parent / "bin"
-_bin_candidates = list(_BIN_DIR.glob("claude-agent-acp*")) if _BIN_DIR.is_dir() else []
-_BIN_PATH: Path | None = _bin_candidates[0] if _bin_candidates else None
-
-
-class _CapsuleAssetsRootOmitted:
-    """Marker for callers that delegate capsule-root selection to settings."""
-
-    __slots__ = ()
-
-
-_CAPSULE_ASSETS_ROOT_OMITTED = _CapsuleAssetsRootOmitted()
-_CAPSULE_NODE_RELATIVE_PATH = (
-    Path("node") / "node.exe" if os.name == "nt" else Path("node") / "bin" / "node"
-)
-_CAPSULE_ACP_RELATIVE_PATH = (
-    Path("node_modules")
-    / "@agentclientprotocol"
-    / "claude-agent-acp"
-    / "dist"
-    / "index.js"
-)
-
-
-def _build_zai_env(
-    zai_base_url: str | None = None,
-    zai_auth_token: str | None = None,
-) -> dict[str, str]:
-    """Return explicit Z.ai auth env vars for the Claude ACP subprocess.
-
-    Z.ai rides the Claude ACP path: the wrapper's
-    Claude Code CLI honours ``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN`` to
-    retarget the Anthropic Messages API at Z.ai's compatible gateway. The base env
-    is scrubbed of ``ANTHROPIC_API_KEY`` (workspace/environment.py) but leaves both
-    of these names untouched, so the provider layer supplies them here. The token
-    is a secret: it is placed in the returned dict but never logged.
-    """
-    env_vars: dict[str, str] = {}
-    if not (zai_auth_token and zai_auth_token.strip()):
-        return env_vars
-    if zai_base_url and zai_base_url.strip():
-        env_vars["ANTHROPIC_BASE_URL"] = zai_base_url
-    env_vars["ANTHROPIC_AUTH_TOKEN"] = zai_auth_token
-    return env_vars
-
-
-def _build_kimi_env(
-    kimi_api_key: str | None = None,
-    kimi_base_url: str | None = None,
-    kimi_temporary_model_name: str | None = None,
-    kimi_code_home: str | None = None,
-    kimi_temporary_model_max_context_size: int | None = None,
-    kimi_temporary_model_capabilities: str | None = None,
-) -> dict[str, str]:
-    """Return the explicit Kimi Code home and temporary-provider definition.
-
-    Kimi Code 0.28.1 treats ``KIMI_MODEL_*`` as one temporary provider, not as
-    independent launch overrides. The tuple is injected only when complete;
-    exact configured-alias selection is a separate ``-m`` argument.
-    """
-    reason = kimi_temporary_model_configuration_reason(
-        kimi_api_key=kimi_api_key,
-        kimi_base_url=kimi_base_url,
-        kimi_temporary_model_name=kimi_temporary_model_name,
-        kimi_temporary_model_max_context_size=kimi_temporary_model_max_context_size,
-        kimi_temporary_model_capabilities=kimi_temporary_model_capabilities,
-    )
-    if reason is not None:
-        raise ValueError(reason)
-    env_vars: dict[str, str] = {}
-    if kimi_code_home and kimi_code_home.strip():
-        env_vars["KIMI_CODE_HOME"] = kimi_code_home.strip()
-    if kimi_api_key and kimi_base_url and kimi_temporary_model_name:
-        env_vars["KIMI_MODEL_API_KEY"] = kimi_api_key.strip()
-        env_vars["KIMI_MODEL_BASE_URL"] = kimi_base_url.strip()
-        env_vars["KIMI_MODEL_NAME"] = kimi_temporary_model_name.strip()
-        if kimi_temporary_model_max_context_size is not None:
-            env_vars["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(
-                kimi_temporary_model_max_context_size
-            )
-        if kimi_temporary_model_capabilities:
-            env_vars["KIMI_MODEL_CAPABILITIES"] = (
-                kimi_temporary_model_capabilities.strip()
-            )
-    return env_vars
-
-
-def kimi_temporary_model_configuration_reason(
-    *,
-    kimi_api_key: str | None,
-    kimi_base_url: str | None,
-    kimi_temporary_model_name: str | None,
-    kimi_temporary_model_max_context_size: int | None = None,
-    kimi_temporary_model_capabilities: str | None = None,
-) -> str | None:
-    """Return a static reason when a temporary Kimi definition is partial."""
-    values = (kimi_api_key, kimi_base_url, kimi_temporary_model_name)
-    present = tuple(bool(value and value.strip()) for value in values)
-    optional_present = kimi_temporary_model_max_context_size is not None or bool(
-        kimi_temporary_model_capabilities and kimi_temporary_model_capabilities.strip()
-    )
-    if (not any(present) and not optional_present) or all(present):
-        return None
-    return (
-        "incomplete Kimi temporary model definition; set KIMI_MODEL_NAME, "
-        "KIMI_MODEL_API_KEY, and KIMI_MODEL_BASE_URL together"
-    )
-
-
-def capsule_node_executable(capsule_assets_root: Path) -> Path:
-    """Return the capsule-owned Node.js executable path for this platform.
-
-    Node's official distribution layout places the executable at ``node/node.exe``
-    on Windows and ``node/bin/node`` on POSIX. The desktop capsule carries that
-    tree verbatim under its assets root.
-    """
-    return capsule_assets_root / _CAPSULE_NODE_RELATIVE_PATH
-
-
-def capsule_acp_entry(capsule_assets_root: Path) -> Path:
-    """Return the capsule-owned Claude ACP entry point path.
-
-    Mirrors the checkout ``node_modules`` layout so the same installed adapter
-    resolves from capsule assets.
-    """
-    return capsule_assets_root / _CAPSULE_ACP_RELATIVE_PATH
-
-
-def _canonical_capsule_assets_root(capsule_assets_root: Path) -> Path:
-    """Return the absolute canonical directory that owns capsule assets."""
-    try:
-        requested_root = capsule_assets_root.expanduser()
-        canonical_root = requested_root.resolve(strict=True)
-    except (OSError, RuntimeError) as exc:
-        raise ConfigError(
-            f"Desktop capsule assets root cannot be resolved: {capsule_assets_root}. "
-            "Install or repair the desktop capsule before starting the provider."
-        ) from exc
-    if not canonical_root.is_dir():
-        raise ConfigError(
-            f"Desktop capsule assets root is not a directory: {canonical_root}. "
-            "Install or repair the desktop capsule before starting the provider."
-        )
-    return canonical_root
-
-
-def _resolve_capsule_asset(
-    capsule_assets_root: Path,
-    relative_path: Path,
-    *,
-    asset_name: str,
-    repair_hint: str,
-) -> Path:
-    """Resolve one required file without allowing it to escape capsule ownership."""
-    candidate = capsule_assets_root / relative_path
-    try:
-        canonical_asset = candidate.resolve(strict=True)
-    except FileNotFoundError as exc:
-        raise ConfigError(
-            f"Desktop capsule {asset_name} not found: {candidate}. "
-            f"The capsule assets root {capsule_assets_root} must carry {repair_hint}."
-        ) from exc
-    except (OSError, RuntimeError) as exc:
-        raise ConfigError(
-            f"Desktop capsule {asset_name} cannot be resolved: {candidate}. "
-            "Install or repair the desktop capsule before starting the provider."
-        ) from exc
-
-    if not canonical_asset.is_relative_to(capsule_assets_root):
-        raise ConfigError(
-            f"Desktop capsule {asset_name} escapes its assets root: {candidate} "
-            f"resolves to {canonical_asset}, outside {capsule_assets_root}. "
-            "Install or repair the desktop capsule before starting the provider."
-        )
-    if not canonical_asset.is_file():
-        raise ConfigError(
-            f"Desktop capsule {asset_name} is not a file: {canonical_asset}. "
-            "Install or repair the desktop capsule before starting the provider."
-        )
-    return canonical_asset
-
-
-def _classify_capsule_acp_command(
-    capsule_assets_root: Path,
-) -> tuple[list[str], dict[str, str]]:
-    """Resolve the Node ACP command strictly from capsule-owned assets.
-
-    The desktop capsule owns Node.js and the ACP adapter, so resolution never
-    falls back to the checkout or to a PATH ``node``. A missing asset is a fatal
-    configuration error naming the exact missing path.
-
-    Raises:
-        ConfigError: If the capsule Node executable or ACP entry is absent.
-    """
-    canonical_root = _canonical_capsule_assets_root(capsule_assets_root)
-    node_executable = _resolve_capsule_asset(
-        canonical_root,
-        _CAPSULE_NODE_RELATIVE_PATH,
-        asset_name="Node executable",
-        repair_hint="the bundled Node.js runtime",
-    )
-    acp_entry = _resolve_capsule_asset(
-        canonical_root,
-        _CAPSULE_ACP_RELATIVE_PATH,
-        asset_name="Claude ACP entry point",
-        repair_hint="the bundled @agentclientprotocol/claude-agent-acp adapter",
-    )
-    return [str(node_executable), str(acp_entry)], {
-        "runtime_authority": "capsule",
-        "command_origin": "capsule",
-        "command_kind": "node_entry",
-        "command_executable": node_executable.name,
-        "command_target": str(acp_entry),
-        "acp_backend": "node",
-    }
-
-
-def _classify_acp_command(
-    backend: str,
-    *,
-    capsule_assets_root: Path | _CapsuleAssetsRootOmitted | None = (
-        _CAPSULE_ASSETS_ROOT_OMITTED
-    ),
-) -> tuple[list[str], dict[str, str]]:
-    """Return the ACP gateway subprocess command for the given backend.
-
-    Args:
-        backend: ``"node"`` for the npm-installed JS entry point (default),
-            ``"binary"`` for the precompiled Bun executable in bin/.
-        capsule_assets_root: Explicit desktop capsule assets root. When omitted,
-            the configured ``settings.capsule_assets_root`` is consulted. Explicit
-            ``None`` forces Compose/project-local resolution even when a capsule
-            root is configured. When a root is in force, the default Node backend
-            resolves its executable and ACP entry ONLY from capsule assets — no
-            checkout or PATH fallback. The experimental binary backend is already
-            package-owned and is unaffected.
-
-    Raises:
-        ConfigError: If the resolved entry point does not exist.
-    """
-    if backend == "binary":
-        if _BIN_PATH is None:
-            raise ConfigError(
-                f"ACP binary backend requested but no executable found in {_BIN_DIR}. "
-                "Place a claude-agent-acp binary in src/vaultspec_a2a/bin/."
-            )
-        if not _BIN_PATH.exists():
-            raise ConfigError(
-                f"ACP binary not found at {_BIN_PATH}. "
-                "Place a claude-agent-acp binary in src/vaultspec_a2a/bin/."
-            )
-        return [str(_BIN_PATH)], {
-            "runtime_authority": "package_bin",
-            "command_origin": "package_bin",
-            "command_kind": "bun_binary",
-            "command_executable": _BIN_PATH.name,
-            "command_target": str(_BIN_PATH),
-            "acp_backend": "binary",
-        }
-    # default: "node"
-    root = (
-        settings.capsule_assets_root
-        if isinstance(capsule_assets_root, _CapsuleAssetsRootOmitted)
-        else capsule_assets_root
-    )
-    if root is not None:
-        return _classify_capsule_acp_command(root)
-    if not _CLAUDE_ACP_JS.exists():
-        raise ConfigError(
-            f"Claude ACP entry point not found: {_CLAUDE_ACP_JS}. "
-            "Run 'npm install' to install @agentclientprotocol/claude-agent-acp."
-        )
-    return ["node", str(_CLAUDE_ACP_JS)], {
-        "runtime_authority": "project_local",
-        "command_origin": "project_node_modules_entry",
-        "command_kind": "node_entry",
-        "command_executable": "node",
-        "command_target": str(_CLAUDE_ACP_JS),
-        "acp_backend": "node",
-    }
-
-
-def _classify_codex_command() -> tuple[list[str], dict[str, str]]:
-    """Return the ``codex app-server`` command plus bounded runtime metadata.
-
-    Codex is a non-ACP JSON-RPC subprocess. Resolution prefers the codex
-    executable on PATH; the bare-name ``fallback_cli_name`` origin (no resolved
-    path) is what ``classify_provider_command`` treats as unresolvable.
-    """
-    system_codex = shutil.which("codex")
-    if system_codex:
-        return [system_codex, "app-server"], {
-            "runtime_authority": "system_cli",
-            "command_origin": "system_path_executable",
-            "command_kind": "codex_cli",
-            "command_executable": Path(system_codex).name,
-            "command_target": system_codex,
-        }
-    return ["codex", "app-server"], {
-        "runtime_authority": "system_cli",
-        "command_origin": "fallback_cli_name",
-        "command_kind": "codex_cli",
-        "command_executable": "codex",
-        "command_target": "codex",
-    }
-
-
-def _classify_kimi_command() -> tuple[list[str], dict[str, str]]:
-    """Return the ``kimi acp`` command plus bounded runtime metadata.
-
-    Kimi speaks ACP natively (``kimi acp`` is a stdio ACP server). Resolution
-    prefers the installed Kimi Code executable on PATH. The bare-name
-    ``fallback_cli_name`` origin is treated as unresolvable by readiness and
-    catalog registration.
-    """
-    system_kimi = shutil.which("kimi")
-    if system_kimi:
-        return [system_kimi, "acp"], {
-            "runtime_authority": "system_cli",
-            "command_origin": "system_path_executable",
-            "command_kind": "kimi_cli",
-            "command_executable": Path(system_kimi).name,
-            "command_target": system_kimi,
-        }
-    return ["kimi", "acp"], {
-        "runtime_authority": "system_cli",
-        "command_origin": "fallback_cli_name",
-        "command_kind": "kimi_cli",
-        "command_executable": "kimi",
-        "command_target": "kimi",
-    }
-
-
-def classify_provider_command(
-    provider: Provider, *, backend: str | None = None
-) -> dict[str, str]:
-    """Resolve a subprocess provider's launch command without instantiating it.
-
-    Returns the command metadata for a genuinely resolvable command and raises
-    when it cannot be resolved. ``_classify_acp_command`` raises when the Claude
-    ACP entry point is missing, and bare-name command fallbacks are treated as
-    unresolvable rather than silently accepted.
-
-    Raises:
-        ValueError: The provider has no resolvable subprocess command.
-        ConfigError: The Claude ACP entry point/binary does not exist.
-    """
-    if provider in (Provider.CLAUDE, Provider.ZAI):
-        # Z.ai launches the same claude-agent-acp wrapper as Claude; only the
-        # injected auth env differs.
-        resolved_backend = backend if backend is not None else settings.acp_backend
-        _, meta = _classify_acp_command(resolved_backend)
-        return meta
-    if provider == Provider.CODEX:
-        _, meta = _classify_codex_command()
-        if meta.get("command_origin") == "fallback_cli_name":
-            raise ValueError("Codex CLI not resolvable: 'codex' not found on PATH.")
-        return meta
-    if provider == Provider.KIMI:
-        _, meta = _classify_kimi_command()
-        if meta.get("command_origin") == "fallback_cli_name":
-            raise ValueError("Kimi Code CLI not resolvable: 'kimi' not found on PATH.")
-        return meta
-    raise ValueError(f"provider {provider.value} has no subprocess command to classify")
 
 
 _SUPPORTED_PROVIDERS: frozenset[Provider] = frozenset(
@@ -741,7 +303,6 @@ async def _discover_kimi_catalog(
             kimi_api_key=api_key,
             kimi_base_url=settings.kimi_base_url,
             kimi_temporary_model_name=settings.kimi_temporary_model_name,
-            kimi_code_home=settings.kimi_code_home,
             kimi_temporary_model_max_context_size=(
                 settings.kimi_temporary_model_max_context_size
             ),
@@ -749,6 +310,7 @@ async def _discover_kimi_catalog(
                 settings.kimi_temporary_model_capabilities
             ),
         )
+        injected.update(_kimi_home_env(settings.kimi_code_home))
     except ValueError:
         return _unavailable_catalog_discovery(
             key,
@@ -875,6 +437,316 @@ def _admit_and_resolve_model_name(provider: Provider, model: object) -> str:
     return model
 
 
+def _admit_execution_mode(
+    provider: Provider, backend: str | None, execution_mode: object
+) -> str | None:
+    if execution_mode is not None:
+        if not isinstance(execution_mode, str):
+            raise ValueError("execution_mode must be a string")
+        acp_prefixes = {
+            Provider.CLAUDE: "claude-agent-acp:",
+            Provider.ZAI: "zai-claude-agent-acp:",
+        }
+        acp_prefix = acp_prefixes.get(provider)
+        if acp_prefix is not None and execution_mode.startswith(acp_prefix):
+            frozen_backend = execution_mode.removeprefix(acp_prefix)
+            if frozen_backend not in {"node", "binary"}:
+                raise ValueError(
+                    f"Provider {provider.value!r} cannot execute mode "
+                    f"{execution_mode!r}"
+                )
+            if backend is not None and backend != frozen_backend:
+                raise ValueError("backend conflicts with frozen execution_mode")
+            backend = frozen_backend
+        validate_current_execution_lane(provider, execution_mode)
+    return backend
+
+
+def _admit_native_controls(
+    provider: Provider, native_controls: object
+) -> dict[str, str]:
+    if native_controls is None:
+        selected_controls: dict[str, str] = {}
+    elif isinstance(native_controls, dict):
+        raw_controls = cast("dict[object, object]", native_controls)
+        if not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in raw_controls.items()
+        ):
+            raise ValueError("native_controls must map control ids to provider values")
+        selected_controls = cast("dict[str, str]", dict(raw_controls))
+    else:
+        raise ValueError("native_controls must map control ids to provider values")
+    validate_current_native_controls(provider, selected_controls)
+    return selected_controls
+
+
+def _admit_create_options(
+    provider: Provider, backend: str | None, kwargs: dict[str, Any]
+) -> tuple[Any, str | None, dict[str, str]]:
+    timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
+    backend = _admit_execution_mode(
+        provider, backend, kwargs.pop("execution_mode", None)
+    )
+    selected_controls = _admit_native_controls(
+        provider, kwargs.pop("native_controls", None)
+    )
+    return timeout, backend, selected_controls
+
+
+def _create_codex_model(
+    model_name: str,
+    agent_config: AgentConfig | None,
+    workspace_root: Path | None,
+    selected_controls: dict[str, str],
+    timeout: Any,
+) -> BaseChatModel:
+    from .codex_chat_model import CodexChatModel
+
+    command, command_meta = _classify_codex_command()
+    # Codex auth is file-based; no secret env is injected.
+    codex_controls: dict[str, str] = {}
+    for control_id, value in selected_controls.items():
+        field = control_id.partition(":")[0]
+        if field not in {"reasoning_effort", "service_tier"}:
+            raise ValueError(f"Unsupported Codex native control {control_id!r}")
+        if field in codex_controls:
+            raise ValueError(f"Duplicate Codex native control {field!r}")
+        codex_controls[field] = value
+    return CodexChatModel(
+        command=command,
+        model_name=model_name,
+        effort=codex_controls.get("reasoning_effort"),
+        service_tier=codex_controls.get("service_tier"),
+        agent_config=agent_config,
+        workspace_root=str(workspace_root) if workspace_root else None,
+        codex_home=settings.codex_home,
+        timeout=float(timeout),
+        provider=str(Provider.CODEX.value),
+        runtime_authority=command_meta["runtime_authority"],
+        command_origin=command_meta["command_origin"],
+        command_kind=command_meta["command_kind"],
+        command_executable=command_meta["command_executable"],
+        command_target=command_meta["command_target"],
+    )
+
+
+def _create_claude_model(
+    model_name: str,
+    agent_config: AgentConfig | None,
+    workspace_root: Path | None,
+    selected_controls: dict[str, str],
+    backend: str | None,
+) -> BaseChatModel:
+    from .acp_chat_model import AcpChatModel
+
+    backend = backend if backend is not None else settings.acp_backend
+    logger.debug("[%s] Instantiating ACP Wrapper. backend=%s", Provider.CLAUDE, backend)
+    try:
+        command, command_meta = _classify_acp_command(backend)
+    except ConfigError as exc:
+        raise ProviderRuntimeUnavailableError(str(exc)) from exc
+
+    # The CLI inherits ambient authentication; this lane injects no credential.
+    env_vars: dict[str, str] = {}
+    if backend == "binary":
+        env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
+    return AcpChatModel(
+        command=command,
+        env_vars=env_vars,
+        desired_model=model_name,
+        desired_config_options=selected_controls,
+        agent_config=agent_config,
+        workspace_root=str(workspace_root) if workspace_root else None,
+        use_exec=(backend == "binary"),
+        provider=str(Provider.CLAUDE.value),
+        runtime_authority=command_meta["runtime_authority"],
+        command_origin=command_meta["command_origin"],
+        command_kind=command_meta["command_kind"],
+        command_executable=command_meta["command_executable"],
+        command_target=command_meta["command_target"],
+        acp_backend=command_meta["acp_backend"],
+        auth_mode="ambient",
+    )
+
+
+def _create_zai_model(
+    model_name: str,
+    agent_config: AgentConfig | None,
+    workspace_root: Path | None,
+    selected_controls: dict[str, str],
+    backend: str | None,
+) -> BaseChatModel:
+    from .acp_chat_model import AcpChatModel
+
+    backend = backend if backend is not None else settings.acp_backend
+    auth_token = settings.zai_auth_token
+    logger.debug(
+        "[%s] Instantiating ACP Wrapper. Auth token present: %s, backend=%s",
+        Provider.ZAI,
+        bool(auth_token and auth_token.strip()),
+        backend,
+    )
+    try:
+        command, command_meta = _classify_acp_command(backend)
+    except ConfigError as exc:
+        raise ProviderRuntimeUnavailableError(str(exc)) from exc
+    env_vars = _build_zai_env(
+        zai_base_url=settings.zai_base_url,
+        zai_auth_token=auth_token,
+    )
+    if backend == "binary":
+        env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
+    return AcpChatModel(
+        command=command,
+        env_vars=env_vars,
+        desired_model=model_name,
+        desired_config_options=selected_controls,
+        agent_config=agent_config,
+        workspace_root=str(workspace_root) if workspace_root else None,
+        use_exec=(backend == "binary"),
+        provider=str(Provider.ZAI.value),
+        runtime_authority=command_meta["runtime_authority"],
+        command_origin=command_meta["command_origin"],
+        command_kind=command_meta["command_kind"],
+        command_executable=command_meta["command_executable"],
+        command_target=command_meta["command_target"],
+        acp_backend=command_meta["acp_backend"],
+        auth_mode=(
+            "zai_auth_token" if "ANTHROPIC_AUTH_TOKEN" in env_vars else "none_detected"
+        ),
+    )
+
+
+def _create_kimi_model(
+    model_name: str,
+    agent_config: AgentConfig | None,
+    workspace_root: Path | None,
+    selected_controls: dict[str, str],
+) -> BaseChatModel:
+    from .acp_chat_model import AcpChatModel
+
+    # The exact catalog alias travels through Kimi's own -m option.
+    base_command, command_meta = _classify_kimi_command()
+    command = [base_command[0], "-m", model_name, *base_command[1:]]
+    api_key = (
+        settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
+    )
+    env_vars = _build_kimi_env(
+        kimi_api_key=api_key,
+        kimi_base_url=settings.kimi_base_url,
+        kimi_temporary_model_name=settings.kimi_temporary_model_name,
+        kimi_temporary_model_max_context_size=(
+            settings.kimi_temporary_model_max_context_size
+        ),
+        kimi_temporary_model_capabilities=settings.kimi_temporary_model_capabilities,
+    )
+    env_vars.update(_kimi_home_env(settings.kimi_code_home))
+    kimi_effort: str | None = None
+    for control_id, value in selected_controls.items():
+        if control_id.partition(":")[0] != "thinking_effort":
+            raise ValueError(f"Unsupported Kimi native control {control_id!r}")
+        if kimi_effort is not None:
+            raise ValueError("Duplicate Kimi thinking-effort control")
+        kimi_effort = value
+    if kimi_effort is not None:
+        env_vars["KIMI_MODEL_THINKING_EFFORT"] = kimi_effort
+    logger.debug(
+        "[%s] Instantiating Kimi ACP agent. Temporary definition present: %s",
+        Provider.KIMI,
+        "KIMI_MODEL_API_KEY" in env_vars,
+    )
+    return AcpChatModel(
+        command=command,
+        env_vars=env_vars,
+        agent_config=agent_config,
+        workspace_root=str(workspace_root) if workspace_root else None,
+        provider=str(Provider.KIMI.value),
+        acp_family="kimi",
+        runtime_authority=command_meta["runtime_authority"],
+        command_origin=command_meta["command_origin"],
+        command_kind=command_meta["command_kind"],
+        command_executable=command_meta["command_executable"],
+        command_target=command_meta["command_target"],
+        acp_backend="kimi-code",
+        auth_mode=(
+            "temporary_model"
+            if "KIMI_MODEL_API_KEY" in env_vars
+            else "persisted_config"
+        ),
+    )
+
+
+def _create_openai_compatible_model(
+    provider: Provider, model_name: str, timeout: Any, kwargs: dict[str, Any]
+) -> BaseChatModel:
+    from langchain_openai import ChatOpenAI
+
+    if provider == Provider.ZHIPU:
+        setting_key = settings.zhipu_api_key
+        env_name = "ZHIPU_API_KEY"
+        base_url = "https://open.bigmodel.cn/api/paas/v4/"
+    elif provider == Provider.OPENAI:
+        setting_key = settings.openai_api_key
+        env_name = "OPENAI_API_KEY"
+        base_url = settings.openai_base_url
+    else:
+        raise ValueError(f"Unsupported provider: {provider}")
+    auth_resolved = (
+        "kwargs" if "api_key" in kwargs else env_name if setting_key else None
+    )
+    api_key = kwargs.pop("api_key", None) or setting_key
+    if not api_key:
+        logger.error("Failed to authenticate %s: Missing %s", provider, env_name)
+        raise ValueError(f"Authentication required for {provider}")
+    logger.debug("[%s] Resolved authentication via: %s", provider, auth_resolved)
+    kwargs["api_key"] = api_key
+    kwargs["model"] = model_name
+    kwargs["base_url"] = base_url
+    kwargs["timeout"] = timeout
+    kwargs["max_retries"] = 2
+    return ChatOpenAI(**kwargs)
+
+
+def _create_in_process_model(
+    provider: Provider, agent_config: AgentConfig | None, kwargs: dict[str, Any]
+) -> BaseChatModel:
+    if provider == Provider.MOCK:
+        from .mock_chat_model import MockChatModel
+
+        return MockChatModel(agent_config=agent_config)
+    if provider != Provider.DETERMINISTIC:
+        raise ValueError(f"Unsupported provider: {provider}")
+    from .deterministic_chat_model import DeterministicResearchAdrChatModel
+
+    det_kwargs = {key: kwargs[key] for key in ("feature_tag", "topic") if key in kwargs}
+    return DeterministicResearchAdrChatModel(agent_config=agent_config, **det_kwargs)
+
+
+def _bind_create_options(
+    args: tuple[object, ...], kwargs: dict[str, Any]
+) -> tuple[AgentConfig | None, Path | None, str | None]:
+    names = ("agent_config", "workspace_root", "backend")
+    if len(args) > len(names):
+        raise TypeError(
+            f"create() takes at most {len(names) + 2} positional arguments "
+            f"({len(args) + 2} given)"
+        )
+    bound: list[object | None] = []
+    for index, name in enumerate(names):
+        if index < len(args):
+            if name in kwargs:
+                raise TypeError(f"create() got multiple values for argument {name!r}")
+            bound.append(args[index])
+        else:
+            bound.append(kwargs.pop(name, None))
+    return (
+        cast("AgentConfig | None", bound[0]),
+        cast("Path | None", bound[1]),
+        cast("str | None", bound[2]),
+    )
+
+
 class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
@@ -972,9 +844,7 @@ class ProviderFactory:
         self,
         provider: Provider,
         model: str,
-        agent_config: AgentConfig | None = None,
-        workspace_root: Path | None = None,
-        backend: str | None = None,
+        *args: object,
         **kwargs: Any,
     ) -> BaseChatModel:
         """Create a configured BaseChatModel for the given provider.
@@ -994,51 +864,10 @@ class ProviderFactory:
         Returns:
             A LangChain BaseChatModel implementation.
         """
-        # Imported here rather than at module scope: this is the only place that
-        # builds one, and the LangChain model stack costs tens of seconds to load,
-        # which every caller of this module's classification helpers used to pay to
-        # answer a question that needs no model at all.
-        from langchain_openai import ChatOpenAI
-
-        from .acp_chat_model import AcpChatModel
-
-        timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
-        execution_mode = kwargs.pop("execution_mode", None)
-        native_controls = kwargs.pop("native_controls", None)
-        if execution_mode is not None:
-            if not isinstance(execution_mode, str):
-                raise ValueError("execution_mode must be a string")
-            acp_prefixes = {
-                Provider.CLAUDE: "claude-agent-acp:",
-                Provider.ZAI: "zai-claude-agent-acp:",
-            }
-            acp_prefix = acp_prefixes.get(provider)
-            if acp_prefix is not None and execution_mode.startswith(acp_prefix):
-                frozen_backend = execution_mode.removeprefix(acp_prefix)
-                if frozen_backend not in {"node", "binary"}:
-                    raise ValueError(
-                        f"Provider {provider.value!r} cannot execute mode "
-                        f"{execution_mode!r}"
-                    )
-                if backend is not None and backend != frozen_backend:
-                    raise ValueError("backend conflicts with frozen execution_mode")
-                backend = frozen_backend
-            validate_current_execution_lane(provider, execution_mode)
-        if native_controls is None:
-            selected_controls: dict[str, str] = {}
-        elif isinstance(native_controls, dict):
-            raw_controls = cast("dict[object, object]", native_controls)
-            if not all(
-                isinstance(key, str) and isinstance(value, str)
-                for key, value in raw_controls.items()
-            ):
-                raise ValueError(
-                    "native_controls must map control ids to provider values"
-                )
-            selected_controls = cast("dict[str, str]", dict(raw_controls))
-        else:
-            raise ValueError("native_controls must map control ids to provider values")
-        validate_current_native_controls(provider, selected_controls)
+        agent_config, workspace_root, backend = _bind_create_options(args, kwargs)
+        timeout, backend, selected_controls = _admit_create_options(
+            provider, backend, kwargs
+        )
 
         # Admission: refuse an unsupported provider and resolve its model name
         # before any construction begins, so a bad request fails clearly rather
@@ -1051,205 +880,27 @@ class ProviderFactory:
             model_name,
         )
 
-        if provider == Provider.MOCK:
-            from .mock_chat_model import MockChatModel
-
-            return MockChatModel(agent_config=agent_config)
-
-        if provider == Provider.DETERMINISTIC:
-            from .deterministic_chat_model import DeterministicResearchAdrChatModel
-
-            # In-process, role-keyed content; no network, no model resolution. Any
-            # feature_tag/topic overrides ride in kwargs from the harness.
-            det_kwargs = {
-                key: kwargs[key] for key in ("feature_tag", "topic") if key in kwargs
-            }
-            return DeterministicResearchAdrChatModel(
-                agent_config=agent_config, **det_kwargs
-            )
+        if provider in {Provider.MOCK, Provider.DETERMINISTIC}:
+            return _create_in_process_model(provider, agent_config, kwargs)
 
         if provider == Provider.CODEX:
-            from .codex_chat_model import CodexChatModel
-
-            command, command_meta = _classify_codex_command()
-            # Codex auth is file-based (persisted local session in the Codex home);
-            # no secret env is injected. Pass the required exact frozen model
-            # value through unchanged.
-            codex_controls: dict[str, str] = {}
-            for control_id, value in selected_controls.items():
-                field = control_id.partition(":")[0]
-                if field not in {"reasoning_effort", "service_tier"}:
-                    raise ValueError(f"Unsupported Codex native control {control_id!r}")
-                if field in codex_controls:
-                    raise ValueError(f"Duplicate Codex native control {field!r}")
-                codex_controls[field] = value
-            return CodexChatModel(
-                command=command,
-                model_name=model_name,
-                effort=codex_controls.get("reasoning_effort"),
-                service_tier=codex_controls.get("service_tier"),
-                agent_config=agent_config,
-                workspace_root=str(workspace_root) if workspace_root else None,
-                codex_home=settings.codex_home,
-                timeout=float(timeout),
-                provider=str(provider.value),
-                runtime_authority=command_meta["runtime_authority"],
-                command_origin=command_meta["command_origin"],
-                command_kind=command_meta["command_kind"],
-                command_executable=command_meta["command_executable"],
-                command_target=command_meta["command_target"],
+            return _create_codex_model(
+                model_name, agent_config, workspace_root, selected_controls, timeout
             )
 
         if provider == Provider.CLAUDE:
-            backend = backend if backend is not None else settings.acp_backend
-            logger.debug(
-                "[%s] Instantiating ACP Wrapper. backend=%s", provider, backend
-            )
-
-            try:
-                command, command_meta = _classify_acp_command(backend)
-            except ConfigError as exc:
-                raise ProviderRuntimeUnavailableError(str(exc)) from exc
-
-            # No authentication is implemented for this lane: the spawned CLI
-            # inherits the ambient environment and the operator's real config
-            # home, and resolves whatever auth the operator ambiently has - a
-            # logged-in CLI session, an API key in the environment, either -
-            # exactly as an interactive `claude` invocation would. This layer
-            # injects nothing, reads no credential, and expresses no preference.
-            env_vars: dict[str, str] = {}
-            # Binary Bun executable requires this flag so acp-agent.ts can detect
-            # it is running as a single-file Bun bundle (not via node + index.js).
-            if backend == "binary":
-                env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
-
-            return AcpChatModel(
-                command=command,
-                env_vars=env_vars,
-                desired_model=model_name,
-                desired_config_options=selected_controls,
-                agent_config=agent_config,
-                workspace_root=str(workspace_root) if workspace_root else None,
-                # Native PE32+ binary bypasses cmd.exe shim — use exec directly.
-                use_exec=(backend == "binary"),
-                provider=str(provider.value),
-                runtime_authority=command_meta["runtime_authority"],
-                command_origin=command_meta["command_origin"],
-                command_kind=command_meta["command_kind"],
-                command_executable=command_meta["command_executable"],
-                command_target=command_meta["command_target"],
-                acp_backend=command_meta["acp_backend"],
-                auth_mode="ambient",
+            return _create_claude_model(
+                model_name, agent_config, workspace_root, selected_controls, backend
             )
 
         if provider == Provider.ZAI:
-            # Z.ai is a config variant of the Claude ACP path: same wrapper
-            # command, Anthropic base URL + auth token injected instead of the
-            # Claude OAuth token. ENABLE_TOOL_SEARCH
-            # and the other Claude-CLI behaviours in AcpChatModel._astream are
-            # inherited unchanged.
-            backend = backend if backend is not None else settings.acp_backend
-            auth_token = settings.zai_auth_token
-            logger.debug(
-                "[%s] Instantiating ACP Wrapper. Auth token present: %s, backend=%s",
-                provider,
-                bool(auth_token and auth_token.strip()),
-                backend,
-            )
-
-            try:
-                command, command_meta = _classify_acp_command(backend)
-            except ConfigError as exc:
-                raise ProviderRuntimeUnavailableError(str(exc)) from exc
-
-            env_vars = _build_zai_env(
-                zai_base_url=settings.zai_base_url,
-                zai_auth_token=auth_token,
-            )
-            if backend == "binary":
-                env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
-
-            return AcpChatModel(
-                command=command,
-                env_vars=env_vars,
-                desired_model=model_name,
-                desired_config_options=selected_controls,
-                agent_config=agent_config,
-                workspace_root=str(workspace_root) if workspace_root else None,
-                use_exec=(backend == "binary"),
-                provider=str(provider.value),
-                runtime_authority=command_meta["runtime_authority"],
-                command_origin=command_meta["command_origin"],
-                command_kind=command_meta["command_kind"],
-                command_executable=command_meta["command_executable"],
-                command_target=command_meta["command_target"],
-                acp_backend=command_meta["acp_backend"],
-                auth_mode=(
-                    "zai_auth_token"
-                    if "ANTHROPIC_AUTH_TOKEN" in env_vars
-                    else "none_detected"
-                ),
+            return _create_zai_model(
+                model_name, agent_config, workspace_root, selected_controls, backend
             )
 
         if provider == Provider.KIMI:
-            # Kimi Code owns its provider aliases. The exact catalog-selected
-            # alias is passed through the installed CLI's `-m` option; it is not
-            # reinterpreted as a temporary-provider KIMI_MODEL_NAME.
-            base_command, command_meta = _classify_kimi_command()
-            command = [base_command[0], "-m", model_name, *base_command[1:]]
-            api_key = (
-                settings.kimi_api_key.get_secret_value()
-                if settings.kimi_api_key
-                else None
-            )
-            env_vars = _build_kimi_env(
-                kimi_api_key=api_key,
-                kimi_base_url=settings.kimi_base_url,
-                kimi_temporary_model_name=settings.kimi_temporary_model_name,
-                kimi_code_home=settings.kimi_code_home,
-                kimi_temporary_model_max_context_size=(
-                    settings.kimi_temporary_model_max_context_size
-                ),
-                kimi_temporary_model_capabilities=(
-                    settings.kimi_temporary_model_capabilities
-                ),
-            )
-            kimi_effort: str | None = None
-            for control_id, value in selected_controls.items():
-                if control_id.partition(":")[0] != "thinking_effort":
-                    raise ValueError(f"Unsupported Kimi native control {control_id!r}")
-                if kimi_effort is not None:
-                    raise ValueError("Duplicate Kimi thinking-effort control")
-                kimi_effort = value
-            if kimi_effort is not None:
-                # Kimi's model-scoped environment binding is the supported
-                # per-invocation override; the CLI intentionally has no effort
-                # flag. Admission already proved this value belongs to the alias.
-                env_vars["KIMI_MODEL_THINKING_EFFORT"] = kimi_effort
-            logger.debug(
-                "[%s] Instantiating Kimi ACP agent. Temporary definition present: %s",
-                provider,
-                "KIMI_MODEL_API_KEY" in env_vars,
-            )
-
-            return AcpChatModel(
-                command=command,
-                env_vars=env_vars,
-                agent_config=agent_config,
-                workspace_root=str(workspace_root) if workspace_root else None,
-                provider=str(provider.value),
-                acp_family="kimi",
-                runtime_authority=command_meta["runtime_authority"],
-                command_origin=command_meta["command_origin"],
-                command_kind=command_meta["command_kind"],
-                command_executable=command_meta["command_executable"],
-                command_target=command_meta["command_target"],
-                acp_backend="kimi-code",
-                auth_mode=(
-                    "temporary_model"
-                    if "KIMI_MODEL_API_KEY" in env_vars
-                    else "persisted_config"
-                ),
+            return _create_kimi_model(
+                model_name, agent_config, workspace_root, selected_controls
             )
 
         if selected_controls:
@@ -1257,59 +908,10 @@ class ProviderFactory:
                 f"Provider {provider.value!r} has no exact native-control executor"
             )
 
-        if provider == Provider.ZHIPU:
-            auth_resolved = (
-                "kwargs"
-                if "api_key" in kwargs
-                else "ZHIPU_API_KEY"
-                if settings.zhipu_api_key
-                else None
+        if provider in {Provider.ZHIPU, Provider.OPENAI}:
+            return _create_openai_compatible_model(
+                provider, model_name, timeout, kwargs
             )
-            api_key = kwargs.pop("api_key", None) or settings.zhipu_api_key
-
-            if not api_key:
-                logger.error(
-                    "Failed to authenticate %s: Missing ZHIPU_API_KEY", provider
-                )
-                raise ValueError(f"Authentication required for {provider}")
-
-            logger.debug(
-                "[%s] Resolved authentication via: %s", provider, auth_resolved
-            )
-            kwargs["api_key"] = api_key
-            kwargs["model"] = model_name
-            kwargs["base_url"] = "https://open.bigmodel.cn/api/paas/v4/"
-            kwargs["timeout"] = timeout
-            kwargs["max_retries"] = 2
-
-            return ChatOpenAI(**kwargs)
-
-        if provider == Provider.OPENAI:
-            auth_resolved = (
-                "kwargs"
-                if "api_key" in kwargs
-                else "OPENAI_API_KEY"
-                if settings.openai_api_key
-                else None
-            )
-            api_key = kwargs.pop("api_key", None) or settings.openai_api_key
-
-            if not api_key:
-                logger.error(
-                    "Failed to authenticate %s: Missing OPENAI_API_KEY", provider
-                )
-                raise ValueError(f"Authentication required for {provider}")
-
-            logger.debug(
-                "[%s] Resolved authentication via: %s", provider, auth_resolved
-            )
-            kwargs["api_key"] = api_key
-            kwargs["model"] = model_name
-            kwargs["base_url"] = settings.openai_base_url
-            kwargs["timeout"] = timeout
-            kwargs["max_retries"] = 2
-
-            return ChatOpenAI(**kwargs)
 
         logger.error("Failed to instantiate: Unsupported provider %s", provider)
         raise ValueError(f"Unsupported provider: {provider}")

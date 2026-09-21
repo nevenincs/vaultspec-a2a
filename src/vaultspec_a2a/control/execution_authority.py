@@ -14,7 +14,6 @@ from ..providers.team_selection import (
 from ..utils.coercion import coerce_object_mapping
 
 __all__ = [
-    "ExecutionAuthority",
     "ExecutionAuthorityError",
     "ExecutionAuthorityFailure",
     "resolve_execution_authority",

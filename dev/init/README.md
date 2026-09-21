@@ -9,11 +9,13 @@ The recipes:
 
 | Recipe             | What it does                                                  |
 | ------------------ | ------------------------------------------------------------- |
-| `just init`        | Everything, in dependency order.                              |
+| `just init`        | Python environment and repository tools.                      |
+| `just init-full`   | Python, pinned Node ACP runtime, and tools.                    |
 | `just init-python` | The Python environment and its locked dependencies.           |
 | `just init-node`   | The pinned Node dependency graph.                             |
 | `just init-tools`  | Framework enrollment, git hooks, and host-tool diagnosis.     |
 | `just init-check`  | Reports whether the worktree is initialized. Mutates nothing. |
+| `just init-full-check` | Checks Python, Node, and tools without mutation.       |
 
 ## The contract
 
@@ -56,8 +58,8 @@ the repository.
 command. There are no `[windows]`/`[unix]` recipe pairs and no shell logic,
 which is what lets one implementation serve `cmd.exe`, `pwsh` and `sh` alike.
 
-**It provisions the worktree, not the workstation.** `uv`, `just`, `node`,
-`rustup` and `mise` are the operator's responsibility; `init` probes for them,
+**It provisions the worktree, not the workstation.** `uv` and `just` are the
+operator's responsibility. `init-full` also requires `node` and `npm`; setup probes for them,
 reports the complete list of what is missing with installation URLs, and exits
 `2`. It never installs system packages — a bootstrap that does cannot be run on
 a machine you do not administer, or in a sandbox.
@@ -68,8 +70,7 @@ stay behind their own named recipes. `init` restores what the lockfiles pin.
 
 ## Layout
 
-Every file here except `plan.py` is byte-identical in `vaultspec-core`,
-`vaultspec-rag`, `vaultspec-dashboard`, `vaultspec-a2a` and `cadrumo`.
+The phase plan and selector policy are specific to this repository.
 
 | File          | Role                                                           |
 | ------------- | -------------------------------------------------------------- |

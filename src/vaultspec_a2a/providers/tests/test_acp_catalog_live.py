@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,9 +10,11 @@ import psutil
 import pytest
 
 from ...control.config import settings
+from ...graph.enums import Provider
 from ...workspace.environment import resolve_env_vars
+from .._factory_commands import _CLAUDE_ACP_JS, _classify_acp_command
 from ..acp_catalog import discover_acp_catalog
-from ..factory import _CLAUDE_ACP_JS, _classify_acp_command
+from ..cli_resolution import resolve_provider_cli_executable
 from ..provider_catalog import (
     AuthenticationState,
     CatalogStatus,
@@ -38,7 +39,7 @@ def _real_adapter_inputs() -> tuple[
     if token:
         environment["CLAUDE_CODE_OAUTH_TOKEN"] = token
     environment.pop("ANTHROPIC_API_KEY", None)
-    if claude := shutil.which("claude"):
+    if claude := resolve_provider_cli_executable(Provider.CLAUDE):
         environment["CLAUDE_CODE_EXECUTABLE"] = claude
     environment.pop("CLAUDECODE", None)
     return tuple(command), environment, metadata

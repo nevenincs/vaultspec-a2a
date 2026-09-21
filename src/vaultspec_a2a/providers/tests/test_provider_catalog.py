@@ -26,6 +26,7 @@ from ..provider_catalog import (
     NativeControlOption,
     ProviderCatalog,
     ProviderCatalogKey,
+    ProviderHealthAxes,
     SelectionReference,
     StructuredProviderHealth,
 )
@@ -158,19 +159,23 @@ def test_catalog_rejects_model_references_to_unadvertised_controls() -> None:
 
 def test_structured_health_derives_selectability_from_independent_axes() -> None:
     healthy = StructuredProviderHealth.derive(
-        configured=HealthState.AVAILABLE,
-        transport=HealthState.AVAILABLE,
-        authentication=AuthenticationState.AUTHENTICATED,
-        catalog=CatalogStatus.AVAILABLE,
-        admission=AdmissionState.ADMITTED,
+        axes=ProviderHealthAxes(
+            configured=HealthState.AVAILABLE,
+            transport=HealthState.AVAILABLE,
+            authentication=AuthenticationState.AUTHENTICATED,
+            catalog=CatalogStatus.AVAILABLE,
+            admission=AdmissionState.ADMITTED,
+        ),
         checked_at=datetime.now(UTC),
     )
     unproven = StructuredProviderHealth.derive(
-        configured=HealthState.AVAILABLE,
-        transport=HealthState.AVAILABLE,
-        authentication=AuthenticationState.UNKNOWN,
-        catalog=CatalogStatus.AVAILABLE,
-        admission=AdmissionState.UNKNOWN,
+        axes=ProviderHealthAxes(
+            configured=HealthState.AVAILABLE,
+            transport=HealthState.AVAILABLE,
+            authentication=AuthenticationState.UNKNOWN,
+            catalog=CatalogStatus.AVAILABLE,
+            admission=AdmissionState.UNKNOWN,
+        ),
         reasons=("authentication and completed-turn admission are unproven",),
         checked_at=datetime.now(UTC),
     )

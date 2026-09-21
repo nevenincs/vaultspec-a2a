@@ -35,11 +35,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..utils.process import (
-    ProcessContainment,
-    ProcessContainmentError,
-    detached_spawn_kwargs,
-)
+from ..utils._process_tree import detached_spawn_kwargs
+from ..utils.process import ProcessContainment, ProcessContainmentError
 from .manager import render_command
 from .procs_config import load_procs_config
 from .registration import (

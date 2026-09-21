@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from ..control.recovery_authority import RecoveryTrigger, reconcile_run_checkpoint
+from ..control.recovery_authority import (
+    RecoveryRequest,
+    RecoveryTrigger,
+    reconcile_run_checkpoint,
+)
 from ..domain_config import domain_config
 from ..thread.enums import ThreadStatus
 from .permission_repository import prune_repair_journal
@@ -49,9 +53,11 @@ async def reconcile_threads_on_startup(
         observed = await reconcile_run_checkpoint(
             session,
             checkpointer,
-            thread_id,
-            checkpoint_timeout_seconds=remaining,
-            trigger=RecoveryTrigger.STARTUP,
+            RecoveryRequest(
+                thread_id=thread_id,
+                checkpoint_timeout_seconds=remaining,
+                trigger=RecoveryTrigger.STARTUP,
+            ),
         )
         settled += int(observed.status is ThreadStatus.COMPLETED)
         paused += int(observed.status is ThreadStatus.INPUT_REQUIRED)

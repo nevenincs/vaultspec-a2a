@@ -9,13 +9,13 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
-from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.permission_service import (
+from ...control._permission_response_contract import (
+    PermissionInput,
+    PermissionRuntime,
     permission_response_action_key,
-    respond_to_permission,
 )
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_thread,
@@ -23,10 +23,11 @@ from ...database import (
     record_permission_request,
 )
 from ...database.models import Base
-from ...streaming.aggregator import EventAggregator
+from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
 from ._catalog_authority import current_execution_metadata
+from .test_dispatch_failure_transitions import _seed_accepted_initial_action
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,6 +62,7 @@ async def _run_case(runtime_dir: Path, bodies: list[tuple[str, str | None]]):
             description="Allow the operation?",
             allowed_options=_OPTIONS,
         )
+        await _seed_accepted_initial_action(session, thread.id, workspace=runtime_dir)
         await session.commit()
         thread_id = thread.id
 
@@ -78,16 +80,10 @@ async def _run_case(runtime_dir: Path, bodies: list[tuple[str, str | None]]):
             await start.wait()
             return await respond_to_permission(
                 session,
-                request_id=request_id,
-                option_id=option_id,
-                notes=notes,
-                idempotency_key=f"client-retry-{index}",
-                aggregator=EventAggregator(),
-                circuit_breaker=breaker,
-                worker_spawner=spawner,
-                worker_client=client,
-                recursion_limit=25,
-                trace_headers=None,
+                response=PermissionInput(
+                    request_id, option_id, f"client-retry-{index}", notes
+                ),
+                runtime=PermissionRuntime(breaker, spawner, client, 25, None),
             )
 
     tasks = [

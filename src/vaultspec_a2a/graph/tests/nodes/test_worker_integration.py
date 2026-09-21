@@ -15,9 +15,8 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from pydantic import PrivateAttr
 
-from vaultspec_a2a.tests._write_authority import make_test_write_authority
-
 from ....conftest import materialize_schema
+from ....tests._write_authority import make_test_write_authority
 from ....thread.state import TeamState
 from ...nodes.worker import create_worker_node
 from .._state_graph_helpers import add_test_node, compile_test_graph

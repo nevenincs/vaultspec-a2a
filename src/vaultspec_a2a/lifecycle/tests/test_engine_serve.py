@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from ...testing import armed_environment as _environ
-from ...utils.process import kill_pid_tree_async, pid_is_live
+from ...utils._process_tree import kill_pid_tree_async, pid_is_live
 from ..engine_serve import EngineSeatError, engine_command, resolve_data_seat, serve
 
 _SERVE_CMD_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"

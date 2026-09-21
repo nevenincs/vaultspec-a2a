@@ -7,7 +7,7 @@ import json
 import os
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from sqlalchemy import and_, exists, func, or_, select, update
@@ -224,23 +224,34 @@ def _workspace_key(workspace_root: str | None) -> str | None:
     return hashlib.sha256(workspace_root.encode("utf-8")).hexdigest()
 
 
+class _CreateThreadOptional(TypedDict, total=False):
+    title: str | None
+    status: ThreadStatus | str
+    metadata: str | None
+    nickname: str | None
+    thread_id: str | None
+    team_preset: str | None
+    repair_status: RepairStatus | str
+    repair_reason: str | None
+    execution_readiness: RepairStatus | str
+
+
+class _CreateThreadArgs(_CreateThreadOptional):
+    write_authority: RunWriteAuthority
+
+
 async def create_thread(
-    session: AsyncSession,
-    *,
-    write_authority: RunWriteAuthority,
-    title: str | None = None,
-    status: ThreadStatus | str = ThreadStatus.SUBMITTED,
-    metadata: str | None = None,
-    nickname: str | None = None,
-    thread_id: str | None = None,
-    team_preset: str | None = None,
-    repair_status: RepairStatus | str = RepairStatus.HEALTHY,
-    repair_reason: str | None = None,
-    execution_readiness: RepairStatus | str = RepairStatus.HEALTHY,
+    session: AsyncSession, **options: Unpack[_CreateThreadArgs]
 ) -> ThreadModel:
     """Create a new orchestration thread."""
-    coerced_status = _coerce_status(status)
-    coerced_repair_status = _coerce_repair_status(repair_status)
+    write_authority = options["write_authority"]
+    metadata = options.get("metadata")
+    nickname = options.get("nickname")
+    thread_id = options.get("thread_id")
+    coerced_status = _coerce_status(options.get("status", ThreadStatus.SUBMITTED))
+    coerced_repair_status = _coerce_repair_status(
+        options.get("repair_status", RepairStatus.HEALTHY)
+    )
 
     if nickname is not None:
         existing = (
@@ -258,18 +269,18 @@ async def create_thread(
         writer_generation=write_authority.writer_generation,
         writer_action_type=write_authority.action_type.value,
         writer_action_receipt_id=write_authority.action_receipt_id,
-        title=title,
+        title=options.get("title"),
         status=coerced_status.value,
         is_active=coerced_status in ACTIVE_STATUSES,
         repair_status=coerced_repair_status.value,
-        repair_reason=repair_reason,
-        execution_readiness=execution_readiness,
+        repair_reason=options.get("repair_reason"),
+        execution_readiness=options.get("execution_readiness", RepairStatus.HEALTHY),
         thread_metadata=metadata,
         workspace_root=workspace_root,
         workspace_key=_workspace_key(workspace_root),
         feature_tag=feature_tag,
         nickname=nickname,
-        team_preset=team_preset,
+        team_preset=options.get("team_preset"),
     )
     try:
         return await save_model(session, thread)
@@ -362,16 +373,26 @@ async def list_non_terminal_threads(session: AsyncSession) -> Sequence[ThreadMod
     return result.scalars().all()
 
 
+class _ActivePageOptional(TypedDict, total=False):
+    workspace_root: str | None
+    feature_tag: str | None
+    after_created_at: datetime | None
+    after_id: str | None
+
+
+class _ActivePageArgs(_ActivePageOptional):
+    limit: int
+
+
 async def list_active_thread_page(
-    session: AsyncSession,
-    *,
-    limit: int,
-    workspace_root: str | None = None,
-    feature_tag: str | None = None,
-    after_created_at: datetime | None = None,
-    after_id: str | None = None,
+    session: AsyncSession, **kwargs: Unpack[_ActivePageArgs]
 ) -> Sequence[ActiveThreadProjection]:
     """Return one narrow, keyset-paginated page of durable active threads."""
+    limit = kwargs["limit"]
+    workspace_root = kwargs.get("workspace_root")
+    feature_tag = kwargs.get("feature_tag")
+    after_created_at = kwargs.get("after_created_at")
+    after_id = kwargs.get("after_id")
     if not 1 <= limit <= 101:
         msg = "active-thread page limit must be between 1 and 101"
         raise ValueError(msg)
@@ -530,15 +551,32 @@ def _validate_successor_authority(
         raise ValueError(f"successor writer_generation must {relation}")
 
 
-async def elect_thread_status(
-    session: AsyncSession,
-    thread_id: str,
-    *,
+def _validate_election_inputs(
     expectation: ThreadWriteExpectation,
     status: ThreadStatus,
     successor: RunWriteAuthority,
-    failure_reason: str | None = None,
-    provider_condition: str | None = None,
+) -> None:
+    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
+        raise TypeError("expectation must be a ThreadWriteExpectation")
+    if not isinstance(cast("object", status), ThreadStatus):
+        raise TypeError("status must be a ThreadStatus")
+    if not isinstance(cast("object", successor), RunWriteAuthority):
+        raise TypeError("successor must be a RunWriteAuthority")
+
+
+class _ElectionOptional(TypedDict, total=False):
+    failure_reason: str | None
+    provider_condition: str | None
+
+
+class _ElectionArgs(_ElectionOptional):
+    expectation: ThreadWriteExpectation
+    status: ThreadStatus
+    successor: RunWriteAuthority
+
+
+async def elect_thread_status(
+    session: AsyncSession, thread_id: str, **kwargs: Unpack[_ElectionArgs]
 ) -> ThreadStatusElectionResult:
     """Atomically elect one lifecycle writer from an exact durable witness.
 
@@ -548,13 +586,12 @@ async def elect_thread_status(
     a same-thread, same-action journal row; absence is a typed refusal and never
     causes authority to be invented.
     """
-    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
-        raise TypeError("expectation must be a ThreadWriteExpectation")
-    if not isinstance(cast("object", status), ThreadStatus):
-        raise TypeError("status must be a ThreadStatus")
-    if not isinstance(cast("object", successor), RunWriteAuthority):
-        raise TypeError("successor must be a RunWriteAuthority")
-
+    expectation = kwargs["expectation"]
+    status = kwargs["status"]
+    successor = kwargs["successor"]
+    failure_reason = kwargs.get("failure_reason")
+    provider_condition = kwargs.get("provider_condition")
+    _validate_election_inputs(expectation, status, successor)
     validate_transition(expectation.status, status, thread_id=thread_id)
     _validate_successor_authority(expectation, successor)
     current = expectation.authority
@@ -763,19 +800,30 @@ async def update_thread_status(
     return thread
 
 
+class _RepairOptional(TypedDict, total=False):
+    repair_reason: str | None
+    execution_readiness: RepairStatus | str | None
+    last_requested_action: ControlActionType | str | None
+    last_applied_action: ControlActionType | str | None
+    increment_generation: bool
+    increment_recovery_epoch: bool
+
+
+class _RepairArgs(_RepairOptional):
+    repair_status: RepairStatus | str
+
+
 async def set_thread_repair_state(
-    session: AsyncSession,
-    thread_id: str,
-    *,
-    repair_status: RepairStatus | str,
-    repair_reason: str | None = None,
-    execution_readiness: RepairStatus | str | None = None,
-    last_requested_action: ControlActionType | str | None = None,
-    last_applied_action: ControlActionType | str | None = None,
-    increment_generation: bool = False,
-    increment_recovery_epoch: bool = False,
+    session: AsyncSession, thread_id: str, **kwargs: Unpack[_RepairArgs]
 ) -> ThreadModel | None:
     """Persist thread repair metadata used by restart reconciliation."""
+    repair_status = kwargs["repair_status"]
+    repair_reason = kwargs.get("repair_reason")
+    execution_readiness = kwargs.get("execution_readiness")
+    last_requested_action = kwargs.get("last_requested_action")
+    last_applied_action = kwargs.get("last_applied_action")
+    increment_generation = kwargs.get("increment_generation", False)
+    increment_recovery_epoch = kwargs.get("increment_recovery_epoch", False)
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
@@ -801,17 +849,23 @@ async def set_thread_repair_state(
     return thread
 
 
+class _ApprovalStateOptions(TypedDict, total=False):
+    approval_status: ApprovalStatus | str | _UnsetType | None
+    approval_request_id: str | _UnsetType | None
+    approval_reason: str | _UnsetType | None
+    approval_response_action_id: str | _UnsetType | None
+    approval_updated_at: datetime | None
+
+
 async def set_thread_approval_state(
-    session: AsyncSession,
-    thread_id: str,
-    *,
-    approval_status: ApprovalStatus | str | _UnsetType | None = _UNSET,
-    approval_request_id: str | _UnsetType | None = _UNSET,
-    approval_reason: str | _UnsetType | None = _UNSET,
-    approval_response_action_id: str | _UnsetType | None = _UNSET,
-    approval_updated_at: datetime | None = None,
+    session: AsyncSession, thread_id: str, **kwargs: Unpack[_ApprovalStateOptions]
 ) -> ThreadModel | None:
     """Persist durable plan-approval state on the thread row."""
+    approval_status = kwargs.get("approval_status", _UNSET)
+    approval_request_id = kwargs.get("approval_request_id", _UNSET)
+    approval_reason = kwargs.get("approval_reason", _UNSET)
+    approval_response_action_id = kwargs.get("approval_response_action_id", _UNSET)
+    approval_updated_at = kwargs.get("approval_updated_at")
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
@@ -832,27 +886,14 @@ async def set_thread_approval_state(
     return thread
 
 
-async def record_thread_execution_state(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    checkpoint_id: str | None,
-    parent_checkpoint_id: str | None,
-    snapshot_created_at: datetime | None,
-    task_count: int,
-    interrupt_count: int,
-    next_nodes: list[str],
-    interrupt_types: list[str],
-    tasks: list[dict[str, object]],
+def _is_degraded_only_execution_state(
+    checkpoint_fields: tuple[str | None, str | None, datetime | None],
+    activity_fields: tuple[int, int, list[str], list[str], list[dict[str, object]]],
     degraded_reasons: list[str],
-) -> ThreadExecutionStateModel | None:
-    """Create or refresh the latest execution-state projection for a thread."""
-    thread = await session.get(ThreadModel, thread_id)
-    if thread is None:
-        return None
-
-    existing = await session.get(ThreadExecutionStateModel, thread_id)
-    degraded_only = (
+) -> bool:
+    checkpoint_id, parent_checkpoint_id, snapshot_created_at = checkpoint_fields
+    task_count, interrupt_count, next_nodes, interrupt_types, tasks = activity_fields
+    return (
         checkpoint_id is None
         and parent_checkpoint_id is None
         and snapshot_created_at is None
@@ -863,18 +904,57 @@ async def record_thread_execution_state(
         and not tasks
         and bool(degraded_reasons)
     )
-    next_nodes_json = json.dumps(next_nodes)
-    interrupt_types_json = json.dumps(interrupt_types)
-    tasks_json = json.dumps(tasks)
-    degraded_reasons_json = json.dumps(degraded_reasons)
+
+
+class _ExecutionStateArgs(TypedDict):
+    thread_id: str
+    checkpoint_id: str | None
+    parent_checkpoint_id: str | None
+    snapshot_created_at: datetime | None
+    task_count: int
+    interrupt_count: int
+    next_nodes: list[str]
+    interrupt_types: list[str]
+    tasks: list[dict[str, object]]
+    degraded_reasons: list[str]
+
+
+async def record_thread_execution_state(
+    session: AsyncSession, **kwargs: Unpack[_ExecutionStateArgs]
+) -> ThreadExecutionStateModel | None:
+    """Create or refresh the latest execution-state projection for a thread."""
+    thread = await session.get(ThreadModel, kwargs["thread_id"])
+    if thread is None:
+        return None
+
+    existing = await session.get(ThreadExecutionStateModel, kwargs["thread_id"])
+    degraded_only = _is_degraded_only_execution_state(
+        (
+            kwargs["checkpoint_id"],
+            kwargs["parent_checkpoint_id"],
+            kwargs["snapshot_created_at"],
+        ),
+        (
+            kwargs["task_count"],
+            kwargs["interrupt_count"],
+            kwargs["next_nodes"],
+            kwargs["interrupt_types"],
+            kwargs["tasks"],
+        ),
+        kwargs["degraded_reasons"],
+    )
+    next_nodes_json = json.dumps(kwargs["next_nodes"])
+    interrupt_types_json = json.dumps(kwargs["interrupt_types"])
+    tasks_json = json.dumps(kwargs["tasks"])
+    degraded_reasons_json = json.dumps(kwargs["degraded_reasons"])
 
     if existing is not None:
         if not degraded_only:
-            existing.checkpoint_id = checkpoint_id
-            existing.parent_checkpoint_id = parent_checkpoint_id
-            existing.snapshot_created_at = snapshot_created_at
-            existing.task_count = task_count
-            existing.interrupt_count = interrupt_count
+            existing.checkpoint_id = kwargs["checkpoint_id"]
+            existing.parent_checkpoint_id = kwargs["parent_checkpoint_id"]
+            existing.snapshot_created_at = kwargs["snapshot_created_at"]
+            existing.task_count = kwargs["task_count"]
+            existing.interrupt_count = kwargs["interrupt_count"]
             existing.next_nodes_json = next_nodes_json
             existing.interrupt_types_json = interrupt_types_json
             existing.tasks_json = tasks_json
@@ -885,14 +965,14 @@ async def record_thread_execution_state(
         return existing
 
     model = ThreadExecutionStateModel(
-        thread_id=thread_id,
-        checkpoint_id=checkpoint_id,
-        parent_checkpoint_id=parent_checkpoint_id,
-        snapshot_created_at=snapshot_created_at,
+        thread_id=kwargs["thread_id"],
+        checkpoint_id=kwargs["checkpoint_id"],
+        parent_checkpoint_id=kwargs["parent_checkpoint_id"],
+        snapshot_created_at=kwargs["snapshot_created_at"],
         recorded_at=_utcnow(),
         recovery_epoch=thread.recovery_epoch,
-        task_count=task_count,
-        interrupt_count=interrupt_count,
+        task_count=kwargs["task_count"],
+        interrupt_count=kwargs["interrupt_count"],
         next_nodes_json=next_nodes_json,
         interrupt_types_json=interrupt_types_json,
         tasks_json=tasks_json,

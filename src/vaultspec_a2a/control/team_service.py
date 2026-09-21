@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
     from ..streaming.aggregator import EventAggregator
 
-__all__ = ["TeamStatus", "build_team_status"]
+__all__ = ["build_team_status"]
 
 
 def _has_valid_permission_options(raw_options_json: str | None) -> bool:
@@ -54,6 +54,56 @@ class TeamStatus:
     pending_permissions: list[PendingPermissionInfo] = field(default_factory=list)
 
 
+async def _pending_thread_sets(
+    db: AsyncSession, thread_ids: list[str]
+) -> tuple[set[str], set[str], set[str]]:
+    if not thread_ids:
+        return set(), set(), set()
+    # Path-unsafe or missing thread ids stay absent from known_thread_ids, so
+    # their permissions are excluded below. The respond route cannot address
+    # those ids; passing them to the status serializer would hide valid rows
+    # behind a whole-response validation error.
+    rows = await db.execute(
+        select(
+            ThreadModel.id,
+            ThreadModel.status,
+            ThreadModel.repair_status,
+            ThreadModel.execution_readiness,
+        ).where(ThreadModel.id.in_(thread_ids), path_safe_run_id_clause())
+    )
+    known_rows = rows.all()
+    known_thread_ids = {thread_id for thread_id, *_rest in known_rows}
+    terminal_thread_ids = {
+        thread_id
+        for thread_id, status, _repair_status, _execution_readiness in known_rows
+        if status in TERMINAL_STATUS_VALUES
+    }
+    checkpoint_unavailable_thread_ids = {
+        thread_id
+        for thread_id, _status, repair_status, execution_readiness in known_rows
+        if repair_status == RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        or execution_readiness == RepairStatus.CHECKPOINT_UNAVAILABLE.value
+    }
+    return known_thread_ids, terminal_thread_ids, checkpoint_unavailable_thread_ids
+
+
+def _active_agent_descriptors(
+    aggregator: EventAggregator, active_threads: list[str]
+) -> list[AgentData]:
+    agents: list[AgentData] = []
+    for thread_id in active_threads:
+        agent_states = aggregator.get_agent_states(thread_id)
+        agents.extend(
+            build_agent_descriptor(
+                summary,
+                agent_states.get(summary["agent_id"], AgentLifecycleState.IDLE),
+                thread_id=thread_id,
+            )
+            for summary in aggregator.get_node_summaries(thread_id)
+        )
+    return agents
+
+
 async def build_team_status(
     *,
     db: AsyncSession,
@@ -66,40 +116,11 @@ async def build_team_status(
         include_answered_pending_apply=False,
     )
     thread_ids = sorted({permission.thread_id for permission in durable_pending})
-    known_thread_ids: set[str] = set()
-    terminal_thread_ids: set[str] = set()
-    checkpoint_unavailable_thread_ids: set[str] = set()
-    if thread_ids:
-        # A pending permission naming a thread id with no path-safe shape drops
-        # out here, not through a parallel clause on PermissionRequestModel: it
-        # is simply absent from known_thread_ids, so the membership check below
-        # excludes it the same way an unrecognised thread id already does. Such
-        # a permission is unanswerable through the API regardless (the respond
-        # route types its path parameter as the validated identity), and the
-        # alternative - a validated run_id failing at RunPendingPermission
-        # serialization - would 500 the whole team-status response, hiding
-        # every OTHER run's valid pending permission along with it.
-        rows = await db.execute(
-            select(
-                ThreadModel.id,
-                ThreadModel.status,
-                ThreadModel.repair_status,
-                ThreadModel.execution_readiness,
-            ).where(ThreadModel.id.in_(thread_ids), path_safe_run_id_clause())
-        )
-        known_rows = rows.all()
-        known_thread_ids = {thread_id for thread_id, *_rest in known_rows}
-        terminal_thread_ids = {
-            thread_id
-            for thread_id, status, _repair_status, _execution_readiness in known_rows
-            if status in TERMINAL_STATUS_VALUES
-        }
-        checkpoint_unavailable_thread_ids = {
-            thread_id
-            for thread_id, _status, repair_status, execution_readiness in known_rows
-            if repair_status == RepairStatus.CHECKPOINT_UNAVAILABLE.value
-            or execution_readiness == RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        }
+    (
+        known_thread_ids,
+        terminal_thread_ids,
+        checkpoint_unavailable_thread_ids,
+    ) = await _pending_thread_sets(db, thread_ids)
 
     nonterminal_durable_pending = [
         permission
@@ -124,22 +145,10 @@ async def build_team_status(
         | {permission.thread_id for permission in nonterminal_durable_pending}
     )
 
-    agents: list[AgentData] = []
-    for thread_id in active_threads:
-        agent_states = aggregator.get_agent_states(thread_id)
-        agents.extend(
-            build_agent_descriptor(
-                summary,
-                agent_states.get(summary["agent_id"], AgentLifecycleState.IDLE),
-                thread_id=thread_id,
-            )
-            for summary in aggregator.get_node_summaries(thread_id)
-        )
-
     # Public pending permissions must be durable-backed; aggregator state is
     # still used for agents and active-thread liveness, not permission truth.
     return TeamStatus(
-        agents=agents,
+        agents=_active_agent_descriptors(aggregator, active_threads),
         active_threads=active_threads,
         pending_permissions=public_pending,
     )

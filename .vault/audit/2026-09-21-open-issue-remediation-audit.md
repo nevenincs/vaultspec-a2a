@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:3558f9e64c1c01c274db04c8584d7b5c862a50ceb430c3e00800c6806641c3af'
+body_hash: 'sha256:c25ac34cddbd7e3b53b5ee25fcd511dce115c798d55d55f63b1006ce9450d9ed'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -22,6 +22,15 @@ Step closure. P01.S02 is PASS with no critical or high finding in that lane.
 
 ## Findings
 
+### workspace-admission-hardening | high | validation could be bypassed before canonical workspace admission | resolved
+
+P01.S03's independent Terra review confirmed the prior prepare/commit preset
+read-before-validation defect is fixed: `gateway.py:277` canonicalizes before
+validation, and managed foreign, ancestor, and symlink cases are exercised at
+both stages. `test_workspace_root_authority.py` passed all 14 tests with a clean
+diff; the Sol full review (67 tests) plus Ruff and Ty also passed. The admission
+portion of the issue #25 boundary is resolved. The issue remains open for the
+separate P01.S10 OS execution-identity and ACP confinement proof.
 ### compose-provider-service-state | high | admitted roots and shared identity expose credentials and durable state | open
 
 Development, integration, and production Compose profiles mount one `/app/data`
@@ -54,6 +63,30 @@ write/create ancestor traversal, directory anchoring, bounded handle lifetime,
 and fail-closed behavior, while preserving desktop compatibility. No proof is
 claimed yet; issue #25 remains open pending S03 admission and S10 OS-boundary
 implementation plus negative live tests.
+### staged-hook-isolation | low | shared dirty worktree hid concurrent S03 symbols from staged hooks | resolved
+
+The first shared-worktree S06 commit attempt correctly ran the normal hooks but
+Ty isolated unstaged S03 changes and reported the staged snapshot's missing
+`require_admitted_workspace_root` import. No hook was bypassed and no concurrent
+source was staged. The exact ten-file S06 snapshot was reproduced in a clean
+sibling worktree from the index, with the locked project environment including
+the `server` extra, and the complete hook suite passed before commit. S05 was
+then validated and committed separately on that branch. Main remains dirty with
+other workers' changes; integration is deliberately left to the coordinator.
+This is a low process constraint, not a source defect.
+### kimi-provider-gate | medium | CI credential cases could silently skip without kimi-cli | resolved
+
+P01.S05 found that the provider gate installed Codex but did not provision or
+require the pinned Kimi CLI, allowing the three historical Kimi configuration
+and credential cases to disappear as skips in CI. Resolution: the workflow now
+installs the project-authoritative `kimi-cli==1.49.0` and exposes its `uv tool`
+bin directory through `GITHUB_PATH`; `Justfile` requires `kimi-cli` and names
+all three Kimi cases explicitly alongside the three Codex controls. The
+isolated locked run passed all six cases with zero skips, and actionlint plus
+the CI contract check passed. The served-provider completed-turn eligibility
+lane remains separate and unchanged; no paid live provider turn was used.
+Independent review found no remaining critical, high, or medium finding in this
+lane. Issue #57 is ready for coordinated closure after commit integration.
 ### prek-annotation-enforcement | high | read-only Core check warns but exits successfully | resolved
 
 The P01.S06 implementation review found that the direct

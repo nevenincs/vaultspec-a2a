@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:bf413279f6ff4efa2501a053d480b95181cb6490b7b8722c73b862e46aa8d2fb'
+body_hash: 'sha256:14cbe213fb4dbc80b5a15bf1b2487937b9e34ad6e48d7368bb281dd599fe4cd0'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -34,6 +34,11 @@ related:
 - `S06` `verify:` `prek validate-config prek.toml` -> `pass`
 - `S06` `by:` `readonly-hooks-luna-max`
 - `S10` `by:` `readonly-hooks-luna-max`
+- `S05` `M` `.github/workflows/test.yml`
+- `S05` `M` `Justfile`
+- `S05` `verify:` `just check-workflow (actionlint and CI contract)` -> `pass`
+- `S05` `by:` `readonly-hooks-luna-max`
+- `S03` `by:` `readonly-hooks-luna-max`
 
 ## Notes
 
@@ -45,3 +50,6 @@ related:
 - `S06` LOW baseline finding queued: locked taplo fmt --check prek.toml fails on the pre-existing Core-managed block; taplo lint passes and no generated block was reformatted.
 - `S06` LOW metadata finding queued: plan check emits PLAN022 because integration Step P02.S09 follows P01.S10; this reflects intentional phase placement and is not an S06 blocker.
 - `S10` HIGH/security finding recorded: privileged ACP callbacks can resolve paths before no-follow read or write/create traversal, creating a TOCTOU escape window. S10 scope now owns _acp_rpc_handlers.py and test_project_confinement.py plus descriptor-relative Linux/Compose proof, directory anchoring, bounded handle lifetime, and fail-closed behavior; no proof claimed yet and issue #25 remains open.
+- `S05` Independent review PASS: CI provisions the pinned kimi-cli 1.49.0 and the provider gate requires kimi-cli; all six intended Codex/Kimi cases ran with zero skips. The separate served-provider completed-turn eligibility lane remains unchanged; no paid live provider turn was used.
+- `S05` Commit isolation constraint recorded: the shared worktree's normal staged hook isolation could not see concurrent S03 symbols, so the exact S06/S05 snapshots were validated and committed in a clean sibling worktree without bypassing hooks or staging other workers' files. Main integration remains coordinator-owned.
+- `S03` Independent Terra review PASS recorded: canonicalize-before-validation fix at gateway.py:277; managed foreign/ancestor/symlink cases cover both stages; test_workspace_root_authority passed 14/14 with clean diff; Sol full review passed 67 tests plus Ruff/Ty. S03 remains open until its source commit is coordinated; issue #25 remains open for S10.

@@ -560,7 +560,8 @@ test-lanes *ARGS:
 test-cross-repo *ARGS:
     {{creds}} live-tests -- uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -o addopts= --strict-markers --strict-config --require-prerequisite=dashboard-engine src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py {{ ARGS }}
 
-# These need the Codex CLI on PATH and no credential, so CI can provision it.
+# These need the Codex and Kimi CLIs on PATH and no credential, so CI can
+# provision them.
 # Explicit node ids make a renamed or deleted proof a usage error. Claude's
 # strict MCP surface proof requires an authenticated ACP session and remains
 # in its separately declared service lane.
@@ -568,7 +569,7 @@ test-cross-repo *ARGS:
 # Run the provider gates whose prerequisite is an installable CLI (never skips).
 [group('test')]
 test-provider-gates *ARGS:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -o addopts= --strict-markers --strict-config --require-prerequisite=codex-cli --require-prerequisite=mcp-streamable-http src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_classify_provider_command_resolves_codex src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_codex_readiness_ready_when_installed src/vaultspec_a2a/providers/tests/test_codex_config_home_service.py::test_codex_mcp_list_accepts_the_built_config_home {{ ARGS }}
+    uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -o addopts= --strict-markers --strict-config --require-prerequisite=codex-cli --require-prerequisite=kimi-cli --require-prerequisite=mcp-streamable-http src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_classify_provider_command_resolves_codex src/vaultspec_a2a/providers/tests/test_codex_chat_model.py::test_codex_readiness_ready_when_installed src/vaultspec_a2a/providers/tests/test_codex_config_home_service.py::test_codex_mcp_list_accepts_the_built_config_home src/vaultspec_a2a/control/tests/test_provider_eligibility_credentials.py::test_persisted_config_mode_reaches_command_eligibility src/vaultspec_a2a/control/tests/test_provider_eligibility_credentials.py::test_complete_temporary_definition_reaches_command_eligibility src/vaultspec_a2a/control/tests/test_provider_eligibility_credentials.py::test_partial_temporary_definition_fails_readiness {{ ARGS }}
 
 # Prove gateway and worker telemetry start in a base-only installation.
 #

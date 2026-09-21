@@ -251,9 +251,12 @@ jobs:
       - name: Initialize the worktree
         run: just init-full
 
-      # The selected Codex gates need an installed CLI but no credential.
+      # The selected Codex and Kimi gates need installed CLIs but no credential.
       - name: Install the provider CLI these gates require
-        run: npm install -g @openai/codex
+        run: |
+          npm install -g @openai/codex
+          uv tool install --force kimi-cli==1.49.0
+          uv tool dir --bin >> "$GITHUB_PATH"
 
       # Declares those CLIs present, so a gate that skips anyway fails this job
       # rather than vanishing from the totals.

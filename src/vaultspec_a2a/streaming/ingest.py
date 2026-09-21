@@ -8,7 +8,7 @@ during the aggregator decomposition.
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -64,6 +64,55 @@ class IngestStallTimeoutError(TimeoutError):
     keeps this bound the wider of the two, so a node using exactly the silence
     its own configuration sanctions is never mistaken for a wedge.
     """
+
+
+async def _cancel_event_read(
+    event_read: "asyncio.Future[dict[str, Any]]",
+    event_stream: AsyncIterator[dict[str, Any]],
+) -> None:
+    """Cancel a blocked next-event read and close a generator when it supports it."""
+    if not event_read.done():
+        event_read.cancel()
+    await asyncio.gather(event_read, return_exceptions=True)
+    close = getattr(event_stream, "aclose", None)
+    if close is not None:
+        await close()
+
+
+async def _next_event_or_cancel(
+    event_stream: AsyncIterator[dict[str, Any]],
+    cancel_event: asyncio.Event,
+    *,
+    stall_timeout: float,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Wait for one graph event, cancellation, or the independent stall bound."""
+    next_event = asyncio.ensure_future(event_stream.__anext__())
+    cancellation = asyncio.create_task(cancel_event.wait())
+    try:
+        done, _ = await asyncio.wait(
+            (next_event, cancellation),
+            timeout=stall_timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        # Cancellation wins a simultaneous event race, matching the prior
+        # post-read cancellation check while no longer requiring a blocked
+        # graph to yield before a requested cancellation can take effect.
+        if cancel_event.is_set():
+            await _cancel_event_read(next_event, event_stream)
+            return None, True
+        if next_event in done:
+            return next_event.result(), False
+        await _cancel_event_read(next_event, event_stream)
+        raise IngestStallTimeoutError(
+            "Ingest stalled: astream_events produced no new "
+            f"event for over {stall_timeout:.0f}s"
+        )
+    finally:
+        if not cancellation.done():
+            cancellation.cancel()
+        await asyncio.gather(cancellation, return_exceptions=True)
+        if not next_event.done():
+            await _cancel_event_read(next_event, event_stream)
 
 
 # Margin (seconds) added atop a run's own configured ``graph.step_timeout``
@@ -221,16 +270,9 @@ class IngestManager:
     # ------------------------------------------------------------------
 
     def cancel_thread(self, thread_id: str) -> None:
-        """Signal cancellation for a running ingest on *thread_id*."""
-        event = self._cancel_events.get(thread_id)
-        if event is not None:
-            event.set()
-            logger.info("Cancellation requested for thread %s", thread_id)
-        else:
-            logger.debug(
-                "No active cancel event for thread %s (may not be ingesting)",
-                thread_id,
-            )
+        """Persist cancellation so a concurrently starting ingest observes it."""
+        self._get_cancel_event(thread_id).set()
+        logger.info("Cancellation requested for thread %s", thread_id)
 
     def _get_cancel_event(self, thread_id: str) -> asyncio.Event:
         """Return (or create) the cancellation event for *thread_id*."""
@@ -298,13 +340,9 @@ class IngestManager:
             try:
                 # Bounded manual iteration, not `async for`: a plain `async for`
                 # trusts astream_events to eventually yield, raise, or exhaust on
-                # its own. A real run was observed wedging silently inside this
-                # exact loop â€” no event, no exception, no log line, forever â€” with
-                # LangGraph's own per-step `step_timeout` never firing to save it.
-                # Wrapping each `__anext__()` in `wait_for` makes "no progress for
-                # stall_timeout seconds" itself a caught, classified, reported
-                # failure instead of an invisible hang, regardless of whether that
-                # root cause is ever found.
+                # its own. Race every blocked next-event read against the local
+                # cancellation event as well as the independent watchdog, so a
+                # cancellation never depends on the graph yielding another frame.
                 event_stream = graph.astream_events(
                     graph_input,
                     config,
@@ -315,29 +353,26 @@ class IngestManager:
                 )
                 while True:
                     try:
-                        raw_event = await asyncio.wait_for(
-                            event_stream.__anext__(), timeout=stall_timeout
+                        raw_event, cancelled = await _next_event_or_cancel(
+                            event_stream,
+                            cancel_event,
+                            stall_timeout=stall_timeout,
                         )
                     except StopAsyncIteration:
-                        break
-                    except TimeoutError as exc:
-                        # Scoped to the exact signal this watchdog reads --
-                        # astream_events -- rather than "the graph" broadly: a
-                        # node can be doing real, sanctioned work (a long tool
-                        # call, extended reasoning) that legitimately relays
-                        # no LangGraph event for a stretch, and this bound is
-                        # already widened past this run's own step_timeout
-                        # (see _effective_stall_timeout) before it ever fires,
-                        # so a client reading this message is not told the
-                        # run produced nothing when only this one channel did.
-                        raise IngestStallTimeoutError(
-                            "Ingest stalled: astream_events produced no new "
-                            f"event for over {stall_timeout:.0f}s"
-                        ) from exc
-                    if on_graph_started is not None:
+                        if not cancel_event.is_set():
+                            break
+                        raw_event, cancelled = None, True
+                    if (
+                        not cancelled
+                        and not cancel_event.is_set()
+                        and on_graph_started is not None
+                    ):
                         await on_graph_started()
                         on_graph_started = None
-                    if cancel_event.is_set():
+                    if cancelled or cancel_event.is_set():
+                        close = getattr(event_stream, "aclose", None)
+                        if close is not None:
+                            await close()
                         logger.info("Ingest cancelled for thread %s", thread_id)
                         _outcome = ThreadStatus.CANCELLED
                         span.set_attribute("cancelled", True)
@@ -349,6 +384,8 @@ class IngestManager:
                             detail="Terminated by user",
                         )
                         break
+                    if raw_event is None:
+                        raise RuntimeError("event read completed without an event")
                     await process_langgraph_event(
                         event_data=raw_event,
                         thread_id=thread_id,

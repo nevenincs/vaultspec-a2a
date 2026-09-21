@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:a6ee09bf89390178b8f69a895ce055f354d0471b57c3234c562c550fca501de4'
+body_hash: 'sha256:4f489e9be1f4b6e92f5d25b6487c3891b1db520778707e3eb45ddf9c2495ecd7'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -263,3 +263,44 @@ Focused Ruff validation passes for every Python path affected by the S11 snapsho
 `.env.example` documents the launcher, UID and GID defaults, states the host or
 desktop exclusion, and the deterministic coverage test passes. The Compose
 service boundary remains an S10 dependency already present in this chain.
+
+### blocked-stream-cancel-dispatch | high/concurrency | stable CANCELLING/RECONCILING cancel redrive and stale-CAS refusal | resolved
+
+P01.S12 integrates the reviewed cancellation correction. Direct recovery redrives
+only the stable cancellation states; terminal and stale claims refuse through the
+compare-and-set result. The focused in-process suite passed 175 tests, including
+C-before-T cancellation and T-before-C rejection; independent real-service output
+records 4/4 passed in 163.90s at
+`C:/Users/hello/AppData/Local/Temp/vaultspec-s12-arch-service-20260921.out`.
+
+### blocked-stream-cancel-settlement | high/correctness | cancellation terminalizes once after active work settles | resolved
+
+The executor preserves terminal-election and per-thread cleanup ordering: the
+C-before-T race produces one exact CANCELLED terminal result, while a prior
+terminal claim rejects cancellation. Capacity remains unavailable until cleanup
+has completed. The independent service summaries retain the stable restart
+redelivery transition `accepted_not_applied -> cancelled_no_active_work`.
+
+### blocked-stream-cancel-post-read | medium/concurrency | cancellation wins over a completed blocked read and EOF is rechecked | resolved
+
+Ingest races the cancellation event against the blocked next-event await, then
+rechecks state after a read and at EOF. Watchdog and generator cleanup behavior
+is unchanged. The focused 175-pass evidence and both captured real-service 4/4
+passes cover blocked/pre-ingest cancellation and restart redelivery without test
+padding.
+
+### blocked-stream-cancel-lifecycle-evidence | low/test-evidence | independent process evidence covers cancellation lifecycle and redelivery | resolved
+
+The isolated review recorded PASS: 175 focused in-process tests and an
+independent four-case real service run. Service artifacts exist at
+`C:/Users/hello/.vaultspec-a2a/runtime/service-tests/vaultspec-service-tests-2b9990ec/session-summary.json`
+and `C:/Users/hello/.vaultspec-a2a/runtime/service-tests/vaultspec-service-tests-26323e17/session-summary.json`.
+Issue #73's implementation scope is closed locally; no external GitHub mutation
+is made in this integration commit.
+
+### sqlite-terminal-election-contention | medium/operational-concurrency | bridge retry recovered SQLITE_BUSY during exact cancellation election | open
+
+A real service run observed one `SQLITE_BUSY` at `event_handlers.py:161` during
+terminal election; the bridge retry recovered it. P01.S13 owns reproduction and
+an evidence-backed choice: prove that bounded retry is the intended contract, or
+correct bounded transaction/retry behavior with focused concurrency coverage.

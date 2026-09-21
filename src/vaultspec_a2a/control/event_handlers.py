@@ -150,7 +150,8 @@ async def _persist_proven_cancellation(
             return False
         if (
             action.action_type != ControlActionType.CANCEL.value
-            or thread.status != ThreadStatus.CANCELLING.value
+            or thread.status
+            not in {ThreadStatus.CANCELLING.value, ThreadStatus.RECONCILING.value}
             or thread.writer_action_type != ControlActionType.CANCEL.value
             or thread.writer_action_receipt_id != evidence.dispatch_id
         ):

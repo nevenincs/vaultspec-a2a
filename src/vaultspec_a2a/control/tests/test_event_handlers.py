@@ -307,12 +307,13 @@ async def _seed_current_cancel(
     *,
     thread_id: str,
     dispatch_id: str,
+    status: ThreadStatus = ThreadStatus.CANCELLING,
 ) -> str:
     async with session_factory() as session:
         await create_thread(
             session,
             thread_id=thread_id,
-            status=ThreadStatus.CANCELLING,
+            status=status,
             write_authority=RunWriteAuthority(
                 0, 1, ControlActionType.CANCEL, dispatch_id
             ),
@@ -346,6 +347,7 @@ async def _seed_current_cancel(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", [ThreadStatus.CANCELLING, ThreadStatus.RECONCILING])
 @pytest.mark.parametrize(
     ("outcome", "result_status"),
     [
@@ -360,26 +362,27 @@ async def test_exact_cancellation_evidence_settles_current_action(
     session_factory: async_sessionmaker[AsyncSession],
     outcome: str,
     result_status: ControlActionResultStatus,
+    status: ThreadStatus,
 ) -> None:
     thread_id = f"cancel-evidence-{outcome}"
     dispatch_id = f"dispatch-{outcome}"
     action_id = await _seed_current_cancel(
-        session_factory, thread_id=thread_id, dispatch_id=dispatch_id
+        session_factory, thread_id=thread_id, dispatch_id=dispatch_id, status=status
     )
 
-    await _handle_terminal_event(
-        thread_id,
-        {
-            "event_type": "thread_terminal",
-            "status": "cancelled",
-            "cancellation_evidence": {
-                "schema_version": "cancellation-evidence-v1",
-                "dispatch_id": dispatch_id,
-                "outcome": outcome,
-            },
+    payload: dict[str, object] = {
+        "event_type": "thread_terminal",
+        "status": "cancelled",
+        "cancellation_evidence": {
+            "schema_version": "cancellation-evidence-v1",
+            "dispatch_id": dispatch_id,
+            "outcome": outcome,
         },
-        session_factory=session_factory,
-    )
+    }
+    for _delivery in range(2):
+        await _handle_terminal_event(
+            thread_id, payload, session_factory=session_factory
+        )
 
     async with session_factory() as session:
         action = await session.get(ControlActionModel, action_id)
@@ -390,6 +393,7 @@ async def test_exact_cancellation_evidence_settles_current_action(
     assert action.claim_token is None
     assert thread is not None
     assert thread.status == ThreadStatus.CANCELLED.value
+    assert thread.run_revision == 1
     assert thread.last_applied_action == ControlActionType.CANCEL.value
 
 
@@ -399,6 +403,8 @@ async def test_exact_cancellation_evidence_settles_current_action(
     [
         (None, ThreadStatus.CANCELLING),
         ("different-dispatch", ThreadStatus.CANCELLING),
+        (None, ThreadStatus.RECONCILING),
+        ("different-dispatch", ThreadStatus.RECONCILING),
     ],
 )
 async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
@@ -409,7 +415,10 @@ async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
     thread_id = f"unproven-cancel-{evidence_dispatch_id or 'absent'}"
     dispatch_id = f"dispatch-{thread_id}"
     action_id = await _seed_current_cancel(
-        session_factory, thread_id=thread_id, dispatch_id=dispatch_id
+        session_factory,
+        thread_id=thread_id,
+        dispatch_id=dispatch_id,
+        status=expected_thread_status,
     )
     payload: dict[str, object] = {
         "event_type": "thread_terminal",

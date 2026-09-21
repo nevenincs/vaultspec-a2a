@@ -271,7 +271,11 @@ async def _restore_requested_state(
     if action_type is ControlActionType.MESSAGE_FOLLOWUP_REQUESTED:
         target = ThreadStatus.RUNNING
     elif action_type is ControlActionType.CANCEL:
-        target = ThreadStatus.CANCELLING
+        target = (
+            expectation.status
+            if expectation.status in {ThreadStatus.CANCELLING, ThreadStatus.RECONCILING}
+            else ThreadStatus.CANCELLING
+        )
     else:
         target = expectation.status
     return (

@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from langgraph.types import Command
 
 from ..domain_config import domain_config
+from ..graph.enums import AgentLifecycleState
 from ..ipc.serializers import sequenced_to_dict
 from ..providers.team_selection import model_assignment_digest
 from ..streaming.node_metadata import node_metadata_from_graph
@@ -46,12 +49,14 @@ from .graph_lifecycle import (
 from .state_projection import StateProjector
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from contextvars import ContextVar
 
     from opentelemetry.trace import Span
 
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
+    from ..providers import ProviderCondition
     from ..streaming.aggregator import EventAggregator
     from ..streaming.types import SequencedEvent, StreamableGraph
     from .catalog_store import RunCatalogStore
@@ -65,6 +70,12 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _TerminalArbitration:
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
 
 
 class Executor:
@@ -121,6 +132,22 @@ class Executor:
         self._aggregator.add_broadcast_hook(_relay_event)
 
         self._capacity = DispatchCapacityState()
+        self._terminal_arbitrations: dict[str, _TerminalArbitration] = {}
+
+    @asynccontextmanager
+    async def _terminal_arbitration(self, thread_id: str) -> AsyncIterator[None]:
+        """Serialize receipt selection, terminal emission and active-slot cleanup."""
+        arbitration = self._terminal_arbitrations.setdefault(
+            thread_id, _TerminalArbitration()
+        )
+        arbitration.users += 1
+        try:
+            async with arbitration.lock:
+                yield
+        finally:
+            arbitration.users -= 1
+            if arbitration.users == 0:
+                self._terminal_arbitrations.pop(thread_id)
 
     @property
     def _aggregator(self) -> EventAggregator:
@@ -249,7 +276,7 @@ class Executor:
         self, thread_id: str
     ) -> tuple[DispatchCapacityReservation | None, str]:
         """Return the bounded reason for one atomic capacity decision."""
-        async with self._ingest_lock:
+        async with self._terminal_arbitration(thread_id), self._ingest_lock:
             if thread_id in self._active_ingests:
                 return None, _CAPACITY_THREAD_ACTIVE
             if len(self._active_ingests) >= domain_config.max_concurrent_threads:
@@ -297,6 +324,7 @@ class Executor:
             self._token_store.drop(thread_id)
             self._catalog_store.drop(thread_id)
             self._aggregator.remove_node_metadata(thread_id)
+            self._aggregator.clear_thread_state(thread_id)
         self._bridge.untrack_thread(thread_id)
         # Prune sequences for threads that are no longer actively executing.
         self._aggregator.prune_sequences(active_snapshot)
@@ -344,6 +372,12 @@ class Executor:
         await self._reject_with_condition(req, str(exc))
 
     async def _reject_with_condition(self, req: DispatchRequest, reason: str) -> None:
+        async with self._terminal_arbitration(req.thread_id):
+            await self._reject_with_condition_locked(req, reason)
+
+    async def _reject_with_condition_locked(
+        self, req: DispatchRequest, reason: str
+    ) -> None:
         """Fail a run before it ran, on both the coded and the durable channel.
 
         Every pre-run refusal knows why it refused, and a client needs that on
@@ -365,13 +399,9 @@ class Executor:
             recoverable=False,
         )
         evidence = failure_evidence(req, detail=reason, condition=_EXECUTOR_CONDITION)
-        if evidence is not None:
-            await self._state_projector.emit_terminal_status(
-                req.thread_id,
-                ThreadStatus.FAILED,
-                error_detail=reason,
-                provider_condition=_EXECUTOR_CONDITION,
-                evidence=evidence,
+        if evidence is not None or req.thread_id in self._pending_cancellations:
+            await self._emit_terminal_outcome(
+                req, ThreadStatus.FAILED, reason, _EXECUTOR_CONDITION
             )
         else:
             logger.warning(
@@ -382,6 +412,7 @@ class Executor:
             )
         self._graph_lifecycle.release_thread(req.thread_id)
         self._aggregator.remove_node_metadata(req.thread_id)
+        self._aggregator.clear_thread_state(req.thread_id)
         reservation = self._dispatch_reservation.get()
         if reservation is not None:
             await self.release_dispatch_capacity(reservation)
@@ -493,11 +524,52 @@ class Executor:
                 fallback_reason,
                 recoverable=False,
             )
-        cancellation_evidence = None
-        if outcome == ThreadStatus.CANCELLED:
-            cancellation_evidence = self._take_cancellation_evidence(
-                req.thread_id, outcome="ceased"
+        async with self._terminal_arbitration(req.thread_id):
+            await self._settle_terminal(
+                req, graph, config, outcome, failure_reason, failure_condition
             )
+
+    async def _settle_terminal(
+        self,
+        req: DispatchRequest,
+        graph: StreamableGraph,
+        config: dict[str, Any],
+        outcome: str,
+        failure_reason: str | None,
+        failure_condition: ProviderCondition | None,
+    ) -> None:
+        outcome = await self._emit_terminal_outcome(
+            req, outcome, failure_reason, failure_condition
+        )
+        if outcome == ThreadStatus.COMPLETED:
+            await self._close_authoring_session_best_effort(
+                req.thread_id, graph, config
+            )
+        await self._mark_ingest_done(req.thread_id, outcome)
+
+    async def _emit_terminal_outcome(
+        self,
+        req: DispatchRequest,
+        outcome: str,
+        failure_reason: str | None = None,
+        failure_condition: ProviderCondition | None = None,
+    ) -> str:
+        """Choose one receipt-aware outcome under the terminal arbitration lock."""
+        cancellation_evidence = self._take_cancellation_evidence(
+            req.thread_id, outcome="ceased"
+        )
+        if cancellation_evidence is not None:
+            if outcome != ThreadStatus.CANCELLED:
+                await self._aggregator.emit_agent_status(
+                    req.thread_id,
+                    req.agent_id or DEFAULT_SUPERVISOR_ID,
+                    "supervisor",
+                    AgentLifecycleState.CANCELLED,
+                    "Terminated by user",
+                )
+            outcome = ThreadStatus.CANCELLED
+            failure_reason = None
+            failure_condition = None
         await self._state_projector.emit_terminal_status(
             req.thread_id,
             outcome,
@@ -520,11 +592,7 @@ class Executor:
                 else None
             ),
         )
-        if outcome == ThreadStatus.COMPLETED:
-            await self._close_authoring_session_best_effort(
-                req.thread_id, graph, config
-            )
-        await self._mark_ingest_done(req.thread_id, outcome)
+        return outcome
 
     async def handle_dispatch(self, req: DispatchRequest) -> None:
         """Reserve capacity and route a direct ``DispatchRequest`` call."""
@@ -587,33 +655,8 @@ class Executor:
                             raise ValueError(
                                 "cancel dispatch requires a stable identity"
                             )
-                        self._pending_cancellations.setdefault(
-                            req.thread_id, req.dispatch_id
-                        )
-                        self._aggregator.cancel_thread(req.thread_id)
-                        # Release the run's tokens and cached catalog on the
-                        # TERMINAL boundary only. When an ingest is still active
-                        # the cancel is not yet terminal: that ingest settles
-                        # (its finally calls _mark_ingest_done) and drops them
-                        # there, so an in-flight authoring call is never stranded
-                        # of its own token mid-run. Only a cancel with no active
-                        # ingest is itself terminal and releases here. (TOCTOU
-                        # safe: cancel flag set before the check; DB rejects
-                        # duplicate terminals.)
-                        async with self._ingest_lock:
-                            is_active = req.thread_id in self._active_ingests
-                        if not is_active:
-                            self._token_store.drop(req.thread_id)
-                            self._catalog_store.drop(req.thread_id)
-                            await self._state_projector.emit_terminal_status(
-                                req.thread_id,
-                                ThreadStatus.CANCELLED,
-                                evidence=self._take_cancellation_evidence(
-                                    req.thread_id, outcome="no_active_work"
-                                ),
-                            )
-                            self._graph_lifecycle.release_thread(req.thread_id)
-                            self._aggregator.remove_node_metadata(req.thread_id)
+                        async with self._terminal_arbitration(req.thread_id):
+                            await self._handle_cancel(req)
                     case _:
                         logger.warning(
                             "Unknown dispatch action: %s",
@@ -646,7 +689,45 @@ class Executor:
             finally:
                 self._dispatch_reservation.reset(reservation_context)
 
+    async def _handle_cancel(self, req: DispatchRequest) -> None:
+        """Apply one cancel while holding the run's terminal arbitration lock."""
+        self._pending_cancellations[req.thread_id] = req.dispatch_id
+        self._aggregator.cancel_thread(req.thread_id)
+        # Release the run's tokens and cached catalog on the
+        # TERMINAL boundary only. When an ingest is still active
+        # the cancel is not yet terminal: that ingest settles
+        # (its finally calls _mark_ingest_done) and drops them
+        # there, so an in-flight authoring call is never stranded
+        # of its own token mid-run. Only a cancel with no active
+        # ingest is itself terminal and releases here. (TOCTOU
+        # safe: cancel flag set before the check; DB rejects
+        # duplicate terminals.)
+        async with self._ingest_lock:
+            is_active = req.thread_id in self._active_ingests
+        if not is_active:
+            self._token_store.drop(req.thread_id)
+            self._catalog_store.drop(req.thread_id)
+            await self._state_projector.emit_terminal_status(
+                req.thread_id,
+                ThreadStatus.CANCELLED,
+                evidence=self._take_cancellation_evidence(
+                    req.thread_id, outcome="no_active_work"
+                ),
+            )
+            self._graph_lifecycle.release_thread(req.thread_id)
+            self._aggregator.remove_node_metadata(req.thread_id)
+            self._aggregator.clear_thread_state(req.thread_id)
+
     async def _fail_unhandled_dispatch(
+        self,
+        req: DispatchRequest,
+        exc: BaseException,
+        reservation: DispatchCapacityReservation | None = None,
+    ) -> None:
+        async with self._terminal_arbitration(req.thread_id):
+            await self._fail_unhandled_dispatch_locked(req, exc, reservation)
+
+    async def _fail_unhandled_dispatch_locked(
         self,
         req: DispatchRequest,
         exc: BaseException,
@@ -713,18 +794,13 @@ class Executor:
                 recoverable=False,
             )
             evidence = failure_evidence(req, detail=reason, condition=condition)
-            if evidence is not None:
-                await self._state_projector.emit_terminal_status(
-                    req.thread_id,
-                    ThreadStatus.FAILED,
-                    error_detail=reason,
-                    provider_condition=condition,
-                    evidence=evidence,
+            outcome = ThreadStatus.FAILED
+            if evidence is not None or req.thread_id in self._pending_cancellations:
+                outcome = await self._emit_terminal_outcome(
+                    req, outcome, reason, condition
                 )
             if owns_slot:
-                await self._mark_ingest_done(
-                    req.thread_id, ThreadStatus.FAILED, reservation
-                )
+                await self._mark_ingest_done(req.thread_id, outcome, reservation)
         except Exception:
             # This runs from the handler that keeps one bad run from taking the
             # worker's task group down with it, so it may not raise in turn - a
@@ -741,6 +817,12 @@ class Executor:
     async def _settle_completed_preflight(
         self, req: DispatchRequest, span: Span
     ) -> None:
+        async with self._terminal_arbitration(req.thread_id):
+            await self._settle_completed_preflight_locked(req, span)
+
+    async def _settle_completed_preflight_locked(
+        self, req: DispatchRequest, span: Span
+    ) -> None:
         logger.info(
             "Thread %s checkpoint shows completion before crash"
             " — emitting completed without re-running",
@@ -752,11 +834,10 @@ class Executor:
             ),
         )
         span.set_attribute("pre_flight", "completed")
-        await self._state_projector.emit_terminal_status(
-            req.thread_id, ThreadStatus.COMPLETED
-        )
+        await self._emit_terminal_outcome(req, ThreadStatus.COMPLETED)
         self._graph_lifecycle.release_thread(req.thread_id)
         self._aggregator.remove_node_metadata(req.thread_id)
+        self._aggregator.clear_thread_state(req.thread_id)
         reservation = self._dispatch_reservation.get()
         if reservation is not None:
             await self.release_dispatch_capacity(reservation)

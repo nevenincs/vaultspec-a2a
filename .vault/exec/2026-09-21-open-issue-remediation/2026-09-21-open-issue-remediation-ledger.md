@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:7733890cf56e2d9444c3a742d772f99c8dbf27ba03557b659e12454cbbb07764'
+body_hash: 'sha256:96f7e7be49265fa842380e27e1992d8ec5775de493116d983866eacb0a5d68b9'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -96,6 +96,18 @@ related:
 - `S11` `M` `src/vaultspec_a2a/control/tests/test_env_example_coverage.py`
 - `S11` `verify:` `ty check src dev docs scripts` -> `pass`
 - `S11` `by:` `terra-high-integration-coordinator`
+- `S12` `M` `src/vaultspec_a2a/control/direct_control_recovery.py`
+- `S12` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S12` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S12` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S12` `M` `src/vaultspec_a2a/control/tests/test_direct_control_recovery_current.py`
+- `S12` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S12` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S12` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S12` `A` `src/vaultspec_a2a/service_tests/test_blocked_stream_cancellation.py`
+- `S12` `M` `src/vaultspec_a2a/api/tests/test_cancel_settled_run_status.py`
+- `S12` `verify:` `focused pytest 175; Ruff; Ty; captured independent service 4` -> `pass`
+- `S12` `by:` `terra-high-integration-coordinator`
 
 ## Notes
 
@@ -111,3 +123,4 @@ related:
 - `S05` Commit isolation constraint recorded: the shared worktree's normal staged hook isolation could not see concurrent S03 symbols, so the exact S06/S05 snapshots were validated and committed in a clean sibling worktree without bypassing hooks or staging other workers' files. Main integration remains coordinator-owned.
 - `S03` Independent Terra review PASS recorded: canonicalize-before-validation fix at gateway.py:277; managed foreign/ancestor/symlink cases cover both stages; test_workspace_root_authority passed 14/14 with clean diff; Sol full review passed 67 tests plus Ruff/Ty. S03 remains open until its source commit is coordinated; issue #25 remains open for S10.
 - `S01` The complete two-test service-file run had one known recovery_owner SQLite lock after the cancellation test; the isolated health/Jaeger target passed, and the cancellation interaction is successor-owned by P01.S12. No S01 source correction was made.
+- `S12` Service evidence: C:/Users/hello/AppData/Local/Temp/vaultspec-s12-arch-service-20260921.out; summaries: vaultspec-service-tests-2b9990ec and vaultspec-service-tests-26323e17.

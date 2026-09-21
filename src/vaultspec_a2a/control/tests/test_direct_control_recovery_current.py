@@ -205,6 +205,35 @@ async def _run_recovery(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", [ThreadStatus.CANCELLING, ThreadStatus.RECONCILING])
+async def test_cancel_recovery_preserves_receipt_in_startup_state(
+    tmp_path: Path,
+    sessions: async_sessionmaker[AsyncSession],
+    status: ThreadStatus,
+) -> None:
+    case = _accepted_cases(tmp_path)[2]
+    case = _AcceptedCase(
+        case.thread_id, case.action_type, status, case.dispatch, case.intent
+    )
+    async with sessions() as db:
+        await _persist_case(db, case)
+        await db.commit()
+
+    summary, received = await _run_recovery(sessions)
+    assert summary.dispatched == 1
+    assert summary.conflicted == summary.refused == 0
+    assert [item["dispatch_id"] for item in received] == ["cancel-stable"]
+    async with sessions() as db:
+        thread = await get_thread(db, case.thread_id)
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id=case.thread_id, dispatch_id="cancel-stable"
+        )
+        assert thread is not None and thread.status == status.value
+        assert thread.writer_action_receipt_id == "cancel-stable"
+        assert action is not None and action.applied_at is None
+
+
+@pytest.mark.asyncio
 async def test_current_message_permission_and_cancel_redrive_stable_ids(
     tmp_path: Path,
     sessions: async_sessionmaker[AsyncSession],

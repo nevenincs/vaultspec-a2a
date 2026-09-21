@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:ad82885969d298771e09e44a28e051aa1453338aae5f9bb00af79b04e00aa85c'
+body_hash: 'sha256:dae21e9a433c02650a4ecc81d6196ede54d475f1d74163cabfddb0f8c68582a3'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -130,6 +130,11 @@ related:
 - `S14` `verify:` `focused-control-action-lease` -> `pass`
 - `S14` `verify:` `api-run-start` -> `pass`
 - `S14` `verify:` `lazy-worker-service` -> `pass`
+- `S15` `M` `src/vaultspec_a2a/worker/tests/test_dispatch_ids.py`
+- `S15` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
+- `S15` `verify:` `just check-type (Ty)` -> `pass`
+- `S15` `by:` `dispatch-deadlock-fix`
+- `S15` `verify:` `Ruff format/check` -> `pass`
 
 ## Notes
 
@@ -146,3 +151,5 @@ related:
 - `S03` Independent Terra review PASS recorded: canonicalize-before-validation fix at gateway.py:277; managed foreign/ancestor/symlink cases cover both stages; test_workspace_root_authority passed 14/14 with clean diff; Sol full review passed 67 tests plus Ruff/Ty. S03 remains open until its source commit is coordinated; issue #25 remains open for S10.
 - `S01` The complete two-test service-file run had one known recovery_owner SQLite lock after the cancellation test; the isolated health/Jaeger target passed, and the cancellation interaction is successor-owned by P01.S12. No S01 source correction was made.
 - `S12` Service evidence: C:/Users/hello/AppData/Local/Temp/vaultspec-s12-arch-service-20260921.out; summaries: vaultspec-service-tests-2b9990ec and vaultspec-service-tests-26323e17.
+- `S15` Root cause classified as test-infrastructure ordering: same-thread terminal arbitration leaves one ingest-lock waiter; no production defect. Durable output retained at ignored tmp/s15-dispatch_ids-full.log; exact process tree cleanup completed.
+- `S15` Existing evidence retained: exact parametrized target passed 3 consecutive repetitions (6/6); full src/vaultspec_a2a/worker/tests/test_dispatch_ids.py passed 6/6 in 21.93s with durable tmp/s15-dispatch_ids-full.log; Ruff format/check and Ty passed. Repeated verify flags may collapse in this CLI, so this note is the authoritative evidence summary.

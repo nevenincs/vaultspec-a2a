@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:61fe4536c275bead59d48442bdb85a31d7b970414e6c1ed39ecfbcb3a984ac19'
+body_hash: 'sha256:e36690163a16783c50f3c87d67fc7ef8b2d3c0161951f4de7b797392c5574a61'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -324,3 +324,14 @@ P01.S14 now commits the initial INGEST action, fresh lease, current writer, exac
 ### p01-s14-final-review | low/review | PASS
 
 Review of the changed acceptance, failure, recovery, and lazy-worker paths found no critical or high finding. The only implementation correction was the resolved cached-thread failure observation: the shared helper now locks and refreshes current state before recording recovery, preserving a concurrent terminal or cancellation winner. No delay, heartbeat, timeout padding, or replacement dispatch identity was added. The explicit restart-redelivery case retains its existing lease-TTL margin; ordinary lazy start is bounded to 30 seconds.
+### canonical-dispatch-id-concurrency-deadlock | high/test-infrastructure-or-correctness | deterministic full-prefix stall blocks the canonical dispatch-id concurrency proof | open
+
+Canonical CI reproduced a deterministic full-prefix stall at `src/vaultspec_a2a/worker/tests/test_dispatch_ids.py:179`: two `ThreadPoolExecutor` `TestClient` requests block through the AnyIO portal while the test holds the executor ingest lock. This evidence does not yet distinguish a test-infrastructure deadlock from a production correctness defect. P01.S15 owns the bounded root-cause proof and a non-timeout correction while preserving identical-capacity exactly-once behavior; durable CI log/session evidence and temporary-resource cleanup are required.
+
+### canonical-api-cluster-isolation | high/CI-blocking | timeout hides the first traceback in recurring canonical API failures | open
+
+Two canonical runs recorded 40 failure marks across five API files, while 136/136 serial tests and the xdist subset passed. The later timeout aborted both runs before any traceback identified the first failing operation. P01.S16 first eliminates or avoids the shared deadlock, captures a `-x` canonical prefix to obtain the first traceback, and then fixes the real shared state, environment, or runner-isolation defect without serializing the whole suite or weakening assertions. Durable log/session evidence and cleanup remain required.
+
+### canonical-dispatch-id-concurrency-deadlock-rereview | low/review | PASS
+
+P01.S15 review found the stall was test-infrastructure ordering, not a production capacity defect: same-thread duplicate requests serialize at terminal arbitration, leaving one request on the held ingest lock and the other behind the arbitration lock. The corrected real TestClient/ThreadPoolExecutor tests await two arbitration users and one ingest waiter, release the held lock in finally, and assert identical replay or distinct-ID refusal. No critical or high finding remains in the changed path. Full dispatch-ID coverage passed 6/6; Ruff format/check and Ty passed. The ignored durable run log is `tmp/s15-dispatch_ids-full.log`mp/s15-dispatch_ids-full.log.

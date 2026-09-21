@@ -68,6 +68,23 @@ def _accepted_graph_dispatch(
     return request.model_copy(update={"graph_action_receipt": receipt})
 
 
+async def _wait_for_same_thread_dispatch_contention(
+    executor: Executor,
+    thread_id: str,
+    admission_lock: Any,
+) -> tuple[int, int]:
+    """Wait until both requests reach the real same-thread admission gates."""
+    with anyio.fail_after(5):
+        while True:
+            arbitration = executor._terminal_arbitrations.get(thread_id)
+            if arbitration is not None and arbitration.users == 2:
+                return (
+                    arbitration.users,
+                    len(getattr(admission_lock, "_waiters", ()) or ()),
+                )
+            await anyio.lowlevel.checkpoint()
+
+
 def test_dispatch_id_admission_is_fifo_bounded() -> None:
     admission = DispatchIdAdmission(capacity=2)
 
@@ -181,17 +198,19 @@ def test_concurrent_identical_capacity_dispatches_replay_one_acceptance(
                     requests.submit(client.post, "/dispatch", json=payload)
                     for _ in range(2)
                 ]
-                deadline = time.monotonic() + 5
-                waiters = 0
-                while time.monotonic() < deadline:
-                    waiters = portal.call(
-                        lambda: len(getattr(admission_lock, "_waiters", ()) or ())
+
+                try:
+                    arbitration_users, lock_waiters = portal.call(
+                        _wait_for_same_thread_dispatch_contention,
+                        app.state.executor,
+                        dispatch.thread_id,
+                        admission_lock,
                     )
-                    if waiters == 2:
-                        break
-                    time.sleep(0.01)
-                assert waiters == 2
-                portal.call(admission_lock.release)
+                    assert arbitration_users == 2
+                    assert lock_waiters == 1
+                finally:
+                    if admission_lock.locked():
+                        portal.call(admission_lock.release)
                 resolved = [future.result(timeout=5) for future in responses]
         finally:
             if admission_lock.locked():
@@ -273,17 +292,18 @@ def test_concurrent_distinct_same_thread_dispatch_retains_capacity_refusal(
                     )
                     for dispatch_id in ("distinct-a", "distinct-b")
                 ]
-                deadline = time.monotonic() + 5
-                waiters = 0
-                while time.monotonic() < deadline:
-                    waiters = portal.call(
-                        lambda: len(getattr(admission_lock, "_waiters", ()) or ())
+                try:
+                    arbitration_users, lock_waiters = portal.call(
+                        _wait_for_same_thread_dispatch_contention,
+                        app.state.executor,
+                        "concurrent-distinct-thread",
+                        admission_lock,
                     )
-                    if waiters == 2:
-                        break
-                    time.sleep(0.01)
-                assert waiters == 2
-                portal.call(admission_lock.release)
+                    assert arbitration_users == 2
+                    assert lock_waiters == 1
+                finally:
+                    if admission_lock.locked():
+                        portal.call(admission_lock.release)
                 resolved = [future.result(timeout=5) for future in responses]
         finally:
             if admission_lock.locked():

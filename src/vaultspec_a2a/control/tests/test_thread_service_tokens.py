@@ -10,6 +10,7 @@ no mock transport — and the database is a real file-backed SQLite engine.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,8 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.direct_control_recovery import redrive_direct_control_actions
 from ...control.thread_service import (
     ThreadCreationRequest,
+    ThreadCreationResult,
     ThreadDispatchRuntime,
     create_and_dispatch_thread,
 )
@@ -529,3 +532,156 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
         thread = await get_thread(session, thread_id)
     assert thread is not None
     assert thread.writer_action_type == ControlActionType.CANCEL.value
+
+
+@pytest.mark.asyncio
+async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    """Recovery cannot claim, refuse, or redeliver a committed fresh INGEST."""
+    accepted = asyncio.Event()
+    release_ack = asyncio.Event()
+    dispatches: list[dict[str, Any]] = []
+    thread_id = "fresh-ingest-recovery-race"
+    app = FastAPI()
+
+    @app.post("/dispatch")
+    async def _hold_ack(request: Request) -> JSONResponse:
+        body = await request.json()
+        async with session_factory() as observer:
+            action = await observer.scalar(
+                select(ControlActionModel).where(
+                    ControlActionModel.thread_id == body["thread_id"],
+                    ControlActionModel.dispatch_id == body["dispatch_id"],
+                )
+            )
+            thread = await get_thread(observer, body["thread_id"])
+        assert action is not None
+        assert action.claim_token is not None
+        assert action.claim_expires_at is not None
+        assert action.graph_receipt_json is not None
+        assert thread is not None
+        assert thread.last_requested_action == ControlActionType.INGEST.value
+        accepted.set()
+        await release_ack.wait()
+        dispatches.append(body)
+        return JSONResponse({"status": "dispatched", "thread_id": thread_id})
+
+    spawner = LazyWorkerSpawner(
+        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+    )
+    spawner.replace_process(None)
+    breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://worker"
+    ) as worker_client:
+
+        async def _create() -> object:
+            async with session_factory() as session:
+                return await create_and_dispatch_thread(
+                    session,
+                    ThreadCreationRequest(
+                        thread_id=thread_id,
+                        title="fresh lease race",
+                        initial_message="hold worker acknowledgement",
+                        team_preset=_PRESET,
+                        autonomous=True,
+                        nickname=None,
+                        metadata=None,
+                        metadata_json=None,
+                        workspace_root=tmp_path,
+                    ),
+                    runtime=ThreadDispatchRuntime(
+                        circuit_breaker=breaker,
+                        worker_spawner=spawner,
+                        worker_client=worker_client,
+                        recursion_limit=domain_config.graph_recursion_limit,
+                        trace_headers=None,
+                    ),
+                )
+
+        creation = asyncio.create_task(_create())
+        await asyncio.wait_for(accepted.wait(), timeout=5.0)
+        recovery = await redrive_direct_control_actions(
+            session_factory,
+            worker_client=worker_client,
+            circuit_breaker=breaker,
+            worker_spawner=spawner,
+            trace_headers=None,
+        )
+        assert recovery.dispatched == 0
+        assert recovery.refused == 0
+        async with session_factory() as observer:
+            action = await observer.scalar(
+                select(ControlActionModel).where(
+                    ControlActionModel.thread_id == thread_id,
+                    ControlActionModel.action_type == ControlActionType.INGEST.value,
+                )
+            )
+            thread = await get_thread(observer, thread_id)
+        assert action is not None
+        assert action.applied_at is None
+        assert action.claim_token is not None
+        assert action.claim_expires_at is not None
+        assert thread is not None
+        assert thread.status == ThreadStatus.SUBMITTED.value
+
+        release_ack.set()
+        result = await asyncio.wait_for(creation, timeout=5.0)
+
+    assert isinstance(result, ThreadCreationResult)
+    assert result.dispatched is True
+    assert result.status == ThreadStatus.RUNNING.value
+    assert len(dispatches) == 1
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_initial_dispatch_retains_its_fresh_lease(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    """A connection failure has no non-delivery proof, so the fresh lease remains."""
+    thread_id = "ambiguous-initial-dispatch"
+    spawner = LazyWorkerSpawner(
+        worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
+    )
+    spawner.replace_process(None)
+    async with (
+        httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.2) as worker_client,
+        session_factory() as session,
+    ):
+        result = await create_and_dispatch_thread(
+            session,
+            ThreadCreationRequest(
+                thread_id=thread_id,
+                title="ambiguous delivery",
+                initial_message="do not acknowledge",
+                team_preset=_PRESET,
+                autonomous=True,
+                nickname=None,
+                metadata=None,
+                metadata_json=None,
+                workspace_root=tmp_path,
+            ),
+            runtime=ThreadDispatchRuntime(
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=1, recovery_timeout=1.0
+                ),
+                worker_spawner=spawner,
+                worker_client=worker_client,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers=None,
+            ),
+        )
+    assert result.failure_type is FailureType.UNREACHABLE
+    async with session_factory() as observer:
+        action = await observer.scalar(
+            select(ControlActionModel).where(
+                ControlActionModel.thread_id == thread_id,
+                ControlActionModel.action_type == ControlActionType.INGEST.value,
+            )
+        )
+    assert action is not None
+    assert action.claim_token is not None
+    assert action.claim_expires_at is not None

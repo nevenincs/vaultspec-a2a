@@ -12,7 +12,6 @@ import asyncio
 import contextlib
 import json
 import logging
-from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,14 +21,19 @@ from uuid import uuid4
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
 from ..control.accepted_input import freeze_accepted_input
+from ..control.action_lease import (
+    ControlActionClaim,
+    ControlActionClaimRequest,
+    finalize_control_action_acceptance,
+    prepare_control_action_claim,
+    record_dispatch_failure,
+)
 from ..control.config import settings
 from ..control.dispatch import DispatchOutcome, safe_dispatch
 from ..control.dispatch_receipts import (
     bind_graph_action_receipt,
-    prepare_graph_action_receipt,
 )
 from ..control.repair_transitions import (
-    mark_ingest_applied,
     mark_ingest_requested,
 )
 from ..database import (
@@ -57,7 +61,6 @@ from ..thread.enums import (
     ApprovalStatus,
     CleanupKind,
     ControlActionType,
-    RecoveryCondition,
     RepairStatus,
     ThreadStatus,
 )
@@ -67,7 +70,6 @@ from ..thread.lifecycle_guards import can_archive, can_delete
 from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES, project_checkpoint_tuple
 from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
 from .permission_options import extract_allowed_option_ids
-from .recovery import RecoveryAuthorityLostError, record_recovery_failure
 from .repositories import (
     CleanupItemResult,
     advance_deletion_cleanup_item,
@@ -456,8 +458,7 @@ class ThreadDispatchRuntime:
 class _CreationDispatchContext:
     request: ThreadCreationRequest
     thread: ThreadModel
-    action_receipt_id: str
-    recovery_deadline_at: datetime
+    claim: ControlActionClaim
 
 
 def process_metadata(
@@ -573,27 +574,17 @@ async def _failed_initial_dispatch(
 ) -> ThreadCreationResult:
     req = context.request
     thread = context.thread
-    action_receipt_id = context.action_receipt_id
-    recovery_deadline_at = context.recovery_deadline_at
+    claim = context.claim
+    action_receipt_id = claim.dispatch_id
     _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
     if typed_failure is None:
         raise RuntimeError("failed initial dispatch carries no failure type")
-    observed_at = datetime.now(UTC)
-    # A checkpoint or another accepted action may win while dispatch is in
-    # flight. Its exact authority decides the result, so discard stale work.
-    with suppress(RecoveryAuthorityLostError):
-        await record_recovery_failure(
-            db,
-            thread_id=thread.id,
-            authority=thread_write_expectation(thread).authority,
-            condition=RecoveryCondition(typed_failure.value),
-            observed_at=observed_at,
-            next_eligible_at=min(
-                observed_at + timedelta(seconds=2), recovery_deadline_at
-            ),
-            deadline_at=recovery_deadline_at,
-            detail=outcome.detail,
-        )
+    await record_dispatch_failure(
+        db,
+        claim,
+        typed_failure,
+        detail=outcome.detail,
+    )
     await db.commit()
     current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
     if current_thread is None:
@@ -716,25 +707,24 @@ async def create_and_dispatch_thread(
     recovery_deadline_at = datetime.now(UTC) + timedelta(
         seconds=dispatch.require_graph_definition().run_timeout_seconds
     )
-    await create_control_action(
+    claim = await prepare_control_action_claim(
         db,
-        thread_id=thread.id,
-        action_type=ControlActionType.INGEST,
-        dispatch_id=action_receipt_id,
-        idempotency_key=f"thread-create:{thread.id}",
-        payload=accepted_input,
-        recovery_deadline_at=recovery_deadline_at,
+        ControlActionClaimRequest(
+            thread_id=thread.id,
+            action_type=ControlActionType.INGEST,
+            idempotency_key=f"thread-create:{thread.id}",
+            payload=accepted_input,
+            dispatch_id=action_receipt_id,
+            worker_generation=thread.writer_generation,
+            write_expectation=thread_write_expectation(thread),
+            recovery_deadline_at=recovery_deadline_at,
+        ),
     )
-    await mark_ingest_requested(db, thread.id)
-    receipt = await prepare_graph_action_receipt(
-        db,
-        thread_id=thread.id,
-        dispatch_id=action_receipt_id,
-    )
-    if receipt is None:
+    if not claim.acquired:
         await db.rollback()
         raise ValueError("initial action could not establish graph receipt authority")
-    await db.commit()
+    await mark_ingest_requested(db, thread.id)
+    await finalize_control_action_acceptance(db, claim)
 
     logger.info(
         "Dispatching ingest dispatch_id=%s for thread %s",
@@ -762,9 +752,7 @@ async def create_and_dispatch_thread(
     if not outcome.success:
         return await _failed_initial_dispatch(
             db,
-            _CreationDispatchContext(
-                req, thread, action_receipt_id, recovery_deadline_at
-            ),
+            _CreationDispatchContext(req, thread, claim),
             outcome,
         )
 
@@ -781,8 +769,6 @@ async def create_and_dispatch_thread(
             action_receipt_id=action_receipt_id,
         ),
     )
-    if election.outcome is ThreadStatusElectionOutcome.WON:
-        await mark_ingest_applied(db, thread.id)
     await db.commit()
     current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
     if current_thread is None:

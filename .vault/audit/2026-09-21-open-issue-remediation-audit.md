@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:e714fc1101f8102b30673fcc3e1ccb270121873c6e0a13595f0a1dd9a31cdff9'
+body_hash: 'sha256:61fe4536c275bead59d48442bdb85a31d7b970414e6c1ed39ecfbcb3a984ac19'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -312,3 +312,15 @@ P01.S13 reproduced the contention with a real file-backed SQLite `BEGIN IMMEDIAT
 ### release-preparation-review | low | P01.S04 review PASS; local preparation preserves Dashboard-owned release-set selection | PASS
 
 The integrated release preparation path accepts only an explicit workflow-dispatch prepare operation, produces reviewable version, lockfile, and changelog metadata, and keeps publication restricted to an existing exact tag at checked-out HEAD. Ten isolated fixtures, workflow/actionlint/YAML contracts, Ruff, Ty, and compilation passed. The direct dry-run and expected failing check left all release metadata byte-identical. No critical, high, or medium finding was identified. Issue #26 remains for the coordinator's integrated disposition; this Step made no external issue change.
+### fresh-ingest-recovery-lease-race | high/correctness | fresh INGEST acceptance can race periodic recovery before its lease is durable | open
+
+The initial `INGEST` path in `src/vaultspec_a2a/control/thread_service.py` needs an evidence-backed prepare/finalize claim boundary: action, fresh lease, writer, exact receipt, and requested projection must commit atomically before network delivery. Definite dispatch failure must release the lease; ambiguous delivery must retain it until expiry; successful delivery remains leased until incorporation evidence; periodic recovery must neither claim nor refuse fresh active ingest. No global delay, heartbeat heuristic, or timeout padding is an acceptable substitute.
+
+P01.S14 owns the correction under the accepted control-action-leases decision, with focused initial-dispatch/recovery-race tests and an exact real lazy-worker proof. This metadata pass changes no source and does not claim implementation or closure. Dashboard handoff evidence remains separate: the latest reported live certification was 2/2 in 21.8s, but no run IDs or timeline artifact is present in this A2A/Dashboard vault corpus; the coordinator must attach those identifiers before P01.S08 closure rather than inventing them.
+### fresh-ingest-recovery-lease-race | high/correctness | resolved
+
+P01.S14 now commits the initial INGEST action, fresh lease, current writer, exact graph receipt, and requested projection in the accepting transaction before worker delivery. Definite non-delivery releases only the exact lease; ambiguous delivery retains it. A worker acknowledgement moves the run to `running` but does not settle action incorporation or clear its lease. The shared failure owner refreshes the current locked thread and yields to an inactive or newer winner rather than recording stale recovery. A held-ack, real SQLite/ASGI regression drives the actual periodic recovery pass and proves it neither claims, refuses, nor redelivers fresh active ingest; it retains the original receipt and lease. The focused control/action-lease bundle passed 27/27 in 32.80s, API run-start passed 4/4, and the independently captured real lazy-worker case passed 1/1 in 21.88s with RUNNING, healthy worker status, and cancellation inside 30 seconds.
+
+### p01-s14-final-review | low/review | PASS
+
+Review of the changed acceptance, failure, recovery, and lazy-worker paths found no critical or high finding. The only implementation correction was the resolved cached-thread failure observation: the shared helper now locks and refreshes current state before recording recovery, preserving a concurrent terminal or cancellation winner. No delay, heartbeat, timeout padding, or replacement dispatch identity was added. The explicit restart-redelivery case retains its existing lease-TTL margin; ordinary lazy start is bounded to 30 seconds.

@@ -16,9 +16,10 @@ related:
   - '[[2026-07-17-kimi-provider-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-09-21-workspace-root-authority-compose-provider-boundary-adr]]'
+  - '[[2026-08-02-control-action-leases-adr]]'
 modified: '2026-09-21'
 body_schema: body-v2
-body_hash: 'sha256:eab564a12b573d7931cef09c1f31bef045667332d314e3457b20374d58ebb678'
+body_hash: 'sha256:a0f74458bfeed5f9767fc7906abd17aba344e1b2c7c06800e8f5e1848b3ab15d'
 ---
 
 # `open-issue-remediation` plan
@@ -69,6 +70,7 @@ Settle and implement each issue lane against its current governing contracts, wi
 - [x] `P01.S11` - Resolve the locked quality-correction findings, document the Compose service-identity variables, and gate completion on deterministic coverage; `.env.example, src/vaultspec_a2a/api/tests/test_workspace_root_authority.py, src/vaultspec_a2a/control/tests/test_active_project_identity.py, src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, scripts/prepare_release.py, src/vaultspec_a2a/providers/tests/test_project_confinement.py, service/docker/service_entrypoint.py, src/vaultspec_a2a/control/tests/test_env_example_coverage.py`.
 - [x] `P01.S12` - Repair blocked-stream cancellation by racing cancel_event against the blocked next-event await while preserving receipt and terminal invariants; `src/vaultspec_a2a/control/direct_control_recovery.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/control/tests/test_direct_control_recovery_current.py, src/vaultspec_a2a/control/tests/test_event_handlers.py, src/vaultspec_a2a/worker/tests/test_executor.py, src/vaultspec_a2a/streaming/tests/test_aggregator.py, src/vaultspec_a2a/service_tests/test_blocked_stream_cancellation.py, src/vaultspec_a2a/api/tests/test_cancel_settled_run_status.py, GitHub issue #73, Dashboard issue #137`.
 - [x] `P01.S13` - Investigate and bound SQLite terminal-election contention, proving bridge retry or correcting bounded transaction/retry ownership; `src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/tests/test_event_handlers.py`.
+- [x] `P01.S14` - Close the HIGH correctness finding fresh-ingest-recovery-lease-race by making initial INGEST acceptance atomically commit the action, fresh lease, writer, exact receipt, and requested projection before network delivery through the existing prepare/finalize claim path; release definite dispatch failures, retain ambiguous delivery until lease expiry, keep successful delivery leased until incorporation evidence, and prevent periodic recovery from claiming or refusing fresh active ingest without global delay, heartbeat, or timeout padding; `src/vaultspec_a2a/control/thread_service.py, existing action lease/dispatch helper paths only when implementation requires, src/vaultspec_a2a/control/tests/ initial-dispatch/recovery-race coverage, src/vaultspec_a2a/service_tests/test_blocked_stream_cancellation.py or a dedicated exact real lazy-worker test`.
 
 ### Phase `P02` - integrate review and issue closure
 

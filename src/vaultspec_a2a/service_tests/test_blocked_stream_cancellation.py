@@ -93,8 +93,11 @@ def test_cancellation_survives_fresh_worker(
                 },
             )
             assert response.status_code == 201, response.text
+            running = wait_for_state(stack, run_id, _is_running, timeout=30.0)
+            health = stack.health()
+            assert health["checks"]["worker"]["status"] == "ok", health
+            stack.record("fresh-worker-running", running)
             if restart:
-                wait_for_state(stack, run_id, _is_running, timeout=30.0)
                 assert stack._worker_proc is not None
                 stack._stop_process(stack._worker_proc)
                 stack._worker_proc = None
@@ -118,7 +121,9 @@ def test_cancellation_survives_fresh_worker(
             stack,
             run_id,
             _is_cancelled,
-            timeout=CONTROL_ACTION_LEASE_TTL.total_seconds() + 60.0,
+            timeout=(
+                CONTROL_ACTION_LEASE_TTL.total_seconds() + 60.0 if restart else 30.0
+            ),
         )
         settled = _cancel_receipt(stack, run_id)
         stack.record("fresh-worker-terminal", terminal)

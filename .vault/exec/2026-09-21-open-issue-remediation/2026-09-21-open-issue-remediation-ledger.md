@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:34208b7f9589e8ee370384114011077efe43b94f0e0b504b6147949997c0378a'
+body_hash: 'sha256:ad82885969d298771e09e44a28e051aa1453338aae5f9bb00af79b04e00aa85c'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -119,6 +119,17 @@ related:
 - `S04` `A` `scripts/tests/test_prepare_release.py`
 - `S04` `verify:` `10 release fixtures + workflow/actionlint/YAML + Ruff/Ty/pycompile + dry-run/check immutability` -> `pass`
 - `S04` `by:` `release-integration-coordinator`
+- `S14` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S14` `M` `src/vaultspec_a2a/control/action_lease.py`
+- `S14` `M` `src/vaultspec_a2a/control/tests/test_thread_service_tokens.py`
+- `S14` `M` `src/vaultspec_a2a/service_tests/test_blocked_stream_cancellation.py`
+- `S14` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
+- `S14` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
+- `S14` `verify:` `ruff-format-ty` -> `pass`
+- `S14` `by:` `vaultspec-high-executor`
+- `S14` `verify:` `focused-control-action-lease` -> `pass`
+- `S14` `verify:` `api-run-start` -> `pass`
+- `S14` `verify:` `lazy-worker-service` -> `pass`
 
 ## Notes
 

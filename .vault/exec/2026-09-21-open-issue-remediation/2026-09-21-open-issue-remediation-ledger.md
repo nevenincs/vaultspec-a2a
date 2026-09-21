@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#open-issue-remediation'
 date: '2026-09-21'
-modified: '2026-09-21'
+modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:2beef28eb02d83a24172770714ddcb799a9e92a316ef53b52e48ff190dcdaac4'
+body_hash: 'sha256:c7e1b03d50037a8857c682f39d838fdaa521221be6b25ec93a1fc6e0b062970b'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -155,6 +155,16 @@ related:
 - `S19` `M` `.vault/exec/2026-09-21-open-issue-remediation/2026-09-21-open-issue-remediation-ledger.md`
 - `S19` `verify:` `Ruff format/check and Ty focused runner paths` -> `pass`
 - `S19` `by:` `serial-bootstrap-fix`
+- `S18` `M` `src/vaultspec_a2a/control/health.py`
+- `S18` `M` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`
+- `S18` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S18` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
+- `S18` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
+- `S18` `M` `.vault/exec/2026-09-21-open-issue-remediation/2026-09-21-open-issue-remediation-ledger.md`
+- `S18` `verify:` `ruff format ty and diff check` -> `pass`
+- `S18` `by:` `terra-high-s18`
+- `S18` `verify:` `focused service/auth/database/readiness 49/49 in 15.81s` -> `pass`
+- `S18` `verify:` `locked-checkpoint real TCP proof 3/3 with response under 4.5s` -> `pass`
 
 ## Notes
 

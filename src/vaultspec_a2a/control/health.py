@@ -71,10 +71,21 @@ __all__ = [
 # storage and journal surfaces report it as such rather than as a missing file.
 _MEMORY_PATH = Path(":memory:")
 
+# Each service-health dependency gets the same deadline and all dependencies run
+# concurrently. This keeps the aggregate under the five-second client contract
+# even when a SQLite writer, checkpointer, and cold worker are all slow.
+_SERVICE_HEALTH_DEADLINE_SECONDS = 3.0
+
 # How long a journal-mode verification may take before the health surface gives
 # up on it. The probe opens a real connection, so a database locked by a long
 # writer must not be able to stall the one endpoint an operator polls.
-_JOURNAL_PROBE_TIMEOUT_SECONDS = 5.0
+_JOURNAL_PROBE_TIMEOUT_SECONDS = _SERVICE_HEALTH_DEADLINE_SECONDS
+
+# Service-state is a read-only status surface. A cold lazy worker is expected,
+# and Windows can spend an unbound loopback connection's whole budget before it
+# reports absence. Keep this bounded below the caller-facing service budget;
+# run-start and watchdog probes retain their own shared default separately.
+_SERVICE_WORKER_PROBE_TIMEOUT_SECONDS = 2.0
 
 logger = logging.getLogger(__name__)
 
@@ -679,16 +690,42 @@ async def probe_desktop_readiness(
     )
 
 
+async def _probe_database_ready_with_deadline(
+    db: AsyncSession,
+) -> tuple[bool, str | None]:
+    """Probe the request-owned database session without over-running service health."""
+    try:
+        return (
+            await asyncio.wait_for(
+                probe_database_ready(db), timeout=_SERVICE_HEALTH_DEADLINE_SECONDS
+            ),
+            None,
+        )
+    except TimeoutError:
+        logger.warning("Health check: database probe timed out")
+        return False, "database probe timed out"
+
+
 async def _database_health_check(db: AsyncSession, app_state: object) -> dict[str, str]:
+    # The session-bound readiness query and engine-owned journal query use
+    # distinct connections. Keep their lifetimes structured so cancellation of
+    # the request cancels and joins both observations.
+    async with asyncio.TaskGroup() as tasks:
+        database_task = tasks.create_task(_probe_database_ready_with_deadline(db))
+        journal_task = tasks.create_task(probe_journal_mode(app_state))
+
+    database_ready, database_detail = database_task.result()
+    if not database_ready and database_detail is None:
+        database_detail = "database probe failed"
+    journal_mode = journal_task.result()
     database_check: dict[str, str] = {
-        "status": "ok" if await probe_database_ready(db) else "error",
+        "status": "ok" if database_ready else "error",
         "backend": settings.resolved_database_backend,
         "postgres_required": "yes" if settings.postgres_required else "no",
     }
-    if database_check["status"] == "error":
-        database_check["detail"] = "database probe failed"
+    if database_detail is not None:
+        database_check["detail"] = database_detail
     # Journal mode is informational: rollback journals still serve requests.
-    journal_mode = await probe_journal_mode(app_state)
     if journal_mode is not None:
         database_check["journal_mode"] = journal_mode
         if journal_mode.lower() not in {"wal", "memory"}:
@@ -721,7 +758,7 @@ async def _checkpoint_health_check(app_state: object) -> dict[str, str]:
                         }
                     }
                 ),
-                timeout=5.0,
+                timeout=_SERVICE_HEALTH_DEADLINE_SECONDS,
             )
             checkpoint_check["status"] = "ok"
         except TimeoutError:
@@ -740,7 +777,9 @@ async def _worker_health_check(
 ) -> tuple[dict[str, str], dict[str, object]]:
     # The pooled-client probe is the same exact-200 authority used by the watchdog.
     worker_probe = await probe_worker_health(
-        settings.worker_url, timeout=5.0, client=worker_client
+        settings.worker_url,
+        timeout=_SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,
+        client=worker_client,
     )
     if worker_probe.healthy:
         worker_check = {"status": "ok"}
@@ -790,19 +829,21 @@ async def build_full_health(
     """
     shared = assemble_health_status(app_state=app_state)
 
-    checks: dict[str, dict[str, str]] = {}
-    checks["gateway"] = {"status": "ok"}
+    # Start independent dependency observations together so their individual
+    # deadlines compose as one service-health deadline rather than accumulating.
+    async with asyncio.TaskGroup() as tasks:
+        database_task = tasks.create_task(_database_health_check(db, app_state))
+        checkpoint_task = tasks.create_task(_checkpoint_health_check(app_state))
+        worker_task = tasks.create_task(
+            _worker_health_check(runtime.worker_client, include_pairing=include_pairing)
+        )
 
-    # --- Database probe ---
-    checks["database"] = await _database_health_check(db, app_state)
-
-    # --- Checkpointer probe ---
-    checks["checkpoint"] = await _checkpoint_health_check(app_state)
-
-    # --- Worker HTTP probe ---
-    checks["worker"], pairing = await _worker_health_check(
-        runtime.worker_client, include_pairing=include_pairing
-    )
+    checks: dict[str, dict[str, str]] = {
+        "gateway": {"status": "ok"},
+        "database": database_task.result(),
+        "checkpoint": checkpoint_task.result(),
+    }
+    checks["worker"], pairing = worker_task.result()
 
     # --- Circuit breaker & spawner ---
     checks["circuit_breaker"] = {"status": runtime.circuit_breaker.state}

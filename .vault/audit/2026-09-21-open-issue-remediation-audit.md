@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-21'
 body_schema: 'body-v2'
-body_hash: 'sha256:405dcaf37312b19fd1639dc5cf4357c27d7ce1fea369c78f55a8228f2c5e08f5'
+body_hash: 'sha256:c085342982419f0b291f7ddfc8fca67fe9037076eb5bb8392c202bd83208dbd9'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -380,3 +380,18 @@ P01.S19 resolution and review (2026-09-22): The completion receipt is now deferr
 The authoritative full-run log is `C:\Users\hello\AppData\Local\Temp\vaultspec-a2a-canonical-ci-2d82a0431b4a40c5a1f4d61228289d42.log`. Measured stage facts are total `2210.699s`, harness outer `56.933s` with `122 passed`, unit outer `2199.596s`, and pytest `2196.57s`. The unit pytest collected `4838` items, selected `4634` after `204 deselected`, and finished with `4621 passed`, `10 skipped`, and `3 failed`.
 
 The six slowest unit nodes were: `140.43s` `src/vaultspec_a2a/desktop_tests/test_run_admission.py::test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound`; `59.95s` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py::test_desktop_readiness_liveness_minimal_and_readiness_authenticated`; `49.60s` `src/vaultspec_a2a/providers/tests/test_model_stack_warmup.py::test_repeated_cold_compiles_keep_serving_under_five_slot_cpu_load`; `37.65s` `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py::test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one`; `34.31s` `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py::test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown`; and `31.12s` `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py::test_two_gateways_one_worker_authenticated_pairing`. These are descriptive measurements only: they do not establish that any slow node caused a failure or attribute total wall time to P01.S18/P01.S19; isolated reruns are required for causal analysis.
+### desktop-readiness-liveness-crash | high/desktop-lifecycle | resolved
+
+The original canonical evidence recorded public `/health` 200 followed by an authenticated health timeout, an exited gateway (`Popen` code 1), and an empty child log. The retained serial-prefix reproduction narrowed the live failure to public `/health` 200, unauthenticated `/v1/service` 401, authenticated `/health` 200, then authenticated `/v1/service` timing out while the gateway remained alive. The cold desktop worker owns an unbound loopback port; on Windows that connection can consume the whole five-second worker probe budget, racing the caller's five-second HTTP budget. S18 now preserves failure exit/lifespan/stderr evidence, uses a two-second service worker probe, and starts the database/journal, checkpoint, and worker observations concurrently under a shared three-second service-health deadline. Timeout results remain truthful degraded diagnostics; no authentication or readiness assertion was relaxed. The real locked-`AsyncSqliteSaver` TCP regression returned degraded checkpoint evidence under 4.5 seconds while retaining the production five-second client contract. Three repeated locked-checkpoint proofs passed at 3.61-3.62 seconds; the focused service/auth/database/readiness suite passed 49/49 in 15.81 seconds; the closest serial desktop prefix passed 28/28 in 103.13 seconds; Ruff, format, Ty, diff check, and independent review passed.
+
+### service-worker-probe-transient-degradation | low/operational | queued
+
+A legitimate worker that cannot answer its exact-200 health probe within the two-second service-state observation budget is reported as degraded for that one service-state response. This is not an authentication bypass: the attach gate remains required, and run-start/watchdog retain their existing shared probe policy. Keep this as a low observation; no existing plan Step explicitly authorizes a different worker-health service-level objective.
+
+### service-state-whole-route-deadline | low/operational | queued
+
+S18 bounds and joins the dependency-probe aggregate, but later synchronous service-state projection work (provider eligibility, storage/discovery projection, response serialization, and route signature) has no separately enforced whole-route deadline. The current evidence does not establish an end-to-end violation or justify a broad timeout redesign. Keep this low observation queued for integrated review; P02.S09 does not explicitly authorize an end-to-end deadline change.
+
+### p01-s18-final-review | low/review | PASS
+
+Independent review found the original high resolved and required only the two low observations above. The final structured concurrency path gives each task an owned connection/session boundary: the request session belongs only to its database probe, journal inspection opens its own engine connection, and nested and outer task groups cancel and join all observations. The 3.0-second aggregate does not serially accumulate the journal, checkpoint, and worker budgets. No critical, high, or medium finding remains in S18.

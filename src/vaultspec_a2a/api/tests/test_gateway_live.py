@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -1014,6 +1015,42 @@ async def test_service_state_degrades_when_recovery_owner_fails(
     assert body["readiness"]["run_admission"] == "blocked"
     assert any("recovery_owner" in reason for reason in body["degraded_reasons"])
     assert "recovery owner failed" in body["readiness"]["reasons"]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_service_state_deadline_returns_degraded_for_locked_real_checkpointer(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """A held real checkpoint cannot consume the service caller's five-second budget.
+
+    The live TCP gateway uses its actual ``AsyncSqliteSaver`` and in-process
+    worker. Holding the saver lock makes the production checkpoint health read
+    wait; service-state must preserve the production five-second client contract
+    while responding inside the measured 4.5-second bound with true degraded
+    checkpoint evidence. The previous sequential five-second checkpoint probe
+    exceeded that response bound.
+    """
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=5.0) as client,
+    ):
+        await checkpointer.lock.acquire()
+        try:
+            started_at = time.perf_counter()
+            response = await client.get("/v1/service")
+            elapsed = time.perf_counter() - started_at
+        finally:
+            checkpointer.lock.release()
+
+    assert response.status_code == 200
+    assert elapsed < 4.5
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert body["ready"] is False
+    assert body["can_accept_run"] is False
+    assert body["checkpoint_ready"] is False
+    assert "checkpoint: checkpoint probe timed out" in body["degraded_reasons"]
 
 
 @pytest.mark.asyncio(loop_scope="function")

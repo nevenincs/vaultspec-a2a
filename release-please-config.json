@@ -4,8 +4,16 @@
     ".": {
       "release-type": "python",
       "package-name": "vaultspec-a2a",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "uv.lock",
+          "jsonpath": "$.package[?(@.name == 'vaultspec-a2a')].version"
+        }
+      ],
       "draft": true,
       "force-tag-creation": true,
+      "include-component-in-tag": false,
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "changelog-sections": [

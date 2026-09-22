@@ -28,7 +28,7 @@ def _triggers(workflow: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_release_please_owns_reviewable_version_proposals() -> None:
-    """Keep release proposals reviewed and publication separately dispatched."""
+    """Keep release proposals reviewed and publication consumer-selected."""
     config = json.loads((ROOT / "release-please-config.json").read_text("utf-8"))
     manifest = json.loads((ROOT / ".release-please-manifest.json").read_text("utf-8"))
     project = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))
@@ -44,15 +44,15 @@ def test_release_please_owns_reviewable_version_proposals() -> None:
     assert workflow["permissions"] == {
         "contents": "write",
         "pull-requests": "write",
-        "actions": "write",
     }
     steps = workflow["jobs"]["release-please"]["steps"]
     assert re.fullmatch(
         r"googleapis/release-please-action@[0-9a-f]{40}", steps[0]["uses"]
     )
-    assert "gh workflow run merge-gate.yml" in steps[1]["run"]
-    assert "gh workflow run release.yml" in steps[2]["run"]
-    assert '-f "operation=publish"' in steps[2]["run"]
+    assert len(steps) == 1
+    assert "gh workflow run" not in (WORKFLOWS / "release-please.yml").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_release_proves_tag_and_publishes_complete_cohort_last() -> None:
@@ -61,7 +61,15 @@ def test_release_proves_tag_and_publishes_complete_cohort_last() -> None:
     triggers = _triggers(workflow)
     assert set(triggers) == {"push", "workflow_dispatch"}
     assert triggers["push"] == {"tags": ["v*.*.*"]}
+    assert triggers["workflow_dispatch"]["inputs"] == {
+        "tag": {
+            "description": "Existing release tag to build and upload (e.g. v0.2.0)",
+            "required": True,
+            "type": "string",
+        }
+    }
     jobs = workflow["jobs"]
+    assert "prepare" not in jobs
     assert jobs["health"]["uses"] == "./.github/workflows/test.yml"
     assert jobs["health"]["with"]["ref"] == "${{ inputs.tag || github.ref }}"
     assert jobs["build"]["needs"] == "health"

@@ -66,10 +66,6 @@
 set windows-shell := ["cmd.exe", "/c"]
 set quiet := true
 
-# Prepare reviewable version/changelog metadata from explicitly supplied environment.
-prepare-release:
-    uv run --no-project --python 3.13 python scripts/prepare_release.py --from-env
-
 # `set dotenv-load` is deliberately ABSENT. It loaded `.env` once and injected
 # every variable in it - live provider keys included - into every subprocess of
 # every recipe, so a TOML formatter and a markdown linter both ran with

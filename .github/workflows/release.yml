@@ -41,25 +41,9 @@ on:
       - "v*.*.*"
   workflow_dispatch:
     inputs:
-      operation:
-        description: "Prepare metadata for review, or publish an existing tag"
-        required: true
-        default: prepare
-        type: choice
-        options:
-          - prepare
-          - publish
-      version:
-        description: "Candidate version to prepare (MAJOR.MINOR.PATCH)"
-        required: false
-        type: string
-      release_date:
-        description: "Candidate release date to record (YYYY-MM-DD)"
-        required: false
-        type: string
       tag:
         description: "Existing release tag to build and upload (e.g. v0.2.0)"
-        required: false
+        required: true
         type: string
 
 permissions:
@@ -70,52 +54,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  prepare:
-    name: Prepare version and changelog for review
-    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'prepare'
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 5
-    steps:
-      - name: Checkout repository history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
-        with:
-          enable-cache: false
-          version: "0.11.29"
-
-      - name: Install Python
-        run: uv python install 3.13
-
-      - name: Install just
-        uses: taiki-e/install-action@6012bba2f8e3e666a2b212f8823c06831704ce92 # just
-        with:
-          tool: just@1.38.0
-
-      - name: Prepare reviewable metadata
-        env:
-          VERSION: ${{ inputs.version }}
-          RELEASE_DATE: ${{ inputs.release_date }}
-        run: just prepare-release
-
-      - name: Upload prepared metadata for review
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-preparation-${{ inputs.version }}
-          path: |
-            pyproject.toml
-            uv.lock
-            CHANGELOG.md
-          if-no-files-found: error
-          retention-days: 7
-
   health:
     name: "Check: Release qualification"
-    if: github.event_name == 'push' || inputs.operation == 'publish'
     uses: ./.github/workflows/test.yml
     permissions:
       contents: read
@@ -124,7 +64,6 @@ jobs:
 
   build:
     name: Freeze ${{ matrix.target }}
-    if: github.event_name == 'push' || inputs.operation == 'publish'
     needs: health
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45

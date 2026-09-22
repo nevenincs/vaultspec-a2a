@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:317b58fe517bdee0b0975300166720c699ff2cd24ae730888af3ed5271a55943'
+body_hash: 'sha256:42afb00bdc1f8b860c336f4bc8403eade118768ee2be48d37a10cf9f96aea6f8'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -42,10 +42,14 @@ related:
 - `S02` `by:` `claude-opus`
 - `S02` `verify:` `release.yml Windows leg locally: freeze + frozen-tree check + prove_artifact_lifecycle.sh` -> `pass`
 - `S02` `D` `dev/tests/test_self_hosted_runners.py`
+- `S03` `M` `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py`
+- `S03` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
+- `S03` `verify:` `lazy-worker reproduction, ~90 runs across isolation, CPU, I/O, ordering, parallel, pinned-CPU conditions` -> `pass`
 
 ## Notes
 
 - `S02` Repository settings changed outside tracked files: googleapis/release-please-action@* allowlisted; CodeQL default setup moved to labeled runner dev-runner.
 - `S02` Operator-owned blockers left open: gh-runner Docker access for the Windows Compose job; offline ARM64 Linux and macOS release runners.
 - `S02` Runner-placement contract test and host-describing workflow comments removed at the user's direction: the software does not test or describe its own infrastructure.
+- `S03` Root cause not yet identified: the failure reproduces only on the CI Linux runner, and every prior CI failure lost its gateway traceback to a truncated assertion message. S03 stays open pending that evidence.
 

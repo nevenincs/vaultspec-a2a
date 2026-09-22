@@ -8,7 +8,7 @@ related:
   - '[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]'
 modified: '2026-09-22'
 body_schema: body-v2
-body_hash: 'sha256:9b6121317484f303b98237c48049ee67a556dfde04a36cf1dffbf1c16e376e27'
+body_hash: 'sha256:a5cc25ce25e5240314c13d830aedefa5fa39cbf67609028ffac2d0c96ae30138'
 ---
 
 # `issue-26-release-automation` plan
@@ -38,6 +38,7 @@ runner choice and none is created.
 
 - [x] `S01` - Give release-please exclusive ownership of version, lockfile, and changelog proposals while retaining guarded publication of an existing tag; `.github/workflows/release-please.yml, .github/workflows/release.yml, release-please-config.json, .release-please-manifest.json, CHANGELOG.md, Justfile, scripts/prepare_release.py, scripts/tests/test_prepare_release.py, dev/tests/test_release_please_automation.py, dev/tests/test_release_workflow_contract.py`.
 - [x] `S02` - Place every CI and release job on the self-hosted fleet and repair the main-branch failures that block release qualification; `.github/workflows/test.yml, .github/workflows/merge-gate.yml, .github/workflows/release.yml, src/vaultspec_a2a/lifecycle/registry.py, src/vaultspec_a2a/providers/tests/test_project_confinement.py, src/vaultspec_a2a/testing/tests/test_runner.py`.
+- [ ] `S03` - Make the concurrent first-demand run-start failure in the lazy-worker certification diagnosable, identify its cause from real evidence, and remove the nondeterminism; `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py`.
 
 ## Parallelization
 

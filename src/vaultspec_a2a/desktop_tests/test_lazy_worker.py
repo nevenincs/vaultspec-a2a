@@ -174,9 +174,14 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
         with ThreadPoolExecutor(max_workers=4) as pool:
             responses = list(pool.map(_start_run_once, range(4)))
         statuses = [status for status, _body in responses]
-        assert statuses == [201, 201, 201, 201], (
-            responses,
-            log_path.read_text(encoding="utf-8", errors="replace"),
+        # A string, not a tuple: pytest shortens a non-string assertion message
+        # to a brief repr, which cut the gateway traceback out of past failures.
+        assert statuses == [201, 201, 201, 201], "\n".join(
+            [
+                *(f"run-start {status}: {body}" for status, body in responses),
+                "----- gateway log -----",
+                log_path.read_text(encoding="utf-8", errors="replace"),
+            ]
         )
 
         # A real worker now listens on its private port.

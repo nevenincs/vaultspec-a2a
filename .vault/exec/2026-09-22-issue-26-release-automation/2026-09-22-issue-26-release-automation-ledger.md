@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:26916f946726d1cac06f6132dcd1bbd2a276ea0e10d9e5078038fbe97f66fbc5'
+body_hash: 'sha256:317b58fe517bdee0b0975300166720c699ff2cd24ae730888af3ed5271a55943'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -41,8 +41,11 @@ related:
 - `S02` `verify:` `just test-service-path test_compose_profile_regression.py (Windows Docker Desktop, 17)` -> `pass`
 - `S02` `by:` `claude-opus`
 - `S02` `verify:` `release.yml Windows leg locally: freeze + frozen-tree check + prove_artifact_lifecycle.sh` -> `pass`
+- `S02` `D` `dev/tests/test_self_hosted_runners.py`
 
 ## Notes
 
 - `S02` Repository settings changed outside tracked files: googleapis/release-please-action@* allowlisted; CodeQL default setup moved to labeled runner dev-runner.
 - `S02` Operator-owned blockers left open: gh-runner Docker access for the Windows Compose job; offline ARM64 Linux and macOS release runners.
+- `S02` Runner-placement contract test and host-describing workflow comments removed at the user's direction: the software does not test or describe its own infrastructure.
+

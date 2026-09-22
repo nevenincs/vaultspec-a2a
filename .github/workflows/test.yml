@@ -51,8 +51,6 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          # The runner's shared UV_CACHE_DIR is already warm; a GitHub-cache
-          # restore here measured 8m35s and ran this job out of its budget.
           enable-cache: false
           version: "0.11.29"
 
@@ -283,9 +281,6 @@ jobs:
   compose-regression:
     name: "Test: Compose server profile (Windows)"
     needs: test
-    # The self-hosted Linux runner has no Docker CLI; the Windows workstation
-    # runner reaches Docker Desktop's Linux engine, and the test resolves
-    # docker.exe itself.
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 45
     steps:

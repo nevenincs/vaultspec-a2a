@@ -362,8 +362,6 @@ jobs:
       count: ${{ steps.subjects.outputs.count }}
       names: ${{ steps.subjects.outputs.names }}
     steps:
-      # A per-run directory: this runner persists between jobs, so a shared
-      # path could carry an earlier run's archives into the attested set.
       - name: Collect every built member
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

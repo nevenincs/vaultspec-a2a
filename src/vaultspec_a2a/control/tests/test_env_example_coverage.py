@@ -37,6 +37,14 @@ if TYPE_CHECKING:
 # service example documents their absence rather than the settings.
 _DESKTOP_ONLY = frozenset({"VAULTSPEC_DESKTOP_APP_HOME", "VAULTSPEC_CAPSULE_ASSETS"})
 
+# Compose's worker image owns these values. The example must describe them even
+# though host and desktop profiles leave the execution boundary unset.
+_COMPOSE_PROVIDER_IDENTITY_DEFAULTS = {
+    "VAULTSPEC_PROVIDER_IDENTITY_LAUNCHER": "/usr/local/bin/vaultspec-agent-launch",
+    "VAULTSPEC_PROVIDER_AGENT_UID": "1002",
+    "VAULTSPEC_PROVIDER_AGENT_GID": "1002",
+}
+
 _ENV_EXAMPLE = pathlib.Path(__file__).resolve().parents[3].parent / ".env.example"
 
 
@@ -111,6 +119,15 @@ def test_every_declared_environment_name_is_documented_or_excluded() -> None:
         f"undocumented settings in .env.example: {undocumented}. "
         "Document them, or add them to the desktop-only exclusion with a reason."
     )
+
+
+def test_compose_provider_identity_defaults_are_documented() -> None:
+    """The service identity contract stays visible in the operator example."""
+    text = _documented()
+
+    assert not _DESKTOP_ONLY.intersection(_COMPOSE_PROVIDER_IDENTITY_DEFAULTS)
+    for name, default in _COMPOSE_PROVIDER_IDENTITY_DEFAULTS.items():
+        assert f"{name}={default}" in text
 
 
 def test_the_exclusions_are_named_in_the_file() -> None:

@@ -233,6 +233,35 @@ async def test_cancelling_an_already_cancelled_run_succeeds_idempotently(
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_accepted_cancel_rejects_late_completion_and_settles_exact_receipt(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        run_id = await _start_run(client)
+        graph_receipt = GraphActionReceipt.model_validate(
+            worker.dispatches[0]["graph_action_receipt"]
+        )
+        cancel = await client.post(f"/v1/runs/{run_id}/cancel")
+        assert cancel.status_code == 200, cancel.text
+        assert cancel.json()["accepted"] is True
+        await _complete_checkpoint(checkpointer, graph_receipt)
+        completion = await client.post(
+            "/internal/events", json=_terminal_envelope(run_id, "completed")
+        )
+        assert completion.status_code == 200, completion.text
+        snapshot = await client.get(f"/v1/runs/{run_id}")
+        assert snapshot.json()["status"] == "cancelling", snapshot.text
+        await _settle(client, run_id, "cancelled", checkpointer, worker)
+        replay = await client.post(f"/v1/runs/{run_id}/cancel")
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["applied"] is True
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_cancelling_an_absent_run_is_still_a_not_found(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:

@@ -25,7 +25,9 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
+
+import httpx
 
 from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
 from ..control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
@@ -51,6 +53,7 @@ from .registry import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
     from typing import IO, Any
 
@@ -690,7 +693,12 @@ def serve_up(
                 command, cwd=cwd, log_path=options.get("log_path"), env=child_env
             )
             if _await_listener(
-                reservation.port, process, timeout=options.get("ready_timeout", 20.0)
+                reservation.port,
+                process,
+                timeout=options.get("ready_timeout", 20.0),
+                health_probe=_health_probe_for(
+                    role_cfg, reservation.port, options.get("internal_token_file", "")
+                ),
             ):
                 stamp = now_ms()
                 record = ProcRecord(
@@ -768,8 +776,61 @@ def _release_held_reservations(held: list[PortReservation]) -> None:
         release_reservation(reservation)
 
 
+def _health_probe_for(
+    role_cfg: RoleConfig,
+    port: int,
+    internal_token_file: str,
+) -> Callable[[float], bool] | None:
+    """Return the bounded HTTP readiness probe required by an A2A serve role.
+
+    The committed role environment identifies the two A2A HTTP servers without
+    making arbitrary registry roles pretend to expose an HTTP surface. Gateway
+    readiness is the public ``ready`` fact; worker readiness is its private
+    ``status`` fact and therefore presents the paired IPC credential when one
+    was supplied for the boot.
+    """
+    is_gateway = "VAULTSPEC_PORT" in role_cfg.env
+    is_worker = "VAULTSPEC_WORKER_PORT" in role_cfg.env
+    if not (is_gateway or is_worker):
+        return None
+
+    headers: dict[str, str] = {}
+    if is_worker and internal_token_file:
+        headers["Authorization"] = (
+            f"Bearer {_read_internal_token(internal_token_file, label=role_cfg.name)}"
+        )
+
+    def _probe(request_timeout: float) -> bool:
+        try:
+            response = httpx.get(
+                f"http://127.0.0.1:{port}/health",
+                headers=headers,
+                timeout=request_timeout,
+            )
+        except httpx.HTTPError:
+            return False
+        if response.status_code != 200:
+            return False
+        try:
+            payload = response.json()
+        except ValueError:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        body = cast("dict[str, object]", payload)
+        if is_gateway:
+            return body.get("service") == "gateway" and body.get("ready") is True
+        return body.get("service") == "worker" and body.get("status") == "ok"
+
+    return _probe
+
+
 def _await_listener(
-    port: int, process: subprocess.Popen[Any], *, timeout: float
+    port: int,
+    process: subprocess.Popen[Any],
+    *,
+    timeout: float,
+    health_probe: Callable[[float], bool] | None = None,
 ) -> bool:
     """Wait for a live listener on *port* that OUR child owns.
 
@@ -778,37 +839,54 @@ def _await_listener(
     it (:func:`~vaultspec_a2a.utils.process.listener_belongs_to`). A foreign holder
     of the port - an un-reaped orphan of a felled generation, or a racer on a
     fixed resume/rerun port - therefore never reads as our process being ready, so
-    a record is not published pointing at a listener we do not own. The owner check
-    fails safe: when the listening pid cannot be resolved it degrades to the bare
-    bound-port signal rather than stalling a legitimate boot.
+    a record is not published pointing at a listener we do not own. An A2A HTTP
+    role additionally must satisfy *health_probe* within the same deadline.
     """
     from ..utils._process_tree import ListenerOwnership, classify_listener_ownership
 
     deadline = time.monotonic() + timeout
+    unresolved_ownership_reported = False
     while time.monotonic() < deadline:
         if process.poll() is not None:
             return False
         if _port_is_bound(port):
             ownership = classify_listener_ownership(port, process.pid)
             if ownership is ListenerOwnership.CONFIRMED:
-                return True
+                if health_probe is None:
+                    return True
+                if health_probe(max(deadline - time.monotonic(), 0.001)):
+                    return True
             if ownership is ListenerOwnership.UNRESOLVED:
-                # Accepted on the bare bound-port signal, which is the right
-                # call - failing a legitimate boot because a pid could not be
-                # read would be worse than the risk. But a host that can never
-                # resolve a listener degrades EVERY probe, permanently, and
-                # without this line that deployment is indistinguishable from
-                # one where the guarantee still holds.
-                logger.warning(
-                    "Readiness accepted port %d on the bound-port signal alone: "
-                    "the listening pid could not be resolved, so it was not "
-                    "confirmed to belong to pid %d. Ownership is unverified for "
-                    "this boot; an orphan or a racer holding the port would read "
-                    "as ready.",
-                    port,
-                    process.pid,
-                )
-                return True
+                if health_probe is None:
+                    # Generic roles remain listener-only. Failing a legitimate
+                    # boot because a pid could not be read would change their
+                    # settled readiness contract, so retain the bound-port
+                    # fallback while reporting that ownership was unverified.
+                    if not unresolved_ownership_reported:
+                        logger.warning(
+                            "Readiness accepted port %d on the bound-port signal "
+                            "alone: the listening pid could not be resolved, so it "
+                            "was not confirmed to belong to pid %d. Ownership is "
+                            "unverified for this boot; an orphan or a racer "
+                            "holding the port would read as ready.",
+                            port,
+                            process.pid,
+                        )
+                        unresolved_ownership_reported = True
+                    return True
+                # A2A readiness is an HTTP claim, and a credentialed worker
+                # probe must never be sent to a listener whose owner is unknown.
+                # Keep waiting until the deadline so serve_up refuses to publish
+                # a record rather than masking unresolved ownership as ours.
+                if not unresolved_ownership_reported:
+                    logger.warning(
+                        "Readiness withheld on port %d: the listening pid could "
+                        "not be resolved, so it was not confirmed to belong to "
+                        "pid %d; the HTTP health probe was skipped.",
+                        port,
+                        process.pid,
+                    )
+                    unresolved_ownership_reported = True
         time.sleep(0.1)
     return False
 
@@ -901,7 +979,12 @@ def _start_from_record(
     )
     cwd = _serve_cwd_for(record)
     process = spawn(command, cwd=cwd, log_path=record.log_path or None, env=child_env)
-    if not _await_listener(record.port, process, timeout=ready_timeout):
+    if not _await_listener(
+        record.port,
+        process,
+        timeout=ready_timeout,
+        health_probe=_health_probe_for(role, record.port, record.internal_token_file),
+    ):
         # The respawn died or never bound its port: fell the process tree and
         # refuse to publish. The prior record generation remains the last
         # committed state - a failed resume/rerun is atomic, not a half-published

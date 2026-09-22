@@ -550,8 +550,13 @@ async def _failure_action(
 async def _failure_thread_authority(
     db: AsyncSession, action: ControlActionModel
 ) -> RunWriteAuthority | DispatchFailureDisposition:
-    thread = await db.get(ThreadModel, action.thread_id, with_for_update=True)
-    if thread is None:
+    thread = await db.get(
+        ThreadModel,
+        action.thread_id,
+        with_for_update=True,
+        populate_existing=True,
+    )
+    if thread is None or not thread.is_active:
         return DispatchFailureDisposition.AUTHORITY_LOST
     authority = thread_write_expectation(thread).authority
     if (

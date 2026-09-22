@@ -37,6 +37,24 @@ if TYPE_CHECKING:
 
 _ATTACH = "attach-credential-readiness-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-readiness-fedcba0987654321"
+_GATEWAY_LOG_TAIL_BYTES = 4096
+_COLD_WORKER_SERVICE_TIMEOUT_SECONDS = 3.0
+
+
+def _gateway_failure_diagnostics(proc: subprocess.Popen[bytes], log_path: Path) -> str:
+    """Preserve child exit and lifespan evidence when the real HTTP trace fails."""
+    exit_code = proc.poll()
+    process_state = "still running" if exit_code is None else f"exited {exit_code}"
+    try:
+        log_tail = log_path.read_bytes()[-_GATEWAY_LOG_TAIL_BYTES:].decode(
+            "utf-8", errors="replace"
+        )
+    except OSError as exc:
+        log_tail = f"<could not read gateway log: {exc}>"
+    return (
+        f"gateway child {process_state}; log={log_path}; "
+        f"lifespan/stderr tail:\n{log_tail or '<empty>'}"
+    )
 
 
 def _assert_readiness_surfaces(client: httpx.Client) -> None:
@@ -88,9 +106,22 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
     assert body["run_admission"] == "deferred"
 
     # --- The service-state verb serves the same readiness projection. ---
-    svc = client.get("/v1/service", headers=auth)
+    # The production gateway intentionally boots with no worker. On Windows an
+    # unbound loopback port can consume a connection's entire budget instead of
+    # refusing promptly, so this real service request proves its worker probe is
+    # bounded beneath the caller-facing budget rather than racing it.
+    svc = client.get(
+        "/v1/service", headers=auth, timeout=_COLD_WORKER_SERVICE_TIMEOUT_SECONDS
+    )
     assert svc.status_code == 200
-    readiness = svc.json()["readiness"]
+    service = svc.json()
+    # The shortened observation budget must not pretend the cold worker is
+    # ready: service-state remains truthful and declines run admission.
+    assert service["status"] == "degraded"
+    assert service["ready"] is False
+    assert service["can_accept_run"] is False
+    assert service["worker_ready"] is False
+    readiness = service["readiness"]
     # Same real gateway process serves both authenticated surfaces.
     assert readiness["gateway_pid"] == gateway_pid
     assert readiness["gateway_readiness"] == "ready"
@@ -114,7 +145,10 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
     # the seated schema, seats the database engine, and creates the lazy worker
     # spawner. With auto-spawn disabled the worker stays cold, which is exactly
     # the fact under test.
-    script = gateway_script(log_level="warning")
+    # This gateway's INFO lifecycle messages are diagnostic evidence only: a
+    # request failure must retain the real startup/shutdown trail and child exit
+    # state instead of leaving a bare client timeout after a Popen exit.
+    script = gateway_script(log_level="info")
 
     def _spawn(port: int, worker_port: int) -> subprocess.Popen[bytes]:
         return spawn_gateway(
@@ -135,7 +169,14 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
     proc, _port, _worker_port, base = spawn_until_ready(_spawn, log_path=log_path)
     try:
         with httpx.Client(base_url=base, timeout=5.0) as client:
-            _assert_readiness_surfaces(client)
+            try:
+                _assert_readiness_surfaces(client)
+            except (httpx.HTTPError, AssertionError) as exc:
+                raise AssertionError(
+                    "desktop readiness HTTP trace failed "
+                    f"({type(exc).__name__}: {exc}); "
+                    f"{_gateway_failure_diagnostics(proc, log_path)}"
+                ) from exc
     finally:
         # The TREE, not the handle: on Windows the virtual-environment
         # interpreter is a launcher stub, so a terminate() aimed at this handle

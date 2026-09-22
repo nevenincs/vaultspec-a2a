@@ -178,9 +178,10 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
     tmp_path: Path,
 ) -> None:
     """A reload discovers the scoped live run, then reads its recovery snapshot."""
-    workspace = (tmp_path / "workspace").resolve()
-    foreign_workspace = (tmp_path / "foreign").resolve()
-    workspace.mkdir()
+    managed_workspaces = tmp_path / "managed-workspaces"
+    workspace = (managed_workspaces / "workspace").resolve()
+    foreign_workspace = (managed_workspaces / "foreign").resolve()
+    workspace.mkdir(parents=True)
     foreign_workspace.mkdir()
     now = datetime(2026, 7, 19, 12, tzinfo=UTC)
 
@@ -447,11 +448,9 @@ async def test_active_run_discovery_rejects_unbounded_selectors(
         assert oversized_limit.status_code == 422
 
         # The workspace bound belongs to the column that stores the selector, so
-        # it is measured off the mapped column rather than restated. Both sides
-        # of the edge are asserted against the same absolute path: a root the
-        # column can hold is answered, and the same root one character wider is
-        # refused HERE rather than at the write, where the caller could only be
-        # told about it as a failed transaction.
+        # it is measured off the mapped column rather than restated. A bounded
+        # but nonexistent root is refused by workspace admission; the same root
+        # one character wider is refused by request-shape validation.
         workspace_root_type = ThreadModel.__table__.c.workspace_root.type
         assert isinstance(workspace_root_type, String)
         column_width = workspace_root_type.length
@@ -459,8 +458,14 @@ async def test_active_run_discovery_rejects_unbounded_selectors(
         prefix = tmp_path.anchor
         widest = prefix + "w" * (column_width - len(prefix))
 
-        admitted = await client.get("/v1/runs", params={"workspace_root": widest})
-        assert admitted.status_code == 200, admitted.text
+        missing_workspace = await client.get(
+            "/v1/runs", params={"workspace_root": widest}
+        )
+        assert missing_workspace.status_code == 422, missing_workspace.text
+        assert (
+            missing_workspace.json()["detail"]
+            == "workspace_root must identify an existing directory"
+        )
 
         oversized_workspace = await client.get(
             "/v1/runs", params={"workspace_root": widest + "w"}

@@ -93,8 +93,8 @@ pass_filenames = false
 
 [[repos.hooks]]
 id = "vault-sanitize-annotations"
-name = "Vault sanitize annotations"
-entry = "uv run --no-sync vaultspec-core vault sanitize annotations"
+name = "Check Vault annotations"
+entry = "uv run --no-sync python dev/vault_annotations_gate.py"
 types = ["markdown"]
 language = "system"
 pass_filenames = false

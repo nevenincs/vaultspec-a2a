@@ -3,9 +3,9 @@ tags:
   - '#research'
   - '#embedded-runtime-remediation'
 date: '2026-09-06'
-modified: '2026-09-06'
+modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:012d94c02f0ab0ac7059d52ef82617bb0d2b0bbd102b00a67e6b2eb5407a38cc'
+body_hash: 'sha256:3751712fcff7bb7a5368ae881e1c781d752ec1547df6b0fba8eaea1603859168'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
 ---
@@ -33,6 +33,9 @@ Environment variables pass naturally to subprocesses, including nested pytest in
 
 An outer owner only protects commands that invoke it. The declarative test targets and maintained Just recipes are routed through one runner, and the CI contract rejects direct pytest commands in those recipes. Direct ad hoc pytest remains an operator escape hatch and does not provide process-exit evidence. See `dev/toolchain.py:183` and `dev/tests/test_ci_contract.py:91`.
 
+### Windows launcher provenance refines the exact-PID rule
+
+The virtual-environment launcher on Windows can make the retained Popen root and the Python runner-child different processes. The ownership invariant is therefore not a bare numeric PID equality. The retained Popen handle admits the suspended launcher to the Job before any instruction runs; the pre-pytest hello may name only a current Job member that remains on that launcher ancestry; then every completion receipt must name that one pinned execution PID. The runner-child removes both endpoint and prior-owner variables before pytest can create nested sessions. This preserves truthful ownership for accidental inherited completion state, while deliberately making no claim to isolate malicious code already trusted to execute in the test interpreter.
 ## Sources
 
 - `src/vaultspec_a2a/testing/runner.py:37`

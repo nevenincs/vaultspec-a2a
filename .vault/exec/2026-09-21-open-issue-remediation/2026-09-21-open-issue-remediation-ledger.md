@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:0d83214fea11baca8ca8ebfad002138af8a27b716eb6678f9480a7958d75f4de'
+body_hash: 'sha256:116c2237abc00ba3fb7427daf80f5b379c756516604f4d33d170daef3ae7ad90'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -176,6 +176,15 @@ related:
 - `S20` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
 - `S20` `verify:` `uv run --no-sync ty check (seven S20 paths)` -> `pass`
 - `S20` `by:` `astra-medium`
+- `S08` `M` `vaultspec-dashboard/frontend/e2e/agent/harness.ts`
+- `S08` `M` `vaultspec-dashboard/frontend/e2e/agent/stream.spec.ts`
+- `S08` `verify:` `Playwright S12/S13 live connected gateway 2/2 in 20.6s` -> `pass`
+- `S08` `by:` `integrated-review-close`
+- `S09` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
+- `S09` `M` `.vault/research/2026-09-06-embedded-runtime-remediation-condition17-process-owner-research.md`
+- `S09` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
+- `S09` `verify:` `plan check PLAN022 intentional-order warning` -> `pass`
+- `S09` `by:` `integrated-review-close`
 
 ## Notes
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:5b8b51141041b0c49477c9ac041f11ab49d367b506515c73f9dfd43afdf53e17'
+body_hash: 'sha256:c4996af897002200c1d14ae557cf1a5b94c4f0f7d2312d3399d5f427d6402afa'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -402,3 +402,29 @@ Final bounded verification: one runner-suite invocation passed 8/8 in 15.71s, in
 ### completion-identity-reuse-review | low | not applicable to retained runner lifecycle
 
 Independent review proposed a HIGH numeric-PID reuse race. Actual lifecycle inspection does not support it: Windows Popen retains its process HANDLE throughout _await_pytest_exit; its _internal_poll and _wait inspect that handle without closing it, and assign_suspended_process seats that same handle in the Job before resuming the launcher. Job membership and launcher ancestry are checked for the initial hello, sent before pytest and before ordinary descendants receive control; nested environments lack its secret endpoint. On POSIX, the exact root remains unreusable while alive or unreaped; after poll observes/reaps its exit, _root_exit_status governs regardless of any receipt and never applies the root teardown branch. A later completion cannot change the pinned identity. No executable premature-timeout race or unrelated-process kill was demonstrated. The channel prevents accidental inherited nested receipts; it is not an isolation boundary against malicious code already executing inside the trusted pytest interpreter. Classification: review hypothesis, not applicable; no speculative process-identity subsystem added.
+### dashboard-relay-live-proof | medium | live A2A relay recovery certification | resolved
+
+Dashboard commit `73d0c1c58cce13c97fdc467b083ca466f0e731bb`, published on `origin/issue-137-live-relay-certification`, supplies the missing controlled live proof. Its real-engine/real-A2A S12 scenario verifies exact scripted content, monotonic relay sequence, and completed terminal truth. S13 starts a deterministic relay burst, observes an honest stale-cursor gap and live broadcast-lag handling, resumes from a known recent cursor for exactly eight contiguous replay frames, accepts cancellation, and reconciles authoritative terminal `cancelled` status. The two live Playwright scenarios passed on the connected gateway (2/2, approximately 22 seconds) before publication. This resolves the sole P01.S08 certification gap; the Dashboard issue can be actioned after the published change is accepted through its repository workflow.
+
+### canonical-ci-final-gate | low/verification | complete integrated canonical gate | PASS
+
+The one permitted final `just ci` run at `99bf928f74d06eb67e65f253ef0ba92a68384f8d` completed with exit 0 in `1430.530s`; durable log: `Y:\code\vaultspec-a2a-ci-logs\99bf928f-just-ci-20260922-021949.log`. It recorded 122 harness tests in 26.54s, 4,627 unit tests passed with 10 environment/platform skips and 204 service deselections in 1278.19s, six docs tests in 0.61s, build artifacts, and a warning-free Sphinx build. The ten slowest unit calls range from 15.43s to 39.24s, led by model-stack warmup (39.24s), worker provenance (25.59s), and owned-process-tree cleanup (23.07s). The earlier failed/timeout gates had different completed work and are not a valid performance baseline; this review records measurement only, not a speedup claim. The runner received and authenticated completion receipts in every owned test stage, including the repaired nested scheduling path.
+
+### p02-s09-integrated-review | low/review | combined remediation is coherent | PASS
+
+Review traced the lifecycle, Compose admission and execution boundary, cancellation and lease recovery, provider qualification, release preparation, read-only hook, and contained test-runner changes against the plan's accepted decisions and the final CI evidence. The S20 Windows launcher identity condition is adequately bounded: the retained Popen handle joins the suspended root to the Job before resume; the pre-pytest hello accepts only a current Job member on that launcher ancestry; completion must come from that pinned execution PID; and nested pytest receives no completion endpoint or owner identity. This provenance channel is not represented as a hostile-code isolation boundary. No critical, high, or unowned medium finding remains. Existing low queue entries remain owned: `prek-format-baseline`, `plan-ordering`, `dashboard-rust-tooling`, `service-worker-probe-transient-degradation`, and `service-state-whole-route-deadline`.
+### dashboard-relay-live-proof-evidence | low/evidence | exact published cross-repository certification | recorded
+
+The durable connected-run log `Y:\code\vaultspec-dashboard-worktrees\main\frontend\test-results\agent-final-20260922-024647.log` records S12/S13 passing 2/2 in 20.6s (21.606s outer), exit 0, Dashboard HEAD `73d0c1c58cce13c97fdc467b083ca466f0e731bb`, and A2A HEAD `99bf928f74d06eb67e65f253ef0ba92a68384f8d`. This replaces the approximate timing in the preceding resolution entry and is the authoritative P01.S08 run evidence.
+
+### issue-18-original-scope | medium/triage | lifecycle remediation does not close the broader historical orchestration issue | queued
+
+P01.S01 completed the accepted HTTP-readiness, lifecycle, and trace evidence slice. GitHub issue #18 also names containerization and BOLID investigation that this plan neither implemented nor disproved. Keep #18 open as its own explicit successor queue item; do not describe the lifecycle correction as full issue closure. No new source change is authorized by this review.
+
+### issue-26-original-scope | medium/triage | release preparation does not implement the broader release-please and first-release request | queued
+
+P01.S04 deliberately delivered an auditable A2A preparation path while preserving Dashboard ownership of release-set selection. GitHub issue #26's original release-please/autorelease and first-release scope remains unimplemented and is not satisfied by that bounded work. Keep #26 open as its explicit successor queue item; no release automation is authorized by this review.
+
+### p02-s09-disposition-correction | low/review | open GitHub successors are explicitly owned, not silently closed | PASS
+
+The integrated PASS means no critical or high implementation finding remains and every discovered item has a durable owner. It does not claim that #18 or #26 are closed: each remains open with the medium triage disposition above. The live relay certification is complete and published, while Dashboard #137 awaits normal repository acceptance before issue action. The five A2A issues with completed bounded corrections (#25, #57, #72, #73, and the lifecycle slice of #18) require the parent coordinator's explicit GitHub disposition; this review neither merges code nor closes issues.

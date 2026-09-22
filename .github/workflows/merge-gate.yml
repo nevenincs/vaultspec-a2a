@@ -67,7 +67,7 @@ jobs:
     name: "Check: Merge gate (Linux)"
     needs: [basic]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
     steps:
       - name: Judge the required checks

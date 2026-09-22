@@ -114,11 +114,15 @@ def test_runner_child_declares_test_environment_before_settings_import(
     assert child.returncode == 0, child.stdout + child.stderr
     assert "1 passed" in child.stdout
 
+    # `just init` provisions the checkout `.env` from `.env.example`, which
+    # declares the development environment; the probe must not inherit that
+    # declaration or it cannot observe the undeclared, fail-closed state.
     production = subprocess.run(
         [
             sys.executable,
             "-c",
-            "from vaultspec_a2a.control.config import settings; "
+            "from vaultspec_a2a.control.config import Settings; "
+            "settings = Settings(_env_file=None); "
             "from vaultspec_a2a.utils.ipc_auth import verify_internal_bearer; "
             "verdict, _ = verify_internal_bearer("
             "None, token=settings.internal_token, environment=settings.environment, "

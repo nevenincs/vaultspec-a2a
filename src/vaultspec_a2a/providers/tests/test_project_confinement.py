@@ -547,6 +547,10 @@ async def test_privileged_write_stays_on_opened_parent_during_symlink_swap(
     protected_target = protected / "target.txt"
     protected_target.write_text("service-state", encoding="utf-8")
     monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
+    # The privileged write re-groups the file to the agent GID; an unprivileged
+    # test process can only fchown to a group it belongs to.
+    assert os.name == "posix"
+    monkeypatch.setattr(settings, "provider_agent_gid", os.getgid())
     real_open = os.open
     swapped = False
 

@@ -352,8 +352,12 @@ def _port_is_free(port: int) -> bool:
       already serves ``0.0.0.0:port`` (no ``SO_EXCLUSIVEADDRUSE``) - observed live
       handing out a resident gateway's port, the exact collision the registry
       exists to prevent.
-    - Then a bind probe (no ``SO_REUSEADDR``): catches a port bound but not yet
-      listening, which the connect probe would miss.
+    - Then a bind probe: catches a port bound but not yet listening, which the
+      connect probe would miss. On POSIX it sets ``SO_REUSEADDR``, as every real
+      server does: without it, the TIME_WAIT connections a just-felled listener
+      leaves behind refuse the probe for a minute although the next server would
+      bind cleanly. Windows never sets it, because there it lets the probe bind
+      over a live holder.
 
     The connect probe is the shared ``discovery.port_has_listener`` primitive; the
     connect-FIRST-then-bind order is load-bearing and must not change.
@@ -361,6 +365,8 @@ def _port_is_free(port: int) -> bool:
     if port_has_listener(port, timeout=0.5):
         return False
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        if os.name != "nt":
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("127.0.0.1", port))
         except OSError:

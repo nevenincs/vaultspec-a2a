@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:bfc81674f30a0f012e5f8140643fc2ebb11fee7b7641f8e8522ef9ae55dd313b'
+body_hash: 'sha256:26916f946726d1cac06f6132dcd1bbd2a276ea0e10d9e5078038fbe97f66fbc5'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -29,3 +29,20 @@ related:
 - `S01` `D` `scripts/tests/test_prepare_release.py`
 - `S01` `verify:` `uv run --no-sync prek run --files <changed-paths>` -> `pass`
 - `S01` `by:` `vaultspec-high-executor`
+- `S02` `M` `.github/workflows/test.yml`
+- `S02` `M` `.github/workflows/merge-gate.yml`
+- `S02` `M` `.github/workflows/release.yml`
+- `S02` `A` `dev/tests/test_self_hosted_runners.py`
+- `S02` `M` `src/vaultspec_a2a/lifecycle/registry.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S02` `M` `src/vaultspec_a2a/testing/tests/test_runner.py`
+- `S02` `M` `.vault/plan/2026-09-22-issue-26-release-automation-plan.md`
+- `S02` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
+- `S02` `verify:` `just test-service-path test_compose_profile_regression.py (Windows Docker Desktop, 17)` -> `pass`
+- `S02` `by:` `claude-opus`
+- `S02` `verify:` `release.yml Windows leg locally: freeze + frozen-tree check + prove_artifact_lifecycle.sh` -> `pass`
+
+## Notes
+
+- `S02` Repository settings changed outside tracked files: googleapis/release-please-action@* allowlisted; CodeQL default setup moved to labeled runner dev-runner.
+- `S02` Operator-owned blockers left open: gh-runner Docker access for the Windows Compose job; offline ARM64 Linux and macOS release runners.

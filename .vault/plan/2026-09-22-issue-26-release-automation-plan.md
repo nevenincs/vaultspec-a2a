@@ -8,7 +8,7 @@ related:
   - '[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]'
 modified: '2026-09-22'
 body_schema: body-v2
-body_hash: 'sha256:40a139c7cc00448e709c9ec4f9dceb0b685306b1b0f315ad772170500acfcde5'
+body_hash: 'sha256:6cc5df47a468256e4f4b87a9b22f9406a232b220556e70e39b5ec9af78017199'
 ---
 
 # `issue-26-release-automation` plan
@@ -27,9 +27,17 @@ the existing guarded A2A artifact publisher unchanged. The reference
 `2026-09-22-issue-26-release-automation-core-pattern-reference` supplies the
 mapped implementation evidence. No new costly policy choice is introduced.
 
+S02 approved 2026-09-22 - the user directed that the release pipeline complete
+and deliver its artifacts, and that every CI run use self-hosted runners. S02
+moves the remaining GitHub-hosted jobs onto the fleet and repairs the three
+deterministic main-branch test failures that fail the release qualification
+job. Placement on existing fleet labels is routine execution; no ADR governs
+runner choice and none is created.
+
 ## Steps
 
 - [x] `S01` - Give release-please exclusive ownership of version, lockfile, and changelog proposals while retaining guarded publication of an existing tag; `.github/workflows/release-please.yml, .github/workflows/release.yml, release-please-config.json, .release-please-manifest.json, CHANGELOG.md, Justfile, scripts/prepare_release.py, scripts/tests/test_prepare_release.py, dev/tests/test_release_please_automation.py, dev/tests/test_release_workflow_contract.py`.
+- [x] `S02` - Place every CI and release job on the self-hosted fleet and repair the main-branch failures that block release qualification; `.github/workflows/test.yml, .github/workflows/merge-gate.yml, .github/workflows/release.yml, dev/tests/test_self_hosted_runners.py, src/vaultspec_a2a/lifecycle/registry.py, src/vaultspec_a2a/providers/tests/test_project_confinement.py, src/vaultspec_a2a/testing/tests/test_runner.py`.
 
 ## Parallelization
 

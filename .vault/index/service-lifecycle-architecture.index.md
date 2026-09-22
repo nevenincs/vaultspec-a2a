@@ -6,10 +6,11 @@ tags:
 date: '2026-07-22'
 modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:90986d89ec5f4f4d07a4ae2f2790773790f9accf2b76ea7b1b88bcb2d3b2ec70'
+body_hash: 'sha256:ca826ec8d85bd5e40dfef0fafe2946fabbd0797c304397f8ad2d915c8927dfc2'
 related:
   - '[[2026-03-20-service-lifecycle-architecture-adr]]'
   - '[[2026-09-22-service-lifecycle-architecture-compose-host-lifecycle-reference]]'
+  - '[[2026-09-22-service-lifecycle-architecture-container-api-boundary-adr]]'
   - '[[2026-09-22-service-lifecycle-architecture-container-api-comparison-research]]'
   - '[[2026-09-22-service-lifecycle-architecture-issue18-evidence-review-audit]]'
 ---
@@ -23,6 +24,7 @@ Auto-generated index of all documents tagged with `#service-lifecycle-architectu
 ### adr
 
 - `2026-03-20-service-lifecycle-architecture-adr` - `service-lifecycle-architecture` adr: `adr-039` | (**status:** `accepted`)
+- `2026-09-22-service-lifecycle-architecture-container-api-boundary-adr` - `service-lifecycle-architecture` adr: `Programmatic container API ownership boundary` | (**status:** `proposed`)
 
 ### audit
 
